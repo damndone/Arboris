@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .artifacts import write_environment_snapshot, write_json
+from .artifacts import write_environment_snapshot, write_json, write_text_durable
 from .config import load_config
 
 
@@ -70,7 +70,7 @@ def create_run(project_root: Path, mode: str) -> Run:
         config_path=config_path,
         random_seed=config.random_seed,
     )
-    (root / "workflow_log.jsonl").write_text("", encoding="utf-8")
+    write_text_durable(root / "workflow_log.jsonl", "")
     write_json(root / "decisions.json", {"decisions": []})
     write_json(root / "errors.json", {"issues": []})
     write_json(root / "artifacts_index.json", {"artifacts": []})

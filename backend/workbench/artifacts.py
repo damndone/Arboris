@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,10 @@ from .domain import ArtifactRecord
 
 PACKAGE_VERSION_NAMES = (
     "fastapi",
+    "uvicorn",
+    "python-multipart",
     "pandas",
+    "openpyxl",
     "pyarrow",
     "statsmodels",
     "scipy",
@@ -25,12 +29,24 @@ PACKAGE_VERSION_NAMES = (
 )
 
 
-def write_json(path: Path, payload: Any) -> None:
+def write_text_durable(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, indent=2, ensure_ascii=False)
     temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    temp_path.write_text(text, encoding="utf-8")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
     temp_path.replace(path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def write_json(path: Path, payload: Any) -> None:
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    write_text_durable(path, text)
 
 
 def read_json(path: Path) -> Any:
