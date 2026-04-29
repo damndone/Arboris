@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .artifacts import write_environment_snapshot, write_json
+from .config import load_config
 
 
 @dataclass(frozen=True)
@@ -26,12 +27,18 @@ def create_project(parent: Path, name: str) -> Project:
     (root / "data" / "raw").mkdir(parents=True, exist_ok=True)
     (root / "runs").mkdir(parents=True, exist_ok=True)
     (root / "backups").mkdir(parents=True, exist_ok=True)
-    write_json(root / "project.yaml", {"name": name})
-    write_json(root / "config.yml", {})
+    project_path = root / "project.yaml"
+    config_path = root / "config.yml"
+    if not project_path.exists():
+        write_json(project_path, {"name": name})
+    if not config_path.exists():
+        write_json(config_path, {})
     return Project(root=root, name=name)
 
 
 def create_run(project_root: Path, mode: str) -> Run:
+    config_path = project_root / "config.yml"
+    config = load_config(config_path)
     runs_root = project_root / "runs"
     runs_root.mkdir(parents=True, exist_ok=True)
     while True:
@@ -58,7 +65,11 @@ def create_run(project_root: Path, mode: str) -> Run:
         root / "run_manifest.json",
         {"run_id": run_id, "mode": mode, "status": "created", "lineage": []},
     )
-    write_environment_snapshot(root / "environment.json")
+    write_environment_snapshot(
+        root / "environment.json",
+        config_path=config_path,
+        random_seed=config.random_seed,
+    )
     (root / "workflow_log.jsonl").write_text("", encoding="utf-8")
     write_json(root / "decisions.json", {"decisions": []})
     write_json(root / "errors.json", {"issues": []})
