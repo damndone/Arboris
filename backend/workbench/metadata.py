@@ -16,9 +16,9 @@ def infer_schema(
     dataset_id: str, frames: dict[str, pd.DataFrame], run_root: Path
 ) -> DatasetSchema:
     columns: list[ColumnMetadata] = []
-    time_candidates: list[str] = []
-    id_candidates: list[str] = []
-    primary_key_candidates: list[str] = []
+    time_candidates: dict[str, None] = {}
+    id_candidates: dict[str, None] = {}
+    primary_key_candidates: dict[str, None] = {}
     for source_file, frame in frames.items():
         row_count = max(len(frame), 1)
         for name in frame.columns:
@@ -34,16 +34,16 @@ def infer_schema(
             if any(token in normalized for token in TIME_TOKENS):
                 role = "time"
                 confidence = 0.85
-                time_candidates.append(str(name))
+                time_candidates.setdefault(str(name), None)
                 evidence.append("name_matches_time_token")
             if any(token in normalized for token in ID_TOKENS):
                 role = "entity_id"
                 confidence = 0.8
-                id_candidates.append(str(name))
+                id_candidates.setdefault(str(name), None)
                 evidence.append("name_matches_id_token")
             unique_ratio = float(series.nunique(dropna=True) / row_count)
             if unique_ratio == 1.0:
-                primary_key_candidates.append(str(name))
+                primary_key_candidates.setdefault(str(name), None)
                 evidence.append("unique_column")
             columns.append(
                 ColumnMetadata(str(name), dtype, role, confidence, source_file, evidence)
@@ -52,9 +52,9 @@ def infer_schema(
         dataset_id,
         list(frames.keys()),
         columns,
-        primary_key_candidates,
-        time_candidates,
-        id_candidates,
+        list(primary_key_candidates.keys()),
+        list(time_candidates.keys()),
+        list(id_candidates.keys()),
     )
     write_json(run_root / "staged" / "metadata_registry.json", schema.to_dict())
     return schema
