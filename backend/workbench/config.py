@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,11 @@ class WorkbenchConfig:
 def load_config(path: Path | None) -> WorkbenchConfig:
     if path is None or not path.exists():
         return WorkbenchConfig()
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if raw is None:
+        return WorkbenchConfig()
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"Config file {path} must contain a mapping of config keys.")
     allowed = {field.name for field in fields(WorkbenchConfig)}
     values: dict[str, Any] = {key: value for key, value in raw.items() if key in allowed}
     return WorkbenchConfig(**values)
