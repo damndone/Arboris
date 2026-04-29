@@ -637,7 +637,7 @@ git commit -m "feat: add ingestion metadata registry"
 - Create: `backend/workbench/validation.py`
 - Test: `tests/test_profiling_validation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_profiling_validation.py
@@ -664,13 +664,13 @@ def test_validation_flags_missing_rate_warning():
     assert any(issue.severity == Severity.WARNING and issue.code == "HIGH_MISSING_RATE" for issue in issues)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_profiling_validation.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.profiling`.
 
-- [ ] **Step 3: Implement profiling and guardrails**
+- [x] **Step 3: Implement profiling and guardrails**
 
 ```python
 # backend/workbench/profiling.py
@@ -721,13 +721,13 @@ def has_blockers(issues: list[GuardrailIssue]) -> bool:
     return any(issue.severity == Severity.BLOCKER for issue in issues)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_profiling_validation.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/profiling.py backend/workbench/validation.py tests/test_profiling_validation.py
