@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-econometrics-workbench"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111",
+  "uvicorn[standard]>=0.30",
+  "python-multipart>=0.0.9",
+  "pandas>=2.2",
+  "openpyxl>=3.1",
+  "pyarrow>=16.0",
+  "statsmodels>=0.14",
+  "scipy>=1.13",
+  "matplotlib>=3.8",
+  "jinja2>=3.1",
+  "reportlab>=4.2",
+  "pyyaml>=6.0",
+  "typer>=0.12"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "httpx>=0.27"]
+
+[project.scripts]
+workbench = "workbench.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["tests"]
