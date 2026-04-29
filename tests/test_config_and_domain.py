@@ -45,6 +45,12 @@ def test_load_config_missing_path_returns_defaults(tmp_path: Path):
     assert load_config(tmp_path / "missing.yml") == WorkbenchConfig()
 
 
+def test_load_config_empty_file_returns_defaults(tmp_path: Path):
+    path = tmp_path / "config.yml"
+    path.write_text("", encoding="utf-8")
+    assert load_config(path) == WorkbenchConfig()
+
+
 def test_load_config_ignores_unknown_keys(tmp_path: Path):
     path = tmp_path / "config.yml"
     path.write_text(

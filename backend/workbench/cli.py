@@ -7,4 +7,4 @@ app = typer.Typer(help="Local econometrics workbench.")
 
 @app.callback()
 def main() -> None:
-    """Task 10 will add workflow commands."""
+    pass
