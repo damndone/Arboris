@@ -37,7 +37,15 @@ def test_claims_skip_unavailable_estimates():
             "x": {
                 "estimate": None,
                 "source_id": "model_results.regression_1.coefficients.x",
-            }
+            },
+            "z": {
+                "estimate": "nan",
+                "source_id": "model_results.regression_1.coefficients.z",
+            },
+            "w": {
+                "estimate": float("inf"),
+                "source_id": "model_results.regression_1.coefficients.w",
+            },
         },
     }
 
