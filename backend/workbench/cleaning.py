@@ -13,6 +13,7 @@ def normalize_column_name(name: str) -> str:
 
 def _unique_normalized_column_names(columns: pd.Index) -> tuple[list[str], list[dict[str, str]]]:
     counts: dict[str, int] = {}
+    used: set[str] = set()
     normalized_columns: list[str] = []
     deduplicated: list[dict[str, str]] = []
     for column in columns:
@@ -21,6 +22,10 @@ def _unique_normalized_column_names(columns: pd.Index) -> tuple[list[str], list[
         base = normalized or "column"
         counts[base] = counts.get(base, 0) + 1
         unique_name = base if counts[base] == 1 else f"{base}_{counts[base]}"
+        while unique_name in used:
+            counts[base] += 1
+            unique_name = f"{base}_{counts[base]}"
+        used.add(unique_name)
         normalized_columns.append(unique_name)
         if unique_name != normalized:
             deduplicated.append({"from": original, "to": unique_name})

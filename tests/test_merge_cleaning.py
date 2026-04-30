@@ -38,6 +38,16 @@ def test_clean_frame_deduplicates_normalized_column_names_and_empty_fallbacks():
     assert any(action["action"] == "deduplicate_column_names" for action in actions)
 
 
+def test_clean_frame_avoids_generated_suffix_collisions():
+    frame = pd.DataFrame([[1, 2, 3]], columns=["Firm ID", "Firm-ID", "firm_id_2"])
+
+    cleaned, actions = clean_frame(frame, date_candidates=[])
+
+    assert list(cleaned.columns) == ["firm_id", "firm_id_2", "firm_id_2_2"]
+    assert cleaned.columns.is_unique
+    assert any(action["action"] == "deduplicate_column_names" for action in actions)
+
+
 def test_recommend_merge_uses_directional_overlap_to_avoid_inner_join_row_loss():
     left = pd.DataFrame({"firm_id": [1, 2, 3, 4, 5], "sales": [10, 12, 13, 14, 15]})
     right = pd.DataFrame({"firm_id": [1], "assets": [20]})
