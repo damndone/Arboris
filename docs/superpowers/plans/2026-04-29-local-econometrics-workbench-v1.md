@@ -859,7 +859,7 @@ git commit -m "feat: add merge advisor cleaning"
 - Create: `backend/workbench/router.py`
 - Test: `tests/test_analysis_router.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_analysis_router.py
@@ -887,13 +887,13 @@ def test_classifies_repeated_cross_section():
     assert result["kind"] == DatasetKind.REPEATED_CROSS_SECTION.value
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_analysis_router.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.router`.
 
-- [ ] **Step 3: Implement dataset classification**
+- [x] **Step 3: Implement dataset classification**
 
 ```python
 # backend/workbench/router.py
@@ -930,13 +930,13 @@ def classify_dataset(frame: pd.DataFrame, id_candidates: list[str], time_candida
     return {"kind": DatasetKind.TIME_SERIES.value, "confidence": 0.8, "secondary_labels": ["single_observation_per_period"], "evidence": [f"time={time_col}"]}
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_analysis_router.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/router.py tests/test_analysis_router.py
