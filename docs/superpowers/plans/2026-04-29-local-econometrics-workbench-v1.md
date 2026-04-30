@@ -1505,7 +1505,7 @@ git commit -m "feat: add workflow orchestrator"
 - Create: `frontend/src/App.test.tsx`
 - Create: `frontend/src/styles.css`
 
-- [ ] **Step 1: Write the failing API test**
+- [x] **Step 1: Write the failing API test**
 
 ```python
 # tests/test_api.py
@@ -1534,13 +1534,13 @@ def test_api_creates_project_and_runs_upload(tmp_path: Path):
     assert run_response.json()["status"] == "completed"
 ```
 
-- [ ] **Step 2: Run the API test to verify it fails**
+- [x] **Step 2: Run the API test to verify it fails**
 
 Run: `pytest tests/test_api.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.api`.
 
-- [ ] **Step 3: Implement the FastAPI API**
+- [x] **Step 3: Implement the FastAPI API**
 
 ```python
 # backend/workbench/api.py
@@ -1578,7 +1578,7 @@ async def run_endpoint(project_root: str = Form(...), mode: str = Form("auto"), 
     return {"run_id": result["run_id"], "status": result["status"]}
 ```
 
-- [ ] **Step 4: Add the React UI files**
+- [x] **Step 4: Add the React UI files**
 
 ```json
 // frontend/package.json
@@ -1719,7 +1719,7 @@ button { background: #1f6feb; color: white; border-color: #1f6feb; cursor: point
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 ```
 
-- [ ] **Step 5: Run API and frontend tests**
+- [x] **Step 5: Run API and frontend tests**
 
 Run: `pytest tests/test_api.py -v`
 
@@ -1729,7 +1729,7 @@ Run: `cd frontend && npm install && npm test`
 
 Expected: PASS with the `renders workbench controls` test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/workbench/api.py tests/test_api.py frontend
