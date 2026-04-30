@@ -1192,7 +1192,7 @@ git commit -m "feat: add visualization engine"
 - Create: `backend/workbench/exports.py`
 - Test: `tests/test_reporting_exports.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_reporting_exports.py
@@ -1222,13 +1222,13 @@ def test_render_and_export_reports(tmp_path: Path):
     assert xlsx_path.exists()
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_reporting_exports.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.exports`.
 
-- [ ] **Step 3: Implement source-bound reporting and exports**
+- [x] **Step 3: Implement source-bound reporting and exports**
 
 ```python
 # backend/workbench/narrative.py
@@ -1343,13 +1343,13 @@ def export_xlsx(tables: dict[str, list[dict[str, Any]]], run_root: Path) -> Path
     return path
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_reporting_exports.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/narrative.py backend/workbench/reporting.py backend/workbench/templates/report.html.j2 backend/workbench/exports.py tests/test_reporting_exports.py
