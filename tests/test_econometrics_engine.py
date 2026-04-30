@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from workbench.econometrics.specs import ModelSpec
 from workbench.econometrics.runner import (
@@ -43,5 +44,7 @@ def test_time_series_diagnostics_reports_autocorrelation():
 def test_model_spec_matches_planned_contract():
     spec = ModelSpec(model_id="m1", model_type="ols", y="y", x=["x1", "x2"])
     assert spec.model_type == "ols"
-    assert spec.x == ["x1", "x2"]
+    assert spec.x == ("x1", "x2")
     assert spec.robust is True
+    with pytest.raises(AttributeError):
+        spec.x.append("x3")
