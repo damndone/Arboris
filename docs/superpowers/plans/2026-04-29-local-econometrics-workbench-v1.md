@@ -1363,7 +1363,7 @@ git commit -m "feat: add source bound reporting exports"
 - Create: `backend/workbench/cli.py`
 - Test: `tests/test_orchestrator_e2e.py`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 ```python
 # tests/test_orchestrator_e2e.py
@@ -1388,13 +1388,13 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     assert (run_root / "artifacts_index.json").exists()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pytest tests/test_orchestrator_e2e.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.orchestrator`.
 
-- [ ] **Step 3: Implement the workflow orchestrator and CLI**
+- [x] **Step 3: Implement the workflow orchestrator and CLI**
 
 ```python
 # backend/workbench/orchestrator.py
@@ -1480,13 +1480,13 @@ def run(project_root: Annotated[Path, typer.Argument()], data_file: Annotated[Pa
     typer.echo(result["run_id"])
 ```
 
-- [ ] **Step 4: Run the integration test to verify it passes**
+- [x] **Step 4: Run the integration test to verify it passes**
 
 Run: `pytest tests/test_orchestrator_e2e.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/orchestrator.py backend/workbench/cli.py tests/test_orchestrator_e2e.py
