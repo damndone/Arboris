@@ -4,7 +4,6 @@ from pathlib import Path
 
 import typer
 
-from .orchestrator import run_workflow
 from .projects import create_project
 
 app = typer.Typer(help="Local econometrics workbench.")
@@ -33,5 +32,11 @@ def run(
     ),
     mode: str = typer.Option("auto", "--mode"),
 ) -> None:
+    from .orchestrator import run_workflow
+
     result = run_workflow(project_root, [data_file], mode=mode, y=y, x=x)
     typer.echo(result["run_id"])
+
+
+if __name__ == "__main__":
+    app()
