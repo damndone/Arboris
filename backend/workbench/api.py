@@ -3,13 +3,17 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from .config import load_config
 from .orchestrator import run_workflow
 from .projects import create_project
 
 app = FastAPI(title="Local Econometrics Workbench")
+
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+BYTES_PER_GB = 1024**3
 
 
 class ProjectRequest(BaseModel):
@@ -31,10 +35,29 @@ async def run_endpoint(
     x: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict[str, str]:
-    temp_dir = Path(tempfile.mkdtemp(prefix="workbench_upload_"))
-    filename = Path(file.filename or "upload.csv").name
-    target = temp_dir / filename
-    target.write_bytes(await file.read())
+    root = Path(project_root)
+    config = load_config(root / "config.yml")
+    max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
     x_columns = [part.strip() for part in x.split(",") if part.strip()]
-    result = run_workflow(Path(project_root), [target], mode=mode, y=y, x=x_columns)
+    try:
+        with tempfile.TemporaryDirectory(prefix="workbench_upload_") as temp_dir:
+            target = Path(temp_dir) / Path(file.filename or "upload.csv").name
+            await _write_upload(file, target, max_upload_bytes)
+            result = run_workflow(root, [target], mode=mode, y=y, x=x_columns)
+    finally:
+        await file.close()
     return {"run_id": result["run_id"], "status": result["status"]}
+
+
+async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
+    written = 0
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as handle:
+        while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+            written += len(chunk)
+            if written > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Uploaded file exceeds project size limit.",
+                )
+            handle.write(chunk)
