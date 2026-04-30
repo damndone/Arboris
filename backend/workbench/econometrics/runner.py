@@ -24,7 +24,7 @@ def run_ols(
     if robust:
         fitted = fitted.get_robustcov_results(cov_type="HC1")
     result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "ols"
+    result["model_type"] = "ols_robust" if robust else "ols"
     return result
 
 

@@ -1,5 +1,6 @@
 import pandas as pd
 
+from workbench.econometrics.specs import ModelSpec
 from workbench.econometrics.runner import (
     run_fixed_effects,
     run_ols,
@@ -11,6 +12,7 @@ def test_run_ols_returns_source_bound_coefficients():
     frame = pd.DataFrame({"y": [1 + 2 * i for i in range(35)], "x": list(range(35))})
     result = run_ols(frame, y="y", x=["x"], robust=True, model_id="regression_1")
     assert result["model_id"] == "regression_1"
+    assert result["model_type"] == "ols_robust"
     assert result["nobs"] == 35
     assert abs(result["coefficients"]["x"]["estimate"] - 2.0) < 1e-8
     assert (
@@ -36,3 +38,10 @@ def test_time_series_diagnostics_reports_autocorrelation():
     )
     result = run_time_series_diagnostics(frame, y="y", time="date")
     assert "lag1_autocorrelation" in result
+
+
+def test_model_spec_matches_planned_contract():
+    spec = ModelSpec(model_id="m1", model_type="ols", y="y", x=["x1", "x2"])
+    assert spec.model_type == "ols"
+    assert spec.x == ["x1", "x2"]
+    assert spec.robust is True
