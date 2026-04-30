@@ -16,7 +16,7 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
     reports_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = reports_dir / "report.pdf"
 
-    pdf = canvas.Canvas(str(pdf_path), pagesize=letter)
+    pdf = canvas.Canvas(str(pdf_path), pagesize=letter, pageCompression=0)
     _, height = letter
     y = height - 72
     pdf.setFont("Helvetica-Bold", 14)
@@ -24,12 +24,11 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
     y -= 32
 
     y = _draw_section(pdf, "Facts", report.get("facts", []), y)
-    interpretation = [claim.get("claim", "") for claim in report.get("claims", [])]
-    y = _draw_section(pdf, "Interpretation", interpretation, y)
+    y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
     _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
 
-    register_artifact(run_root, "report_pdf", pdf_path, "report", "export", ["report_html"])
+    register_artifact(run_root, "report_pdf", pdf_path, "report", "export", [])
     return pdf_path
 
 
@@ -62,7 +61,7 @@ def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float
     y -= 18
     pdf.setFont("Helvetica", 10)
     for item in items:
-        text = item.get("message") if isinstance(item, Mapping) else str(item)
+        text = _report_item_text(item)
         pdf.drawString(90, y, f"- {text}")
         y -= 14
         if y < 72:
@@ -70,6 +69,19 @@ def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float
             y = letter[1] - 72
             pdf.setFont("Helvetica", 10)
     return y - 10
+
+
+def _report_item_text(item: Any) -> str:
+    if not isinstance(item, Mapping):
+        return str(item)
+    text = str(item.get("claim", item.get("message", "")))
+    source_id = item.get("source_id")
+    if source_id:
+        text = f"{text} [source: {source_id}]"
+    confidence = item.get("confidence")
+    if confidence is not None:
+        text = f"{text} [confidence: {confidence}]"
+    return text
 
 
 def _headers(rows: Sequence[Mapping[str, Any]]) -> list[str]:

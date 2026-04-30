@@ -20,7 +20,9 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
                 continue
             estimate = coefficient.get("estimate")
             numeric_estimate = _as_float(estimate)
-            direction = "positive" if numeric_estimate is not None and numeric_estimate >= 0 else "negative"
+            if numeric_estimate is None:
+                continue
+            direction = "positive" if numeric_estimate >= 0 else "negative"
             claim: dict[str, Any] = {
                 "claim": f"{term} has a {direction} coefficient in {model_id}",
                 "source_id": source_id,

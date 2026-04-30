@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader
 
 from .artifacts import register_artifact, write_text_durable
 
@@ -15,7 +15,7 @@ def render_html_report(report: dict[str, Any], run_root: Path) -> Path:
 
     environment = Environment(
         loader=FileSystemLoader(Path(__file__).parent / "templates"),
-        autoescape=select_autoescape(("html", "xml")),
+        autoescape=True,
     )
     template = environment.get_template("report.html.j2")
     write_text_durable(html_path, template.render(report=report))
