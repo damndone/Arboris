@@ -741,7 +741,7 @@ git commit -m "feat: add profiling guardrails"
 - Create: `backend/workbench/cleaning.py`
 - Test: `tests/test_merge_cleaning.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_merge_cleaning.py
@@ -769,13 +769,13 @@ def test_clean_frame_normalizes_columns_and_records_actions():
     assert any(action["action"] == "drop_duplicate_rows" for action in actions)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_merge_cleaning.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.merge`.
 
-- [ ] **Step 3: Implement merge advice and deterministic cleaning**
+- [x] **Step 3: Implement merge advice and deterministic cleaning**
 
 ```python
 # backend/workbench/merge.py
@@ -840,13 +840,13 @@ def clean_frame(frame: pd.DataFrame, date_candidates: list[str]) -> tuple[pd.Dat
     return cleaned, actions
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_merge_cleaning.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/merge.py backend/workbench/cleaning.py tests/test_merge_cleaning.py
