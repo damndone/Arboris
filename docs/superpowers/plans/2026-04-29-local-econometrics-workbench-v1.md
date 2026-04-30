@@ -952,7 +952,7 @@ git commit -m "feat: add analysis router"
 - Create: `backend/workbench/econometrics/normalize.py`
 - Test: `tests/test_econometrics_engine.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_econometrics_engine.py
@@ -983,13 +983,13 @@ def test_time_series_diagnostics_reports_autocorrelation():
     assert "lag1_autocorrelation" in result
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_econometrics_engine.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.econometrics`.
 
-- [ ] **Step 3: Implement model runners and normalization**
+- [x] **Step 3: Implement model runners and normalization**
 
 ```python
 # backend/workbench/econometrics/__init__.py
@@ -1081,13 +1081,13 @@ class ModelSpec:
     robust: bool = True
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_econometrics_engine.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/econometrics tests/test_econometrics_engine.py
