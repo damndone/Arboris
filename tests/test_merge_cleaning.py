@@ -20,3 +20,30 @@ def test_clean_frame_normalizes_columns_and_records_actions():
     assert list(cleaned.columns) == ["firm_id", "year", "sales"]
     assert len(cleaned) == 2
     assert any(action["action"] == "drop_duplicate_rows" for action in actions)
+
+
+def test_clean_frame_deduplicates_normalized_column_names_and_empty_fallbacks():
+    frame = pd.DataFrame(
+        {
+            "Firm ID": [1],
+            "Firm-ID": [2],
+            "!!!": [3],
+            "???": [4],
+            "Date": ["2020-01-01"],
+        }
+    )
+    cleaned, actions = clean_frame(frame, date_candidates=["date"])
+    assert list(cleaned.columns) == ["firm_id", "firm_id_2", "column", "column_2", "date"]
+    assert pd.api.types.is_datetime64_any_dtype(cleaned["date"])
+    assert any(action["action"] == "deduplicate_column_names" for action in actions)
+
+
+def test_recommend_merge_uses_directional_overlap_to_avoid_inner_join_row_loss():
+    left = pd.DataFrame({"firm_id": [1, 2, 3, 4, 5], "sales": [10, 12, 13, 14, 15]})
+    right = pd.DataFrame({"firm_id": [1], "assets": [20]})
+    plan = recommend_merge(left, right, WorkbenchConfig(min_join_overlap=0.5))
+    assert plan["join_key"] == "firm_id"
+    assert plan["join_type"] == "left"
+    assert plan["overlap"] == 1.0
+    assert plan["left_overlap"] == 0.2
+    assert plan["right_overlap"] == 1.0
