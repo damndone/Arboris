@@ -47,3 +47,25 @@ def test_recommend_merge_uses_directional_overlap_to_avoid_inner_join_row_loss()
     assert plan["overlap"] == 1.0
     assert plan["left_overlap"] == 0.2
     assert plan["right_overlap"] == 1.0
+
+
+def test_recommend_merge_ranks_keys_by_directional_overlap():
+    left = pd.DataFrame(
+        {
+            "country": ["US", "CN", "DE", "FR", "JP"],
+            "firm_id": [1, 2, 3, 4, 5],
+        }
+    )
+    right = pd.DataFrame(
+        {
+            "country": ["US", "US", "US", "US"],
+            "firm_id": [1, 2, 3, 4],
+        }
+    )
+
+    plan = recommend_merge(left, right, WorkbenchConfig(min_join_overlap=0.5))
+
+    assert plan["join_key"] == "firm_id"
+    assert plan["join_type"] == "inner"
+    assert plan["left_overlap"] == 0.8
+    assert plan["right_overlap"] == 1.0

@@ -19,7 +19,7 @@ def recommend_merge(left: pd.DataFrame, right: pd.DataFrame, config: WorkbenchCo
         right_overlap = len(intersection) / max(len(right_values), 1)
         left_unique = left[column].dropna().is_unique
         right_unique = right[column].dropna().is_unique
-        confidence = overlap
+        confidence = min(left_overlap, right_overlap)
         if left_unique or right_unique:
             confidence += 0.1
         join_type = (
