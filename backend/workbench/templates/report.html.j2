@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ report.title }}</title>
+  </head>
+  <body>
+    <h1>{{ report.title }}</h1>
+
+    <section>
+      <h2>Facts</h2>
+      <ul>
+        {% for fact in report.facts %}
+        <li>{{ fact }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>Interpretation</h2>
+      <ul>
+        {% for claim in report.claims %}
+        <li>
+          {{ claim.claim }}
+          <span data-source-id="{{ claim.source_id }}">Source: {{ claim.source_id }}</span>
+          {% if claim.confidence is defined %}
+          <span>Confidence: {{ claim.confidence }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section>
+      <h2>Warnings</h2>
+      <ul>
+        {% for warning in report.warnings %}
+        <li>
+          {% if warning is mapping %}
+          {{ warning.message }}
+          <span data-source-id="{{ warning.source_id | default('errors.json') }}">
+            Source: {{ warning.source_id | default('errors.json') }}
+          </span>
+          {% else %}
+          {{ warning }}
+          <span data-source-id="errors.json">Source: errors.json</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </body>
+</html>

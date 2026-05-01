@@ -63,7 +63,7 @@ V1.x export formats Word, Notebook, and LaTeX are represented in the report/expo
 - Create: `backend/workbench/config.py`
 - Test: `tests/test_config_and_domain.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_config_and_domain.py
@@ -107,13 +107,13 @@ def test_domain_records_are_serializable():
     assert DatasetKind.PANEL.value == "panel"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_config_and_domain.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'workbench'`.
 
-- [ ] **Step 3: Create the package and shared types**
+- [x] **Step 3: Create the package and shared types**
 
 ```toml
 # pyproject.toml
@@ -290,13 +290,13 @@ def load_config(path: Path | None) -> WorkbenchConfig:
     return WorkbenchConfig(**values)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_config_and_domain.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml backend/workbench/__init__.py backend/workbench/domain.py backend/workbench/config.py tests/test_config_and_domain.py
@@ -310,7 +310,7 @@ git commit -m "feat: bootstrap workbench package"
 - Create: `backend/workbench/artifacts.py`
 - Test: `tests/test_project_run_artifacts.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_project_run_artifacts.py
@@ -350,13 +350,13 @@ def test_register_artifact_writes_index_and_hash(tmp_path: Path):
     assert record.path.endswith("sample.txt")
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_project_run_artifacts.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.projects`.
 
-- [ ] **Step 3: Implement project/run and artifact management**
+- [x] **Step 3: Implement project/run and artifact management**
 
 ```python
 # backend/workbench/projects.py
@@ -467,13 +467,13 @@ def write_environment_snapshot(path: Path) -> None:
     )
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_project_run_artifacts.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/projects.py backend/workbench/artifacts.py tests/test_project_run_artifacts.py
@@ -487,7 +487,7 @@ git commit -m "feat: add project run artifact management"
 - Create: `backend/workbench/metadata.py`
 - Test: `tests/test_ingestion_metadata.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_ingestion_metadata.py
@@ -517,13 +517,13 @@ def test_ingest_csv_copies_raw_snapshot_and_registers_schema(tmp_path: Path):
     assert roles["sales"] == "numeric_measure"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_ingestion_metadata.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.ingestion`.
 
-- [ ] **Step 3: Implement ingestion and schema inference**
+- [x] **Step 3: Implement ingestion and schema inference**
 
 ```python
 # backend/workbench/ingestion.py
@@ -617,13 +617,13 @@ def infer_schema(dataset_id: str, frames: dict[str, pd.DataFrame], run_root: Pat
     return schema
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_ingestion_metadata.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/ingestion.py backend/workbench/metadata.py tests/test_ingestion_metadata.py
@@ -637,7 +637,7 @@ git commit -m "feat: add ingestion metadata registry"
 - Create: `backend/workbench/validation.py`
 - Test: `tests/test_profiling_validation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_profiling_validation.py
@@ -664,13 +664,13 @@ def test_validation_flags_missing_rate_warning():
     assert any(issue.severity == Severity.WARNING and issue.code == "HIGH_MISSING_RATE" for issue in issues)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_profiling_validation.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.profiling`.
 
-- [ ] **Step 3: Implement profiling and guardrails**
+- [x] **Step 3: Implement profiling and guardrails**
 
 ```python
 # backend/workbench/profiling.py
@@ -721,13 +721,13 @@ def has_blockers(issues: list[GuardrailIssue]) -> bool:
     return any(issue.severity == Severity.BLOCKER for issue in issues)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_profiling_validation.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/profiling.py backend/workbench/validation.py tests/test_profiling_validation.py
@@ -741,7 +741,7 @@ git commit -m "feat: add profiling guardrails"
 - Create: `backend/workbench/cleaning.py`
 - Test: `tests/test_merge_cleaning.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_merge_cleaning.py
@@ -769,13 +769,13 @@ def test_clean_frame_normalizes_columns_and_records_actions():
     assert any(action["action"] == "drop_duplicate_rows" for action in actions)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_merge_cleaning.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.merge`.
 
-- [ ] **Step 3: Implement merge advice and deterministic cleaning**
+- [x] **Step 3: Implement merge advice and deterministic cleaning**
 
 ```python
 # backend/workbench/merge.py
@@ -840,13 +840,13 @@ def clean_frame(frame: pd.DataFrame, date_candidates: list[str]) -> tuple[pd.Dat
     return cleaned, actions
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_merge_cleaning.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/merge.py backend/workbench/cleaning.py tests/test_merge_cleaning.py
@@ -859,7 +859,7 @@ git commit -m "feat: add merge advisor cleaning"
 - Create: `backend/workbench/router.py`
 - Test: `tests/test_analysis_router.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_analysis_router.py
@@ -887,13 +887,13 @@ def test_classifies_repeated_cross_section():
     assert result["kind"] == DatasetKind.REPEATED_CROSS_SECTION.value
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_analysis_router.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.router`.
 
-- [ ] **Step 3: Implement dataset classification**
+- [x] **Step 3: Implement dataset classification**
 
 ```python
 # backend/workbench/router.py
@@ -930,13 +930,13 @@ def classify_dataset(frame: pd.DataFrame, id_candidates: list[str], time_candida
     return {"kind": DatasetKind.TIME_SERIES.value, "confidence": 0.8, "secondary_labels": ["single_observation_per_period"], "evidence": [f"time={time_col}"]}
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_analysis_router.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/router.py tests/test_analysis_router.py
@@ -952,7 +952,7 @@ git commit -m "feat: add analysis router"
 - Create: `backend/workbench/econometrics/normalize.py`
 - Test: `tests/test_econometrics_engine.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_econometrics_engine.py
@@ -983,13 +983,13 @@ def test_time_series_diagnostics_reports_autocorrelation():
     assert "lag1_autocorrelation" in result
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_econometrics_engine.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.econometrics`.
 
-- [ ] **Step 3: Implement model runners and normalization**
+- [x] **Step 3: Implement model runners and normalization**
 
 ```python
 # backend/workbench/econometrics/__init__.py
@@ -1081,13 +1081,13 @@ class ModelSpec:
     robust: bool = True
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_econometrics_engine.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/econometrics tests/test_econometrics_engine.py
@@ -1100,7 +1100,7 @@ git commit -m "feat: add econometrics engine"
 - Create: `backend/workbench/visualization.py`
 - Test: `tests/test_visualization.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # tests/test_visualization.py
@@ -1121,13 +1121,13 @@ def test_create_figures_writes_png_artifacts(tmp_path: Path):
     assert (run.root / figures["correlation_heatmap"]).exists()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pytest tests/test_visualization.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.visualization`.
 
-- [ ] **Step 3: Implement figure generation**
+- [x] **Step 3: Implement figure generation**
 
 ```python
 # backend/workbench/visualization.py
@@ -1170,13 +1170,13 @@ def create_figures(frame: pd.DataFrame, run_root: Path, numeric_columns: list[st
     return figures
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `pytest tests/test_visualization.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/visualization.py tests/test_visualization.py
@@ -1192,7 +1192,7 @@ git commit -m "feat: add visualization engine"
 - Create: `backend/workbench/exports.py`
 - Test: `tests/test_reporting_exports.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_reporting_exports.py
@@ -1222,13 +1222,13 @@ def test_render_and_export_reports(tmp_path: Path):
     assert xlsx_path.exists()
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_reporting_exports.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.exports`.
 
-- [ ] **Step 3: Implement source-bound reporting and exports**
+- [x] **Step 3: Implement source-bound reporting and exports**
 
 ```python
 # backend/workbench/narrative.py
@@ -1343,13 +1343,13 @@ def export_xlsx(tables: dict[str, list[dict[str, Any]]], run_root: Path) -> Path
     return path
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_reporting_exports.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/narrative.py backend/workbench/reporting.py backend/workbench/templates/report.html.j2 backend/workbench/exports.py tests/test_reporting_exports.py
@@ -1363,7 +1363,7 @@ git commit -m "feat: add source bound reporting exports"
 - Create: `backend/workbench/cli.py`
 - Test: `tests/test_orchestrator_e2e.py`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 ```python
 # tests/test_orchestrator_e2e.py
@@ -1388,13 +1388,13 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
     assert (run_root / "artifacts_index.json").exists()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `pytest tests/test_orchestrator_e2e.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.orchestrator`.
 
-- [ ] **Step 3: Implement the workflow orchestrator and CLI**
+- [x] **Step 3: Implement the workflow orchestrator and CLI**
 
 ```python
 # backend/workbench/orchestrator.py
@@ -1480,13 +1480,13 @@ def run(project_root: Annotated[Path, typer.Argument()], data_file: Annotated[Pa
     typer.echo(result["run_id"])
 ```
 
-- [ ] **Step 4: Run the integration test to verify it passes**
+- [x] **Step 4: Run the integration test to verify it passes**
 
 Run: `pytest tests/test_orchestrator_e2e.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/orchestrator.py backend/workbench/cli.py tests/test_orchestrator_e2e.py
@@ -1505,7 +1505,7 @@ git commit -m "feat: add workflow orchestrator"
 - Create: `frontend/src/App.test.tsx`
 - Create: `frontend/src/styles.css`
 
-- [ ] **Step 1: Write the failing API test**
+- [x] **Step 1: Write the failing API test**
 
 ```python
 # tests/test_api.py
@@ -1534,13 +1534,13 @@ def test_api_creates_project_and_runs_upload(tmp_path: Path):
     assert run_response.json()["status"] == "completed"
 ```
 
-- [ ] **Step 2: Run the API test to verify it fails**
+- [x] **Step 2: Run the API test to verify it fails**
 
 Run: `pytest tests/test_api.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.api`.
 
-- [ ] **Step 3: Implement the FastAPI API**
+- [x] **Step 3: Implement the FastAPI API**
 
 ```python
 # backend/workbench/api.py
@@ -1578,7 +1578,7 @@ async def run_endpoint(project_root: str = Form(...), mode: str = Form("auto"), 
     return {"run_id": result["run_id"], "status": result["status"]}
 ```
 
-- [ ] **Step 4: Add the React UI files**
+- [x] **Step 4: Add the React UI files**
 
 ```json
 // frontend/package.json
@@ -1719,7 +1719,7 @@ button { background: #1f6feb; color: white; border-color: #1f6feb; cursor: point
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 ```
 
-- [ ] **Step 5: Run API and frontend tests**
+- [x] **Step 5: Run API and frontend tests**
 
 Run: `pytest tests/test_api.py -v`
 
@@ -1729,7 +1729,7 @@ Run: `cd frontend && npm install && npm test`
 
 Expected: PASS with the `renders workbench controls` test.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/workbench/api.py tests/test_api.py frontend
@@ -1745,7 +1745,7 @@ git commit -m "feat: add local api ui"
 - Create: `tests/test_acceptance_templates.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write the failing acceptance tests**
+- [x] **Step 1: Write the failing acceptance tests**
 
 ```python
 # tests/test_acceptance_templates.py
@@ -1767,13 +1767,13 @@ def test_panel_template_runs(tmp_path: Path):
     assert result["status"] == "completed"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_acceptance_templates.py -v`
 
 Expected: FAIL because `examples/datasets/cross_section.csv` does not exist.
 
-- [ ] **Step 3: Add template datasets**
+- [x] **Step 3: Add template datasets**
 
 ```csv
 wage,education,experience,region
@@ -1877,7 +1877,7 @@ firm_id,year,sales,assets
 15,2021,34,68
 ```
 
-- [ ] **Step 4: Add user-facing README**
+- [x] **Step 4: Add user-facing README**
 
 ````markdown
 # Local Econometrics Workbench
@@ -1912,7 +1912,7 @@ npm run dev
 The V1 workflow writes outputs into `project/runs/{run_id}/`, including `run_manifest.json`, `environment.json`, `decisions.json`, `errors.json`, `artifacts_index.json`, reports, figures, tables, and processed data.
 ````
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run: `pytest -v`
 
@@ -1922,7 +1922,7 @@ Run: `cd frontend && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add README.md examples/datasets tests/test_acceptance_templates.py
