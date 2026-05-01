@@ -63,7 +63,7 @@ V1.x export formats Word, Notebook, and LaTeX are represented in the report/expo
 - Create: `backend/workbench/config.py`
 - Test: `tests/test_config_and_domain.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_config_and_domain.py
@@ -107,13 +107,13 @@ def test_domain_records_are_serializable():
     assert DatasetKind.PANEL.value == "panel"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_config_and_domain.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'workbench'`.
 
-- [ ] **Step 3: Create the package and shared types**
+- [x] **Step 3: Create the package and shared types**
 
 ```toml
 # pyproject.toml
@@ -290,13 +290,13 @@ def load_config(path: Path | None) -> WorkbenchConfig:
     return WorkbenchConfig(**values)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_config_and_domain.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add pyproject.toml backend/workbench/__init__.py backend/workbench/domain.py backend/workbench/config.py tests/test_config_and_domain.py
@@ -310,7 +310,7 @@ git commit -m "feat: bootstrap workbench package"
 - Create: `backend/workbench/artifacts.py`
 - Test: `tests/test_project_run_artifacts.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_project_run_artifacts.py
@@ -350,13 +350,13 @@ def test_register_artifact_writes_index_and_hash(tmp_path: Path):
     assert record.path.endswith("sample.txt")
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_project_run_artifacts.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.projects`.
 
-- [ ] **Step 3: Implement project/run and artifact management**
+- [x] **Step 3: Implement project/run and artifact management**
 
 ```python
 # backend/workbench/projects.py
@@ -467,13 +467,13 @@ def write_environment_snapshot(path: Path) -> None:
     )
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_project_run_artifacts.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/projects.py backend/workbench/artifacts.py tests/test_project_run_artifacts.py
@@ -487,7 +487,7 @@ git commit -m "feat: add project run artifact management"
 - Create: `backend/workbench/metadata.py`
 - Test: `tests/test_ingestion_metadata.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_ingestion_metadata.py
@@ -517,13 +517,13 @@ def test_ingest_csv_copies_raw_snapshot_and_registers_schema(tmp_path: Path):
     assert roles["sales"] == "numeric_measure"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_ingestion_metadata.py -v`
 
 Expected: FAIL with `ModuleNotFoundError` for `workbench.ingestion`.
 
-- [ ] **Step 3: Implement ingestion and schema inference**
+- [x] **Step 3: Implement ingestion and schema inference**
 
 ```python
 # backend/workbench/ingestion.py
@@ -617,13 +617,13 @@ def infer_schema(dataset_id: str, frames: dict[str, pd.DataFrame], run_root: Pat
     return schema
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `pytest tests/test_ingestion_metadata.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/workbench/ingestion.py backend/workbench/metadata.py tests/test_ingestion_metadata.py
@@ -1745,7 +1745,7 @@ git commit -m "feat: add local api ui"
 - Create: `tests/test_acceptance_templates.py`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write the failing acceptance tests**
+- [x] **Step 1: Write the failing acceptance tests**
 
 ```python
 # tests/test_acceptance_templates.py
@@ -1767,13 +1767,13 @@ def test_panel_template_runs(tmp_path: Path):
     assert result["status"] == "completed"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `pytest tests/test_acceptance_templates.py -v`
 
 Expected: FAIL because `examples/datasets/cross_section.csv` does not exist.
 
-- [ ] **Step 3: Add template datasets**
+- [x] **Step 3: Add template datasets**
 
 ```csv
 wage,education,experience,region
@@ -1877,7 +1877,7 @@ firm_id,year,sales,assets
 15,2021,34,68
 ```
 
-- [ ] **Step 4: Add user-facing README**
+- [x] **Step 4: Add user-facing README**
 
 ````markdown
 # Local Econometrics Workbench
@@ -1912,7 +1912,7 @@ npm run dev
 The V1 workflow writes outputs into `project/runs/{run_id}/`, including `run_manifest.json`, `environment.json`, `decisions.json`, `errors.json`, `artifacts_index.json`, reports, figures, tables, and processed data.
 ````
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run: `pytest -v`
 
@@ -1922,7 +1922,7 @@ Run: `cd frontend && npm test`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add README.md examples/datasets tests/test_acceptance_templates.py
