@@ -261,3 +261,31 @@ def test_download_artifact_returns_not_found_when_file_missing_on_disk(completed
 
     assert download_response.status_code == 404
     assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
+
+
+def test_get_report_returns_html(completed_run):
+    client, project_root, run_id = completed_run
+
+    report_response = client.get(
+        f"/runs/{run_id}/report", params={"project_root": project_root}
+    )
+
+    assert report_response.status_code == 200
+    assert report_response.headers["content-type"].startswith("text/html")
+    assert b"<html" in report_response.content.lower()
+
+
+def test_get_report_returns_report_not_found_when_missing(tmp_path: Path):
+    from workbench.projects import create_project, create_run
+
+    create_project(tmp_path, "demo")
+    project_root = tmp_path / "demo"
+    run = create_run(project_root, mode="auto")
+
+    client = TestClient(app)
+    report_response = client.get(
+        f"/runs/{run.run_id}/report", params={"project_root": str(project_root)}
+    )
+
+    assert report_response.status_code == 404
+    assert report_response.json()["error"]["code"] == "REPORT_NOT_FOUND"
