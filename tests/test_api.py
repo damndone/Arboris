@@ -8,6 +8,27 @@ from workbench import api
 from workbench.api import app
 
 
+@pytest.fixture
+def completed_run(tmp_path: Path):
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+    with data.open("rb") as handle:
+        run_response = client.post(
+            "/runs",
+            data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    return client, project_root, run_response.json()["run_id"]
+
+
 def test_api_creates_project_and_runs_upload(tmp_path: Path):
     client = TestClient(app)
     response = client.post(
@@ -62,23 +83,8 @@ def test_api_rejects_oversized_upload_and_cleans_temp_dir(
     assert not list(tmp_path.glob("workbench_upload_*"))
 
 
-def test_list_runs_returns_summary_for_completed_run(tmp_path: Path):
-    client = TestClient(app)
-    response = client.post(
-        "/projects",
-        json={"parent": str(tmp_path), "name": "demo"},
-    )
-    project_root = response.json()["project_root"]
-    data = tmp_path / "data.csv"
-    pd.DataFrame(
-        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
-    ).to_csv(data, index=False)
-    with data.open("rb") as handle:
-        client.post(
-            "/runs",
-            data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
-            files={"file": ("data.csv", handle, "text/csv")},
-        )
+def test_list_runs_returns_summary_for_completed_run(completed_run):
+    client, project_root, _run_id = completed_run
 
     list_response = client.get("/runs", params={"project_root": project_root})
 
@@ -93,6 +99,20 @@ def test_list_runs_returns_summary_for_completed_run(tmp_path: Path):
     assert summary["x"] == ["x"]
     assert "started_at" in summary
     assert "run_id" in summary
+
+
+def test_list_runs_returns_empty_for_project_with_no_runs(tmp_path: Path):
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+
+    list_response = client.get("/runs", params={"project_root": project_root})
+
+    assert list_response.status_code == 200
+    assert list_response.json() == {"runs": []}
 
 
 def test_list_runs_returns_invalid_path_for_missing_project(tmp_path: Path):
@@ -111,24 +131,8 @@ def test_list_runs_returns_invalid_path_for_missing_project(tmp_path: Path):
     }
 
 
-def test_get_run_detail_returns_artifact_counts(tmp_path: Path):
-    client = TestClient(app)
-    response = client.post(
-        "/projects",
-        json={"parent": str(tmp_path), "name": "demo"},
-    )
-    project_root = response.json()["project_root"]
-    data = tmp_path / "data.csv"
-    pd.DataFrame(
-        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
-    ).to_csv(data, index=False)
-    with data.open("rb") as handle:
-        run_response = client.post(
-            "/runs",
-            data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
-            files={"file": ("data.csv", handle, "text/csv")},
-        )
-    run_id = run_response.json()["run_id"]
+def test_get_run_detail_returns_artifact_counts(completed_run):
+    client, project_root, run_id = completed_run
 
     detail_response = client.get(
         f"/runs/{run_id}", params={"project_root": project_root}
