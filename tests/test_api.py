@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from workbench import api
@@ -59,3 +60,121 @@ def test_api_rejects_oversized_upload_and_cleans_temp_dir(
 
     assert run_response.status_code == 413
     assert not list(tmp_path.glob("workbench_upload_*"))
+
+
+def test_list_runs_returns_summary_for_completed_run(tmp_path: Path):
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+    with data.open("rb") as handle:
+        client.post(
+            "/runs",
+            data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+
+    list_response = client.get("/runs", params={"project_root": project_root})
+
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert "runs" in payload
+    assert len(payload["runs"]) == 1
+    summary = payload["runs"][0]
+    assert summary["status"] == "completed"
+    assert summary["mode"] == "auto"
+    assert summary["y"] == "y"
+    assert summary["x"] == ["x"]
+    assert "started_at" in summary
+    assert "run_id" in summary
+
+
+def test_list_runs_returns_invalid_path_for_missing_project(tmp_path: Path):
+    client = TestClient(app)
+    list_response = client.get(
+        "/runs", params={"project_root": str(tmp_path / "does_not_exist")}
+    )
+
+    assert list_response.status_code == 404
+    assert list_response.json() == {
+        "error": {
+            "code": "PROJECT_NOT_FOUND",
+            "message": f"Project not found: {tmp_path / 'does_not_exist'}",
+            "details": {"project_root": str(tmp_path / "does_not_exist")},
+        }
+    }
+
+
+def test_get_run_detail_returns_artifact_counts(tmp_path: Path):
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+    with data.open("rb") as handle:
+        run_response = client.post(
+            "/runs",
+            data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    run_id = run_response.json()["run_id"]
+
+    detail_response = client.get(
+        f"/runs/{run_id}", params={"project_root": project_root}
+    )
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["run_id"] == run_id
+    assert detail["status"] == "completed"
+    assert detail["y"] == "y"
+    assert detail["x"] == ["x"]
+    assert "artifact_counts" in detail
+    assert isinstance(detail["artifact_counts"], dict)
+    assert sum(detail["artifact_counts"].values()) > 0
+    assert detail["errors"] == {"issues": []}
+
+
+def test_get_run_detail_returns_run_not_found(tmp_path: Path):
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+
+    detail_response = client.get(
+        "/runs/missing-run", params={"project_root": project_root}
+    )
+
+    assert detail_response.status_code == 404
+    assert detail_response.json()["error"]["code"] == "RUN_NOT_FOUND"
+
+
+def test_resolve_run_root_rejects_path_escape(tmp_path: Path):
+    from workbench.api import _resolve_run_root
+    from workbench.api_errors import WorkbenchAPIError
+
+    client = TestClient(app)
+    response = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo"},
+    )
+    project_root = response.json()["project_root"]
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        _resolve_run_root(project_root, "../escape")
+
+    assert exc_info.value.code == "INVALID_PATH"
+    assert exc_info.value.status_code == 400
