@@ -229,3 +229,35 @@ def test_download_artifact_returns_artifact_not_found(completed_run):
 
     assert download_response.status_code == 404
     assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
+
+
+def test_resolve_artifact_path_rejects_escape(tmp_path: Path):
+    from workbench.api import _resolve_artifact_path
+    from workbench.api_errors import WorkbenchAPIError
+
+    run_root = tmp_path / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    record = {"artifact_id": "x", "path": "../../etc/passwd"}
+
+    with pytest.raises(WorkbenchAPIError) as exc_info:
+        _resolve_artifact_path(run_root, record)
+
+    assert exc_info.value.code == "INVALID_PATH"
+    assert exc_info.value.status_code == 400
+
+
+def test_download_artifact_returns_not_found_when_file_missing_on_disk(completed_run):
+    client, project_root, run_id = completed_run
+
+    # Registry says the report exists; delete the actual file behind it.
+    report_file = Path(project_root) / "runs" / run_id / "reports" / "report.html"
+    assert report_file.is_file()
+    report_file.unlink()
+
+    download_response = client.get(
+        f"/runs/{run_id}/artifacts/report_html",
+        params={"project_root": project_root},
+    )
+
+    assert download_response.status_code == 404
+    assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"

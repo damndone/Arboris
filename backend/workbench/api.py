@@ -256,5 +256,5 @@ def download_artifact_endpoint(
     return FileResponse(
         path,
         filename=path.name,
-        media_type="application/octet-stream",
+        media_type=None,
     )
