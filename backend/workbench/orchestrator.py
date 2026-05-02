@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +34,29 @@ def run_workflow(
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
     run = create_run(project_root, mode=mode)
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root,
+        run.run_id,
+        mode,
+        "running",
+        _lineage(input_files),
+        started_at=started_at,
+        y=y,
+        x=x,
+    )
 
     try:
-        return _run_workflow(run.root, run.run_id, input_files, mode, y, x, config)
+        return _run_workflow(
+            run.root,
+            run.run_id,
+            input_files,
+            mode,
+            y,
+            x,
+            config,
+            started_at,
+        )
     except Exception as exc:
         issue = GuardrailIssue(
             Severity.BLOCKER,
@@ -44,7 +65,16 @@ def run_workflow(
             {"error": str(exc)},
         )
         write_json(run.root / "errors.json", {"issues": [issue.to_dict()]})
-        _write_manifest(run.root, run.run_id, mode, "failed", _lineage(input_files))
+        _write_manifest(
+            run.root,
+            run.run_id,
+            mode,
+            "failed",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+        )
         raise
 
 
@@ -56,6 +86,7 @@ def _run_workflow(
     y: str,
     x: list[str],
     config: Any,
+    started_at: str,
 ) -> dict[str, str]:
     frames = ingest_files([Path(path) for path in input_files], run_root, config)
     schema = infer_schema("dataset_1", frames, run_root)
@@ -100,7 +131,16 @@ def _run_workflow(
     issue_dicts = [issue.to_dict() for issue in issues]
     write_json(run_root / "errors.json", {"issues": issue_dicts})
     if has_blockers(issues):
-        _write_manifest(run_root, run_id, mode, "blocked", _lineage(input_files))
+        _write_manifest(
+            run_root,
+            run_id,
+            mode,
+            "blocked",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+        )
         return {"run_id": run_id, "status": "blocked"}
 
     time_candidates = _normalized_existing(schema.time_candidates, cleaned)
@@ -123,7 +163,16 @@ def _run_workflow(
     if model_issue is not None:
         issue_dicts.append(model_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
-        _write_manifest(run_root, run_id, mode, "blocked", _lineage(input_files))
+        _write_manifest(
+            run_root,
+            run_id,
+            mode,
+            "blocked",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+        )
         return {"run_id": run_id, "status": "blocked"}
 
     model_result = run_ols(
@@ -170,7 +219,16 @@ def _run_workflow(
     export_pdf(report, run_root)
     export_xlsx({"coefficients": _coefficient_rows(model_result)}, run_root)
 
-    _write_manifest(run_root, run_id, mode, "completed", _lineage(input_files))
+    _write_manifest(
+        run_root,
+        run_id,
+        mode,
+        "completed",
+        _lineage(input_files),
+        started_at=started_at,
+        y=y,
+        x=x,
+    )
     return {"run_id": run_id, "status": "completed"}
 
 
@@ -232,8 +290,20 @@ def _write_manifest(
     mode: str,
     status: str,
     lineage: list[dict[str, str]],
+    *,
+    started_at: str,
+    y: str,
+    x: list[str],
 ) -> None:
     write_json(
         run_root / "run_manifest.json",
-        {"run_id": run_id, "mode": mode, "status": status, "lineage": lineage},
+        {
+            "run_id": run_id,
+            "mode": mode,
+            "status": status,
+            "started_at": started_at,
+            "y": y,
+            "x": list(x),
+            "lineage": lineage,
+        },
     )

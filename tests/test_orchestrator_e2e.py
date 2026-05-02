@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -69,3 +70,23 @@ def test_run_workflow_blocks_missing_model_columns(tmp_path: Path):
     assert manifest["status"] == "blocked"
     assert errors["issues"][0]["code"] == "MODEL_COLUMNS_NOT_FOUND"
     assert not (run_root / "model_results" / "regression_1.json").exists()
+
+
+def test_manifest_contains_started_at_y_and_x(tmp_path: Path):
+    project_root = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    data = project_root / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+
+    result = run_workflow(project_root, [data], mode="auto", y="y", x=["x"])
+
+    manifest_path = project_root / "runs" / result["run_id"] / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert "started_at" in manifest
+    assert manifest["started_at"].endswith("+00:00") or manifest["started_at"].endswith("Z")
+    assert manifest["y"] == "y"
+    assert manifest["x"] == ["x"]
+    assert manifest["status"] == "completed"
