@@ -11,6 +11,7 @@ from .api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     ERROR_INVALID_PATH,
     ERROR_PROJECT_NOT_FOUND,
+    ERROR_REPORT_NOT_FOUND,
     ERROR_RUN_NOT_FOUND,
     WorkbenchAPIError,
     register_error_handlers,
@@ -258,3 +259,17 @@ def download_artifact_endpoint(
         filename=path.name,
         media_type=None,
     )
+
+
+@app.get("/runs/{run_id}/report")
+def get_report_endpoint(run_id: str, project_root: str) -> FileResponse:
+    run_root = _resolve_run_root(project_root, run_id)
+    report_path = run_root / "reports" / "report.html"
+    if not report_path.is_file():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_REPORT_NOT_FOUND,
+            message="report.html not found for this run",
+            details={"run_id": run_id},
+        )
+    return FileResponse(report_path, media_type="text/html")
