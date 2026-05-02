@@ -326,3 +326,19 @@ dd {
 .runs-row:hover {
   background: #f3f4f6;
 }
+.report-frame {
+  width: 100%;
+  height: 600px;
+  margin-top: 0.75rem;
+  border: 1px solid #d1d5db;
+}
+.report-link {
+  margin-left: 0.75rem;
+}
+.artifact-group {
+  margin-top: 0.75rem;
+}
+.artifact-group h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
