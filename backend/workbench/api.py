@@ -102,7 +102,7 @@ def _resolve_run_root(project_root: str, run_id: str) -> Path:
             status_code=404,
             code=ERROR_RUN_NOT_FOUND,
             message=f"Run not found: {run_id}",
-            details={"run_id": run_id, "project_root": project_root},
+            details={"run_id": run_id, "project_root": str(runs_dir.parent)},
         )
     return candidate
 
