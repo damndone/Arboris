@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ApiError, createProject, runWorkflow, type RunResponse } from "./api";
+import { RunHistoryPanel } from "./runHistory";
+import { RunDetailPanel } from "./runDetail";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
@@ -43,6 +45,14 @@ export default function App() {
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activity, setActivity] = useState<string>("Idle");
+
+  type ViewState = { name: "submit" } | { name: "history" } | { name: "detail"; runId: string };
+  const [view, setView] = useState<ViewState>({ name: "submit" });
+  const [historyKey, setHistoryKey] = useState(0);
+
+  const handlePanelError = useCallback((message: string) => {
+    setErrorMessage(message);
+  }, []);
 
   const xColumns = useMemo(() => parseColumns(x), [x]);
 
@@ -141,6 +151,33 @@ export default function App() {
           <p>{errorMessage}</p>
         </section>
       )}
+
+      <nav className="tabs" role="tablist" aria-label="workbench views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view.name === "submit"}
+          onClick={() => setView({ name: "submit" })}
+        >
+          Submit
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view.name === "history" || view.name === "detail"}
+          disabled={projectRoot === ""}
+          onClick={() => {
+            setView({ name: "history" });
+            setHistoryKey((value) => value + 1);
+            setErrorMessage(null);
+          }}
+        >
+          History
+        </button>
+      </nav>
+
+      {view.name === "submit" && (
+        <>
 
       <section className="panel" aria-labelledby="project-heading">
         <div className="panel-heading">
@@ -308,6 +345,36 @@ export default function App() {
           <p className="muted">Submit a workflow to see run details and output paths.</p>
         )}
       </section>
+
+        </>
+      )}
+
+      {view.name === "history" && projectRoot && (
+        <section className="panel" aria-labelledby="history-heading">
+          <div className="panel-heading">
+            <h2 id="history-heading">Run history</h2>
+            <span>{projectRoot}</span>
+          </div>
+          <RunHistoryPanel
+            key={historyKey}
+            projectRoot={projectRoot}
+            onSelect={(runId) => setView({ name: "detail", runId })}
+            onError={handlePanelError}
+          />
+        </section>
+      )}
+      {view.name === "detail" && projectRoot && (
+        <RunDetailPanel
+          projectRoot={projectRoot}
+          runId={view.runId}
+          onBack={() => {
+            setView({ name: "history" });
+            setHistoryKey((value) => value + 1);
+            setErrorMessage(null);
+          }}
+          onError={handlePanelError}
+        />
+      )}
     </main>
   );
 }

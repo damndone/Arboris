@@ -300,3 +300,29 @@ dd {
     grid-template-columns: 1fr;
   }
 }
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.tabs button[aria-selected="true"] {
+  font-weight: 600;
+  border-bottom: 2px solid currentColor;
+}
+.runs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.runs-table th,
+.runs-table td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+.runs-row {
+  cursor: pointer;
+}
+.runs-row:hover {
+  background: #f3f4f6;
+}

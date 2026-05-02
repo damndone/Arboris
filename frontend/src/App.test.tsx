@@ -189,3 +189,123 @@ test("HTTP 422 with validation array detail joins location + msg", async () => {
   expect(alert).toHaveTextContent("HTTP 422");
   expect(alert).toHaveTextContent("parent: field required");
 });
+
+test("history tab fetches and lists runs for the current project", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [
+        {
+          run_id: "run-2",
+          status: "completed",
+          mode: "auto",
+          started_at: "2026-05-01T01:00:00+00:00",
+          y: "y",
+          x: ["x"],
+        },
+        {
+          run_id: "run-1",
+          status: "blocked",
+          mode: "auto",
+          started_at: "2026-05-01T00:00:00+00:00",
+          y: "y",
+          x: ["x"],
+        },
+      ],
+    })
+  );
+
+  render(<App />);
+  await fillProject();
+
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+
+  await waitFor(() => {
+    expect(screen.getByText("run-1")).toBeInTheDocument();
+  });
+  expect(screen.getByText("run-2")).toBeInTheDocument();
+  expect(screen.getByText("Blocked")).toBeInTheDocument();
+});
+
+test("clicking a history row loads run detail with errors", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [
+        {
+          run_id: "run-1",
+          status: "blocked",
+          mode: "auto",
+          started_at: "2026-05-01T00:00:00+00:00",
+          y: "y",
+          x: ["x"],
+        },
+      ],
+    })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "blocked",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+      lineage: [{ source: "/tmp/demo/data.csv", artifact_id: "raw_data.csv" }],
+      artifact_counts: { metadata: 2, profile: 1 },
+      errors: {
+        issues: [
+          {
+            severity: "BLOCKER",
+            code: "DATA_QUALITY",
+            message: "Bad column",
+            evidence: {},
+          },
+        ],
+      },
+    })
+  );
+
+  render(<App />);
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(
+      screen.getByRole("heading", { name: /run detail/i })
+    ).toBeInTheDocument();
+  });
+  expect(screen.getByText("Bad column")).toBeInTheDocument();
+  expect(screen.getByText("DATA_QUALITY")).toBeInTheDocument();
+});
+
+test("history tab surfaces PROJECT_NOT_FOUND envelope in error panel", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse(
+      {
+        error: {
+          code: "PROJECT_NOT_FOUND",
+          message: "Project not found",
+          details: {},
+        },
+      },
+      { status: 404 }
+    )
+  );
+
+  render(<App />);
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("PROJECT_NOT_FOUND");
+});
