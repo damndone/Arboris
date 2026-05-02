@@ -18,10 +18,16 @@ export type RunSummary = {
   x: string[] | null;
 };
 
+export type IssueRecord = {
+  severity?: string;
+  code?: string;
+  message?: string;
+};
+
 export type RunDetail = RunSummary & {
   lineage: Array<{ source: string; artifact_id: string }>;
   artifact_counts: Record<string, number>;
-  errors: { issues: Array<Record<string, unknown>> };
+  errors: { issues: IssueRecord[] };
 };
 
 export type ArtifactItem = {
