@@ -182,3 +182,50 @@ def test_resolve_run_root_rejects_path_escape(tmp_path: Path):
 
     assert exc_info.value.code == "INVALID_PATH"
     assert exc_info.value.status_code == 400
+
+
+def test_list_artifacts_groups_by_type(completed_run):
+    client, project_root, run_id = completed_run
+
+    artifacts_response = client.get(
+        f"/runs/{run_id}/artifacts", params={"project_root": project_root}
+    )
+
+    assert artifacts_response.status_code == 200
+    payload = artifacts_response.json()
+    assert "groups" in payload
+    by_type = {group["artifact_type"]: group for group in payload["groups"]}
+    assert "report" in by_type
+    assert "model_result" in by_type
+    report_items = by_type["report"]["items"]
+    assert any(item["artifact_id"] == "report_html" for item in report_items)
+    for group in payload["groups"]:
+        for item in group["items"]:
+            assert "artifact_id" in item
+            assert "path" in item
+            assert "step" in item
+
+
+def test_download_artifact_returns_file_with_attachment_disposition(completed_run):
+    client, project_root, run_id = completed_run
+
+    download_response = client.get(
+        f"/runs/{run_id}/artifacts/report_html",
+        params={"project_root": project_root},
+    )
+
+    assert download_response.status_code == 200
+    assert "attachment" in download_response.headers["content-disposition"]
+    assert b"<html" in download_response.content.lower()
+
+
+def test_download_artifact_returns_artifact_not_found(completed_run):
+    client, project_root, run_id = completed_run
+
+    download_response = client.get(
+        f"/runs/{run_id}/artifacts/does_not_exist",
+        params={"project_root": project_root},
+    )
+
+    assert download_response.status_code == 404
+    assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"

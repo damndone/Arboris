@@ -4,9 +4,11 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .api_errors import (
+    ERROR_ARTIFACT_NOT_FOUND,
     ERROR_INVALID_PATH,
     ERROR_PROJECT_NOT_FOUND,
     ERROR_RUN_NOT_FOUND,
@@ -142,6 +144,61 @@ def _artifact_counts(run_root: Path) -> dict[str, int]:
     return counts
 
 
+def _read_artifact_records(run_root: Path) -> list[dict]:
+    index_path = run_root / "artifacts_index.json"
+    if not index_path.is_file():
+        return []
+    return list(read_json(index_path).get("artifacts", []))
+
+
+def _group_artifacts(records: list[dict]) -> list[dict]:
+    by_type: dict[str, list[dict]] = {}
+    for record in records:
+        artifact_type = record.get("artifact_type", "unknown")
+        by_type.setdefault(artifact_type, []).append(
+            {
+                "artifact_id": record.get("artifact_id"),
+                "path": record.get("path"),
+                "artifact_type": artifact_type,
+                "step": record.get("step"),
+                "sha256": record.get("sha256"),
+            }
+        )
+    return [
+        {"artifact_type": artifact_type, "items": items}
+        for artifact_type, items in sorted(by_type.items())
+    ]
+
+
+def _resolve_artifact_path(run_root: Path, record: dict) -> Path:
+    relative = record.get("path")
+    if not isinstance(relative, str) or relative == "":
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_ARTIFACT_NOT_FOUND,
+            message="Artifact has no path",
+            details={"artifact_id": record.get("artifact_id")},
+        )
+    candidate = (run_root / relative).resolve()
+    try:
+        candidate.relative_to(run_root.resolve())
+    except ValueError as exc:
+        raise WorkbenchAPIError(
+            status_code=400,
+            code=ERROR_INVALID_PATH,
+            message="Artifact path resolved outside run root",
+            details={"artifact_id": record.get("artifact_id")},
+        ) from exc
+    if not candidate.is_file():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_ARTIFACT_NOT_FOUND,
+            message=f"Artifact file missing on disk: {relative}",
+            details={"artifact_id": record.get("artifact_id")},
+        )
+    return candidate
+
+
 @app.get("/runs")
 def list_runs_endpoint(project_root: str) -> dict:
     runs_dir = _resolve_project_runs_dir(project_root)
@@ -169,3 +226,35 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "artifact_counts": _artifact_counts(run_root),
         "errors": errors,
     }
+
+
+@app.get("/runs/{run_id}/artifacts")
+def list_artifacts_endpoint(run_id: str, project_root: str) -> dict:
+    run_root = _resolve_run_root(project_root, run_id)
+    records = _read_artifact_records(run_root)
+    return {"groups": _group_artifacts(records)}
+
+
+@app.get("/runs/{run_id}/artifacts/{artifact_id}")
+def download_artifact_endpoint(
+    run_id: str, artifact_id: str, project_root: str
+) -> FileResponse:
+    run_root = _resolve_run_root(project_root, run_id)
+    records = _read_artifact_records(run_root)
+    matched = next(
+        (record for record in records if record.get("artifact_id") == artifact_id),
+        None,
+    )
+    if matched is None:
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_ARTIFACT_NOT_FOUND,
+            message=f"Artifact not found: {artifact_id}",
+            details={"artifact_id": artifact_id, "run_id": run_id},
+        )
+    path = _resolve_artifact_path(run_root, matched)
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/octet-stream",
+    )
