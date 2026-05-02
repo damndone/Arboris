@@ -6,11 +6,13 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from .api_errors import register_error_handlers
 from .config import load_config
 from .orchestrator import run_workflow
 from .projects import create_project
 
 app = FastAPI(title="Local Econometrics Workbench")
+register_error_handlers(app)
 
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 BYTES_PER_GB = 1024**3
