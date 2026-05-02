@@ -309,3 +309,131 @@ test("history tab surfaces PROJECT_NOT_FOUND envelope in error panel", async () 
   });
   expect(screen.getByRole("alert")).toHaveTextContent("PROJECT_NOT_FOUND");
 });
+
+test("run detail shows artifact list with download links", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" })); // createProject
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [
+        {
+          run_id: "run-1",
+          status: "completed",
+          mode: "auto",
+          started_at: "2026-05-01T00:00:00+00:00",
+          y: "y",
+          x: ["x"],
+        },
+      ],
+    })
+  ); // fetchRuns
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: { issues: [] },
+    })
+  ); // fetchRunDetail
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      groups: [
+        {
+          artifact_type: "report",
+          items: [
+            {
+              artifact_id: "report_html",
+              path: "reports/report.html",
+              artifact_type: "report",
+              step: "reporting",
+              sha256: "deadbeef",
+            },
+          ],
+        },
+      ],
+    })
+  ); // fetchRunArtifacts
+
+  render(<App />);
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => screen.getByRole("heading", { name: /artifacts/i }));
+
+  const downloadLink = screen.getByRole("link", { name: /report_html/i });
+  expect(downloadLink).toHaveAttribute(
+    "href",
+    "/runs/run-1/artifacts/report_html?project_root=%2Ftmp%2Fdemo",
+  );
+});
+
+test("view report toggles iframe with report URL", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" })); // createProject
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [
+        {
+          run_id: "run-1",
+          status: "completed",
+          mode: "auto",
+          started_at: "2026-05-01T00:00:00+00:00",
+          y: "y",
+          x: ["x"],
+        },
+      ],
+    })
+  ); // fetchRuns
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: { issues: [] },
+    })
+  ); // fetchRunDetail
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      groups: [
+        {
+          artifact_type: "report",
+          items: [
+            {
+              artifact_id: "report_html",
+              path: "reports/report.html",
+              artifact_type: "report",
+              step: "reporting",
+              sha256: "deadbeef",
+            },
+          ],
+        },
+      ],
+    })
+  ); // fetchRunArtifacts
+
+  render(<App />);
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => screen.getByRole("button", { name: /view report/i }));
+  fireEvent.click(screen.getByRole("button", { name: /view report/i }));
+
+  const iframe = screen.getByTitle("Run report") as HTMLIFrameElement;
+  expect(iframe.src).toContain(
+    "/runs/run-1/report?project_root=%2Ftmp%2Fdemo",
+  );
+});

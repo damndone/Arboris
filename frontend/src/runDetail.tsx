@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import {
   ApiError,
+  artifactDownloadUrl,
+  fetchRunArtifacts,
   fetchRunDetail,
+  reportUrl,
+  type ArtifactGroup,
   type IssueRecord,
   type RunDetail,
 } from "./api";
@@ -26,6 +30,8 @@ function statusLabel(status: string): string {
 
 export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [groups, setGroups] = useState<ArtifactGroup[] | null>(null);
+  const [showReport, setShowReport] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +54,22 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
       cancelled = true;
     };
   }, [projectRoot, runId, onError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRunArtifacts(projectRoot, runId)
+      .then((value) => {
+        if (cancelled) return;
+        setGroups(value.groups);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGroups([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId]);
 
   if (detail === null) {
     return <p className="muted">Loading run…</p>;
@@ -114,6 +136,58 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
           </ul>
         </section>
       )}
+      <section aria-labelledby="report-heading">
+        <h3 id="report-heading" className="subhead">
+          Report
+        </h3>
+        <button type="button" onClick={() => setShowReport((value) => !value)}>
+          {showReport ? "Hide report" : "View report"}
+        </button>
+        <a
+          className="report-link"
+          href={reportUrl(projectRoot, runId)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open in new tab
+        </a>
+        {showReport && (
+          <iframe
+            title="Run report"
+            src={reportUrl(projectRoot, runId)}
+            className="report-frame"
+          />
+        )}
+      </section>
+      <section aria-labelledby="artifacts-heading">
+        <h3 id="artifacts-heading" className="subhead">
+          Artifacts
+        </h3>
+        {groups === null ? (
+          <p className="muted">Loading artifacts…</p>
+        ) : groups.length === 0 ? (
+          <p className="muted">No artifacts recorded.</p>
+        ) : (
+          groups.map((group) => (
+            <div key={group.artifact_type} className="artifact-group">
+              <h4>{group.artifact_type}</h4>
+              <ul>
+                {group.items.map((item) => (
+                  <li key={item.artifact_id}>
+                    <a
+                      href={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+                    >
+                      {item.artifact_id}
+                    </a>
+                    <span className="mono"> · {item.path}</span>
+                    <span className="muted"> · {item.step}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </section>
     </section>
   );
 }
