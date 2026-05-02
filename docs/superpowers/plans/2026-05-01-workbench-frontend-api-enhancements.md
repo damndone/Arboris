@@ -1,6 +1,6 @@
 # V1.1 Workbench Frontend & API Enhancements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build an API-backed result browser on top of V1: read-only endpoints expose run history, run detail, artifacts, and the HTML report; the frontend grows a run-list / detail / artifact / report-viewer flow that consumes only the API.
 
@@ -39,13 +39,13 @@ This plan covers exactly what is in `docs/superpowers/specs/2026-05-01-workbench
 - Modify: `tests/test_orchestrator_e2e.py`
 - Modify: `tests/test_project_run_artifacts.py` (only if it asserts on manifest shape; verify first)
 
-- [ ] **Step 1: Inspect current manifest assertions**
+- [x] **Step 1: Inspect current manifest assertions**
 
 Run: `grep -n "run_manifest\|started_at\|\"y\"\|\"x\":" tests/`
 
 Expected: list of files that assert on manifest. Plan accordingly — the new fields must not break existing assertions. (V1 tests assert on `run_id`, `mode`, `status`, `lineage` only.)
 
-- [ ] **Step 2: Write the failing test in `tests/test_orchestrator_e2e.py`**
+- [x] **Step 2: Write the failing test in `tests/test_orchestrator_e2e.py`**
 
 Append at the end of the file:
 
@@ -72,13 +72,13 @@ def test_manifest_contains_started_at_y_and_x(tmp_path: Path):
 
 Add the imports at the top of the file if missing: `import json`, `import pandas as pd`, `from workbench.orchestrator import run_workflow`, `from workbench.projects import create_project`. Do not duplicate imports already present.
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `pytest tests/test_orchestrator_e2e.py::test_manifest_contains_started_at_y_and_x -v`
 
 Expected: FAIL with `KeyError: 'started_at'` or `assert 'started_at' in manifest` failing.
 
-- [ ] **Step 4: Update `_write_manifest` signature in `backend/workbench/orchestrator.py`**
+- [x] **Step 4: Update `_write_manifest` signature in `backend/workbench/orchestrator.py`**
 
 Replace the existing `_write_manifest` (lines 229-239) with:
 
@@ -108,7 +108,7 @@ def _write_manifest(
     )
 ```
 
-- [ ] **Step 5: Capture started_at and pass it through `run_workflow`**
+- [x] **Step 5: Capture started_at and pass it through `run_workflow`**
 
 In `backend/workbench/orchestrator.py`, add `from datetime import datetime, timezone` to the imports.
 
@@ -170,7 +170,7 @@ def run_workflow(
         raise
 ```
 
-- [ ] **Step 6: Thread `started_at` into `_run_workflow` and update its `_write_manifest` calls**
+- [x] **Step 6: Thread `started_at` into `_run_workflow` and update its `_write_manifest` calls**
 
 Replace the `_run_workflow` signature (line 51) to add `started_at: str` as the last parameter (after `config: Any`), and update both internal `_write_manifest` calls (the "blocked" calls on lines 103 and 126, and the "completed" call on line 173) to pass `started_at=started_at, y=y, x=x` as keyword args.
 
@@ -191,19 +191,19 @@ _write_manifest(run_root, run_id, mode, "completed", _lineage(input_files),
                 started_at=started_at, y=y, x=x)
 ```
 
-- [ ] **Step 7: Run the new test**
+- [x] **Step 7: Run the new test**
 
 Run: `pytest tests/test_orchestrator_e2e.py::test_manifest_contains_started_at_y_and_x -v`
 
 Expected: PASS.
 
-- [ ] **Step 8: Run the full backend suite to confirm no regressions**
+- [x] **Step 8: Run the full backend suite to confirm no regressions**
 
 Run: `pytest -q`
 
 Expected: all tests pass (V1 baseline + the new test). If a V1 test fails because of the new manifest fields, fix the test to be additive (assert on existing fields only) — never weaken the new fields.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/workbench/orchestrator.py tests/test_orchestrator_e2e.py
@@ -219,7 +219,7 @@ git commit -m "feat(orchestrator): record started_at / y / x in run manifest"
 - Create: `tests/test_api_errors.py`
 - Modify: `backend/workbench/api.py`
 
-- [ ] **Step 1: Write the failing tests in `tests/test_api_errors.py`**
+- [x] **Step 1: Write the failing tests in `tests/test_api_errors.py`**
 
 ```python
 from fastapi import FastAPI
@@ -272,13 +272,13 @@ def test_workbench_api_error_default_details_is_empty_dict():
     assert err.status_code == 404
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_api_errors.py -v`
 
 Expected: FAIL with `ModuleNotFoundError: workbench.api_errors`.
 
-- [ ] **Step 3: Create `backend/workbench/api_errors.py`**
+- [x] **Step 3: Create `backend/workbench/api_errors.py`**
 
 ```python
 from __future__ import annotations
@@ -327,13 +327,13 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pytest tests/test_api_errors.py -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Wire the handler into the existing app in `backend/workbench/api.py`**
+- [x] **Step 5: Wire the handler into the existing app in `backend/workbench/api.py`**
 
 After the `app = FastAPI(...)` line (around line 13), add:
 
@@ -345,13 +345,13 @@ register_error_handlers(app)
 
 (Combine the import with the other relative imports at the top of the file.)
 
-- [ ] **Step 6: Run the full backend suite**
+- [x] **Step 6: Run the full backend suite**
 
 Run: `pytest -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/workbench/api_errors.py tests/test_api_errors.py backend/workbench/api.py
@@ -366,7 +366,7 @@ git commit -m "feat(api): add WorkbenchAPIError envelope handler"
 - Modify: `backend/workbench/api.py`
 - Modify: `tests/test_api.py`
 
-- [ ] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
+- [x] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
 
 ```python
 def test_list_runs_returns_summary_for_completed_run(tmp_path: Path):
@@ -485,13 +485,13 @@ def test_get_run_detail_rejects_path_escape(tmp_path: Path):
     assert detail_response.json()["error"]["code"] == "INVALID_PATH"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_api.py -v -k "list_runs or run_detail or path_escape"`
 
 Expected: FAIL — endpoints don't exist yet.
 
-- [ ] **Step 3: Add helpers and endpoints to `backend/workbench/api.py`**
+- [x] **Step 3: Add helpers and endpoints to `backend/workbench/api.py`**
 
 Add to the imports:
 
@@ -610,19 +610,19 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pytest tests/test_api.py -v -k "list_runs or run_detail or path_escape"`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full backend suite**
+- [x] **Step 5: Run the full backend suite**
 
 Run: `pytest -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/workbench/api.py tests/test_api.py
@@ -637,7 +637,7 @@ git commit -m "feat(api): add /runs list and /runs/{run_id} detail endpoints"
 - Modify: `backend/workbench/api.py`
 - Modify: `tests/test_api.py`
 
-- [ ] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
+- [x] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
 
 ```python
 def test_list_artifacts_groups_by_type(tmp_path: Path):
@@ -735,13 +735,13 @@ def test_download_artifact_returns_artifact_not_found(tmp_path: Path):
     assert download_response.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_api.py -v -k "list_artifacts or download_artifact"`
 
 Expected: FAIL — endpoints don't exist yet.
 
-- [ ] **Step 3: Add helpers and endpoints to `backend/workbench/api.py`**
+- [x] **Step 3: Add helpers and endpoints to `backend/workbench/api.py`**
 
 Add to the imports:
 
@@ -843,19 +843,19 @@ def download_artifact_endpoint(
     )
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pytest tests/test_api.py -v -k "list_artifacts or download_artifact"`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full backend suite**
+- [x] **Step 5: Run the full backend suite**
 
 Run: `pytest -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/workbench/api.py tests/test_api.py
@@ -870,7 +870,7 @@ git commit -m "feat(api): add artifact list and download endpoints"
 - Modify: `backend/workbench/api.py`
 - Modify: `tests/test_api.py`
 
-- [ ] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
+- [x] **Step 1: Write the failing tests at the bottom of `tests/test_api.py`**
 
 ```python
 def test_get_report_returns_html(tmp_path: Path):
@@ -917,13 +917,13 @@ def test_get_report_returns_report_not_found_when_missing(tmp_path: Path):
     assert report_response.json()["error"]["code"] == "REPORT_NOT_FOUND"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_api.py -v -k "get_report"`
 
 Expected: FAIL — endpoint doesn't exist yet.
 
-- [ ] **Step 3: Add the endpoint to `backend/workbench/api.py`**
+- [x] **Step 3: Add the endpoint to `backend/workbench/api.py`**
 
 Add to the imports:
 
@@ -948,19 +948,19 @@ def get_report_endpoint(run_id: str, project_root: str) -> FileResponse:
     return FileResponse(report_path, media_type="text/html")
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `pytest tests/test_api.py -v -k "get_report"`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full backend suite**
+- [x] **Step 5: Run the full backend suite**
 
 Run: `pytest -q`
 
 Expected: all tests pass. Record total test count and report to user (e.g., "62 passed").
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/workbench/api.py tests/test_api.py
@@ -975,7 +975,7 @@ git commit -m "feat(api): add /runs/{run_id}/report endpoint"
 - Modify: `frontend/src/api.ts`
 - Create: `frontend/src/api.test.ts`
 
-- [ ] **Step 1: Write the failing tests in `frontend/src/api.test.ts`**
+- [x] **Step 1: Write the failing tests in `frontend/src/api.test.ts`**
 
 ```typescript
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -1128,13 +1128,13 @@ test("reportUrl encodes project_root", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd frontend && npm test -- src/api.test.ts`
 
 Expected: FAIL — `fetchRuns`, `fetchRunDetail`, `fetchRunArtifacts`, `reportUrl`, `artifactDownloadUrl` are not exported.
 
-- [ ] **Step 3: Extend `frontend/src/api.ts`**
+- [x] **Step 3: Extend `frontend/src/api.ts`**
 
 Add the new types after `RunResponse`:
 
@@ -1275,19 +1275,19 @@ export function reportUrl(projectRoot: string, runId: string): string {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd frontend && npm test -- src/api.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run all frontend tests**
+- [x] **Step 5: Run all frontend tests**
 
 Run: `cd frontend && npm test`
 
 Expected: all tests pass (including existing `App.test.tsx` — the new `ApiError` constructor signature is backward-compatible because the `code` parameter defaults to `null`).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/api.ts frontend/src/api.test.ts
@@ -1307,7 +1307,7 @@ git commit -m "feat(frontend): add typed clients for run/artifact/report endpoin
 
 This task introduces the run-history and run-detail views without the artifact browser or report viewer (those land in Task 8). The detail view shows status, summary, lineage, artifact counts, and an errors panel.
 
-- [ ] **Step 1: Write the failing tests in `frontend/src/App.test.tsx`**
+- [x] **Step 1: Write the failing tests in `frontend/src/App.test.tsx`**
 
 Append at the end of the file:
 
@@ -1433,13 +1433,13 @@ test("history tab surfaces RUN_NOT_FOUND envelope in error panel", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd frontend && npm test`
 
 Expected: the three new tests FAIL (no `History` tab exists).
 
-- [ ] **Step 3: Create `frontend/src/runHistory.tsx`**
+- [x] **Step 3: Create `frontend/src/runHistory.tsx`**
 
 ```typescript
 import { useEffect, useState } from "react";
@@ -1535,7 +1535,7 @@ export function RunHistoryPanel({ projectRoot, onSelect, onError }: Props) {
 }
 ```
 
-- [ ] **Step 4: Create `frontend/src/runDetail.tsx`**
+- [x] **Step 4: Create `frontend/src/runDetail.tsx`**
 
 ```typescript
 import { useEffect, useState } from "react";
@@ -1663,7 +1663,7 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
 }
 ```
 
-- [ ] **Step 5: Add tab navigation to `frontend/src/App.tsx`**
+- [x] **Step 5: Add tab navigation to `frontend/src/App.tsx`**
 
 Add the imports near the top:
 
@@ -1751,7 +1751,7 @@ After that fragment, render the history and detail panels:
 )}
 ```
 
-- [ ] **Step 6: Add minimal CSS to `frontend/src/styles.css`**
+- [x] **Step 6: Add minimal CSS to `frontend/src/styles.css`**
 
 Append at the end of the file:
 
@@ -1783,13 +1783,13 @@ Append at the end of the file:
 }
 ```
 
-- [ ] **Step 7: Run the new tests**
+- [x] **Step 7: Run the new tests**
 
 Run: `cd frontend && npm test`
 
 Expected: all tests pass — original 6 + new 3 history/detail tests + Task 6's api.test.ts tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add frontend/src/runHistory.tsx frontend/src/runDetail.tsx frontend/src/App.tsx frontend/src/App.test.tsx frontend/src/styles.css
@@ -1807,7 +1807,7 @@ git commit -m "feat(frontend): add run history and run detail views"
 
 The artifact browser and report viewer live inside the `RunDetailPanel` so the detail page shows everything for one run. Selecting "View report" toggles the iframe; the artifact list always shows.
 
-- [ ] **Step 1: Write the failing tests in `frontend/src/App.test.tsx`**
+- [x] **Step 1: Write the failing tests in `frontend/src/App.test.tsx`**
 
 Append to the end of the file:
 
@@ -1941,13 +1941,13 @@ test("view report toggles iframe with report URL", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd frontend && npm test`
 
 Expected: the two new tests FAIL — artifact browser and report viewer don't exist yet.
 
-- [ ] **Step 3: Extend `frontend/src/runDetail.tsx`**
+- [x] **Step 3: Extend `frontend/src/runDetail.tsx`**
 
 At the top of the file, replace the import block with:
 
@@ -2050,7 +2050,7 @@ Append to the JSX returned by `RunDetailPanel` (before the closing `</section>`)
 </section>
 ```
 
-- [ ] **Step 4: Append CSS to `frontend/src/styles.css`**
+- [x] **Step 4: Append CSS to `frontend/src/styles.css`**
 
 ```css
 .report-frame {
@@ -2071,13 +2071,13 @@ Append to the JSX returned by `RunDetailPanel` (before the closing `</section>`)
 }
 ```
 
-- [ ] **Step 5: Run the new tests**
+- [x] **Step 5: Run the new tests**
 
 Run: `cd frontend && npm test`
 
 Expected: all frontend tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/runDetail.tsx frontend/src/App.test.tsx frontend/src/styles.css
@@ -2092,36 +2092,36 @@ git commit -m "feat(frontend): add artifact browser and embedded report viewer"
 - Modify: `README.md` (only if a result-browser section is missing — verify first)
 - Modify: `docs/superpowers/plans/2026-05-01-workbench-frontend-api-enhancements.md`
 
-- [ ] **Step 1: Run the entire backend suite**
+- [x] **Step 1: Run the entire backend suite**
 
 Run: `pytest -q`
 
 Expected: all tests pass. Capture and report the final pass count to the user.
 
-- [ ] **Step 2: Run the entire frontend suite**
+- [x] **Step 2: Run the entire frontend suite**
 
 Run: `cd frontend && npm test`
 
 Expected: all tests pass.
 
-- [ ] **Step 3: Check README for V1.1 surface mention**
+- [x] **Step 3: Check README for V1.1 surface mention**
 
 Run: `grep -n "/runs?\|run history\|result browser" README.md`
 
 If V1.1 endpoints are not mentioned, add a short "V1.1 Result Browser" subsection under the existing API section listing the five endpoints and noting that the frontend now has a History tab. Keep it under ~12 lines. If they are already mentioned, skip the README change.
 
-- [ ] **Step 4: Mark plan tasks complete**
+- [x] **Step 4: Mark plan tasks complete**
 
-In this very plan file (`docs/superpowers/plans/2026-05-01-workbench-frontend-api-enhancements.md`), flip every `- [ ]` checkbox to `- [x]` for tasks that are done. (The implementer should keep flipping checkboxes as they go; this step is the final sweep to ensure nothing was missed.)
+In this very plan file (`docs/superpowers/plans/2026-05-01-workbench-frontend-api-enhancements.md`), flip every `- [x]` checkbox to `- [x]` for tasks that are done. (The implementer should keep flipping checkboxes as they go; this step is the final sweep to ensure nothing was missed.)
 
-- [ ] **Step 5: Commit closure**
+- [x] **Step 5: Commit closure**
 
 ```bash
 git add README.md docs/superpowers/plans/2026-05-01-workbench-frontend-api-enhancements.md
 git commit -m "docs: mark V1.1 plan complete"
 ```
 
-- [ ] **Step 6: Push and open PR (waits for user)**
+- [x] **Step 6: Push and open PR (waits for user)**
 
 Do not push or open a PR autonomously. Report to the user: "V1.1 implementation complete. Backend: <N> passed. Frontend: <M> passed. Ready to push and open PR."
 
