@@ -6,7 +6,14 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from .api_errors import register_error_handlers
+from .api_errors import (
+    ERROR_INVALID_PATH,
+    ERROR_PROJECT_NOT_FOUND,
+    ERROR_RUN_NOT_FOUND,
+    WorkbenchAPIError,
+    register_error_handlers,
+)
+from .artifacts import read_json
 from .config import load_config
 from .orchestrator import run_workflow
 from .projects import create_project
@@ -63,3 +70,102 @@ async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
                     detail="Uploaded file exceeds project size limit.",
                 )
             handle.write(chunk)
+
+
+def _resolve_project_runs_dir(project_root: str) -> Path:
+    project = Path(project_root).resolve()
+    runs_dir = project / "runs"
+    if not runs_dir.is_dir():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_PROJECT_NOT_FOUND,
+            message=f"Project not found: {project}",
+            details={"project_root": str(project)},
+        )
+    return runs_dir
+
+
+def _resolve_run_root(project_root: str, run_id: str) -> Path:
+    runs_dir = _resolve_project_runs_dir(project_root)
+    candidate = (runs_dir / run_id).resolve()
+    try:
+        candidate.relative_to(runs_dir.resolve())
+    except ValueError as exc:
+        raise WorkbenchAPIError(
+            status_code=400,
+            code=ERROR_INVALID_PATH,
+            message="run_id must resolve inside the project's runs directory",
+            details={"run_id": run_id},
+        ) from exc
+    if not candidate.is_dir():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_RUN_NOT_FOUND,
+            message=f"Run not found: {run_id}",
+            details={"run_id": run_id, "project_root": project_root},
+        )
+    return candidate
+
+
+def _read_manifest(run_root: Path) -> dict:
+    manifest_path = run_root / "run_manifest.json"
+    if not manifest_path.is_file():
+        raise WorkbenchAPIError(
+            status_code=404,
+            code=ERROR_RUN_NOT_FOUND,
+            message=f"run_manifest.json missing for run: {run_root.name}",
+            details={"run_id": run_root.name},
+        )
+    return read_json(manifest_path)
+
+
+def _summarize_manifest(manifest: dict) -> dict:
+    return {
+        "run_id": manifest.get("run_id"),
+        "status": manifest.get("status"),
+        "mode": manifest.get("mode"),
+        "started_at": manifest.get("started_at"),
+        "y": manifest.get("y"),
+        "x": manifest.get("x"),
+    }
+
+
+def _artifact_counts(run_root: Path) -> dict[str, int]:
+    index_path = run_root / "artifacts_index.json"
+    if not index_path.is_file():
+        return {}
+    index = read_json(index_path)
+    counts: dict[str, int] = {}
+    for record in index.get("artifacts", []):
+        artifact_type = record.get("artifact_type", "unknown")
+        counts[artifact_type] = counts.get(artifact_type, 0) + 1
+    return counts
+
+
+@app.get("/runs")
+def list_runs_endpoint(project_root: str) -> dict:
+    runs_dir = _resolve_project_runs_dir(project_root)
+    summaries: list[dict] = []
+    for entry in sorted(runs_dir.iterdir(), reverse=True):
+        if not entry.is_dir():
+            continue
+        manifest_path = entry / "run_manifest.json"
+        if not manifest_path.is_file():
+            continue
+        summaries.append(_summarize_manifest(read_json(manifest_path)))
+    return {"runs": summaries}
+
+
+@app.get("/runs/{run_id}")
+def get_run_endpoint(run_id: str, project_root: str) -> dict:
+    run_root = _resolve_run_root(project_root, run_id)
+    manifest = _read_manifest(run_root)
+    summary = _summarize_manifest(manifest)
+    errors_path = run_root / "errors.json"
+    errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
+    return {
+        **summary,
+        "lineage": manifest.get("lineage", []),
+        "artifact_counts": _artifact_counts(run_root),
+        "errors": errors,
+    }
