@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
-import {
-  ApiError,
-  fetchRuns,
-  type RunSummary,
-} from "./api";
+import { useEffect, useMemo, useState } from "react";
+import { type RunSummary } from "./api";
+
+const PAGE_SIZE = 25;
 
 type Props = {
-  projectRoot: string;
+  runs: RunSummary[] | null;
   onSelect: (runId: string) => void;
-  onError: (message: string) => void;
 };
 
 function statusBadgeClass(status: string): string {
@@ -22,30 +19,21 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-export function RunHistoryPanel({ projectRoot, onSelect, onError }: Props) {
-  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+export function RunHistoryPanel({ runs, onSelect }: Props) {
+  const [page, setPage] = useState(1);
 
+  const totalPages = runs ? Math.max(1, Math.ceil(runs.length / PAGE_SIZE)) : 1;
+
+  const pageRuns = useMemo(() => {
+    if (!runs) return null;
+    const start = (page - 1) * PAGE_SIZE;
+    return runs.slice(start, start + PAGE_SIZE);
+  }, [runs, page]);
+
+  // Reset to page 1 when runs change
   useEffect(() => {
-    let cancelled = false;
-    fetchRuns(projectRoot)
-      .then((response) => {
-        if (cancelled) return;
-        setRuns(response.runs);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        const message =
-          error instanceof ApiError
-            ? `[${error.code ?? `HTTP ${error.status}`}] ${error.message}`
-            : error instanceof Error
-              ? error.message
-              : "Failed to load runs";
-        onError(message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRoot, onError]);
+    setPage(1);
+  }, [runs]);
 
   if (runs === null) {
     return <p className="muted">Loading runs…</p>;
@@ -55,37 +43,60 @@ export function RunHistoryPanel({ projectRoot, onSelect, onError }: Props) {
   }
 
   return (
-    <table className="runs-table" aria-label="run history">
-      <thead>
-        <tr>
-          <th>Run ID</th>
-          <th>Status</th>
-          <th>Mode</th>
-          <th>Started</th>
-          <th>Y</th>
-          <th>X</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((run) => (
-          <tr
-            key={run.run_id}
-            onClick={() => onSelect(run.run_id)}
-            className="runs-row"
-          >
-            <td className="mono">{run.run_id}</td>
-            <td>
-              <span className={statusBadgeClass(run.status)}>
-                {statusLabel(run.status)}
-              </span>
-            </td>
-            <td>{run.mode ?? "—"}</td>
-            <td>{run.started_at ?? "—"}</td>
-            <td>{run.y ?? "—"}</td>
-            <td>{(run.x ?? []).join(", ") || "—"}</td>
+    <>
+      <table className="runs-table" aria-label="run history">
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Status</th>
+            <th>Mode</th>
+            <th>Started</th>
+            <th>Y</th>
+            <th>X</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {pageRuns!.map((run) => (
+            <tr
+              key={run.run_id}
+              onClick={() => onSelect(run.run_id)}
+              className="runs-row"
+            >
+              <td className="mono">{run.run_id}</td>
+              <td>
+                <span className={statusBadgeClass(run.status)}>
+                  {statusLabel(run.status)}
+                </span>
+              </td>
+              <td>{run.mode ?? "—"}</td>
+              <td>{run.started_at ?? "—"}</td>
+              <td>{run.y ?? "—"}</td>
+              <td>{(run.x ?? []).join(", ") || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {runs.length > PAGE_SIZE && (
+        <nav className="pagination" aria-label="run history pagination">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Previous
+          </button>
+          <span className="pagination-info">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+    </>
   );
 }
