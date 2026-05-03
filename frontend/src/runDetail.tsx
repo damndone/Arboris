@@ -156,6 +156,7 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
             title="Run report"
             src={reportUrl(projectRoot, runId)}
             className="report-frame"
+            sandbox="allow-same-origin"
           />
         )}
       </section>
