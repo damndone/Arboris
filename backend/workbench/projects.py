@@ -73,5 +73,5 @@ def create_run(project_root: Path, mode: str) -> Run:
     write_text_durable(root / "workflow_log.jsonl", "")
     write_json(root / "decisions.json", {"decisions": []})
     write_json(root / "errors.json", {"issues": []})
-    write_json(root / "artifacts_index.json", {"artifacts": []})
+    write_json(root / "artifacts_index.json", {"schema_version": 1, "artifacts": []})
     return Run(root=root, run_id=run_id, mode=mode)

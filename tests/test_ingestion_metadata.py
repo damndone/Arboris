@@ -36,7 +36,7 @@ def test_unsupported_file_is_not_copied_or_registered(tmp_path: Path):
     with pytest.raises(ValueError, match="unsupported file type"):
         ingest_files([source], run.root, WorkbenchConfig())
     assert not (run.root / "raw_snapshot" / "source.txt").exists()
-    assert read_json(run.root / "artifacts_index.json") == {"artifacts": []}
+    assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
 
 
 def test_duplicate_basenames_are_rejected_before_copy(tmp_path: Path):
@@ -63,7 +63,7 @@ def test_row_limit_is_checked_before_registration(tmp_path: Path):
     with pytest.raises(ValueError, match="row count exceeds limit"):
         ingest_files([source], run.root, WorkbenchConfig(max_rows=1))
     assert not (run.root / "raw_snapshot" / "source.csv").exists()
-    assert read_json(run.root / "artifacts_index.json") == {"artifacts": []}
+    assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
 
 
 def test_excel_sheet_limit_is_checked_before_registration(tmp_path: Path):
@@ -76,7 +76,7 @@ def test_excel_sheet_limit_is_checked_before_registration(tmp_path: Path):
     with pytest.raises(ValueError, match="excel sheet count exceeds limit"):
         ingest_files([source], run.root, WorkbenchConfig(max_excel_sheets=1))
     assert not (run.root / "raw_snapshot" / "source.xlsx").exists()
-    assert read_json(run.root / "artifacts_index.json") == {"artifacts": []}
+    assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
 
 
 def test_metadata_candidates_are_deduplicated_across_files(tmp_path: Path):

@@ -46,3 +46,9 @@ def test_workbench_api_error_default_details_is_empty_dict():
     assert err.details == {}
     assert err.code == "RUN_NOT_FOUND"
     assert err.status_code == 404
+
+
+def test_registry_version_unsupported_has_correct_code():
+    from workbench.api_errors import ERROR_REGISTRY_VERSION_UNSUPPORTED
+
+    assert ERROR_REGISTRY_VERSION_UNSUPPORTED == "REGISTRY_VERSION_UNSUPPORTED"
