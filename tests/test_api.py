@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -289,3 +290,121 @@ def test_get_report_returns_report_not_found_when_missing(tmp_path: Path):
 
     assert report_response.status_code == 404
     assert report_response.json()["error"]["code"] == "REPORT_NOT_FOUND"
+
+
+def test_artifacts_index_missing_schema_version_is_ok(tmp_path: Path):
+    from workbench.api import _read_artifacts_index
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"artifacts": [{"artifact_id": "a", "path": "a.txt", "artifact_type": "data", "step": "ingest", "sha256": "x"}]}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+    (run_root / "a.txt").write_text("content", encoding="utf-8")
+
+    data = _read_artifacts_index(run_root)
+    assert len(data["artifacts"]) == 1
+    assert data["artifacts"][0]["artifact_id"] == "a"
+
+
+def test_artifacts_index_version_1_is_ok(tmp_path: Path):
+    from workbench.api import _read_artifacts_index
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"schema_version": 1, "artifacts": [{"artifact_id": "a", "path": "a.txt", "artifact_type": "data", "step": "ingest", "sha256": "x"}]}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+    (run_root / "a.txt").write_text("content", encoding="utf-8")
+
+    data = _read_artifacts_index(run_root)
+    assert len(data["artifacts"]) == 1
+
+
+def test_artifacts_index_version_2_rejected(tmp_path: Path):
+    from workbench.api import _read_artifacts_index
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"schema_version": 2, "artifacts": []}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc:
+        _read_artifacts_index(run_root)
+    assert exc.value.code == "REGISTRY_VERSION_UNSUPPORTED"
+
+
+def test_artifacts_index_version_string_rejected(tmp_path: Path):
+    from workbench.api import _read_artifacts_index
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"schema_version": "1", "artifacts": []}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc:
+        _read_artifacts_index(run_root)
+    assert exc.value.code == "REGISTRY_VERSION_INVALID"
+
+
+def test_artifacts_index_version_zero_rejected(tmp_path: Path):
+    from workbench.api import _read_artifacts_index
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"schema_version": 0, "artifacts": []}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc:
+        _read_artifacts_index(run_root)
+    assert exc.value.code == "REGISTRY_VERSION_INVALID"
+
+
+def test_artifacts_index_version_bool_true_rejected(tmp_path: Path):
+    """JSON boolean true is an int subclass in Python; must be rejected."""
+    from workbench.api import _read_artifacts_index
+    from workbench.api_errors import WorkbenchAPIError
+    from workbench.projects import create_project
+
+    project = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    run_root = project / "runs" / "r1"
+    run_root.mkdir(parents=True)
+    index = {"schema_version": True, "artifacts": []}
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    with pytest.raises(WorkbenchAPIError) as exc:
+        _read_artifacts_index(run_root)
+    assert exc.value.code == "REGISTRY_VERSION_INVALID"
+
+
+def test_artifacts_list_and_download_use_schema_validated_index(completed_run):
+    client, project_root, run_id = completed_run
+
+    list_resp = client.get(
+        f"/runs/{run_id}/artifacts", params={"project_root": project_root}
+    )
+    assert list_resp.status_code == 200
+    assert "groups" in list_resp.json()
+
+    dl_resp = client.get(
+        f"/runs/{run_id}/artifacts/report_html",
+        params={"project_root": project_root},
+    )
+    assert dl_resp.status_code == 200

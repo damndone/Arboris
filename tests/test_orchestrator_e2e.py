@@ -90,3 +90,18 @@ def test_manifest_contains_started_at_y_and_x(tmp_path: Path):
     assert manifest["y"] == "y"
     assert manifest["x"] == ["x"]
     assert manifest["status"] == "completed"
+
+
+def test_new_run_artifacts_index_has_schema_version(tmp_path: Path):
+    project_root = tmp_path / "proj"
+    create_project(tmp_path, "proj")
+    data = project_root / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+
+    result = run_workflow(project_root, [data], mode="auto", y="y", x=["x"])
+
+    index_path = project_root / "runs" / result["run_id"] / "artifacts_index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index.get("schema_version") == 1
