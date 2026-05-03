@@ -1,5 +1,23 @@
-import { useCallback, useMemo, useState } from "react";
-import { ApiError, createProject, runWorkflow, type RunResponse } from "./api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Link,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import {
+  ApiError,
+  createProject,
+  fetchRuns,
+  runWorkflow,
+  type RunResponse,
+  type RunSummary,
+} from "./api";
 import { RunHistoryPanel } from "./runHistory";
 import { RunDetailPanel } from "./runDetail";
 import "./styles.css";
@@ -12,7 +30,7 @@ const RUN_OUTPUT_PATHS = [
   "errors.json",
   "reports/report.html",
   "reports/report.pdf",
-  "exports/tables.xlsx"
+  "exports/tables.xlsx",
 ];
 
 function joinPath(base: string, suffix: string): string {
@@ -33,26 +51,38 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-export default function App() {
+// --- Context ---
+
+type AppContextValue = {
+  projectRoot: string;
+  setProjectRoot: (root: string) => void;
+  setError: (msg: string | null) => void;
+  setActivity: (text: string) => void;
+  activity: string;
+};
+
+function useAppContext(): AppContextValue {
+  return useOutletContext<AppContextValue>();
+}
+
+// --- SubmitRoute ---
+
+function SubmitRoute() {
+  const { projectRoot, setProjectRoot, setError, setActivity, activity } =
+    useAppContext();
+
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
-  const [projectRoot, setProjectRoot] = useState("");
   const [mode, setMode] = useState("auto");
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [activity, setActivity] = useState<string>("Idle");
 
-  type ViewState = { name: "submit" } | { name: "history" } | { name: "detail"; runId: string };
-  const [view, setView] = useState<ViewState>({ name: "submit" });
-  const [historyKey, setHistoryKey] = useState(0);
-
-  const handlePanelError = useCallback((message: string) => {
-    setErrorMessage(message);
-  }, []);
+  useEffect(() => {
+    setError(null);
+  }, [setError]);
 
   const xColumns = useMemo(() => parseColumns(x), [x]);
 
@@ -75,7 +105,7 @@ export default function App() {
 
   async function onCreateProject() {
     setRequestState("working");
-    setErrorMessage(null);
+    setError(null);
     setActivity("Creating project");
     try {
       const result = await createProject(parent.trim(), name.trim());
@@ -88,7 +118,7 @@ export default function App() {
           : error instanceof Error
             ? error.message
             : "Project creation failed";
-      setErrorMessage(message);
+      setError(message);
       setActivity("Project creation failed");
     } finally {
       setRequestState("idle");
@@ -98,7 +128,7 @@ export default function App() {
   async function onRun() {
     if (!file) return;
     setRequestState("working");
-    setErrorMessage(null);
+    setError(null);
     setActivity("Running workflow");
     try {
       const result = await runWorkflow(
@@ -121,64 +151,22 @@ export default function App() {
           : error instanceof Error
             ? error.message
             : "Workflow request failed";
-      setErrorMessage(message);
+      setError(message);
       setActivity("Workflow request failed");
     } finally {
       setRequestState("idle");
     }
   }
 
-  const runDir = lastRun ? joinPath(projectRoot, `runs/${lastRun.run_id}`) : null;
+  const runDir = lastRun
+    ? joinPath(projectRoot, `runs/${lastRun.run_id}`)
+    : null;
   const badgeClass = lastRun
     ? `badge badge-${lastRun.status === "completed" ? "ok" : lastRun.status === "blocked" ? "warn" : "neutral"}`
     : "badge badge-neutral";
 
   return (
-    <main className="workbench-shell">
-      <header className="workbench-header">
-        <h1>Local Econometrics Workbench</h1>
-        <span
-          className={`activity ${requestState === "working" ? "activity-working" : ""}`}
-          aria-live="polite"
-        >
-          {activity}
-        </span>
-      </header>
-
-      {errorMessage && (
-        <section className="panel panel-error" role="alert">
-          <strong>Request error</strong>
-          <p>{errorMessage}</p>
-        </section>
-      )}
-
-      <nav className="tabs" role="tablist" aria-label="workbench views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view.name === "submit"}
-          onClick={() => setView({ name: "submit" })}
-        >
-          Submit
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={view.name === "history" || view.name === "detail"}
-          disabled={projectRoot === ""}
-          onClick={() => {
-            setView({ name: "history" });
-            setHistoryKey((value) => value + 1);
-            setErrorMessage(null);
-          }}
-        >
-          History
-        </button>
-      </nav>
-
-      {view.name === "submit" && (
-        <>
-
+    <>
       <section className="panel" aria-labelledby="project-heading">
         <div className="panel-heading">
           <h2 id="project-heading">Project</h2>
@@ -302,7 +290,9 @@ export default function App() {
         <div className="panel-heading">
           <h2 id="result-heading">Last run</h2>
           <span>
-            {lastRun ? "Outputs are written under the run directory." : "No run yet."}
+            {lastRun
+              ? "Outputs are written under the run directory."
+              : "No run yet."}
           </span>
         </div>
         {lastRun ? (
@@ -315,7 +305,9 @@ export default function App() {
               <div>
                 <dt>Status</dt>
                 <dd>
-                  <span className={badgeClass}>{statusLabel(lastRun.status)}</span>
+                  <span className={badgeClass}>
+                    {statusLabel(lastRun.status)}
+                  </span>
                   {lastRun.status === "blocked" && (
                     <span className="status-hint">
                       Workflow blocked — inspect <code>errors.json</code>.
@@ -342,39 +334,220 @@ export default function App() {
             </ul>
           </>
         ) : (
-          <p className="muted">Submit a workflow to see run details and output paths.</p>
+          <p className="muted">
+            Submit a workflow to see run details and output paths.
+          </p>
         )}
       </section>
+    </>
+  );
+}
 
-        </>
-      )}
+// --- RunHistoryRoute ---
 
-      {view.name === "history" && projectRoot && (
-        <section className="panel" aria-labelledby="history-heading">
-          <div className="panel-heading">
-            <h2 id="history-heading">Run history</h2>
-            <span>{projectRoot}</span>
-          </div>
-          <RunHistoryPanel
-            key={historyKey}
-            projectRoot={projectRoot}
-            onSelect={(runId) => setView({ name: "detail", runId })}
-            onError={handlePanelError}
-          />
+function RunHistoryRoute() {
+  const { projectRoot, setError } = useAppContext();
+  const navigate = useNavigate();
+  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, [setError]);
+
+  useEffect(() => {
+    if (!projectRoot) {
+      setRuns(null);
+      return;
+    }
+    let cancelled = false;
+    setRuns(null);
+    fetchRuns(projectRoot)
+      .then((res) => {
+        if (!cancelled) setRuns(res.runs);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const message =
+          error instanceof ApiError
+            ? `[${error.code ?? `HTTP ${error.status}`}] ${error.message}`
+            : error instanceof Error
+              ? error.message
+              : "Failed to load runs";
+        setError(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, setError]);
+
+  if (!projectRoot) {
+    return (
+      <section className="panel">
+        <p className="muted">Select a project first.</p>
+      </section>
+    );
+  }
+
+  const handleSelect = (runId: string) => {
+    navigate(
+      `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`
+    );
+  };
+
+  return (
+    <section className="panel" aria-labelledby="history-heading">
+      <div className="panel-heading">
+        <h2 id="history-heading">Run history</h2>
+        <span>{projectRoot}</span>
+      </div>
+      <RunHistoryPanel runs={runs} onSelect={handleSelect} />
+    </section>
+  );
+}
+
+// --- RunDetailRoute ---
+
+function RunDetailRoute() {
+  const { projectRoot, setError } = useAppContext();
+  const { runId } = useParams<{ runId: string }>();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    setError(null);
+  }, [setError]);
+
+  if (!projectRoot) {
+    return (
+      <section className="panel panel-error">
+        <strong>Missing project_root</strong>
+        <p>
+          Cannot view run detail without a project.{" "}
+          <Link to="/">Return to submit</Link>
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <RunDetailPanel
+      projectRoot={projectRoot}
+      runId={runId!}
+      onBack={() =>
+        navigate(
+          `/runs?project_root=${encodeURIComponent(projectRoot)}`
+        )
+      }
+      onError={setError}
+    />
+  );
+}
+
+// --- AppShell ---
+
+function AppShell() {
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const [projectRoot, setProjectRootState] = useState<string>(() => {
+    const fromUrl = searchParams.get("project_root");
+    if (fromUrl) return fromUrl;
+    try {
+      return localStorage.getItem("lastProjectRoot") ?? "";
+    } catch {
+      return "";
+    }
+  });
+
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activity, setActivity] = useState<string>("Idle");
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("project_root");
+    if (fromUrl && fromUrl !== projectRoot) {
+      setProjectRootState(fromUrl);
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setProjectRoot = useCallback((root: string) => {
+    setProjectRootState(root);
+    try {
+      localStorage.setItem("lastProjectRoot", root);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const setError = useCallback((msg: string | null) => {
+    setErrorMessage(msg);
+  }, []);
+
+  const context = useMemo<AppContextValue>(
+    () => ({ projectRoot, setProjectRoot, setError, setActivity, activity }),
+    [projectRoot, setProjectRoot, setError, activity]
+  );
+
+  const historyUrl = projectRoot
+    ? `/runs?project_root=${encodeURIComponent(projectRoot)}`
+    : "/runs";
+
+  const isSubmitActive = location.pathname === "/";
+  const isHistoryActive = location.pathname.startsWith("/runs");
+
+  return (
+    <main className="workbench-shell">
+      <header className="workbench-header">
+        <h1>Local Econometrics Workbench</h1>
+        <span className="activity" aria-live="polite">
+          {activity}
+        </span>
+      </header>
+
+      {errorMessage && (
+        <section className="panel panel-error" role="alert">
+          <strong>Request error</strong>
+          <p>{errorMessage}</p>
         </section>
       )}
-      {view.name === "detail" && projectRoot && (
-        <RunDetailPanel
-          projectRoot={projectRoot}
-          runId={view.runId}
-          onBack={() => {
-            setView({ name: "history" });
-            setHistoryKey((value) => value + 1);
+
+      <nav className="tabs" role="tablist" aria-label="workbench views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isSubmitActive}
+          onClick={() => navigate("/")}
+        >
+          Submit
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={isHistoryActive}
+          disabled={!projectRoot}
+          onClick={() => {
+            navigate(historyUrl);
             setErrorMessage(null);
           }}
-          onError={handlePanelError}
-        />
-      )}
+        >
+          History
+        </button>
+      </nav>
+
+      <Outlet context={context} />
     </main>
+  );
+}
+
+// --- App (router root) ---
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route index element={<SubmitRoute />} />
+        <Route path="runs" element={<RunHistoryRoute />} />
+        <Route path="runs/:runId" element={<RunDetailRoute />} />
+      </Route>
+    </Routes>
   );
 }

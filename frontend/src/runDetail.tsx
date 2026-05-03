@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   ApiError,
   artifactDownloadUrl,
@@ -13,7 +14,6 @@ import {
 type Props = {
   projectRoot: string;
   runId: string;
-  onBack: () => void;
   onError: (message: string) => void;
 };
 
@@ -28,7 +28,9 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
+export function RunDetailPanel({ projectRoot, runId, onError }: Props) {
+  const navigate = useNavigate();
+
   const [detail, setDetail] = useState<RunDetail | null>(null);
   type ArtifactsState =
     | { status: "loading" }
@@ -95,11 +97,13 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
 
   const issues: IssueRecord[] = detail.errors?.issues ?? [];
 
+  const backUrl = `/runs?project_root=${encodeURIComponent(projectRoot)}`;
+
   return (
     <section className="panel" aria-labelledby="run-detail-heading">
       <div className="panel-heading">
         <h2 id="run-detail-heading">Run detail</h2>
-        <button type="button" onClick={onBack}>
+        <button type="button" onClick={() => navigate(backUrl)}>
           Back to history
         </button>
       </div>
