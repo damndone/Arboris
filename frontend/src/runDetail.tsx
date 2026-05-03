@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   artifactDownloadUrl,
@@ -30,8 +30,35 @@ function statusLabel(status: string): string {
 
 export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
-  const [groups, setGroups] = useState<ArtifactGroup[] | null>(null);
+  type ArtifactsState =
+    | { status: "loading" }
+    | { status: "loaded"; groups: ArtifactGroup[] }
+    | { status: "error"; message: string };
+
+  const [artifactsState, setArtifactsState] = useState<ArtifactsState>({ status: "loading" });
   const [showReport, setShowReport] = useState(false);
+
+  const fetchIdRef = useRef(0);
+
+  const fetchArtifacts = useCallback(() => {
+    const id = ++fetchIdRef.current;
+    setArtifactsState({ status: "loading" });
+    fetchRunArtifacts(projectRoot, runId)
+      .then((value) => {
+        if (id !== fetchIdRef.current) return;
+        setArtifactsState({ status: "loaded", groups: value.groups });
+      })
+      .catch((error) => {
+        if (id !== fetchIdRef.current) return;
+        const message =
+          error instanceof ApiError
+            ? `[${error.code ?? `HTTP ${error.status}`}] ${error.message}`
+            : error instanceof Error
+              ? error.message
+              : "Unknown error";
+        setArtifactsState({ status: "error", message });
+      });
+  }, [projectRoot, runId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,20 +83,11 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
   }, [projectRoot, runId, onError]);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchRunArtifacts(projectRoot, runId)
-      .then((value) => {
-        if (cancelled) return;
-        setGroups(value.groups);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setGroups([]);
-      });
+    fetchArtifacts();
     return () => {
-      cancelled = true;
+      fetchIdRef.current += 1;
     };
-  }, [projectRoot, runId]);
+  }, [fetchArtifacts]);
 
   if (detail === null) {
     return <p className="muted">Loading run…</p>;
@@ -164,12 +182,14 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
         <h3 id="artifacts-heading" className="subhead">
           Artifacts
         </h3>
-        {groups === null ? (
+        {artifactsState.status === "loading" && (
           <p className="muted">Loading artifacts…</p>
-        ) : groups.length === 0 ? (
+        )}
+        {artifactsState.status === "loaded" && artifactsState.groups.length === 0 && (
           <p className="muted">No artifacts recorded.</p>
-        ) : (
-          groups.map((group) => (
+        )}
+        {artifactsState.status === "loaded" && artifactsState.groups.length > 0 && (
+          artifactsState.groups.map((group) => (
             <div key={group.artifact_type} className="artifact-group">
               <h4>{group.artifact_type}</h4>
               <ul>
@@ -187,6 +207,14 @@ export function RunDetailPanel({ projectRoot, runId, onBack, onError }: Props) {
               </ul>
             </div>
           ))
+        )}
+        {artifactsState.status === "error" && (
+          <div className="panel panel-error" role="alert">
+            <p>Failed to load artifacts: {artifactsState.message}</p>
+            <button type="button" onClick={fetchArtifacts}>
+              Retry
+            </button>
+          </div>
         )}
       </section>
     </section>

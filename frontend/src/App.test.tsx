@@ -499,3 +499,62 @@ test("report iframe has sandbox attribute restricting scripts", async () => {
   const iframe = screen.getByTitle("Run report") as HTMLIFrameElement;
   expect(iframe.getAttribute("sandbox")).toBe("allow-same-origin");
 });
+
+test("artifact fetch error shows retry button; retry succeeds", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+
+  // createProject, fetchRuns, fetchRunDetail all succeed
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [{ run_id: "run-1", status: "completed", mode: "auto", started_at: null, y: null, x: null }],
+    })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1", status: "completed", mode: "auto", started_at: null, y: null, x: null,
+      lineage: [], artifact_counts: {}, errors: { issues: [] },
+    })
+  );
+
+  // fetchRunArtifacts rejects the first time
+  fetchMock.mockRejectedValueOnce(new Error("Network failure"));
+
+  render(<App />);
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText(/failed to load artifacts/i)).toBeInTheDocument();
+  });
+  const retryButton = screen.getByRole("button", { name: /retry/i });
+  expect(retryButton).toBeInTheDocument();
+
+  // Second attempt succeeds
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      groups: [
+        {
+          artifact_type: "report",
+          items: [
+            {
+              artifact_id: "report_html",
+              path: "reports/report.html",
+              artifact_type: "report",
+              step: "reporting",
+              sha256: "x",
+            },
+          ],
+        },
+      ],
+    })
+  );
+
+  fireEvent.click(retryButton);
+
+  await waitFor(() => {
+    expect(screen.getByText("report_html")).toBeInTheDocument();
+  });
+});
