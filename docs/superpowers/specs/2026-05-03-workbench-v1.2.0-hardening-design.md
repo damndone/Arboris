@@ -79,9 +79,7 @@ Retry 按钮重置状态为 `loading`，重新调用 `fetchRunArtifacts`。
 
 ### 测试
 
-`App.test.tsx` 新增两个 case：
-1. mock `fetchRunArtifacts` 返回 rejected Promise → 断言出现 "Failed to load artifacts" + Retry 按钮
-2. 点击 Retry 后 mock 改为 resolve → 断言 artifact 列表正常渲染
+`App.test.tsx` 新增一个 **合并 case**：mock `fetchRunArtifacts` 首次 reject → 断言出现 "Failed to load artifacts" + Retry 按钮；点击 Retry 后 mock 改为 resolve → 断言 artifact 列表正常渲染。合并为一个测试避免测试间依赖，同时覆盖错误态与恢复路径。
 
 ## 5. Item 2 — Report iframe sandbox
 
@@ -104,12 +102,12 @@ Retry 按钮重置状态为 `loading`，重新调用 `fetchRunArtifacts`。
 ### 安全策略
 
 - **不自动放宽**：如果将来 report.html 需要脚本，**必须另开 spec 重新设计**。届时考虑独立 origin、CSP header 或受控交互组件方案，不在 V1.2.0 范围内放宽。
-- **自动化防线**：加一个 backend 测试，grep `backend/workbench/report_renderer.py` 生成的 HTML 模板，断言无 `<script`、`javascript:`、`on*=` 事件属性。
+- **自动化防线**：加一个 backend 测试，定位实际的报告模板文件（如 `reporting.py` + Jinja2 模板），渲染一个最小 report 后扫描输出 HTML，断言无 `<script`、`javascript:`、`\son[a-zA-Z]+\s*=`（事件属性，case-insensitive）。
 
 ### 测试
 
 - 前端 `App.test.tsx`：断言 iframe 元素的 `sandbox` 属性等于 `"allow-same-origin"`
-- 后端 `tests/test_report_no_scripts.py`（新建）：扫描 report 模板文件，无 `<script` / `javascript:` / `on*=` 模式
+- 后端 `tests/test_report_no_scripts.py`（新建）：渲染最小 report，扫描输出 HTML 无 `<script` / `javascript:` / `\son[a-zA-Z]+\s*=`（case-insensitive）
 
 ## 6. Item 3 — 旧 run 兼容性验证
 
@@ -257,7 +255,7 @@ V1.1 已经通过"加新字段 + 老数据填 null"走了兼容路径，且到�
 | `tests/test_orchestrator_e2e.py` | 后端 | +1（schema_version 写入） |
 | `tests/test_legacy_run_compat.py`（新建） | 后端 | +2（Case A, B） |
 | `tests/test_report_no_scripts.py`（新建） | 后端 | +1（grep 报告模板无脚本） |
-| `frontend/src/App.test.tsx` | 前端 | +2（artifact 错误态 + Retry, iframe sandbox） |
+| `frontend/src/App.test.tsx` | 前端 | +2（artifact 错误态 + Retry 合并一个 case；iframe sandbox 一个 case） |
 
 **总计：后端 +11 case，前端 +2 case，无现有测试回归。**
 
