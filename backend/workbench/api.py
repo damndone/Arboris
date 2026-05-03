@@ -11,6 +11,8 @@ from .api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
     ERROR_INVALID_PATH,
     ERROR_PROJECT_NOT_FOUND,
+    ERROR_REGISTRY_VERSION_INVALID,
+    ERROR_REGISTRY_VERSION_UNSUPPORTED,
     ERROR_REPORT_NOT_FOUND,
     ERROR_RUN_NOT_FOUND,
     WorkbenchAPIError,
@@ -134,10 +136,7 @@ def _summarize_manifest(manifest: dict) -> dict:
 
 
 def _artifact_counts(run_root: Path) -> dict[str, int]:
-    index_path = run_root / "artifacts_index.json"
-    if not index_path.is_file():
-        return {}
-    index = read_json(index_path)
+    index = _read_artifacts_index(run_root)
     counts: dict[str, int] = {}
     for record in index.get("artifacts", []):
         artifact_type = record.get("artifact_type", "unknown")
@@ -145,11 +144,41 @@ def _artifact_counts(run_root: Path) -> dict[str, int]:
     return counts
 
 
-def _read_artifact_records(run_root: Path) -> list[dict]:
+SUPPORTED_REGISTRY_VERSION = 1
+
+
+def _read_artifacts_index(run_root: Path) -> dict:
     index_path = run_root / "artifacts_index.json"
     if not index_path.is_file():
-        return []
-    return list(read_json(index_path).get("artifacts", []))
+        return {"artifacts": []}
+    data = read_json(index_path)
+    raw = data.get("schema_version", 1)
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code=ERROR_REGISTRY_VERSION_INVALID,
+            message="artifacts_index.json schema_version is not an integer",
+            details={"found": raw, "type": type(raw).__name__},
+        )
+    if raw < 1:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code=ERROR_REGISTRY_VERSION_INVALID,
+            message=f"artifacts_index.json schema_version must be >= 1, got {raw}",
+            details={"found": raw},
+        )
+    if raw > SUPPORTED_REGISTRY_VERSION:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code=ERROR_REGISTRY_VERSION_UNSUPPORTED,
+            message=f"artifacts_index.json schema_version {raw} not supported",
+            details={"found": raw, "supported": SUPPORTED_REGISTRY_VERSION},
+        )
+    return data
+
+
+def _read_artifact_records(run_root: Path) -> list[dict]:
+    return list(_read_artifacts_index(run_root).get("artifacts", []))
 
 
 def _group_artifacts(records: list[dict]) -> list[dict]:

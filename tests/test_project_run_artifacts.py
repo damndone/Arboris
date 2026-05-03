@@ -45,7 +45,7 @@ def test_create_project_and_run_directories(tmp_path: Path):
     assert environment["python_version"]
     assert environment["os"]
     assert environment["random_seed"] == 20260429
-    assert read_json(run.root / "artifacts_index.json") == {"artifacts": []}
+    assert read_json(run.root / "artifacts_index.json") == {"schema_version": 1, "artifacts": []}
     assert read_json(run.root / "decisions.json") == {"decisions": []}
     assert read_json(run.root / "errors.json") == {"issues": []}
 
