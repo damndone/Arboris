@@ -1,6 +1,6 @@
 # V1.2.0 Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Harden the V1.1 codebase by adding artifact registry schema/version, report iframe sandbox, artifact error visibility with Retry, and legacy run compatibility tests.
 
@@ -38,7 +38,7 @@
 - Modify: `tests/test_api_errors.py`
 - Modify: `tests/test_orchestrator_e2e.py`
 
-- [ ] **Step 1: Add error code constants to `api_errors.py`**
+- [x] **Step 1: Add error code constants to `api_errors.py`**
 
 Append after `ERROR_INVALID_PATH`:
 
@@ -49,7 +49,7 @@ ERROR_REGISTRY_VERSION_INVALID = "REGISTRY_VERSION_INVALID"
 
 Total file after edit — 14 lines of constants, no structural changes.
 
-- [ ] **Step 2: Write failing tests in `tests/test_api.py`**
+- [x] **Step 2: Write failing tests in `tests/test_api.py`**
 
 Append after the last line. These tests cover the `_read_artifacts_index` helper and the three call sites (list, count, download). Each test creates a project with `TestClient`, then writes an `artifacts_index.json` fixture directly to disk.
 
@@ -168,13 +168,13 @@ def test_artifacts_list_and_download_use_schema_validated_index(completed_run):
 
 Add `import json` to the top of `tests/test_api.py` if not already present.
 
-- [ ] **Step 3: Run the failing tests**
+- [x] **Step 3: Run the failing tests**
 
 Run: `.venv/bin/pytest tests/test_api.py -v -k "artifacts_index"`
 
 Expected: FAIL — `_read_artifacts_index` is not defined in `api.py`.
 
-- [ ] **Step 4: Write failing tests in `tests/test_api_errors.py`**
+- [x] **Step 4: Write failing tests in `tests/test_api_errors.py`**
 
 Append after `test_workbench_api_error_default_details_is_empty_dict`:
 
@@ -185,7 +185,7 @@ def test_registry_version_unsupported_has_correct_code():
     assert ERROR_REGISTRY_VERSION_UNSUPPORTED == "REGISTRY_VERSION_UNSUPPORTED"
 ```
 
-- [ ] **Step 5: Write failing test in `tests/test_orchestrator_e2e.py`**
+- [x] **Step 5: Write failing test in `tests/test_orchestrator_e2e.py`**
 
 Append after `test_manifest_contains_started_at_y_and_x`:
 
@@ -205,7 +205,7 @@ def test_new_run_artifacts_index_has_schema_version(tmp_path: Path):
     assert index.get("schema_version") == 1
 ```
 
-- [ ] **Step 6: Add `_read_artifacts_index` helper and replace call sites in `api.py`**
+- [x] **Step 6: Add `_read_artifacts_index` helper and replace call sites in `api.py`**
 
 In the import block, add the new error codes:
 
@@ -279,7 +279,7 @@ def _read_artifact_records(run_root: Path) -> list[dict]:
 
 No changes needed to `_group_artifacts`, `_resolve_artifact_path`, or the endpoints themselves — they call `_read_artifact_records` which now goes through the validated helper.
 
-- [ ] **Step 7: Add `schema_version: 1` to project creation in `projects.py`**
+- [x] **Step 7: Add `schema_version: 1` to project creation in `projects.py`**
 
 In `projects.py` around line 76, change:
 
@@ -293,13 +293,13 @@ to:
 write_json(root / "artifacts_index.json", {"schema_version": 1, "artifacts": []})
 ```
 
-- [ ] **Step 8: Run tests**
+- [x] **Step 8: Run tests**
 
 Run: `.venv/bin/pytest -q`
 
 Expected: all tests pass (75 + new registry tests).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/workbench/api_errors.py backend/workbench/api.py backend/workbench/projects.py tests/test_api.py tests/test_api_errors.py tests/test_orchestrator_e2e.py
@@ -315,7 +315,7 @@ git commit -m "feat(artifacts): add registry schema_version validation"
 - Modify: `frontend/src/App.test.tsx`
 - Create: `tests/test_report_no_scripts.py`
 
-- [ ] **Step 1: Write the failing frontend test in `frontend/src/App.test.tsx`**
+- [x] **Step 1: Write the failing frontend test in `frontend/src/App.test.tsx`**
 
 Append at the end of the file:
 
@@ -383,7 +383,7 @@ test("report iframe has sandbox attribute restricting scripts", async () => {
 });
 ```
 
-- [ ] **Step 2: Write the backend test in `tests/test_report_no_scripts.py`**
+- [x] **Step 2: Write the backend test in `tests/test_report_no_scripts.py`**
 
 The test renders the Jinja2 template directly with a minimal fixture (avoiding `render_html_report`'s disk and registry side effects), then scans the output HTML.
 
@@ -432,7 +432,7 @@ class TestReportContent:
         assert not re.search(r"\son[a-zA-Z]+\s*=", html, re.IGNORECASE)
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Frontend:
 ```
@@ -446,7 +446,7 @@ Backend:
 ```
 Expected: FAIL — `reporting` module path may need adjustment.
 
-- [ ] **Step 4: Add sandbox attribute to iframe in `frontend/src/runDetail.tsx`**
+- [x] **Step 4: Add sandbox attribute to iframe in `frontend/src/runDetail.tsx`**
 
 Change line 155-159:
 
@@ -461,12 +461,12 @@ Change line 155-159:
 )}
 ```
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Frontend: `npm test -- --run` — all 20 pass.
 Backend: `.venv/bin/pytest -q` — all existing + new report tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add frontend/src/runDetail.tsx frontend/src/App.test.tsx tests/test_report_no_scripts.py
@@ -481,7 +481,7 @@ git commit -m "feat: add iframe sandbox and report content safety test"
 - Modify: `frontend/src/runDetail.tsx`
 - Modify: `frontend/src/App.test.tsx`
 
-- [ ] **Step 1: Write the failing test in `frontend/src/App.test.tsx`**
+- [x] **Step 1: Write the failing test in `frontend/src/App.test.tsx`**
 
 Append at the end of the file:
 
@@ -547,7 +547,7 @@ test("artifact fetch error shows retry button; retry succeeds", async () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```
 npm test -- --run src/App.test.tsx
@@ -555,7 +555,7 @@ npm test -- --run src/App.test.tsx
 
 Expected: 12 existing pass, new test fails because the panel doesn't show a retry button.
 
-- [ ] **Step 3: Update `frontend/src/runDetail.tsx` — three‑state machine + Retry**
+- [x] **Step 3: Update `frontend/src/runDetail.tsx` — three‑state machine + Retry**
 
 Change the imports to add `useRef` and `useCallback`:
 
@@ -655,7 +655,7 @@ Replace the JSX for the artifacts section (lines 162-189). The render logic chan
 
 Note: The existing passing tests that indirectly trigger artifact fetch (the Task 8 view-report test) will now error out if the 4th mock (fetchRunArtifacts) is missing. **Check the existing test "view report toggles iframe with report URL"** — it mocks 4 calls and the 4th returns `jsonResponse(...)` so it will continue to succeed. The Task 7 test "clicking a history row loads run detail with errors" mocks only 3 calls (no fetchRunArtifacts) but doesn't assert the absence of error panels — it asserts text content and a role="alert" for DATA_QUALITY. The artifact error will put a 2nd alert on the page. The App tests check for `getByText` and heading presence, which should be tolerant. Verify after implementation.
 
-- [ ] **Step 4: Run all tests**
+- [x] **Step 4: Run all tests**
 
 ```
 npm test -- --run
@@ -663,7 +663,7 @@ npm test -- --run
 
 Expected: all 21 tests pass (7 api + 11 existing App + 1 sandbox + 1 artifact error/retry + 1 stale).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add frontend/src/runDetail.tsx frontend/src/App.test.tsx
@@ -677,7 +677,7 @@ git commit -m "feat(frontend): add artifact error state with retry button"
 **Files:**
 - Create: `tests/test_legacy_run_compat.py`
 
-- [ ] **Step 1: Write the fixture helper and Case A test**
+- [x] **Step 1: Write the fixture helper and Case A test**
 
 Create `tests/test_legacy_run_compat.py` with a shared fixture that builds a V1-shape run directory (no `started_at/y/x` in manifest, no `schema_version` in index):
 
@@ -806,7 +806,7 @@ class TestV1RunHappyPath:
         assert b"<html" in resp.content.lower()
 ```
 
-- [ ] **Step 2: Append Case B — broken artifact**
+- [x] **Step 2: Append Case B — broken artifact**
 
 ```python
 class TestV1RunMissingArtifact:
@@ -842,7 +842,7 @@ class TestV1RunMissingArtifact:
         assert resp.json()["error"]["code"] == "ARTIFACT_NOT_FOUND"
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```
 .venv/bin/pytest tests/test_legacy_run_compat.py -v
@@ -850,7 +850,7 @@ class TestV1RunMissingArtifact:
 
 Expected: all 8 tests pass.
 
-- [ ] **Step 4: Run full suite**
+- [x] **Step 4: Run full suite**
 
 ```
 .venv/bin/pytest -q
@@ -858,7 +858,7 @@ Expected: all 8 tests pass.
 
 Expected: all tests pass (75 existing + 11 = 86).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/test_legacy_run_compat.py
@@ -872,21 +872,21 @@ git commit -m "test: add legacy V1 run compatibility tests"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-05-03-workbench-v1.2.0-hardening.md`
 
-- [ ] **Step 1: Run the entire backend suite**
+- [x] **Step 1: Run the entire backend suite**
 
 Run: `.venv/bin/pytest -q`
 Expected: all 86 tests pass. Report count.
 
-- [ ] **Step 2: Run the entire frontend suite**
+- [x] **Step 2: Run the entire frontend suite**
 
 Run: `npm test -- --run`
 Expected: all 21 tests pass (7 api + 14 App).
 
-- [ ] **Step 3: Mark plan tasks complete**
+- [x] **Step 3: Mark plan tasks complete**
 
-In this plan file, flip every `- [ ]` to `- [x]`.
+In this plan file, flip every `- [x]` to `- [x]`.
 
-- [ ] **Step 4: Commit closure**
+- [x] **Step 4: Commit closure**
 
 ```bash
 git add docs/superpowers/plans/2026-05-03-workbench-v1.2.0-hardening.md
@@ -899,13 +899,13 @@ git commit -m "docs: mark V1.2.0 plan complete"
 
 Before reporting completion:
 
-- [ ] Backend pytest: all 86 tests pass (75 existing + 11 new)
-- [ ] Frontend vitest: all 21 tests pass (7 api + 14 App)
-- [ ] `_read_artifacts_index` validates `schema_version` on every registry read
-- [ ] New runs produce `artifacts_index.json` with `schema_version: 1`
-- [ ] Old runs (no `schema_version`) are tolerated and treated as v1
-- [ ] Future versions (2+), non-integer values, and values < 1 are rejected
-- [ ] `sandbox="allow-same-origin"` on report iframe
-- [ ] Test scans rendered report HTML for scripts and event handlers
-- [ ] Artifact error shows retry button; retry rebuilds list
-- [ ] Legacy V1 runs (null fields) render correctly through all 5 endpoints
+- [x] Backend pytest: all 86 tests pass (75 existing + 11 new)
+- [x] Frontend vitest: all 21 tests pass (7 api + 14 App)
+- [x] `_read_artifacts_index` validates `schema_version` on every registry read
+- [x] New runs produce `artifacts_index.json` with `schema_version: 1`
+- [x] Old runs (no `schema_version`) are tolerated and treated as v1
+- [x] Future versions (2+), non-integer values, and values < 1 are rejected
+- [x] `sandbox="allow-same-origin"` on report iframe
+- [x] Test scans rendered report HTML for scripts and event handlers
+- [x] Artifact error shows retry button; retry rebuilds list
+- [x] Legacy V1 runs (null fields) render correctly through all 5 endpoints
