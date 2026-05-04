@@ -20,6 +20,14 @@ def _json_safe_float(value: Any) -> float | None:
     return float(value)
 
 
+def _json_safe_sequence(values: Any) -> list[float | None]:
+    try:
+        iterable = list(values)
+    except TypeError:
+        return []
+    return [_json_safe_float(value) for value in iterable]
+
+
 def _labelled_values(fitted: Any, name: str) -> dict[str, Any]:
     values = getattr(fitted, name)
     if hasattr(values, "items"):
@@ -39,6 +47,8 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "model_id": model_id,
         "nobs": int(fitted.nobs),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
+        "fitted_values": _json_safe_sequence(getattr(fitted, "fittedvalues", [])),
+        "residuals": _json_safe_sequence(getattr(fitted, "resid", [])),
         "coefficients": {
             term: {
                 "estimate": _json_safe_float(estimate),

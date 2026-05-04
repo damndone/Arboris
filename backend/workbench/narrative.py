@@ -23,15 +23,31 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
             numeric_estimate = _as_float(estimate)
             if numeric_estimate is None:
                 continue
-            direction = "positive" if numeric_estimate >= 0 else "negative"
+            p_value = _as_float(coefficient.get("p_value"))
+            significance = _significance_text(p_value)
             claim: dict[str, Any] = {
-                "claim": f"{term} has a {direction} coefficient in {model_id}",
+                "claim": (
+                    f"In {model_id}, each one-unit increase in {term} is "
+                    f"associated with an average change of {numeric_estimate:.4f} "
+                    f"in the dependent variable; {significance}."
+                ),
                 "source_id": source_id,
             }
-            p_value = _as_float(coefficient.get("p_value"))
             if p_value is not None:
                 claim["confidence"] = max(0.0, min(1.0, 1.0 - p_value))
             claims.append(claim)
+        r_squared = _as_float(model_result.get("r_squared"))
+        if r_squared is not None:
+            claims.append(
+                {
+                    "claim": (
+                        f"Model {model_id} explains {r_squared * 100:.1f}% "
+                        "of dependent-variable variation."
+                    ),
+                    "source_id": f"model_results.{model_id}.r_squared",
+                    "confidence": 1.0,
+                }
+            )
 
     for warning in warnings:
         message = warning.get("message") if isinstance(warning, Mapping) else str(warning)
@@ -46,3 +62,13 @@ def _as_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def _significance_text(p_value: float | None) -> str:
+    if p_value is None:
+        return "statistical significance was not reported"
+    if p_value < 0.01:
+        return "this is significant at the 1% level"
+    if p_value < 0.05:
+        return "this is significant at the 5% level"
+    return "this does not reach conventional significance levels"

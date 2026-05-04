@@ -282,6 +282,18 @@ def _artifact_counts(run_root: Path) -> dict[str, int]:
     return counts
 
 
+def _model_results(run_root: Path) -> list[dict]:
+    model_dir = run_root / "model_results"
+    if not model_dir.is_dir():
+        return []
+    results: list[dict] = []
+    for path in sorted(model_dir.glob("*.json")):
+        data = read_json(path)
+        if isinstance(data, dict) and isinstance(data.get("coefficients"), dict):
+            results.append(data)
+    return results
+
+
 SUPPORTED_REGISTRY_VERSION = 1
 
 
@@ -394,6 +406,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "lineage": manifest.get("lineage", []),
         "artifact_counts": _artifact_counts(run_root),
         "errors": errors,
+        "model_results": _model_results(run_root),
     }
 
 

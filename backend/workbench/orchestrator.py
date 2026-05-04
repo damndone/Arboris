@@ -10,7 +10,11 @@ from .artifacts import register_artifact, write_json
 from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
 from .domain import GuardrailIssue, Severity
-from .econometrics.runner import run_ols
+from .econometrics.runner import (
+    run_fixed_effects,
+    run_ols,
+    run_time_series_diagnostics,
+)
 from .exports import export_pdf, export_xlsx
 from .ingestion import ingest_files
 from .metadata import infer_schema
@@ -195,30 +199,75 @@ def _run_workflow(
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("model_check", "complete", "Model columns valid")
 
-    if _s: _s("estimation", "start", "Fitting OLS...")
-    model_result = run_ols(
+    model_results: list[tuple[str, dict[str, Any]]] = []
+    if _s:
+        _s("estimation", "start", "Fitting OLS baseline...")
+    ols_result = run_ols(
         cleaned,
         y=normalized_y,
         x=normalized_x,
         robust=True,
-        model_id="regression_1",
+        model_id="ols_1",
     )
-    model_path = run_root / "model_results" / "regression_1.json"
-    write_json(model_path, model_result)
-    register_artifact(
-        run_root,
-        "regression_1",
-        model_path,
-        "model_result",
-        "econometrics",
-        ["cleaned_dataset"],
-    )
+    _write_model_result(run_root, "ols_1", ols_result)
+    model_results.append(("ols_1", ols_result))
+
+    if routing["kind"] == "panel" and id_candidates:
+        if _s:
+            _s("estimation", "start", "Attempting fixed effects...")
+        try:
+            fe_result = run_fixed_effects(
+                cleaned,
+                y=normalized_y,
+                x=normalized_x,
+                entity=id_candidates[0],
+                time=time_candidates[0] if time_candidates else None,
+                model_id="fe_1",
+            )
+            _write_model_result(run_root, "fe_1", fe_result)
+            model_results.append(("fe_1", fe_result))
+        except Exception:
+            fe_issue = GuardrailIssue(
+                Severity.WARNING,
+                "FE_ESTIMATION_FAILED",
+                "Fixed effects estimation failed; results include OLS baseline only.",
+                {"y": normalized_y, "x": normalized_x},
+            )
+            issue_dicts.append(fe_issue.to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+            if _s:
+                _s("estimation", "complete", "FE failed, OLS baseline retained")
+    elif routing["kind"] == "panel" and not id_candidates:
+        panel_issue = GuardrailIssue(
+            Severity.WARNING,
+            "PANEL_NO_ENTITY",
+            "Panel dataset detected but no entity identifier available; running OLS only.",
+            {"kind": routing["kind"]},
+        )
+        issue_dicts.append(panel_issue.to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+
+    if routing["kind"] == "time_series" and time_candidates:
+        diagnostics = run_time_series_diagnostics(
+            cleaned, normalized_y, time_candidates[0]
+        )
+        diagnostics_path = run_root / "model_results" / "time_series_diagnostics.json"
+        write_json(diagnostics_path, diagnostics)
+        register_artifact(
+            run_root,
+            "time_series_diagnostics",
+            diagnostics_path,
+            "model_diagnostic",
+            "econometrics",
+            ["cleaned_dataset"],
+        )
+
     if _s:
-        r2 = model_result.get("r_squared") or model_result.get("rsquared")
+        r2 = ols_result.get("r_squared") or ols_result.get("rsquared")
         if r2 is not None:
-            _s("estimation", "complete", f"OLS fitted, R²={r2:.4f}")
+            _s("estimation", "complete", f"Model(s) fitted, OLS R²={r2:.4f}")
         else:
-            _s("estimation", "complete", "OLS fitted")
+            _s("estimation", "complete", "Model(s) fitted")
 
     if _s: _s("visualization", "start", "Creating figures...")
     numeric_columns = [
@@ -230,11 +279,12 @@ def _run_workflow(
         run_root,
         numeric_columns=numeric_columns,
         time_column=time_candidates[0] if time_candidates else None,
+        model_results=model_results,
     )
     if _s: _s("visualization", "complete", "Created diagnostic figures")
 
     if _s: _s("narrative", "start", "Building claims...")
-    claims = build_claims([model_result], issue_dicts)
+    claims = build_claims([result for _, result in model_results], issue_dicts)
     if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
     report = {
         "title": "Econometrics Report",
@@ -252,7 +302,10 @@ def _run_workflow(
 
     if _s: _s("export", "start", "Exporting files...")
     export_pdf(report, run_root)
-    export_xlsx({"coefficients": _coefficient_rows(model_result)}, run_root)
+    export_xlsx(
+        {"coefficients": _coefficient_rows_for_models(model_results)},
+        run_root,
+    )
     if _s: _s("export", "complete", "Exported PDF and XLSX")
 
     _write_manifest(
@@ -277,6 +330,19 @@ def _normalized_existing(candidates: tuple[str, ...], frame: pd.DataFrame) -> li
     ]
 
 
+def _write_model_result(run_root: Path, model_id: str, model_result: dict[str, Any]) -> None:
+    model_path = run_root / "model_results" / f"{model_id}.json"
+    write_json(model_path, model_result)
+    register_artifact(
+        run_root,
+        model_id,
+        model_path,
+        "model_result",
+        "econometrics",
+        ["cleaned_dataset"],
+    )
+
+
 def _coefficient_rows(model_result: dict[str, Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     coefficients = model_result.get("coefficients", {})
@@ -285,6 +351,16 @@ def _coefficient_rows(model_result: dict[str, Any]) -> list[dict[str, Any]]:
     for term, values in coefficients.items():
         if isinstance(values, dict):
             rows.append({"term": term, **values})
+    return rows
+
+
+def _coefficient_rows_for_models(
+    model_results: list[tuple[str, dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for model_id, model_result in model_results:
+        for row in _coefficient_rows(model_result):
+            rows.append({"model_id": model_id, **row})
     return rows
 
 

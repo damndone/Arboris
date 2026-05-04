@@ -191,6 +191,8 @@ def test_get_run_detail_returns_artifact_counts(completed_run):
     assert isinstance(detail["artifact_counts"], dict)
     assert sum(detail["artifact_counts"].values()) > 0
     assert detail["errors"] == {"issues": []}
+    assert detail["model_results"][0]["model_id"] == "ols_1"
+    assert "x" in detail["model_results"][0]["coefficients"]
 
 
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):

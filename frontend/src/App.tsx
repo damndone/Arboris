@@ -1,54 +1,35 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Link,
   Outlet,
   Route,
   Routes,
   useLocation,
   useNavigate,
   useOutletContext,
-  useParams,
   useSearchParams,
 } from "react-router-dom";
 import {
   ApiError,
   createProject,
   fetchRuns,
+  previewFile,
   runWorkflow,
+  type FilePreview,
   type RunResponse,
   type RunSummary,
 } from "./api";
 import { RunHistoryPanel } from "./runHistory";
-import { RunDetailPanel } from "./runDetail";
+import { RunDetailRoute } from "./runDetail";
+import { RunResultView } from "./runResult";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
-
-const RUN_OUTPUT_PATHS = [
-  "run_manifest.json",
-  "artifacts_index.json",
-  "errors.json",
-  "reports/report.html",
-  "reports/report.pdf",
-  "exports/tables.xlsx",
-];
-
-function joinPath(base: string, suffix: string): string {
-  if (!base) return suffix;
-  const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
-  return `${trimmed}/${suffix}`;
-}
 
 function parseColumns(value: string): string[] {
   return value
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part !== "");
-}
-
-function statusLabel(status: string): string {
-  if (!status) return "—";
-  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 // --- Context ---
@@ -70,7 +51,6 @@ function useAppContext(): AppContextValue {
 function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
-  const navigate = useNavigate();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
@@ -78,8 +58,14 @@ function SubmitRoute() {
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
+  const [previewState, setPreviewState] = useState<
+    "idle" | "loading" | "error"
+  >("idle");
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
   const [lastRun, setLastRun] = useState<RunResponse | null>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setError(null);
@@ -97,7 +83,7 @@ function SubmitRoute() {
   if (projectRoot.trim() === "") runErrors.projectRoot = "Create a project first";
   if (y.trim() === "") runErrors.y = "Required";
   if (xColumns.length === 0) runErrors.x = "Provide at least one column";
-  if (!file) runErrors.file = "Select a CSV file";
+  if (!file) runErrors.file = "Select a CSV or Excel file";
 
   const canCreate =
     Object.keys(projectErrors).length === 0 && requestState === "idle";
@@ -126,6 +112,44 @@ function SubmitRoute() {
     }
   }
 
+  async function onFileChange(nextFile: File | null) {
+    setFile(nextFile);
+    setPreview(null);
+    setPreviewError(null);
+    if (!nextFile) {
+      setPreviewState("idle");
+      return;
+    }
+    setPreviewState("loading");
+    try {
+      const nextPreview = await previewFile(nextFile);
+      setPreview(nextPreview);
+      if (nextPreview.suggestedY) setY(nextPreview.suggestedY);
+      setX(nextPreview.suggestedX.join(", "));
+      setPreviewState("idle");
+    } catch (error) {
+      setPreviewState("error");
+      setPreviewError(
+        error instanceof Error ? error.message : "File preview failed",
+      );
+    }
+  }
+
+  function onFolderFiles(files: FileList | null) {
+    const first = files?.[0] as (File & { webkitRelativePath?: string }) | undefined;
+    const relativePath = first?.webkitRelativePath;
+    if (!relativePath) return;
+    const rootName = relativePath.split("/")[0];
+    if (rootName) setParent(parent ? parent : `/${rootName}`);
+  }
+
+  function setXSelection(column: string, selected: boolean) {
+    const next = new Set(xColumns);
+    if (selected) next.add(column);
+    else next.delete(column);
+    setX(Array.from(next).join(", "));
+  }
+
   async function onRun() {
     if (!file) return;
     setRequestState("working");
@@ -145,9 +169,6 @@ function SubmitRoute() {
           ? "Workflow returned blocked"
           : "Workflow completed"
       );
-      navigate(
-        `/runs/${encodeURIComponent(result.run_id)}?project_root=${encodeURIComponent(projectRoot)}`
-      );
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -161,13 +182,6 @@ function SubmitRoute() {
       setRequestState("idle");
     }
   }
-
-  const runDir = lastRun
-    ? joinPath(projectRoot, `runs/${lastRun.run_id}`)
-    : null;
-  const badgeClass = lastRun
-    ? `badge badge-${lastRun.status === "completed" ? "ok" : lastRun.status === "blocked" ? "warn" : "neutral"}`
-    : "badge badge-neutral";
 
   return (
     <>
@@ -190,6 +204,26 @@ function SubmitRoute() {
               <span className="field-error">{projectErrors.parent}</span>
             )}
           </label>
+          <div className="folder-picker">
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+            >
+              Browse
+            </button>
+            <input
+              ref={folderInputRef}
+              aria-label="folder picker"
+              className="visually-hidden"
+              type="file"
+              multiple
+              {...({ webkitdirectory: "true", directory: "true" } as Record<
+                string,
+                string
+              >)}
+              onChange={(event) => onFolderFiles(event.target.files)}
+            />
+          </div>
           <label>
             Project name
             <input
@@ -223,7 +257,7 @@ function SubmitRoute() {
       <section className="panel" aria-labelledby="run-heading">
         <div className="panel-heading">
           <h2 id="run-heading">Run</h2>
-          <span>Upload one CSV; configure model; submit workflow.</span>
+          <span>Upload CSV or Excel; preview data; submit workflow.</span>
         </div>
         <div className="control-grid run-grid">
           <label>
@@ -262,13 +296,15 @@ function SubmitRoute() {
             </span>
           </label>
           <label>
-            Data file (.csv)
+            Data file (.csv, .xlsx, .xls)
             <input
               aria-label="data file"
               aria-invalid={Boolean(runErrors.file)}
               type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+              accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              onChange={(event) => {
+                void onFileChange(event.target.files?.[0] ?? null);
+              }}
             />
             {file && (
               <span className="field-hint">
@@ -288,6 +324,78 @@ function SubmitRoute() {
         {runErrors.projectRoot && (
           <p className="field-error inline-error">{runErrors.projectRoot}</p>
         )}
+        {previewState === "loading" && (
+          <p className="muted">Previewing file…</p>
+        )}
+        {previewState === "error" && previewError && (
+          <p className="field-error inline-error">{previewError}</p>
+        )}
+        {preview && (
+          <section className="preview-panel" aria-labelledby="preview-heading">
+            <div className="panel-heading compact-heading">
+              <h3 id="preview-heading" className="subhead">
+                Data preview
+              </h3>
+              <span>
+                {preview.fileName} · {preview.rowCount} rows ·{" "}
+                {preview.columnCount} columns
+              </span>
+            </div>
+            <div className="preview-table-wrap">
+              <table className="preview-table">
+                <thead>
+                  <tr>
+                    {preview.columns.map((column) => (
+                      <th key={column.name}>{column.name}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.previewRows.map((row, index) => (
+                    <tr key={index}>
+                      {preview.columns.map((column) => (
+                        <td key={column.name}>{String(row[column.name] ?? "")}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="column-selector" aria-label="column selector">
+              {preview.columns.map((column) => (
+                <div key={column.name} className="column-option">
+                  <div>
+                    <strong>{column.name}</strong>
+                    <span className="column-meta">
+                      {column.dtype} · missing{" "}
+                      {(column.missingRate * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <label className="inline-choice">
+                    <input
+                      type="radio"
+                      name="dependent-column"
+                      checked={y === column.name}
+                      onChange={() => setY(column.name)}
+                    />
+                    y
+                  </label>
+                  <label className="inline-choice">
+                    <input
+                      type="checkbox"
+                      checked={xColumns.includes(column.name)}
+                      disabled={y === column.name}
+                      onChange={(event) =>
+                        setXSelection(column.name, event.target.checked)
+                      }
+                    />
+                    x
+                  </label>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </section>
 
       <section className="panel" aria-labelledby="result-heading">
@@ -295,48 +403,16 @@ function SubmitRoute() {
           <h2 id="result-heading">Last run</h2>
           <span>
             {lastRun
-              ? "Outputs are written under the run directory."
+              ? "Workflow output is available below."
               : "No run yet."}
           </span>
         </div>
         {lastRun ? (
-          <>
-            <dl className="summary-list">
-              <div>
-                <dt>Run ID</dt>
-                <dd className="mono">{lastRun.run_id}</dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd>
-                  <span className={badgeClass}>
-                    {statusLabel(lastRun.status)}
-                  </span>
-                  {lastRun.status === "blocked" && (
-                    <span className="status-hint">
-                      Workflow blocked — inspect <code>errors.json</code>.
-                    </span>
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt>Project root</dt>
-                <dd className="mono">{projectRoot}</dd>
-              </div>
-              <div>
-                <dt>Run directory</dt>
-                <dd className="mono">{runDir}</dd>
-              </div>
-            </dl>
-            <h3 className="subhead">Expected outputs</h3>
-            <ul className="path-list" aria-label="expected outputs">
-              {RUN_OUTPUT_PATHS.map((suffix) => (
-                <li key={suffix} className="mono">
-                  {joinPath(runDir ?? "", suffix)}
-                </li>
-              ))}
-            </ul>
-          </>
+          <RunResultView
+            projectRoot={projectRoot}
+            runId={lastRun.run_id}
+            onError={setError}
+          />
         ) : (
           <p className="muted">
             Submit a workflow to see run details and output paths.
@@ -351,8 +427,8 @@ function SubmitRoute() {
 
 function RunHistoryRoute() {
   const { projectRoot, setError } = useAppContext();
-  const navigate = useNavigate();
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -361,6 +437,7 @@ function RunHistoryRoute() {
   useEffect(() => {
     if (!projectRoot) {
       setRuns(null);
+      setSelectedRunId(null);
       return;
     }
     let cancelled = false;
@@ -392,57 +469,23 @@ function RunHistoryRoute() {
     );
   }
 
-  const handleSelect = (runId: string) => {
-    navigate(
-      `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`
-    );
-  };
-
   return (
-    <section className="panel" aria-labelledby="history-heading">
-      <div className="panel-heading">
-        <h2 id="history-heading">Run history</h2>
-        <span>{projectRoot}</span>
-      </div>
-      <RunHistoryPanel runs={runs} onSelect={handleSelect} />
-    </section>
-  );
-}
-
-// --- RunDetailRoute ---
-
-function RunDetailRoute() {
-  const { projectRoot, setError } = useAppContext();
-  const { runId } = useParams<{ runId: string }>();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    setError(null);
-  }, [setError]);
-
-  if (!projectRoot) {
-    return (
-      <section className="panel panel-error">
-        <strong>Missing project_root</strong>
-        <p>
-          Cannot view run detail without a project.{" "}
-          <Link to="/">Return to submit</Link>
-        </p>
+    <>
+      <section className="panel" aria-labelledby="history-heading">
+        <div className="panel-heading">
+          <h2 id="history-heading">Run history</h2>
+          <span>{projectRoot}</span>
+        </div>
+        <RunHistoryPanel runs={runs} onSelect={setSelectedRunId} />
       </section>
-    );
-  }
-
-  return (
-    <RunDetailPanel
-      projectRoot={projectRoot}
-      runId={runId!}
-      onBack={() =>
-        navigate(
-          `/runs?project_root=${encodeURIComponent(projectRoot)}`
-        )
-      }
-      onError={setError}
-    />
+      {selectedRunId && (
+        <RunResultView
+          projectRoot={projectRoot}
+          runId={selectedRunId}
+          onError={setError}
+        />
+      )}
+    </>
   );
 }
 
