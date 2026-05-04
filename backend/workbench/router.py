@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 import pandas as pd
@@ -56,3 +57,30 @@ def classify_dataset(
         "secondary_labels": ["single_observation_per_period"],
         "evidence": [f"time={time_col}"],
     }
+
+
+class YKind(str, Enum):
+    BINARY = "binary"
+    COUNT = "count"
+    CONTINUOUS = "continuous"
+
+
+_POISSON_MAX_UNIQUE = 20
+
+def detect_y_kind(frame: pd.DataFrame, y: str) -> YKind:
+    series = frame[y].dropna()
+    nunique = int(series.nunique())
+    if nunique == 2:
+        unique_vals = set(series.unique())
+        if unique_vals <= {0, 1} or unique_vals <= {True, False}:
+            return YKind.BINARY
+        return YKind.CONTINUOUS
+    if (
+        nunique >= 3
+        and nunique <= _POISSON_MAX_UNIQUE
+        and pd.api.types.is_numeric_dtype(series)
+        and (series >= 0).all()
+        and (series == series.astype(int)).all()
+    ):
+        return YKind.COUNT
+    return YKind.CONTINUOUS

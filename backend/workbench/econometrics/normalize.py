@@ -47,6 +47,10 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "model_id": model_id,
         "nobs": int(fitted.nobs),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
+        "pseudo_r2": _json_safe_float(getattr(fitted, "prsquared", None)),
+        "llf": _json_safe_float(getattr(fitted, "llf", None)),
+        "aic": _json_safe_float(getattr(fitted, "aic", None)),
+        "bic": _json_safe_float(getattr(fitted, "bic", None)),
         "fitted_values": _json_safe_sequence(getattr(fitted, "fittedvalues", [])),
         "residuals": _json_safe_sequence(getattr(fitted, "resid", [])),
         "coefficients": {

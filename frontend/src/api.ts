@@ -42,7 +42,13 @@ export type CoefficientRecord = {
 
 export type ModelResult = {
   model_id: string;
+  model_type?: string;
   r_squared?: number | null;
+  pseudo_r2?: number | null;
+  llf?: number | null;
+  aic?: number | null;
+  bic?: number | null;
+  nobs?: number;
   coefficients: Record<string, CoefficientRecord>;
 };
 
@@ -185,11 +191,13 @@ export async function runWorkflow(
   mode: string,
   y: string,
   x: string,
-  file: File
+  file: File,
+  modelType: string = "auto",
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append("project_root", projectRoot);
   form.append("mode", mode);
+  form.append("model_type", modelType);
   form.append("y", y);
   form.append("x", x);
   form.append("file", file);

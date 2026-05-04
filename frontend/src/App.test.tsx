@@ -745,3 +745,26 @@ test("running run progress includes statistical tests step", async () => {
   });
   expect(screen.getByText("Statistical tests")).toBeInTheDocument();
 });
+
+// --- V1.2.5 model type selector tests ---
+
+test("model type selector renders with auto, ols, logit, poisson options", () => {
+  renderAt("/");
+
+  const selector = screen.getByLabelText("model type");
+  expect(selector).toBeInTheDocument();
+
+  const options = within(selector).getAllByRole("option");
+  const optionValues = options.map((opt) => (opt as HTMLOptionElement).value);
+  expect(optionValues).toEqual(["auto", "ols", "logit", "poisson"]);
+});
+
+test("model type defaults to Auto and can be changed to logit", async () => {
+  renderAt("/");
+
+  const selector = screen.getByLabelText("model type") as HTMLSelectElement;
+  expect(selector.value).toBe("auto");
+
+  fireEvent.change(selector, { target: { value: "logit" } });
+  expect(selector.value).toBe("logit");
+});
