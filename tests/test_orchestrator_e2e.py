@@ -37,7 +37,7 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
         "cleaned_dataset",
         "data_profile",
         "analysis_router",
-        "regression_1",
+        "ols_1",
         "report_html",
         "report_pdf",
         "tables_xlsx",
@@ -46,8 +46,8 @@ def test_run_workflow_creates_traceable_outputs(tmp_path: Path):
         not artifact["path"].startswith("/")
         for artifact in artifact_index["artifacts"]
     )
-    model_result = read_json(run_root / "model_results" / "regression_1.json")
-    assert model_result["model_id"] == "regression_1"
+    model_result = read_json(run_root / "model_results" / "ols_1.json")
+    assert model_result["model_id"] == "ols_1"
     assert "x" in model_result["coefficients"]
 
 
@@ -69,7 +69,39 @@ def test_run_workflow_blocks_missing_model_columns(tmp_path: Path):
     errors = read_json(run_root / "errors.json")
     assert manifest["status"] == "blocked"
     assert errors["issues"][0]["code"] == "MODEL_COLUMNS_NOT_FOUND"
-    assert not (run_root / "model_results" / "regression_1.json").exists()
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+
+
+def test_panel_run_writes_fixed_effects_and_ols_baseline(tmp_path: Path):
+    rows = []
+    for firm_id in range(6):
+        for year in range(2018, 2025):
+            x = firm_id + year - 2018
+            rows.append(
+                {
+                    "firm_id": firm_id,
+                    "year": year,
+                    "x": x,
+                    "y": 1.0 + 2.0 * x + firm_id * 0.1,
+                }
+            )
+    source = tmp_path / "panel.csv"
+    pd.DataFrame(rows).to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+    assert (run_root / "model_results" / "ols_1.json").exists()
+    assert (run_root / "model_results" / "fe_1.json").exists()
+    artifact_ids = {
+        artifact["artifact_id"]
+        for artifact in read_json(run_root / "artifacts_index.json")["artifacts"]
+    }
+    assert {"ols_1", "fe_1"}.issubset(artifact_ids)
+    routing = read_json(run_root / "staged" / "analysis_router.json")
+    assert routing["kind"] == "panel"
 
 
 def test_manifest_contains_started_at_y_and_x(tmp_path: Path):
@@ -192,6 +224,54 @@ def test_on_step_callback_blocked_validation(tmp_path: Path):
     ]
     assert len(blocked_calls) >= 1
     assert blocked_calls[0][0] == "validation"
+
+
+def test_fe_failure_writes_warning_not_blocker(tmp_path: Path):
+    """FE failure writes FE_ESTIMATION_FAILED warning; OLS baseline survives; status=completed."""
+    import workbench.orchestrator as orch
+    from unittest.mock import patch
+
+    rows = []
+    for firm_id in range(6):
+        for year in range(2018, 2025):
+            x = firm_id + year - 2018
+            rows.append(
+                {
+                    "firm_id": firm_id,
+                    "year": year,
+                    "x": x,
+                    "y": 1.0 + 2.0 * x + firm_id * 0.1,
+                }
+            )
+    source = tmp_path / "panel.csv"
+    pd.DataFrame(rows).to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+    assert (run_root / "model_results" / "ols_1.json").exists()
+
+    # Now with mocked FE failure
+    source2 = tmp_path / "panel2.csv"
+    pd.DataFrame(rows).to_csv(source2, index=False)
+    project2 = create_project(tmp_path, "demo2")
+
+    def _failing_fe(*args, **kwargs):
+        raise RuntimeError("FE solver failed")
+
+    with patch.object(orch, "run_fixed_effects", _failing_fe):
+        result2 = run_workflow(
+            project2.root, [source2], mode="auto", y="y", x=["x"],
+        )
+
+    assert result2["status"] == "completed"
+    run_root2 = project2.root / "runs" / result2["run_id"]
+    assert (run_root2 / "model_results" / "ols_1.json").exists()
+    assert not (run_root2 / "model_results" / "fe_1.json").exists()
+    errors = read_json(run_root2 / "errors.json")
+    fe_codes = [i["code"] for i in errors["issues"] if i["code"] == "FE_ESTIMATION_FAILED"]
+    assert len(fe_codes) == 1
 
 
 def test_on_step_callback_blocked_columns(tmp_path: Path):

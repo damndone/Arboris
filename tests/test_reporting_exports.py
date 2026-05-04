@@ -22,6 +22,29 @@ def test_claims_have_source_ids():
     assert claims[0]["source_id"] == "model_results.regression_1.coefficients.x"
 
 
+def test_claims_include_magnitude_significance_and_r_squared():
+    model_result = {
+        "model_id": "ols_1",
+        "r_squared": 0.834,
+        "coefficients": {
+            "x": {
+                "estimate": 2.5,
+                "p_value": 0.04,
+                "source_id": "model_results.ols_1.coefficients.x",
+            }
+        },
+    }
+
+    claims = build_claims([model_result], warnings=[])
+
+    assert "one-unit increase in x" in claims[0]["claim"]
+    assert "2.5000" in claims[0]["claim"]
+    assert "5% level" in claims[0]["claim"]
+    assert claims[1]["claim"] == (
+        "Model ols_1 explains 83.4% of dependent-variable variation."
+    )
+
+
 def test_warning_claims_bind_to_errors_source():
     claims = build_claims([], warnings=["High missingness"])
 

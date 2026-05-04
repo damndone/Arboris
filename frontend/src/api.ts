@@ -1,3 +1,5 @@
+import * as XLSX from "xlsx";
+
 export type ProjectResponse = {
   project_root: string;
 };
@@ -28,6 +30,20 @@ export type RunDetail = RunSummary & {
   lineage: Array<{ source: string; artifact_id: string }>;
   artifact_counts: Record<string, number>;
   errors: { issues: IssueRecord[] };
+  model_results?: ModelResult[];
+};
+
+export type CoefficientRecord = {
+  estimate?: number | null;
+  std_error?: number | null;
+  p_value?: number | null;
+  source_id?: string;
+};
+
+export type ModelResult = {
+  model_id: string;
+  r_squared?: number | null;
+  coefficients: Record<string, CoefficientRecord>;
 };
 
 export type ArtifactItem = {
@@ -45,6 +61,29 @@ export type ArtifactGroup = {
 
 export type RunsListResponse = { runs: RunSummary[] };
 export type ArtifactsResponse = { groups: ArtifactGroup[] };
+
+export type ColumnRole = "y" | "x" | "id" | "time" | "ignore";
+export type ColumnDtype = "numeric" | "string" | "datetime" | "other";
+
+export type ColumnPreview = {
+  name: string;
+  dtype: ColumnDtype;
+  missingRate: number;
+  uniqueCount: number;
+  mean?: number;
+  std?: number;
+  suggestedRole: ColumnRole;
+};
+
+export type FilePreview = {
+  fileName: string;
+  rowCount: number;
+  columnCount: number;
+  columns: ColumnPreview[];
+  previewRows: Record<string, unknown>[];
+  suggestedY: string | null;
+  suggestedX: string[];
+};
 
 export type ApiErrorEnvelope = {
   code: string;
@@ -156,6 +195,123 @@ export async function runWorkflow(
   form.append("file", file);
   const response = await fetch("/runs", { method: "POST", body: form });
   return readResponse<RunResponse>(response);
+}
+
+function isMissing(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function isDateLike(value: unknown): boolean {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return true;
+  if (typeof value !== "string" || value.trim() === "") return false;
+  return !Number.isNaN(Date.parse(value));
+}
+
+function inferDtype(values: unknown[]): ColumnDtype {
+  const present = values.filter((value) => !isMissing(value));
+  if (present.length === 0) return "other";
+  if (present.every((value) => asNumber(value) !== null)) return "numeric";
+  if (present.every(isDateLike)) return "datetime";
+  if (present.every((value) => typeof value === "string")) return "string";
+  return "other";
+}
+
+function inferRole(name: string, dtype: ColumnDtype): ColumnRole {
+  const lower = name.toLowerCase();
+  if (/(^|_|\b)(date|time|year|month|timestamp)(_|$|\b)/.test(lower)) return "time";
+  if (/(^|_|\b)(id|code|key|firm|user)(_|$|\b)/.test(lower)) return "id";
+  if (/(^|_|\b)(y|dependent|outcome|target|result)(_|$|\b)/.test(lower)) return "y";
+  if (dtype === "numeric") return "x";
+  return "ignore";
+}
+
+function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPreview {
+  const values = rows.map((row) => row[name]);
+  const present = values.filter((value) => !isMissing(value));
+  const dtype = inferDtype(values);
+  const numeric = present
+    .map(asNumber)
+    .filter((value): value is number => value !== null);
+  const mean =
+    dtype === "numeric" && numeric.length > 0
+      ? numeric.reduce((sum, value) => sum + value, 0) / numeric.length
+      : undefined;
+  const variance =
+    mean !== undefined && numeric.length > 1
+      ? numeric.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+        (numeric.length - 1)
+      : undefined;
+
+  return {
+    name,
+    dtype,
+    missingRate: values.length === 0 ? 0 : (values.length - present.length) / values.length,
+    uniqueCount: new Set(present.map((value) => String(value))).size,
+    mean,
+    std: variance === undefined ? undefined : Math.sqrt(variance),
+    suggestedRole: inferRole(name, dtype),
+  };
+}
+
+export async function previewFile(file: File): Promise<FilePreview> {
+  const buffer =
+    typeof file.arrayBuffer === "function"
+      ? await file.arrayBuffer()
+      : await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as ArrayBuffer);
+          reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+          reader.readAsArrayBuffer(file);
+        });
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: null,
+    raw: true,
+  });
+  const columnNames =
+    rows.length > 0
+      ? Object.keys(rows[0])
+      : XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 })[0] ?? [];
+  const columns = columnNames.map((name) => columnStats(String(name), rows));
+  const suggestedY =
+    columns.find((column) => column.suggestedRole === "y" && column.dtype === "numeric")?.name ??
+    columns.find(
+      (column) =>
+        column.dtype === "numeric" &&
+        column.suggestedRole !== "id" &&
+        column.suggestedRole !== "time",
+    )?.name ??
+    null;
+  const suggestedX = columns
+    .filter(
+      (column) =>
+        column.dtype === "numeric" &&
+        column.name !== suggestedY &&
+        column.suggestedRole !== "id" &&
+        column.suggestedRole !== "time",
+    )
+    .map((column) => column.name);
+
+  return {
+    fileName: file.name,
+    rowCount: rows.length,
+    columnCount: columns.length,
+    columns,
+    previewRows: rows.slice(0, 10),
+    suggestedY,
+    suggestedX,
+  };
 }
 
 export async function fetchRuns(projectRoot: string): Promise<RunsListResponse> {

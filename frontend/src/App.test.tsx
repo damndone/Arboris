@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 import type { RunSummary } from "./api";
+import * as XLSX from "xlsx";
 
 type FetchInit = { status?: number; ok?: boolean };
 
@@ -79,6 +80,20 @@ function fillRunForm(): void {
   });
 }
 
+function makeXlsxFile(): File {
+  const sheet = XLSX.utils.json_to_sheet([
+    { target: 10, x1: 1, x2: 100, user_id: "u1" },
+    { target: 12, x1: 2, x2: 120, user_id: "u2" },
+    { target: 14, x1: 3, x2: 140, user_id: "u3" },
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Data");
+  const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  return new File([data], "data.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+}
+
 test("renders workbench panels and disables run when invalid", () => {
   renderAt("/");
 
@@ -99,6 +114,25 @@ test("renders workbench panels and disables run when invalid", () => {
   expect(screen.getByText(/no run yet/i)).toBeInTheDocument();
 });
 
+test("selecting an XLSX file previews rows and applies suggested variables", async () => {
+  renderAt("/");
+
+  fireEvent.change(screen.getByLabelText("data file"), {
+    target: { files: [makeXlsxFile()] },
+  });
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: /data preview/i })).toBeInTheDocument();
+  });
+
+  expect(document.body).toHaveTextContent("data.xlsx");
+  expect(document.body).toHaveTextContent("3 rows");
+  expect(document.body).toHaveTextContent("4 columns");
+  expect(screen.getAllByText("target").length).toBeGreaterThan(0);
+  expect(screen.getByLabelText("dependent variable")).toHaveValue("target");
+  expect(screen.getByLabelText("independent variables")).toHaveValue("x1, x2");
+});
+
 test("createProject success populates project_root", async () => {
   (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
     jsonResponse({ project_root: "/tmp/demo" })
@@ -110,7 +144,7 @@ test("createProject success populates project_root", async () => {
   expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
 });
 
-test("runWorkflow navigates to run detail on success", async () => {
+test("runWorkflow shows run result inline on submit page", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
   // POST returns running (async)
@@ -123,6 +157,15 @@ test("runWorkflow navigates to run detail on success", async () => {
       run_id: "abc-123", status: "completed", mode: "auto",
       started_at: "2026-05-01T00:00:00+00:00", y: "y", x: ["x1", "x2"],
       lineage: [], artifact_counts: { report: 1 }, errors: { issues: [] },
+      model_results: [
+        {
+          model_id: "ols_1",
+          r_squared: 0.9,
+          coefficients: {
+            x1: { estimate: 2, std_error: 0.1, p_value: 0.01 },
+          },
+        },
+      ],
     })
   );
   // GET run artifacts
@@ -133,17 +176,20 @@ test("runWorkflow navigates to run detail on success", async () => {
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
-  // Should navigate to run detail page
   await waitFor(() => {
     expect(
       screen.getByRole("heading", { name: /run detail/i })
     ).toBeInTheDocument();
   });
+  expect(screen.getByRole("heading", { name: "Project" })).toBeInTheDocument();
   expect(screen.getByText("abc-123")).toBeInTheDocument();
-  expect(screen.getByText("Completed")).toBeInTheDocument();
+  expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
+  expect(screen.getByRole("heading", { name: /coefficients/i })).toBeInTheDocument();
+  expect(document.body).toHaveTextContent("ols_1");
+  expect(document.body).toHaveTextContent("x1");
 });
 
-test("runWorkflow blocked navigates to run detail with blocked status", async () => {
+test("runWorkflow blocked shows run result inline with blocked status", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
   // POST returns running (workflow is async, blocked result comes later)
@@ -173,8 +219,9 @@ test("runWorkflow blocked navigates to run detail with blocked status", async ()
       screen.getByRole("heading", { name: /run detail/i })
     ).toBeInTheDocument();
   });
+  expect(screen.getByRole("heading", { name: "Project" })).toBeInTheDocument();
   expect(screen.getByText("blk-1")).toBeInTheDocument();
-  expect(screen.getByText("Blocked")).toBeInTheDocument();
+  expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
 });
 
 test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {
@@ -296,6 +343,7 @@ test("clicking a history row loads run detail with errors", async () => {
       screen.getByRole("heading", { name: /run detail/i })
     ).toBeInTheDocument();
   });
+  expect(screen.getByRole("heading", { name: /run history/i })).toBeInTheDocument();
   expect(screen.getByText("Bad column")).toBeInTheDocument();
   expect(screen.getByText("DATA_QUALITY")).toBeInTheDocument();
 });
@@ -550,32 +598,54 @@ test("artifact fetch error shows retry button; retry succeeds", async () => {
 
 // --- New tests for V1.2.1 ---
 
-test("direct URL access to run detail via MemoryRouter initialEntries renders detail", async () => {
+test("direct URL access to history via MemoryRouter initialEntries renders runs", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({ runs: [makeRun("run-direct")] })
+  );
+
+  renderAt("/runs?project_root=/tmp");
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: /run history/i })).toBeInTheDocument();
+  });
+  expect(screen.getByText("run-direct")).toBeInTheDocument();
+  expect(screen.getByText("Completed")).toBeInTheDocument();
+});
+
+test("direct URL access to run detail keeps shareable result route", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-direct",
       status: "completed",
       mode: "auto",
-      started_at: "2026-05-02T00:00:00+00:00",
+      started_at: "2026-05-01T00:00:00+00:00",
       y: "y",
       x: ["x"],
       lineage: [],
-      artifact_counts: { metadata: 1 },
+      artifact_counts: { report: 1 },
       errors: { issues: [] },
-    })
+      model_results: [
+        {
+          model_id: "ols_1",
+          coefficients: {
+            x: { estimate: 1.5, std_error: 0.2, p_value: 0.03 },
+          },
+        },
+      ],
+    }),
   );
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ groups: [] })
-  );
+  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
 
-  renderAt("/runs/run-direct?project_root=/tmp");
+  renderAt("/runs/run-direct?project_root=/tmp/demo");
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: /run detail/i })).toBeInTheDocument();
   });
   expect(screen.getByText("run-direct")).toBeInTheDocument();
-  expect(screen.getByText("Completed")).toBeInTheDocument();
+  expect(document.body).toHaveTextContent("ols_1");
+  expect(document.body).toHaveTextContent("x");
 });
 
 test("history pagination bar renders Page X of Y, Previous disabled on first page", async () => {
