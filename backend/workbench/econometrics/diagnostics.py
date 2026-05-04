@@ -101,9 +101,15 @@ def _compute_cooks_distance(fitted: Any, diag: dict[str, Any]) -> None:
         influence = OLSInfluence(fitted)
         cooks = [float(v) for v in influence.cooks_distance[0]]
         hat = [float(v) for v in influence.hat_matrix_diag]
+        threshold = 4 / len(cooks) if cooks else 0.005
+        max_cook = round(max(cooks), 4) if cooks else None
+        n_high = sum(1 for v in cooks if v > threshold) if cooks else 0
+        severe = sum(1 for v in cooks if v > 0.5) if cooks else 0
         diag["cooks_distance"] = {
-            "max": round(max(cooks), 4) if cooks else None,
-            "n_high": sum(1 for v in cooks if v > 4 / len(cooks)) if cooks else 0,
+            "max": max_cook,
+            "threshold": round(threshold, 4),
+            "n_high": n_high,
+            "n_severe": severe,
             "leverage_max": round(max(hat), 4) if hat else None,
         }
     except Exception:
