@@ -64,6 +64,7 @@ const PROGRESS_STEPS: StepProgress[] = [
   { step: "validation", label: "Validation", status: "pending" },
   { step: "routing", label: "Routing", status: "pending" },
   { step: "model_check", label: "Model check", status: "pending" },
+  { step: "statistical_tests", label: "Statistical tests", status: "pending" },
   { step: "estimation", label: "Estimation", status: "pending" },
   { step: "visualization", label: "Visualization", status: "pending" },
   { step: "narrative", label: "Narrative", status: "pending" },

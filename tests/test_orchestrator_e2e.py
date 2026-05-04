@@ -174,15 +174,15 @@ def test_on_step_callback_all_steps(tmp_path: Path):
         on_step=mock,
     )
 
-    assert mock.call_count >= 20
+    assert mock.call_count >= 22
     call_args = [(c[0][0], c[0][1]) for c in mock.call_args_list]
 
     # Every step should have at least a complete or blocked
     steps_completed = {step for step, status in call_args if status in ("complete", "blocked")}
     expected_steps = {
         "ingestion", "schema", "cleaning", "profiling",
-        "validation", "routing", "model_check", "estimation",
-        "visualization", "narrative", "reporting", "export",
+        "validation", "routing", "model_check", "statistical_tests",
+        "estimation", "visualization", "narrative", "reporting", "export",
     }
     assert steps_completed == expected_steps
 
@@ -312,3 +312,53 @@ def test_on_step_callback_blocked_columns(tmp_path: Path):
     ]
     assert len(blocked_calls) >= 1
     assert blocked_calls[0][0] == "model_check"
+
+
+def test_run_workflow_writes_statistical_test_artifacts(tmp_path: Path):
+    rows = []
+    for i in range(60):
+        rows.append(
+            {
+                "y": float(i) + (5 if i % 2 else 0),
+                "x_num": float(i),
+                "treatment": "treated" if i % 2 else "control",
+                "region": ["north", "south", "west"][i % 3],
+            }
+        )
+    source = tmp_path / "mixed.csv"
+    pd.DataFrame(rows).to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x_num", "treatment", "region"],
+    )
+
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+    expected_files = {
+        "correlations": run_root / "statistical_tests" / "correlations.json",
+        "t_tests": run_root / "statistical_tests" / "t_tests.json",
+        "anova": run_root / "statistical_tests" / "anova.json",
+        "chi_square": run_root / "statistical_tests" / "chi_square.json",
+    }
+    for family, path in expected_files.items():
+        assert path.exists(), f"{family} file missing"
+        payload = read_json(path)
+        assert payload["schema_version"] == 1
+        assert payload["test_type"] == family
+        assert payload["results"], f"{family} results empty"
+
+    artifact_ids = {
+        artifact["artifact_id"]
+        for artifact in read_json(run_root / "artifacts_index.json")["artifacts"]
+    }
+    assert {
+        "statistical_tests_correlations",
+        "statistical_tests_t_tests",
+        "statistical_tests_anova",
+        "statistical_tests_chi_square",
+    }.issubset(artifact_ids)

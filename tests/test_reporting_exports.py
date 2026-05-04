@@ -133,3 +133,32 @@ def test_render_html_report_escapes_untrusted_content(tmp_path: Path):
     assert "<script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "&lt;b&gt;unsafe&lt;/b&gt;" in html
+
+
+def test_report_renders_statistical_tests_section(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "statistical_tests": [
+            {
+                "label": "Pearson correlation: y vs x",
+                "statistic": 0.98,
+                "p_value": 0.001,
+                "interpretation": "Statistic 0.9800; p = 0.001.",
+                "source_id": "statistical_tests.correlations.y.x",
+            }
+        ],
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+    pdf_path = export_pdf(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "<h2>Statistical tests</h2>" in html
+    assert "Pearson correlation: y vs x" in html
+    assert 'data-source-id="statistical_tests.correlations.y.x"' in html
+    assert b"Statistical tests" in pdf_path.read_bytes()
