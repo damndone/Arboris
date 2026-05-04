@@ -12,7 +12,6 @@ from .config import load_config
 from .domain import GuardrailIssue, Severity
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
-    run_fixed_effects,
     run_logit,
     run_ols,
     run_poisson,
@@ -267,43 +266,6 @@ def _run_workflow(
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
 
-    # Fixed effects only for continuous y with panel data
-    if routing["kind"] == "panel" and id_candidates and y_type == "continuous" and _has_panel_structure(cleaned, id_candidates, time_candidates):
-        if _s:
-            _s("estimation", "start", "Attempting fixed effects...")
-        try:
-            fe_result, fe_fitted = run_fixed_effects(
-                cleaned,
-                y=normalized_y,
-                x=normalized_x,
-                entity=id_candidates[0],
-                time=time_candidates[0] if time_candidates else None,
-                model_id="fe_1",
-            )
-            _write_model_result(run_root, "fe_1", fe_result)
-            model_results.append(("fe_1", fe_result))
-            fitted_models["fe_1"] = fe_fitted
-        except Exception:
-            fe_issue = GuardrailIssue(
-                Severity.WARNING,
-                "FE_ESTIMATION_FAILED",
-                "Fixed effects estimation failed; results include primary model only.",
-                {"y": normalized_y, "x": normalized_x},
-            )
-            issue_dicts.append(fe_issue.to_dict())
-            write_json(run_root / "errors.json", {"issues": issue_dicts})
-            if _s:
-                _s("estimation", "complete", "FE failed, primary model retained")
-    elif routing["kind"] == "panel" and not id_candidates:
-        panel_issue = GuardrailIssue(
-            Severity.WARNING,
-            "PANEL_NO_ENTITY",
-            "Panel dataset detected but no entity identifier available; running primary model only.",
-            {"kind": routing["kind"]},
-        )
-        issue_dicts.append(panel_issue.to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
-
     if _s: _s("diagnostics", "start", "Running regression diagnostics...")
     exog = cleaned[normalized_x] if normalized_x else pd.DataFrame(index=cleaned.index)
     diagnostic_artifacts: dict[str, dict[str, Any]] = {}
@@ -383,7 +345,7 @@ def _run_workflow(
         "descriptive_stats": descriptive_stats,
         "statistical_tests": statistical_test_summaries,
         "variable_importance": _build_variable_importance(
-            statistical_tests, normalized_y, normalized_x
+            statistical_tests, normalized_y, normalized_x, model_results
         ),
         "diagnostics": diagnostic_artifacts,
     }
@@ -526,6 +488,7 @@ def _build_variable_importance(
     statistical_tests: dict[str, dict[str, Any]],
     y: str,
     x_vars: list[str],
+    model_results: list[tuple[str, dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     importance: dict[str, dict[str, Any]] = {}
     for var in x_vars:
@@ -539,8 +502,9 @@ def _build_variable_importance(
                 if var != y and var in importance:
                     importance[var]["correlation"] = row.get("effect", {}).get("r")
                     p = row.get("p_value")
-                    importance[var]["best_p_value"] = p
-                    importance[var]["test_type"] = "correlation"
+                    if p is not None:
+                        importance[var]["best_p_value"] = p
+                        importance[var]["test_type"] = "correlation"
     for family in ("t_tests", "anova"):
         for row in statistical_tests.get(family, {}).get("results", []):
             outcome = row.get("outcome")
@@ -553,6 +517,17 @@ def _build_variable_importance(
                 if p is not None and (existing is None or p < existing):
                     importance[group]["best_p_value"] = p
                     importance[group]["test_type"] = family
+    if model_results:
+        primary = model_results[0][1] if model_results else {}
+        coefficients = primary.get("coefficients", {})
+        for var in x_vars:
+            imp = importance[var]
+            if imp["best_p_value"] is not None:
+                continue
+            coeff = coefficients.get(var)
+            if isinstance(coeff, dict) and coeff.get("p_value") is not None:
+                imp["best_p_value"] = coeff["p_value"]
+                imp["test_type"] = "ols_coefficient"
     return sorted(importance.values(), key=_importance_sort_key)
 
 
@@ -584,24 +559,6 @@ def _check_model_validity(
             )
             issue_dicts.append(issue.to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
-
-
-def _has_panel_structure(
-    frame: pd.DataFrame, id_candidates: list[str], time_candidates: list[str]
-) -> bool:
-    if not id_candidates:
-        return False
-    entity = id_candidates[0]
-    if entity not in frame.columns:
-        return False
-    nunique = int(frame[entity].nunique())
-    if nunique < 5:
-        return False
-    if time_candidates and time_candidates[0] in frame.columns:
-        time_nunique = int(frame[time_candidates[0]].nunique())
-        if time_nunique < 2:
-            return False
-    return True
 
 
 def _importance_sort_key(item: dict[str, Any]) -> float:
