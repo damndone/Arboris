@@ -105,3 +105,130 @@ def test_new_run_artifacts_index_has_schema_version(tmp_path: Path):
     index_path = project_root / "runs" / result["run_id"] / "artifacts_index.json"
     index = json.loads(index_path.read_text(encoding="utf-8"))
     assert index.get("schema_version") == 1
+
+
+# --- V1.2.2 on_step callback tests ---
+
+from unittest.mock import Mock
+
+
+def test_on_step_callback_all_steps(tmp_path: Path):
+    """_run_workflow(on_step=mock) fires start + complete for each pipeline step."""
+    from workbench.orchestrator import _run_workflow, _lineage, _write_manifest
+    from workbench.projects import create_project, create_run
+    from workbench.config import load_config
+    from datetime import datetime, timezone
+
+    proot = tmp_path / "demo"
+    create_project(tmp_path, "demo")
+    run = create_run(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+
+    config = load_config(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root, run.run_id, "auto", "running",
+        _lineage([data]),
+        started_at=started_at, y="y", x=["x"],
+    )
+
+    mock = Mock()
+    _run_workflow(
+        run.root, run.run_id, [data],
+        "auto", "y", ["x"], config, started_at,
+        on_step=mock,
+    )
+
+    assert mock.call_count >= 20
+    call_args = [(c[0][0], c[0][1]) for c in mock.call_args_list]
+
+    # Every step should have at least a complete or blocked
+    steps_completed = {step for step, status in call_args if status in ("complete", "blocked")}
+    expected_steps = {
+        "ingestion", "schema", "cleaning", "profiling",
+        "validation", "routing", "model_check", "estimation",
+        "visualization", "narrative", "reporting", "export",
+    }
+    assert steps_completed == expected_steps
+
+
+def test_on_step_callback_blocked_validation(tmp_path: Path):
+    """Data with too few rows triggers validation blocker → on_step('validation','blocked',...)."""
+    from workbench.orchestrator import _run_workflow, _lineage, _write_manifest
+    from workbench.projects import create_project, create_run
+    from workbench.config import load_config
+    from datetime import datetime, timezone
+
+    proot = tmp_path / "demo"
+    create_project(tmp_path, "demo")
+    run = create_run(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    # Only 3 rows → below min_model_n=30
+    pd.DataFrame({"y": [1, 2, 3], "x": [10, 20, 30]}).to_csv(data, index=False)
+
+    config = load_config(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root, run.run_id, "auto", "running",
+        _lineage([data]),
+        started_at=started_at, y="y", x=["x"],
+    )
+
+    mock = Mock()
+    result = _run_workflow(
+        run.root, run.run_id, [data],
+        "auto", "y", ["x"], config, started_at,
+        on_step=mock,
+    )
+
+    assert result["status"] == "blocked"
+    # Should have received step_blocked for validation
+    blocked_calls = [
+        (s, st) for s, st, _ in [c[0] for c in mock.call_args_list]
+        if st == "blocked"
+    ]
+    assert len(blocked_calls) >= 1
+    assert blocked_calls[0][0] == "validation"
+
+
+def test_on_step_callback_blocked_columns(tmp_path: Path):
+    """Requested model column not in data → on_step('model_check','blocked',...)."""
+    from workbench.orchestrator import _run_workflow, _lineage, _write_manifest
+    from workbench.projects import create_project, create_run
+    from workbench.config import load_config
+    from datetime import datetime, timezone
+
+    proot = tmp_path / "demo"
+    create_project(tmp_path, "demo")
+    run = create_run(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+
+    config = load_config(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root, run.run_id, "auto", "running",
+        _lineage([data]),
+        started_at=started_at, y="y", x=["x"],
+    )
+
+    mock = Mock()
+    # Request column 'z' which doesn't exist
+    result = _run_workflow(
+        run.root, run.run_id, [data],
+        "auto", "z", ["x"], config, started_at,
+        on_step=mock,
+    )
+
+    assert result["status"] == "blocked"
+    blocked_calls = [
+        (s, st) for s, st, _ in [c[0] for c in mock.call_args_list]
+        if st == "blocked"
+    ]
+    assert len(blocked_calls) >= 1
+    assert blocked_calls[0][0] == "model_check"
