@@ -183,7 +183,7 @@ def test_on_step_callback_all_steps(tmp_path: Path):
     expected_steps = {
         "ingestion", "schema", "cleaning", "profiling",
         "validation", "routing", "y_type", "model_check", "statistical_tests",
-        "estimation", "visualization", "narrative", "reporting", "export",
+        "estimation", "diagnostics", "visualization", "narrative", "reporting", "export",
     }
     assert steps_completed == expected_steps
 

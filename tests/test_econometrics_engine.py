@@ -14,7 +14,7 @@ from workbench.econometrics.runner import (
 
 def test_run_ols_returns_source_bound_coefficients():
     frame = pd.DataFrame({"y": [1 + 2 * i for i in range(35)], "x": list(range(35))})
-    result = run_ols(frame, y="y", x=["x"], robust=True, model_id="regression_1")
+    result, _ = run_ols(frame, y="y", x=["x"], robust=True, model_id="regression_1")
     assert result["model_id"] == "regression_1"
     assert result["model_type"] == "ols_robust"
     assert result["nobs"] == 35
@@ -29,7 +29,7 @@ def test_run_fixed_effects_includes_entity_terms():
     frame = pd.DataFrame(
         {"y": [1, 2, 2, 3], "x": [0, 1, 0, 1], "firm_id": [1, 1, 2, 2]}
     )
-    result = run_fixed_effects(
+    result, _ = run_fixed_effects(
         frame, y="y", x=["x"], entity="firm_id", time=None, model_id="fe_1"
     )
     assert result["model_id"] == "fe_1"
@@ -63,7 +63,7 @@ def test_run_logit_binary_y():
     y = (rng.uniform(0, 1, n) < p).astype(int)
     frame = pd.DataFrame({"y": y, "x1": x1, "x2": x2})
 
-    result = run_logit(frame, y="y", x=["x1", "x2"], model_id="logit_1")
+    result, _ = run_logit(frame, y="y", x=["x1", "x2"], model_id="logit_1")
 
     assert result["model_id"] == "logit_1"
     assert result["model_type"] == "logit"
@@ -87,7 +87,7 @@ def test_run_poisson_count_y():
     y = rng.poisson(lam)
     frame = pd.DataFrame({"y": y, "x1": x1})
 
-    result = run_poisson(frame, y="y", x=["x1"], model_id="poisson_1")
+    result, _ = run_poisson(frame, y="y", x=["x1"], model_id="poisson_1")
 
     assert result["model_id"] == "poisson_1"
     assert result["model_type"] == "poisson"
@@ -124,7 +124,7 @@ def test_detect_y_kind_continuous():
 
 def test_unified_schema_ols():
     frame = pd.DataFrame({"y": [1 + 2 * i for i in range(35)], "x": list(range(35))})
-    result = run_ols(frame, y="y", x=["x"], robust=True, model_id="ols_1")
+    result, _ = run_ols(frame, y="y", x=["x"], robust=True, model_id="ols_1")
     assert result["model_id"] == "ols_1"
     assert "r_squared" in result
     assert "pseudo_r2" in result
@@ -143,7 +143,7 @@ def test_unified_schema_logit():
     y = (rng.uniform(0, 1, n) < p).astype(int)
     frame = pd.DataFrame({"y": y, "x1": x1})
 
-    result = run_logit(frame, y="y", x=["x1"], model_id="logit_test")
+    result, _ = run_logit(frame, y="y", x=["x1"], model_id="logit_test")
 
     assert "r_squared" in result
     assert result["pseudo_r2"] is not None
@@ -177,6 +177,6 @@ def test_poisson_zero_counts_ok():
     assert (y == 0).any(), "test data should include zeros"
     frame = pd.DataFrame({"y": y, "x1": x1})
 
-    result = run_poisson(frame, y="y", x=["x1"], model_id="poisson_zero")
+    result, _ = run_poisson(frame, y="y", x=["x1"], model_id="poisson_zero")
     assert result["model_type"] == "poisson"
     assert result["pseudo_r2"] is not None

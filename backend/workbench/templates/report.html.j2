@@ -147,6 +147,58 @@
     </section>
     {% endif %}
 
+    {% if report.diagnostics %}
+    <section>
+      <h2>Regression diagnostics</h2>
+      {% for model_id, diag in report.diagnostics.items() %}
+      <h3>{{ model_id }}</h3>
+
+      {% if diag.vif %}
+      <h4>Multicollinearity (VIF)</h4>
+      <table>
+        <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
+        <tbody>
+          {% for var, vif in diag.vif.items() %}
+          <tr>
+            <td>{{ var }}</td>
+            <td>
+              {% if vif is none %}—{% else %}{{ "%.1f"|format(vif) }}{% endif %}
+              {% if vif is not none and vif > 10 %}⚠️ high{% elif vif is not none and vif > 5 %}⚡ moderate{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {% set bp = diag.get("breusch_pagan", {}) %}
+      {% if bp and bp.get("lm") is not none %}
+      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p = {{ "%.4f"|format(bp.p_value) }}
+      {% if bp.p_value < 0.05 %}— significant heteroskedasticity detected{% else %}— homoskedasticity not rejected{% endif %}</p>
+      {% endif %}
+
+      {% set dw = diag.get("durbin_watson") %}
+      {% if dw is not none %}
+      <p>Durbin-Watson (autocorrelation): {{ "%.3f"|format(dw) }}
+      {% if dw < 1.5 %}⚠️ positive autocorrelation{% elif dw > 2.5 %}⚠️ negative autocorrelation{% else %}— no autocorrelation concern{% endif %}</p>
+      {% endif %}
+
+      {% set jb = diag.get("jarque_bera", {}) %}
+      {% if jb and jb.get("statistic") is not none %}
+      <p>Jarque-Bera (normality): JB = {{ "%.2f"|format(jb.statistic) }}, p = {{ "%.4f"|format(jb.p_value) }}
+      {% if jb.p_value < 0.05 %}— residuals are not normally distributed{% else %}— residuals appear normal{% endif %}</p>
+      {% endif %}
+
+      {% set cd = diag.get("cooks_distance", {}) %}
+      {% if cd and cd.get("max") is not none %}
+      <p>Cook's distance: max = {{ "%.4f"|format(cd.max) }}, {{ cd.n_high }} influential observation(s) (D &gt; 4/n)
+      {% if cd.get("leverage_max") is not none %} · max leverage = {{ "%.4f"|format(cd.leverage_max) }}{% endif %}</p>
+      {% endif %}
+
+      {% endfor %}
+    </section>
+    {% endif %}
+
     <section>
       <h2>Warnings</h2>
       <ul>
