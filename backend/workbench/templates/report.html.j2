@@ -193,11 +193,14 @@
 
       {% set cd = diag.get("cooks_distance", {}) %}
       {% if cd and cd.get("max") is not none %}
-      <p>Cook's distance: max = {{ "%.4f"|format(cd.max) }}, threshold = {{ "%.4f"|format(cd.threshold) }}.
-      {{ cd.n_high }} observation(s) exceed the screening threshold.
+      {% set sev = "low" if cd.max < 0.5 else ("moderate" if cd.max < 1.0 else "high") %}
+      {% set sev_label = {"low": "Low concern", "moderate": "Moderate concern", "high": "High concern"}[sev] %}
+      <p>Cook's distance: {{ sev_label }}. Max = {{ "%.4f"|format(cd.max) }}, screening threshold = {{ "%.4f"|format(cd.threshold) }}.
+      {{ cd.n_high }} observation(s) exceed the screening threshold (4/n).
       {% if cd.get("n_severe") and cd.n_severe > 0 %}
+      ⚠️ {{ cd.n_severe }} observation(s) exceed the severe threshold (D &gt; 0.5).
       {% else %}
-      No single observation appears to dominate the model (max D &lt; 0.5).
+      No single observation dominates the model (max D &lt; 0.5).
       {% endif %}
       {% if cd.get("leverage_max") is not none %} · max leverage = {{ "%.4f"|format(cd.leverage_max) }}{% endif %}</p>
       {% endif %}

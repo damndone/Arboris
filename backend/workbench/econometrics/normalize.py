@@ -39,10 +39,33 @@ def _labelled_values(fitted: Any, name: str) -> dict[str, Any]:
     }
 
 
+def _confidence_intervals(fitted: Any) -> tuple[dict[str, float], dict[str, float]]:
+    try:
+        ci = fitted.conf_int()
+        labels = getattr(getattr(fitted, "model", None), "exog_names", None)
+        if labels is None:
+            labels = [fitted.model.data.param_names[i] for i in range(ci.shape[0])] if hasattr(fitted.model.data, "param_names") else []
+        lower: dict[str, float] = {}
+        upper: dict[str, float] = {}
+        for i in range(ci.shape[0]):
+            row = ci[i] if hasattr(ci, "iloc") else ci[i]
+            lo = float(row[0]) if len(row) >= 2 else None
+            hi = float(row[1]) if len(row) >= 2 else None
+            term = _public_term(labels[i]) if i < len(labels) else f"x{i}"
+            if lo is not None:
+                lower[term] = lo
+            if hi is not None:
+                upper[term] = hi
+        return lower, upper
+    except Exception:
+        return {}, {}
+
+
 def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
     params = _labelled_values(fitted, "params")
     bse = _labelled_values(fitted, "bse")
     pvalues = _labelled_values(fitted, "pvalues")
+    ci_lower, ci_upper = _confidence_intervals(fitted)
     return {
         "model_id": model_id,
         "nobs": int(fitted.nobs),
@@ -58,6 +81,8 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
                 "estimate": _json_safe_float(estimate),
                 "std_error": _json_safe_float(bse.get(term)),
                 "p_value": _json_safe_float(pvalues.get(term)),
+                "ci_lower": _json_safe_float(ci_lower.get(term)),
+                "ci_upper": _json_safe_float(ci_upper.get(term)),
                 "source_id": f"model_results.{model_id}.coefficients.{term}",
             }
             for term, estimate in params.items()

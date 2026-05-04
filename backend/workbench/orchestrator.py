@@ -345,7 +345,8 @@ def _run_workflow(
         "descriptive_stats": descriptive_stats,
         "statistical_tests": statistical_test_summaries,
         "variable_importance": _build_variable_importance(
-            statistical_tests, normalized_y, normalized_x, model_results
+            statistical_tests, normalized_y, normalized_x, model_results,
+            cleaned,
         ),
         "diagnostics": diagnostic_artifacts,
     }
@@ -489,12 +490,23 @@ def _build_variable_importance(
     y: str,
     x_vars: list[str],
     model_results: list[tuple[str, dict[str, Any]]] | None = None,
+    frame: pd.DataFrame | None = None,
 ) -> list[dict[str, Any]]:
     importance: dict[str, dict[str, Any]] = {}
     for var in x_vars:
         importance[var] = {
             "variable": var, "correlation": None, "best_p_value": None, "test_type": None
         }
+    if frame is not None:
+        cols = [y] + [v for v in x_vars if v in frame.columns]
+        if len(cols) >= 2:
+            corr = frame[cols].corr(numeric_only=True)
+            if y in corr.columns:
+                for var in x_vars:
+                    if var in corr.columns:
+                        c = corr[y].get(var)
+                        if pd.notna(c):
+                            importance[var]["correlation"] = round(float(c), 3)
     for row in statistical_tests.get("correlations", {}).get("results", []):
         variables = row.get("variables", [])
         if isinstance(variables, list) and y in variables:
