@@ -10,6 +10,7 @@ from .artifacts import register_artifact, write_json
 from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
 from .domain import GuardrailIssue, Severity
+from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
     run_fixed_effects,
     run_logit,
@@ -234,21 +235,25 @@ def _run_workflow(
         _s("statistical_tests", "complete", "Statistical tests completed")
 
     model_results: list[tuple[str, dict[str, Any]]] = []
+    fitted_models: dict[str, Any] = {}
 
     if _s: _s("estimation", "start", f"Fitting {y_type} model (y type: {y_type})...")
     try:
         if y_type == "binary":
-            primary = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1")
+            primary, primary_fitted = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1")
             _write_model_result(run_root, "logit_1", primary)
             model_results.append(("logit_1", primary))
+            fitted_models["logit_1"] = primary_fitted
         elif y_type == "count":
-            primary = run_poisson(cleaned, y=normalized_y, x=normalized_x, model_id="poisson_1")
+            primary, primary_fitted = run_poisson(cleaned, y=normalized_y, x=normalized_x, model_id="poisson_1")
             _write_model_result(run_root, "poisson_1", primary)
             model_results.append(("poisson_1", primary))
+            fitted_models["poisson_1"] = primary_fitted
         else:
-            primary = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
+            primary, primary_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
             _write_model_result(run_root, "ols_1", primary)
             model_results.append(("ols_1", primary))
+            fitted_models["ols_1"] = primary_fitted
     except ValueError as exc:
         model_issue = GuardrailIssue(
             Severity.WARNING,
@@ -260,16 +265,17 @@ def _run_workflow(
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
         # Fall back to OLS
-        ols_result = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
+        ols_result, ols_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
         _write_model_result(run_root, "ols_1", ols_result)
         model_results.append(("ols_1", ols_result))
+        fitted_models["ols_1"] = ols_fitted
 
     # Fixed effects only for continuous y with panel data
     if routing["kind"] == "panel" and id_candidates and y_type == "continuous":
         if _s:
             _s("estimation", "start", "Attempting fixed effects...")
         try:
-            fe_result = run_fixed_effects(
+            fe_result, fe_fitted = run_fixed_effects(
                 cleaned,
                 y=normalized_y,
                 x=normalized_x,
@@ -279,6 +285,7 @@ def _run_workflow(
             )
             _write_model_result(run_root, "fe_1", fe_result)
             model_results.append(("fe_1", fe_result))
+            fitted_models["fe_1"] = fe_fitted
         except Exception:
             fe_issue = GuardrailIssue(
                 Severity.WARNING,
@@ -299,6 +306,30 @@ def _run_workflow(
         )
         issue_dicts.append(panel_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
+
+    if _s: _s("diagnostics", "start", "Running regression diagnostics...")
+    exog = cleaned[normalized_x] if normalized_x else pd.DataFrame(index=cleaned.index)
+    diagnostic_artifacts: dict[str, dict[str, Any]] = {}
+    for model_id, fitted in fitted_models.items():
+        result_dict = dict(model_results)
+        model_type = next(
+            (r.get("model_type", "ols") for mid, r in model_results if mid == model_id),
+            "ols",
+        )
+        family = "ols" if model_type in ("ols", "ols_robust", "fixed_effects") else model_type
+        diag = compute_diagnostics(fitted, exog, model_id, model_family=family)
+        diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
+        write_json(diag_path, diag)
+        register_artifact(
+            run_root,
+            f"diagnostics_{model_id}",
+            diag_path,
+            "model_diagnostic",
+            "econometrics",
+            ["cleaned_dataset"],
+        )
+        diagnostic_artifacts[model_id] = diag
+    if _s: _s("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
     if routing["kind"] == "time_series" and time_candidates:
         diagnostics = run_time_series_diagnostics(
@@ -356,6 +387,7 @@ def _run_workflow(
         "variable_importance": _build_variable_importance(
             statistical_tests, normalized_y, normalized_x
         ),
+        "diagnostics": diagnostic_artifacts,
     }
     if _s: _s("reporting", "start", "Rendering report...")
     render_html_report(report, run_root)

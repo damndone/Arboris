@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from .normalize import normalize_statsmodels_result
+from .normalize import _json_safe_float, normalize_statsmodels_result
 
 
 def _formula_term(column: str) -> str:
@@ -35,20 +35,19 @@ def _ensure_numeric_y(frame: pd.DataFrame, y: str) -> pd.DataFrame:
 
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
-    fitted = smf.ols(formula=formula, data=frame).fit()
-    if robust:
-        fitted = fitted.get_robustcov_results(cov_type="HC1")
+    original = smf.ols(formula=formula, data=frame).fit()
+    fitted = original.get_robustcov_results(cov_type="HC1") if robust else original
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "ols_robust" if robust else "ols"
-    return result
+    return result, original
 
 
 def run_logit(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
     try:
@@ -65,12 +64,12 @@ def run_logit(
         )
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "logit"
-    return result
+    return result, fitted
 
 
 def run_poisson(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     series = frame[y].dropna()
     if (series < 0).any():
@@ -96,7 +95,7 @@ def run_poisson(
         )
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "poisson"
-    return result
+    return result, fitted
 
 
 def run_fixed_effects(
@@ -106,7 +105,7 @@ def run_fixed_effects(
     entity: str,
     time: str | None,
     model_id: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     terms = [_formula_term(column) for column in x]
     terms.append(f"C({_formula_term(entity)})")
@@ -115,7 +114,7 @@ def run_fixed_effects(
     fitted = smf.ols(formula=_ols_formula(y, terms), data=frame).fit()
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "fixed_effects"
-    return result
+    return result, fitted
 
 
 def run_time_series_diagnostics(
