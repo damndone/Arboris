@@ -330,14 +330,23 @@ def _run_workflow(
     if _s: _s("visualization", "complete", "Created diagnostic figures")
 
     if _s: _s("narrative", "start", "Building claims...")
-    claims = build_claims([result for _, result in model_results], issue_dicts)
+    binary_vars = _detect_binary_vars(cleaned, normalized_x)
+    suspicious_vars = _detect_suspicious_vars(normalized_x)
+    claims = build_claims(
+        [result for _, result in model_results], issue_dicts,
+        binary_vars=binary_vars, suspicious_vars=suspicious_vars,
+    )
     if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
+    _check_suspicious_dtypes(cleaned, normalized_x, issue_dicts, run_root)
     descriptive_stats = _build_descriptive_stats(cleaned)
+    model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson"}
+    primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     report = {
         "title": "Econometrics Report",
         "facts": [
-            f"Rows: {profile['row_count']}",
-            f"Columns: {profile['column_count']}",
+            f"Model: {model_family_display.get(primary_type, primary_type)}",
+            f"y = {normalized_y};  X = {', '.join(normalized_x)}",
+            f"Rows used: {profile['row_count']} · Columns: {profile['column_count']}",
             f"Dataset kind: {routing['kind']}",
         ],
         "claims": claims,
@@ -540,6 +549,20 @@ def _build_variable_importance(
             if isinstance(coeff, dict) and coeff.get("p_value") is not None:
                 imp["best_p_value"] = coeff["p_value"]
                 imp["test_type"] = "ols_coefficient"
+    for var in x_vars:
+        imp = importance[var]
+        corr = imp["correlation"]
+        p = imp["best_p_value"]
+        if corr is not None and abs(corr) >= 0.3:
+            imp["strength"] = "strong"
+        elif corr is not None and abs(corr) >= 0.1:
+            imp["strength"] = "moderate"
+        elif corr is not None:
+            imp["strength"] = "weak"
+        elif p is not None and p < 0.05:
+            imp["strength"] = "significant (no correlation data)"
+        else:
+            imp["strength"] = ""
     return sorted(importance.values(), key=_importance_sort_key)
 
 
@@ -571,6 +594,59 @@ def _check_model_validity(
             )
             issue_dicts.append(issue.to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
+
+
+_SUSPICIOUS_NAME_PATTERNS = {"noise", "random", "placebo", "check", "fake", "test"}
+
+
+def _detect_binary_vars(frame: pd.DataFrame, x_vars: list[str]) -> set[str]:
+    binary: set[str] = set()
+    for var in x_vars:
+        if var not in frame.columns:
+            continue
+        unique = sorted(frame[var].dropna().unique())
+        if len(unique) == 2:
+            try:
+                if set(unique) <= {0, 1, 0.0, 1.0, True, False}:
+                    binary.add(var)
+            except Exception:
+                pass
+    return binary
+
+
+def _detect_suspicious_vars(x_vars: list[str]) -> set[str]:
+    suspicious: set[str] = set()
+    for var in x_vars:
+        name_lower = var.lower()
+        for pattern in _SUSPICIOUS_NAME_PATTERNS:
+            if pattern in name_lower:
+                suspicious.add(var)
+                break
+    return suspicious
+
+
+def _check_suspicious_dtypes(
+    frame: pd.DataFrame,
+    x_vars: list[str],
+    issue_dicts: list[dict[str, Any]],
+    run_root: Path,
+) -> None:
+    for col in frame.columns:
+        if col in x_vars:
+            continue
+        if pd.api.types.is_datetime64_any_dtype(frame[col]):
+            nunique = int(frame[col].nunique())
+            if nunique <= 5:
+                issue = GuardrailIssue(
+                    Severity.INFO,
+                    "SUSPICIOUS_DTYPE",
+                    f"Column '{col}' has datetime dtype with only {nunique} unique value(s). "
+                    f"It may be a binary/categorical variable misread as datetime. "
+                    f"Verify before using it as a predictor.",
+                    {"column": col, "dtype": str(frame[col].dtype), "nunique": nunique},
+                )
+                issue_dicts.append(issue.to_dict())
+                write_json(run_root / "errors.json", {"issues": issue_dicts})
 
 
 def _importance_sort_key(item: dict[str, Any]) -> float:

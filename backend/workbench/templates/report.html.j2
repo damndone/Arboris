@@ -93,9 +93,17 @@
               {% if item.best_p_value is none %}
               no data
               {% elif item.best_p_value < 0.01 %}
-              significant (1%)
+                {% if item.strength == "strong" %}strong &amp; significant
+                {% elif item.strength == "moderate" %}significant, moderate correlation
+                {% elif item.strength == "weak" %}significant, weak correlation
+                {% else %}significant (1%)
+                {% endif %}
               {% elif item.best_p_value < 0.05 %}
-              significant (5%)
+                {% if item.strength == "strong" %}strong &amp; significant (5%)
+                {% elif item.strength == "moderate" %}significant (5%), moderate correlation
+                {% elif item.strength == "weak" %}significant (5%), weak correlation
+                {% else %}significant (5%)
+                {% endif %}
               {% elif item.best_p_value < 0.10 %}
               marginal
               {% else %}
