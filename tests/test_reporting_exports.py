@@ -162,3 +162,52 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
     assert "Pearson correlation: y vs x" in html
     assert 'data-source-id="statistical_tests.correlations.y.x"' in html
     assert b"Statistical tests" in pdf_path.read_bytes()
+
+
+def test_report_renders_descriptive_statistics_section(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "descriptive_stats": [
+            {
+                "column": "y",
+                "dtype": "float64",
+                "count": 35,
+                "missing": 0,
+                "missing_rate": 0.0,
+                "unique_count": 35,
+                "mean": 10.5,
+                "std": 3.2,
+                "min": 1.0,
+                "max": 20.0,
+            },
+            {
+                "column": "x",
+                "dtype": "float64",
+                "count": 35,
+                "missing": 0,
+                "missing_rate": 0.0,
+                "unique_count": 35,
+                "mean": 5.25,
+                "std": 2.1,
+                "min": 0.0,
+                "max": 10.0,
+            },
+        ],
+        "statistical_tests": [],
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+    pdf_path = export_pdf(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "<h2>Descriptive statistics</h2>" in html
+    assert "y" in html
+    assert "float64" in html
+    assert "10.5" in html
+    assert "3.2" in html
+    assert b"Descriptive statistics" in pdf_path.read_bytes()

@@ -89,7 +89,20 @@ def test_invalid_pairs_are_skipped_without_nan_output():
         assert family["schema_version"] == 1
         assert isinstance(family["results"], list)
         for row in family["results"]:
-            assert not any(
-                isinstance(value, float) and math.isnan(value)
-                for value in row.values()
-            )
+            for value in row.values():
+                if isinstance(value, float):
+                    assert math.isfinite(value), f"non-finite float found: {value}"
+
+
+def test_zero_variance_welch_t_test_is_skipped():
+    frame = pd.DataFrame({
+        "y": [5.0, 5.0, 5.0, 1.0, 2.0, 3.0],
+        "treatment": ["control", "control", "control", "treated", "treated", "treated"],
+    })
+
+    results = run_statistical_tests(frame, analysis_columns=["y", "treatment"])
+
+    for row in results["t_tests"]["results"]:
+        for value in row.values():
+            if isinstance(value, float):
+                assert math.isfinite(value), f"non-finite float found: {value}"

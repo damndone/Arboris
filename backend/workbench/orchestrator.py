@@ -24,6 +24,7 @@ from .projects import create_run
 from .reporting import render_html_report
 from .router import classify_dataset
 from .statistical_tests import (
+    CATEGORY_MAX_UNIQUE,
     run_statistical_tests,
     summarize_statistical_tests,
     write_statistical_test_artifacts,
@@ -206,9 +207,12 @@ def _run_workflow(
 
     if _s:
         _s("statistical_tests", "start", "Running statistical tests...")
+    stat_analysis_columns = [normalized_y, *normalized_x, *_extra_categorical_columns(
+        cleaned, {normalized_y, *normalized_x},
+    )]
     statistical_tests = run_statistical_tests(
         cleaned,
-        analysis_columns=[normalized_y, *normalized_x],
+        analysis_columns=stat_analysis_columns,
     )
     write_statistical_test_artifacts(run_root, statistical_tests)
     statistical_test_summaries = summarize_statistical_tests(statistical_tests)
@@ -302,6 +306,7 @@ def _run_workflow(
     if _s: _s("narrative", "start", "Building claims...")
     claims = build_claims([result for _, result in model_results], issue_dicts)
     if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
+    descriptive_stats = _build_descriptive_stats(cleaned)
     report = {
         "title": "Econometrics Report",
         "facts": [
@@ -311,6 +316,7 @@ def _run_workflow(
         ],
         "claims": claims,
         "warnings": issue_dicts,
+        "descriptive_stats": descriptive_stats,
         "statistical_tests": statistical_test_summaries,
     }
     if _s: _s("reporting", "start", "Rendering report...")
@@ -436,3 +442,52 @@ def _write_manifest(
             "lineage": lineage,
         },
     )
+
+
+def _extra_categorical_columns(
+    frame: pd.DataFrame, existing: set[str],
+) -> list[str]:
+    extras: list[str] = []
+    for column in frame.columns:
+        col_str = str(column)
+        if col_str in existing:
+            continue
+        series = frame[column]
+        nunique = int(series.dropna().nunique())
+        if nunique < 2 or nunique > CATEGORY_MAX_UNIQUE:
+            continue
+        if pd.api.types.is_numeric_dtype(series):
+            if nunique < int(series.dropna().shape[0]):
+                extras.append(col_str)
+        else:
+            extras.append(col_str)
+    return extras
+
+
+def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    stats: list[dict[str, Any]] = []
+    for column in frame.columns:
+        col_str = str(column)
+        series = frame[column]
+        present = int(series.notna().sum())
+        total = len(series)
+        row: dict[str, Any] = {
+            "column": col_str,
+            "dtype": str(series.dtype),
+            "count": present,
+            "missing": total - present,
+            "missing_rate": round((total - present) / total, 4) if total > 0 else 0.0,
+            "unique_count": int(series.nunique()),
+        }
+        if pd.api.types.is_numeric_dtype(series):
+            row["mean"] = round(float(series.mean()), 4)
+            row["std"] = round(float(series.std()), 4)
+            row["min"] = round(float(series.min()), 4)
+            row["max"] = round(float(series.max()), 4)
+        else:
+            row["mean"] = None
+            row["std"] = None
+            row["min"] = None
+            row["max"] = None
+        stats.append(row)
+    return stats

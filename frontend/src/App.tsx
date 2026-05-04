@@ -367,8 +367,10 @@ function SubmitRoute() {
                   <div>
                     <strong>{column.name}</strong>
                     <span className="column-meta">
-                      {column.dtype} · missing{" "}
-                      {(column.missingRate * 100).toFixed(0)}%
+                      {column.dtype} · {column.uniqueCount} unique ·{" "}
+                      {column.mean !== undefined
+                        ? `mean ${column.mean.toFixed(2)} / std ${(column.std ?? 0).toFixed(2)}`
+                        : `${(column.missingRate * 100).toFixed(0)}% missing`}
                     </span>
                   </div>
                   <label className="inline-choice">
