@@ -31,6 +31,20 @@
       </ul>
     </section>
 
+    {% if report.statistical_tests %}
+    <section>
+      <h2>Statistical tests</h2>
+      <ul>
+        {% for test in report.statistical_tests %}
+        <li>
+          {{ test.label }}: {{ test.interpretation }}
+          <span data-source-id="{{ test.source_id }}">Source: {{ test.source_id }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
     <section>
       <h2>Warnings</h2>
       <ul>

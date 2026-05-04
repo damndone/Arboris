@@ -23,6 +23,11 @@ from .profiling import profile_frame
 from .projects import create_run
 from .reporting import render_html_report
 from .router import classify_dataset
+from .statistical_tests import (
+    run_statistical_tests,
+    summarize_statistical_tests,
+    write_statistical_test_artifacts,
+)
 from .validation import has_blockers, validate_profile
 from .visualization import create_figures
 
@@ -199,6 +204,17 @@ def _run_workflow(
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("model_check", "complete", "Model columns valid")
 
+    if _s:
+        _s("statistical_tests", "start", "Running statistical tests...")
+    statistical_tests = run_statistical_tests(
+        cleaned,
+        analysis_columns=[normalized_y, *normalized_x],
+    )
+    write_statistical_test_artifacts(run_root, statistical_tests)
+    statistical_test_summaries = summarize_statistical_tests(statistical_tests)
+    if _s:
+        _s("statistical_tests", "complete", "Statistical tests completed")
+
     model_results: list[tuple[str, dict[str, Any]]] = []
     if _s:
         _s("estimation", "start", "Fitting OLS baseline...")
@@ -295,6 +311,7 @@ def _run_workflow(
         ],
         "claims": claims,
         "warnings": issue_dicts,
+        "statistical_tests": statistical_test_summaries,
     }
     if _s: _s("reporting", "start", "Rendering report...")
     render_html_report(report, run_root)

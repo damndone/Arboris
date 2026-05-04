@@ -712,3 +712,36 @@ test("/runs route with missing project_root shows prompt", () => {
     screen.queryByLabelText("run history")
   ).not.toBeInTheDocument();
 });
+
+test("running run progress includes statistical tests step", async () => {
+  class MockEventSource {
+    close = vi.fn();
+    addEventListener = vi.fn();
+  }
+  vi.stubGlobal("EventSource", MockEventSource);
+
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({
+      run_id: "running-1",
+      status: "running",
+      mode: "auto",
+      started_at: "2026-05-04T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+      lineage: [],
+      artifact_counts: {},
+      errors: { issues: [] },
+      model_results: [],
+    }),
+  } as Response);
+
+  renderAt("/runs/running-1?project_root=/tmp/demo");
+
+  await waitFor(() => {
+    expect(screen.getByLabelText("run progress")).toBeInTheDocument();
+  });
+  expect(screen.getByText("Statistical tests")).toBeInTheDocument();
+});

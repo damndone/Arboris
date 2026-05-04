@@ -25,6 +25,7 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
 
     y = _draw_section(pdf, "Facts", report.get("facts", []), y)
     y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
+    y = _draw_section(pdf, "Statistical tests", report.get("statistical_tests", []), y)
     _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
 
@@ -74,7 +75,10 @@ def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float
 def _report_item_text(item: Any) -> str:
     if not isinstance(item, Mapping):
         return str(item)
-    text = str(item.get("claim", item.get("message", "")))
+    if item.get("label") and item.get("interpretation"):
+        text = f"{item['label']}: {item['interpretation']}"
+    else:
+        text = str(item.get("claim", item.get("message", "")))
     source_id = item.get("source_id")
     if source_id:
         text = f"{text} [source: {source_id}]"
