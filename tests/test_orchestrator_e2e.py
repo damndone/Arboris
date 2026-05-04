@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from workbench.artifacts import read_json
@@ -181,7 +182,7 @@ def test_on_step_callback_all_steps(tmp_path: Path):
     steps_completed = {step for step, status in call_args if status in ("complete", "blocked")}
     expected_steps = {
         "ingestion", "schema", "cleaning", "profiling",
-        "validation", "routing", "model_check", "statistical_tests",
+        "validation", "routing", "y_type", "model_check", "statistical_tests",
         "estimation", "visualization", "narrative", "reporting", "export",
     }
     assert steps_completed == expected_steps
@@ -298,10 +299,10 @@ def test_on_step_callback_blocked_columns(tmp_path: Path):
     )
 
     mock = Mock()
-    # Request column 'z' which doesn't exist
+    # Request x column 'z' which doesn't exist (y column 'y' exists)
     result = _run_workflow(
         run.root, run.run_id, [data],
-        "auto", "z", ["x"], config, started_at,
+        "auto", "y", ["z"], config, started_at,
         on_step=mock,
     )
 
@@ -362,3 +363,62 @@ def test_run_workflow_writes_statistical_test_artifacts(tmp_path: Path):
         "statistical_tests_anova",
         "statistical_tests_chi_square",
     }.issubset(artifact_ids)
+
+
+def test_e2e_binary_y_produces_logit(tmp_path: Path):
+    rng = np.random.default_rng(42)
+    n = 60
+    x1 = rng.uniform(0, 10, n)
+    logit = -1 + 0.5 * x1
+    p = 1 / (1 + np.exp(-logit))
+    y = (rng.uniform(0, 1, n) < p).astype(int)
+    source = tmp_path / "binary.csv"
+    pd.DataFrame({"y": y, "x1": x1}).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x1"])
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    logit_result = read_json(run_root / "model_results" / "logit_1.json")
+    assert logit_result["model_type"] == "logit"
+    assert logit_result["pseudo_r2"] is not None
+
+    idx = read_json(run_root / "artifacts_index.json")
+    artifact_ids = {a["artifact_id"] for a in idx["artifacts"]}
+    assert "logit_1" in artifact_ids
+
+
+def test_e2e_count_y_produces_poisson(tmp_path: Path):
+    rng = np.random.default_rng(42)
+    n = 60
+    x1 = rng.uniform(0, 5, n)
+    lam = np.exp(-0.5 + 0.3 * x1)
+    y = rng.poisson(lam)
+    source = tmp_path / "count.csv"
+    pd.DataFrame({"y": y, "x1": x1}).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x1"])
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert poisson_result["model_type"] == "poisson"
+    assert poisson_result["pseudo_r2"] is not None
+
+
+def test_e2e_continuous_y_still_produces_ols(tmp_path: Path):
+    source = tmp_path / "continuous.csv"
+    pd.DataFrame({
+        "y": [1.5 + 2.3 * i for i in range(35)],
+        "x": list(range(35)),
+    }).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    ols_result = read_json(run_root / "model_results" / "ols_1.json")
+    assert ols_result["model_type"] in ("ols", "ols_robust")

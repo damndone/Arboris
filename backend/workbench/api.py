@@ -55,6 +55,7 @@ def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
 async def run_endpoint(
     project_root: str = Form(...),
     mode: str = Form("auto"),
+    model_type: str = Form("auto"),
     y: str = Form(...),
     x: str = Form(...),
     file: UploadFile = File(...),
@@ -92,7 +93,7 @@ async def run_endpoint(
         events.mark_active(run.run_id)
         events.executor.submit(
             _bg_run, run.root, run.run_id, saved_path,
-            mode, y, x_columns, started_at,
+            mode, y, x_columns, started_at, model_type,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -143,6 +144,7 @@ def _bg_run(
     y: str,
     x_columns: list[str],
     started_at: str,
+    model_type: str = "auto",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -166,6 +168,7 @@ def _bg_run(
             run_root, run_id, [saved_path],
             mode, y, x_columns, config, started_at,
             on_step=_on_step,
+            model_type=model_type,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

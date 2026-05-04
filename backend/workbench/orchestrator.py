@@ -12,7 +12,9 @@ from .config import load_config
 from .domain import GuardrailIssue, Severity
 from .econometrics.runner import (
     run_fixed_effects,
+    run_logit,
     run_ols,
+    run_poisson,
     run_time_series_diagnostics,
 )
 from .exports import export_pdf, export_xlsx
@@ -22,7 +24,7 @@ from .narrative import build_claims
 from .profiling import profile_frame
 from .projects import create_run
 from .reporting import render_html_report
-from .router import classify_dataset
+from .router import classify_dataset, detect_y_kind
 from .statistical_tests import (
     CATEGORY_MAX_UNIQUE,
     run_statistical_tests,
@@ -98,6 +100,7 @@ def _run_workflow(
     config: Any,
     started_at: str,
     on_step: Callable[[str, str, str], None] | None = None,
+    model_type: str = "auto",
 ) -> dict[str, str]:
     _s = on_step  # shorthand
 
@@ -184,9 +187,18 @@ def _run_workflow(
         ["data_profile"],
     )
 
-    if _s: _s("model_check", "start", "Checking model columns...")
+    if _s: _s("y_type", "start", "Detecting y variable type...")
     normalized_y = normalize_column_name(y)
     normalized_x = [normalize_column_name(column) for column in x]
+    if model_type != "auto":
+        y_type = model_type
+    elif normalized_y in cleaned.columns:
+        y_type = detect_y_kind(cleaned, normalized_y).value
+    else:
+        y_type = "continuous"
+    if _s: _s("y_type", "complete", f"y classified as {y_type}")
+
+    if _s: _s("model_check", "start", "Checking model columns...")
     model_issue = _model_column_issue(cleaned, normalized_y, normalized_x, y, x)
     if model_issue is not None:
         issue_dicts.append(model_issue.to_dict())
@@ -220,19 +232,38 @@ def _run_workflow(
         _s("statistical_tests", "complete", "Statistical tests completed")
 
     model_results: list[tuple[str, dict[str, Any]]] = []
-    if _s:
-        _s("estimation", "start", "Fitting OLS baseline...")
-    ols_result = run_ols(
-        cleaned,
-        y=normalized_y,
-        x=normalized_x,
-        robust=True,
-        model_id="ols_1",
-    )
-    _write_model_result(run_root, "ols_1", ols_result)
-    model_results.append(("ols_1", ols_result))
 
-    if routing["kind"] == "panel" and id_candidates:
+    if _s: _s("estimation", "start", f"Fitting {y_type} model (y type: {y_type})...")
+    try:
+        if y_type == "binary":
+            primary = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1")
+            _write_model_result(run_root, "logit_1", primary)
+            model_results.append(("logit_1", primary))
+        elif y_type == "count":
+            primary = run_poisson(cleaned, y=normalized_y, x=normalized_x, model_id="poisson_1")
+            _write_model_result(run_root, "poisson_1", primary)
+            model_results.append(("poisson_1", primary))
+        else:
+            primary = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
+            _write_model_result(run_root, "ols_1", primary)
+            model_results.append(("ols_1", primary))
+    except ValueError as exc:
+        model_issue = GuardrailIssue(
+            Severity.WARNING,
+            "MODEL_FIT_FAILED",
+            str(exc),
+            {"y": normalized_y, "x": normalized_x, "y_type": y_type},
+        )
+        issue_dicts.append(model_issue.to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
+        # Fall back to OLS
+        ols_result = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1")
+        _write_model_result(run_root, "ols_1", ols_result)
+        model_results.append(("ols_1", ols_result))
+
+    # Fixed effects only for continuous y with panel data
+    if routing["kind"] == "panel" and id_candidates and y_type == "continuous":
         if _s:
             _s("estimation", "start", "Attempting fixed effects...")
         try:
@@ -250,18 +281,18 @@ def _run_workflow(
             fe_issue = GuardrailIssue(
                 Severity.WARNING,
                 "FE_ESTIMATION_FAILED",
-                "Fixed effects estimation failed; results include OLS baseline only.",
+                "Fixed effects estimation failed; results include primary model only.",
                 {"y": normalized_y, "x": normalized_x},
             )
             issue_dicts.append(fe_issue.to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             if _s:
-                _s("estimation", "complete", "FE failed, OLS baseline retained")
+                _s("estimation", "complete", "FE failed, primary model retained")
     elif routing["kind"] == "panel" and not id_candidates:
         panel_issue = GuardrailIssue(
             Severity.WARNING,
             "PANEL_NO_ENTITY",
-            "Panel dataset detected but no entity identifier available; running OLS only.",
+            "Panel dataset detected but no entity identifier available; running primary model only.",
             {"kind": routing["kind"]},
         )
         issue_dicts.append(panel_issue.to_dict())
@@ -283,9 +314,11 @@ def _run_workflow(
         )
 
     if _s:
-        r2 = ols_result.get("r_squared") or ols_result.get("rsquared")
+        primary_result = model_results[0][1] if model_results else {}
+        r2 = primary_result.get("r_squared") or primary_result.get("pseudo_r2")
         if r2 is not None:
-            _s("estimation", "complete", f"Model(s) fitted, OLS R²={r2:.4f}")
+            kind_label = "pseudo-R²" if primary_result.get("pseudo_r2") is not None else "R²"
+            _s("estimation", "complete", f"Model(s) fitted, {kind_label}={r2:.4f}")
         else:
             _s("estimation", "complete", "Model(s) fitted")
 

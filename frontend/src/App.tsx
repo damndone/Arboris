@@ -55,6 +55,7 @@ function SubmitRoute() {
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
   const [mode, setMode] = useState("auto");
+  const [modelType, setModelType] = useState("auto");
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -161,7 +162,8 @@ function SubmitRoute() {
         mode,
         y.trim(),
         xColumns.join(","),
-        file
+        file,
+        modelType,
       );
       setLastRun(result);
       setActivity(
@@ -269,6 +271,19 @@ function SubmitRoute() {
             >
               <option value="auto">Auto</option>
               <option value="stepped">Stepped</option>
+            </select>
+          </label>
+          <label>
+            Model type
+            <select
+              aria-label="model type"
+              value={modelType}
+              onChange={(event) => setModelType(event.target.value)}
+            >
+              <option value="auto">Auto (infer from y)</option>
+              <option value="ols">OLS (linear regression)</option>
+              <option value="logit">Logit (binary outcome)</option>
+              <option value="poisson">Poisson (count outcome)</option>
             </select>
           </label>
           <label>
