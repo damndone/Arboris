@@ -27,7 +27,6 @@ from .projects import create_run
 from .reporting import render_html_report
 from .router import classify_dataset, detect_y_kind
 from .statistical_tests import (
-    CATEGORY_MAX_UNIQUE,
     run_statistical_tests,
     summarize_statistical_tests,
     write_statistical_test_artifacts,
@@ -222,9 +221,7 @@ def _run_workflow(
 
     if _s:
         _s("statistical_tests", "start", "Running statistical tests...")
-    stat_analysis_columns = [normalized_y, *normalized_x, *_extra_categorical_columns(
-        cleaned, {normalized_y, *normalized_x},
-    )]
+    stat_analysis_columns = [normalized_y, *normalized_x]
     statistical_tests = run_statistical_tests(
         cleaned,
         analysis_columns=stat_analysis_columns,
@@ -271,7 +268,7 @@ def _run_workflow(
         fitted_models["ols_1"] = ols_fitted
 
     # Fixed effects only for continuous y with panel data
-    if routing["kind"] == "panel" and id_candidates and y_type == "continuous":
+    if routing["kind"] == "panel" and id_candidates and y_type == "continuous" and _has_panel_structure(cleaned, id_candidates, time_candidates):
         if _s:
             _s("estimation", "start", "Attempting fixed effects...")
         try:
@@ -329,6 +326,7 @@ def _run_workflow(
             ["cleaned_dataset"],
         )
         diagnostic_artifacts[model_id] = diag
+        _check_model_validity(diag, model_id, issue_dicts, run_root)
     if _s: _s("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
     if routing["kind"] == "time_series" and time_candidates:
@@ -514,26 +512,6 @@ def _write_manifest(
     )
 
 
-def _extra_categorical_columns(
-    frame: pd.DataFrame, existing: set[str],
-) -> list[str]:
-    extras: list[str] = []
-    for column in frame.columns:
-        col_str = str(column)
-        if col_str in existing:
-            continue
-        series = frame[column]
-        nunique = int(series.dropna().nunique())
-        if nunique < 2 or nunique > CATEGORY_MAX_UNIQUE:
-            continue
-        if pd.api.types.is_numeric_dtype(series):
-            if nunique < int(series.dropna().shape[0]):
-                extras.append(col_str)
-        else:
-            extras.append(col_str)
-    return extras
-
-
 _MODEL_TYPE_MAP = {"ols": "continuous", "logit": "binary", "poisson": "count"}
 
 
@@ -576,6 +554,54 @@ def _build_variable_importance(
                     importance[group]["best_p_value"] = p
                     importance[group]["test_type"] = family
     return sorted(importance.values(), key=_importance_sort_key)
+
+
+def _check_model_validity(
+    diag: dict[str, Any],
+    model_id: str,
+    issue_dicts: list[dict[str, Any]],
+    run_root: Path,
+) -> None:
+    cd = diag.get("cooks_distance", {})
+    if isinstance(cd, dict):
+        if cd.get("max") is None and cd.get("leverage_max") is not None:
+            issue = GuardrailIssue(
+                Severity.WARNING,
+                "MODEL_DIAGNOSTIC_ANOMALY",
+                f"Model {model_id}: Cook's distance could not be computed. "
+                f"Derived results (influence diagnostics) may be unreliable.",
+                {"model_id": model_id, "leverage_max": cd.get("leverage_max")},
+            )
+            issue_dicts.append(issue.to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if cd.get("leverage_max") is not None and float(cd["leverage_max"]) >= 1.0:
+            issue = GuardrailIssue(
+                Severity.WARNING,
+                "MODEL_OVERPARAMETERIZED",
+                f"Model {model_id}: max leverage is {cd['leverage_max']:.4f}. "
+                f"Model may be over-parameterized or contain near-singular design matrix.",
+                {"model_id": model_id, "leverage_max": cd["leverage_max"]},
+            )
+            issue_dicts.append(issue.to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+
+
+def _has_panel_structure(
+    frame: pd.DataFrame, id_candidates: list[str], time_candidates: list[str]
+) -> bool:
+    if not id_candidates:
+        return False
+    entity = id_candidates[0]
+    if entity not in frame.columns:
+        return False
+    nunique = int(frame[entity].nunique())
+    if nunique < 5:
+        return False
+    if time_candidates and time_candidates[0] in frame.columns:
+        time_nunique = int(frame[time_candidates[0]].nunique())
+        if time_nunique < 2:
+            return False
+    return True
 
 
 def _importance_sort_key(item: dict[str, Any]) -> float:

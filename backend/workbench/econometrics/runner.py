@@ -33,10 +33,24 @@ def _ensure_numeric_y(frame: pd.DataFrame, y: str) -> pd.DataFrame:
     return frame
 
 
+def _ensure_numeric_x(frame: pd.DataFrame, x: list[str]) -> pd.DataFrame:
+    for col in x:
+        if col not in frame.columns:
+            continue
+        series = frame[col]
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        converted = pd.to_numeric(series, errors="coerce")
+        if converted.notna().sum() > 0:
+            frame[col] = converted
+    return frame
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
+    frame = _ensure_numeric_x(frame, x)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
     original = smf.ols(formula=formula, data=frame).fit()
     fitted = original.get_robustcov_results(cov_type="HC1") if robust else original
@@ -49,6 +63,7 @@ def run_logit(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
+    frame = _ensure_numeric_x(frame, x)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
     try:
         fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
