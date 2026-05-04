@@ -26,7 +26,15 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
     y = _draw_section(pdf, "Facts", report.get("facts", []), y)
     y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
     y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
-    y = _draw_section(pdf, "Statistical tests", report.get("statistical_tests", []), y)
+    st = report.get("statistical_tests")
+    if isinstance(st, Mapping):
+        y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
+        other = st.get("other", [])
+        truncated = st.get("other_truncated", 0)
+        if other:
+            y = _draw_section(pdf, f"Other tests (+{truncated} truncated)", other, y)
+    else:
+        y = _draw_section(pdf, "Statistical tests", st or [], y)
     _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
 
