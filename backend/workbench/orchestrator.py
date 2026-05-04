@@ -360,16 +360,36 @@ def _run_workflow(
         "diagnostics": diagnostic_artifacts,
     }
     if _s: _s("reporting", "start", "Rendering report...")
-    render_html_report(report, run_root)
-    if _s: _s("reporting", "complete", "Rendered HTML report")
+    try:
+        render_html_report(report, run_root)
+        if _s: _s("reporting", "complete", "Rendered HTML report")
+    except Exception as exc:
+        issue_dicts.append(GuardrailIssue(
+            Severity.WARNING,
+            "REPORT_RENDER_FAILED",
+            f"HTML report generation failed: {exc}. Model results are still available.",
+            {"error": str(exc)},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("reporting", "complete", "Report render failed — model results available")
 
     if _s: _s("export", "start", "Exporting files...")
-    export_pdf(report, run_root)
-    export_xlsx(
-        {"coefficients": _coefficient_rows_for_models(model_results)},
-        run_root,
-    )
-    if _s: _s("export", "complete", "Exported PDF and XLSX")
+    try:
+        export_pdf(report, run_root)
+        export_xlsx(
+            {"coefficients": _coefficient_rows_for_models(model_results)},
+            run_root,
+        )
+        if _s: _s("export", "complete", "Exported PDF and XLSX")
+    except Exception as exc:
+        issue_dicts.append(GuardrailIssue(
+            Severity.WARNING,
+            "EXPORT_FAILED",
+            f"File export failed: {exc}. Model results are still available.",
+            {"error": str(exc)},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("export", "complete", "Export failed — model results available")
 
     _write_manifest(
         run_root,

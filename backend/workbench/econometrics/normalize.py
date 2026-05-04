@@ -61,12 +61,29 @@ def _confidence_intervals(fitted: Any) -> tuple[dict[str, float], dict[str, floa
         return {}, {}
 
 
+def _odds_ratios(
+    fitted: Any, params: dict[str, float]
+) -> dict[str, dict[str, float | None]]:
+    import math
+
+    or_dict: dict[str, dict[str, float | None]] = {}
+    for term, coef in params.items():
+        try:
+            or_val = math.exp(float(coef))
+            or_dict[term] = {"odds_ratio": round(or_val, 4)}
+        except Exception:
+            or_dict[term] = {"odds_ratio": None}
+    return or_dict
+
+
 def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
     params = _labelled_values(fitted, "params")
     bse = _labelled_values(fitted, "bse")
     pvalues = _labelled_values(fitted, "pvalues")
     ci_lower, ci_upper = _confidence_intervals(fitted)
-    return {
+    has_pr2 = getattr(fitted, "prsquared", None) is not None
+    odds_or = _odds_ratios(fitted, params) if has_pr2 else {}
+    result: dict[str, Any] = {
         "model_id": model_id,
         "nobs": int(fitted.nobs),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
@@ -88,3 +105,6 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
             for term, estimate in params.items()
         },
     }
+    if odds_or:
+        result["odds_ratios"] = odds_or
+    return result
