@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from itertools import combinations
 from pathlib import Path
 from typing import Any
@@ -119,6 +120,8 @@ def _safe_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     if pd.isna(parsed):
+        return None
+    if not math.isfinite(parsed):
         return None
     return parsed
 
