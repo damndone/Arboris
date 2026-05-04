@@ -33,7 +33,8 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
 
             claim: dict[str, Any] = {
                 "claim": (
-                    f"In {model_id}, each one-unit increase in {term} is "
+                    f"In {model_id}, holding other selected regressors constant, "
+                    f"each one-unit increase in {term} is "
                     f"associated with an average change of {numeric_estimate:.4f} "
                     f"in the dependent variable; {significance}."
                 ),
@@ -75,7 +76,28 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
         message = warning.get("message") if isinstance(warning, Mapping) else str(warning)
         claims.append({"claim": message, "source_id": "errors.json", "confidence": 1.0})
 
+    if _count_coefficients(model_results) > 5:
+        claims.append({
+            "claim": (
+                "Statistical significance does not imply causality. With multiple "
+                "predictors and tests, some variables may appear significant by chance. "
+                "Consider the economic or domain relevance of each predictor "
+                "alongside its p-value."
+            ),
+            "source_id": "interpretation.caution",
+            "confidence": 1.0,
+        })
+
     return claims
+
+
+def _count_coefficients(model_results: Iterable[Mapping[str, Any]]) -> int:
+    total = 0
+    for m in model_results:
+        coeffs = m.get("coefficients", {})
+        if isinstance(coeffs, Mapping):
+            total += len(coeffs)
+    return total
 
 
 def _is_dummy_term(term: str) -> bool:
