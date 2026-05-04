@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -87,12 +87,22 @@ def _run_workflow(
     x: list[str],
     config: Any,
     started_at: str,
+    on_step: Callable[[str, str, str], None] | None = None,
 ) -> dict[str, str]:
+    _s = on_step  # shorthand
+
+    if _s: _s("ingestion", "start", "Ingesting files...")
     frames = ingest_files([Path(path) for path in input_files], run_root, config)
+    if _s: _s("ingestion", "complete", f"Ingested {len(frames)} file(s)")
+
+    if _s: _s("schema", "start", "Inferring schema...")
     schema = infer_schema("dataset_1", frames, run_root)
+    if _s: _s("schema", "complete", f"Inferred schema with {len(schema.columns)} columns")
     frame = next(iter(frames.values()))
 
+    if _s: _s("cleaning", "start", "Cleaning data...")
     cleaned, actions = clean_frame(frame, list(schema.time_candidates))
+    if _s: _s("cleaning", "complete", f"Applied {len(actions)} cleaning actions")
     raw_inputs = [f"raw_{path.name}" for path in input_files]
     cleaning_path = run_root / "processed" / "cleaning_actions.json"
     write_json(cleaning_path, {"actions": actions})
@@ -115,7 +125,9 @@ def _run_workflow(
         raw_inputs,
     )
 
+    if _s: _s("profiling", "start", "Profiling data...")
     profile = profile_frame(cleaned)
+    if _s: _s("profiling", "complete", f"Profiled {profile['row_count']} rows")
     profile_path = run_root / "staged" / "data_profile.json"
     write_json(profile_path, profile)
     register_artifact(
@@ -127,10 +139,12 @@ def _run_workflow(
         ["cleaned_dataset"],
     )
 
+    if _s: _s("validation", "start", "Validating profile...")
     issues = validate_profile(profile, config)
     issue_dicts = [issue.to_dict() for issue in issues]
     write_json(run_root / "errors.json", {"issues": issue_dicts})
     if has_blockers(issues):
+        if _s: _s("validation", "blocked", "Validation found blocker issues")
         _write_manifest(
             run_root,
             run_id,
@@ -142,10 +156,13 @@ def _run_workflow(
             x=x,
         )
         return {"run_id": run_id, "status": "blocked"}
+    if _s: _s("validation", "complete", "Validation passed")
 
+    if _s: _s("routing", "start", "Classifying dataset...")
     time_candidates = _normalized_existing(schema.time_candidates, cleaned)
     id_candidates = _normalized_existing(schema.id_candidates, cleaned)
     routing = classify_dataset(cleaned, id_candidates, time_candidates)
+    if _s: _s("routing", "complete", f"Classified as {routing['kind']}")
     routing_path = run_root / "staged" / "analysis_router.json"
     write_json(routing_path, routing)
     register_artifact(
@@ -157,12 +174,14 @@ def _run_workflow(
         ["data_profile"],
     )
 
+    if _s: _s("model_check", "start", "Checking model columns...")
     normalized_y = normalize_column_name(y)
     normalized_x = [normalize_column_name(column) for column in x]
     model_issue = _model_column_issue(cleaned, normalized_y, normalized_x, y, x)
     if model_issue is not None:
         issue_dicts.append(model_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("model_check", "blocked", "Requested model columns not found")
         _write_manifest(
             run_root,
             run_id,
@@ -174,7 +193,9 @@ def _run_workflow(
             x=x,
         )
         return {"run_id": run_id, "status": "blocked"}
+    if _s: _s("model_check", "complete", "Model columns valid")
 
+    if _s: _s("estimation", "start", "Fitting OLS...")
     model_result = run_ols(
         cleaned,
         y=normalized_y,
@@ -192,7 +213,14 @@ def _run_workflow(
         "econometrics",
         ["cleaned_dataset"],
     )
+    if _s:
+        r2 = model_result.get("r_squared") or model_result.get("rsquared")
+        if r2 is not None:
+            _s("estimation", "complete", f"OLS fitted, R²={r2:.4f}")
+        else:
+            _s("estimation", "complete", "OLS fitted")
 
+    if _s: _s("visualization", "start", "Creating figures...")
     numeric_columns = [
         str(column)
         for column in cleaned.select_dtypes(include="number").columns
@@ -203,8 +231,11 @@ def _run_workflow(
         numeric_columns=numeric_columns,
         time_column=time_candidates[0] if time_candidates else None,
     )
+    if _s: _s("visualization", "complete", "Created diagnostic figures")
 
+    if _s: _s("narrative", "start", "Building claims...")
     claims = build_claims([model_result], issue_dicts)
+    if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
     report = {
         "title": "Econometrics Report",
         "facts": [
@@ -215,9 +246,14 @@ def _run_workflow(
         "claims": claims,
         "warnings": issue_dicts,
     }
+    if _s: _s("reporting", "start", "Rendering report...")
     render_html_report(report, run_root)
+    if _s: _s("reporting", "complete", "Rendered HTML report")
+
+    if _s: _s("export", "start", "Exporting files...")
     export_pdf(report, run_root)
     export_xlsx({"coefficients": _coefficient_rows(model_result)}, run_root)
+    if _s: _s("export", "complete", "Exported PDF and XLSX")
 
     _write_manifest(
         run_root,

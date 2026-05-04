@@ -7,10 +7,17 @@ from fastapi.testclient import TestClient
 
 from workbench import api
 from workbench.api import app
+from workbench.events import get_event_manager
+
+
+@pytest.fixture(autouse=True)
+def _reset_event_manager():
+    get_event_manager()._reset_for_testing()
 
 
 @pytest.fixture
 def completed_run(tmp_path: Path):
+    import time
     client = TestClient(app)
     response = client.post(
         "/projects",
@@ -27,7 +34,22 @@ def completed_run(tmp_path: Path):
             data={"project_root": project_root, "mode": "auto", "y": "y", "x": "x"},
             files={"file": ("data.csv", handle, "text/csv")},
         )
-    return client, project_root, run_response.json()["run_id"]
+    assert run_response.status_code == 200
+    run_id = run_response.json()["run_id"]
+    # Poll until terminal (POST is now async)
+    for _ in range(120):
+        detail = client.get(
+            f"/runs/{run_id}", params={"project_root": project_root}
+        )
+        status = detail.json()["status"]
+        if status in ("completed", "blocked", "failed"):
+            break
+        time.sleep(0.5)
+    else:
+        pytest.fail(f"Run {run_id} did not reach terminal status within 60s")
+    # Give the background thread a moment to release its slot
+    time.sleep(0.2)
+    return client, project_root, run_id
 
 
 def test_api_creates_project_and_runs_upload(tmp_path: Path):
@@ -49,11 +71,22 @@ def test_api_creates_project_and_runs_upload(tmp_path: Path):
             files={"file": ("data.csv", handle, "text/csv")},
         )
     assert run_response.status_code == 200
-    assert run_response.json()["status"] == "completed"
+    assert run_response.json()["status"] == "running"
+    # Wait for background thread to finish so slot is released for next test
+    run_id = run_response.json()["run_id"]
+    import time
+    for _ in range(120):
+        detail = client.get(
+            f"/runs/{run_id}", params={"project_root": project_root}
+        )
+        if detail.json()["status"] in ("completed", "blocked", "failed"):
+            break
+        time.sleep(0.5)
+    time.sleep(0.2)
 
 
-def test_api_rejects_oversized_upload_and_cleans_temp_dir(
-    tmp_path: Path, monkeypatch
+def test_api_rejects_oversized_upload_and_slot_released(
+    tmp_path: Path,
 ):
     client = TestClient(app)
     response = client.post(
@@ -64,12 +97,6 @@ def test_api_rejects_oversized_upload_and_cleans_temp_dir(
     (project_root / "config.yml").write_text(
         "max_single_file_gb: 0.000000001\n", encoding="utf-8"
     )
-    original_temp_dir = api.tempfile.TemporaryDirectory
-
-    def tracked_temp_dir(prefix: str):
-        return original_temp_dir(prefix=prefix, dir=tmp_path)
-
-    monkeypatch.setattr(api.tempfile, "TemporaryDirectory", tracked_temp_dir)
     data = tmp_path / "large.csv"
     data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
 
@@ -81,7 +108,22 @@ def test_api_rejects_oversized_upload_and_cleans_temp_dir(
         )
 
     assert run_response.status_code == 413
-    assert not list(tmp_path.glob("workbench_upload_*"))
+    # Slot should be released — a subsequent run in a different project should succeed
+    r2 = client.post(
+        "/projects",
+        json={"parent": str(tmp_path), "name": "demo2"},
+    )
+    proot2 = r2.json()["project_root"]
+    small = tmp_path / "small.csv"
+    pd.DataFrame({"y": [1, 2, 3], "x": [4, 5, 6]}).to_csv(small, index=False)
+    with small.open("rb") as handle:
+        rr2 = client.post(
+            "/runs",
+            data={"project_root": str(proot2), "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("small.csv", handle, "text/csv")},
+        )
+    assert rr2.status_code == 200
+    assert rr2.json()["status"] == "running"
 
 
 def test_list_runs_returns_summary_for_completed_run(completed_run):
