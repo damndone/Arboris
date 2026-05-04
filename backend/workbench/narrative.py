@@ -13,6 +13,7 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
         coefficients = model_result.get("coefficients", {})
         if not isinstance(coefficients, Mapping):
             continue
+        dummy_count = 0
         for term, coefficient in coefficients.items():
             if term == "Intercept" or not isinstance(coefficient, Mapping):
                 continue
@@ -25,6 +26,11 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
                 continue
             p_value = _as_float(coefficient.get("p_value"))
             significance = _significance_text(p_value)
+
+            if _is_dummy_term(term) or _is_categorical_term(term):
+                dummy_count += 1
+                continue
+
             claim: dict[str, Any] = {
                 "claim": (
                     f"In {model_id}, each one-unit increase in {term} is "
@@ -36,6 +42,15 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
             if p_value is not None:
                 claim["confidence"] = max(0.0, min(1.0, 1.0 - p_value))
             claims.append(claim)
+        if dummy_count > 0:
+            claims.append({
+                "claim": (
+                    f"Model {model_id} contains {dummy_count} dummy/categorical "
+                    f"coefficient(s) not individually listed (see coefficient table for full output)."
+                ),
+                "source_id": f"model_results.{model_id}",
+                "confidence": 1.0,
+            })
         r_squared = _as_float(
             model_result.get("r_squared") or model_result.get("pseudo_r2")
         )
@@ -61,6 +76,14 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
         claims.append({"claim": message, "source_id": "errors.json", "confidence": 1.0})
 
     return claims
+
+
+def _is_dummy_term(term: str) -> bool:
+    return "[T." in term
+
+
+def _is_categorical_term(term: str) -> bool:
+    return term.startswith("C(")
 
 
 def _as_float(value: Any) -> float | None:
