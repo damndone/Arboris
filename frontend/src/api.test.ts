@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   ApiError,
+  connectRunEvents,
   fetchRunDetail,
   fetchRuns,
   fetchRunArtifacts,
@@ -148,4 +149,66 @@ test("artifactDownloadUrl encodes project_root and ids", () => {
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
   expect(url).toBe("/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+});
+
+test("connectRunEvents wires step events and terminal close", () => {
+
+  const listeners: Record<string, (e: MessageEvent) => void> = {};
+  const mockSource = {
+    addEventListener: vi.fn(
+      (type: string, handler: (e: MessageEvent) => void) => {
+        listeners[type] = handler;
+      },
+    ),
+    close: vi.fn(),
+  };
+
+  const origEventSource = (globalThis as any).EventSource;
+  (globalThis as any).EventSource = vi.fn(() => mockSource);
+
+  const callbacks = {
+    onStepStart: vi.fn(),
+    onStepComplete: vi.fn(),
+    onStepBlocked: vi.fn(),
+    onTerminal: vi.fn(),
+    onError: vi.fn(),
+  };
+
+  const cleanup = connectRunEvents("/tmp/demo", "run-1", callbacks);
+
+  // Simulate step_start
+  listeners["step_start"]?.(
+    new MessageEvent("step_start", {
+      data: JSON.stringify({
+        event: "step_start", step: "ingestion", message: "Ingesting...",
+      }),
+    }),
+  );
+  expect(callbacks.onStepStart).toHaveBeenCalledWith("ingestion", "Ingesting...");
+
+  // Simulate step_blocked
+  listeners["step_blocked"]?.(
+    new MessageEvent("step_blocked", {
+      data: JSON.stringify({
+        event: "step_blocked", step: "validation", message: "Blocked",
+      }),
+    }),
+  );
+  expect(callbacks.onStepBlocked).toHaveBeenCalledWith("validation", "Blocked");
+
+  // Simulate terminal -> should close
+  listeners["workflow_completed"]?.(
+    new MessageEvent("workflow_completed", {
+      data: JSON.stringify({
+        event: "workflow_completed", status: "completed", message: "Done",
+      }),
+    }),
+  );
+  expect(callbacks.onTerminal).toHaveBeenCalledWith("completed", "Done");
+  expect(mockSource.close).toHaveBeenCalled();
+
+  // Cleanup
+  cleanup();
+
+  (globalThis as any).EventSource = origEventSource;
 });
