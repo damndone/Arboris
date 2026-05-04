@@ -193,3 +193,58 @@ export function artifactDownloadUrl(
 export function reportUrl(projectRoot: string, runId: string): string {
   return `/runs/${encodeURIComponent(runId)}/report?project_root=${encodeURIComponent(projectRoot)}`;
 }
+
+export type RunProgressEvent = {
+  event: "step_start" | "step_complete" | "step_blocked"
+       | "workflow_completed" | "workflow_blocked"
+       | "workflow_failed" | "workflow_interrupted";
+  run_id: string;
+  sequence: number;
+  timestamp: string;
+  step: string | null;
+  message: string;
+  status: string | null;
+};
+
+export type RunProgressCallbacks = {
+  onStepStart?: (step: string, msg: string) => void;
+  onStepComplete?: (step: string, msg: string) => void;
+  onStepBlocked?: (step: string, msg: string) => void;
+  onTerminal?: (status: string, msg: string) => void;
+  onError?: (err: Error) => void;
+};
+
+export function connectRunEvents(
+  projectRoot: string,
+  runId: string,
+  callbacks: RunProgressCallbacks,
+): () => void {
+  const url = `/runs/${encodeURIComponent(runId)}/events?project_root=${encodeURIComponent(projectRoot)}`;
+  const source = new EventSource(url);
+
+  source.addEventListener("step_start", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as RunProgressEvent;
+    callbacks.onStepStart?.(data.step ?? "", data.message);
+  });
+  source.addEventListener("step_complete", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as RunProgressEvent;
+    callbacks.onStepComplete?.(data.step ?? "", data.message);
+  });
+  source.addEventListener("step_blocked", (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as RunProgressEvent;
+    callbacks.onStepBlocked?.(data.step ?? "", data.message);
+  });
+
+  const handleTerminal = (e: MessageEvent) => {
+    const data = JSON.parse(e.data) as RunProgressEvent;
+    callbacks.onTerminal?.(data.status ?? "unknown", data.message);
+    source.close();
+  };
+  source.addEventListener("workflow_completed", handleTerminal);
+  source.addEventListener("workflow_blocked", handleTerminal);
+  source.addEventListener("workflow_failed", handleTerminal);
+  source.addEventListener("workflow_interrupted", handleTerminal);
+
+  source.onerror = () => callbacks.onError?.(new Error("SSE connection error"));
+  return () => source.close();
+}

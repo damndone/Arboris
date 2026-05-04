@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-import tempfile
+import asyncio
+import json
+import queue
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .api_errors import (
@@ -18,10 +21,17 @@ from .api_errors import (
     WorkbenchAPIError,
     register_error_handlers,
 )
-from .artifacts import read_json
+from .artifacts import read_json, write_json
 from .config import load_config
-from .orchestrator import run_workflow
-from .projects import create_project
+from .domain import GuardrailIssue, Severity
+from .events import get_event_manager
+from .orchestrator import (
+    _lineage,
+    _run_workflow,
+    _write_manifest,
+    run_workflow,
+)
+from .projects import create_project, create_run
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
@@ -53,14 +63,58 @@ async def run_endpoint(
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
     x_columns = [part.strip() for part in x.split(",") if part.strip()]
+
+    events = get_event_manager()
+    if not events.try_acquire_slot():
+        raise HTTPException(
+            status_code=429,
+            detail="A run is already in progress.",
+        )
+
+    run_id_for_cleanup: str | None = None
     try:
-        with tempfile.TemporaryDirectory(prefix="workbench_upload_") as temp_dir:
-            target = Path(temp_dir) / Path(file.filename or "upload.csv").name
-            await _write_upload(file, target, max_upload_bytes)
-            result = run_workflow(root, [target], mode=mode, y=y, x=x_columns)
+        run = create_run(root, mode=mode)
+        run_id_for_cleanup = run.run_id
+        started_at = datetime.now(timezone.utc).isoformat()
+
+        uploads_dir = run.root / "_uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        saved_path = uploads_dir / Path(file.filename or "upload.csv").name
+        await _write_upload(file, saved_path, max_upload_bytes)
+
+        _write_manifest(
+            run.root, run.run_id, mode, "running",
+            _lineage([saved_path]),
+            started_at=started_at, y=y, x=x_columns,
+        )
+
+        events.register_run(run.run_id)
+        events.mark_active(run.run_id)
+        events.executor.submit(
+            _bg_run, run.root, run.run_id, saved_path,
+            mode, y, x_columns, started_at,
+        )
+
+        return {"run_id": run.run_id, "status": "running"}
+    except Exception:
+        events.release_slot(run_id_for_cleanup)
+        if run_id_for_cleanup is not None:
+            write_json(
+                run.root / "errors.json",
+                {"issues": [GuardrailIssue(
+                    Severity.BLOCKER, "WORKFLOW_FAILED",
+                    "Workflow submission failed: the background worker could not be started.",
+                    {},
+                ).to_dict()]},
+            )
+            _write_manifest(
+                run.root, run.run_id, mode, "failed",
+                _lineage([saved_path]),
+                started_at=started_at, y=y, x=x_columns,
+            )
+        raise
     finally:
         await file.close()
-    return {"run_id": result["run_id"], "status": result["status"]}
 
 
 async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
@@ -75,6 +129,90 @@ async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
                     detail="Uploaded file exceeds project size limit.",
                 )
             handle.write(chunk)
+
+
+def _resolve_project_root(run_root: Path) -> Path:
+    return run_root.parent.parent
+
+
+def _bg_run(
+    run_root: Path,
+    run_id: str,
+    saved_path: Path,
+    mode: str,
+    y: str,
+    x_columns: list[str],
+    started_at: str,
+) -> None:
+    events = get_event_manager()
+    config = load_config(_resolve_project_root(run_root) / "config.yml")
+
+    def _on_step(step: str, status: str, message: str) -> None:
+        if status == "blocked":
+            event_name = "step_blocked"
+        elif status in ("start", "complete"):
+            event_name = f"step_{status}"
+        else:
+            event_name = f"step_{status}"
+        events.emit(run_id, {
+            "event": event_name,
+            "step": step,
+            "message": message,
+            "status": status if status not in ("start", "complete") else None,
+        })
+
+    try:
+        result = _run_workflow(
+            run_root, run_id, [saved_path],
+            mode, y, x_columns, config, started_at,
+            on_step=_on_step,
+        )
+        status = result["status"]
+        events.emit_terminal(run_id, status, f"Workflow {status}")
+    except Exception as exc:
+        _write_manifest(
+            run_root, run_id, mode, "failed",
+            _lineage([saved_path]),
+            started_at=started_at, y=y, x=x_columns,
+        )
+        write_json(run_root / "errors.json", {
+            "issues": [GuardrailIssue(
+                Severity.BLOCKER, "WORKFLOW_FAILED",
+                str(exc), {},
+            ).to_dict()],
+        })
+        events.emit_terminal(run_id, "failed", f"Workflow failed: {exc}")
+    finally:
+        events.release_slot(run_id)
+
+
+def _mark_interrupted_if_dead(run_root: Path, manifest: dict) -> str | None:
+    run_id = manifest.get("run_id")
+    if manifest.get("status") != "running":
+        return None
+    events = get_event_manager()
+    if events.is_active(run_id):
+        return None
+    issue = GuardrailIssue(
+        Severity.BLOCKER, "WORKFLOW_INTERRUPTED",
+        "Workflow interrupted because the server process stopped before completion.",
+        {},
+    )
+    write_json(run_root / "errors.json", {"issues": [issue.to_dict()]})
+    _write_manifest(
+        run_root, run_id,
+        manifest.get("mode", "auto"), "interrupted",
+        manifest.get("lineage", []),
+        started_at=manifest.get("started_at"),
+        y=manifest.get("y"),
+        x=manifest.get("x") or [],
+    )
+    manifest["status"] = "interrupted"
+    return "interrupted"
+
+
+def _sse_frame(event: dict) -> str:
+    return f"event: {event['event']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 def _resolve_project_runs_dir(project_root: str) -> Path:
@@ -247,6 +385,7 @@ def list_runs_endpoint(project_root: str) -> dict:
 def get_run_endpoint(run_id: str, project_root: str) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
     manifest = _read_manifest(run_root)
+    _mark_interrupted_if_dead(run_root, manifest)
     summary = _summarize_manifest(manifest)
     errors_path = run_root / "errors.json"
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
@@ -302,3 +441,55 @@ def get_report_endpoint(run_id: str, project_root: str) -> FileResponse:
             details={"run_id": run_id},
         )
     return FileResponse(report_path, media_type="text/html")
+
+
+_TERMINAL_EVENTS = {
+    "workflow_completed", "workflow_blocked",
+    "workflow_failed", "workflow_interrupted",
+}
+
+
+@app.get("/runs/{run_id}/events")
+async def run_events_endpoint(run_id: str, project_root: str):
+    run_root = _resolve_run_root(project_root, run_id)
+    manifest = _read_manifest(run_root)
+    events = get_event_manager()
+
+    status = _mark_interrupted_if_dead(run_root, manifest)
+    if status == "interrupted":
+        events.register_run(run_id)
+        events.emit_terminal(run_id, "interrupted", "Server stopped before completion.")
+
+    sub_queue, snapshot = events.subscribe(run_id)
+
+    async def _generator():
+        loop = asyncio.get_running_loop()
+        try:
+            for event in snapshot:
+                yield _sse_frame(event)
+                if event["event"] in _TERMINAL_EVENTS:
+                    return
+                await asyncio.sleep(0)
+
+            while True:
+                try:
+                    event = await loop.run_in_executor(
+                        None, sub_queue.get, True, 30)
+                except queue.Empty:
+                    yield ":\n\n"
+                    continue
+                if event is None:
+                    break
+                yield _sse_frame(event)
+        finally:
+            events.unsubscribe(run_id, sub_queue)
+
+    return StreamingResponse(
+        _generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

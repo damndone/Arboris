@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ApiError,
   artifactDownloadUrl,
+  connectRunEvents,
   fetchRunArtifacts,
   fetchRunDetail,
   reportUrl,
@@ -39,6 +40,25 @@ export function RunDetailPanel({ projectRoot, runId, onError }: Props) {
 
   const [artifactsState, setArtifactsState] = useState<ArtifactsState>({ status: "loading" });
   const [showReport, setShowReport] = useState(false);
+
+  type StepStatus = "pending" | "running" | "completed" | "blocked";
+  type StepProgress = { step: string; label: string; status: StepStatus };
+  const PROGRESS_STEPS: StepProgress[] = [
+    { step: "ingestion",    label: "Ingestion",    status: "pending" },
+    { step: "schema",       label: "Schema",       status: "pending" },
+    { step: "cleaning",     label: "Cleaning",     status: "pending" },
+    { step: "profiling",    label: "Profiling",    status: "pending" },
+    { step: "validation",   label: "Validation",   status: "pending" },
+    { step: "routing",      label: "Routing",      status: "pending" },
+    { step: "model_check",  label: "Model check",  status: "pending" },
+    { step: "estimation",   label: "Estimation",   status: "pending" },
+    { step: "visualization", label: "Visualization", status: "pending" },
+    { step: "narrative",    label: "Narrative",    status: "pending" },
+    { step: "reporting",    label: "Reporting",    status: "pending" },
+    { step: "export",       label: "Export",       status: "pending" },
+  ];
+  const [progressSteps, setProgressSteps] = useState<StepProgress[]>(PROGRESS_STEPS);
+  const [isLive, setIsLive] = useState(false);
 
   const fetchIdRef = useRef(0);
 
@@ -91,6 +111,36 @@ export function RunDetailPanel({ projectRoot, runId, onError }: Props) {
     };
   }, [fetchArtifacts]);
 
+  useEffect(() => {
+    if (!detail || detail.status !== "running") return;
+    setIsLive(true);
+
+    const cleanup = connectRunEvents(projectRoot, runId, {
+      onStepStart: (step) => {
+        setProgressSteps((prev) =>
+          prev.map((s) => (s.step === step ? { ...s, status: "running" } : s))
+        );
+      },
+      onStepComplete: (step) => {
+        setProgressSteps((prev) =>
+          prev.map((s) => (s.step === step ? { ...s, status: "completed" } : s))
+        );
+      },
+      onStepBlocked: (step) => {
+        setProgressSteps((prev) =>
+          prev.map((s) => (s.step === step ? { ...s, status: "blocked" } : s))
+        );
+      },
+      onTerminal: () => {
+        setIsLive(false);
+        fetchRunDetail(projectRoot, runId).then(setDetail).catch(() => {});
+        fetchArtifacts();
+      },
+      onError: () => { setIsLive(false); },
+    });
+    return cleanup;
+  }, [detail?.status, projectRoot, runId, fetchArtifacts]);
+
   if (detail === null) {
     return <p className="muted">Loading run…</p>;
   }
@@ -107,6 +157,20 @@ export function RunDetailPanel({ projectRoot, runId, onError }: Props) {
           Back to history
         </button>
       </div>
+      {isLive && (
+        <section className="progress-panel" aria-label="run progress">
+          <h3 className="subhead">Progress</h3>
+          <ol className="progress-list">
+            {progressSteps.map((s) => (
+              <li key={s.step} className={`progress-step ${s.status}`}>
+                <span className={`progress-dot ${s.status}`} />
+                {s.label}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       <dl className="summary-list">
         <div>
           <dt>Run ID</dt>

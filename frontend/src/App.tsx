@@ -70,6 +70,7 @@ function useAppContext(): AppContextValue {
 function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
+  const navigate = useNavigate();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
@@ -143,6 +144,9 @@ function SubmitRoute() {
         result.status === "blocked"
           ? "Workflow returned blocked"
           : "Workflow completed"
+      );
+      navigate(
+        `/runs/${encodeURIComponent(result.run_id)}?project_root=${encodeURIComponent(projectRoot)}`
       );
     } catch (error) {
       const message =

@@ -110,52 +110,58 @@ test("createProject success populates project_root", async () => {
   expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
 });
 
-test("runWorkflow completed shows run_id, badge and expected output paths", async () => {
+test("runWorkflow navigates to run detail on success", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  // POST returns running (async)
   fetchMock.mockResolvedValueOnce(
-    jsonResponse({ run_id: "abc-123", status: "completed" })
+    jsonResponse({ run_id: "abc-123", status: "running" })
   );
+  // GET run detail
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "abc-123", status: "completed", mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00", y: "y", x: ["x1", "x2"],
+      lineage: [], artifact_counts: { report: 1 }, errors: { issues: [] },
+    })
+  );
+  // GET run artifacts
+  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
 
   renderAt("/");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
+  // Should navigate to run detail page
   await waitFor(() => {
-    expect(screen.getByText("abc-123")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /run detail/i })
+    ).toBeInTheDocument();
   });
-
+  expect(screen.getByText("abc-123")).toBeInTheDocument();
   expect(screen.getByText("Completed")).toBeInTheDocument();
-  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-
-  const outputs = screen.getByLabelText("expected outputs");
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/run_manifest.json")
-  ).toBeInTheDocument();
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/artifacts_index.json")
-  ).toBeInTheDocument();
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/errors.json")
-  ).toBeInTheDocument();
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/reports/report.html")
-  ).toBeInTheDocument();
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/reports/report.pdf")
-  ).toBeInTheDocument();
-  expect(
-    within(outputs).getByText("/tmp/demo/runs/abc-123/exports/tables.xlsx")
-  ).toBeInTheDocument();
 });
 
-test("runWorkflow blocked is workflow status, not an HTTP error", async () => {
+test("runWorkflow blocked navigates to run detail with blocked status", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  // POST returns running (workflow is async, blocked result comes later)
   fetchMock.mockResolvedValueOnce(
-    jsonResponse({ run_id: "blk-1", status: "blocked" })
+    jsonResponse({ run_id: "blk-1", status: "running" })
   );
+  // GET run detail shows blocked
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "blk-1", status: "blocked", mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00", y: "y", x: ["x1", "x2"],
+      lineage: [], artifact_counts: {}, errors: {
+        issues: [{ severity: "BLOCKER", code: "DATA_QUALITY", message: "Bad data" }],
+      },
+    })
+  );
+  // GET artifacts
+  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
 
   renderAt("/");
   await fillProject();
@@ -163,12 +169,12 @@ test("runWorkflow blocked is workflow status, not an HTTP error", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
   await waitFor(() => {
-    expect(screen.getByText("blk-1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /run detail/i })
+    ).toBeInTheDocument();
   });
-
+  expect(screen.getByText("blk-1")).toBeInTheDocument();
   expect(screen.getByText("Blocked")).toBeInTheDocument();
-  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  expect(screen.getByText(/inspect/i)).toBeInTheDocument();
 });
 
 test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {

@@ -392,3 +392,55 @@ dd {
   font-size: 0.82rem;
   font-weight: 600;
 }
+
+.progress-panel {
+  background: #f0f7ff;
+  border: 1px solid #b3d4ff;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.progress-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+@media (max-width: 640px) {
+  .progress-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+}
+
+.progress-step.pending  { color: #8c9aaa; }
+.progress-step.running  { color: #1f6feb; font-weight: 600; }
+.progress-step.completed { color: #13693a; }
+.progress-step.blocked  { color: #cf222e; }
+
+.progress-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.progress-dot.pending  { background: #d1d9e6; }
+.progress-dot.running  { background: #1f6feb; animation: pulse 1s infinite; }
+.progress-dot.completed { background: #2da44e; }
+.progress-dot.blocked  { background: #cf222e; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
