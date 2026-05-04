@@ -41,7 +41,7 @@ def test_claims_include_magnitude_significance_and_r_squared():
     assert "2.5000" in claims[0]["claim"]
     assert "5% level" in claims[0]["claim"]
     assert claims[1]["claim"] == (
-        "Model ols_1 explains 83.4% of dependent-variable variation."
+        "Model ols_1 (R²) explains 83.4% of dependent-variable variation."
     )
 
 

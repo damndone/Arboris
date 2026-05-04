@@ -36,15 +36,22 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
             if p_value is not None:
                 claim["confidence"] = max(0.0, min(1.0, 1.0 - p_value))
             claims.append(claim)
-        r_squared = _as_float(model_result.get("r_squared"))
+        r_squared = _as_float(
+            model_result.get("r_squared") or model_result.get("pseudo_r2")
+        )
         if r_squared is not None:
+            label = "pseudo-R²" if model_result.get("pseudo_r2") is not None else "R²"
             claims.append(
                 {
                     "claim": (
-                        f"Model {model_id} explains {r_squared * 100:.1f}% "
+                        f"Model {model_id} ({label}) explains {r_squared * 100:.1f}% "
                         "of dependent-variable variation."
                     ),
-                    "source_id": f"model_results.{model_id}.r_squared",
+                    "source_id": (
+                        f"model_results.{model_id}.pseudo_r2"
+                        if model_result.get("pseudo_r2") is not None
+                        else f"model_results.{model_id}.r_squared"
+                    ),
                     "confidence": 1.0,
                 }
             )
