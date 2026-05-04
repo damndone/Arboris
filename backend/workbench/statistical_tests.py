@@ -86,14 +86,30 @@ def write_statistical_test_artifacts(
         )
 
 
+_MAX_TEST_SUMMARIES_PER_FAMILY = 15
+
+
 def summarize_statistical_tests(
     results: dict[str, dict[str, Any]],
-) -> list[dict[str, Any]]:
-    summaries: list[dict[str, Any]] = []
+    y: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    y_related: list[dict[str, Any]] = []
+    other: list[dict[str, Any]] = []
     for family in ("correlations", "t_tests", "anova", "chi_square"):
         for row in results.get(family, {}).get("results", []):
-            summaries.append(_summary_row(row))
-    return summaries
+            summary = _summary_row(row)
+            if y and _involves_variable(row, y):
+                y_related.append(summary)
+            else:
+                other.append(summary)
+    y_related.sort(key=_p_value_sort_key)
+    other.sort(key=_p_value_sort_key)
+    total_other = len(other)
+    return {
+        "y_related": y_related,
+        "other": other[:_MAX_TEST_SUMMARIES_PER_FAMILY],
+        "other_truncated": total_other - len(other[:_MAX_TEST_SUMMARIES_PER_FAMILY]),
+    }
 
 
 # --- Helpers ---
@@ -251,6 +267,23 @@ def _chi_square(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | 
         },
         "source_id": f"statistical_tests.chi_square.{left}.{right}",
     }
+
+
+def _involves_variable(row: dict[str, Any], var: str) -> bool:
+    variables = row.get("variables", [])
+    if isinstance(variables, list) and var in variables:
+        return True
+    outcome = row.get("outcome")
+    if outcome == var:
+        return True
+    return False
+
+
+def _p_value_sort_key(summary: dict[str, Any]) -> float:
+    p = summary.get("p_value")
+    if p is None:
+        return 2.0
+    return float(p)
 
 
 def _p_value_text(p_value: float | None) -> str:

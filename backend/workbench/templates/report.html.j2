@@ -69,17 +69,81 @@
       </ul>
     </section>
 
+    {% if report.variable_importance %}
+    <section>
+      <h2>Variable importance (vs outcome)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Correlation with y</th>
+            <th>Best p-value</th>
+            <th>Test</th>
+            <th>Assessment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in report.variable_importance %}
+          <tr>
+            <td>{{ item.variable }}</td>
+            <td>{{ "%.3f"|format(item.correlation) if item.correlation is not none else "—" }}</td>
+            <td>{{ "%.4f"|format(item.best_p_value) if item.best_p_value is not none else "—" }}</td>
+            <td>{{ item.test_type or "—" }}</td>
+            <td>
+              {% if item.best_p_value is none %}
+              no data
+              {% elif item.best_p_value < 0.01 %}
+              significant (1%)
+              {% elif item.best_p_value < 0.05 %}
+              significant (5%)
+              {% elif item.best_p_value < 0.10 %}
+              marginal
+              {% else %}
+              not significant
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
     {% if report.statistical_tests %}
+    {% set st = report.statistical_tests %}
     <section>
       <h2>Statistical tests</h2>
+
+      {% if st.y_related %}
+      <h3>{{ st.y_related | length }} test(s) involving outcome variable</h3>
       <ul>
-        {% for test in report.statistical_tests %}
+        {% for test in st.y_related %}
         <li>
           {{ test.label }}: {{ test.interpretation }}
           <span data-source-id="{{ test.source_id }}">Source: {{ test.source_id }}</span>
         </li>
         {% endfor %}
       </ul>
+      {% endif %}
+
+      {% if st.other %}
+      <h3>{{ st.other | length }} other test(s)
+      {% if st.other_truncated and st.other_truncated > 0 %}
+      ({{ st.other_truncated }} truncated)
+      {% endif %}
+      </h3>
+      <details>
+        <summary>Show all</summary>
+        <ul>
+          {% for test in st.other %}
+          <li>
+            {{ test.label }}: {{ test.interpretation }}
+            <span data-source-id="{{ test.source_id }}">Source: {{ test.source_id }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
     </section>
     {% endif %}
 
