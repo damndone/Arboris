@@ -101,11 +101,13 @@ def _run_workflow(
     started_at: str,
     on_step: Callable[[str, str, str], None] | None = None,
     model_type: str = "auto",
+    sheet_name: str | None = None,
+    transpose: bool = False,
 ) -> dict[str, str]:
     _s = on_step  # shorthand
 
     if _s: _s("ingestion", "start", "Ingesting files...")
-    frames = ingest_files([Path(path) for path in input_files], run_root, config)
+    frames = ingest_files([Path(path) for path in input_files], run_root, config, sheet_name, transpose)
     if _s: _s("ingestion", "complete", f"Ingested {len(frames)} file(s)")
 
     if _s: _s("schema", "start", "Inferring schema...")

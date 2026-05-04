@@ -83,6 +83,8 @@ export type ColumnPreview = {
 
 export type FilePreview = {
   fileName: string;
+  sheetNames: string[];
+  selectedSheet: string;
   rowCount: number;
   columnCount: number;
   columns: ColumnPreview[];
@@ -193,6 +195,8 @@ export async function runWorkflow(
   x: string,
   file: File,
   modelType: string = "auto",
+  sheetName?: string,
+  transpose?: boolean,
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append("project_root", projectRoot);
@@ -200,6 +204,8 @@ export async function runWorkflow(
   form.append("model_type", modelType);
   form.append("y", y);
   form.append("x", x);
+  if (sheetName) form.append("sheet_name", sheetName);
+  if (transpose) form.append("transpose", "true");
   form.append("file", file);
   const response = await fetch("/runs", { method: "POST", body: form });
   return readResponse<RunResponse>(response);
@@ -270,7 +276,11 @@ function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPrevi
   };
 }
 
-export async function previewFile(file: File): Promise<FilePreview> {
+export async function previewFile(
+  file: File,
+  sheetName?: string,
+  transpose?: boolean,
+): Promise<FilePreview> {
   const buffer =
     typeof file.arrayBuffer === "function"
       ? await file.arrayBuffer()
@@ -281,12 +291,24 @@ export async function previewFile(file: File): Promise<FilePreview> {
           reader.readAsArrayBuffer(file);
         });
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  const firstSheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+  const selectedSheet = sheetName ?? workbook.SheetNames[0];
+  const sheet = workbook.Sheets[selectedSheet];
+  let rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: null,
     raw: true,
   });
+  if (transpose && rows.length > 0) {
+    const transposed: Record<string, unknown>[] = [];
+    const keys = Object.keys(rows[0]);
+    for (const key of keys) {
+      const row: Record<string, unknown> = {};
+      for (const src of rows) {
+        row[String(src[key] ?? "")] = src[key];
+      }
+      transposed.push(row);
+    }
+    rows = transposed;
+  }
   const columnNames =
     rows.length > 0
       ? Object.keys(rows[0])
@@ -313,6 +335,8 @@ export async function previewFile(file: File): Promise<FilePreview> {
 
   return {
     fileName: file.name,
+    sheetNames: workbook.SheetNames,
+    selectedSheet,
     rowCount: rows.length,
     columnCount: columns.length,
     columns,
