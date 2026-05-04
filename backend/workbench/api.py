@@ -59,6 +59,8 @@ async def run_endpoint(
     y: str = Form(...),
     x: str = Form(...),
     file: UploadFile = File(...),
+    sheet_name: str = Form(""),
+    transpose: str = Form("false"),
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -94,6 +96,7 @@ async def run_endpoint(
         events.executor.submit(
             _bg_run, run.root, run.run_id, saved_path,
             mode, y, x_columns, started_at, model_type,
+            sheet_name or None, transpose == "true",
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -145,6 +148,8 @@ def _bg_run(
     x_columns: list[str],
     started_at: str,
     model_type: str = "auto",
+    sheet_name: str | None = None,
+    transpose: bool = False,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -169,6 +174,8 @@ def _bg_run(
             mode, y, x_columns, config, started_at,
             on_step=_on_step,
             model_type=model_type,
+            sheet_name=sheet_name,
+            transpose=transpose,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

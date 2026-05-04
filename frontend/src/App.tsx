@@ -56,6 +56,8 @@ function SubmitRoute() {
   const [name, setName] = useState("demo");
   const [mode, setMode] = useState("auto");
   const [modelType, setModelType] = useState("auto");
+  const [sheetName, setSheetName] = useState<string | undefined>(undefined);
+  const [transpose, setTranspose] = useState(false);
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -117,14 +119,25 @@ function SubmitRoute() {
     setFile(nextFile);
     setPreview(null);
     setPreviewError(null);
+    setSheetName(undefined);
+    setTranspose(false);
     if (!nextFile) {
       setPreviewState("idle");
       return;
     }
+    await refreshPreview(nextFile, undefined, false);
+  }
+
+  async function refreshPreview(
+    sourceFile: File,
+    sheet: string | undefined,
+    transposed: boolean,
+  ) {
     setPreviewState("loading");
     try {
-      const nextPreview = await previewFile(nextFile);
+      const nextPreview = await previewFile(sourceFile, sheet, transposed);
       setPreview(nextPreview);
+      if (sheet === undefined) setSheetName(nextPreview.selectedSheet);
       if (nextPreview.suggestedY) setY(nextPreview.suggestedY);
       setX(nextPreview.suggestedX.join(", "));
       setPreviewState("idle");
@@ -164,6 +177,8 @@ function SubmitRoute() {
         xColumns.join(","),
         file,
         modelType,
+        sheetName,
+        transpose,
       );
       setLastRun(result);
       setActivity(
@@ -286,6 +301,38 @@ function SubmitRoute() {
               <option value="poisson">Poisson (count outcome)</option>
             </select>
           </label>
+          {preview && preview.sheetNames.length > 1 && (
+            <label>
+              Sheet
+              <select
+                aria-label="sheet selector"
+                value={sheetName ?? preview.selectedSheet}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setSheetName(next);
+                  if (file) refreshPreview(file, next, transpose);
+                }}
+              >
+                {preview.sheetNames.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {file && (
+            <label className="inline-choice">
+              <input
+                type="checkbox"
+                checked={transpose}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setTranspose(next);
+                  if (file) refreshPreview(file, sheetName, next);
+                }}
+              />
+              Transpose (swap rows/columns)
+            </label>
+          )}
           <label>
             Dependent variable (y)
             <input
