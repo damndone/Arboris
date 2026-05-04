@@ -191,7 +191,7 @@ def _run_workflow(
     normalized_y = normalize_column_name(y)
     normalized_x = [normalize_column_name(column) for column in x]
     if model_type != "auto":
-        y_type = model_type
+        y_type = _map_model_type(model_type)
     elif normalized_y in cleaned.columns:
         y_type = detect_y_kind(cleaned, normalized_y).value
     else:
@@ -495,6 +495,16 @@ def _extra_categorical_columns(
         else:
             extras.append(col_str)
     return extras
+
+
+_MODEL_TYPE_MAP = {"ols": "continuous", "logit": "binary", "poisson": "count"}
+
+
+def _map_model_type(model_type: str) -> str:
+    y_type = _MODEL_TYPE_MAP.get(model_type)
+    if y_type is None:
+        return "continuous"
+    return y_type
 
 
 def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
