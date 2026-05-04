@@ -10,8 +10,11 @@ def build_claims(
     warnings: Iterable[Any],
     binary_vars: set[str] | None = None,
     suspicious_vars: set[str] | None = None,
+    model_type: str = "ols",
 ) -> list[dict[str, Any]]:
     claims: list[dict[str, Any]] = []
+    is_logit = model_type in ("logit",)
+    is_poisson = model_type in ("poisson",)
     if binary_vars is None:
         binary_vars = set()
     if suspicious_vars is None:
@@ -41,19 +44,41 @@ def build_claims(
                 continue
 
             if term in binary_vars or term in suspicious_vars:
-                claim_text = (
-                    f"In {model_id}, holding other selected regressors constant, "
-                    f"the presence of {term} is associated with an average change of "
-                    f"{numeric_estimate:+.4f} in the dependent variable "
-                    f"compared to its absence; {significance}."
-                )
+                if is_logit:
+                    or_val = _format_or(_exp_float(numeric_estimate))
+                    claim_text = (
+                        f"In {model_id}, holding other variables constant, "
+                        f"the presence of {term} is associated with "
+                        f"{'higher' if numeric_estimate > 0 else 'lower'} odds of the outcome "
+                        f"(log-odds coefficient = {numeric_estimate:+.4f}"
+                        f"{', odds ratio ≈ ' + or_val if or_val else ''}); "
+                        f"{significance}."
+                    )
+                else:
+                    claim_text = (
+                        f"In {model_id}, holding other selected regressors constant, "
+                        f"the presence of {term} is associated with an average change of "
+                        f"{numeric_estimate:+.4f} in the dependent variable "
+                        f"compared to its absence; {significance}."
+                    )
             else:
-                claim_text = (
-                    f"In {model_id}, holding other selected regressors constant, "
-                    f"each one-unit increase in {term} is "
-                    f"associated with an average change of {numeric_estimate:.4f} "
-                    f"in the dependent variable; {significance}."
-                )
+                if is_logit:
+                    or_val = _format_or(_exp_float(numeric_estimate))
+                    claim_text = (
+                        f"In {model_id}, holding other variables constant, "
+                        f"each one-unit increase in {term} is associated with "
+                        f"{'higher' if numeric_estimate > 0 else 'lower'} log-odds of the outcome "
+                        f"(coefficient = {numeric_estimate:.4f} on log-odds scale"
+                        f"{', odds ratio ≈ ' + or_val if or_val else ''}); "
+                        f"{significance}."
+                    )
+                else:
+                    claim_text = (
+                        f"In {model_id}, holding other selected regressors constant, "
+                        f"each one-unit increase in {term} is "
+                        f"associated with an average change of {numeric_estimate:.4f} "
+                        f"in the dependent variable; {significance}."
+                    )
 
             if term in suspicious_vars:
                 claim_text += (
@@ -82,16 +107,24 @@ def build_claims(
             model_result.get("r_squared") or model_result.get("pseudo_r2")
         )
         if r_squared is not None:
-            label = "pseudo-R²" if model_result.get("pseudo_r2") is not None else "R²"
+            has_pseudo = model_result.get("pseudo_r2") is not None
+            label = "pseudo-R²" if has_pseudo else "R²"
+            if has_pseudo:
+                fit_text = (
+                    f"Model {model_id} has a McFadden pseudo-R² of {r_squared:.4f}, "
+                    f"indicating improved fit relative to an intercept-only model. "
+                    f"This is not directly comparable to OLS R²."
+                )
+            else:
+                fit_text = (
+                    f"Model {model_id} (R²) explains {r_squared * 100:.1f}% "
+                    "of dependent-variable variation."
+                )
             claims.append(
                 {
-                    "claim": (
-                        f"Model {model_id} ({label}) explains {r_squared * 100:.1f}% "
-                        "of dependent-variable variation."
-                    ),
+                    "claim": fit_text,
                     "source_id": (
-                        f"model_results.{model_id}.pseudo_r2"
-                        if model_result.get("pseudo_r2") is not None
+                        f"model_results.{model_id}.pseudo_r2" if has_pseudo
                         else f"model_results.{model_id}.r_squared"
                     ),
                     "confidence": 1.0,
@@ -140,6 +173,24 @@ def _as_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def _exp_float(value: float) -> float | None:
+    try:
+        result = math.exp(value)
+        return result if math.isfinite(result) else None
+    except (OverflowError, ValueError):
+        return None
+
+
+def _format_or(or_val: float | None) -> str:
+    if or_val is None:
+        return ""
+    if or_val >= 100:
+        return f"{or_val:.0f}"
+    if or_val >= 10:
+        return f"{or_val:.1f}"
+    return f"{or_val:.4f}"
 
 
 def _significance_text(p_value: float | None) -> str:

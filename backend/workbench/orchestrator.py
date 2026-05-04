@@ -332,12 +332,24 @@ def _run_workflow(
     if _s: _s("narrative", "start", "Building claims...")
     binary_vars = _detect_binary_vars(cleaned, normalized_x)
     suspicious_vars = _detect_suspicious_vars(normalized_x)
+    primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     claims = build_claims(
         [result for _, result in model_results], issue_dicts,
         binary_vars=binary_vars, suspicious_vars=suspicious_vars,
+        model_type=primary_type,
     )
     if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
     _check_suspicious_dtypes(cleaned, normalized_x, issue_dicts, run_root)
+    _check_rare_event(cleaned, normalized_y, primary_type, issue_dicts, run_root)
+    if routing["kind"] == "panel" and primary_type != "fixed_effects":
+        issue_dicts.append(GuardrailIssue(
+            Severity.INFO,
+            "PANEL_POOLED_MODEL",
+            f"Dataset detected as panel-like, but this run used a pooled {primary_type} model "
+            f"without fixed effects or clustered standard errors.",
+            {"kind": routing["kind"], "model_type": primary_type},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
     descriptive_stats = _build_descriptive_stats(cleaned)
     model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
@@ -355,7 +367,7 @@ def _run_workflow(
         "statistical_tests": statistical_test_summaries,
         "variable_importance": _build_variable_importance(
             statistical_tests, normalized_y, normalized_x, model_results,
-            cleaned,
+            cleaned, primary_type,
         ),
         "diagnostics": diagnostic_artifacts,
     }
@@ -520,6 +532,7 @@ def _build_variable_importance(
     x_vars: list[str],
     model_results: list[tuple[str, dict[str, Any]]] | None = None,
     frame: pd.DataFrame | None = None,
+    primary_type: str = "ols",
 ) -> list[dict[str, Any]]:
     importance: dict[str, dict[str, Any]] = {}
     for var in x_vars:
@@ -568,7 +581,7 @@ def _build_variable_importance(
             coeff = coefficients.get(var)
             if isinstance(coeff, dict) and coeff.get("p_value") is not None:
                 imp["best_p_value"] = coeff["p_value"]
-                imp["test_type"] = "ols_coefficient"
+                imp["test_type"] = f"{primary_type}_coefficient" if primary_type else "model_coefficient"
     for var in x_vars:
         imp = importance[var]
         corr = imp["correlation"]
@@ -617,6 +630,34 @@ def _check_model_validity(
 
 
 _SUSPICIOUS_NAME_PATTERNS = {"noise", "random", "placebo", "check", "fake", "test"}
+
+
+def _check_rare_event(
+    frame: pd.DataFrame,
+    y: str,
+    model_type: str,
+    issue_dicts: list[dict[str, Any]],
+    run_root: Path,
+) -> None:
+    if model_type not in ("logit",):
+        return
+    if y not in frame.columns:
+        return
+    series = frame[y].dropna()
+    if len(series) == 0:
+        return
+    positive_rate = float(series.astype(float).mean())
+    if positive_rate < 0.05:
+        issue_dicts.append(GuardrailIssue(
+            Severity.WARNING,
+            "RARE_EVENT_WARNING",
+            f"The positive class for '{y}' accounts for only {positive_rate:.1%} of observations "
+            f"({int(positive_rate * len(series))} of {len(series)} rows). "
+            f"Logistic regression estimates and significance should be interpreted with caution. "
+            f"Consider Firth's penalized likelihood or exact logistic regression for rare events.",
+            {"positive_rate": positive_rate, "n_positive": int(positive_rate * len(series)), "n_total": int(len(series))},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
 
 
 def _detect_binary_vars(frame: pd.DataFrame, x_vars: list[str]) -> set[str]:
