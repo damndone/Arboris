@@ -16,9 +16,27 @@ def _ols_formula(y: str, terms: list[str]) -> str:
     return f"{_formula_term(y)} ~ {' + '.join(terms)}"
 
 
+def _ensure_numeric_y(frame: pd.DataFrame, y: str) -> pd.DataFrame:
+    series = frame[y]
+    if pd.api.types.is_numeric_dtype(series):
+        return frame
+    converted = pd.to_numeric(series, errors="coerce")
+    if converted.isna().all():
+        cleaned = series.astype(str).str.replace(r"[$,€£¥\s%]", "", regex=True)
+        converted = pd.to_numeric(cleaned, errors="coerce")
+    if converted.isna().all():
+        raise ValueError(
+            f"Column '{y}' is non-numeric and could not be converted. "
+            f"Check that the correct sheet, column, and transpose setting are selected."
+        )
+    frame[y] = converted
+    return frame
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str
 ) -> dict[str, Any]:
+    frame = _ensure_numeric_y(frame, y)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
     fitted = smf.ols(formula=formula, data=frame).fit()
     if robust:
@@ -31,6 +49,7 @@ def run_ols(
 def run_logit(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str
 ) -> dict[str, Any]:
+    frame = _ensure_numeric_y(frame, y)
     formula = _ols_formula(y, [_formula_term(column) for column in x])
     try:
         fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
@@ -52,6 +71,7 @@ def run_logit(
 def run_poisson(
     frame: pd.DataFrame, y: str, x: list[str], model_id: str
 ) -> dict[str, Any]:
+    frame = _ensure_numeric_y(frame, y)
     series = frame[y].dropna()
     if (series < 0).any():
         raise ValueError(
@@ -87,6 +107,7 @@ def run_fixed_effects(
     time: str | None,
     model_id: str,
 ) -> dict[str, Any]:
+    frame = _ensure_numeric_y(frame, y)
     terms = [_formula_term(column) for column in x]
     terms.append(f"C({_formula_term(entity)})")
     if time is not None:
