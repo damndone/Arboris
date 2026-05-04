@@ -229,7 +229,7 @@ def _run_workflow(
         analysis_columns=stat_analysis_columns,
     )
     write_statistical_test_artifacts(run_root, statistical_tests)
-    statistical_test_summaries = summarize_statistical_tests(statistical_tests)
+    statistical_test_summaries = summarize_statistical_tests(statistical_tests, y=normalized_y)
     if _s:
         _s("statistical_tests", "complete", "Statistical tests completed")
 
@@ -353,6 +353,9 @@ def _run_workflow(
         "warnings": issue_dicts,
         "descriptive_stats": descriptive_stats,
         "statistical_tests": statistical_test_summaries,
+        "variable_importance": _build_variable_importance(
+            statistical_tests, normalized_y, normalized_x
+        ),
     }
     if _s: _s("reporting", "start", "Rendering report...")
     render_html_report(report, run_root)
@@ -507,6 +510,47 @@ def _map_model_type(model_type: str) -> str:
     if y_type is None:
         return "continuous"
     return y_type
+
+
+def _build_variable_importance(
+    statistical_tests: dict[str, dict[str, Any]],
+    y: str,
+    x_vars: list[str],
+) -> list[dict[str, Any]]:
+    importance: dict[str, dict[str, Any]] = {}
+    for var in x_vars:
+        importance[var] = {
+            "variable": var, "correlation": None, "best_p_value": None, "test_type": None
+        }
+    for row in statistical_tests.get("correlations", {}).get("results", []):
+        variables = row.get("variables", [])
+        if isinstance(variables, list) and y in variables:
+            for var in variables:
+                if var != y and var in importance:
+                    importance[var]["correlation"] = row.get("effect", {}).get("r")
+                    p = row.get("p_value")
+                    importance[var]["best_p_value"] = p
+                    importance[var]["test_type"] = "correlation"
+    for family in ("t_tests", "anova"):
+        for row in statistical_tests.get(family, {}).get("results", []):
+            outcome = row.get("outcome")
+            if outcome != y:
+                continue
+            group = row.get("group", "")
+            if group in importance:
+                p = row.get("p_value")
+                existing = importance[group]["best_p_value"]
+                if p is not None and (existing is None or p < existing):
+                    importance[group]["best_p_value"] = p
+                    importance[group]["test_type"] = family
+    return sorted(importance.values(), key=_importance_sort_key)
+
+
+def _importance_sort_key(item: dict[str, Any]) -> float:
+    p = item.get("best_p_value")
+    if p is None:
+        return 2.0
+    return float(p)
 
 
 def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:

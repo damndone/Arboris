@@ -142,15 +142,27 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
         "title": "Demo Report",
         "facts": [],
         "claims": [],
-        "statistical_tests": [
+        "variable_importance": [
             {
-                "label": "Pearson correlation: y vs x",
-                "statistic": 0.98,
-                "p_value": 0.001,
-                "interpretation": "Statistic 0.9800; p = 0.001.",
-                "source_id": "statistical_tests.correlations.y.x",
+                "variable": "x",
+                "correlation": 0.98,
+                "best_p_value": 0.001,
+                "test_type": "correlation",
             }
         ],
+        "statistical_tests": {
+            "y_related": [
+                {
+                    "label": "Pearson correlation: y vs x",
+                    "statistic": 0.98,
+                    "p_value": 0.001,
+                    "interpretation": "Statistic 0.9800; p = 0.001.",
+                    "source_id": "statistical_tests.correlations.y.x",
+                }
+            ],
+            "other": [],
+            "other_truncated": 0,
+        },
         "warnings": [],
     }
 
