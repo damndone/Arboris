@@ -5,8 +5,17 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
-def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[Any]) -> list[dict[str, Any]]:
+def build_claims(
+    model_results: Iterable[Mapping[str, Any]],
+    warnings: Iterable[Any],
+    binary_vars: set[str] | None = None,
+    suspicious_vars: set[str] | None = None,
+) -> list[dict[str, Any]]:
     claims: list[dict[str, Any]] = []
+    if binary_vars is None:
+        binary_vars = set()
+    if suspicious_vars is None:
+        suspicious_vars = set()
 
     for model_result in model_results:
         model_id = str(model_result.get("model_id", "model"))
@@ -31,13 +40,30 @@ def build_claims(model_results: Iterable[Mapping[str, Any]], warnings: Iterable[
                 dummy_count += 1
                 continue
 
-            claim: dict[str, Any] = {
-                "claim": (
+            if term in binary_vars or term in suspicious_vars:
+                claim_text = (
+                    f"In {model_id}, holding other selected regressors constant, "
+                    f"the presence of {term} is associated with an average change of "
+                    f"{numeric_estimate:+.4f} in the dependent variable "
+                    f"compared to its absence; {significance}."
+                )
+            else:
+                claim_text = (
                     f"In {model_id}, holding other selected regressors constant, "
                     f"each one-unit increase in {term} is "
                     f"associated with an average change of {numeric_estimate:.4f} "
                     f"in the dependent variable; {significance}."
-                ),
+                )
+
+            if term in suspicious_vars:
+                claim_text += (
+                    f" Note: '{term}' may be a diagnostic or noise variable. "
+                    f"Its correlation with the outcome is very weak. "
+                    f"Interpret with caution."
+                )
+
+            claim: dict[str, Any] = {
+                "claim": claim_text,
                 "source_id": source_id,
             }
             if p_value is not None:
