@@ -33,6 +33,14 @@ def classify_dataset(
                 "evidence": [f"{id_col}-{time_col} duplicates"],
             }
         counts = frame.groupby(id_col)[time_col].nunique()
+        obs_per_entity = float(len(frame)) / max(int(frame[id_col].nunique()), 1)
+        if obs_per_entity < 1.5:
+            return {
+                "kind": DatasetKind.CROSS_SECTION.value,
+                "confidence": 0.7,
+                "secondary_labels": ["no_repeated_entities"],
+                "evidence": [f"id={id_col} has {int(frame[id_col].nunique())} unique values in {len(frame)} rows"],
+            }
         if counts.nunique() == 1:
             labels.append("panel_balanced")
         else:

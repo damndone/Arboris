@@ -31,6 +31,9 @@ def compute_diagnostics(
         _compute_jarque_bera(resid, n, diag)
         _compute_cooks_distance(fitted, diag)
 
+    if model_family in ("logit",):
+        _check_separation(fitted, diag)
+
     return diag
 
 
@@ -92,6 +95,45 @@ def _compute_jarque_bera(resid: Any, n: int, diag: dict[str, Any]) -> None:
         }
     except Exception:
         diag["jarque_bera"] = {"statistic": None, "p_value": None}
+
+
+def _check_separation(fitted: Any, diag: dict[str, Any]) -> None:
+    separation: dict[str, Any] = {
+        "converged": bool(getattr(fitted, "converged", True)),
+        "max_abs_coef": None,
+        "max_std_error": None,
+        "pred_prob_min": None,
+        "pred_prob_max": None,
+        "warning": None,
+    }
+    try:
+        params = getattr(fitted, "params", None)
+        if params is not None:
+            import numpy as np
+            vals = np.abs([float(v) for v in params.values() if hasattr(params, "values")] if hasattr(params, "values") else np.abs(list(params)))
+            if len(vals) > 0:
+                separation["max_abs_coef"] = round(float(np.max(vals)), 2)
+        bse = getattr(fitted, "bse", None)
+        if bse is not None:
+            import numpy as np
+            se_vals = [float(v) for v in (bse.values if hasattr(bse, "values") else bse)]
+            if se_vals:
+                separation["max_std_error"] = round(float(np.max(se_vals)), 2)
+        fittedvals = getattr(fitted, "fittedvalues", None)
+        if fittedvals is not None:
+            import numpy as np
+            fv = np.asarray(fittedvals, dtype=float)
+            separation["pred_prob_min"] = round(float(np.min(fv)), 6)
+            separation["pred_prob_max"] = round(float(np.max(fv)), 6)
+    except Exception:
+        pass
+    if not separation["converged"]:
+        separation["warning"] = "Model did not converge. Check for complete or quasi-complete separation."
+    elif separation["max_abs_coef"] is not None and separation["max_abs_coef"] > 10:
+        separation["warning"] = "Large coefficients detected (max |coef| > 10). Possible quasi-separation."
+    elif separation["pred_prob_min"] is not None and separation["pred_prob_min"] < 1e-6:
+        separation["warning"] = "Very small predicted probabilities. Possible quasi-separation."
+    diag["separation"] = separation
 
 
 def _compute_cooks_distance(fitted: Any, diag: dict[str, Any]) -> None:

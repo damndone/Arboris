@@ -289,6 +289,18 @@ def _run_workflow(
         )
         diagnostic_artifacts[model_id] = diag
         _check_model_validity(diag, model_id, issue_dicts, run_root)
+        sep = diag.get("separation", {})
+        if isinstance(sep, dict) and sep.get("warning"):
+            issue_dicts.append(GuardrailIssue(
+                Severity.WARNING,
+                "SEPARATION_WARNING",
+                f"Model {model_id}: {sep['warning']} "
+                f"(converged={sep.get('converged')}, max|coef|={sep.get('max_abs_coef')}, "
+                f"max SE={sep.get('max_std_error')}). "
+                f"Consider Firth penalized likelihood or removing problematic predictors.",
+                {"model_id": model_id, **{k: v for k, v in sep.items() if v is not None}},
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
     if _s: _s("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
     if routing["kind"] == "time_series" and time_candidates:
@@ -333,14 +345,17 @@ def _run_workflow(
     binary_vars = _detect_binary_vars(cleaned, normalized_x)
     suspicious_vars = _detect_suspicious_vars(normalized_x)
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+    reliability_info = _check_rare_event(cleaned, normalized_y, primary_type, len(normalized_x), issue_dicts, run_root)
+    caveat = ""
+    if reliability_info and reliability_info.get("reliability", "").startswith("Low"):
+        caveat = "Reliability is limited due to rare events; interpret with caution"
     claims = build_claims(
         [result for _, result in model_results], issue_dicts,
         binary_vars=binary_vars, suspicious_vars=suspicious_vars,
-        model_type=primary_type,
+        model_type=primary_type, reliability_caveat=caveat,
     )
     if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
     _check_suspicious_dtypes(cleaned, normalized_x, issue_dicts, run_root)
-    _check_rare_event(cleaned, normalized_y, primary_type, issue_dicts, run_root)
     if routing["kind"] == "panel" and primary_type != "fixed_effects":
         issue_dicts.append(GuardrailIssue(
             Severity.INFO,
@@ -353,14 +368,21 @@ def _run_workflow(
     descriptive_stats = _build_descriptive_stats(cleaned)
     model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+    facts = [
+        f"Model: {model_family_display.get(primary_type, primary_type)}",
+        f"y = {normalized_y};  X = {', '.join(normalized_x)}",
+        f"Rows used: {profile['row_count']} · Columns: {profile['column_count']}",
+        f"Dataset kind: {routing['kind']}",
+    ]
+    if reliability_info:
+        facts.append(
+            f"Model reliability: {reliability_info['reliability']} "
+            f"(positive rate: {reliability_info['positive_rate']:.1%}, "
+            f"events per predictor: {reliability_info['events_per_predictor']:.1f})"
+        )
     report = {
         "title": "Econometrics Report",
-        "facts": [
-            f"Model: {model_family_display.get(primary_type, primary_type)}",
-            f"y = {normalized_y};  X = {', '.join(normalized_x)}",
-            f"Rows used: {profile['row_count']} · Columns: {profile['column_count']}",
-            f"Dataset kind: {routing['kind']}",
-        ],
+        "facts": facts,
         "claims": claims,
         "warnings": issue_dicts,
         "descriptive_stats": descriptive_stats,
@@ -636,28 +658,34 @@ def _check_rare_event(
     frame: pd.DataFrame,
     y: str,
     model_type: str,
+    n_predictors: int,
     issue_dicts: list[dict[str, Any]],
     run_root: Path,
-) -> None:
+) -> dict[str, Any] | None:
     if model_type not in ("logit",):
-        return
+        return None
     if y not in frame.columns:
-        return
+        return None
     series = frame[y].dropna()
     if len(series) == 0:
-        return
+        return None
     positive_rate = float(series.astype(float).mean())
-    if positive_rate < 0.05:
-        issue_dicts.append(GuardrailIssue(
-            Severity.WARNING,
-            "RARE_EVENT_WARNING",
-            f"The positive class for '{y}' accounts for only {positive_rate:.1%} of observations "
-            f"({int(positive_rate * len(series))} of {len(series)} rows). "
-            f"Logistic regression estimates and significance should be interpreted with caution. "
-            f"Consider Firth's penalized likelihood or exact logistic regression for rare events.",
-            {"positive_rate": positive_rate, "n_positive": int(positive_rate * len(series)), "n_total": int(len(series))},
-        ).to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
+    n_positive = int(positive_rate * len(series))
+    epv = n_positive / max(n_predictors, 1)
+    if positive_rate >= 0.05 and epv >= 5:
+        return None
+    reliability = "Low / exploratory only" if (positive_rate < 0.05 or epv < 5) else "Caution advised"
+    issue_dicts.append(GuardrailIssue(
+        Severity.WARNING if reliability.startswith("Low") else Severity.INFO,
+        "RARE_EVENT_WARNING",
+        f"The positive class for '{y}' accounts for {positive_rate:.1%} ({n_positive} of {len(series)}). "
+        f"Events per predictor: {epv:.1f}. "
+        f"Standard MLE Logit reliability is reduced. "
+        f"Consider Firth penalized likelihood or exact logistic regression (not yet available in this MVP).",
+        {"positive_rate": positive_rate, "n_positive": n_positive, "n_total": int(len(series)), "events_per_predictor": round(epv, 1)},
+    ).to_dict())
+    write_json(run_root / "errors.json", {"issues": issue_dicts})
+    return {"reliability": reliability, "events_per_predictor": round(epv, 1), "positive_rate": positive_rate}
 
 
 def _detect_binary_vars(frame: pd.DataFrame, x_vars: list[str]) -> set[str]:
