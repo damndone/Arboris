@@ -11,6 +11,7 @@ def build_claims(
     binary_vars: set[str] | None = None,
     suspicious_vars: set[str] | None = None,
     model_type: str = "ols",
+    reliability_caveat: str = "",
 ) -> list[dict[str, Any]]:
     claims: list[dict[str, Any]] = []
     is_logit = model_type in ("logit",)
@@ -86,6 +87,9 @@ def build_claims(
                     f"Its correlation with the outcome is very weak. "
                     f"Interpret with caution."
                 )
+
+            if reliability_caveat:
+                claim_text += f" ({reliability_caveat})"
 
             claim: dict[str, Any] = {
                 "claim": claim_text,
