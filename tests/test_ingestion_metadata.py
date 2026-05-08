@@ -106,3 +106,20 @@ def test_metadata_role_precedence_is_explicit(tmp_path: Path):
     schema = infer_schema("dataset_1", frames, run.root)
     roles = {column.name: column.semantic_role for column in schema.columns}
     assert roles == {"year": "time", "firm_id": "entity_id", "year_id": "entity_id"}
+
+
+def test_coerce_datetime_to_numeric_converts_numeric_hint_columns():
+    from workbench.ingestion import _coerce_datetime_to_numeric
+
+    frame = pd.DataFrame({
+        "policy_years": pd.to_datetime(["1900-01-01", "1900-01-02", "1900-01-03"]),
+        "exposure_months": pd.to_datetime(["1900-01-01", "1900-02-01", "1900-03-01"]),
+        "label": pd.to_datetime(["2020-01-01", "2021-06-15", "2022-12-31"]),
+    })
+    _coerce_datetime_to_numeric(frame)
+
+    # Columns with numeric hints should be coerced to numeric
+    assert pd.api.types.is_numeric_dtype(frame["policy_years"])
+    assert pd.api.types.is_numeric_dtype(frame["exposure_months"])
+    # Column without numeric hint should stay datetime
+    assert pd.api.types.is_datetime64_any_dtype(frame["label"])

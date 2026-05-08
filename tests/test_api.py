@@ -195,6 +195,67 @@ def test_get_run_detail_returns_artifact_counts(completed_run):
     assert "x" in detail["model_results"][0]["coefficients"]
 
 
+def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
+    from workbench.artifacts import write_json
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "completed",
+            "mode": "auto",
+            "started_at": "2026-05-08T00:00:00+00:00",
+            "y": "continuous_score_y",
+            "x": ["x7_region_code"],
+            "lineage": [],
+        },
+    )
+    write_json(
+        run.root / "errors.json",
+        {
+            "issues": [
+                {
+                    "severity": "INFO",
+                    "code": "CATEGORICAL_CANDIDATE",
+                    "message": "Column 'x7_region_code' may be categorical (3 unique values). Consider one-hot encoding.",
+                    "evidence": {"column": "x7_region_code", "nunique": 3},
+                }
+            ]
+        },
+    )
+    write_json(
+        run.root / "model_results" / "ols_1.json",
+        {
+            "model_id": "ols_1",
+            "model_type": "ols_robust",
+            "coefficients": {
+                "Intercept": {"estimate": 1.0},
+                "C(Q('x7_region_code'))[T.region_B]": {"estimate": 0.2},
+            },
+        },
+    )
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    issues = detail_response.json()["errors"]["issues"]
+    assert not any(issue["code"] == "CATEGORICAL_CANDIDATE" for issue in issues)
+    assert issues == [
+        {
+            "severity": "INFO",
+            "code": "CATEGORICAL_AUTO_DUMMY_CODED",
+            "message": "Column 'x7_region_code' was detected as categorical and automatically dummy-coded.",
+            "evidence": {"column": "x7_region_code", "preprocessing": "dummy_coded"},
+        }
+    ]
+
+
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):
     client = TestClient(app)
     response = client.post(

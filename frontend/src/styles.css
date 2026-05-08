@@ -316,6 +316,16 @@ dd {
   margin-bottom: 8px;
 }
 
+.transpose-warning {
+  background: #fff4dc;
+  border: 1px solid #bf8700;
+  border-radius: 5px;
+  color: #6f4900;
+  font-size: 0.82rem;
+  margin-top: 8px;
+  padding: 8px 12px;
+}
+
 .preview-table-wrap {
   border: 1px solid #e2e6ee;
   border-radius: 5px;

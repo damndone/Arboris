@@ -74,6 +74,13 @@ class YKind(str, Enum):
 
 
 _POISSON_MAX_UNIQUE = 20
+_COUNT_NAME_PATTERNS = ("count", "event", "events", "num", "number", "frequency", "freq")
+
+
+def _looks_like_count_name(name: str) -> bool:
+    lowered = name.lower()
+    return any(pattern in lowered for pattern in _COUNT_NAME_PATTERNS)
+
 
 def detect_y_kind(frame: pd.DataFrame, y: str) -> YKind:
     series = frame[y].dropna()
@@ -83,12 +90,13 @@ def detect_y_kind(frame: pd.DataFrame, y: str) -> YKind:
         if unique_vals <= {0, 1} or unique_vals <= {True, False}:
             return YKind.BINARY
         return YKind.CONTINUOUS
-    if (
-        nunique >= 3
-        and nunique <= _POISSON_MAX_UNIQUE
-        and pd.api.types.is_numeric_dtype(series)
-        and (series >= 0).all()
-        and (series == series.astype(int)).all()
-    ):
-        return YKind.COUNT
+    if nunique >= 3 and pd.api.types.is_numeric_dtype(series):
+        is_nonnegative_integer = (
+            (series >= 0).all()
+            and (series == series.astype(int)).all()
+        )
+        if is_nonnegative_integer and (
+            nunique <= _POISSON_MAX_UNIQUE or _looks_like_count_name(y)
+        ):
+            return YKind.COUNT
     return YKind.CONTINUOUS

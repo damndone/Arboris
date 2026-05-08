@@ -45,11 +45,19 @@ def test_claims_include_magnitude_significance_and_r_squared():
     )
 
 
-def test_warning_claims_bind_to_errors_source():
-    claims = build_claims([], warnings=["High missingness"])
+def test_warning_claims_bind_to_severity_aware_sources():
+    claims = build_claims([], warnings=[
+        {"severity": "BLOCKER", "message": "Bad data"},
+        {"severity": "WARNING", "message": "High correlation"},
+        {"severity": "INFO", "message": "Dummy-coded categorical"},
+        "Legacy issue",
+    ])
 
     assert claims == [
-        {"claim": "High missingness", "source_id": "errors.json", "confidence": 1.0}
+        {"claim": "Bad data", "source_id": "errors.json", "confidence": 1.0},
+        {"claim": "High correlation", "source_id": "warnings.json", "confidence": 1.0},
+        {"claim": "Dummy-coded categorical", "source_id": "diagnostics.warnings", "confidence": 1.0},
+        {"claim": "Legacy issue", "source_id": "errors.json", "confidence": 1.0},
     ]
 
 
@@ -174,6 +182,54 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
     assert "Pearson correlation: y vs x" in html
     assert 'data-source-id="statistical_tests.correlations.y.x"' in html
     assert b"Statistical tests" in pdf_path.read_bytes()
+
+
+def test_report_formats_tiny_variable_importance_p_values(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "variable_importance": [
+            {
+                "variable": "x",
+                "correlation": 0.31,
+                "best_p_value": 0.0000004,
+                "test_type": "correlation",
+            }
+        ],
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "&lt; 0.001" in html
+    assert "0.0000" not in html
+
+
+def test_report_formats_tiny_diagnostic_p_values(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "warnings": [],
+        "diagnostics": {
+            "ols_1": {
+                "breusch_pagan": {"lm": 25.0, "p_value": 0.0000002},
+                "jarque_bera": {"statistic": 40.0, "p_value": 0.0000003},
+            }
+        },
+    }
+
+    html_path = render_html_report(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "p &lt; 0.001" in html
+    assert "p = 0.0000" not in html
 
 
 def test_report_renders_descriptive_statistics_section(tmp_path: Path):

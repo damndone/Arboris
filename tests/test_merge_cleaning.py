@@ -79,3 +79,38 @@ def test_recommend_merge_ranks_keys_by_directional_overlap():
     assert plan["join_type"] == "inner"
     assert plan["left_overlap"] == 0.8
     assert plan["right_overlap"] == 1.0
+
+
+def test_clean_frame_coerces_datetime_column_with_numeric_hint():
+    """clean_frame coerces datetime columns with numeric-like names to numeric."""
+    frame = pd.DataFrame({
+        "policy_years": pd.to_datetime(["1900-01-01", "1900-01-02", "1900-01-03"]),
+        "y": [1, 2, 3],
+    })
+    cleaned, actions = clean_frame(frame, date_candidates=[])
+    assert pd.api.types.is_numeric_dtype(cleaned["policy_years"])
+    assert any(
+        a["action"] == "coerce_to_numeric" and a["column"] == "policy_years"
+        for a in actions
+    )
+
+
+def test_clean_frame_leaves_legitimate_date_column():
+    """clean_frame does NOT coerce a legitimate date column to numeric."""
+    frame = pd.DataFrame({
+        "date": pd.to_datetime(["2020-01-01", "2021-06-15", "2022-12-31"]),
+        "y": [1, 2, 3],
+    })
+    cleaned, actions = clean_frame(frame, date_candidates=["date"])
+    assert pd.api.types.is_datetime64_any_dtype(cleaned["date"])
+
+
+def test_clean_frame_skips_date_parsing_for_already_numeric():
+    """clean_frame does not re-parse a numeric column as a date candidate."""
+    frame = pd.DataFrame({
+        "years": [2020, 2021, 2022],
+        "y": [1, 2, 3],
+    })
+    cleaned, actions = clean_frame(frame, date_candidates=["years"])
+    assert pd.api.types.is_numeric_dtype(cleaned["years"])
+    assert not pd.api.types.is_datetime64_any_dtype(cleaned["years"])

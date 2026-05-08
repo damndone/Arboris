@@ -348,6 +348,150 @@ test("clicking a history row loads run detail with errors", async () => {
   expect(screen.getByText("DATA_QUALITY")).toBeInTheDocument();
 });
 
+test("run detail renders info issues as diagnostics instead of errors", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [makeRun("run-1")],
+    })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "binary_success_y",
+      x: ["x7_region_code"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: {
+        issues: [
+          {
+            severity: "INFO",
+            code: "CATEGORICAL_CANDIDATE",
+            message: "Column 'x7_region_code' may be categorical.",
+            evidence: {},
+          },
+        ],
+      },
+    })
+  );
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText("CATEGORICAL_CANDIDATE")).toBeInTheDocument();
+  });
+  expect(screen.queryByText("Issues")).not.toBeInTheDocument();
+  expect(screen.getByText("Diagnostics")).toBeInTheDocument();
+});
+
+test("run detail normalizes stale categorical candidate when model dummy-coded it", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [makeRun("run-1")],
+    })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "continuous_score_y",
+      x: ["x7_region_code"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: {
+        issues: [
+          {
+            severity: "INFO",
+            code: "CATEGORICAL_CANDIDATE",
+            message: "Column 'x7_region_code' may be categorical. Consider one-hot encoding.",
+            evidence: { column: "x7_region_code" },
+          },
+        ],
+      },
+      model_results: [
+        {
+          model_id: "ols_1",
+          model_type: "ols_robust",
+          coefficients: {
+            "C(Q('x7_region_code'))[T.region_B]": { estimate: 0.2 },
+          },
+        },
+      ],
+    })
+  );
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText("CATEGORICAL_AUTO_DUMMY_CODED")).toBeInTheDocument();
+  });
+  expect(screen.queryByText("CATEGORICAL_CANDIDATE")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Consider one-hot encoding/)).not.toBeInTheDocument();
+});
+
+test("run detail renders warning issues separately from blockers", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      runs: [makeRun("run-1")],
+    })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "count_events_y",
+      x: ["x8_treatment", "x10_interaction_proxy"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: {
+        issues: [
+          {
+            severity: "WARNING",
+            code: "TREATMENT_PROXY_CORRELATION",
+            message: "x8_treatment and x10_interaction_proxy are highly correlated.",
+            evidence: {},
+          },
+        ],
+      },
+    })
+  );
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText("TREATMENT_PROXY_CORRELATION")).toBeInTheDocument();
+  });
+  expect(screen.queryByText("Issues")).not.toBeInTheDocument();
+  expect(screen.getByText("Warnings")).toBeInTheDocument();
+});
+
 test("history tab surfaces PROJECT_NOT_FOUND envelope in error panel", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
@@ -646,6 +790,45 @@ test("direct URL access to run detail keeps shareable result route", async () =>
   expect(screen.getByText("run-direct")).toBeInTheDocument();
   expect(document.body).toHaveTextContent("ols_1");
   expect(document.body).toHaveTextContent("x");
+});
+
+test("run detail coefficient table uses p-value display text when available", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-direct",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: { issues: [] },
+      model_results: [
+        {
+          model_id: "ols_1",
+          coefficients: {
+            x: {
+              estimate: 1.5,
+              std_error: 0.2,
+              p_value: 0,
+              p_value_display: "< 0.001",
+            },
+          },
+        },
+      ],
+    }),
+  );
+  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
+
+  renderAt("/runs/run-direct?project_root=/tmp/demo");
+
+  await waitFor(() => {
+    expect(screen.getByRole("heading", { name: /coefficients/i })).toBeInTheDocument();
+  });
+  expect(screen.getByText("< 0.001")).toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("0.0000");
 });
 
 test("history pagination bar renders Page X of Y, Previous disabled on first page", async () => {

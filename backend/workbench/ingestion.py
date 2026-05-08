@@ -21,6 +21,26 @@ def _ensure_unique_basenames(paths: list[Path]) -> None:
         raise ValueError(f"duplicate input filenames are not allowed: {names}")
 
 
+_NUMERIC_HINT_TOKENS = frozenset({
+    "year", "month", "age", "miles", "density", "score", "count",
+    "claims", "days", "number", "num", "amount", "rate", "price",
+    "cost", "value", "size", "weight", "volume", "sum",
+})
+
+
+def _coerce_datetime_to_numeric(frame: pd.DataFrame) -> None:
+    for col in frame.columns:
+        if not pd.api.types.is_datetime64_any_dtype(frame[col]):
+            continue
+        if not any(token in col.lower() for token in _NUMERIC_HINT_TOKENS):
+            continue
+        numeric = pd.to_numeric(frame[col], errors="coerce")
+        good = numeric.notna().sum()
+        total = len(numeric)
+        if total > 0 and (good / total) >= 0.9:
+            frame[col] = numeric
+
+
 def _read_frame(
     path: Path,
     config: WorkbenchConfig,
@@ -36,6 +56,7 @@ def _read_frame(
                 raise ValueError(f"excel sheet count exceeds limit: {path.name}")
             target_sheet = sheet_name if sheet_name else excel.sheet_names[0]
             frame = pd.read_excel(excel, sheet_name=target_sheet, nrows=config.max_rows + 1)
+        _coerce_datetime_to_numeric(frame)
     else:
         raise ValueError(f"unsupported file type: {path.suffix}")
     if len(frame) > config.max_rows:
