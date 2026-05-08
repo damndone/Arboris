@@ -11,6 +11,19 @@ export type RunResponse = {
   status: RunStatus;
 };
 
+export type BatchRunSummary = {
+  y: string;
+  run_id: string;
+  status: string;
+  model_id: string | null;
+  model_type: string | null;
+};
+
+export type BatchRunResponse = {
+  status: string;
+  runs: BatchRunSummary[];
+};
+
 export type RunSummary = {
   run_id: string;
   status: string;
@@ -24,6 +37,7 @@ export type IssueRecord = {
   severity?: string;
   code?: string;
   message?: string;
+  evidence?: Record<string, unknown>;
 };
 
 export type RunDetail = RunSummary & {
@@ -37,6 +51,7 @@ export type CoefficientRecord = {
   estimate?: number | null;
   std_error?: number | null;
   p_value?: number | null;
+  p_value_display?: string | null;
   source_id?: string;
 };
 
@@ -81,6 +96,11 @@ export type ColumnPreview = {
   suggestedRole: ColumnRole;
 };
 
+export type ExcludedColumn = {
+  name: string;
+  reason: string;
+};
+
 export type FilePreview = {
   fileName: string;
   sheetNames: string[];
@@ -91,6 +111,9 @@ export type FilePreview = {
   previewRows: Record<string, unknown>[];
   suggestedY: string | null;
   suggestedX: string[];
+  excludedColumns: ExcludedColumn[];
+  transposed?: boolean;
+  transpose_warning?: string | null;
 };
 
 export type ApiErrorEnvelope = {
@@ -211,6 +234,23 @@ export async function runWorkflow(
   return readResponse<RunResponse>(response);
 }
 
+export async function runBatchWorkflow(
+  projectRoot: string,
+  mode: string,
+  yList: string[],
+  x: string[],
+  file: File,
+): Promise<BatchRunResponse> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("mode", mode);
+  form.append("y_list", yList.join(","));
+  form.append("x", x.join(","));
+  form.append("file", file);
+  const response = await fetch("/runs/batch", { method: "POST", body: form });
+  return readResponse<BatchRunResponse>(response);
+}
+
 function isMissing(value: unknown): boolean {
   return value === null || value === undefined || value === "";
 }
@@ -239,19 +279,55 @@ function inferDtype(values: unknown[]): ColumnDtype {
   return "other";
 }
 
-function inferRole(name: string, dtype: ColumnDtype): ColumnRole {
+function _isDateLike(value: unknown): boolean {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return true;
+  if (typeof value === "number" && value > 30000 && value < 50000) return true;
+  return false;
+}
+
+function inferRole(name: string, dtype: ColumnDtype, uniqueCount: number, totalCount: number, values: unknown[]): ColumnRole {
   const lower = name.toLowerCase();
-  if (/(^|_|\b)(date|time|year|month|timestamp)(_|$|\b)/.test(lower)) return "time";
-  if (/(^|_|\b)(id|code|key|firm|user)(_|$|\b)/.test(lower)) return "id";
-  if (/(^|_|\b)(y|dependent|outcome|target|result)(_|$|\b)/.test(lower)) return "y";
-  if (dtype === "numeric") return "x";
+  const strongTimePattern = /(^|_)(date|timestamp)(_|$)/.test(lower);
+  const weakTimePattern = /(^|_|\b)(time|year|month)(_|$|\b)/.test(lower);
+  const idNamePattern = /(^|_)id$/.test(lower);
+  const codeNamePattern = /(^|_|\b)(code|region|category|group|type|class|level)(_|$|\b)/.test(lower);
+  const outcomePattern = /(^|_|\b)(y|outcome|target|label|dependent|result|response)(_|$|\b)/.test(lower);
+
+  // Outcome: name strongly signals y → always classify as y
+  if (outcomePattern) return "y";
+
+  // Data can override weak name hints
+  const isNumeric = dtype === "numeric";
+  const diverseNumeric = isNumeric && uniqueCount > 20;
+  const allUnique = uniqueCount === totalCount && totalCount > 0;
+
+  // Strong time names + actual date-like data → time
+  if (strongTimePattern && values.some(_isDateLike)) return "time";
+  // Weak time names but diverse numeric → predictor (not time)
+  if (weakTimePattern && diverseNumeric) return "x";
+  // Strong time names but diverse numeric → predictor
+  if (strongTimePattern && diverseNumeric) return "x";
+
+  // _id suffix + truly unique per row → id
+  if (idNamePattern && allUnique) return "id";
+  // code/region/category names → categorical candidate (still usable as x)
+  if (codeNamePattern) return "x";
+
+  if (isNumeric) return "x";
   return "ignore";
 }
+
+type ExcludedColumn = {
+  name: string;
+  suggestedRole: ColumnRole;
+  reason: string;
+};
 
 function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPreview {
   const values = rows.map((row) => row[name]);
   const present = values.filter((value) => !isMissing(value));
   const dtype = inferDtype(values);
+  const uniqueCount = new Set(present.map((value) => String(value))).size;
   const numeric = present
     .map(asNumber)
     .filter((value): value is number => value !== null);
@@ -269,10 +345,10 @@ function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPrevi
     name,
     dtype,
     missingRate: values.length === 0 ? 0 : (values.length - present.length) / values.length,
-    uniqueCount: new Set(present.map((value) => String(value))).size,
+    uniqueCount,
     mean,
     std: variance === undefined ? undefined : Math.sqrt(variance),
-    suggestedRole: inferRole(name, dtype),
+    suggestedRole: inferRole(name, dtype, uniqueCount, values.length, present),
   };
 }
 
@@ -298,12 +374,17 @@ export async function previewFile(
     raw: true,
   });
   if (transpose && rows.length > 0) {
+    const originalKeys = Object.keys(rows[0]);
+    const firstKey = originalKeys[0];
+    // Use first column values as new column headers
+    const newHeaders = rows.map(row => String(row[firstKey] ?? ""));
     const transposed: Record<string, unknown>[] = [];
-    const keys = Object.keys(rows[0]);
-    for (const key of keys) {
+    for (const key of originalKeys) {
       const row: Record<string, unknown> = {};
-      for (const src of rows) {
-        row[String(src[key] ?? "")] = src[key];
+      // Original column header becomes the first cell value (unnamed column)
+      row[""] = key;
+      for (let i = 0; i < rows.length; i++) {
+        row[newHeaders[i]] = rows[i][key];
       }
       transposed.push(row);
     }
@@ -323,15 +404,42 @@ export async function previewFile(
         column.suggestedRole !== "time",
     )?.name ??
     null;
+  function isOutcomeCandidate(name: string): boolean {
+    const lower = name.toLowerCase();
+    return /_y$|_outcome$|_target$|_label$|_response$|_dependent$/.test(lower);
+  }
+
   const suggestedX = columns
     .filter(
       (column) =>
         column.dtype === "numeric" &&
         column.name !== suggestedY &&
-        column.suggestedRole !== "id" &&
-        column.suggestedRole !== "time",
+        !isOutcomeCandidate(column.name) &&
+        column.suggestedRole === "x",
     )
     .map((column) => column.name);
+
+  const excludedColumns: ExcludedColumn[] = columns
+    .filter((column) =>
+      column.dtype === "numeric" &&
+      column.name !== suggestedY &&
+      !isOutcomeCandidate(column.name) &&
+      column.suggestedRole !== "x"
+    )
+    .map((column) => {
+      const role = column.suggestedRole;
+      let reason: string;
+      if (role === "id") reason = `auto-detected as identifier (${column.uniqueCount} unique values in ${rows.length} rows)`;
+      else if (role === "time") reason = "auto-detected as time/date column";
+      else if (role === "ignore") reason = "auto-detected as non-numeric";
+      else reason = `excluded (role: ${role})`;
+      return { name: column.name, reason };
+    });
+
+  const transposeWarning =
+    transpose && columns.length > rows.length * 2
+      ? `⚠️ Your data has ${columns.length} columns but only ${rows.length} rows. This may mean rows and columns are reversed. Uncheck 'Transpose' if variables should be in columns.`
+      : null;
 
   return {
     fileName: file.name,
@@ -343,6 +451,9 @@ export async function previewFile(
     previewRows: rows.slice(0, 10),
     suggestedY,
     suggestedX,
+    excludedColumns,
+    transposed: transpose ?? false,
+    transpose_warning: transposeWarning,
   };
 }
 

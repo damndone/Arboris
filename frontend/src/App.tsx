@@ -60,6 +60,7 @@ function SubmitRoute() {
   const [transpose, setTranspose] = useState(false);
   const [y, setY] = useState("");
   const [x, setX] = useState("");
+  const [xManuallySet, setXManuallySet] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewState, setPreviewState] = useState<
@@ -121,6 +122,7 @@ function SubmitRoute() {
     setPreviewError(null);
     setSheetName(undefined);
     setTranspose(false);
+    setXManuallySet(false);
     if (!nextFile) {
       setPreviewState("idle");
       return;
@@ -139,7 +141,7 @@ function SubmitRoute() {
       setPreview(nextPreview);
       if (sheet === undefined) setSheetName(nextPreview.selectedSheet);
       if (nextPreview.suggestedY) setY(nextPreview.suggestedY);
-      setX(nextPreview.suggestedX.join(", "));
+      if (!xManuallySet) setX(nextPreview.suggestedX.join(", "));
       setPreviewState("idle");
     } catch (error) {
       setPreviewState("error");
@@ -310,6 +312,8 @@ function SubmitRoute() {
                 onChange={(event) => {
                   const next = event.target.value;
                   setSheetName(next);
+                  setY("");
+                  setX("");
                   if (file) refreshPreview(file, next, transpose);
                 }}
               >
@@ -327,6 +331,8 @@ function SubmitRoute() {
                 onChange={(event) => {
                   const next = event.target.checked;
                   setTranspose(next);
+                  setY("");
+                  setX("");
                   if (file) refreshPreview(file, sheetName, next);
                 }}
               />
@@ -351,12 +357,43 @@ function SubmitRoute() {
               aria-invalid={Boolean(runErrors.x)}
               placeholder="x1, x2"
               value={x}
-              onChange={(event) => setX(event.target.value)}
+              onChange={(event) => {
+                setX(event.target.value);
+                setXManuallySet(true);
+              }}
             />
             <span className={runErrors.x ? "field-error" : "field-hint"}>
               {runErrors.x ?? `${xColumns.length} column${xColumns.length === 1 ? "" : "s"}`}
             </span>
           </label>
+          {preview && preview.excludedColumns.length > 0 && (
+            <details className="excluded-columns">
+              <summary>
+                {preview.excludedColumns.length} column(s) excluded from auto-suggest
+              </summary>
+              <ul>
+                {preview.excludedColumns.map((col) => (
+                  <li key={col.name}>
+                    <span className="excluded-name">{col.name}</span>
+                    <span className="excluded-reason"> — {col.reason}</span>
+                    <button
+                      type="button"
+                      className="add-back-btn"
+                      onClick={() => {
+                        const current = xColumns;
+                        if (!current.includes(col.name)) {
+                          setX([...current, col.name].join(", "));
+                          setXManuallySet(true);
+                        }
+                      }}
+                    >
+                      + add to X
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <label>
             Data file (.csv, .xlsx, .xls)
             <input
@@ -403,6 +440,11 @@ function SubmitRoute() {
                 {preview.columnCount} columns
               </span>
             </div>
+            {preview.transpose_warning && (
+              <div className="transpose-warning" role="alert">
+                {preview.transpose_warning}
+              </div>
+            )}
             <div className="preview-table-wrap">
               <table className="preview-table">
                 <thead>

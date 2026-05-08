@@ -8,8 +8,11 @@ import statsmodels.formula.api as smf
 from .normalize import _json_safe_float, normalize_statsmodels_result
 
 
-def _formula_term(column: str) -> str:
-    return f"Q({column!r})"
+def _formula_term(column: str, categorical: bool = False) -> str:
+    quoted = f"Q({column!r})"
+    if categorical:
+        return f"C({quoted})"
+    return quoted
 
 
 def _ols_formula(y: str, terms: list[str]) -> str:
@@ -47,11 +50,13 @@ def _ensure_numeric_x(frame: pd.DataFrame, x: list[str]) -> pd.DataFrame:
 
 
 def run_ols(
-    frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str
+    frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
+    categorical_x: set[str] | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
-    formula = _ols_formula(y, [_formula_term(column) for column in x])
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     original = smf.ols(formula=formula, data=frame).fit()
     fitted = original.get_robustcov_results(cov_type="HC1") if robust else original
     result = normalize_statsmodels_result(fitted, model_id)
@@ -60,11 +65,13 @@ def run_ols(
 
 
 def run_logit(
-    frame: pd.DataFrame, y: str, x: list[str], model_id: str
+    frame: pd.DataFrame, y: str, x: list[str], model_id: str,
+    categorical_x: set[str] | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
-    formula = _ols_formula(y, [_formula_term(column) for column in x])
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     try:
         fitted = smf.logit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
@@ -83,7 +90,9 @@ def run_logit(
 
 
 def run_poisson(
-    frame: pd.DataFrame, y: str, x: list[str], model_id: str
+    frame: pd.DataFrame, y: str, x: list[str], model_id: str,
+    exposure_col: str | None = None,
+    categorical_x: set[str] | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     series = frame[y].dropna()
@@ -102,14 +111,42 @@ def run_poisson(
             f"Poisson model requires integer y (counts), "
             f"but column '{y}' has non-integer values."
         )
-    formula = _ols_formula(y, [_formula_term(column) for column in x])
-    fitted = smf.poisson(formula=formula, data=frame).fit(disp=False, maxiter=100)
+
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+
+    exposure_actually_used = False
+    if exposure_col is not None and exposure_col in frame.columns:
+        exposure_vals = frame[exposure_col].values
+        if (exposure_vals <= 0).any():
+            import warnings
+            warnings.warn(
+                f"Exposure column '{exposure_col}' contains non-positive values "
+                f"(zeros or negatives). Falling back to standard Poisson "
+                f"without exposure adjustment."
+            )
+            fitted = smf.poisson(formula=formula, data=frame).fit(disp=False, maxiter=100)
+        else:
+            from statsmodels.genmod.families import Poisson
+            fitted = smf.glm(
+                formula=formula, data=frame,
+                family=Poisson(),
+                exposure=exposure_vals,
+            ).fit(disp=False, maxiter=100)
+            exposure_actually_used = True
+    else:
+        fitted = smf.poisson(formula=formula, data=frame).fit(disp=False, maxiter=100)
+
     if not getattr(fitted, "converged", True):
         raise ValueError(
             f"Poisson model {model_id} did not converge."
         )
     result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "poisson"
+    if exposure_actually_used:
+        result["model_type"] = "poisson_rate"
+        result["exposure_col"] = exposure_col
+    else:
+        result["model_type"] = "poisson"
     return result, fitted
 
 
@@ -120,9 +157,11 @@ def run_fixed_effects(
     entity: str,
     time: str | None,
     model_id: str,
+    categorical_x: set[str] | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
-    terms = [_formula_term(column) for column in x]
+    cat = categorical_x or set()
+    terms = [_formula_term(column, column in cat) for column in x]
     terms.append(f"C({_formula_term(entity)})")
     if time is not None:
         terms.append(f"C({_formula_term(time)})")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -12,14 +13,17 @@ def build_claims(
     suspicious_vars: set[str] | None = None,
     model_type: str = "ols",
     reliability_caveat: str = "",
+    categorical_vars: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     claims: list[dict[str, Any]] = []
     is_logit = model_type in ("logit",)
-    is_poisson = model_type in ("poisson",)
+    is_poisson = model_type in ("poisson", "poisson_rate")
     if binary_vars is None:
         binary_vars = set()
     if suspicious_vars is None:
         suspicious_vars = set()
+    if categorical_vars is None:
+        categorical_vars = set()
 
     for model_result in model_results:
         model_id = str(model_result.get("model_id", "model"))
@@ -27,6 +31,7 @@ def build_claims(
         if not isinstance(coefficients, Mapping):
             continue
         dummy_count = 0
+        seen_categorical_claims: set[str] = set()
         for term, coefficient in coefficients.items():
             if term == "Intercept" or not isinstance(coefficient, Mapping):
                 continue
@@ -37,6 +42,31 @@ def build_claims(
             numeric_estimate = _as_float(estimate)
             if numeric_estimate is None:
                 continue
+
+            # Handle explicitly C()-encoded categorical variables
+            cat_base = _parse_categorical_term(term)
+            if cat_base is not None and cat_base in categorical_vars:
+                if cat_base not in seen_categorical_claims:
+                    seen_categorical_claims.add(cat_base)
+                    if is_poisson:
+                        cat_claim = (
+                            f"In {model_id}, {cat_base} is a categorical variable "
+                            f"(dummy-coded). Each coefficient represents the ratio of "
+                            f"expected count relative to the reference category."
+                        )
+                    else:
+                        cat_claim = (
+                            f"In {model_id}, {cat_base} is a categorical variable "
+                            f"(dummy-coded). Each coefficient represents the difference "
+                            f"from the reference category."
+                        )
+                    claims.append({
+                        "claim": cat_claim,
+                        "source_id": f"model_results.{model_id}.categorical.{cat_base}",
+                        "confidence": 1.0,
+                    })
+                continue
+
             p_value = _as_float(coefficient.get("p_value"))
             significance = _significance_text(p_value)
 
@@ -44,7 +74,36 @@ def build_claims(
                 dummy_count += 1
                 continue
 
-            if term in binary_vars or term in suspicious_vars:
+            irr_val = _get_irr(model_result, term)
+            irr_rescale_hint = _get_irr_rescale_hint(model_result, term)
+
+            pv_str = _format_pvalue(p_value)
+            if is_poisson:
+                if irr_rescale_hint:
+                    irr_display = f"{irr_val:.6f}" if irr_val is not None else ""
+                else:
+                    irr_display = _format_or(irr_val)
+                if term in binary_vars or term in suspicious_vars:
+                    claim_text = (
+                        f"In {model_id}, holding other variables constant, "
+                        f"the presence of {term} is associated with "
+                        f"{irr_display}x the expected count compared to its absence "
+                        f"(IRR = {irr_display}, p = {pv_str}); "
+                        f"{significance}."
+                    )
+                else:
+                    direction = "increase" if numeric_estimate > 0 else "decrease"
+                    claim_text = (
+                        f"In {model_id}, holding other variables constant, "
+                        f"each one-unit increase in {term} is associated with "
+                        f"a multiplicative {direction} of {irr_display}x "
+                        f"in the expected count "
+                        f"(IRR = {irr_display}, p = {pv_str}); "
+                        f"{significance}."
+                    )
+                if irr_rescale_hint:
+                    claim_text += f" ({irr_rescale_hint})"
+            elif term in binary_vars or term in suspicious_vars:
                 if is_logit:
                     or_val = _format_or(_exp_float(numeric_estimate))
                     claim_text = (
@@ -96,7 +155,7 @@ def build_claims(
                 "source_id": source_id,
             }
             if p_value is not None:
-                claim["confidence"] = max(0.0, min(1.0, 1.0 - p_value))
+                claim["confidence"] = None
             claims.append(claim)
         if dummy_count > 0:
             claims.append({
@@ -137,7 +196,8 @@ def build_claims(
 
     for warning in warnings:
         message = warning.get("message") if isinstance(warning, Mapping) else str(warning)
-        claims.append({"claim": message, "source_id": "errors.json", "confidence": 1.0})
+        source_id = _issue_source_id(warning)
+        claims.append({"claim": message, "source_id": source_id, "confidence": 1.0})
 
     if _count_coefficients(model_results) > 5:
         claims.append({
@@ -152,6 +212,17 @@ def build_claims(
         })
 
     return claims
+
+
+def _issue_source_id(issue: Any) -> str:
+    if not isinstance(issue, Mapping):
+        return "errors.json"
+    severity = issue.get("severity")
+    if severity == "WARNING":
+        return "warnings.json"
+    if severity == "INFO":
+        return "diagnostics.warnings"
+    return "errors.json"
 
 
 def _count_coefficients(model_results: Iterable[Mapping[str, Any]]) -> int:
@@ -169,6 +240,25 @@ def _is_dummy_term(term: str) -> bool:
 
 def _is_categorical_term(term: str) -> bool:
     return term.startswith("C(")
+
+
+def _parse_categorical_term(term: str) -> str | None:
+    """Extract original column name from a C(Q('col'))[T.val] term.
+
+    Returns the column name if the term is a C()-encoded categorical term,
+    or None if the term does not match the expected pattern.
+    """
+    if not term.startswith("C(") or "[T." not in term:
+        return None
+    end_of_inner = term.find(")[T.")
+    if end_of_inner == -1:
+        return None
+    inner = term[2:end_of_inner]
+    # Handle C(Q('col')) and C(Q("col")) forms
+    m = re.match(r"""^Q\(['\"](.+?)['\"]\)$""", inner)
+    if m:
+        return m.group(1)
+    return None
 
 
 def _as_float(value: Any) -> float | None:
@@ -195,6 +285,37 @@ def _format_or(or_val: float | None) -> str:
     if or_val >= 10:
         return f"{or_val:.1f}"
     return f"{or_val:.4f}"
+
+
+def _get_irr(model_result: Mapping[str, Any], term: str) -> float | None:
+    """Extract IRR for a term from the model result, if available."""
+    irr_dict = model_result.get("irr", {})
+    if not isinstance(irr_dict, Mapping):
+        return None
+    term_irr = irr_dict.get(term, {})
+    if not isinstance(term_irr, Mapping):
+        return None
+    irr = _as_float(term_irr.get("irr"))
+    return irr
+
+
+def _get_irr_rescale_hint(model_result: Mapping[str, Any], term: str) -> str | None:
+    """Extract rescale hint from the IRR entry for a term, if present."""
+    irr_dict = model_result.get("irr", {})
+    if not isinstance(irr_dict, Mapping):
+        return None
+    term_irr = irr_dict.get(term, {})
+    if not isinstance(term_irr, Mapping):
+        return None
+    return term_irr.get("irr_rescale_hint")
+
+
+def _format_pvalue(p_value: float | None) -> str:
+    if p_value is None:
+        return "N/A"
+    if p_value < 0.001:
+        return "< 0.001"
+    return f"{p_value:.4f}"
 
 
 def _significance_text(p_value: float | None) -> str:

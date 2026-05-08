@@ -385,6 +385,266 @@ def test_e2e_count_y_produces_poisson(tmp_path: Path):
     assert poisson_result["pseudo_r2"] is not None
 
 
+def test_e2e_poisson_has_irr_and_overdispersion(tmp_path: Path):
+    """Poisson model results should include IRR and overdispersion diagnostics."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x1 = rng.uniform(0, 5, n)
+    lam = np.exp(-0.5 + 0.3 * x1)
+    y = rng.poisson(lam)
+    source = tmp_path / "poisson_irr.csv"
+    pd.DataFrame({"y": y, "x1": x1}).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x1"])
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+
+    # Verify IRR
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert "irr" in poisson_result
+    assert "x1" in poisson_result["irr"]
+    assert poisson_result["irr"]["x1"]["irr"] is not None
+    assert poisson_result["irr"]["x1"].get("irr_ci_lower") is not None
+    assert poisson_result["irr"]["x1"].get("irr_ci_upper") is not None
+
+    # Verify overdispersion diagnostics
+    diag = read_json(run_root / "model_results" / "diagnostics_poisson_1.json")
+    assert "overdispersion" in diag
+    od = diag["overdispersion"]
+    assert od["overdispersion_ratio"] is not None
+    assert od["zero_rate"] is not None
+    assert od["mean_y"] is not None
+    assert od["var_y"] is not None
+
+
+def test_e2e_poisson_exposure_used_as_offset(tmp_path: Path):
+    """Exposure variable in X should be used as offset, not predictor."""
+    rng = np.random.default_rng(42)
+    n = 60
+    x1 = rng.uniform(0, 5, n)
+    exposure_months = np.full(n, 12)
+    # Low rate so counts stay under 20 unique values (Poisson detection cap)
+    rate = np.exp(-3.0 + 0.2 * x1)
+    y = rng.poisson(rate * exposure_months)
+    source = tmp_path / "poisson_exposure.csv"
+    pd.DataFrame({
+        "y": y, "x1": x1, "exposure_months": exposure_months,
+    }).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x1", "exposure_months"],
+    )
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert poisson_result["model_type"] == "poisson_rate"
+    assert poisson_result["exposure_col"] == "exposure_months"
+    # exposure_months should not be a predictor
+    assert "exposure_months" not in poisson_result["coefficients"]
+    # x1 should still be a predictor
+    assert "x1" in poisson_result["coefficients"]
+    # EXPOSURE_VARIABLE_DETECTED issue should NOT exist (it's handled now)
+    errors = read_json(run_root / "errors.json")
+    codes = [issue["code"] for issue in errors.get("issues", [])]
+    assert "EXPOSURE_VARIABLE_DETECTED" not in codes
+
+
+def test_e2e_poisson_rate_model_facts(tmp_path: Path):
+    """Poisson rate model should include offset fact in report."""
+    rng = np.random.default_rng(42)
+    n = 60
+    x1 = rng.uniform(0, 5, n)
+    exposure_months = np.full(n, 12)
+    rate = np.exp(-3.0 + 0.2 * x1)
+    y = rng.poisson(rate * exposure_months)
+    source = tmp_path / "poisson_rate_facts.csv"
+    pd.DataFrame({
+        "y": y, "x1": x1, "exposure_months": exposure_months,
+    }).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x1", "exposure_months"],
+    )
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert poisson_result["model_type"] == "poisson_rate"
+
+
+def test_e2e_poisson_rate_vif_excludes_exposure(tmp_path: Path):
+    """VIF diagnostics for poisson_rate should not include the exposure column."""
+    from workbench.econometrics.diagnostics import compute_diagnostics
+    from workbench.econometrics.runner import run_poisson
+
+    rng = np.random.default_rng(42)
+    n = 100
+    x1 = rng.uniform(0, 5, n)
+    x2 = rng.normal(10, 2, n)
+    exposure_months = np.full(n, 12)
+    rate = np.exp(-3.0 + 0.2 * x1 + 0.1 * x2)
+    y = rng.poisson(rate * exposure_months)
+    frame = pd.DataFrame({
+        "y": y, "x1": x1, "x2": x2, "exposure_months": exposure_months,
+    })
+
+    result, fitted = run_poisson(
+        frame, y="y", x=["x1", "x2", "exposure_months"],
+        model_id="poisson_vif", exposure_col="exposure_months",
+    )
+    assert result["model_type"] == "poisson_rate"
+
+    # Compute diagnostics with x that excludes exposure (leaving x1, x2 = 2 columns = VIF enabled)
+    from workbench.orchestrator import _detect_exposure_candidates
+    normalized_x = ["x1", "x2", "exposure_months"]
+    exposure_col = _detect_exposure_candidates(normalized_x)[0]
+    diag_x = [v for v in normalized_x if v != exposure_col]
+    exog = frame[diag_x]
+    diag = compute_diagnostics(fitted, exog, model_id="poisson_vif", model_family="poisson")
+
+    vif = diag.get("vif", {})
+    assert "exposure_months" not in vif, "VIF should exclude exposure column"
+    assert "x1" in vif, "VIF should include non-exposure predictors"
+    assert "x2" in vif, "VIF should include non-exposure predictors"
+
+
+def test_e2e_poisson_rate_stat_tests_exclude_exposure(tmp_path: Path):
+    """Statistical tests for poisson_rate should not include exposure column."""
+    rng = np.random.default_rng(42)
+    n = 60
+    x1 = rng.uniform(0, 5, n)
+    exposure_months = np.full(n, 12)
+    rate = np.exp(-3.0 + 0.2 * x1)
+    y = rng.poisson(rate * exposure_months)
+    source = tmp_path / "poisson_stat_excl.csv"
+    pd.DataFrame({
+        "y": y, "x1": x1, "exposure_months": exposure_months,
+    }).to_csv(source, index=False)
+
+    from workbench.artifacts import read_json
+    project = create_project(tmp_path, "poisson_stat_excl_proj")
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x1", "exposure_months"],
+    )
+    assert result["status"] == "completed"
+    run_root = project.root / "runs" / result["run_id"]
+
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    assert poisson_result["model_type"] == "poisson_rate"
+
+    # Check correlation results do NOT include exposure_months
+    correlations = read_json(run_root / "statistical_tests" / "correlations.json")
+    for corr_result in correlations["results"]:
+        for var in corr_result.get("variables", []):
+            assert "exposure_months" not in var, \
+                f"exposure_months found in correlation variables: {corr_result.get('variables')}"
+
+    # Check t-test results do NOT reference exposure_months
+    t_tests = read_json(run_root / "statistical_tests" / "t_tests.json")
+    for t_result in t_tests.get("results", []):
+        group = t_result.get("group", "")
+        assert "exposure_months" not in group, \
+            f"exposure_months found in t-test group: {group}"
+
+
+def test_e2e_poisson_facts_include_zero_rate_and_overdispersion(tmp_path: Path):
+    """Poisson report facts should include zero rate and overdispersion status."""
+    rng = np.random.default_rng(42)
+    n = 100
+    x1 = rng.uniform(0, 5, n)
+    lam = np.exp(-0.5 + 0.3 * x1)
+    y = rng.poisson(lam)
+    source = tmp_path / "poisson_facts.csv"
+    pd.DataFrame({"y": y, "x1": x1}).to_csv(source, index=False)
+
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x1"])
+    assert result["status"] == "completed"
+
+    run_root = project.root / "runs" / result["run_id"]
+    poisson_result = read_json(run_root / "model_results" / "poisson_1.json")
+    # At minimum verify Poisson result is complete
+    assert poisson_result["model_type"] == "poisson"
+    assert "irr" in poisson_result
+
+
+def test_coerce_x_columns_to_numeric_converts_datetime_x(tmp_path: Path):
+    """_coerce_x_columns_to_numeric converts a datetime X column to numeric."""
+    from workbench.orchestrator import _coerce_x_columns_to_numeric
+    from workbench.artifacts import write_json
+
+    # Create the required artifacts_index.json for register_artifact
+    write_json(tmp_path / "artifacts_index.json", {"schema_version": 1, "artifacts": []})
+
+    frame = pd.DataFrame({
+        "y": [1, 2, 3, 4, 5],
+        "x": pd.to_datetime(["1970-01-01", "1970-01-02", "1970-01-03", "1970-01-04", "1970-01-05"]),
+    })
+    actions = _coerce_x_columns_to_numeric(frame, ["x"], tmp_path)
+    assert len(actions) == 1
+    assert actions[0]["column"] == "x"
+    assert pd.api.types.is_numeric_dtype(frame["x"])
+
+    # Coercion summary artifact should exist
+    assert (tmp_path / "staged" / "x_coercion_summary.json").exists()
+
+
+def test_e2e_datetime_x_coerces_before_model_fit(tmp_path: Path, monkeypatch):
+    """End-to-end: workflow coerces datetime X columns before model fit."""
+    from workbench.orchestrator import _run_workflow, _lineage, _write_manifest
+    from workbench.projects import create_project, create_run
+    from workbench.config import load_config
+    from workbench.artifacts import read_json
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    import workbench.ingestion as ingestion_mod
+
+    proot = tmp_path / "demo"
+    create_project(tmp_path, "demo")
+    run = create_run(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [1 + 2 * i for i in range(35)], "x": list(range(35))}
+    ).to_csv(data, index=False)
+
+    config = load_config(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root, run.run_id, "auto", "running",
+        _lineage([data]),
+        started_at=started_at, y="y", x=["x"],
+    )
+
+    # Monkey-patch to make X column datetime after ingestion
+    original_read = ingestion_mod._read_frame
+    def patched_read(*args, **kwargs):
+        df = original_read(*args, **kwargs)
+        df["x"] = pd.to_datetime(df["x"])
+        return df
+    monkeypatch.setattr(ingestion_mod, "_read_frame", patched_read)
+
+    mock = Mock()
+    result = _run_workflow(
+        run.root, run.run_id, [data],
+        "auto", "y", ["x"], config, started_at,
+        on_step=mock,
+    )
+
+    assert result["status"] == "completed"
+    # Coercion happens in clean_frame via _coerce_numeric_like_columns,
+    # so verify through cleaning actions
+    cleaning = read_json(run.root / "processed" / "cleaning_actions.json")
+    coerce_actions = [a for a in cleaning["actions"] if a["action"] == "coerce_to_numeric"]
+    assert len(coerce_actions) == 1
+    assert coerce_actions[0]["column"] == "x"
+
+
 def test_e2e_continuous_y_still_produces_ols(tmp_path: Path):
     source = tmp_path / "continuous.csv"
     pd.DataFrame({

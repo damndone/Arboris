@@ -61,7 +61,7 @@
         <li>
           {{ claim.claim }}
           <span data-source-id="{{ claim.source_id }}">Source: {{ claim.source_id }}</span>
-          {% if claim.confidence is defined %}
+          {% if claim.confidence is defined and claim.confidence is not none %}
           <span>Confidence: {{ claim.confidence }}</span>
           {% endif %}
         </li>
@@ -87,7 +87,7 @@
           <tr>
             <td>{{ item.variable }}</td>
             <td>{{ "%.3f"|format(item.correlation) if item.correlation is not none else "—" }}</td>
-            <td>{{ "%.4f"|format(item.best_p_value) if item.best_p_value is not none else "—" }}</td>
+            <td>{% if item.best_p_value is none %}—{% elif item.best_p_value < 0.001 %}&lt; 0.001{% else %}{{ "%.4f"|format(item.best_p_value) }}{% endif %}</td>
             <td>{{ item.test_type or "—" }}</td>
             <td>
               {% if item.best_p_value is none %}
@@ -183,8 +183,8 @@
 
       {% set bp = diag.get("breusch_pagan", {}) %}
       {% if bp and bp.get("lm") is not none %}
-      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p = {{ "%.4f"|format(bp.p_value) }}
-      {% if bp.p_value < 0.05 %}— significant heteroskedasticity detected{% else %}— homoskedasticity not rejected{% endif %}</p>
+      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p {% if bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}
+      {% if bp.p_value < 0.05 %}— significant heteroskedasticity detected{% if 'robust' in diag.get('model_type', '') %} — robust standard errors applied for inference{% endif %}{% else %}— homoskedasticity not rejected{% endif %}</p>
       {% endif %}
 
       {% set dw = diag.get("durbin_watson") %}
@@ -195,7 +195,7 @@
 
       {% set jb = diag.get("jarque_bera", {}) %}
       {% if jb and jb.get("statistic") is not none %}
-      <p>Jarque-Bera (normality): JB = {{ "%.2f"|format(jb.statistic) }}, p = {{ "%.4f"|format(jb.p_value) }}
+      <p>Jarque-Bera (normality): JB = {{ "%.2f"|format(jb.statistic) }}, p {% if jb.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(jb.p_value) }}{% endif %}
       {% if jb.p_value < 0.05 %}— residuals are not normally distributed{% else %}— residuals appear normal{% endif %}</p>
       {% endif %}
 
@@ -217,23 +217,60 @@
     </section>
     {% endif %}
 
+    {% if report.overdispersion %}
+    <section>
+      <h3>Poisson overdispersion</h3>
+      <p>Overdispersion ratio: {{ "%.4f"|format(report.overdispersion.overdispersion_ratio) if report.overdispersion.overdispersion_ratio is not none else "N/A" }}</p>
+      <p>Zero rate: {{ "%.1f"|format(report.overdispersion.zero_rate * 100) if report.overdispersion.zero_rate is not none else "N/A" }}%</p>
+      <p>Mean y: {{ "%.4f"|format(report.overdispersion.mean_y) }}, Variance y: {{ "%.4f"|format(report.overdispersion.var_y) }}</p>
+      {% if report.overdispersion.zero_inflation_hint %}<p>Note: {{ report.overdispersion.zero_inflation_hint }}</p>{% endif %}
+      {% if report.overdispersion.warning %}<p>Warning: {{ report.overdispersion.warning }}</p>{% endif %}
+    </section>
+    {% endif %}
+
+    {% set blockers = report.warnings | selectattr("severity", "equalto", "BLOCKER") | list %}
+    {% set warnings = report.warnings | selectattr("severity", "equalto", "WARNING") | list %}
+    {% set infos = report.warnings | rejectattr("severity", "defined") | list + report.warnings | selectattr("severity", "equalto", "INFO") | list %}
+
+    {% if blockers %}
+    <section>
+      <h2>Errors</h2>
+      <ul>
+        {% for issue in blockers %}
+        <li>{{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if warnings %}
     <section>
       <h2>Warnings</h2>
       <ul>
-        {% for warning in report.warnings %}
-        <li>
-          {% if warning is mapping %}
-          {{ warning.message }}
-          <span data-source-id="{{ warning.source_id | default('errors.json') }}">
-            Source: {{ warning.source_id | default('errors.json') }}
-          </span>
-          {% else %}
-          {{ warning }}
-          <span data-source-id="errors.json">Source: errors.json</span>
-          {% endif %}
+        {% for issue in warnings %}
+        <li>{{ issue.message }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if infos %}
+    <section>
+      <h2>Diagnostics</h2>
+      <ul>
+        {% for issue in infos %}
+        <li>{{ issue.message }}
+        {% if issue.evidence and issue.evidence.action_suggestions %}
+          <ul>
+            {% for suggestion in issue.evidence.action_suggestions %}
+            <li>{{ suggestion }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
         </li>
         {% endfor %}
       </ul>
     </section>
+    {% endif %}
   </body>
 </html>

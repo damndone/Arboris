@@ -34,6 +34,14 @@ function formatNumber(value: number | null | undefined): string {
     : "—";
 }
 
+function formatPValue(
+  value: number | null | undefined,
+  display: string | null | undefined,
+): string {
+  if (display) return display;
+  return formatNumber(value);
+}
+
 function coefficientRows(detail: RunDetail) {
   return (detail.model_results ?? []).flatMap((model) =>
     Object.entries(model.coefficients ?? {})
@@ -44,8 +52,69 @@ function coefficientRows(detail: RunDetail) {
         estimate: coefficient.estimate,
         stdError: coefficient.std_error,
         pValue: coefficient.p_value,
+        pValueDisplay: coefficient.p_value_display,
       })),
   );
+}
+
+function normalizeIssues(detail: RunDetail): IssueRecord[] {
+  const issues = detail.errors?.issues ?? [];
+  const dummyCodedColumns = dummyCodedColumnsFromModels(detail);
+  if (dummyCodedColumns.size === 0) return issues;
+
+  const normalized: IssueRecord[] = [];
+  const emitted = new Set<string>();
+  for (const issue of issues) {
+    const column =
+      typeof issue.evidence?.column === "string" ? issue.evidence.column : null;
+    if (issue.code === "CATEGORICAL_CANDIDATE" && column && dummyCodedColumns.has(column)) {
+      if (!emitted.has(column)) {
+        normalized.push(autoDummyCodedIssue(column));
+        emitted.add(column);
+      }
+      continue;
+    }
+    normalized.push(issue);
+  }
+
+  for (const column of dummyCodedColumns) {
+    const alreadyPresent = normalized.some(
+      (issue) =>
+        issue.code === "CATEGORICAL_AUTO_DUMMY_CODED" &&
+        issue.evidence?.column === column,
+    );
+    if (!alreadyPresent && !emitted.has(column)) {
+      normalized.push(autoDummyCodedIssue(column));
+    }
+  }
+  return normalized;
+}
+
+function dummyCodedColumnsFromModels(detail: RunDetail): Set<string> {
+  const columns = new Set<string>();
+  for (const model of detail.model_results ?? []) {
+    for (const term of Object.keys(model.coefficients ?? {})) {
+      const parsed = parseDummyCodedColumn(term);
+      if (parsed) columns.add(parsed);
+    }
+  }
+  return columns;
+}
+
+function parseDummyCodedColumn(term: string): string | null {
+  const single = /^C\(Q\('(.+?)'\)\)\[T\./.exec(term);
+  if (single) return single[1];
+  const double = /^C\(Q\("(.+?)"\)\)\[T\./.exec(term);
+  return double?.[1] ?? null;
+}
+
+function autoDummyCodedIssue(column: string): IssueRecord {
+  return {
+    severity: "INFO",
+    code: "CATEGORICAL_AUTO_DUMMY_CODED",
+    message: `Column '${column}' was detected as categorical and automatically dummy-coded.`,
+    evidence: { column, preprocessing: "dummy_coded" },
+  };
 }
 
 type ArtifactsState =
@@ -172,7 +241,10 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
     return <p className="muted">Loading run…</p>;
   }
 
-  const issues: IssueRecord[] = detail.errors?.issues ?? [];
+  const issues: IssueRecord[] = normalizeIssues(detail);
+  const problemIssues = issues.filter((issue) => issue.severity === "BLOCKER");
+  const warningIssues = issues.filter((issue) => issue.severity === "WARNING");
+  const infoIssues = issues.filter((issue) => issue.severity === "INFO");
   const coefficients = coefficientRows(detail);
 
   return (
@@ -258,7 +330,7 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
                     <td>{row.term}</td>
                     <td>{formatNumber(row.estimate)}</td>
                     <td>{formatNumber(row.stdError)}</td>
-                    <td>{formatNumber(row.pValue)}</td>
+                    <td>{formatPValue(row.pValue, row.pValueDisplay)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -266,13 +338,39 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           </div>
         </section>
       )}
-      {issues.length > 0 && (
+      {problemIssues.length > 0 && (
         <section className="panel panel-error" role="alert">
           <strong>Issues</strong>
           <ul>
-            {issues.map((issue, index) => (
+            {problemIssues.map((issue, index) => (
               <li key={index}>
                 <strong>{issue.code ?? "ISSUE"}</strong>:{" "}
+                <span>{issue.message ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {warningIssues.length > 0 && (
+        <section className="panel" aria-label="warnings">
+          <strong>Warnings</strong>
+          <ul>
+            {warningIssues.map((issue, index) => (
+              <li key={index}>
+                <strong>{issue.code ?? "WARNING"}</strong>:{" "}
+                <span>{issue.message ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {infoIssues.length > 0 && (
+        <section className="panel" aria-label="diagnostics">
+          <strong>Diagnostics</strong>
+          <ul>
+            {infoIssues.map((issue, index) => (
+              <li key={index}>
+                <strong>{issue.code ?? "INFO"}</strong>:{" "}
                 <span>{issue.message ?? ""}</span>
               </li>
             ))}

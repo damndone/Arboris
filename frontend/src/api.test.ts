@@ -5,6 +5,7 @@ import {
   fetchRunDetail,
   fetchRuns,
   fetchRunArtifacts,
+  runBatchWorkflow,
   previewFile,
   reportUrl,
   artifactDownloadUrl,
@@ -151,6 +152,45 @@ test("artifactDownloadUrl encodes project_root and ids", () => {
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
   expect(url).toBe("/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+});
+
+test("runBatchWorkflow posts y_list and x as form data", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    jsonResponse({
+      status: "completed",
+      runs: [
+        {
+          y: "continuous_score_y",
+          run_id: "run-1",
+          status: "completed",
+          model_id: "ols_1",
+          model_type: "ols_robust",
+        },
+      ],
+    }),
+  );
+  const file = new File(["y,x\n1,2\n"], "sample.csv", { type: "text/csv" });
+
+  const result = await runBatchWorkflow(
+    "/tmp/demo",
+    "auto",
+    ["continuous_score_y", "binary_success_y"],
+    ["x1", "x2"],
+    file,
+  );
+
+  expect(fetch).toHaveBeenCalledWith(
+    "/runs/batch",
+    expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+  );
+  const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    .body as FormData;
+  expect(body.get("project_root")).toBe("/tmp/demo");
+  expect(body.get("mode")).toBe("auto");
+  expect(body.get("y_list")).toBe("continuous_score_y,binary_success_y");
+  expect(body.get("x")).toBe("x1,x2");
+  expect(body.get("file")).toBe(file);
+  expect(result.runs[0].model_type).toBe("ols_robust");
 });
 
 test("previewFile parses CSV and suggests y/x columns", async () => {
