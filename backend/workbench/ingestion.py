@@ -21,7 +21,32 @@ def _ensure_unique_basenames(paths: list[Path]) -> None:
         raise ValueError(f"duplicate input filenames are not allowed: {names}")
 
 
-def _read_frame(path: Path, config: WorkbenchConfig) -> pd.DataFrame:
+_NUMERIC_HINT_TOKENS = frozenset({
+    "year", "month", "age", "miles", "density", "score", "count",
+    "claims", "days", "number", "num", "amount", "rate", "price",
+    "cost", "value", "size", "weight", "volume", "sum",
+})
+
+
+def _coerce_datetime_to_numeric(frame: pd.DataFrame) -> None:
+    for col in frame.columns:
+        if not pd.api.types.is_datetime64_any_dtype(frame[col]):
+            continue
+        if not any(token in col.lower() for token in _NUMERIC_HINT_TOKENS):
+            continue
+        numeric = pd.to_numeric(frame[col], errors="coerce")
+        good = numeric.notna().sum()
+        total = len(numeric)
+        if total > 0 and (good / total) >= 0.9:
+            frame[col] = numeric
+
+
+def _read_frame(
+    path: Path,
+    config: WorkbenchConfig,
+    sheet_name: str | None = None,
+    transpose: bool = False,
+) -> pd.DataFrame:
     suffix = path.suffix.lower()
     if suffix == ".csv":
         frame = pd.read_csv(path, nrows=config.max_rows + 1)
@@ -29,16 +54,26 @@ def _read_frame(path: Path, config: WorkbenchConfig) -> pd.DataFrame:
         with pd.ExcelFile(path) as excel:
             if len(excel.sheet_names) > config.max_excel_sheets:
                 raise ValueError(f"excel sheet count exceeds limit: {path.name}")
-            frame = pd.read_excel(excel, sheet_name=excel.sheet_names[0], nrows=config.max_rows + 1)
+            target_sheet = sheet_name if sheet_name else excel.sheet_names[0]
+            frame = pd.read_excel(excel, sheet_name=target_sheet, nrows=config.max_rows + 1)
+        _coerce_datetime_to_numeric(frame)
     else:
         raise ValueError(f"unsupported file type: {path.suffix}")
     if len(frame) > config.max_rows:
         raise ValueError(f"row count exceeds limit: {path.name}")
+    if transpose:
+        frame = frame.transpose()
+        frame.columns = frame.iloc[0]
+        frame = frame.iloc[1:].reset_index(drop=True)
     return frame
 
 
 def ingest_files(
-    paths: list[Path], run_root: Path, config: WorkbenchConfig
+    paths: list[Path],
+    run_root: Path,
+    config: WorkbenchConfig,
+    sheet_name: str | None = None,
+    transpose: bool = False,
 ) -> dict[str, pd.DataFrame]:
     if len(paths) > config.max_upload_files:
         raise ValueError(
@@ -50,7 +85,7 @@ def ingest_files(
         size_gb = path.stat().st_size / (1024**3)
         if size_gb > config.max_single_file_gb:
             raise ValueError(f"file exceeds size limit: {path.name}")
-        frame = _read_frame(path, config)
+        frame = _read_frame(path, config, sheet_name, transpose)
         target = run_root / "raw_snapshot" / path.name
         resolved_target = target.resolve()
         raw_snapshot_root = (run_root / "raw_snapshot").resolve()

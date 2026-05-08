@@ -22,11 +22,42 @@ def test_claims_have_source_ids():
     assert claims[0]["source_id"] == "model_results.regression_1.coefficients.x"
 
 
-def test_warning_claims_bind_to_errors_source():
-    claims = build_claims([], warnings=["High missingness"])
+def test_claims_include_magnitude_significance_and_r_squared():
+    model_result = {
+        "model_id": "ols_1",
+        "r_squared": 0.834,
+        "coefficients": {
+            "x": {
+                "estimate": 2.5,
+                "p_value": 0.04,
+                "source_id": "model_results.ols_1.coefficients.x",
+            }
+        },
+    }
+
+    claims = build_claims([model_result], warnings=[])
+
+    assert "one-unit increase in x" in claims[0]["claim"]
+    assert "2.5000" in claims[0]["claim"]
+    assert "5% level" in claims[0]["claim"]
+    assert claims[1]["claim"] == (
+        "Model ols_1 (R²) explains 83.4% of dependent-variable variation."
+    )
+
+
+def test_warning_claims_bind_to_severity_aware_sources():
+    claims = build_claims([], warnings=[
+        {"severity": "BLOCKER", "message": "Bad data"},
+        {"severity": "WARNING", "message": "High correlation"},
+        {"severity": "INFO", "message": "Dummy-coded categorical"},
+        "Legacy issue",
+    ])
 
     assert claims == [
-        {"claim": "High missingness", "source_id": "errors.json", "confidence": 1.0}
+        {"claim": "Bad data", "source_id": "errors.json", "confidence": 1.0},
+        {"claim": "High correlation", "source_id": "warnings.json", "confidence": 1.0},
+        {"claim": "Dummy-coded categorical", "source_id": "diagnostics.warnings", "confidence": 1.0},
+        {"claim": "Legacy issue", "source_id": "errors.json", "confidence": 1.0},
     ]
 
 
@@ -110,3 +141,141 @@ def test_render_html_report_escapes_untrusted_content(tmp_path: Path):
     assert "<script>" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "&lt;b&gt;unsafe&lt;/b&gt;" in html
+
+
+def test_report_renders_statistical_tests_section(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "variable_importance": [
+            {
+                "variable": "x",
+                "correlation": 0.98,
+                "best_p_value": 0.001,
+                "test_type": "correlation",
+            }
+        ],
+        "statistical_tests": {
+            "y_related": [
+                {
+                    "label": "Pearson correlation: y vs x",
+                    "statistic": 0.98,
+                    "p_value": 0.001,
+                    "interpretation": "Statistic 0.9800; p = 0.001.",
+                    "source_id": "statistical_tests.correlations.y.x",
+                }
+            ],
+            "other": [],
+            "other_truncated": 0,
+        },
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+    pdf_path = export_pdf(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "<h2>Statistical tests</h2>" in html
+    assert "Pearson correlation: y vs x" in html
+    assert 'data-source-id="statistical_tests.correlations.y.x"' in html
+    assert b"Statistical tests" in pdf_path.read_bytes()
+
+
+def test_report_formats_tiny_variable_importance_p_values(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "variable_importance": [
+            {
+                "variable": "x",
+                "correlation": 0.31,
+                "best_p_value": 0.0000004,
+                "test_type": "correlation",
+            }
+        ],
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "&lt; 0.001" in html
+    assert "0.0000" not in html
+
+
+def test_report_formats_tiny_diagnostic_p_values(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "warnings": [],
+        "diagnostics": {
+            "ols_1": {
+                "breusch_pagan": {"lm": 25.0, "p_value": 0.0000002},
+                "jarque_bera": {"statistic": 40.0, "p_value": 0.0000003},
+            }
+        },
+    }
+
+    html_path = render_html_report(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "p &lt; 0.001" in html
+    assert "p = 0.0000" not in html
+
+
+def test_report_renders_descriptive_statistics_section(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    report = {
+        "title": "Demo Report",
+        "facts": [],
+        "claims": [],
+        "descriptive_stats": [
+            {
+                "column": "y",
+                "dtype": "float64",
+                "count": 35,
+                "missing": 0,
+                "missing_rate": 0.0,
+                "unique_count": 35,
+                "mean": 10.5,
+                "std": 3.2,
+                "min": 1.0,
+                "max": 20.0,
+            },
+            {
+                "column": "x",
+                "dtype": "float64",
+                "count": 35,
+                "missing": 0,
+                "missing_rate": 0.0,
+                "unique_count": 35,
+                "mean": 5.25,
+                "std": 2.1,
+                "min": 0.0,
+                "max": 10.0,
+            },
+        ],
+        "statistical_tests": [],
+        "warnings": [],
+    }
+
+    html_path = render_html_report(report, run.root)
+    pdf_path = export_pdf(report, run.root)
+
+    html = html_path.read_text(encoding="utf-8")
+    assert "<h2>Descriptive statistics</h2>" in html
+    assert "y" in html
+    assert "float64" in html
+    assert "10.5" in html
+    assert "3.2" in html
+    assert b"Descriptive statistics" in pdf_path.read_bytes()

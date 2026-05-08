@@ -24,7 +24,17 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
     y -= 32
 
     y = _draw_section(pdf, "Facts", report.get("facts", []), y)
+    y = _draw_section(pdf, "Descriptive statistics", report.get("descriptive_stats", []), y)
     y = _draw_section(pdf, "Interpretation", report.get("claims", []), y)
+    st = report.get("statistical_tests")
+    if isinstance(st, Mapping):
+        y = _draw_section(pdf, "Statistical tests (outcome-related)", st.get("y_related", []), y)
+        other = st.get("other", [])
+        truncated = st.get("other_truncated", 0)
+        if other:
+            y = _draw_section(pdf, f"Other tests (+{truncated} truncated)", other, y)
+    else:
+        y = _draw_section(pdf, "Statistical tests", st or [], y)
     _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
 
@@ -74,7 +84,25 @@ def _draw_section(pdf: canvas.Canvas, title: str, items: Any, y: float) -> float
 def _report_item_text(item: Any) -> str:
     if not isinstance(item, Mapping):
         return str(item)
-    text = str(item.get("claim", item.get("message", "")))
+    if "column" in item and "dtype" in item:
+        dtype = item.get("dtype", "")
+        missing = item.get("missing", 0)
+        unique = item.get("unique_count", 0)
+        if item.get("mean") is not None:
+            return (
+                f"{item['column']} ({dtype}): "
+                f"mean={item['mean']:.4f} std={item['std']:.4f} "
+                f"min={item['min']:.4f} max={item['max']:.4f} "
+                f"missing={missing} unique={unique}"
+            )
+        return (
+            f"{item['column']} ({dtype}): "
+            f"missing={missing} unique={unique}"
+        )
+    if item.get("label") and item.get("interpretation"):
+        text = f"{item['label']}: {item['interpretation']}"
+    else:
+        text = str(item.get("claim", item.get("message", "")))
     source_id = item.get("source_id")
     if source_id:
         text = f"{text} [source: {source_id}]"

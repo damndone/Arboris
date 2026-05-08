@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
   ApiError,
+  connectRunEvents,
   fetchRunDetail,
   fetchRuns,
   fetchRunArtifacts,
+  runBatchWorkflow,
+  previewFile,
   reportUrl,
   artifactDownloadUrl,
 } from "./api";
+import * as XLSX from "xlsx";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -148,4 +152,164 @@ test("artifactDownloadUrl encodes project_root and ids", () => {
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
   expect(url).toBe("/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+});
+
+test("runBatchWorkflow posts y_list and x as form data", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    jsonResponse({
+      status: "completed",
+      runs: [
+        {
+          y: "continuous_score_y",
+          run_id: "run-1",
+          status: "completed",
+          model_id: "ols_1",
+          model_type: "ols_robust",
+        },
+      ],
+    }),
+  );
+  const file = new File(["y,x\n1,2\n"], "sample.csv", { type: "text/csv" });
+
+  const result = await runBatchWorkflow(
+    "/tmp/demo",
+    "auto",
+    ["continuous_score_y", "binary_success_y"],
+    ["x1", "x2"],
+    file,
+  );
+
+  expect(fetch).toHaveBeenCalledWith(
+    "/runs/batch",
+    expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+  );
+  const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    .body as FormData;
+  expect(body.get("project_root")).toBe("/tmp/demo");
+  expect(body.get("mode")).toBe("auto");
+  expect(body.get("y_list")).toBe("continuous_score_y,binary_success_y");
+  expect(body.get("x")).toBe("x1,x2");
+  expect(body.get("file")).toBe(file);
+  expect(result.runs[0].model_type).toBe("ols_robust");
+});
+
+test("previewFile parses CSV and suggests y/x columns", async () => {
+  const file = new File(
+    [
+      "outcome,treatment,revenue,firm_id,date\n",
+      "10,1,100,a,2026-01-01\n",
+      "12,0,120,b,2026-01-02\n",
+      "15,1,150,c,2026-01-03\n",
+    ],
+    "sample.csv",
+    { type: "text/csv" },
+  );
+
+  const preview = await previewFile(file);
+
+  expect(preview.fileName).toBe("sample.csv");
+  expect(preview.rowCount).toBe(3);
+  expect(preview.columnCount).toBe(5);
+  expect(preview.previewRows).toHaveLength(3);
+  expect(preview.suggestedY).toBe("outcome");
+  expect(preview.suggestedX).toEqual(["treatment", "revenue"]);
+  expect(preview.columns.find((column) => column.name === "outcome")).toMatchObject({
+    dtype: "numeric",
+    suggestedRole: "y",
+    missingRate: 0,
+    uniqueCount: 3,
+  });
+  expect(preview.columns.find((column) => column.name === "firm_id")).toMatchObject({
+    dtype: "string",
+    suggestedRole: "id",
+  });
+});
+
+test("previewFile parses XLSX first sheet", async () => {
+  const sheet = XLSX.utils.json_to_sheet([
+    { target: 1, x1: 10, x2: 100, user_id: "u1" },
+    { target: 2, x1: 20, x2: 200, user_id: "u2" },
+    { target: 3, x1: 30, x2: 300, user_id: "u3" },
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Data");
+  const data = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  const file = new File([data], "sample.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const preview = await previewFile(file);
+
+  expect(preview.fileName).toBe("sample.xlsx");
+  expect(preview.rowCount).toBe(3);
+  expect(preview.columnCount).toBe(4);
+  expect(preview.suggestedY).toBe("target");
+  expect(preview.suggestedX).toEqual(["x1", "x2"]);
+  expect(preview.columns.find((column) => column.name === "x1")).toMatchObject({
+    dtype: "numeric",
+    suggestedRole: "x",
+    mean: 20,
+  });
+});
+
+test("connectRunEvents wires step events and terminal close", () => {
+
+  const listeners: Record<string, (e: MessageEvent) => void> = {};
+  const mockSource = {
+    addEventListener: vi.fn(
+      (type: string, handler: (e: MessageEvent) => void) => {
+        listeners[type] = handler;
+      },
+    ),
+    close: vi.fn(),
+  };
+
+  const origEventSource = (globalThis as any).EventSource;
+  (globalThis as any).EventSource = vi.fn(() => mockSource);
+
+  const callbacks = {
+    onStepStart: vi.fn(),
+    onStepComplete: vi.fn(),
+    onStepBlocked: vi.fn(),
+    onTerminal: vi.fn(),
+    onError: vi.fn(),
+  };
+
+  const cleanup = connectRunEvents("/tmp/demo", "run-1", callbacks);
+
+  // Simulate step_start
+  listeners["step_start"]?.(
+    new MessageEvent("step_start", {
+      data: JSON.stringify({
+        event: "step_start", step: "ingestion", message: "Ingesting...",
+      }),
+    }),
+  );
+  expect(callbacks.onStepStart).toHaveBeenCalledWith("ingestion", "Ingesting...");
+
+  // Simulate step_blocked
+  listeners["step_blocked"]?.(
+    new MessageEvent("step_blocked", {
+      data: JSON.stringify({
+        event: "step_blocked", step: "validation", message: "Blocked",
+      }),
+    }),
+  );
+  expect(callbacks.onStepBlocked).toHaveBeenCalledWith("validation", "Blocked");
+
+  // Simulate terminal -> should close
+  listeners["workflow_completed"]?.(
+    new MessageEvent("workflow_completed", {
+      data: JSON.stringify({
+        event: "workflow_completed", status: "completed", message: "Done",
+      }),
+    }),
+  );
+  expect(callbacks.onTerminal).toHaveBeenCalledWith("completed", "Done");
+  expect(mockSource.close).toHaveBeenCalled();
+
+  // Cleanup
+  cleanup();
+
+  (globalThis as any).EventSource = origEventSource;
 });
