@@ -58,16 +58,18 @@ def build_diagnostic_summary(
         template_key = "coef_continuous_association"
         linked_issues: list[str] = []
 
-        if term in treatment_roles or _is_treatment_like(term, variable_roles):
-            if _has_proxy_correlation(term, proxy_vars, issue_dicts):
+        term_base = _term_base_name(term)
+
+        if term in treatment_roles or term_base in treatment_roles or term_base in _get_candidate_roles(variable_roles, "treatment"):
+            if _has_proxy_correlation(term_base, proxy_vars, issue_dicts):
                 interpretation_guide = "warn_joint"
                 template_key = "coef_warn_joint"
                 linked_issues = [i.get("issue_id", "") for i in issue_dicts
-                                 if i.get("code") == "TREATMENT_PROXY_CORRELATION" and term in i.get("variables", [])]
+                                 if i.get("code") == "TREATMENT_PROXY_CORRELATION" and term_base in i.get("variables", [])]
             else:
+                interpretation_guide = "treatment_direct"
                 template_key = "coef_binary_association"
 
-        term_base = _term_base_name(term)
         coeff_rows.append({
             "variable": term,
             "display_name": term_base,
@@ -81,7 +83,7 @@ def build_diagnostic_summary(
         })
 
     encoded_cat = [
-        {"variable": v, "n_levels": _n_levels(v, categorical_vars, coefficients), "reference": "1", "method": "treatment_dummy"}
+        {"variable": v, "n_levels": _n_levels(v, coefficients), "reference": "1", "method": "treatment_dummy"}
         for v in sorted(categorical_vars)
     ]
 
@@ -227,11 +229,6 @@ def _get_candidate_roles(roles: dict, role_name: str) -> set[str]:
     return result
 
 
-def _is_treatment_like(term: str, roles: dict) -> bool:
-    base = _term_base_name(term)
-    return base in _get_confirmed_roles(roles, "treatment") or base in _get_candidate_roles(roles, "treatment")
-
-
 def _has_proxy_correlation(term: str, proxy_vars: set[str], issues: list[dict]) -> bool:
     for issue in issues:
         if issue.get("code") == "TREATMENT_PROXY_CORRELATION":
@@ -253,7 +250,7 @@ def _term_base_name(term: str) -> str:
     return term
 
 
-def _n_levels(var: str, categorical_vars: set[str], coefficients: Mapping) -> int:
+def _n_levels(var: str, coefficients: Mapping) -> int:
     count = 0
     for term in coefficients:
         base = _term_base_name(term)
