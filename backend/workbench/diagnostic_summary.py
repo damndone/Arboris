@@ -59,8 +59,12 @@ def build_diagnostic_summary(
         linked_issues: list[str] = []
 
         term_base = _term_base_name(term)
+        cat_level = _cat_level(term)
 
-        if term in treatment_roles or term_base in treatment_roles or term_base in _get_candidate_roles(variable_roles, "treatment"):
+        if cat_level is not None and term_base in categorical_vars:
+            interpretation_guide = "categorical_level"
+            template_key = "coef_categorical"
+        elif term in treatment_roles or term_base in treatment_roles or term_base in _get_candidate_roles(variable_roles, "treatment"):
             if _has_proxy_correlation(term_base, proxy_vars, issue_dicts):
                 interpretation_guide = "warn_joint"
                 template_key = "coef_warn_joint"
@@ -73,6 +77,7 @@ def build_diagnostic_summary(
         coeff_rows.append({
             "variable": term,
             "display_name": term_base,
+            "level": cat_level or "",
             "estimate": round(float(est), 4),
             "std_error": round(float(std_err), 4) if std_err is not None else None,
             "p_value": round(float(p), 4) if p is not None else None,
@@ -224,7 +229,7 @@ def _get_candidate_roles(roles: dict, role_name: str) -> set[str]:
     result: set[str] = set()
     for var, info in roles.items():
         for r in info.get("roles", []):
-            if r.get("role") == role_name:
+            if r.get("role") == role_name and r.get("status") != "rejected":
                 result.add(var)
     return result
 
@@ -266,6 +271,15 @@ def _count_dummy_coefs(var: str, coefficients: Mapping) -> int:
         if base == var and "[T." in term:
             count += 1
     return count
+
+
+def _cat_level(term: str) -> str | None:
+    if "[T." in term:
+        start = term.rfind("[T.") + 3
+        end = term.find("]", start)
+        if end > start:
+            return term[start:end]
+    return None
 
 
 def _primary_metric_keys(y_type: str, metrics: dict) -> list[str]:

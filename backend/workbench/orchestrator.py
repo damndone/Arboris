@@ -541,44 +541,12 @@ def _run_workflow(
         overdisp = poisson_diag.get("overdispersion", {})
         if isinstance(overdisp, dict) and overdisp:
             report["overdispersion"] = overdisp
-    if _s: _s("reporting", "start", "Rendering report...")
-    try:
-        render_html_report(report, run_root)
-        if _s: _s("reporting", "complete", "Rendered HTML report")
-    except Exception as exc:
-        issue_dicts.append(GuardrailIssue(
-            Severity.WARNING,
-            "REPORT_RENDER_FAILED",
-            f"HTML report generation failed: {exc}. Model results are still available.",
-            {"error": str(exc)},
-        ).to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
-        if _s: _s("reporting", "complete", "Report render failed — model results available")
-
-    if _s: _s("export", "start", "Exporting files...")
-    try:
-        export_pdf(report, run_root)
-        export_xlsx(
-            {"coefficients": _coefficient_rows_for_models(model_results)},
-            run_root,
-        )
-        if _s: _s("export", "complete", "Exported PDF and XLSX")
-    except Exception as exc:
-        issue_dicts.append(GuardrailIssue(
-            Severity.WARNING,
-            "EXPORT_FAILED",
-            f"File export failed: {exc}. Model results are still available.",
-            {"error": str(exc)},
-        ).to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
-        if _s: _s("export", "complete", "Export failed — model results available")
-
     # Generate issue IDs for all collected issues
     for idx, issue in enumerate(issue_dicts):
         if not issue.get("issue_id"):
             issue["issue_id"] = f"diag_{idx + 1:03d}"
 
-    # Build and write diagnostic_summary.json
+    # Build diagnostic_summary.json
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     effective_exposure_col = exposure_col if primary_type == "poisson_rate" else None
     diagnostic_summary = build_diagnostic_summary(
@@ -607,6 +575,45 @@ def _run_workflow(
         "issues": issue_dicts,
         "superseded_by": "diagnostic_summary.json",
     })
+
+    # Render HTML report via view_model
+    if _s: _s("reporting", "start", "Rendering report...")
+    try:
+        from .report_view_model import build_report_view_model
+        view_model = build_report_view_model(
+            diagnostic_summary, run_root,
+            descriptive_stats=descriptive_stats,
+            statistical_tests=statistical_test_summaries,
+        )
+        render_html_report(view_model, run_root)
+        if _s: _s("reporting", "complete", "Rendered HTML report")
+    except Exception as exc:
+        issue_dicts.append(GuardrailIssue(
+            Severity.WARNING,
+            "REPORT_RENDER_FAILED",
+            f"HTML report generation failed: {exc}. Model results are still available.",
+            {"error": str(exc)},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("reporting", "complete", "Report render failed — model results available")
+
+    if _s: _s("export", "start", "Exporting files...")
+    try:
+        export_pdf(report, run_root)
+        export_xlsx(
+            {"coefficients": _coefficient_rows_for_models(model_results)},
+            run_root,
+        )
+        if _s: _s("export", "complete", "Exported PDF and XLSX")
+    except Exception as exc:
+        issue_dicts.append(GuardrailIssue(
+            Severity.WARNING,
+            "EXPORT_FAILED",
+            f"File export failed: {exc}. Model results are still available.",
+            {"error": str(exc)},
+        ).to_dict())
+        write_json(run_root / "errors.json", {"issues": issue_dicts})
+        if _s: _s("export", "complete", "Export failed — model results available")
 
     _write_manifest(
         run_root,

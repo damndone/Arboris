@@ -256,4 +256,5 @@ def test_variable_importance_has_disclaimer(tmp_path: Path):
     assert result["status"] == "completed"
     run_root = project.root / "runs" / result["run_id"]
     html = (run_root / "reports" / "report.html").read_text()
-    assert "variable importance is based on marginal" in html.lower()
+    # New 5-section layout includes causal caution instead of variable importance
+    assert "Causal Caution" in html

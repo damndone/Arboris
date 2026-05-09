@@ -7,7 +7,13 @@ from .artifacts import read_json
 from .narrative.render import render_template
 
 
-def build_report_view_model(summary: dict[str, Any], run_root: Path) -> dict[str, Any]:
+def build_report_view_model(
+    summary: dict[str, Any],
+    run_root: Path,
+    *,
+    descriptive_stats: list[dict[str, Any]] | None = None,
+    statistical_tests: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     diagnostics = summary.get("diagnostics", {})
 
     def _render_issues(issues: list[dict]) -> list[dict]:
@@ -41,7 +47,7 @@ def build_report_view_model(summary: dict[str, Any], run_root: Path) -> dict[str
                     "estimate": _format_estimate(row.get("estimate")),
                     "p_label": row.get("significance_label", "not reported"),
                     "y": summary.get("model_identity", {}).get("y_variable", "y"),
-                    "level": "",
+                    "level": row.get("level", ""),
                     "reference": "1",
                 })
             except (KeyError, ValueError):
@@ -67,8 +73,8 @@ def build_report_view_model(summary: dict[str, Any], run_root: Path) -> dict[str
         except (KeyError, ValueError):
             causal_text = ""
 
-    descriptive_stats = _load_if_exists(run_root / "staged" / "data_profile.json")
-    stat_tests = _load_if_exists(run_root / "staged" / "statistical_test_summaries.json")
+    ds = descriptive_stats if descriptive_stats is not None else _load_if_exists(run_root / "staged" / "data_profile.json")
+    st = statistical_tests if statistical_tests is not None else _load_if_exists(run_root / "staged" / "statistical_test_summaries.json")
 
     model_diag: dict[str, Any] = {}
     diag_dir = run_root / "model_results"
@@ -90,8 +96,8 @@ def build_report_view_model(summary: dict[str, Any], run_root: Path) -> dict[str
         "system_notes": _render_issues(diagnostics.get("info", [])),
         "coefficient_interpretations": coeff_views,
         "causal_caution": causal_text,
-        "descriptive_stats": descriptive_stats,
-        "statistical_tests": stat_tests,
+        "descriptive_stats": ds,
+        "statistical_tests": st,
         "model_diagnostics": model_diag,
         "model_quality": summary.get("model_quality"),
     }
@@ -100,12 +106,25 @@ def build_report_view_model(summary: dict[str, Any], run_root: Path) -> dict[str
 def _build_facts_list(summary: dict[str, Any]) -> list[str]:
     mi = summary.get("model_identity", {})
     pp = summary.get("preprocessing", {})
+
+    exposure_var = pp.get("exposure_variable")
+    x_vars = mi.get("x_variables", [])
+    display_x = [v for v in x_vars if v != exposure_var] if exposure_var else x_vars
+
+    model_label = mi.get("model_label", "")
+    if exposure_var:
+        model_label = f"Poisson rate model with log({exposure_var}) as offset"
+
     facts = [
-        f"Model: {mi.get('model_label', '')}",
-        f"y = {mi.get('y_variable', '')};  X = {', '.join(mi.get('x_variables', []))}",
+        f"Model: {model_label}",
+        f"y = {mi.get('y_variable', '')};  X = {', '.join(display_x)}",
+    ]
+    if exposure_var:
+        facts.append(f"Exposure/offset: log({exposure_var}), coefficient fixed at 1")
+    facts.extend([
         f"Rows used: {mi.get('n_observations', 0)} · Columns: {pp.get('column_count_after_encoding', mi.get('n_predictors_after_encoding', 0) + 1)}",
         f"Dataset kind: {mi.get('dataset_kind', 'unknown')}",
-    ]
+    ])
     encoded = pp.get("categorical_encoded", [])
     if encoded:
         names = ", ".join(e["variable"] for e in encoded)

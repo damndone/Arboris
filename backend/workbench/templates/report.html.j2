@@ -2,171 +2,79 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>{{ report.title }}</title>
+    <title>{{ view_model.title }}</title>
+    <style>
+      .critical-error { background: #fff0f0; border-left: 4px solid #e00; padding: 8px; margin: 4px 0; }
+      .warning { background: #fff8f0; border-left: 4px solid #f80; padding: 8px; margin: 4px 0; }
+      .caution { background: #fffff0; border-left: 4px solid #ee0; padding: 8px; margin: 4px 0; }
+      .system-note { background: #f8f8f8; border-left: 4px solid #999; padding: 8px; margin: 4px 0; color: #666; }
+      .fact-item { margin: 2px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+      th { background: #f5f5f5; }
+    </style>
   </head>
   <body>
-    <h1>{{ report.title }}</h1>
+    <h1>{{ view_model.title }}</h1>
 
-    <section>
+    {% if view_model.critical_errors %}
+    <section id="critical-errors">
+      <h2>Critical Errors</h2>
+      <p style="color:#e00;"><strong>This report may not be reliable. Review the errors below before interpreting results.</strong></p>
+      {% for item in view_model.critical_errors %}
+      <div class="critical-error">{{ item.text }}</div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <section id="facts">
       <h2>Facts</h2>
       <ul>
-        {% for fact in report.facts %}
-        <li>{{ fact }}</li>
+        {% for fact in view_model.facts %}
+        <li class="fact-item">{{ fact }}</li>
         {% endfor %}
       </ul>
     </section>
 
-    {% if report.descriptive_stats %}
-    <section>
-      <h2>Descriptive statistics</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Column</th>
-            <th>Dtype</th>
-            <th>Count</th>
-            <th>Missing</th>
-            <th>Missing%</th>
-            <th>Unique</th>
-            <th>Mean</th>
-            <th>Std</th>
-            <th>Min</th>
-            <th>Max</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in report.descriptive_stats %}
-          <tr>
-            <td>{{ row.column }}</td>
-            <td>{{ row.dtype }}</td>
-            <td>{{ row.count }}</td>
-            <td>{{ row.missing }}</td>
-            <td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td>
-            <td>{{ row.unique_count }}</td>
-            <td>{{ row.mean if row.mean is not none else "—" }}</td>
-            <td>{{ row.std if row.std is not none else "—" }}</td>
-            <td>{{ row.min if row.min is not none else "—" }}</td>
-            <td>{{ row.max if row.max is not none else "—" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    {% if view_model.system_notes %}
+    <section id="data-diagnostics">
+      <h2>Data Diagnostics</h2>
+      {% for item in view_model.system_notes %}
+      <div class="system-note">{{ item.text }}</div>
+      {% endfor %}
     </section>
     {% endif %}
 
-    <section>
-      <h2>Interpretation</h2>
-      <ul>
-        {% for claim in report.claims %}
-        <li>
-          {{ claim.claim }}
-          <span data-source-id="{{ claim.source_id }}">Source: {{ claim.source_id }}</span>
-          {% if claim.confidence is defined and claim.confidence is not none %}
-          <span>Confidence: {{ claim.confidence }}</span>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </section>
-
-    {% if report.variable_importance %}
-    <section>
-      <h2>Variable importance (vs outcome)</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Variable</th>
-            <th>Correlation with y</th>
-            <th>Best p-value</th>
-            <th>Test</th>
-            <th>Assessment</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in report.variable_importance %}
-          <tr>
-            <td>{{ item.variable }}</td>
-            <td>{{ "%.3f"|format(item.correlation) if item.correlation is not none else "—" }}</td>
-            <td>{% if item.best_p_value is none %}—{% elif item.best_p_value < 0.001 %}&lt; 0.001{% else %}{{ "%.4f"|format(item.best_p_value) }}{% endif %}</td>
-            <td>{{ item.test_type or "—" }}</td>
-            <td>
-              {% if item.best_p_value is none %}
-              no data
-              {% elif item.best_p_value < 0.01 %}
-                {% if item.strength == "strong" %}strong &amp; significant
-                {% elif item.strength == "moderate" %}significant, moderate correlation
-                {% elif item.strength == "weak" %}significant, weak correlation
-                {% else %}significant (1%)
-                {% endif %}
-              {% elif item.best_p_value < 0.05 %}
-                {% if item.strength == "strong" %}strong &amp; significant (5%)
-                {% elif item.strength == "moderate" %}significant (5%), moderate correlation
-                {% elif item.strength == "weak" %}significant (5%), weak correlation
-                {% else %}significant (5%)
-                {% endif %}
-              {% elif item.best_p_value < 0.10 %}
-              marginal
-              {% else %}
-              not significant
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
-    {% endif %}
-
-    {% if report.statistical_tests %}
-    {% set st = report.statistical_tests %}
-    <section>
-      <h2>Statistical tests</h2>
-
-      {% if st.y_related %}
-      <h3>{{ st.y_related | length }} test(s) involving outcome variable</h3>
-      <ul>
-        {% for test in st.y_related %}
-        <li>
-          {{ test.label }}: {{ test.interpretation }}
-          <span data-source-id="{{ test.source_id }}">Source: {{ test.source_id }}</span>
-        </li>
-        {% endfor %}
-      </ul>
+    {% if view_model.warnings or view_model.cautions %}
+    <section id="model-diagnostics">
+      <h2>Model Diagnostics</h2>
+      {% if view_model.warnings %}
+      <h3>Warnings</h3>
+      {% for item in view_model.warnings %}
+      <div class="warning">{{ item.text }}</div>
+      {% endfor %}
       {% endif %}
-
-      {% if st.other %}
-      <h3>{{ st.other | length }} other test(s)
-      {% if st.other_truncated and st.other_truncated > 0 %}
-      ({{ st.other_truncated }} truncated)
-      {% endif %}
-      </h3>
-      <details>
-        <summary>Show all</summary>
-        <ul>
-          {% for test in st.other %}
-          <li>
-            {{ test.label }}: {{ test.interpretation }}
-            <span data-source-id="{{ test.source_id }}">Source: {{ test.source_id }}</span>
-          </li>
-          {% endfor %}
-        </ul>
-      </details>
+      {% if view_model.cautions %}
+      <h3>Cautions</h3>
+      {% for item in view_model.cautions %}
+      <div class="caution">{{ item.text }}</div>
+      {% endfor %}
       {% endif %}
     </section>
     {% endif %}
 
-    {% if report.diagnostics %}
-    <section>
-      <h2>Regression diagnostics</h2>
-      {% for model_id, diag in report.diagnostics.items() %}
-      <h3>{{ model_id }}</h3>
-
-      {% if diag.vif %}
+    {% if view_model.model_diagnostics %}
+    <section id="regression-diagnostics">
+      <h2>Regression Diagnostics</h2>
+      {% for diag_id, diag in view_model.model_diagnostics.items() %}
+      <h3>{{ diag_id }}</h3>
+      {% set vif_data = diag.get("vif") %}
+      {% if vif_data %}
       <h4>Multicollinearity (VIF)</h4>
       <table>
         <thead><tr><th>Variable</th><th>VIF</th></tr></thead>
         <tbody>
-          {% for var, vif in diag.vif.items() %}
+          {% for var, vif in vif_data.items() %}
           {% if var != 'const' and var != 'const ' %}
           <tr>
             <td>{{ var }}</td>
@@ -180,96 +88,58 @@
         </tbody>
       </table>
       {% endif %}
-
       {% set bp = diag.get("breusch_pagan", {}) %}
       {% if bp and bp.get("lm") is not none %}
-      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p {% if bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}
-      {% if bp.p_value < 0.05 %}— significant heteroskedasticity detected{% if 'robust' in diag.get('model_type', '') %} — robust standard errors applied for inference{% endif %}{% else %}— homoskedasticity not rejected{% endif %}</p>
+      <p>Breusch-Pagan (heteroskedasticity): LM = {{ "%.2f"|format(bp.lm) }}, p {% if bp.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(bp.p_value) }}{% endif %}</p>
       {% endif %}
-
       {% set dw = diag.get("durbin_watson") %}
       {% if dw is not none %}
-      <p>Durbin-Watson (autocorrelation): {{ "%.3f"|format(dw) }}
-      {% if dw < 1.5 %}⚠️ positive autocorrelation{% elif dw > 2.5 %}⚠️ negative autocorrelation{% else %}— no autocorrelation concern{% endif %}</p>
+      <p>Durbin-Watson: {{ "%.3f"|format(dw) }}</p>
       {% endif %}
-
-      {% set jb = diag.get("jarque_bera", {}) %}
-      {% if jb and jb.get("statistic") is not none %}
-      <p>Jarque-Bera (normality): JB = {{ "%.2f"|format(jb.statistic) }}, p {% if jb.p_value < 0.001 %}&lt; 0.001{% else %}= {{ "%.4f"|format(jb.p_value) }}{% endif %}
-      {% if jb.p_value < 0.05 %}— residuals are not normally distributed{% else %}— residuals appear normal{% endif %}</p>
-      {% endif %}
-
-      {% set cd = diag.get("cooks_distance", {}) %}
-      {% if cd and cd.get("max") is not none %}
-      {% set sev = "low" if cd.max < 0.5 else ("moderate" if cd.max < 1.0 else "high") %}
-      {% set sev_label = {"low": "Low concern", "moderate": "Moderate concern", "high": "High concern"}[sev] %}
-      <p>Cook's distance: {{ sev_label }}. Max = {{ "%.4f"|format(cd.max) }}, screening threshold = {{ "%.4f"|format(cd.threshold) }}.
-      {{ cd.n_high }} observation(s) exceed the screening threshold (4/n).
-      {% if cd.get("n_severe") and cd.n_severe > 0 %}
-      ⚠️ {{ cd.n_severe }} observation(s) exceed the severe threshold (D &gt; 0.5).
-      {% else %}
-      No single observation dominates the model (max D &lt; 0.5).
-      {% endif %}
-      {% if cd.get("leverage_max") is not none %} · max leverage = {{ "%.4f"|format(cd.leverage_max) }}{% endif %}</p>
-      {% endif %}
-
       {% endfor %}
     </section>
     {% endif %}
 
-    {% if report.overdispersion %}
-    <section>
-      <h3>Poisson overdispersion</h3>
-      <p>Overdispersion ratio: {{ "%.4f"|format(report.overdispersion.overdispersion_ratio) if report.overdispersion.overdispersion_ratio is not none else "N/A" }}</p>
-      <p>Zero rate: {{ "%.1f"|format(report.overdispersion.zero_rate * 100) if report.overdispersion.zero_rate is not none else "N/A" }}%</p>
-      <p>Mean y: {{ "%.4f"|format(report.overdispersion.mean_y) }}, Variance y: {{ "%.4f"|format(report.overdispersion.var_y) }}</p>
-      {% if report.overdispersion.zero_inflation_hint %}<p>Note: {{ report.overdispersion.zero_inflation_hint }}</p>{% endif %}
-      {% if report.overdispersion.warning %}<p>Warning: {{ report.overdispersion.warning }}</p>{% endif %}
-    </section>
-    {% endif %}
-
-    {% set blockers = report.warnings | selectattr("severity", "equalto", "BLOCKER") | list %}
-    {% set warnings = report.warnings | selectattr("severity", "equalto", "WARNING") | list %}
-    {% set infos = report.warnings | rejectattr("severity", "defined") | list + report.warnings | selectattr("severity", "equalto", "INFO") | list %}
-
-    {% if blockers %}
-    <section>
-      <h2>Errors</h2>
+    {% if view_model.coefficient_interpretations %}
+    <section id="coefficient-interpretation">
+      <h2>Coefficient Interpretation</h2>
       <ul>
-        {% for issue in blockers %}
-        <li>{{ issue.message }}</li>
+        {% for coef in view_model.coefficient_interpretations %}
+        <li>{{ coef.text }}</li>
         {% endfor %}
       </ul>
     </section>
     {% endif %}
 
-    {% if warnings %}
-    <section>
-      <h2>Warnings</h2>
-      <ul>
-        {% for issue in warnings %}
-        <li>{{ issue.message }}</li>
-        {% endfor %}
-      </ul>
+    <section id="causal-caution">
+      <h2>Causal Caution</h2>
+      <p>{{ view_model.causal_caution }}</p>
+    </section>
+
+    {% if view_model.descriptive_stats %}
+    <section id="descriptive-stats">
+      <h2>Descriptive Statistics</h2>
+      <table>
+        <thead><tr><th>Column</th><th>Dtype</th><th>Count</th><th>Missing</th><th>Mean</th><th>Std</th></tr></thead>
+        <tbody>
+          {% for row in view_model.descriptive_stats %}
+          <tr><td>{{ row.column }}</td><td>{{ row.dtype }}</td><td>{{ row.count }}</td><td>{{ "%.1f"|format(row.missing_rate * 100) }}%</td><td>{{ row.mean if row.mean is not none else "—" }}</td><td>{{ row.std if row.std is not none else "—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </section>
     {% endif %}
 
-    {% if infos %}
-    <section>
-      <h2>Diagnostics</h2>
+    {% if view_model.statistical_tests %}
+    <section id="statistical-tests">
+      <h2>Statistical Tests</h2>
+      {% if view_model.statistical_tests.y_related %}
       <ul>
-        {% for issue in infos %}
-        <li>{{ issue.message }}
-        {% if issue.evidence and issue.evidence.action_suggestions %}
-          <ul>
-            {% for suggestion in issue.evidence.action_suggestions %}
-            <li>{{ suggestion }}</li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-        </li>
+        {% for test in view_model.statistical_tests.y_related %}
+        <li>{{ test.label }}: {{ test.interpretation }}</li>
         {% endfor %}
       </ul>
+      {% endif %}
     </section>
     {% endif %}
   </body>
