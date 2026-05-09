@@ -51,7 +51,7 @@ TEMPLATES: dict[str, dict] = {
     "cook_distance_high": {
         "category": "diagnostic",
         "severity": "WARNING",
-        "required_params": ["n_exceed", "max_d", "n_severe"],
+        "required_params": ["max_d", "n_severe"],
         "text": (
             "{n_severe} observation(s) have high Cook's D (max = {max_d}). "
             "These observations have disproportionate influence and should be examined."
