@@ -33,6 +33,7 @@ class RunMode(str, Enum):
 class Severity(str, Enum):
     BLOCKER = "BLOCKER"
     WARNING = "WARNING"
+    CAUTION = "CAUTION"
     INFO = "INFO"
 
 
