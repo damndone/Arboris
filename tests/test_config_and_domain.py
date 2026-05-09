@@ -104,6 +104,16 @@ def test_guardrail_issue_serializes_enum_value():
         "code": "missing_rate",
         "message": "Column has many missing values.",
         "evidence": {"column": "wage", "missing_rate": 0.45},
+        "issue_id": "",
+        "affected_stage": "",
+        "variables": [],
+        "metric": "",
+        "value": None,
+        "threshold": None,
+        "template_key": "",
+        "template_params": {},
+        "recommended_action_key": "",
+        "is_user_action_required": False,
     }
 
 
