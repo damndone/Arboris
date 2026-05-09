@@ -9,6 +9,7 @@ import pandas as pd
 from .artifacts import read_json, register_artifact, write_json
 from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
+from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
@@ -31,6 +32,7 @@ from .statistical_tests import (
     write_statistical_test_artifacts,
 )
 from .validation import has_blockers, validate_profile
+from .variable_roles import infer_variable_roles
 from .visualization import create_figures
 
 # ============================================================
@@ -282,6 +284,8 @@ def _run_workflow(
 
     # Detect categorical X variables for C() encoding in model formula
     categorical_vars = _detect_categorical_x_vars(cleaned, normalized_x)
+
+    variable_roles = infer_variable_roles(cleaned, normalized_x, y_type=y_type)
 
     # Detect exposure variable early for count models (needed before statistical tests and VIF)
     exposure_col = None
@@ -568,6 +572,41 @@ def _run_workflow(
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("export", "complete", "Export failed — model results available")
+
+    # Generate issue IDs for all collected issues
+    for idx, issue in enumerate(issue_dicts):
+        if not issue.get("issue_id"):
+            issue["issue_id"] = f"diag_{idx + 1:03d}"
+
+    # Build and write diagnostic_summary.json
+    primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+    effective_exposure_col = exposure_col if primary_type == "poisson_rate" else None
+    diagnostic_summary = build_diagnostic_summary(
+        issue_dicts=issue_dicts,
+        model_results=[result for _, result in model_results],
+        routing=routing,
+        normalized_y=normalized_y,
+        normalized_x=normalized_x,
+        profile=profile,
+        categorical_vars=categorical_vars,
+        y_type=y_type,
+        primary_type=primary_type,
+        variable_roles=variable_roles,
+        run_id=run_id,
+        exposure_col=effective_exposure_col,
+        dropped_vars=dropped_vars,
+        coercions=coercion_actions,
+    )
+    write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
+    register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
+
+    # Write legacy errors.json with superseded_by pointer
+    write_json(run_root / "errors.json", {
+        "schema_version": "legacy",
+        "run_id": run_id,
+        "issues": issue_dicts,
+        "superseded_by": "diagnostic_summary.json",
+    })
 
     _write_manifest(
         run_root,
