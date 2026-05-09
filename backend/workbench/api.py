@@ -432,12 +432,15 @@ def _parse_dummy_coded_column(term: str) -> str | None:
 
 
 def _auto_dummy_coded_issue(column: str) -> dict:
-    return {
-        "severity": "INFO",
-        "code": "CATEGORICAL_AUTO_DUMMY_CODED",
-        "message": f"Column '{column}' was detected as categorical and automatically dummy-coded.",
-        "evidence": {"column": column, "preprocessing": "dummy_coded"},
-    }
+    return GuardrailIssue(
+        Severity.INFO,
+        "CATEGORICAL_AUTO_DUMMY_CODED",
+        f"Column '{column}' was detected as categorical and automatically dummy-coded.",
+        evidence={"column": column, "preprocessing": "dummy_coded"},
+        affected_stage="data_cleaning",
+        variables=[column],
+        template_key="categorical_auto_dummy",
+    ).to_dict()
 
 
 SUPPORTED_REGISTRY_VERSION = 1

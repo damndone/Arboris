@@ -246,14 +246,23 @@ def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
     assert detail_response.status_code == 200
     issues = detail_response.json()["errors"]["issues"]
     assert not any(issue["code"] == "CATEGORICAL_CANDIDATE" for issue in issues)
-    assert issues == [
-        {
-            "severity": "INFO",
-            "code": "CATEGORICAL_AUTO_DUMMY_CODED",
-            "message": "Column 'x7_region_code' was detected as categorical and automatically dummy-coded.",
-            "evidence": {"column": "x7_region_code", "preprocessing": "dummy_coded"},
-        }
-    ]
+    auto_dummy = [i for i in issues if i["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"]
+    assert len(auto_dummy) == 1
+    assert auto_dummy[0]["severity"] == "INFO"
+    assert auto_dummy[0]["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"
+    assert auto_dummy[0]["message"] == (
+        "Column 'x7_region_code' was detected as categorical and automatically dummy-coded."
+    )
+    assert auto_dummy[0]["evidence"] == {"column": "x7_region_code", "preprocessing": "dummy_coded"}
+    assert auto_dummy[0]["affected_stage"] == "data_cleaning"
+    assert auto_dummy[0]["variables"] == ["x7_region_code"]
+    assert auto_dummy[0]["template_key"] == "categorical_auto_dummy"
+    assert auto_dummy[0]["issue_id"] == ""
+    assert auto_dummy[0]["metric"] == ""
+    assert auto_dummy[0]["value"] is None
+    assert auto_dummy[0]["threshold"] is None
+    assert auto_dummy[0]["recommended_action_key"] == ""
+    assert auto_dummy[0]["is_user_action_required"] is False
 
 
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):
