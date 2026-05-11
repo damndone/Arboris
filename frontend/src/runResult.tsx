@@ -264,12 +264,17 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
   const primaryModel = coefficientRisk?.models?.find((m) => m.is_primary);
   const riskGroups = primaryModel?.risk_groups?.filter((g) => g.terms.length > 0) ?? [];
 
-  // P0-3: Report gating
+  // P0-3: Report gating — browser never infers availability.
+  // V1.3.1 preview: require explicit artifact_manifest.report_html.available === true.
+  // Legacy (no preview): fall back to artifact_counts.report > 0.
   const reportAvailable = hasPreview
-    ? preview!.artifact_manifest
-      ? (preview!.artifact_manifest as Record<string, {available?: boolean}>).report_html?.available !== false
-      : true
-    : detail.artifact_counts?.report > 0;
+    ? (preview!.artifact_manifest as Record<string, {available?: boolean}> | undefined)
+        ?.report_html?.available === true
+    : (detail.artifact_counts?.report ?? 0) > 0;
+  const reportManifestMissing = hasPreview && (
+    !preview?.artifact_manifest ||
+    !(preview.artifact_manifest as Record<string, unknown>).report_html
+  );
   const reportBlocked = hasPreview && preview?.run_status?.status === "blocked";
   const reportDisabled = !reportAvailable || (hasPreview && preview?.run_status?.status === "failed");
 
@@ -388,11 +393,12 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
               {group.summary && <p className="risk-summary">{group.summary}</p>}
               {group.terms.length > 0 && (
                 <table className="risk-terms-table">
-                  <thead><tr><th>Level</th><th>Estimate</th><th>p-value</th></tr></thead>
+                  <thead><tr><th>Level</th><th>Reference</th><th>Estimate</th><th>p-value</th></tr></thead>
                   <tbody>
                     {group.terms.map((t) => (
                       <tr key={t.source_id}>
                         <td>{t.display_term}</td>
+                        <td>{t.reference_level ?? "—"}</td>
                         <td>{formatNumber(t.estimate)}</td>
                         <td>{formatNumber(t.p_value)}</td>
                       </tr>
@@ -514,6 +520,9 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
         <h3 id="report-heading" className="subhead">
           Report
         </h3>
+        {reportManifestMissing && (
+          <p className="report-warning">Report availability cannot be verified — artifact manifest is incomplete. Viewing may show partial or legacy output.</p>
+        )}
         {reportBlocked && (
           <p className="report-warning">Blocking issues detected. Report is available for review but should not be treated as formal output.</p>
         )}
