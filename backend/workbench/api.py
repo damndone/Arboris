@@ -23,6 +23,7 @@ from .api_errors import (
 )
 from .artifacts import read_json, write_json
 from .config import load_config
+from .diagnostic_preview import build_diagnostic_summary_preview
 from .domain import GuardrailIssue, Severity
 from .events import get_event_manager
 from .orchestrator import (
@@ -552,12 +553,14 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
     model_results = _model_results(run_root)
     errors = _normalize_issue_stream(errors, model_results)
+    preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
         "artifact_counts": _artifact_counts(run_root),
         "errors": errors,
         "model_results": model_results,
+        "diagnostic_summary_preview": preview,
     }
 
 

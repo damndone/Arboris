@@ -265,6 +265,29 @@ def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
     assert auto_dummy[0]["is_user_action_required"] is False
 
 
+def test_get_run_detail_returns_diagnostic_summary_preview(completed_run):
+    client, project_root, run_id = completed_run
+
+    detail_response = client.get(
+        f"/runs/{run_id}", params={"project_root": project_root}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is True
+    assert preview["preview_contract_version"] == "1.0"
+    assert preview["preview_status"] == "complete"
+    assert preview["run_lifecycle_status"] == "completed"
+    assert "run_status" in preview
+    assert "trust_label" in preview
+    assert "trust_counts" in preview
+    assert "model_identity" in preview
+    assert "primary_reasons" in preview
+    assert "artifact_manifest" in preview
+    assert "diagnostic_highlights" in preview
+    assert "recommended_actions" in preview
+
+
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):
     client = TestClient(app)
     response = client.post(
