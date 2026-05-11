@@ -357,6 +357,8 @@ def _risk_groups(
         group["risk_level"] = _highest_severity(group["risk_level"], linked, issue_by_id)
         ref = group.pop("_reference_level", "1")
         group["terms"].append(_term_row(row, variable, ref, model_id))
+    # Elevate risk for proxy variables in treatment-proxy correlation issues.
+    _apply_treatment_proxy_risk(grouped, summary)
     for group in grouped.values():
         group.pop("_reference_level", None)
         if group["variable_kind"] == "dummy_coded":
@@ -365,17 +367,50 @@ def _risk_groups(
     return list(grouped.values())
 
 
+def _apply_treatment_proxy_risk(
+    grouped: dict[str, dict[str, Any]],
+    summary: dict[str, Any],
+) -> None:
+    """When a TREATMENT_PROXY_CORRELATION issue exists, both the treatment
+    and the proxy variable should show elevated risk, not just the treatment."""
+    diagnostics = summary.get("diagnostics", {})
+    if not isinstance(diagnostics, dict):
+        return
+    for bucket in ("blockers", "warnings", "cautions"):
+        for issue in _issue_list(diagnostics.get(bucket)):
+            if issue.get("code") != "TREATMENT_PROXY_CORRELATION":
+                continue
+            affected = [str(v) for v in (issue.get("variables") or []) if v]
+            for var in affected:
+                if var in grouped:
+                    group = grouped[var]
+                    group["risk_level"] = max(
+                        group["risk_level"],
+                        str(issue.get("severity") or "WARNING"),
+                        key=lambda s: SEVERITY_ORDER.get(s, 0),
+                    )
+                    group["summary"] = (
+                        f"{var} is highly correlated with another variable in the model. "
+                        "Interpret jointly; do not treat this coefficient as an independent effect."
+                    )
+
+
 def _new_risk_group(variable: str, summary: dict[str, Any]) -> dict[str, Any]:
     encoded = _encoded_map(summary).get(variable)
     role_summary = _role_summary(summary, variable)
-    variable_kind = "dummy_coded" if encoded else _variable_kind(role_summary)
-    ref = str((encoded or {}).get("reference") or "1")
+    encoded_entry = encoded
+    variable_kind = "dummy_coded" if encoded_entry else _variable_kind(role_summary)
+    # categorical_candidate that was NOT encoded → model treated it as numeric.
+    # Show as discrete_numeric to avoid suggesting it should have been dummy-coded.
+    if variable_kind == "categorical_candidate":
+        variable_kind = "discrete_numeric"
+    ref = str((encoded_entry or {}).get("reference") or "1")
     return {
         "variable": variable,
         "display_name": variable,
         "variable_kind": variable_kind,
         "risk_level": "INFO",
-        "interpretation_guide": "standard" if variable_kind == "continuous" else "review_required",
+        "interpretation_guide": "standard" if variable_kind in ("continuous", "discrete_numeric") else "review_required",
         "summary": "",
         "linked_issue_ids": [],
         "role_summary": role_summary,
