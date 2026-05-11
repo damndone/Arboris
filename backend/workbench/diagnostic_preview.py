@@ -458,6 +458,9 @@ def _role_summary(summary: dict[str, Any], variable: str) -> dict[str, Any]:
 def _variable_kind(role_summary: dict[str, Any]) -> str:
     role = role_summary.get("role")
     status = role_summary.get("status")
+    # Rejected roles carry no signal — treat as continuous.
+    if status == "rejected":
+        return "continuous"
     if role == "categorical" and status == "confirmed_by_rules":
         return "categorical_confirmed"
     if role == "categorical" and status == "candidate":

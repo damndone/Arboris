@@ -303,6 +303,14 @@ def _run_workflow(
     )
     write_statistical_test_artifacts(run_root, statistical_tests)
     statistical_test_summaries = summarize_statistical_tests(statistical_tests, y=normalized_y)
+    # Drop Pearson correlation entries for categorical variables — correlation
+    # on integer category codes is misleading.
+    if categorical_vars:
+        statistical_test_summaries["y_related"] = [
+            r for r in statistical_test_summaries.get("y_related", [])
+            if not (r.get("test_type") == "Pearson correlation"
+                    and any(v in categorical_vars for v in (r.get("variables") or [])))
+        ]
     if _s:
         _s("statistical_tests", "complete", "Statistical tests completed")
 

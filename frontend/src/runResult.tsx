@@ -392,10 +392,11 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
               </div>
               {group.summary && <p className="risk-summary">{group.summary}</p>}
               {group.terms.length > 0 && (() => {
+                // Only show Level/Reference for variables actually encoded as categorical.
+                // categorical_candidate means the model still treats it as numeric.
                 const isCategorical =
                   group.variable_kind === "dummy_coded" ||
-                  group.variable_kind === "categorical_confirmed" ||
-                  group.variable_kind === "categorical_candidate";
+                  group.variable_kind === "categorical_confirmed";
                 return isCategorical ? (
                   <table className="risk-terms-table">
                     <thead><tr><th>Level</th><th>Reference</th><th>Estimate</th><th>p-value</th></tr></thead>
