@@ -308,7 +308,7 @@ def _run_workflow(
     if categorical_vars:
         statistical_test_summaries["y_related"] = [
             r for r in statistical_test_summaries.get("y_related", [])
-            if not (r.get("test_type") == "Pearson correlation"
+            if not (r.get("test_type") == "pearson_correlation"
                     and any(v in categorical_vars for v in (r.get("variables") or [])))
         ]
     if _s:

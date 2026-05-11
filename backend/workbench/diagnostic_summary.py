@@ -73,6 +73,13 @@ def build_diagnostic_summary(
             else:
                 interpretation_guide = "treatment_direct"
                 template_key = "coef_binary_association"
+        elif _has_proxy_correlation(term_base, proxy_vars, issue_dicts):
+            # Proxy or overlapping variable in a treatment-proxy pair —
+            # should also warn against independent interpretation.
+            interpretation_guide = "warn_joint"
+            template_key = "coef_warn_joint"
+            linked_issues = [i.get("issue_id", "") for i in issue_dicts
+                             if i.get("code") == "TREATMENT_PROXY_CORRELATION" and term_base in i.get("variables", [])]
 
         coeff_rows.append({
             "variable": term,

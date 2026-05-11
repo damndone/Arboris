@@ -308,6 +308,8 @@ def _summary_row(row: dict[str, Any]) -> dict[str, Any]:
         label = f"Chi-square: {row['variables'][0]} vs {row['variables'][1]}"
     return {
         "label": label,
+        "test_type": row.get("test_type", ""),
+        "variables": row.get("variables", []),
         "statistic": statistic,
         "p_value": p_value,
         "interpretation": (
