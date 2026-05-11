@@ -85,11 +85,17 @@ def build_report_view_model(
 
     model_diag: dict[str, Any] = {}
     diag_dir = run_root / "model_results"
+    categorical_vars = {
+        e.get("variable", "")
+        for e in summary.get("preprocessing", {}).get("categorical_encoded", [])
+        if isinstance(e, dict)
+    }
     if diag_dir.is_dir():
         for path in sorted(diag_dir.glob("diagnostics_*.json")):
             try:
                 data = read_json(path)
                 if isinstance(data, dict):
+                    _rename_categorical_vif_keys(data, categorical_vars)
                     model_diag[path.stem] = data
             except Exception:
                 pass
@@ -146,6 +152,20 @@ def _format_estimate(estimate: Any) -> str:
         return f"{float(estimate):+.4f}"
     except (ValueError, TypeError):
         return str(estimate)
+
+
+def _rename_categorical_vif_keys(data: dict[str, Any], categorical_vars: set[str]) -> None:
+    vif = data.get("vif")
+    if not isinstance(vif, dict):
+        return
+    renamed: dict[str, Any] = {}
+    for key, value in vif.items():
+        base = str(key).strip()
+        if base in categorical_vars:
+            renamed[f"{base} dummy group"] = value
+        else:
+            renamed[base] = value
+    data["vif"] = renamed
 
 
 def _load_if_exists(path: Path) -> Any | None:
