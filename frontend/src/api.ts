@@ -38,6 +38,78 @@ export type IssueRecord = {
   code?: string;
   message?: string;
   evidence?: Record<string, unknown>;
+  issue_id?: string;
+  affected_stage?: string;
+  variables?: string[];
+  metric?: string;
+  value?: number | null;
+  threshold?: number | null;
+  template_key?: string;
+  template_params?: Record<string, unknown>;
+  recommended_action_key?: string;
+  is_user_action_required?: boolean;
+};
+
+export type TrustStatus = "ok" | "usable_with_caution" | "blocked" | "failed";
+
+export type TrustLabel =
+  | "analysis_running"
+  | "ready_to_interpret"
+  | "interpret_with_caution"
+  | "not_ready_to_interpret"
+  | "run_failed"
+  | "lifecycle_unavailable"
+  | "legacy_unavailable"
+  | "contract_unavailable";
+
+export type DiagnosticSummaryPreview = {
+  available: boolean;
+  preview_contract_version: string;
+  source_schema_version: string;
+  preview_status: string;
+  contract_warnings: string[];
+  run_lifecycle_status: string;
+  run_status?: {
+    status: TrustStatus;
+    status_scope: string;
+    safe_to_generate_report: boolean;
+    safe_to_interpret: string;
+    has_blockers: boolean;
+    has_warnings: boolean;
+    has_cautions: boolean;
+    model_results_available: boolean;
+  };
+  trust_label: TrustLabel;
+  trust_counts?: {
+    blockers: number;
+    warnings: number;
+    cautions: number;
+    info: number;
+  };
+  primary_reasons: Array<{
+    reason_id: string;
+    reason_key: string;
+    severity: string;
+    message: string;
+    message_params?: Record<string, unknown>;
+    affected_variables: string[];
+    linked_issue_ids: string[];
+  }>;
+  model_identity?: {
+    primary_model_id: string;
+    model_label: string;
+    model_type: string;
+    y_variable: string;
+    n_observations: number;
+    x_variables?: string[];
+    x_variable_count?: number;
+    standard_error_type?: string;
+  };
+  artifact_manifest?: Record<string, unknown>;
+  diagnostic_highlights?: Array<Record<string, unknown>>;
+  coefficient_risk?: unknown;
+  interpretation_restrictions?: Array<Record<string, unknown>>;
+  recommended_actions?: Array<Record<string, unknown>>;
 };
 
 export type RunDetail = RunSummary & {
@@ -45,6 +117,7 @@ export type RunDetail = RunSummary & {
   artifact_counts: Record<string, number>;
   errors: { issues: IssueRecord[] };
   model_results?: ModelResult[];
+  diagnostic_summary_preview?: DiagnosticSummaryPreview;
 };
 
 export type CoefficientRecord = {

@@ -114,6 +114,9 @@ function autoDummyCodedIssue(column: string): IssueRecord {
     code: "CATEGORICAL_AUTO_DUMMY_CODED",
     message: `Column '${column}' was detected as categorical and automatically dummy-coded.`,
     evidence: { column, preprocessing: "dummy_coded" },
+    affected_stage: "data_cleaning",
+    variables: [column],
+    template_key: "categorical_auto_dummy",
   };
 }
 
@@ -244,8 +247,11 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
   const issues: IssueRecord[] = normalizeIssues(detail);
   const problemIssues = issues.filter((issue) => issue.severity === "BLOCKER");
   const warningIssues = issues.filter((issue) => issue.severity === "WARNING");
+  const cautionIssues = issues.filter((issue) => issue.severity === "CAUTION");
   const infoIssues = issues.filter((issue) => issue.severity === "INFO");
   const coefficients = coefficientRows(detail);
+  const preview = detail.diagnostic_summary_preview;
+  const hasPreview = preview?.available === true;
 
   return (
     <section className="result-panel" aria-labelledby="run-detail-heading">
@@ -299,6 +305,48 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           <dd>{(detail.x ?? []).join(", ") || "—"}</dd>
         </div>
       </dl>
+      {hasPreview && preview && (
+        <section className="trust-summary" aria-label="trust status">
+          <div className={`trust-bar trust-${preview.trust_label}`}>
+            <strong>
+              {preview.trust_label === "ready_to_interpret" && "Ready to interpret"}
+              {preview.trust_label === "interpret_with_caution" && "Interpret with caution"}
+              {preview.trust_label === "not_ready_to_interpret" && "Not ready to interpret"}
+              {preview.trust_label === "run_failed" && "Run failed"}
+              {preview.trust_label === "analysis_running" && "Analysis running"}
+              {!["ready_to_interpret", "interpret_with_caution", "not_ready_to_interpret", "run_failed", "analysis_running"].includes(preview.trust_label) && "Trust status unavailable"}
+            </strong>
+            {preview.trust_counts && (
+              <span className="trust-counts">
+                {preview.trust_counts.blockers > 0 && <span className="count-blocker">{preview.trust_counts.blockers} blocking</span>}
+                {preview.trust_counts.warnings > 0 && <span className="count-warning">{preview.trust_counts.warnings} warnings</span>}
+                {preview.trust_counts.cautions > 0 && <span className="count-caution">{preview.trust_counts.cautions} cautions</span>}
+                {preview.trust_counts.info > 0 && <span className="count-info">{preview.trust_counts.info} notes</span>}
+              </span>
+            )}
+          </div>
+          {preview.primary_reasons.length > 0 && (
+            <div className="trust-reasons">
+              {preview.primary_reasons.map((r) => (
+                <div key={r.reason_id} className={`reason reason-${r.severity.toLowerCase()}`}>
+                  <strong>{r.severity}</strong>: {r.message}
+                </div>
+              ))}
+            </div>
+          )}
+          {preview.model_identity && (
+            <div className="trust-model-id">
+              {preview.model_identity.model_label} · y = {preview.model_identity.y_variable} · n = {preview.model_identity.n_observations}
+            </div>
+          )}
+        </section>
+      )}
+      {!hasPreview && detail.diagnostic_summary_preview && (
+        <section className="panel panel-neutral" aria-label="trust unavailable">
+          <strong>Trust preview unavailable</strong>
+          <p>{(detail.diagnostic_summary_preview.contract_warnings ?? []).join("; ") || "Diagnostic summary could not be loaded. Showing legacy results below."}</p>
+        </section>
+      )}
       <h3 className="subhead">Artifact counts</h3>
       <ul className="path-list" aria-label="artifact counts">
         {Object.entries(detail.artifact_counts).map(([type, count]) => (
@@ -364,9 +412,22 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           </ul>
         </section>
       )}
+      {cautionIssues.length > 0 && (
+        <section className="panel" aria-label="cautions">
+          <strong>Interpretation cautions</strong>
+          <ul>
+            {cautionIssues.map((issue, index) => (
+              <li key={index}>
+                <strong>{issue.code ?? "CAUTION"}</strong>:{" "}
+                <span>{issue.message ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {infoIssues.length > 0 && (
         <section className="panel" aria-label="diagnostics">
-          <strong>Diagnostics</strong>
+          <strong>System notes</strong>
           <ul>
             {infoIssues.map((issue, index) => (
               <li key={index}>

@@ -348,7 +348,7 @@ test("clicking a history row loads run detail with errors", async () => {
   expect(screen.getByText("DATA_QUALITY")).toBeInTheDocument();
 });
 
-test("run detail renders info issues as diagnostics instead of errors", async () => {
+test("run detail renders info issues as system notes instead of errors", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
   fetchMock.mockResolvedValueOnce(
@@ -390,7 +390,7 @@ test("run detail renders info issues as diagnostics instead of errors", async ()
     expect(screen.getByText("CATEGORICAL_CANDIDATE")).toBeInTheDocument();
   });
   expect(screen.queryByText("Issues")).not.toBeInTheDocument();
-  expect(screen.getByText("Diagnostics")).toBeInTheDocument();
+  expect(screen.getByText("System notes")).toBeInTheDocument();
 });
 
 test("run detail normalizes stale categorical candidate when model dummy-coded it", async () => {
