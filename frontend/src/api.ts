@@ -107,9 +107,39 @@ export type DiagnosticSummaryPreview = {
   };
   artifact_manifest?: Record<string, unknown>;
   diagnostic_highlights?: Array<Record<string, unknown>>;
-  coefficient_risk?: unknown;
+  coefficient_risk?: CoefficientRisk;
   interpretation_restrictions?: Array<Record<string, unknown>>;
   recommended_actions?: Array<Record<string, unknown>>;
+};
+
+export type CoefficientRisk = {
+  primary_model_id: string;
+  models: Array<{
+    model_id: string;
+    model_label: string;
+    is_primary: boolean;
+    model_type: string;
+    outcome: string;
+    risk_groups: Array<{
+      variable: string;
+      display_name: string;
+      variable_kind: string;
+      risk_level: string;
+      interpretation_guide: string;
+      summary: string;
+      linked_issue_ids: string[];
+      role_summary?: { role: string; status: string; confidence?: number; needs_user_confirmation: boolean };
+      terms: Array<{
+        term: string;
+        display_term: string;
+        level: string;
+        reference_level: string;
+        estimate?: number;
+        p_value?: number;
+        source_id: string;
+      }>;
+    }>;
+  }>;
 };
 
 export type RunDetail = RunSummary & {
@@ -389,12 +419,6 @@ function inferRole(name: string, dtype: ColumnDtype, uniqueCount: number, totalC
   if (isNumeric) return "x";
   return "ignore";
 }
-
-type ExcludedColumn = {
-  name: string;
-  suggestedRole: ColumnRole;
-  reason: string;
-};
 
 function columnStats(name: string, rows: Record<string, unknown>[]): ColumnPreview {
   const values = rows.map((row) => row[name]);

@@ -600,3 +600,29 @@ dd {
 .trust-reasons { padding: 8px 14px; background: #fafafa; border-top: 1px solid #eee; }
 .trust-reasons .reason { margin: 3px 0; font-size: 0.9rem; }
 .trust-model-id { padding: 6px 14px; font-size: 0.82rem; color: #666; background: #f5f5f5; }
+
+/* V1.3.1 Coefficient Risk */
+.coefficient-risk { margin-bottom: 16px; }
+.risk-group { padding: 10px; margin: 8px 0; border-left: 4px solid #ccc; background: #fafafa; border-radius: 4px; }
+.risk-group.risk-blocker { border-left-color: #c62828; background: #fff5f5; }
+.risk-group.risk-warning { border-left-color: #e65100; background: #fff8f0; }
+.risk-group.risk-caution { border-left-color: #f9a825; background: #fffff0; }
+.risk-group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.risk-badge { padding: 1px 6px; border-radius: 3px; font-size: 0.75rem; background: #eee; }
+.risk-badge.badge-blocker { background: #ffcdd2; color: #b71c1c; }
+.risk-badge.badge-warning { background: #ffe0b2; color: #e65100; }
+.risk-badge.badge-caution { background: #fff9c4; color: #f57f17; }
+.risk-level { font-size: 0.8rem; color: #666; text-transform: uppercase; }
+.risk-summary { font-size: 0.85rem; color: #555; margin: 2px 0; }
+.risk-terms-table { width: 100%; margin-top: 6px; font-size: 0.85rem; }
+.risk-terms-table th, .risk-terms-table td { padding: 3px 6px; border: 1px solid #eee; }
+
+/* V1.3.1 Interpretation Guidance */
+.interpretation-guidance { margin-bottom: 16px; }
+.restriction, .action { padding: 6px 10px; margin: 3px 0; border-radius: 3px; font-size: 0.88rem; }
+.restriction { border-left: 3px solid #e57373; background: #fff5f5; }
+.action { border-left: 3px solid #81c784; background: #f1f8e9; }
+
+/* V1.3.1 Report gating */
+.report-warning { color: #c62828; font-size: 0.85rem; margin: 4px 0; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
