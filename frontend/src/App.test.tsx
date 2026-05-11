@@ -951,3 +951,143 @@ test("model type defaults to Auto and can be changed to logit", async () => {
   fireEvent.change(selector, { target: { value: "logit" } });
   expect(selector.value).toBe("logit");
 });
+
+// --- V1.3.1 Trust Preview regression tests ---
+
+test("report is disabled when artifact manifest is missing in preview", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({ runs: [makeRun("run-1")] })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-11T00:00:00+00:00",
+      y: "y",
+      x: ["x1"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: { issues: [] },
+      diagnostic_summary_preview: {
+        available: true,
+        preview_contract_version: "1.0",
+        source_schema_version: "diagnostic_summary.v1",
+        preview_status: "partial",
+        contract_warnings: ["artifact manifest incomplete"],
+        run_lifecycle_status: "completed",
+        trust_label: "interpret_with_caution",
+        primary_reasons: [],
+        // artifact_manifest intentionally missing — gating must not default to available
+      },
+    })
+  );
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText("Report")).toBeInTheDocument();
+  });
+  // Missing manifest → report button disabled, warning shown
+  const button = screen.getByRole("button", { name: /report/i });
+  expect(button).toBeDisabled();
+  expect(screen.getByText(/artifact manifest is incomplete/)).toBeInTheDocument();
+});
+
+test("run detail coefficient risk shows reference level column", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({ runs: [makeRun("run-1")] })
+  );
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-11T00:00:00+00:00",
+      y: "wage",
+      x: ["region_code"],
+      lineage: [],
+      artifact_counts: { report: 1 },
+      errors: { issues: [] },
+      diagnostic_summary_preview: {
+        available: true,
+        preview_contract_version: "1.0",
+        source_schema_version: "diagnostic_summary.v1",
+        preview_status: "complete",
+        contract_warnings: [],
+        run_lifecycle_status: "completed",
+        trust_label: "interpret_with_caution",
+        primary_reasons: [],
+        artifact_manifest: {
+          report_html: { available: true, artifact_id: "report_html", filename: "report.html" },
+        },
+        run_status: {
+          status: "usable_with_caution",
+          status_scope: "primary_model",
+          safe_to_generate_report: true,
+          safe_to_interpret: "partial",
+          has_blockers: false,
+          has_warnings: true,
+          has_cautions: false,
+          model_results_available: true,
+        },
+        trust_counts: { blockers: 0, warnings: 1, cautions: 0, info: 0 },
+        coefficient_risk: {
+          primary_model_id: "ols_1",
+          models: [{
+            model_id: "ols_1",
+            model_label: "Primary model",
+            is_primary: true,
+            model_type: "ols",
+            outcome: "wage",
+            risk_groups: [{
+              variable: "region_code",
+              display_name: "region_code",
+              variable_kind: "dummy_coded",
+              risk_level: "WARNING",
+              interpretation_guide: "categorical_levels_vs_reference",
+              summary: "region_code was dummy-coded.",
+              linked_issue_ids: [],
+              role_summary: { role: "categorical", status: "confirmed_by_rules", needs_user_confirmation: false },
+              terms: [{
+                term: "C(Q('region_code'))[T.2]",
+                display_term: "region_code = 2",
+                level: "2",
+                reference_level: "1",
+                estimate: 1.23,
+                p_value: 0.04,
+                source_id: "model_results.ols_1.coefficients.C(Q('region_code'))[T.2]",
+              }],
+            }],
+          }],
+        },
+        interpretation_restrictions: [],
+        recommended_actions: [],
+      },
+    })
+  );
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+  fireEvent.click(screen.getByText("run-1"));
+
+  await waitFor(() => {
+    expect(screen.getByText("Coefficient risk")).toBeInTheDocument();
+  });
+  // Reference column header and value visible
+  expect(screen.getByText("Reference")).toBeInTheDocument();
+  // reference_level "1" visible in the term row
+  expect(screen.getByText("1")).toBeInTheDocument();
+  // display_term shows "region_code = 2"
+  expect(screen.getByText("region_code = 2")).toBeInTheDocument();
+});
