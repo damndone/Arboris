@@ -537,14 +537,18 @@ def _recommended_actions(trust_status: str, summary: dict[str, Any], issues: lis
         actions.append(_action("action_global_blocked_001", "run", "BLOCKER", "DO_NOT_INTERPRET_UNTIL_BLOCKERS_RESOLVED", "Do not interpret the model results until blocking issues are resolved.", []))
     if trust_status == "usable_with_caution":
         actions.append(_action("action_global_caution_001", "run", "CAUTION", "REVIEW_CAUTIONS_BEFORE_INTERPRETING", "Review warnings and interpretation cautions before using coefficient-level conclusions.", []))
+    counters: dict[str, int] = {}
     for issue in issues:
         code = str(issue.get("code") or "")
         if code == "TREATMENT_PROXY_CORRELATION":
-            actions.append(_action("action_issue_treatment_proxy_001", "issue", str(issue.get("severity") or "CAUTION"), "INTERPRET_TREATMENT_PROXY_JOINTLY", "Interpret treatment and proxy variables jointly rather than as independent effects.", _issue_ids(issue), list(issue.get("variables") or [])))
+            counters[code] = counters.get(code, 0) + 1
+            actions.append(_action(f"action_issue_treatment_proxy_{counters[code]:03d}", "issue", str(issue.get("severity") or "CAUTION"), "INTERPRET_TREATMENT_PROXY_JOINTLY", "Interpret treatment and proxy variables jointly rather than as independent effects.", _issue_ids(issue), list(issue.get("variables") or [])))
         elif code == "CATEGORICAL_CANDIDATE":
-            actions.append(_action("action_issue_categorical_001", "issue", str(issue.get("severity") or "CAUTION"), "REVIEW_CATEGORICAL_ENCODING", "Review categorical encoding before interpreting this variable.", _issue_ids(issue), [_issue_variable(issue)] if _issue_variable(issue) else []))
+            counters[code] = counters.get(code, 0) + 1
+            actions.append(_action(f"action_issue_categorical_{counters[code]:03d}", "issue", str(issue.get("severity") or "CAUTION"), "REVIEW_CATEGORICAL_ENCODING", "Review categorical encoding before interpreting this variable.", _issue_ids(issue), [_issue_variable(issue)] if _issue_variable(issue) else []))
         elif code == "EXPOSURE_VARIABLE_DETECTED_BUT_NOT_USED":
-            actions.append(_action("action_issue_exposure_001", "issue", str(issue.get("severity") or "WARNING"), "REVIEW_EXPOSURE_OFFSET_HANDLING", "Review exposure or offset handling before interpreting count-model coefficients.", _issue_ids(issue), list(issue.get("variables") or [])))
+            counters[code] = counters.get(code, 0) + 1
+            actions.append(_action(f"action_issue_exposure_{counters[code]:03d}", "issue", str(issue.get("severity") or "WARNING"), "REVIEW_EXPOSURE_OFFSET_HANDLING", "Review exposure or offset handling before interpreting count-model coefficients.", _issue_ids(issue), list(issue.get("variables") or [])))
     return actions[:6]
 
 

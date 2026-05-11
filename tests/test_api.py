@@ -288,6 +288,108 @@ def test_get_run_detail_returns_diagnostic_summary_preview(completed_run):
     assert "recommended_actions" in preview
 
 
+def test_running_run_returns_pending_preview(tmp_path: Path):
+    """A manually-written 'running' manifest returns preview_status=pending
+    only when the worker is still active."""
+    from workbench.artifacts import write_json
+    from workbench.events import get_event_manager
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "running",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+    # Register the run as active so _mark_interrupted_if_dead leaves it alone
+    events = get_event_manager()
+    events.register_run(run.run_id)
+    events.mark_active(run.run_id)
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "pending"
+    assert preview["trust_label"] == "analysis_running"
+    assert preview["run_lifecycle_status"] == "running"
+
+
+def test_legacy_run_without_diagnostic_summary_returns_legacy_fallback(tmp_path: Path):
+    """Completed run with no diagnostic_summary.json → legacy_unavailable."""
+    from workbench.artifacts import write_json
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "completed",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "unavailable"
+    assert preview["trust_label"] == "legacy_unavailable"
+    assert any("missing" in w for w in preview["contract_warnings"])
+
+
+def test_malformed_diagnostic_summary_via_api_returns_contract_unavailable(tmp_path: Path):
+    """diagnostic_summary.json with invalid JSON → contract_unavailable."""
+    from workbench.artifacts import write_json
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "completed",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+    (run.root / "diagnostic_summary.json").write_text("not json", encoding="utf-8")
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "malformed"
+    assert preview["trust_label"] == "contract_unavailable"
+
+
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):
     client = TestClient(app)
     response = client.post(
