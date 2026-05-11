@@ -39,7 +39,14 @@ def build_report_view_model(
     coeff_rows = summary.get("coefficients_summary", {}).get("rows", [])
     coeff_views: list[dict] = []
     for row in coeff_rows:
+        guide = row.get("interpretation_guide", "standard")
         tk = row.get("template_key", "")
+        # Guardrail: categorical/dummy variables must not use continuous templates
+        if guide == "categorical_levels_vs_reference":
+            tk = "coef_categorical"
+        elif tk in ("coef_continuous_association",) and row.get("level"):
+            # Has a level → likely categorical, don't use continuous text
+            tk = "coef_categorical"
         if tk:
             try:
                 text = render_template(tk, {
@@ -51,13 +58,13 @@ def build_report_view_model(
                     "reference": "1",
                 })
             except (KeyError, ValueError):
-                text = ""
+                text = row.get("message", "")
         else:
             text = ""
         coeff_views.append({
             "text": text,
             "variable": row.get("variable", ""),
-            "interpretation_guide": row.get("interpretation_guide", "standard"),
+            "interpretation_guide": guide,
         })
 
     nc = summary.get("narrative_contract", {})
