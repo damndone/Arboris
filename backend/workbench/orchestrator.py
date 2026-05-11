@@ -469,7 +469,7 @@ def _run_workflow(
             {"kind": routing["kind"], "model_type": primary_type},
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
-    descriptive_stats = _build_descriptive_stats(cleaned)
+    descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
     model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     if effective_exposure_col:
@@ -520,6 +520,7 @@ def _run_workflow(
     variable_importance = _build_variable_importance(
         statistical_tests, normalized_y, normalized_x, model_results,
         cleaned, primary_type, exposure_col=effective_exposure_col,
+        categorical_vars=categorical_vars,
     )
     facts.append(
         "Note: variable importance is based on marginal (univariate) association "
@@ -807,7 +808,9 @@ def _build_variable_importance(
     frame: pd.DataFrame | None = None,
     primary_type: str = "ols",
     exposure_col: str | None = None,
+    categorical_vars: set[str] | None = None,
 ) -> list[dict[str, Any]]:
+    cat_set = categorical_vars or set()
     importance: dict[str, dict[str, Any]] = {}
     for var in x_vars:
         if var == exposure_col:
@@ -827,6 +830,8 @@ def _build_variable_importance(
                         c = corr[y].get(var)
                         if pd.notna(c):
                             importance[var]["correlation"] = round(float(c), 3)
+                            if var in cat_set:
+                                importance[var]["correlation_note"] = "Pearson r on categorical codes — prefer ANOVA"
     for row in statistical_tests.get("correlations", {}).get("results", []):
         variables = row.get("variables", [])
         if isinstance(variables, list) and y in variables:
@@ -1316,7 +1321,8 @@ def _importance_sort_key(item: dict[str, Any]) -> float:
     return float(p)
 
 
-def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] | None = None) -> list[dict[str, Any]]:
+    cat_set = categorical_vars or set()
     stats: list[dict[str, Any]] = []
     for column in frame.columns:
         col_str = str(column)
@@ -1331,7 +1337,8 @@ def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
             "missing_rate": round((total - present) / total, 4) if total > 0 else 0.0,
             "unique_count": int(series.nunique()),
         }
-        if pd.api.types.is_numeric_dtype(series):
+        is_categorical = col_str in cat_set
+        if pd.api.types.is_numeric_dtype(series) and not is_categorical:
             row["mean"] = round(float(series.mean()), 4)
             row["std"] = round(float(series.std()), 4)
             row["min"] = round(float(series.min()), 4)
@@ -1341,6 +1348,8 @@ def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
             row["std"] = None
             row["min"] = None
             row["max"] = None
+            if is_categorical:
+                row["note"] = "categorical — mean/std not meaningful"
         stats.append(row)
     return stats
 
