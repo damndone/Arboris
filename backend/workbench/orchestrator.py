@@ -827,11 +827,11 @@ def _build_variable_importance(
                     if var == exposure_col:
                         continue
                     if var in corr.columns:
+                        if var in cat_set:
+                            continue  # Pearson r on category codes is misleading
                         c = corr[y].get(var)
                         if pd.notna(c):
                             importance[var]["correlation"] = round(float(c), 3)
-                            if var in cat_set:
-                                importance[var]["correlation_note"] = "Pearson r on categorical codes — prefer ANOVA"
     for row in statistical_tests.get("correlations", {}).get("results", []):
         variables = row.get("variables", [])
         if isinstance(variables, list) and y in variables:
@@ -1132,6 +1132,7 @@ def _check_treatment_proxy_correlations(
                         "Interpret treatment and proxy coefficients jointly.",
                     ],
                 },
+                variables=[treatment, proxy],
             )
             issue_dicts.append(issue.to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})

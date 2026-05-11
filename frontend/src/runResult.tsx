@@ -391,21 +391,40 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
                 <span className="risk-level">{group.risk_level}</span>
               </div>
               {group.summary && <p className="risk-summary">{group.summary}</p>}
-              {group.terms.length > 0 && (
-                <table className="risk-terms-table">
-                  <thead><tr><th>Level</th><th>Reference</th><th>Estimate</th><th>p-value</th></tr></thead>
-                  <tbody>
-                    {group.terms.map((t) => (
-                      <tr key={t.source_id}>
-                        <td>{t.display_term}</td>
-                        <td>{t.reference_level ?? "—"}</td>
-                        <td>{formatNumber(t.estimate)}</td>
-                        <td>{formatNumber(t.p_value)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              {group.terms.length > 0 && (() => {
+                const isCategorical =
+                  group.variable_kind === "dummy_coded" ||
+                  group.variable_kind === "categorical_confirmed" ||
+                  group.variable_kind === "categorical_candidate";
+                return isCategorical ? (
+                  <table className="risk-terms-table">
+                    <thead><tr><th>Level</th><th>Reference</th><th>Estimate</th><th>p-value</th></tr></thead>
+                    <tbody>
+                      {group.terms.map((t) => (
+                        <tr key={t.source_id}>
+                          <td>{t.display_term}</td>
+                          <td>{t.reference_level ?? "—"}</td>
+                          <td>{formatNumber(t.estimate)}</td>
+                          <td>{formatNumber(t.p_value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="risk-terms-table">
+                    <thead><tr><th>Variable</th><th>Estimate</th><th>p-value</th></tr></thead>
+                    <tbody>
+                      {group.terms.map((t) => (
+                        <tr key={t.source_id}>
+                          <td>{t.display_term}</td>
+                          <td>{formatNumber(t.estimate)}</td>
+                          <td>{formatNumber(t.p_value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
           ))}
         </section>

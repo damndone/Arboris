@@ -435,12 +435,22 @@ def _role_summary(summary: dict[str, Any], variable: str) -> dict[str, Any]:
     roles = summary.get("preprocessing", {}).get("variable_roles", {})
     role_entries = roles.get(variable, {}).get("roles", []) if isinstance(roles, dict) else []
     if isinstance(role_entries, list) and role_entries:
+        # Pick the first non-rejected role; rejected roles carry no signal.
+        for role in role_entries:
+            if role.get("status") not in ("rejected",):
+                return {
+                    "role": role.get("role", "unknown"),
+                    "status": role.get("status", "unknown"),
+                    "confidence": role.get("confidence"),
+                    "needs_user_confirmation": bool(role.get("needs_user_confirmation", False)),
+                }
+        # All roles rejected → report the first one but mark status clearly.
         role = role_entries[0]
         return {
             "role": role.get("role", "unknown"),
-            "status": role.get("status", "unknown"),
-            "confidence": role.get("confidence"),
-            "needs_user_confirmation": bool(role.get("needs_user_confirmation", False)),
+            "status": "rejected",
+            "confidence": None,
+            "needs_user_confirmation": False,
         }
     return {"role": "unknown", "status": "unknown", "confidence": None, "needs_user_confirmation": False}
 
