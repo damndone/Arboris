@@ -11,6 +11,7 @@ import {
   type IssueRecord,
   type RunDetail,
 } from "./api";
+import { validateDiagnosticPreview } from "./contract/validateDiagnosticPreview";
 
 type Props = {
   projectRoot: string;
@@ -245,8 +246,20 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
     return <p className="muted">Loading run…</p>;
   }
 
-  const preview = detail.diagnostic_summary_preview;
+  const rawPreview = detail.diagnostic_summary_preview;
+  const validation = rawPreview === undefined
+    ? { valid: true as const, data: undefined }
+    : validateDiagnosticPreview(rawPreview);
+
+  if (validation.valid === false) {
+    if (typeof console !== "undefined") {
+      console.error("[runResult] diagnostic_summary_preview failed validation:", validation.errors);
+    }
+  }
+
+  const preview = validation.valid === true ? validation.data : undefined;
   const hasPreview = preview?.available === true;
+  const previewInvalid = validation.valid === false;
 
   // Backend normalizes CATEGORICAL_CANDIDATE→AUTO_DUMMY in _normalize_issue_stream.
   // Frontend normalizeIssues is legacy fallback for old backends without preview.
@@ -372,6 +385,11 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
               {preview.model_identity.model_label} · y = {preview.model_identity.y_variable} · n = {preview.model_identity.n_observations}
             </div>
           )}
+        </section>
+      )}
+      {previewInvalid && (
+        <section className="trust-summary trust-summary-error">
+          <p>Invalid diagnostic data — see browser console for details.</p>
         </section>
       )}
       {!hasPreview && detail.diagnostic_summary_preview && (
