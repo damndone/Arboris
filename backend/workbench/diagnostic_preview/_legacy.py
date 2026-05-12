@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .artifacts import read_json
+from ..artifacts import read_json
 
 PREVIEW_CONTRACT_VERSION = "1.0"
 SOURCE_SCHEMA_VERSION = "diagnostic_summary.v1"
