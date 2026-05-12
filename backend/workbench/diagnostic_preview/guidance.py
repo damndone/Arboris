@@ -183,3 +183,43 @@ def _issue_variable(issue: dict[str, Any]) -> str:
     if isinstance(evidence, dict) and evidence.get("column"):
         return str(evidence["column"])
     return ""
+
+
+def model_identity(
+    summary: dict[str, Any],
+    manifest: dict[str, Any],
+    model_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    raw = summary.get("model_identity", {}) if isinstance(summary.get("model_identity"), dict) else {}
+    primary = model_results[0] if model_results else {}
+    x_vars = raw.get("x_variables") or manifest.get("x") or []
+    model_type = primary.get("model_type") or raw.get("model_family") or "unknown"
+    identity = {
+        "primary_model_id": primary.get("model_id") or "unavailable",
+        "model_label": raw.get("model_label") or _model_label(model_type),
+        "model_type": model_type,
+        "y_variable": raw.get("y_variable") or manifest.get("y") or "",
+        "n_observations": raw.get("n_observations") or primary.get("nobs") or 0,
+    }
+    if isinstance(x_vars, list):
+        identity["x_variables"] = x_vars
+        identity["x_variable_count"] = len(x_vars)
+    identity["standard_error_type"] = _standard_error_type(model_type)
+    return identity
+
+
+def _model_label(model_type: str) -> str:
+    labels = {
+        "ols": "OLS regression",
+        "ols_robust": "OLS regression",
+        "logit": "Logistic regression",
+        "poisson": "Poisson regression",
+        "poisson_rate": "Poisson rate model",
+    }
+    return labels.get(model_type, str(model_type))
+
+
+def _standard_error_type(model_type: str) -> str:
+    if model_type == "ols_robust":
+        return "robust"
+    return "unavailable"

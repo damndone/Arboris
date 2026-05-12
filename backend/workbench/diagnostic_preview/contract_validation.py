@@ -57,3 +57,31 @@ def mark_partial_if_needed(preview: dict[str, Any]) -> dict[str, Any]:
         preview["preview_status"] = "partial"
         preview["contract_warnings"].append("coefficient_risk is unavailable for this run.")
     return preview
+
+
+def trust_status(counts: dict[str, int], has_model_results: bool) -> str:
+    if not has_model_results:
+        return "failed"
+    if counts["blockers"] > 0:
+        return "blocked"
+    if counts["warnings"] > 0 or counts["cautions"] > 0:
+        return "usable_with_caution"
+    return "ok"
+
+
+def trust_label_for_status(status: str) -> str:
+    return {
+        "ok": "ready_to_interpret",
+        "usable_with_caution": "interpret_with_caution",
+        "blocked": "not_ready_to_interpret",
+        "failed": "run_failed",
+    }[status]
+
+
+def safe_to_interpret(status: str) -> str:
+    return {
+        "ok": "yes",
+        "usable_with_caution": "partial",
+        "blocked": "no",
+        "failed": "unavailable",
+    }[status]
