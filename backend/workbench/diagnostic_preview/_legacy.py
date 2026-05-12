@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..artifacts import read_json
+from .artifact_manifest import build_artifact_manifest
 
 PREVIEW_CONTRACT_VERSION = "1.0"
 SOURCE_SCHEMA_VERSION = "diagnostic_summary.v1"
@@ -31,7 +32,7 @@ def build_diagnostic_summary_preview(
     if not summary_path.is_file():
         preview = _base_unavailable(lifecycle, "unavailable", "legacy_unavailable")
         preview["contract_warnings"].append("diagnostic_summary.json is missing; using legacy/debug fallback.")
-        preview["artifact_manifest"] = _artifact_manifest(run_root, model_results)
+        preview["artifact_manifest"] = build_artifact_manifest(run_root, model_results)
         return preview
 
     try:
@@ -39,7 +40,7 @@ def build_diagnostic_summary_preview(
     except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
         preview = _base_unavailable(lifecycle, "malformed", "contract_unavailable")
         preview["contract_warnings"].append(f"diagnostic_summary.json could not be parsed: {exc}")
-        preview["artifact_manifest"] = _artifact_manifest(run_root, model_results)
+        preview["artifact_manifest"] = build_artifact_manifest(run_root, model_results)
         return preview
 
     return _complete_or_partial_preview(run_root, manifest, summary, model_results)
@@ -75,43 +76,9 @@ def _failed_preview(
         "model_results_available": bool(model_results),
     }
     preview["trust_counts"] = {"blockers": 1, "warnings": 0, "cautions": 0, "info": 0}
-    preview["artifact_manifest"] = _artifact_manifest(run_root, model_results)
+    preview["artifact_manifest"] = build_artifact_manifest(run_root, model_results)
     return preview
 
-
-def _artifact_manifest(run_root: Path, model_results: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "report_html": _file_artifact(run_root / "reports" / "report.html", "report_html", "report.html"),
-        "diagnostic_summary_json": {
-            **_file_artifact(run_root / "diagnostic_summary.json", "diagnostic_summary", "diagnostic_summary.json"),
-            "schema_valid": (run_root / "diagnostic_summary.json").is_file(),
-        },
-        "primary_model_results": {
-            "expected": True,
-            "available": bool(model_results),
-            "readable": bool(model_results),
-            "model_id": model_results[0].get("model_id") if model_results else None,
-        },
-        "secondary_model_results": {
-            "expected": len(model_results) > 1,
-            "available_count": max(len(model_results) - 1, 0),
-        },
-        "errors_json": {
-            **_file_artifact(run_root / "errors.json", "errors_json", "errors.json"),
-            "legacy_debug_only": True,
-        },
-    }
-
-
-def _file_artifact(path: Path, artifact_id: str, filename: str) -> dict[str, Any]:
-    available = path.is_file()
-    return {
-        "expected": True,
-        "available": available,
-        "readable": available,
-        "artifact_id": artifact_id,
-        "filename": filename,
-    }
 
 
 SEVERITY_ORDER: dict[str, int] = {"BLOCKER": 4, "WARNING": 3, "CAUTION": 2, "INFO": 1}
@@ -160,7 +127,7 @@ def _complete_or_partial_preview(
         "trust_counts": counts,
         "primary_reasons": _primary_reasons(all_issues, limit=4),
         "model_identity": model_identity,
-        "artifact_manifest": _artifact_manifest(run_root, model_results),
+        "artifact_manifest": build_artifact_manifest(run_root, model_results),
         "diagnostic_highlights": _diagnostic_highlights([*all_issues, *infos]),
         "coefficient_risk": _coefficient_risk(summary, model_results),
         "interpretation_restrictions": _interpretation_restrictions(summary, all_issues),
