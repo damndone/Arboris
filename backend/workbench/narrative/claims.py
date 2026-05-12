@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from ..term_parser import parse_term
+from ..term_parser import parse_term, is_q_quoted_dummy
 
 
 def build_claims(
@@ -245,10 +245,9 @@ def _is_categorical_term(term: str) -> bool:
 
 
 def _parse_categorical_term(term: str) -> str | None:
-    parsed = parse_term(term)
-    if parsed.transformation_op == "C" and parsed.is_dummy:
-        return parsed.source_id
-    return None
+    if not is_q_quoted_dummy(term):
+        return None
+    return parse_term(term).source_id
 
 
 def _as_float(value: Any) -> float | None:

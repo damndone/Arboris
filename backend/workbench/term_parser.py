@@ -9,7 +9,7 @@ Public API: `parse_term(raw, reference_level=None) -> ParsedTerm`.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 _C_QUOTED_INNER = re.compile(r"""^Q\(['\"](.+?)['\"]\)$""")
@@ -27,7 +27,7 @@ class ParsedTerm:
     is_dummy: bool
     is_interaction: bool
     transformation_op: str | None
-    components: list[str] = field(default_factory=list)
+    components: tuple[str, ...] = ()
 
 
 def parse_term(raw: str, *, reference_level: str | None = None) -> ParsedTerm:
@@ -54,7 +54,7 @@ def parse_term(raw: str, *, reference_level: str | None = None) -> ParsedTerm:
             is_dummy=is_dummy,
             is_interaction=True,
             transformation_op=None,
-            components=components,
+            components=tuple(components),
         )
 
     # Categorical: C(...) optionally followed by [T.level]
@@ -76,7 +76,7 @@ def parse_term(raw: str, *, reference_level: str | None = None) -> ParsedTerm:
             is_dummy=False,
             is_interaction=False,
             transformation_op=op,
-            components=[source],
+            components=(source,),
         )
 
     return _fallback(raw)
@@ -98,7 +98,7 @@ def _parse_categorical(raw: str, reference_level: str | None) -> ParsedTerm:
             is_dummy=True,
             is_interaction=False,
             transformation_op="C",
-            components=[source],
+            components=(source,),
         )
     closing = raw.rfind(")")
     inner = raw[2:closing] if closing > 2 else raw[2:]
@@ -111,7 +111,7 @@ def _parse_categorical(raw: str, reference_level: str | None) -> ParsedTerm:
         is_dummy=False,
         is_interaction=False,
         transformation_op="C",
-        components=[source],
+        components=(source,),
     )
 
 
@@ -139,6 +139,20 @@ def _is_inside_parens_colon(raw: str) -> bool:
     return True
 
 
+def is_q_quoted_dummy(raw: str) -> bool:
+    """True iff `raw` is a Q-wrapped categorical dummy term (V1.3.1-compatible).
+
+    Returns True only for terms of the form `C(Q('var'))[T.level]` or
+    `C(Q("var"))[T.level]`. The plain `C(var)[T.level]` form returns False.
+    This narrower predicate exists to preserve V1.3.1 behavior at call sites
+    that historically guarded on Q-quoting; `parse_term(...).is_dummy` is the
+    broader, format-agnostic version.
+    """
+    if not (raw.startswith("C(Q('") or raw.startswith('C(Q("')):
+        return False
+    return parse_term(raw).is_dummy
+
+
 def _fallback(raw: str) -> ParsedTerm:
     return ParsedTerm(
         raw=raw,
@@ -148,5 +162,5 @@ def _fallback(raw: str) -> ParsedTerm:
         is_dummy=False,
         is_interaction=False,
         transformation_op=None,
-        components=[raw] if raw else [],
+        components=(raw,) if raw else (),
     )

@@ -1,5 +1,5 @@
 # tests/test_term_parser.py
-from workbench.term_parser import parse_term, ParsedTerm
+from workbench.term_parser import parse_term, ParsedTerm, is_q_quoted_dummy
 
 
 def test_plain_term():
@@ -12,7 +12,7 @@ def test_plain_term():
         is_dummy=False,
         is_interaction=False,
         transformation_op=None,
-        components=["income"],
+        components=("income",),
     )
 
 
@@ -30,7 +30,7 @@ def test_c_quoted_single_dummy_with_level():
     assert p.is_dummy is True
     assert p.transformation_op == "C"
     assert p.display_term == "region = north"
-    assert p.components == ["region"]
+    assert p.components == ("region",)
 
 
 def test_c_quoted_double_dummy_with_level():
@@ -62,7 +62,7 @@ def test_log_transform():
     assert p.transformation_op == "log"
     assert p.display_term == "log(income)"
     assert p.is_dummy is False
-    assert p.components == ["income"]
+    assert p.components == ("income",)
 
 
 def test_log_with_offset():
@@ -82,7 +82,7 @@ def test_sqrt_transform():
 def test_interaction_two_continuous():
     p = parse_term("income:age")
     assert p.is_interaction is True
-    assert p.components == ["income", "age"]
+    assert p.components == ("income", "age")
     assert p.source_id == "income:age"
     assert p.transformation_op is None
     assert p.display_term == "income × age"
@@ -91,7 +91,7 @@ def test_interaction_two_continuous():
 def test_interaction_with_dummy():
     p = parse_term("C(region)[T.north]:income")
     assert p.is_interaction is True
-    assert p.components == ["region", "income"]
+    assert p.components == ("region", "income")
     assert p.is_dummy is True
     assert p.display_term == "region = north × income"
 

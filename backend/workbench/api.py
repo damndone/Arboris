@@ -24,7 +24,7 @@ from .api_errors import (
 from .artifacts import read_json, write_json
 from .config import load_config
 from .diagnostic_preview import build_diagnostic_summary_preview
-from .term_parser import parse_term
+from .term_parser import parse_term, is_q_quoted_dummy
 from .domain import GuardrailIssue, Severity
 from .events import get_event_manager
 from .orchestrator import (
@@ -413,9 +413,8 @@ def _dummy_coded_columns(model_results: list[dict]) -> set[str]:
         for term in coefficients:
             if not isinstance(term, str):
                 continue
-            parsed = parse_term(term)
-            if parsed.is_dummy:
-                columns.add(parsed.source_id)
+            if is_q_quoted_dummy(term):
+                columns.add(parse_term(term).source_id)
     return columns
 
 
