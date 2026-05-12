@@ -5,6 +5,8 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ..term_parser import parse_term
+
 
 def build_claims(
     model_results: Iterable[Mapping[str, Any]],
@@ -235,29 +237,17 @@ def _count_coefficients(model_results: Iterable[Mapping[str, Any]]) -> int:
 
 
 def _is_dummy_term(term: str) -> bool:
-    return "[T." in term
+    return parse_term(term).is_dummy
 
 
 def _is_categorical_term(term: str) -> bool:
-    return term.startswith("C(")
+    return parse_term(term).transformation_op == "C"
 
 
 def _parse_categorical_term(term: str) -> str | None:
-    """Extract original column name from a C(Q('col'))[T.val] term.
-
-    Returns the column name if the term is a C()-encoded categorical term,
-    or None if the term does not match the expected pattern.
-    """
-    if not term.startswith("C(") or "[T." not in term:
-        return None
-    end_of_inner = term.find(")[T.")
-    if end_of_inner == -1:
-        return None
-    inner = term[2:end_of_inner]
-    # Handle C(Q('col')) and C(Q("col")) forms
-    m = re.match(r"""^Q\(['\"](.+?)['\"]\)$""", inner)
-    if m:
-        return m.group(1)
+    parsed = parse_term(term)
+    if parsed.transformation_op == "C" and parsed.is_dummy:
+        return parsed.source_id
     return None
 
 
