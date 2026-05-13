@@ -392,7 +392,7 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           <p>Invalid diagnostic data — see browser console for details.</p>
         </section>
       )}
-      {!hasPreview && detail.diagnostic_summary_preview && (
+      {!hasPreview && !previewInvalid && detail.diagnostic_summary_preview && (
         <section className="panel panel-neutral" aria-label="trust unavailable">
           <strong>Trust preview unavailable</strong>
           <p>{(detail.diagnostic_summary_preview.contract_warnings ?? []).join("; ") || "Diagnostic summary could not be loaded. Showing legacy results below."}</p>

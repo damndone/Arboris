@@ -97,4 +97,25 @@ describe("validateDiagnosticPreview", () => {
       expect(result.errors.length).toBeGreaterThanOrEqual(2);
     }
   });
+
+  it("rejects malformed run_status fields", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      run_status: {
+        status: "ok",
+        status_scope: "primary_model",
+        safe_to_generate_report: "yes",  // wrong type: should be boolean
+        safe_to_interpret: "yes",
+        has_blockers: false,
+        has_warnings: 0,                  // wrong type: should be boolean
+        has_cautions: false,
+        model_results_available: true,
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.path === "run_status.safe_to_generate_report")).toBe(true);
+      expect(result.errors.some((e) => e.path === "run_status.has_warnings")).toBe(true);
+    }
+  });
 });

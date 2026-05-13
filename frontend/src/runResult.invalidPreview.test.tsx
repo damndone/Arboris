@@ -68,4 +68,8 @@ test("renders error state when diagnostic_summary_preview is malformed", async (
   await waitFor(() => {
     expect(screen.getByText(/Invalid diagnostic data/i)).toBeInTheDocument();
   });
+
+  // Legacy fallback ("Trust preview unavailable" / contract_warnings) must NOT render
+  // simultaneously with the validation error — that was the V1.3.2-code-review-found bug.
+  expect(screen.queryByText(/diagnostic summary could not be loaded/i)).not.toBeInTheDocument();
 });

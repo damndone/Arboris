@@ -162,16 +162,16 @@ function validateRunStatus(raw: unknown, errors: ValidationError[]): void {
     return;
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.status !== "string") {
-    errors.push({ path: "run_status.status", reason: "wrong type", expected: "string", actual: typeOf(obj.status) });
+
+  for (const key of ["status", "status_scope", "safe_to_interpret"] as const) {
+    if (typeof obj[key] !== "string") {
+      errors.push({ path: `run_status.${key}`, reason: "wrong type", expected: "string", actual: typeOf(obj[key]) });
+    }
   }
-  if (typeof obj.safe_to_generate_report !== "boolean") {
-    errors.push({
-      path: "run_status.safe_to_generate_report",
-      reason: "wrong type",
-      expected: "boolean",
-      actual: typeOf(obj.safe_to_generate_report),
-    });
+  for (const key of ["safe_to_generate_report", "has_blockers", "has_warnings", "has_cautions", "model_results_available"] as const) {
+    if (typeof obj[key] !== "boolean") {
+      errors.push({ path: `run_status.${key}`, reason: "wrong type", expected: "boolean", actual: typeOf(obj[key]) });
+    }
   }
 }
 
