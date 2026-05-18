@@ -11,6 +11,9 @@ from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
+from .graph_recorder import GraphRecorder
+from .graph_store import GraphStore
+from . import graph_decision_factory as dpf
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
     run_logit,
@@ -165,6 +168,14 @@ def _run_workflow(
 ) -> dict[str, str]:
     _s = on_step  # shorthand
 
+    _graph_store = GraphStore(runs_root=run_root.parent)
+    _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
+    _recorder.record_stage(
+        node_id="stage:raw",
+        display_label="Raw input data",
+        payload_ref=None,
+    )
+
     if _s: _s("ingestion", "start", "Ingesting files...")
     frames = ingest_files([Path(path) for path in input_files], run_root, config, sheet_name, transpose)
     if _s: _s("ingestion", "complete", f"Ingested {len(frames)} file(s)")
@@ -251,14 +262,25 @@ def _run_workflow(
     if _s: _s("y_type", "start", "Detecting y variable type...")
     normalized_y = normalize_column_name(y)
     normalized_x = [normalize_column_name(column) for column in x]
+
+    _missing_values_dp = dpf.handle_missing_values(
+        variables=[normalized_y, *normalized_x],
+    )
+
     if normalized_y in cleaned.columns:
         data_detected_y_type = detect_y_kind(cleaned, normalized_y).value
     else:
         data_detected_y_type = "continuous"
     if model_type != "auto":
         y_type = _map_model_type(model_type)
+        _model_type_dp = None
     else:
         y_type = data_detected_y_type
+        _model_type_dp = dpf.model_type_auto_select(
+            selected=y_type,
+            y_unique=int(cleaned[normalized_y].nunique()) if normalized_y in cleaned.columns else 0,
+            y_dtype=str(cleaned[normalized_y].dtype) if normalized_y in cleaned.columns else "unknown",
+        )
     if _s: _s("y_type", "complete", f"y classified as {y_type}")
 
     if _s: _s("model_check", "start", "Checking model columns...")
@@ -282,8 +304,25 @@ def _run_workflow(
 
     coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
 
+    _coerce_dps: dict[str, Any] = {}
+    for action in coercion_actions:
+        col = action["column"]
+        _coerce_dps[col] = dpf.auto_coerce_to_numeric(
+            variable=col,
+            conversion_rate=action["conversion_rate"],
+        )
+
     # Detect categorical X variables for C() encoding in model formula
     categorical_vars = _detect_categorical_x_vars(cleaned, normalized_x)
+
+    _categorical_dummy_dps: dict[str, Any] = {}
+    for cat_var in categorical_vars:
+        ref = sorted(cleaned[cat_var].dropna().unique())[0] if cat_var in cleaned.columns else "?"
+        _categorical_dummy_dps[cat_var] = dpf.categorical_auto_dummy(
+            variable=cat_var,
+            n_unique=int(cleaned[cat_var].nunique()) if cat_var in cleaned.columns else 0,
+            reference_level=str(ref),
+        )
 
     variable_roles = infer_variable_roles(cleaned, normalized_x, y_type=y_type)
 
@@ -315,6 +354,8 @@ def _run_workflow(
     if exposure_col:
         poisson_x = [v for v in normalized_x if v != exposure_col]
 
+    _robust_se_dp = None
+
     try:
         if y_type == "binary":
             primary, primary_fitted = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
@@ -336,6 +377,7 @@ def _run_workflow(
             _write_model_result(run_root, "ols_1", primary)
             model_results.append(("ols_1", primary))
             fitted_models["ols_1"] = primary_fitted
+            _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
     except ValueError as exc:
         model_issue = GuardrailIssue(
             Severity.WARNING,
@@ -348,6 +390,7 @@ def _run_workflow(
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
         # Fall back to OLS
         ols_result, ols_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+        _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
         _write_model_result(run_root, "ols_1", ols_result)
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
@@ -355,6 +398,82 @@ def _run_workflow(
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     drop_check_x = poisson_x if primary_type == "poisson_rate" else normalized_x
     dropped_vars = _check_dropped_variables(drop_check_x, model_results, cleaned, issue_dicts, run_root, categorical_vars=categorical_vars)
+
+    _dropped_dps: dict[str, Any] = {}
+    for entry in dropped_vars:
+        # entry format: "var_name (reason text)"
+        if " (" in entry:
+            var_name = entry.split(" (")[0]
+            reason_text = entry.split(" (")[1].rstrip(")")
+            normalized_reason = reason_text.replace(" ", "_").lower()
+        else:
+            var_name = entry
+            normalized_reason = "unknown"
+        _dropped_dps[var_name] = dpf.variable_silently_dropped(
+            variable=var_name,
+            drop_reason=normalized_reason,
+        )
+
+    # -- Record lineage graph nodes with accumulated DecisionPoints ----------
+    _recorder.record_stage(
+        node_id="stage:cleaned",
+        display_label="Cleaned data",
+        payload_ref="processed/cleaned_dataset.parquet",
+        decision_point=_missing_values_dp,
+    )
+    _recorder.record_edge(
+        edge_id="e:raw-cleaned",
+        source_id="stage:raw",
+        target_id="stage:cleaned",
+        op="drop_rows_with_missing_required_fields",
+    )
+
+    for var in [normalized_y, *normalized_x]:
+        _recorder.record_variable(
+            node_id=f"var:{var}:cleaned",
+            display_label=f"{var} (cleaned)",
+            parent_stage_id="stage:cleaned",
+            decision_point=_categorical_dummy_dps.get(var) or _coerce_dps.get(var),
+        )
+
+    for var_name, dropped_dp in _dropped_dps.items():
+        _recorder.record_variable(
+            node_id=f"var:{var_name}:dropped",
+            display_label=f"{var_name} (dropped)",
+            parent_stage_id="stage:cleaned",
+            decision_point=dropped_dp,
+        )
+
+    if model_results:
+        primary_model_id = model_results[0][0]
+        primary_model_type = model_results[0][1].get("model_type", "ols")
+        # Attach one DecisionPoint per node for V1.4.0:
+        # model_type_auto_select (data-driven) > ols_default_robust_se
+        _primary_dp = _model_type_dp or _robust_se_dp
+        _recorder.record_model(
+            node_id=f"model:{primary_model_id}",
+            display_label=f"{primary_model_type} (primary)",
+            payload_ref=f"model_results/{primary_model_id}.json",
+            decision_point=_primary_dp,
+        )
+        _recorder.record_edge(
+            edge_id="e:cleaned-model-primary",
+            source_id="stage:cleaned",
+            target_id=f"model:{primary_model_id}",
+            op=f"{primary_model_type}.fit",
+        )
+
+        _recorder.record_report(
+            node_id="report:html",
+            display_label="HTML report",
+            payload_ref="reports/report.html",
+        )
+        _recorder.record_edge(
+            edge_id="e:model-report",
+            source_id=f"model:{primary_model_id}",
+            target_id="report:html",
+            op="render_report",
+        )
 
     if _s: _s("diagnostics", "start", "Running regression diagnostics...")
     diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
@@ -615,6 +734,8 @@ def _run_workflow(
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("export", "complete", "Export failed — model results available")
+
+    _recorder.flush()
 
     _write_manifest(
         run_root,
