@@ -8,8 +8,12 @@ import pytest
 
 from workbench.graph_model import (
     AutoChosenReason,
+    BranchRef,
     Contestability,
     DecisionPoint,
+    Edge,
+    Graph,
+    Node,
     NodeKind,
     Trust,
 )
@@ -183,3 +187,110 @@ def test_decision_point_is_frozen():
     dp = DecisionPoint(decision_id="test")
     with pytest.raises((AttributeError, Exception)):
         dp.decision_id = "other"  # type: ignore[misc]
+
+
+def test_node_minimal():
+    n = Node(
+        id="stage:raw",
+        kind=NodeKind.DATASET_STAGE,
+        display_label="Raw data",
+        created_at="2026-05-13T10:23:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+    )
+    assert n.trust == Trust.OK
+    assert n.trust_reason is None
+    assert n.archived is False
+    assert n.payload_ref is None
+    assert n.decision_point is None
+    assert n.annotations == ()
+
+
+def test_node_with_decision_point():
+    dp = DecisionPoint(
+        decision_id="model_type_auto_select",
+        selected="logit",
+        candidates=("ols", "logit", "poisson"),
+        source="data_driven_default",
+    )
+    n = Node(
+        id="model:primary",
+        kind=NodeKind.MODEL,
+        display_label="logit primary",
+        created_at="2026-05-13T10:25:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+        decision_point=dp,
+    )
+    assert n.decision_point is dp
+    assert n.decision_point.selected == "logit"
+
+
+def test_node_is_frozen():
+    n = Node(
+        id="x",
+        kind=NodeKind.VARIABLE,
+        display_label="x",
+        created_at="2026-05-13T10:25:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+    )
+    with pytest.raises((AttributeError, Exception)):
+        n.archived = True  # type: ignore[misc]
+
+
+def test_edge_minimal():
+    e = Edge(
+        id="e1",
+        source_id="stage:raw",
+        target_id="stage:cleaned",
+        op="drop_na",
+        params={},
+    )
+    assert e.reversible is False
+    assert e.inverse_op is None
+
+
+def test_edge_with_inverse():
+    e = Edge(
+        id="e2",
+        source_id="var:income:cleaned",
+        target_id="var:log_income:transformed",
+        op="np.log(x + 1)",
+        params={"offset": 1},
+        reversible=True,
+        inverse_op="np.exp(x) - 1",
+    )
+    assert e.reversible is True
+    assert e.inverse_op == "np.exp(x) - 1"
+
+
+def test_branch_ref_minimal():
+    b = BranchRef(id="main", forked_from_node_id=None, head_node_ids=("model:primary",))
+    assert b.archived is False
+
+
+def test_graph_minimal():
+    g = Graph(
+        schema_version=1,
+        run_id="run_42",
+        nodes={},
+        edges={},
+        branches={"main": BranchRef(id="main", forked_from_node_id=None, head_node_ids=())},
+    )
+    assert g.legacy is False
+    assert "main" in g.branches
+
+
+def test_graph_legacy_empty():
+    """Pre-V1.4 runs surface as legacy=True empty graphs."""
+    g = Graph(
+        schema_version=1,
+        run_id="run_old",
+        nodes={},
+        edges={},
+        branches={},
+        legacy=True,
+    )
+    assert g.legacy is True
+    assert g.nodes == {}

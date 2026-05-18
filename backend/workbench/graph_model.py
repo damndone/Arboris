@@ -144,3 +144,52 @@ class DecisionPoint:
     source: DecisionSource = "system_default"
     contestability: Contestability = field(default_factory=Contestability)
     reason: AutoChosenReason | None = None
+
+
+@dataclass(frozen=True)
+class Node:
+    """A vertex in the lineage graph."""
+    id: str
+    kind: NodeKind
+    display_label: str
+    created_at: str  # ISO 8601 UTC
+    parent_stage_id: str | None
+    branch_id: str
+    trust: Trust = Trust.OK
+    trust_reason: str | None = None
+    archived: bool = False
+    payload_ref: str | None = None  # path relative to run root
+    decision_point: DecisionPoint | None = None
+    annotations: tuple = ()  # reserved for V1.6 AI; tuple of Annotation
+
+
+@dataclass(frozen=True)
+class Edge:
+    """A directed edge in the lineage graph."""
+    id: str
+    source_id: str
+    target_id: str
+    op: str
+    params: dict[str, Any] = field(default_factory=dict)
+    reversible: bool = False
+    inverse_op: str | None = None
+
+
+@dataclass(frozen=True)
+class BranchRef:
+    """A named branch within a run's lineage graph."""
+    id: str
+    forked_from_node_id: str | None
+    head_node_ids: tuple[str, ...] = ()
+    archived: bool = False
+
+
+@dataclass(frozen=True)
+class Graph:
+    """The full lineage graph for one run."""
+    schema_version: int
+    run_id: str
+    nodes: dict[str, Node]
+    edges: dict[str, Edge]
+    branches: dict[str, BranchRef]
+    legacy: bool = False
