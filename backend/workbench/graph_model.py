@@ -129,3 +129,18 @@ class AutoChosenReason:
     explanation: str | None = None
     chosen_params_schema: str | None = None
     chosen_params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DecisionPoint:
+    """Audit trail entry on a graph node. Records what was selected from what set.
+
+    See module docstring for schema evolution rules.
+    """
+    decision_id: str
+    decision_id_alias: tuple[str, ...] = ()
+    selected: Any = None
+    candidates: tuple[Any, ...] = ()
+    source: DecisionSource = "system_default"
+    contestability: Contestability = field(default_factory=Contestability)
+    reason: AutoChosenReason | None = None

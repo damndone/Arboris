@@ -9,6 +9,7 @@ import pytest
 from workbench.graph_model import (
     AutoChosenReason,
     Contestability,
+    DecisionPoint,
     NodeKind,
     Trust,
 )
@@ -133,3 +134,52 @@ def test_auto_chosen_reason_chosen_params_must_be_json_safe():
         reason_type="system_default",
         chosen_params={"obj": _NotJsonSafe()},
     )
+
+
+def test_decision_point_minimal():
+    dp = DecisionPoint(decision_id="model_type_auto_select")
+    assert dp.decision_id == "model_type_auto_select"
+    assert dp.decision_id_alias == ()
+    assert dp.selected is None
+    assert dp.candidates == ()
+    assert dp.source == "system_default"
+    assert isinstance(dp.contestability, Contestability)
+    assert dp.reason is None
+
+
+def test_decision_point_full():
+    dp = DecisionPoint(
+        decision_id="model_type_auto_select",
+        selected="logit",
+        candidates=("ols", "logit", "poisson"),
+        source="data_driven_default",
+        contestability=Contestability(
+            assumption_checks_needed=("variable_role_inference",),
+        ),
+        reason=AutoChosenReason(
+            reason_type="data_driven_default",
+            explanation="y is binary",
+            chosen_params={"y_unique": 2},
+        ),
+    )
+    assert dp.selected == "logit"
+    assert dp.candidates == ("ols", "logit", "poisson")
+    assert dp.contestability.review_status == "needed"
+    assert dp.reason is not None
+    assert dp.reason.chosen_params == {"y_unique": 2}
+
+
+def test_decision_point_aliases_preserved_across_renames():
+    """Schema evolution rule: renaming a decision_id keeps old IDs in alias."""
+    dp = DecisionPoint(
+        decision_id="model_type_auto_select_v2",
+        decision_id_alias=("model_type_auto_select",),
+        selected="logit",
+    )
+    assert "model_type_auto_select" in dp.decision_id_alias
+
+
+def test_decision_point_is_frozen():
+    dp = DecisionPoint(decision_id="test")
+    with pytest.raises((AttributeError, Exception)):
+        dp.decision_id = "other"  # type: ignore[misc]
