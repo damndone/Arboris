@@ -130,3 +130,63 @@ def test_flush_updates_main_branch_head(tmp_path: Path):
     recorder.flush()
     g = store.read("run_test")
     assert "model:primary" in g.branches["main"].head_node_ids
+
+
+# -- DecisionPoint factory tests ----------------------------------------------
+
+from workbench.graph_decision_factory import (
+    auto_coerce_to_numeric,
+    categorical_auto_dummy,
+    handle_missing_values,
+    model_type_auto_select,
+    ols_default_robust_se,
+    variable_silently_dropped,
+)
+
+
+def test_factory_model_type_auto_select_shape():
+    dp = model_type_auto_select(selected="logit", y_unique=2, y_dtype="int64")
+    assert dp.decision_id == "model_type_auto_select"
+    assert dp.candidates == ("ols", "logit", "poisson")
+    assert dp.source == "data_driven_default"
+    assert dp.reason is not None
+    assert dp.reason.chosen_params["y_unique"] == 2
+
+
+def test_factory_categorical_auto_dummy_shape():
+    dp = categorical_auto_dummy(variable="region", n_unique=4, reference_level="north")
+    assert dp.decision_id == "categorical_auto_dummy"
+    assert dp.reason.chosen_params["reference_level"] == "north"
+
+
+def test_factory_ols_default_robust_se_shape():
+    dp = ols_default_robust_se()
+    assert dp.decision_id == "ols_default_robust_se"
+    assert dp.candidates == ()  # not enumerated
+    assert dp.source == "system_default"
+    assert dp.contestability.assumption_checks_needed == ("breusch_pagan", "white_test")
+
+
+def test_factory_auto_coerce_to_numeric_shape():
+    dp = auto_coerce_to_numeric(variable="rating", conversion_rate=1.0)
+    assert dp.decision_id == "auto_coerce_to_numeric"
+    assert dp.reason.chosen_params["conversion_rate"] == 1.0
+
+
+def test_factory_handle_missing_values_shape():
+    dp = handle_missing_values(variables=["y", "x1", "x2"])
+    assert dp.decision_id == "handle_missing_values"
+    assert len(dp.candidates) == 18
+    assert dp.reason.chosen_params_schema == "MissingValueStrategy.v1"
+    assert dp.reason.chosen_params["method"] == "drop_rows_with_missing_required_fields"
+
+
+def test_factory_variable_silently_dropped_shape():
+    dp = variable_silently_dropped(
+        variable="edu_level",
+        drop_reason="zero_variance",
+        n_unique_after_cleaning=1,
+    )
+    assert dp.decision_id == "variable_silently_dropped"
+    assert dp.contestability.assumption_checks_needed == ()
+    assert dp.reason.chosen_params["drop_reason"] == "zero_variance"
