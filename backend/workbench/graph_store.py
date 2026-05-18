@@ -38,27 +38,44 @@ class GraphSerializationError(ValueError):
     """Raised when a graph cannot be JSON-serialized."""
 
 
+class GraphDeserializationError(ValueError):
+    """Raised when a persisted graph cannot be deserialized."""
+
+
 def graph_to_json(graph: Graph) -> dict[str, Any]:
     """Serialize a Graph to a JSON-compatible dict. Raises on non-JSON-safe values."""
     try:
         data = _to_jsonable(graph)
-        # Round-trip through json to surface any latent issues
-        json.dumps(data)
-    except (TypeError, ValueError) as exc:
+    except TypeError as exc:
         raise GraphSerializationError(f"Graph is not JSON-serializable: {exc}") from exc
+    if __debug__:
+        # Validate JSON-safety in dev/test; skipped with `python -O` in production
+        try:
+            json.dumps(data)
+        except (TypeError, ValueError) as exc:
+            raise GraphSerializationError(f"Graph is not JSON-serializable: {exc}") from exc
     return data
 
 
 def graph_from_json(data: dict[str, Any]) -> Graph:
-    """Deserialize a Graph from a JSON-compatible dict."""
-    return Graph(
-        schema_version=data["schema_version"],
-        run_id=data["run_id"],
-        nodes={k: _node_from_json(v) for k, v in data.get("nodes", {}).items()},
-        edges={k: _edge_from_json(v) for k, v in data.get("edges", {}).items()},
-        branches={k: _branch_from_json(v) for k, v in data.get("branches", {}).items()},
-        legacy=data.get("legacy", False),
-    )
+    """Deserialize a Graph from a JSON-compatible dict.
+
+    Raises GraphDeserializationError if required keys are missing, values have
+    wrong types, or an unknown enum value is encountered (e.g. future NodeKind).
+    """
+    try:
+        return Graph(
+            schema_version=data["schema_version"],
+            run_id=data["run_id"],
+            nodes={k: _node_from_json(v) for k, v in data.get("nodes", {}).items()},
+            edges={k: _edge_from_json(v) for k, v in data.get("edges", {}).items()},
+            branches={k: _branch_from_json(v) for k, v in data.get("branches", {}).items()},
+            legacy=data.get("legacy", False),
+        )
+    except (KeyError, ValueError, TypeError) as exc:
+        raise GraphDeserializationError(
+            f"Cannot deserialize graph for run {data.get('run_id', '?')}: {exc}"
+        ) from exc
 
 
 class GraphStore:
@@ -82,9 +99,16 @@ class GraphStore:
                 branches={},
                 legacy=True,
             )
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return graph_from_json(data)
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return graph_from_json(data)
+        except GraphDeserializationError:
+            raise
+        except json.JSONDecodeError as exc:
+            raise GraphDeserializationError(
+                f"Corrupt graph.json for run {run_id}: {exc}"
+            ) from exc
 
     def write(self, graph: Graph) -> None:
         path = self._graph_path(graph.run_id)
@@ -94,10 +118,21 @@ class GraphStore:
             self._atomic_write_json(path, data)
 
     def mutate(self, run_id: str, fn: Callable[[Graph], Graph]) -> Graph:
-        """Read-modify-write under a per-run lock."""
+        """Read-modify-write under a per-run lock.
+
+        The `fn` callback receives the current Graph and must return the
+        updated Graph. The returned Graph's run_id is validated against
+        the lock's run_id — a mismatch raises ValueError to prevent
+        accidentally writing one run's graph into another's directory.
+        """
         with self._lock(run_id):
             current = self.read(run_id)
             updated = fn(current)
+            if updated.run_id != run_id:
+                raise ValueError(
+                    f"Mutation callback changed run_id from {run_id!r} to "
+                    f"{updated.run_id!r}. The graph's run_id must be preserved."
+                )
             data = graph_to_json(updated)
             self._atomic_write_json(self._graph_path(run_id), data)
             return updated

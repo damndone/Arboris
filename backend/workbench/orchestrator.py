@@ -240,6 +240,7 @@ def _run_workflow(
             y=y,
             x=x,
         )
+        _recorder.flush()
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("validation", "complete", "Validation passed")
 
@@ -299,6 +300,7 @@ def _run_workflow(
             y=y,
             x=x,
         )
+        _recorder.flush()
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("model_check", "complete", "Model columns valid")
 
@@ -388,7 +390,8 @@ def _run_workflow(
         issue_dicts.append(model_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
-        # Fall back to OLS
+        # Fall back to OLS — clear auto model_type DP since it no longer applies
+        _model_type_dp = None
         ols_result, ols_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
         _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
         _write_model_result(run_root, "ols_1", ols_result)
@@ -401,17 +404,10 @@ def _run_workflow(
 
     _dropped_dps: dict[str, Any] = {}
     for entry in dropped_vars:
-        # entry format: "var_name (reason text)"
-        if " (" in entry:
-            var_name = entry.split(" (")[0]
-            reason_text = entry.split(" (")[1].rstrip(")")
-            normalized_reason = reason_text.replace(" ", "_").lower()
-        else:
-            var_name = entry
-            normalized_reason = "unknown"
-        _dropped_dps[var_name] = dpf.variable_silently_dropped(
-            variable=var_name,
-            drop_reason=normalized_reason,
+        parsed = _parse_dropped_var_entry(entry)
+        _dropped_dps[parsed["variable"]] = dpf.variable_silently_dropped(
+            variable=parsed["variable"],
+            drop_reason=parsed["reason"],
         )
 
     # -- Record lineage graph nodes with accumulated DecisionPoints ----------
@@ -425,15 +421,28 @@ def _run_workflow(
         edge_id="e:raw-cleaned",
         source_id="stage:raw",
         target_id="stage:cleaned",
-        op="drop_rows_with_missing_required_fields",
+        op="clean_frame",
+        params={"cleaning_actions_count": len(actions)},
     )
 
     for var in [normalized_y, *normalized_x]:
+        _cat_dp = _categorical_dummy_dps.get(var)
+        _coer_dp = _coerce_dps.get(var)
+        if _cat_dp is not None and _coer_dp is not None:
+            import warnings as _warnings
+            _warnings.warn(
+                f"Variable {var!r} has both categorical_dummy and auto_coerce "
+                f"DecisionPoints. Using categorical_dummy (coerce DP ignored). "
+                f"This is unexpected — a column should not be both categorical "
+                f"and coerced-to-numeric.",
+                UserWarning, stacklevel=2,
+            )
+        _dp_for_var = _cat_dp or _coer_dp
         _recorder.record_variable(
             node_id=f"var:{var}:cleaned",
             display_label=f"{var} (cleaned)",
             parent_stage_id="stage:cleaned",
-            decision_point=_categorical_dummy_dps.get(var) or _coerce_dps.get(var),
+            decision_point=_dp_for_var,
         )
 
     for var_name, dropped_dp in _dropped_dps.items():
@@ -1473,6 +1482,26 @@ def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] 
                 row["note"] = "categorical — mean/std not meaningful"
         stats.append(row)
     return stats
+
+
+def _parse_dropped_var_entry(entry: str) -> dict[str, str]:
+    """Parse a dropped-variable string like 'x4 (dropped due to zero variance)'.
+
+    Returns {'variable': 'x4', 'reason': 'dropped_due_to_zero_variance'}.
+    Handles edge cases: no parentheses, nested parens, empty string.
+    """
+    entry = entry.strip()
+    if not entry:
+        return {"variable": "", "reason": "unknown"}
+    # Find the last " (" to split variable name from reason.
+    # Using rfind avoids problems with variable names containing " (".
+    idx = entry.rfind(" (")
+    if idx == -1 or not entry.endswith(")"):
+        return {"variable": entry, "reason": "unknown"}
+    var_name = entry[:idx]
+    reason_text = entry[idx + 2:-1]  # strip " (" prefix and ")" suffix
+    normalized_reason = reason_text.strip().replace(" ", "_").lower()
+    return {"variable": var_name, "reason": normalized_reason}
 
 
 def _check_dropped_variables(

@@ -18,6 +18,7 @@ from workbench.graph_model import (
     Trust,
 )
 from workbench.graph_store import (
+    GraphDeserializationError,
     GraphSerializationError,
     GraphStore,
     graph_from_json,
@@ -204,3 +205,51 @@ def test_store_mutate_returns_post_mutation_graph(tmp_path: Path):
     result = store.mutate("run_mut", archive_main_branch)
     assert result.branches["main"].archived is True
     assert store.read("run_mut").branches["main"].archived is True
+
+
+def test_mutate_rejects_run_id_change(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_mut"
+    run_dir.mkdir()
+
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_mut")
+    store.write(g)
+
+    def change_run_id(graph: Graph) -> Graph:
+        return Graph(
+            schema_version=graph.schema_version,
+            run_id="different_run",
+            nodes=graph.nodes,
+            edges=graph.edges,
+            branches=graph.branches,
+        )
+
+    with pytest.raises(ValueError, match="changed run_id"):
+        store.mutate("run_mut", change_run_id)
+
+
+def test_graph_from_json_deserialization_error_on_missing_keys():
+    from workbench.graph_store import GraphDeserializationError, graph_from_json
+
+    with pytest.raises(GraphDeserializationError):
+        graph_from_json({"schema_version": 1})
+
+
+def test_graph_from_json_deserialization_error_on_corrupt_data():
+    from workbench.graph_store import GraphDeserializationError, graph_from_json
+
+    with pytest.raises(GraphDeserializationError):
+        graph_from_json({"not": "a valid graph"})
+
+
+def test_graph_to_json_still_works_with_optimized_path():
+    """Verify graph_to_json produces correct output (debug validation path)."""
+    g = _sample_graph()
+    data = graph_to_json(g)
+    assert data["run_id"] == "run_test"
+    assert "nodes" in data
+    # Output must be JSON-encodable
+    import json
+    encoded = json.dumps(data)
+    assert len(encoded) > 0

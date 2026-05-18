@@ -68,6 +68,7 @@ class GraphRecorder:
             trust=trust,
             trust_reason=trust_reason,
             decision_point=decision_point,
+            created_at=_now_iso(),
         )
 
     def record_variable(
@@ -90,6 +91,7 @@ class GraphRecorder:
             trust=trust,
             trust_reason=trust_reason,
             decision_point=decision_point,
+            created_at=_now_iso(),
         )
 
     def record_model(
@@ -111,6 +113,7 @@ class GraphRecorder:
             trust=trust,
             trust_reason=trust_reason,
             decision_point=decision_point,
+            created_at=_now_iso(),
         )
 
     def record_report(
@@ -131,6 +134,7 @@ class GraphRecorder:
             trust=trust,
             trust_reason=trust_reason,
             decision_point=None,
+            created_at=_now_iso(),
         )
 
     def record_edge(
@@ -194,6 +198,7 @@ class GraphRecorder:
         trust: Trust,
         trust_reason: str | None,
         decision_point: DecisionPoint | None,
+        created_at: str,
     ) -> None:
         if id in self._nodes:
             raise ValueError(f"duplicate node id {id!r}")
@@ -201,7 +206,7 @@ class GraphRecorder:
             id=id,
             kind=kind,
             display_label=display_label,
-            created_at=_now_iso(),
+            created_at=created_at,
             parent_stage_id=parent_stage_id,
             branch_id=_MAIN_BRANCH,
             trust=trust,
