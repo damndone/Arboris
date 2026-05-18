@@ -253,3 +253,77 @@ def test_graph_to_json_still_works_with_optimized_path():
     import json
     encoded = json.dumps(data)
     assert len(encoded) > 0
+
+
+def test_store_read_corrupt_json_raises_deserialization_error(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_corrupt"
+    run_dir.mkdir()
+    (run_dir / "graph.json").write_text("{this is not valid json", encoding="utf-8")
+    with pytest.raises(GraphDeserializationError, match="Corrupt graph.json"):
+        store.read("run_corrupt")
+
+
+def test_store_mutate_on_legacy_run(tmp_path: Path):
+    """Mutate should work on a legacy run (no graph.json yet)."""
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_legacy"
+    run_dir.mkdir()
+
+    def add_node(graph: Graph) -> Graph:
+        n = Node(
+            id="stage:raw", kind=NodeKind.DATASET_STAGE, display_label="Raw",
+            created_at="2026-05-18T12:00:00+00:00", parent_stage_id=None, branch_id="main",
+        )
+        return Graph(
+            schema_version=1, run_id=graph.run_id,
+            nodes={"stage:raw": n}, edges={}, branches={
+                "main": BranchRef(id="main", forked_from_node_id=None, head_node_ids=("stage:raw",)),
+            },
+        )
+
+    result = store.mutate("run_legacy", add_node)
+    assert not result.legacy
+    assert "stage:raw" in result.nodes
+    # Now it should be persisted
+    assert store.read("run_legacy").nodes == result.nodes
+
+
+def test_roundtrip_preserves_decision_point_substructure():
+    """Full round-trip must preserve Contestability warnings, reason params, etc."""
+    g = _sample_graph()
+    data = graph_to_json(g)
+    rebuilt = graph_from_json(data)
+
+    orig_node = g.nodes["model:primary"]
+    rebuilt_node = rebuilt.nodes["model:primary"]
+    assert rebuilt_node.decision_point is not None
+    assert rebuilt_node.decision_point.contestability.warnings == \
+        orig_node.decision_point.contestability.warnings  # type: ignore[union-attr]
+    assert rebuilt_node.decision_point.contestability.assumption_checks_needed == \
+        orig_node.decision_point.contestability.assumption_checks_needed  # type: ignore[union-attr]
+    assert rebuilt_node.decision_point.reason.chosen_params == \
+        orig_node.decision_point.reason.chosen_params  # type: ignore[union-attr]
+
+
+def test_empty_graph_serialization():
+    """An empty (legacy) graph must round-trip correctly."""
+    g = Graph(schema_version=1, run_id="empty", nodes={}, edges={}, branches={}, legacy=True)
+    data = graph_to_json(g)
+    assert data["legacy"] is True
+    assert data["nodes"] == {}
+    rebuilt = graph_from_json(data)
+    assert rebuilt.legacy is True
+    assert rebuilt.nodes == {}
+
+
+def test_write_creates_run_directory_if_needed(tmp_path: Path):
+    """write() must create the run directory if it doesn't exist."""
+    store = GraphStore(runs_root=tmp_path)
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_auto_create")
+    # No run_dir created beforehand
+    store.write(g)
+    assert (tmp_path / "run_auto_create" / "graph.json").is_file()
+    loaded = store.read("run_auto_create")
+    assert loaded == g

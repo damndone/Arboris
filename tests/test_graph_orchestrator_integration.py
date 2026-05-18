@@ -192,3 +192,112 @@ def test_parse_dropped_var_nested_parens_in_reason():
 def test_parse_dropped_var_empty_and_no_parens():
     assert _parse_dropped_var_entry("") == {"variable": "", "reason": "unknown"}
     assert _parse_dropped_var_entry("my_var") == {"variable": "my_var", "reason": "unknown"}
+
+
+# -- Blocked run still gets graph.json (P0-2 regression guard) -----------------
+
+
+def test_blocked_run_still_gets_graph_json(tmp_path: Path):
+    """Validation-blocked runs must still write a partial graph.json."""
+    from workbench.projects import create_project as cp, create_run as cr
+    from workbench.config import load_config as lc
+    from workbench.orchestrator import _run_workflow as rw, _lineage as li, _write_manifest as wm
+
+    proot = tmp_path / "demo"
+    cp(tmp_path, "demo")
+    run = cr(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    # Only 3 rows → below min_model_n threshold → validation blocker
+    pd.DataFrame({"y": [1, 2, 3], "x": [10, 20, 30]}).to_csv(data, index=False)
+
+    config = lc(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    wm(run.root, run.run_id, "auto", "running", li([data]),
+       started_at=started_at, y="y", x=["x"])
+
+    result = rw(run.root, run.run_id, [data], "auto", "y", ["x"], config, started_at)
+    assert result["status"] == "blocked"
+
+    # graph.json must exist even for blocked runs
+    store = GraphStore(runs_root=tmp_path / "demo" / "runs")
+    graph = store.read(run.run_id)
+    assert not graph.legacy
+    assert "stage:raw" in graph.nodes
+
+
+# -- logit model path graph completeness ---------------------------------------
+
+
+def test_logit_model_path_produces_complete_graph(tmp_path: Path):
+    """Binary y → logit path must emit a complete graph with stage:cleaned + model node."""
+    from workbench.projects import create_project as cp, create_run as cr
+    from workbench.config import load_config as lc
+    from workbench.orchestrator import _run_workflow as rw, _lineage as li, _write_manifest as wm
+
+    proot = tmp_path / "demo"
+    cp(tmp_path, "demo")
+    run = cr(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    # Binary y for logit
+    pd.DataFrame({
+        "y": [0, 1, 0, 1, 0, 1, 0, 1] * 5,  # 40 rows, balanced
+        "x1": list(range(40)),
+    }).to_csv(data, index=False)
+
+    config = lc(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    wm(run.root, run.run_id, "auto", "running", li([data]),
+       started_at=started_at, y="y", x=["x1"])
+
+    rw(run.root, run.run_id, [data], "auto", "y", ["x1"], config, started_at)
+
+    store = GraphStore(runs_root=tmp_path / "demo" / "runs")
+    graph = store.read(run.run_id)
+    assert not graph.legacy
+    assert "model:logit_1" in graph.nodes
+    # logit path should get model_type_auto_select DP when auto
+    model_node = graph.nodes["model:logit_1"]
+    assert model_node.decision_point is not None, "logit model must emit a DecisionPoint"
+    assert model_node.decision_point.decision_id == "model_type_auto_select"
+    assert model_node.decision_point.selected == "binary"
+
+
+# -- explicit OLS graph consistency (P0-1 regression guard) --------------------
+
+
+def test_explicit_ols_graph_has_robust_se_dp_not_model_type_dp(tmp_path: Path):
+    """Explicit model_type="ols" must emit ols_default_robust_se DP,
+    NOT model_type_auto_select (P0-1 regression guard — the else branch
+    after auto model selection short-circuits)."""
+    from workbench.projects import create_project as cp, create_run as cr
+    from workbench.config import load_config as lc
+    from workbench.orchestrator import _run_workflow as rw, _lineage as li, _write_manifest as wm
+
+    proot = tmp_path / "demo"
+    cp(tmp_path, "demo")
+    run = cr(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    # Force ols type so we can test the DP is robust_se (no fallback needed for ols)
+    # For the fallback path test, we use model_type="ols" which uses the else branch
+    # and gets _robust_se_dp directly (no _model_type_dp since not auto).
+    pd.DataFrame({
+        "y": [1 + 2 * i for i in range(35)],
+        "x1": list(range(35)),
+    }).to_csv(data, index=False)
+
+    config = lc(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    wm(run.root, run.run_id, "auto", "running", li([data]),
+       started_at=started_at, y="y", x=["x1"])
+
+    # Use model_type="ols" to go through the else branch (non-auto, explicit ols)
+    rw(run.root, run.run_id, [data], "auto", "y", ["x1"], config, started_at,
+       model_type="ols")
+
+    store = GraphStore(runs_root=tmp_path / "demo" / "runs")
+    graph = store.read(run.run_id)
+    model_node = graph.nodes["model:ols_1"]
+    # Explicit ols → no model_type_auto_select DP (it wasn't auto)
+    # Should have ols_default_robust_se
+    assert model_node.decision_point is not None
+    assert model_node.decision_point.decision_id == "ols_default_robust_se"

@@ -71,3 +71,31 @@ def test_get_graph_404_for_unknown_run(project_root: Path):
     client = TestClient(app)
     response = client.get("/runs/does_not_exist/graph", params={"project_root": str(project_root)})
     assert response.status_code == 404
+
+
+def test_get_graph_422_for_corrupt_json(project_root: Path):
+    runs_root = project_root / "runs"
+    run_dir = runs_root / "run_corrupt"
+    run_dir.mkdir(parents=True)
+    (run_dir / "graph.json").write_text("this is not valid json", encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.get("/runs/run_corrupt/graph", params={"project_root": str(project_root)})
+    assert response.status_code == 422
+    data = response.json()
+    assert data["error"]["code"] == "GRAPH_CORRUPT"
+
+
+def test_get_graph_422_for_missing_keys(project_root: Path):
+    runs_root = project_root / "runs"
+    run_dir = runs_root / "run_bad_keys"
+    run_dir.mkdir(parents=True)
+    import json
+    (run_dir / "graph.json").write_text(
+        json.dumps({"wrong_key": "no schema_version or run_id"}), encoding="utf-8",
+    )
+
+    client = TestClient(app)
+    response = client.get("/runs/run_bad_keys/graph", params={"project_root": str(project_root)})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "GRAPH_CORRUPT"

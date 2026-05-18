@@ -294,3 +294,134 @@ def test_graph_legacy_empty():
     )
     assert g.legacy is True
     assert g.nodes == {}
+
+
+# -- Enum value constructors ---------------------------------------------------
+
+
+def test_node_kind_construct_from_value():
+    assert NodeKind("dataset_stage") == NodeKind.DATASET_STAGE
+    assert NodeKind("model") == NodeKind.MODEL
+    with pytest.raises(ValueError):
+        NodeKind("nonexistent")
+
+
+def test_trust_construct_from_value():
+    assert Trust("ok") == Trust.OK
+    assert Trust("blocker") == Trust.BLOCKER
+    with pytest.raises(ValueError):
+        Trust("nonexistent")
+
+
+# -- Node with optional fields -------------------------------------------------
+
+
+def test_node_with_all_optional_fields():
+    n = Node(
+        id="var:x:cleaned",
+        kind=NodeKind.VARIABLE,
+        display_label="x (cleaned)",
+        created_at="2026-05-18T12:00:00+00:00",
+        parent_stage_id="stage:cleaned",
+        branch_id="main",
+        trust=Trust.WARNING,
+        trust_reason="auto-coerced from string",
+        archived=False,
+        payload_ref="processed/x_stats.json",
+        annotations=("outlier_flag",),
+    )
+    assert n.trust == Trust.WARNING
+    assert n.trust_reason == "auto-coerced from string"
+    assert n.payload_ref == "processed/x_stats.json"
+    assert n.annotations == ("outlier_flag",)
+    assert n.decision_point is None
+
+
+def test_node_archived_flag():
+    n = Node(
+        id="model:old",
+        kind=NodeKind.MODEL,
+        display_label="old model",
+        created_at="2026-05-18T12:00:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+        archived=True,
+    )
+    assert n.archived is True
+
+
+# -- Edge with params ----------------------------------------------------------
+
+
+def test_edge_with_params():
+    e = Edge(
+        id="e_transform",
+        source_id="var:x:raw",
+        target_id="var:x:cleaned",
+        op="np.log",
+        params={"base": "e", "offset": 1.0},
+        reversible=True,
+        inverse_op="np.exp",
+    )
+    assert e.params == {"base": "e", "offset": 1.0}
+    assert e.reversible is True
+    assert e.inverse_op == "np.exp"
+
+
+# -- BranchRef edge cases ------------------------------------------------------
+
+
+def test_branch_ref_archived():
+    b = BranchRef(id="experiment", forked_from_node_id="model:primary",
+                  head_node_ids=("model:alt",), archived=True)
+    assert b.archived is True
+    assert b.forked_from_node_id == "model:primary"
+    assert b.head_node_ids == ("model:alt",)
+
+
+# -- Graph with populated content ----------------------------------------------
+
+
+def test_graph_with_nodes_and_edges():
+    n1 = Node(id="stage:raw", kind=NodeKind.DATASET_STAGE, display_label="Raw",
+              created_at="t1", parent_stage_id=None, branch_id="main")
+    n2 = Node(id="stage:cleaned", kind=NodeKind.DATASET_STAGE, display_label="Cleaned",
+              created_at="t2", parent_stage_id=None, branch_id="main")
+    e = Edge(id="e1", source_id="stage:raw", target_id="stage:cleaned", op="clean_frame")
+    g = Graph(
+        schema_version=1, run_id="run_full",
+        nodes={"stage:raw": n1, "stage:cleaned": n2},
+        edges={"e1": e},
+        branches={"main": BranchRef(id="main", forked_from_node_id=None,
+                                     head_node_ids=("stage:cleaned",))},
+    )
+    assert len(g.nodes) == 2
+    assert len(g.edges) == 1
+    assert g.branches["main"].head_node_ids == ("stage:cleaned",)
+
+
+def test_graph_multi_branch():
+    g = Graph(
+        schema_version=1, run_id="run_forked",
+        nodes={}, edges={},
+        branches={
+            "main": BranchRef(id="main", forked_from_node_id=None,
+                              head_node_ids=("model:primary",)),
+            "experiment": BranchRef(id="experiment",
+                                    forked_from_node_id="model:primary",
+                                    head_node_ids=("model:alt",)),
+        },
+    )
+    assert len(g.branches) == 2
+    assert g.branches["experiment"].forked_from_node_id == "model:primary"
+
+
+# -- Literal types are importable ----------------------------------------------
+
+
+def test_decision_source_and_reason_type_importable():
+    from workbench.graph_model import DecisionSource, ReasonType, ReviewStatus
+    # Verify these are usable as type annotations (import-time check)
+    assert DecisionSource is not None
+    assert ReasonType is not None
+    assert ReviewStatus is not None

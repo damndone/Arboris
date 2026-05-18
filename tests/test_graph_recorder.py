@@ -190,3 +190,110 @@ def test_factory_variable_silently_dropped_shape():
     assert dp.decision_id == "variable_silently_dropped"
     assert dp.contestability.assumption_checks_needed == ()
     assert dp.reason.chosen_params["drop_reason"] == "zero_variance"
+
+
+# -- Edge cases ----------------------------------------------------------------
+
+
+def test_record_report_adds_report_node(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_report(
+        node_id="report:html",
+        display_label="HTML report",
+        payload_ref="reports/report.html",
+        trust=Trust.OK,
+    )
+    recorder.flush()
+    g = store.read("run_test")
+    assert "report:html" in g.nodes
+    assert g.nodes["report:html"].kind == NodeKind.REPORT
+    assert g.nodes["report:html"].payload_ref == "reports/report.html"
+
+
+def test_duplicate_node_id_raises(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    with pytest.raises(ValueError, match="duplicate node id"):
+        recorder.record_stage(node_id="stage:raw", display_label="Raw again")
+
+
+def test_flush_with_no_model_or_report_uses_last_node_as_head(tmp_path: Path):
+    """When there are only stages, head = last stage node id."""
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.record_stage(node_id="stage:cleaned", display_label="Cleaned")
+    recorder.flush()
+    g = store.read("run_test")
+    assert "stage:cleaned" in g.branches["main"].head_node_ids
+
+
+def test_record_stage_with_trust_and_decision_point(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    dp = DecisionPoint(decision_id="handle_missing_values",
+                       selected="drop_rows_with_missing_required_fields")
+    recorder.record_stage(
+        node_id="stage:cleaned",
+        display_label="Cleaned",
+        trust=Trust.CAUTION,
+        trust_reason="MCAR assumption not verified",
+        decision_point=dp,
+    )
+    recorder.flush()
+    g = store.read("run_test")
+    n = g.nodes["stage:cleaned"]
+    assert n.trust == Trust.CAUTION
+    assert n.trust_reason == "MCAR assumption not verified"
+    assert n.decision_point is not None
+    assert n.decision_point.decision_id == "handle_missing_values"
+
+
+def test_record_edge_with_reversible_and_params(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.record_stage(node_id="stage:transformed", display_label="Transformed")
+    recorder.record_edge(
+        edge_id="e_log",
+        source_id="stage:raw",
+        target_id="stage:transformed",
+        op="np.log1p",
+        params={"description": "log(1+x) transform"},
+        reversible=True,
+        inverse_op="np.expm1",
+    )
+    recorder.flush()
+    g = store.read("run_test")
+    e = g.edges["e_log"]
+    assert e.op == "np.log1p"
+    assert e.params == {"description": "log(1+x) transform"}
+    assert e.reversible is True
+    assert e.inverse_op == "np.expm1"
+
+
+def test_record_edge_with_none_params_defaults_to_empty_dict(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="a", display_label="A")
+    recorder.record_stage(node_id="b", display_label="B")
+    recorder.record_edge(edge_id="e", source_id="a", target_id="b", op="link")
+    recorder.flush()
+    assert store.read("run_test").edges["e"].params == {}
+
+
+def test_record_variable_without_decision_point(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:cleaned", display_label="Cleaned")
+    recorder.record_variable(
+        node_id="var:income:cleaned",
+        display_label="income (cleaned)",
+        parent_stage_id="stage:cleaned",
+    )
+    recorder.flush()
+    v = store.read("run_test").nodes["var:income:cleaned"]
+    assert v.kind == NodeKind.VARIABLE
+    assert v.decision_point is None
