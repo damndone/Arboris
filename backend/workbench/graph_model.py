@@ -111,3 +111,21 @@ class Contestability:
             self.assumption_checks_needed,
             self.review_status,  # type: ignore[arg-type]
         )
+
+
+@dataclass(frozen=True)
+class AutoChosenReason:
+    """Why an auto choice was made + its parameters.
+
+    `chosen_params` values must be JSON-serializable; GraphStore enforces this
+    at write time. Do NOT embed DataFrames, fitted model objects, callables,
+    or class instances.
+
+    `chosen_params_schema`: when a params shape stabilizes, the versioned
+    schema name (e.g. "MissingValueStrategy.v1") is recorded so consumers
+    can dispatch on it. None means free-form params.
+    """
+    reason_type: ReasonType
+    explanation: str | None = None
+    chosen_params_schema: str | None = None
+    chosen_params: dict[str, Any] = field(default_factory=dict)

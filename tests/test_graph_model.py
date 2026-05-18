@@ -8,12 +8,7 @@ import pytest
 
 from workbench.graph_model import (
     AutoChosenReason,
-    BranchRef,
     Contestability,
-    DecisionPoint,
-    Edge,
-    Graph,
-    Node,
     NodeKind,
     Trust,
 )
@@ -91,3 +86,50 @@ def test_contestability_default_is_contestable_true():
     c = Contestability()
     assert c.is_contestable is True
     assert c.warnings == ()
+
+
+def test_auto_chosen_reason_minimal():
+    r = AutoChosenReason(reason_type="system_default")
+    assert r.reason_type == "system_default"
+    assert r.explanation is None
+    assert r.chosen_params_schema is None
+    assert r.chosen_params == {}
+
+
+def test_auto_chosen_reason_with_params():
+    r = AutoChosenReason(
+        reason_type="data_driven_default",
+        explanation="y is binary",
+        chosen_params={"y_unique": 2, "y_dtype": "int64"},
+    )
+    assert r.chosen_params == {"y_unique": 2, "y_dtype": "int64"}
+
+
+def test_auto_chosen_reason_with_schema_version():
+    r = AutoChosenReason(
+        reason_type="system_default",
+        chosen_params_schema="MissingValueStrategy.v1",
+        chosen_params={"method": "drop_rows_with_missing_required_fields"},
+    )
+    assert r.chosen_params_schema == "MissingValueStrategy.v1"
+
+
+def test_auto_chosen_reason_is_frozen():
+    r = AutoChosenReason(reason_type="system_default")
+    with pytest.raises((AttributeError, Exception)):
+        r.reason_type = "fallback"  # type: ignore[misc]
+
+
+def test_auto_chosen_reason_chosen_params_must_be_json_safe():
+    """Indirect: AutoChosenReason allows dict[str, Any] at type level, but downstream
+    GraphStore enforces JSON-safety at serialization time. Document that intent here
+    by constructing one with a known-bad value and verifying the dataclass itself
+    does NOT reject (rejection is GraphStore's job)."""
+    class _NotJsonSafe:
+        pass
+
+    # This must NOT raise here — JSON enforcement is at serialization, not construction.
+    AutoChosenReason(
+        reason_type="system_default",
+        chosen_params={"obj": _NotJsonSafe()},
+    )
