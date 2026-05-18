@@ -155,10 +155,11 @@ class GraphStore:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, path)
         except Exception:
-            # Clean up temp file if rename failed
+            # Clean up temp file if rename failed; swallow cleanup errors
+            # so the original exception propagates unshadowed.
             try:
                 os.unlink(tmp_path)
-            except FileNotFoundError:
+            except OSError:
                 pass
             raise
 

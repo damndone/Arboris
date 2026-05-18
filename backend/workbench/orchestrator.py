@@ -1488,14 +1488,17 @@ def _parse_dropped_var_entry(entry: str) -> dict[str, str]:
     """Parse a dropped-variable string like 'x4 (dropped due to zero variance)'.
 
     Returns {'variable': 'x4', 'reason': 'dropped_due_to_zero_variance'}.
-    Handles edge cases: no parentheses, nested parens, empty string.
+    Handles edge cases: no parentheses, nested parens in reason, empty string.
+
+    Uses the FIRST ' (' as the delimiter since variable names from
+    normalize_column_name never contain ' ('. This correctly handles
+    reasons with nested parentheses like:
+    'x1 (dropped due to perfect collinearity (categories may overlap))'.
     """
     entry = entry.strip()
     if not entry:
         return {"variable": "", "reason": "unknown"}
-    # Find the last " (" to split variable name from reason.
-    # Using rfind avoids problems with variable names containing " (".
-    idx = entry.rfind(" (")
+    idx = entry.find(" (")
     if idx == -1 or not entry.endswith(")"):
         return {"variable": entry, "reason": "unknown"}
     var_name = entry[:idx]

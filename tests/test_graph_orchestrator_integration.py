@@ -167,3 +167,28 @@ def test_orchestrator_graph_has_variable_nodes_for_all_x(tmp_path: Path):
     # Model graph is complete
     assert "model:ols_1" in graph.nodes
     assert "report:html" in graph.nodes
+
+
+# -- _parse_dropped_var_entry unit tests ---------------------------------------
+
+from workbench.orchestrator import _parse_dropped_var_entry
+
+
+def test_parse_dropped_var_basic():
+    assert _parse_dropped_var_entry("x4 (dropped due to zero variance)") == {
+        "variable": "x4", "reason": "dropped_due_to_zero_variance",
+    }
+
+
+def test_parse_dropped_var_nested_parens_in_reason():
+    """Reason may contain parens (e.g. collinearity → categories may overlap)."""
+    entry = "x1 (dropped due to perfect collinearity (categories may overlap with other predictors))"
+    result = _parse_dropped_var_entry(entry)
+    assert result["variable"] == "x1"
+    assert "perfect_collinearity" in result["reason"]
+    assert "categories_may_overlap" in result["reason"]
+
+
+def test_parse_dropped_var_empty_and_no_parens():
+    assert _parse_dropped_var_entry("") == {"variable": "", "reason": "unknown"}
+    assert _parse_dropped_var_entry("my_var") == {"variable": "my_var", "reason": "unknown"}
