@@ -23,6 +23,7 @@ from .api_errors import (
 )
 from .artifacts import read_json, write_json
 from .config import load_config
+from .graph_store import GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
 from .term_parser import parse_term, is_q_quoted_dummy
 from .domain import GuardrailIssue, Severity
@@ -641,6 +642,15 @@ _TERMINAL_EVENTS = {
     "workflow_completed", "workflow_blocked",
     "workflow_failed", "workflow_interrupted",
 }
+
+
+@app.get("/runs/{run_id}/graph")
+def get_run_graph(run_id: str, project_root: str):
+    runs_root = _resolve_project_runs_dir(project_root)
+    run_root = _resolve_run_root(project_root, run_id)  # 404 if run dir missing
+    store = GraphStore(runs_root=runs_root)
+    graph = store.read(run_id)
+    return graph_to_json(graph)
 
 
 @app.get("/runs/{run_id}/events")
