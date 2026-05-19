@@ -105,6 +105,19 @@ def test_record_edge_validates_endpoints_exist(tmp_path: Path):
         )
 
 
+def test_record_edge_rejects_missing_target_id(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    with pytest.raises(ValueError, match="target_id 'missing' not in graph"):
+        recorder.record_edge(
+            edge_id="e1",
+            source_id="stage:raw",
+            target_id="missing",
+            op="drop_na",
+        )
+
+
 def test_record_variable_includes_parent_stage(tmp_path: Path):
     store = GraphStore(runs_root=tmp_path)
     recorder = GraphRecorder(run_id="run_test", store=store)
