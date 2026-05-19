@@ -340,3 +340,33 @@ def test_record_variable_without_decision_point(tmp_path: Path):
     v = store.read("run_test").nodes["var:income:cleaned"]
     assert v.kind == NodeKind.VARIABLE
     assert v.decision_points == ()
+
+
+def test_record_stage_persists_summary(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw",
+                          summary="Raw: 35 rows x 3 cols")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["stage:raw"].summary == "Raw: 35 rows x 3 cols"
+
+
+def test_record_model_persists_summary(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.record_model(node_id="m1", display_label="Primary OLS",
+                          summary="OLS (HC1, n=32)")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["m1"].summary == "OLS (HC1, n=32)"
+
+
+def test_record_with_no_summary_keeps_none(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["stage:raw"].summary is None
