@@ -1,0 +1,111 @@
+/* frontend/src/lineage/lineage.css — V1.4.1 design language tokens */
+
+.lineage-root {
+  --bg-canvas:        #0e0f12;
+  --bg-card:          #1c1c1e;
+  --bg-card-2:        #2c2c2e;
+  --bg-elev:          #3a3a3c;
+  --separator:        #2e2e30;
+  --separator-faint:  #232325;
+
+  --label:            #ffffff;
+  --label-secondary:  rgba(235, 235, 245, 0.6);
+  --label-tertiary:   rgba(235, 235, 245, 0.4);
+
+  --tint:             #0a84ff;
+  --tint-hover:       #409cff;
+  --orange:           #ff9f0a;
+  --orange-bg:        rgba(255, 159, 10, 0.10);
+  --red:              #ff453a;
+  --green:            #30d158;
+
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+               "SF Pro Text", system-ui, sans-serif;
+  font-feature-settings: "tnum";
+  color: var(--label);
+  background: var(--bg-canvas);
+}
+
+/* Card */
+.ln-card {
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+/* Pill */
+.ln-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ln-pill--orange {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+.ln-pill--red {
+  background: rgba(255, 69, 58, 0.10);
+  color: var(--red);
+}
+
+/* Button */
+.ln-btn-primary {
+  background: var(--tint);
+  color: #fff;
+  border: 0;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-primary:hover { background: var(--tint-hover); }
+
+.ln-btn-secondary {
+  background: var(--bg-card-2);
+  color: var(--label);
+  border: 0;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-secondary:hover { background: var(--bg-elev); }
+
+/* Status callout */
+.ln-callout {
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ln-callout--orange { background: var(--orange-bg); }
+.ln-callout--orange .ln-callout-title { color: var(--orange); }
+.ln-callout--red { background: rgba(255, 69, 58, 0.10); }
+.ln-callout--red .ln-callout-title { color: var(--red); }
+.ln-callout--green { background: rgba(48, 209, 88, 0.10); }
+.ln-callout--green .ln-callout-title { color: var(--green); }
+.ln-callout-title { font-weight: 600; font-size: 14px; }
+.ln-callout-body { color: var(--label); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
+
+/* Section label (SMALL CAPS) */
+.ln-section-label {
+  color: var(--label-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* Node selected state */
+.ln-node--selected {
+  border-color: var(--tint);
+  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.13);
+}
