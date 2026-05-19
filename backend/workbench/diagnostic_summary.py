@@ -17,7 +17,7 @@ def build_diagnostic_summary(
     variable_roles: dict[str, Any],
     run_id: str = "",
     exposure_col: str | None = None,
-    dropped_vars: list[str] | None = None,
+    dropped_vars: list[dict[str, str]] | list[str] | None = None,
     coercions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     blockers: list[dict] = []
