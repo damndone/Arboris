@@ -433,7 +433,7 @@ def _run_workflow(
         node_id="stage:cleaned",
         display_label="Cleaned data",
         payload_ref="processed/cleaned_dataset.parquet",
-        decision_point=_missing_values_dp,
+        decision_points=(_missing_values_dp,) if _missing_values_dp else (),
     )
     _recorder.record_edge(
         edge_id="e:raw-cleaned",
@@ -455,12 +455,12 @@ def _run_workflow(
                 f"and coerced-to-numeric.",
                 UserWarning, stacklevel=2,
             )
-        _dp_for_var = _cat_dp or _coer_dp
+        _dps_for_var = tuple(dp for dp in (_cat_dp, _coer_dp) if dp is not None)
         _recorder.record_variable(
             node_id=f"var:{var}:cleaned",
             display_label=f"{var} (cleaned)",
             parent_stage_id="stage:cleaned",
-            decision_point=_dp_for_var,
+            decision_points=_dps_for_var,
         )
 
     for var_name, dropped_dp in _dropped_dps.items():
@@ -468,29 +468,18 @@ def _run_workflow(
             node_id=f"var:{var_name}:dropped",
             display_label=f"{var_name} (dropped)",
             parent_stage_id="stage:cleaned",
-            decision_point=dropped_dp,
+            decision_points=(dropped_dp,),
         )
 
     if model_results:
         primary_model_id = model_results[0][0]
         primary_model_type = model_results[0][1].get("model_type", "ols")
-        # Attach one DecisionPoint per node for V1.4.0:
-        # model_type_auto_select (data-driven) > ols_default_robust_se
-        if _model_type_dp is not None and _robust_se_dp is not None:
-            import warnings as _warnings
-            _warnings.warn(
-                "Both model_type_auto_select and ols_default_robust_se DPs "
-                "populated; recording only model_type_auto_select on MODEL "
-                "node (V1.4.0 limit: one DP per node). V1.4.1+ will support "
-                "multiple DPs.",
-                UserWarning, stacklevel=2,
-            )
-        _primary_dp = _model_type_dp or _robust_se_dp
+        _dps_for_model = tuple(dp for dp in (_model_type_dp, _robust_se_dp) if dp is not None)
         _recorder.record_model(
             node_id=f"model:{primary_model_id}",
             display_label=f"{primary_model_type} (primary)",
             payload_ref=f"model_results/{primary_model_id}.json",
-            decision_point=_primary_dp,
+            decision_points=_dps_for_model,
         )
         _recorder.record_edge(
             edge_id="e:cleaned-model-primary",

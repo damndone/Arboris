@@ -315,28 +315,18 @@ def test_explicit_ols_graph_has_robust_se_dp_not_model_type_dp(tmp_path: Path):
     assert model_node.decision_points[0].decision_id == "ols_default_robust_se"
 
 
-def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
-    """auto + continuous y: both DPs are populated, but model_type_auto_select
-    must win per orchestrator.py:461 `_primary_dp = _model_type_dp or _robust_se_dp`.
-    Also verifies the V1.4.0 single-DP warning fires."""
-    import warnings as _w
+def test_auto_ols_path_records_both_dps_on_model_node(tmp_path: Path):
+    """auto + continuous y: both DPs now ride together (no precedence drop)."""
     runs_root = tmp_path / "demo"
-    with _w.catch_warnings(record=True) as caught:
-        _w.simplefilter("always")
-        run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path,
-                                       model_type="auto")
+    run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path,
+                                   model_type="auto")
 
     store = GraphStore(runs_root=runs_root / "runs")
     graph = store.read(run_id)
     model_node = graph.nodes["model:ols_1"]
-    assert model_node.decision_points
-    assert model_node.decision_points[0].decision_id == "model_type_auto_select"
-    assert model_node.decision_points[0].selected == "continuous"
-    # The discard warning must fire — caller knows a DP was dropped.
-    assert any(
-        "model_type_auto_select" in str(w.message) and "ols_default_robust_se" in str(w.message)
-        for w in caught if issubclass(w.category, UserWarning)
-    ), [str(w.message) for w in caught]
+    dp_ids = [dp.decision_id for dp in model_node.decision_points]
+    assert "model_type_auto_select" in dp_ids
+    assert "ols_default_robust_se" in dp_ids
 
 
 def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):
