@@ -99,3 +99,36 @@ def test_get_graph_422_for_missing_keys(project_root: Path):
     response = client.get("/runs/run_bad_keys/graph", params={"project_root": str(project_root)})
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "GRAPH_CORRUPT"
+
+
+def test_get_graph_returns_stats_block(project_root: Path):
+    runs_root = project_root / "runs"
+    _seed_run(runs_root, "run_present", with_graph=True)
+    client = TestClient(app)
+    response = client.get("/runs/run_present/graph", params={"project_root": str(project_root)})
+    assert response.status_code == 200
+    body = response.json()
+    assert "stats" in body
+    stats = body["stats"]
+    assert isinstance(stats["node_count"], int)
+    assert isinstance(stats["edge_count"], int)
+    assert isinstance(stats["leaf_count"], int)
+    assert isinstance(stats["has_dp_count"], int)
+
+
+def test_get_graph_response_has_summary_field_on_nodes(project_root: Path):
+    runs_root = project_root / "runs"
+    _seed_run(runs_root, "run_present", with_graph=True)
+    client = TestClient(app)
+    response = client.get("/runs/run_present/graph", params={"project_root": str(project_root)})
+    body = response.json()
+    for node in body["nodes"].values():
+        assert "summary" in node
+
+
+def test_get_graph_schema_version_is_2(project_root: Path):
+    runs_root = project_root / "runs"
+    _seed_run(runs_root, "run_present", with_graph=True)
+    client = TestClient(app)
+    response = client.get("/runs/run_present/graph", params={"project_root": str(project_root)})
+    assert response.json()["schema_version"] == 2
