@@ -66,6 +66,24 @@ export function validateDiagnosticPreview(raw: unknown): ValidationResult {
     validateRunStatus(obj.run_status, errors);
   }
 
+  if ("model_identity" in obj && obj.model_identity !== undefined) {
+    if (typeof obj.model_identity !== "string") {
+      errors.push({
+        path: "model_identity",
+        reason: "wrong type",
+        expected: "string",
+        actual: typeOf(obj.model_identity),
+      });
+    } else if (obj.model_identity.trim() === "") {
+      errors.push({
+        path: "model_identity",
+        reason: "must be a non-empty string",
+        expected: "non-empty string",
+        actual: "empty string",
+      });
+    }
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: obj as unknown as DiagnosticSummaryPreview };
 }
