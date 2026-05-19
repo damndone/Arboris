@@ -588,3 +588,21 @@ def test_writer_emits_schema_version_2(tmp_path: Path):
     for nd in data["nodes"].values():
         assert "decision_point" not in nd
         assert "decision_points" in nd
+
+
+def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
+    """Trust.WARNING and Trust.BLOCKER serialize and deserialize correctly."""
+    for trust_value in (Trust.WARNING, Trust.BLOCKER):
+        store = GraphStore(runs_root=tmp_path)
+        node = Node(
+            id="n1", kind=NodeKind.MODEL, display_label="m",
+            created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+            branch_id="main", trust=trust_value,
+            trust_reason=f"test reason for {trust_value.value}",
+        )
+        g = Graph(schema_version=2, run_id=f"run_{trust_value.value}",
+                  nodes={"n1": node}, edges={}, branches={})
+        store.write(g)
+        reloaded = store.read(f"run_{trust_value.value}")
+        assert reloaded.nodes["n1"].trust == trust_value
+        assert reloaded.nodes["n1"].trust_reason == f"test reason for {trust_value.value}"
