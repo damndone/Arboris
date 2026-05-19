@@ -5,6 +5,7 @@ import {
   fetchRunDetail,
   fetchRuns,
   fetchRunArtifacts,
+  getRunGraph,
   runBatchWorkflow,
   previewFile,
   reportUrl,
@@ -312,4 +313,32 @@ test("connectRunEvents wires step events and terminal close", () => {
   cleanup();
 
   (globalThis as any).EventSource = origEventSource;
+});
+
+test("getRunGraph returns parsed GraphResponse on 200", async () => {
+  const fake = {
+    schema_version: 2,
+    run_id: "r1",
+    legacy: false,
+    stats: { node_count: 0, edge_count: 0, leaf_count: 0, has_dp_count: 0 },
+    nodes: {},
+    edges: {},
+    branches: {},
+  };
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse(fake),
+  );
+  const result = await getRunGraph("/proj", "r1");
+  expect(result.schema_version).toBe(2);
+  expect(result.run_id).toBe("r1");
+  expect(fetch).toHaveBeenCalledWith(
+    "/runs/r1/graph?project_root=%2Fproj",
+  );
+});
+
+test("getRunGraph throws ApiError on 404", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse({ detail: "Run not found" }, 404),
+  );
+  await expect(getRunGraph("/proj", "missing")).rejects.toBeInstanceOf(ApiError);
 });

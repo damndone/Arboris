@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import type { GraphResponse } from "./lineage/types";
 
 export type ProjectResponse = {
   project_root: string;
@@ -588,6 +589,15 @@ export function artifactDownloadUrl(
 
 export function reportUrl(projectRoot: string, runId: string): string {
   return `/runs/${encodeURIComponent(runId)}/report?project_root=${encodeURIComponent(projectRoot)}`;
+}
+
+export async function getRunGraph(
+  projectRoot: string,
+  runId: string,
+): Promise<GraphResponse> {
+  const url = `/runs/${encodeURIComponent(runId)}/graph?project_root=${encodeURIComponent(projectRoot)}`;
+  const response = await fetch(url);
+  return readResponse<GraphResponse>(response);
 }
 
 export type RunProgressEvent = {
