@@ -7,8 +7,6 @@ with verbose DecisionPoint construction.
 """
 from __future__ import annotations
 
-from typing import Any
-
 from .graph_model import (
     AutoChosenReason,
     Contestability,
