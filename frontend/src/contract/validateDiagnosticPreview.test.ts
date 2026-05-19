@@ -118,4 +118,39 @@ describe("validateDiagnosticPreview", () => {
       expect(result.errors.some((e) => e.path === "run_status.has_warnings")).toBe(true);
     }
   });
+
+  it("accepts model_identity as non-empty string", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      model_identity: "ols_1",
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects model_identity that is empty string", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      model_identity: "",
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.path === "model_identity")).toBe(true);
+    }
+  });
+
+  it("rejects model_identity that is non-string", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      model_identity: 123,
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.path === "model_identity")).toBe(true);
+    }
+  });
+
+  it("does not reject when model_identity is absent (optional field)", () => {
+    const result = validateDiagnosticPreview(validPreview);
+    expect(result.valid).toBe(true);
+  });
 });
