@@ -1,0 +1,134 @@
+import { useMemo } from "react";
+import ReactFlow, { Background, Controls } from "reactflow";
+import type { Node as RFNode, Edge as RFEdge } from "reactflow";
+import "reactflow/dist/style.css";
+import dagre from "dagre";
+import "./lineage.css";
+import { NodeCard } from "./NodeCard";
+import type { GraphResponse, LineageNode } from "./types";
+import { foldVariableClusters, type GroupNode } from "./folding";
+
+const nodeTypes = { lineageNode: NodeCard };
+
+interface GraphCanvasProps {
+  graph: GraphResponse;
+  selectedNodeId: string | null;
+  expandedGroups: Set<string>;
+  onSelect: (nodeId: string) => void;
+  onExpandGroup: (groupId: string) => void;
+}
+
+function layoutDagre<T extends RFNode>(nodes: T[], edges: RFEdge[]): T[] {
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 60 });
+  g.setDefaultEdgeLabel(() => ({}));
+  nodes.forEach((n) => g.setNode(n.id, { width: 240, height: 80 }));
+  edges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+  return nodes.map((n) => {
+    const pos = g.node(n.id);
+    return { ...n, position: { x: pos.x - 120, y: pos.y - 40 } };
+  });
+}
+
+function groupAsNode(g: GroupNode): LineageNode {
+  return {
+    id: g.id,
+    kind: "operation",
+    display_label: g.display_label,
+    summary: "Tap to expand",
+    created_at: "",
+    parent_stage_id: g.parent_stage_id,
+    branch_id: "main",
+    trust: "ok",
+    trust_reason: null,
+    archived: false,
+    payload_ref: null,
+    decision_points: [],
+    annotations: [],
+  };
+}
+
+export function GraphCanvas({
+  graph,
+  selectedNodeId,
+  expandedGroups,
+  onSelect,
+  onExpandGroup,
+}: GraphCanvasProps) {
+  const { rfNodes, rfEdges } = useMemo(() => {
+    const allNodes = Object.values(graph.nodes);
+    const { kept, groups } = foldVariableClusters(allNodes, expandedGroups);
+
+    const visible = new Set<string>(kept.map((n) => n.id));
+    groups.forEach((g) => visible.add(g.id));
+
+    const realNodes: RFNode[] = kept.map((n) => ({
+      id: n.id,
+      type: "lineageNode",
+      position: { x: 0, y: 0 },
+      data: { node: n },
+      selected: n.id === selectedNodeId,
+    }));
+    const groupNodes: RFNode[] = groups.map((g) => ({
+      id: g.id,
+      type: "lineageNode",
+      position: { x: 0, y: 0 },
+      data: { node: groupAsNode(g) },
+      selected: false,
+    }));
+
+    const memberToGroup = new Map<string, string>();
+    groups.forEach((g) =>
+      g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
+    );
+
+    const candidateEdges: RFEdge[] = [];
+    for (const e of Object.values(graph.edges)) {
+      const src = memberToGroup.get(e.source_id) ?? e.source_id;
+      const tgt = memberToGroup.get(e.target_id) ?? e.target_id;
+      if (src === tgt) continue;
+      if (!visible.has(src) || !visible.has(tgt)) continue;
+      candidateEdges.push({
+        id: `${src}->${tgt}`,
+        source: src,
+        target: tgt,
+        animated: false,
+      });
+    }
+    const seen = new Set<string>();
+    const uniqEdges = candidateEdges.filter((e) => {
+      const key = `${e.source}|${e.target}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const layouted = layoutDagre([...realNodes, ...groupNodes], uniqEdges);
+    return { rfNodes: layouted, rfEdges: uniqEdges };
+  }, [graph, selectedNodeId, expandedGroups]);
+
+  return (
+    <div
+      className="lineage-root"
+      style={{ width: "100%", height: "100%", minHeight: 480 }}
+    >
+      <ReactFlow
+        nodes={rfNodes}
+        edges={rfEdges}
+        nodeTypes={nodeTypes}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={true}
+        onNodeClick={(_, n) => {
+          if (n.id.startsWith("group:")) onExpandGroup(n.id);
+          else onSelect(n.id);
+        }}
+        fitView
+      >
+        <Background gap={20} />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  );
+}
