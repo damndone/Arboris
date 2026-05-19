@@ -493,3 +493,25 @@ def test_resolve_decision_id_skips_nodes_without_dp():
     )
     assert resolve_decision_id(g, "y") == "x"
     assert resolve_decision_id(g, "missing") is None
+
+
+def test_node_has_decision_points_tuple_default():
+    """V1.4.1 Node uses decision_points tuple, not single decision_point."""
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+    )
+    assert node.decision_points == ()
+    assert hasattr(node, "decision_points")
+    assert not hasattr(node, "decision_point")
+
+
+def test_node_summary_field_default_none():
+    """V1.4.1 Node has nullable summary field."""
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+    )
+    assert node.summary is None

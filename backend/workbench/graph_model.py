@@ -178,7 +178,8 @@ class Node:
     trust_reason: str | None = None
     archived: bool = False
     payload_ref: str | None = None  # path relative to run root
-    decision_point: DecisionPoint | None = None
+    decision_points: tuple[DecisionPoint, ...] = ()
+    summary: str | None = None
     annotations: tuple = ()  # reserved for V1.6 AI; tuple of Annotation
 
 
