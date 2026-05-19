@@ -150,7 +150,7 @@ class GraphStore:
                 )
             data = graph_to_json(updated)
             self._atomic_write_json(self._graph_path(run_id), data)
-            return updated
+            return graph_from_json(data)
 
     # -- internals -------------------------------------------------------------
 
@@ -230,6 +230,8 @@ def _to_jsonable(value: Any) -> Any:
 def _node_from_json(d: dict[str, Any]) -> Node:
     dps_field = d.get("decision_points")
     if dps_field is not None:
+        if not isinstance(dps_field, list):
+            raise TypeError("decision_points must be a list")
         decision_points = tuple(_decision_point_from_json(x) for x in dps_field)
     elif d.get("decision_point") is not None:
         decision_points = (_decision_point_from_json(d["decision_point"]),)
