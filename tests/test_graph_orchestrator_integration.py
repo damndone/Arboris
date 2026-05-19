@@ -72,9 +72,9 @@ def test_orchestrator_emits_handle_missing_values_decision_point(tmp_path: Path)
     run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path)
     graph = GraphStore(runs_root=runs_root / "runs").read(run_id)
     cleaned = graph.nodes["stage:cleaned"]
-    assert cleaned.decision_point is not None
-    assert cleaned.decision_point.decision_id == "handle_missing_values"
-    assert cleaned.decision_point.reason.chosen_params_schema == "MissingValueStrategy.v1"
+    assert cleaned.decision_points
+    assert cleaned.decision_points[0].decision_id == "handle_missing_values"
+    assert cleaned.decision_points[0].reason.chosen_params_schema == "MissingValueStrategy.v1"
 
 
 def test_orchestrator_emits_model_decision_point_for_ols(tmp_path: Path):
@@ -84,8 +84,8 @@ def test_orchestrator_emits_model_decision_point_for_ols(tmp_path: Path):
     graph = GraphStore(runs_root=runs_root / "runs").read(run_id)
     model_nodes = [n for n in graph.nodes.values() if n.kind.value == "model"]
     primary = next((n for n in model_nodes if "primary" in n.id.lower() or "model:" in n.id), model_nodes[0])
-    assert primary.decision_point is not None
-    assert primary.decision_point.decision_id == "ols_default_robust_se"
+    assert primary.decision_points
+    assert primary.decision_points[0].decision_id == "ols_default_robust_se"
 
 
 def test_existing_artifacts_still_present_with_graph(tmp_path: Path):
@@ -129,8 +129,8 @@ def test_orchestrator_graph_complete_after_multi_x_run(tmp_path: Path):
     assert not graph.legacy
     assert "stage:cleaned" in graph.nodes
     assert "model:ols_1" in graph.nodes
-    assert graph.nodes["stage:cleaned"].decision_point is not None
-    assert graph.nodes["stage:cleaned"].decision_point.decision_id == "handle_missing_values"
+    assert graph.nodes["stage:cleaned"].decision_points
+    assert graph.nodes["stage:cleaned"].decision_points[0].decision_id == "handle_missing_values"
 
 
 def test_orchestrator_graph_has_variable_nodes_for_all_x(tmp_path: Path):
@@ -269,9 +269,9 @@ def test_logit_model_path_produces_complete_graph(tmp_path: Path):
     assert "model:logit_1" in graph.nodes
     # logit path should get model_type_auto_select DP when auto
     model_node = graph.nodes["model:logit_1"]
-    assert model_node.decision_point is not None, "logit model must emit a DecisionPoint"
-    assert model_node.decision_point.decision_id == "model_type_auto_select"
-    assert model_node.decision_point.selected == "binary"
+    assert model_node.decision_points, "logit model must emit a DecisionPoint"
+    assert model_node.decision_points[0].decision_id == "model_type_auto_select"
+    assert model_node.decision_points[0].selected == "binary"
 
 
 # -- explicit OLS graph consistency (P0-1 regression guard) --------------------
@@ -311,8 +311,8 @@ def test_explicit_ols_graph_has_robust_se_dp_not_model_type_dp(tmp_path: Path):
     model_node = graph.nodes["model:ols_1"]
     # Explicit ols → no model_type_auto_select DP (it wasn't auto)
     # Should have ols_default_robust_se
-    assert model_node.decision_point is not None
-    assert model_node.decision_point.decision_id == "ols_default_robust_se"
+    assert model_node.decision_points
+    assert model_node.decision_points[0].decision_id == "ols_default_robust_se"
 
 
 def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
@@ -329,9 +329,9 @@ def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
     store = GraphStore(runs_root=runs_root / "runs")
     graph = store.read(run_id)
     model_node = graph.nodes["model:ols_1"]
-    assert model_node.decision_point is not None
-    assert model_node.decision_point.decision_id == "model_type_auto_select"
-    assert model_node.decision_point.selected == "continuous"
+    assert model_node.decision_points
+    assert model_node.decision_points[0].decision_id == "model_type_auto_select"
+    assert model_node.decision_points[0].selected == "continuous"
     # The discard warning must fire — caller knows a DP was dropped.
     assert any(
         "model_type_auto_select" in str(w.message) and "ols_default_robust_se" in str(w.message)
@@ -373,5 +373,5 @@ def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):
     # OLS fallback ran. _model_type_dp was None (non-auto path). After fit failure,
     # it stays None and only _robust_se_dp populates the MODEL DP.
     model_node = graph.nodes["model:ols_1"]
-    assert model_node.decision_point is not None
-    assert model_node.decision_point.decision_id == "ols_default_robust_se"
+    assert model_node.decision_points
+    assert model_node.decision_points[0].decision_id == "ols_default_robust_se"

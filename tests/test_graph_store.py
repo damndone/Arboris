@@ -69,7 +69,7 @@ def _sample_graph() -> Graph:
         params={},
     )
     return Graph(
-        schema_version=1,
+        schema_version=2,
         run_id="run_test",
         nodes={node_raw.id: node_raw, node_model.id: node_model},
         edges={edge.id: edge},
@@ -114,7 +114,7 @@ def test_to_json_rejects_non_json_safe_payload():
         created_at="2026-05-13T10:00:00+00:00",
         parent_stage_id=None,
         branch_id="main",
-        decision_point=bad_dp,
+        decision_points=(bad_dp,),
     )
     g = Graph(
         schema_version=1, run_id="run_bad",
@@ -298,13 +298,13 @@ def test_roundtrip_preserves_decision_point_substructure():
 
     orig_node = g.nodes["model:primary"]
     rebuilt_node = rebuilt.nodes["model:primary"]
-    assert rebuilt_node.decision_point is not None
-    assert rebuilt_node.decision_point.contestability.warnings == \
-        orig_node.decision_point.contestability.warnings  # type: ignore[union-attr]
-    assert rebuilt_node.decision_point.contestability.assumption_checks_needed == \
-        orig_node.decision_point.contestability.assumption_checks_needed  # type: ignore[union-attr]
-    assert rebuilt_node.decision_point.reason.chosen_params == \
-        orig_node.decision_point.reason.chosen_params  # type: ignore[union-attr]
+    assert rebuilt_node.decision_points
+    assert rebuilt_node.decision_points[0].contestability.warnings == \
+        orig_node.decision_points[0].contestability.warnings
+    assert rebuilt_node.decision_points[0].contestability.assumption_checks_needed == \
+        orig_node.decision_points[0].contestability.assumption_checks_needed
+    assert rebuilt_node.decision_points[0].reason.chosen_params == \
+        orig_node.decision_points[0].reason.chosen_params  # type: ignore[union-attr]
 
 
 def test_empty_graph_serialization():

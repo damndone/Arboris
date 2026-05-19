@@ -223,7 +223,7 @@ def test_node_minimal():
     assert n.trust_reason is None
     assert n.archived is False
     assert n.payload_ref is None
-    assert n.decision_point is None
+    assert n.decision_points == ()
     assert n.annotations == ()
 
 
@@ -241,10 +241,10 @@ def test_node_with_decision_point():
         created_at="2026-05-13T10:25:00+00:00",
         parent_stage_id=None,
         branch_id="main",
-        decision_point=dp,
+        decision_points=(dp,),
     )
-    assert n.decision_point is dp
-    assert n.decision_point.selected == "logit"
+    assert n.decision_points == (dp,)
+    assert n.decision_points[0].selected == "logit"
 
 
 def test_node_is_frozen():
@@ -355,7 +355,7 @@ def test_node_with_all_optional_fields():
     assert n.trust_reason == "auto-coerced from string"
     assert n.payload_ref == "processed/x_stats.json"
     assert n.annotations == ("outlier_flag",)
-    assert n.decision_point is None
+    assert n.decision_points == ()
 
 
 def test_node_archived_flag():
