@@ -506,7 +506,7 @@ def _run_workflow(
             import warnings as _warnings
             _warnings.warn(
                 f"Variable {var!r} has both categorical_dummy and auto_coerce "
-                f"DecisionPoints. Using categorical_dummy (coerce DP ignored). "
+                f"DecisionPoints. Recording both; summary prefers categorical_dummy. "
                 f"This is unexpected — a column should not be both categorical "
                 f"and coerced-to-numeric.",
                 UserWarning, stacklevel=2,

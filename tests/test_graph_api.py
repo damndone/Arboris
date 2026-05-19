@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from workbench.api import app
-from workbench.graph_model import BranchRef, Graph, Node, NodeKind
+from workbench.graph_model import BranchRef, DecisionPoint, Edge, Graph, Node, NodeKind
 from workbench.graph_store import GraphStore
 
 
@@ -114,6 +114,69 @@ def test_get_graph_returns_stats_block(project_root: Path):
     assert isinstance(stats["edge_count"], int)
     assert isinstance(stats["leaf_count"], int)
     assert isinstance(stats["has_dp_count"], int)
+
+
+def test_get_graph_stats_counts_leaves_and_dp_nodes(project_root: Path):
+    runs_root = project_root / "runs"
+    run_dir = runs_root / "run_stats"
+    run_dir.mkdir(parents=True)
+    raw = Node(
+        id="stage:raw",
+        kind=NodeKind.DATASET_STAGE,
+        display_label="Raw",
+        created_at="2026-05-13T10:00:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+    )
+    cleaned = Node(
+        id="stage:cleaned",
+        kind=NodeKind.DATASET_STAGE,
+        display_label="Cleaned",
+        created_at="2026-05-13T10:01:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+        decision_points=(DecisionPoint(decision_id="handle_missing_values"),),
+    )
+    report = Node(
+        id="report:html",
+        kind=NodeKind.REPORT,
+        display_label="HTML report",
+        created_at="2026-05-13T10:02:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+    )
+    graph = Graph(
+        schema_version=2,
+        run_id="run_stats",
+        nodes={node.id: node for node in (raw, cleaned, report)},
+        edges={
+            "e_raw_cleaned": Edge(
+                id="e_raw_cleaned",
+                source_id="stage:raw",
+                target_id="stage:cleaned",
+                op="clean",
+            )
+        },
+        branches={
+            "main": BranchRef(
+                id="main",
+                forked_from_node_id=None,
+                head_node_ids=("stage:cleaned", "report:html"),
+            )
+        },
+    )
+    GraphStore(runs_root=runs_root).write(graph)
+
+    client = TestClient(app)
+    response = client.get("/runs/run_stats/graph", params={"project_root": str(project_root)})
+
+    assert response.status_code == 200
+    assert response.json()["stats"] == {
+        "node_count": 3,
+        "edge_count": 1,
+        "leaf_count": 2,
+        "has_dp_count": 1,
+    }
 
 
 def test_get_graph_response_has_summary_field_on_nodes(project_root: Path):

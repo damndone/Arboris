@@ -579,6 +579,26 @@ def test_missing_dp_field_yields_empty_tuple(tmp_path: Path):
     assert g.nodes["n1"].decision_points == ()
 
 
+@pytest.mark.parametrize("bad_value", [{}, ""])
+def test_v2_decision_points_must_be_list_shape(bad_value):
+    """V1.4.1 decision_points must be a JSON array, not another iterable."""
+    malformed = {
+        "schema_version": 2,
+        "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z",
+                "parent_stage_id": None, "branch_id": "main",
+                "decision_points": bad_value,
+            }
+        },
+        "edges": {}, "branches": {}, "legacy": False,
+    }
+    with pytest.raises(GraphDeserializationError, match="decision_points"):
+        graph_from_json(malformed)
+
+
 def test_writer_emits_schema_version_2(tmp_path: Path):
     """graph_to_json always emits schema_version: 2."""
     g = _sample_graph()
@@ -606,3 +626,27 @@ def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
         reloaded = store.read(f"run_{trust_value.value}")
         assert reloaded.nodes["n1"].trust == trust_value
         assert reloaded.nodes["n1"].trust_reason == f"test reason for {trust_value.value}"
+
+
+def test_mutate_returns_schema_version_2_after_write(tmp_path: Path):
+    """mutate() returns the post-serialization graph shape callers will read."""
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_v1"
+    run_dir.mkdir()
+    v1 = Graph(schema_version=1, run_id="run_v1", nodes={}, edges={}, branches={})
+    store.write(v1)
+
+    def keep_v1(graph: Graph) -> Graph:
+        return Graph(
+            schema_version=1,
+            run_id=graph.run_id,
+            nodes=graph.nodes,
+            edges=graph.edges,
+            branches=graph.branches,
+            legacy=graph.legacy,
+        )
+
+    returned = store.mutate("run_v1", keep_v1)
+
+    assert returned.schema_version == 2
+    assert store.read("run_v1").schema_version == 2
