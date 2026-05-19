@@ -137,6 +137,19 @@ def run_batch_y_workflow(
     return {"status": status, "runs": runs}
 
 
+def _safe_flush_recorder(recorder: GraphRecorder, *, context: str) -> None:
+    """Persist lineage best-effort. Lineage is observability, not correctness —
+    a write failure must not promote a blocked run to errored."""
+    try:
+        recorder.flush()
+    except Exception as exc:  # noqa: BLE001
+        import warnings as _warnings
+        _warnings.warn(
+            f"Failed to flush lineage graph ({context}): {exc!r}",
+            RuntimeWarning, stacklevel=2,
+        )
+
+
 def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     model_dir = run_root / "model_results"
     if not model_dir.is_dir():
@@ -240,7 +253,7 @@ def _run_workflow(
             y=y,
             x=x,
         )
-        _recorder.flush()
+        _safe_flush_recorder(_recorder, context="blocked@validation")
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("validation", "complete", "Validation passed")
 
@@ -300,7 +313,7 @@ def _run_workflow(
             y=y,
             x=x,
         )
-        _recorder.flush()
+        _safe_flush_recorder(_recorder, context="blocked@model_check")
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("model_check", "complete", "Model columns valid")
 
@@ -410,10 +423,9 @@ def _run_workflow(
 
     _dropped_dps: dict[str, Any] = {}
     for entry in dropped_vars:
-        parsed = _parse_dropped_var_entry(entry)
-        _dropped_dps[parsed["variable"]] = dpf.variable_silently_dropped(
-            variable=parsed["variable"],
-            drop_reason=parsed["reason"],
+        _dropped_dps[entry["variable"]] = dpf.variable_silently_dropped(
+            variable=entry["variable"],
+            drop_reason=entry["reason"],
         )
 
     # -- Record lineage graph nodes with accumulated DecisionPoints ----------
@@ -464,6 +476,15 @@ def _run_workflow(
         primary_model_type = model_results[0][1].get("model_type", "ols")
         # Attach one DecisionPoint per node for V1.4.0:
         # model_type_auto_select (data-driven) > ols_default_robust_se
+        if _model_type_dp is not None and _robust_se_dp is not None:
+            import warnings as _warnings
+            _warnings.warn(
+                "Both model_type_auto_select and ols_default_robust_se DPs "
+                "populated; recording only model_type_auto_select on MODEL "
+                "node (V1.4.0 limit: one DP per node). V1.4.1+ will support "
+                "multiple DPs.",
+                UserWarning, stacklevel=2,
+            )
         _primary_dp = _model_type_dp or _robust_se_dp
         _recorder.record_model(
             node_id=f"model:{primary_model_id}",
@@ -625,7 +646,10 @@ def _run_workflow(
             f"Dataset kind: {routing['kind']}",
         ])
     if dropped_vars:
-        facts.append(f"Variables dropped from model: {'; '.join(dropped_vars)}")
+        facts.append(
+            "Variables dropped from model: "
+            + "; ".join(f"{e['variable']} ({e['reason_display']})" for e in dropped_vars)
+        )
     if categorical_vars:
         facts.append(f"Categorical variable(s): {', '.join(sorted(categorical_vars))} (dummy-coded in model)")
     if reliability_info:
@@ -750,7 +774,7 @@ def _run_workflow(
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("export", "complete", "Export failed — model results available")
 
-    _recorder.flush()
+    _safe_flush_recorder(_recorder, context="success")
 
     _write_manifest(
         run_root,
@@ -1490,29 +1514,6 @@ def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] 
     return stats
 
 
-def _parse_dropped_var_entry(entry: str) -> dict[str, str]:
-    """Parse a dropped-variable string like 'x4 (dropped due to zero variance)'.
-
-    Returns {'variable': 'x4', 'reason': 'dropped_due_to_zero_variance'}.
-    Handles edge cases: no parentheses, nested parens in reason, empty string.
-
-    Uses the FIRST ' (' as the delimiter since variable names from
-    normalize_column_name never contain ' ('. This correctly handles
-    reasons with nested parentheses like:
-    'x1 (dropped due to perfect collinearity (categories may overlap))'.
-    """
-    entry = entry.strip()
-    if not entry:
-        return {"variable": "", "reason": "unknown"}
-    idx = entry.find(" (")
-    if idx == -1 or not entry.endswith(")"):
-        return {"variable": entry, "reason": "unknown"}
-    var_name = entry[:idx]
-    reason_text = entry[idx + 2:-1]  # strip " (" prefix and ")" suffix
-    normalized_reason = reason_text.strip().replace(" ", "_").lower()
-    return {"variable": var_name, "reason": normalized_reason}
-
-
 def _check_dropped_variables(
     x_vars: list[str],
     model_results: list[tuple[str, dict[str, Any]]],
@@ -1520,13 +1521,11 @@ def _check_dropped_variables(
     issue_dicts: list[dict[str, Any]],
     run_root: Path,
     categorical_vars: set[str] | None = None,
-) -> list[str]:
+) -> list[dict[str, str]]:
     """Check for user-specified X variables dropped from the model silently.
 
-    Respects C()-encoded categorical variables whose terms appear as
-    C(Q('var'))[T.val] in the coefficient names rather than bare 'var'.
-
-    Returns a list of human-readable strings like "x4 (dropped due to zero variance)".
+    Returns structured entries: {"variable", "reason" (normalized id),
+    "reason_display" (human string)}. Respects C()-encoded categoricals.
     """
     if categorical_vars is None:
         categorical_vars = set()
@@ -1543,7 +1542,6 @@ def _check_dropped_variables(
         if var in coefficients:
             return True
         if var in categorical_vars:
-            # Check for C(Q('var'))[T.*] or C(Q("var"))[T.*] pattern
             sq = f"C(Q('{var}'))[T."
             dq = f'C(Q("{var}"))[T.'
             for cterm in coefficients:
@@ -1551,29 +1549,34 @@ def _check_dropped_variables(
                     return True
         return False
 
-    dropped: list[str] = []
+    dropped: list[dict[str, str]] = []
     for var in x_vars:
         if _in_coefficients(var):
             continue
-        if var not in frame.columns:
-            reason = "dropped due to all-missing after cleaning"
-        elif frame[var].isna().all():
-            reason = "dropped due to all-missing after cleaning"
+        if var not in frame.columns or frame[var].isna().all():
+            reason_id = "all_missing_after_cleaning"
+            reason_display = "dropped due to all-missing after cleaning"
         elif frame[var].nunique() <= 1:
-            reason = "dropped due to zero variance"
+            reason_id = "zero_variance"
+            reason_display = "dropped due to zero variance"
         elif var in categorical_vars:
-            # C()-encoded but not in coefficients — likely collinear categories
-            reason = "dropped due to perfect collinearity (categories may overlap with other predictors)"
+            reason_id = "perfect_collinearity_categorical"
+            reason_display = "dropped due to perfect collinearity (categories may overlap with other predictors)"
         else:
-            reason = "dropped due to perfect collinearity"
+            reason_id = "perfect_collinearity"
+            reason_display = "dropped due to perfect collinearity"
 
-        dropped.append(f"{var} ({reason})")
+        dropped.append({
+            "variable": var,
+            "reason": reason_id,
+            "reason_display": reason_display,
+        })
         issue_dicts.append(
             GuardrailIssue(
                 Severity.INFO,
                 "VARIABLE_DROPPED",
-                f"Variable '{var}' was {reason}.",
-                {"variable": var, "reason": reason},
+                f"Variable '{var}' was {reason_display}.",
+                {"variable": var, "reason": reason_display},
             ).to_dict()
         )
 

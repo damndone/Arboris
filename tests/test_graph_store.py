@@ -19,6 +19,7 @@ from workbench.graph_model import (
 )
 from workbench.graph_store import (
     GraphDeserializationError,
+    GraphLockTimeout,
     GraphSerializationError,
     GraphStore,
     graph_from_json,
@@ -327,6 +328,23 @@ def test_write_creates_run_directory_if_needed(tmp_path: Path):
     assert (tmp_path / "run_auto_create" / "graph.json").is_file()
     loaded = store.read("run_auto_create")
     assert loaded == g
+
+
+def test_lock_acquire_timeout_raises_typed_exception(tmp_path: Path, monkeypatch):
+    """A held lock + timeout=0 surfaces as GraphLockTimeout, not filelock.Timeout."""
+    store = GraphStore(runs_root=tmp_path)
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_locked")
+    store.write(g)
+    monkeypatch.setattr(GraphStore, "LOCK_TIMEOUT_SECONDS", 0.1)
+
+    held = store._lock("run_locked")
+    held.acquire()
+    try:
+        with pytest.raises(GraphLockTimeout, match="run_locked"):
+            store.write(g)
+    finally:
+        held.release()
 
 
 def test_read_rejects_oversized_graph_json(tmp_path: Path, monkeypatch):

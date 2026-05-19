@@ -169,29 +169,41 @@ def test_orchestrator_graph_has_variable_nodes_for_all_x(tmp_path: Path):
     assert "report:html" in graph.nodes
 
 
-# -- _parse_dropped_var_entry unit tests ---------------------------------------
+def test_safe_flush_swallows_errors_and_warns(tmp_path: Path):
+    """A failing GraphRecorder.flush() must not propagate; warning is raised."""
+    import warnings as _w
+    from workbench.orchestrator import _safe_flush_recorder
 
-from workbench.orchestrator import _parse_dropped_var_entry
-
-
-def test_parse_dropped_var_basic():
-    assert _parse_dropped_var_entry("x4 (dropped due to zero variance)") == {
-        "variable": "x4", "reason": "dropped_due_to_zero_variance",
-    }
-
-
-def test_parse_dropped_var_nested_parens_in_reason():
-    """Reason may contain parens (e.g. collinearity → categories may overlap)."""
-    entry = "x1 (dropped due to perfect collinearity (categories may overlap with other predictors))"
-    result = _parse_dropped_var_entry(entry)
-    assert result["variable"] == "x1"
-    assert "perfect_collinearity" in result["reason"]
-    assert "categories_may_overlap" in result["reason"]
+    class _Boom:
+        def flush(self):
+            raise OSError("disk full")
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        _safe_flush_recorder(_Boom(), context="test")  # must not raise
+    assert any(
+        issubclass(w.category, RuntimeWarning) and "disk full" in str(w.message)
+        for w in caught
+    )
 
 
-def test_parse_dropped_var_empty_and_no_parens():
-    assert _parse_dropped_var_entry("") == {"variable": "", "reason": "unknown"}
-    assert _parse_dropped_var_entry("my_var") == {"variable": "my_var", "reason": "unknown"}
+# -- _check_dropped_variables structured-return unit tests --------------------
+
+
+def test_check_dropped_variables_returns_structured_entries(tmp_path: Path):
+    """Structured return — no more string round-tripping."""
+    from workbench.orchestrator import _check_dropped_variables
+
+    frame = pd.DataFrame({"x_kept": [1.0, 2.0, 3.0], "x_zero": [1.0, 1.0, 1.0]})
+    model_results = [("ols_1", {"coefficients": {"x_kept": 0.5, "Intercept": 0.1}})]
+    issue_dicts: list = []
+    result = _check_dropped_variables(
+        ["x_kept", "x_zero"], model_results, frame, issue_dicts, tmp_path,
+    )
+    assert result == [{
+        "variable": "x_zero",
+        "reason": "zero_variance",
+        "reason_display": "dropped due to zero variance",
+    }]
 
 
 # -- Blocked run still gets graph.json (P0-2 regression guard) -----------------
@@ -305,10 +317,14 @@ def test_explicit_ols_graph_has_robust_se_dp_not_model_type_dp(tmp_path: Path):
 
 def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
     """auto + continuous y: both DPs are populated, but model_type_auto_select
-    must win per orchestrator.py:461 `_primary_dp = _model_type_dp or _robust_se_dp`."""
+    must win per orchestrator.py:461 `_primary_dp = _model_type_dp or _robust_se_dp`.
+    Also verifies the V1.4.0 single-DP warning fires."""
+    import warnings as _w
     runs_root = tmp_path / "demo"
-    run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path,
-                                   model_type="auto")
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path,
+                                       model_type="auto")
 
     store = GraphStore(runs_root=runs_root / "runs")
     graph = store.read(run_id)
@@ -316,6 +332,11 @@ def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
     assert model_node.decision_point is not None
     assert model_node.decision_point.decision_id == "model_type_auto_select"
     assert model_node.decision_point.selected == "continuous"
+    # The discard warning must fire — caller knows a DP was dropped.
+    assert any(
+        "model_type_auto_select" in str(w.message) and "ols_default_robust_se" in str(w.message)
+        for w in caught if issubclass(w.category, UserWarning)
+    ), [str(w.message) for w in caught]
 
 
 def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):

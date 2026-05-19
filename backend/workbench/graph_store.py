@@ -20,7 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from .graph_model import (
     AutoChosenReason,
@@ -41,6 +41,10 @@ class GraphSerializationError(ValueError):
 
 class GraphDeserializationError(ValueError):
     """Raised when a persisted graph cannot be deserialized."""
+
+
+class GraphLockTimeout(RuntimeError):
+    """Raised when the per-run graph lock cannot be acquired within the timeout."""
 
 
 def graph_to_json(graph: Graph) -> dict[str, Any]:
@@ -124,7 +128,7 @@ class GraphStore:
         path = self._graph_path(graph.run_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = graph_to_json(graph)
-        with self._lock(graph.run_id):
+        with self._acquire(graph.run_id):
             self._atomic_write_json(path, data)
 
     def mutate(self, run_id: str, fn: Callable[[Graph], Graph]) -> Graph:
@@ -135,7 +139,7 @@ class GraphStore:
         the lock's run_id — a mismatch raises ValueError to prevent
         accidentally writing one run's graph into another's directory.
         """
-        with self._lock(run_id):
+        with self._acquire(run_id):
             current = self.read(run_id)
             updated = fn(current)
             if updated.run_id != run_id:
@@ -149,6 +153,8 @@ class GraphStore:
 
     # -- internals -------------------------------------------------------------
 
+    LOCK_TIMEOUT_SECONDS = 30.0
+
     def _graph_path(self, run_id: str) -> Path:
         return self._runs_root / run_id / "graph.json"
 
@@ -156,6 +162,17 @@ class GraphStore:
         lock_dir = self._runs_root / run_id
         lock_dir.mkdir(parents=True, exist_ok=True)
         return FileLock(str(lock_dir / "graph.lock"))
+
+    def _acquire(self, run_id: str) -> FileLock:
+        lock = self._lock(run_id)
+        try:
+            lock.acquire(timeout=self.LOCK_TIMEOUT_SECONDS)
+        except Timeout as exc:
+            raise GraphLockTimeout(
+                f"Could not acquire graph lock for run {run_id!r} within "
+                f"{self.LOCK_TIMEOUT_SECONDS}s"
+            ) from exc
+        return lock
 
     _TMP_STALE_SECONDS = 300
 
