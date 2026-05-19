@@ -301,3 +301,56 @@ def test_explicit_ols_graph_has_robust_se_dp_not_model_type_dp(tmp_path: Path):
     # Should have ols_default_robust_se
     assert model_node.decision_point is not None
     assert model_node.decision_point.decision_id == "ols_default_robust_se"
+
+
+def test_auto_ols_path_picks_model_type_dp_over_robust_se(tmp_path: Path):
+    """auto + continuous y: both DPs are populated, but model_type_auto_select
+    must win per orchestrator.py:461 `_primary_dp = _model_type_dp or _robust_se_dp`."""
+    runs_root = tmp_path / "demo"
+    run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path,
+                                   model_type="auto")
+
+    store = GraphStore(runs_root=runs_root / "runs")
+    graph = store.read(run_id)
+    model_node = graph.nodes["model:ols_1"]
+    assert model_node.decision_point is not None
+    assert model_node.decision_point.decision_id == "model_type_auto_select"
+    assert model_node.decision_point.selected == "continuous"
+
+
+def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):
+    """When the primary fit raises ValueError (orchestrator.py:393-398), the
+    fallback retries OLS and clears _model_type_dp; only ols_default_robust_se
+    remains on the MODEL node."""
+    from workbench.projects import create_project as cp, create_run as cr
+    from workbench.config import load_config as lc
+    from workbench.orchestrator import _run_workflow as rw, _lineage as li, _write_manifest as wm
+
+    proot = tmp_path / "demo"
+    cp(tmp_path, "demo")
+    run = cr(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    # model_type="poisson" with continuous (non-count) y forces _map → "count",
+    # but run_poisson should reject non-integer / negative-friendly continuous
+    # values; the except block at orchestrator.py:383 catches the ValueError
+    # and retries OLS, clearing _model_type_dp.
+    pd.DataFrame({
+        "y": [1.5 + 0.3 * i for i in range(35)],
+        "x1": list(range(35)),
+    }).to_csv(data, index=False)
+
+    config = lc(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    wm(run.root, run.run_id, "auto", "running", li([data]),
+       started_at=started_at, y="y", x=["x1"])
+
+    rw(run.root, run.run_id, [data], "auto", "y", ["x1"], config, started_at,
+       model_type="poisson")
+
+    store = GraphStore(runs_root=tmp_path / "demo" / "runs")
+    graph = store.read(run.run_id)
+    # OLS fallback ran. _model_type_dp was None (non-auto path). After fit failure,
+    # it stays None and only _robust_se_dp populates the MODEL DP.
+    model_node = graph.nodes["model:ols_1"]
+    assert model_node.decision_point is not None
+    assert model_node.decision_point.decision_id == "ols_default_robust_se"

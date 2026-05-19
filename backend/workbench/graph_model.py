@@ -193,3 +193,19 @@ class Graph:
     edges: dict[str, Edge]
     branches: dict[str, BranchRef]
     legacy: bool = False
+
+
+def resolve_decision_id(graph: Graph, id_or_alias: str) -> str | None:
+    """Return the canonical decision_id for a given id or alias.
+
+    Honors the rename invariant: when a decision_id is renamed, the old name
+    is added to `decision_id_alias`. Consumers should resolve through this
+    function rather than matching `decision_id` directly.
+    """
+    for node in graph.nodes.values():
+        dp = node.decision_point
+        if dp is None:
+            continue
+        if dp.decision_id == id_or_alias or id_or_alias in dp.decision_id_alias:
+            return dp.decision_id
+    return None

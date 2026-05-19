@@ -232,15 +232,45 @@ def test_duplicate_node_id_raises(tmp_path: Path):
         recorder.record_stage(node_id="stage:raw", display_label="Raw again")
 
 
-def test_flush_with_no_model_or_report_uses_last_node_as_head(tmp_path: Path):
-    """When there are only stages, head = last stage node id."""
+def test_flush_with_no_model_or_report_uses_leaves_as_head(tmp_path: Path):
+    """When there are only stages, head = topological leaves (no outgoing edges)."""
     store = GraphStore(runs_root=tmp_path)
     recorder = GraphRecorder(run_id="run_test", store=store)
     recorder.record_stage(node_id="stage:raw", display_label="Raw")
     recorder.record_stage(node_id="stage:cleaned", display_label="Cleaned")
+    recorder.record_edge(edge_id="e1", source_id="stage:raw",
+                         target_id="stage:cleaned", op="clean")
     recorder.flush()
     g = store.read("run_test")
-    assert "stage:cleaned" in g.branches["main"].head_node_ids
+    heads = g.branches["main"].head_node_ids
+    assert heads == ("stage:cleaned",), heads
+
+
+def test_flush_head_with_multiple_leaves(tmp_path: Path):
+    """Multiple leaves all become heads."""
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.record_stage(node_id="stage:cleanedA", display_label="A")
+    recorder.record_stage(node_id="stage:cleanedB", display_label="B")
+    recorder.record_edge(edge_id="eA", source_id="stage:raw",
+                         target_id="stage:cleanedA", op="x")
+    recorder.record_edge(edge_id="eB", source_id="stage:raw",
+                         target_id="stage:cleanedB", op="y")
+    recorder.flush()
+    g = store.read("run_test")
+    heads = set(g.branches["main"].head_node_ids)
+    assert heads == {"stage:cleanedA", "stage:cleanedB"}
+
+
+def test_flush_blocked_path_head_is_lone_leaf(tmp_path: Path):
+    """Blocked-path early flush with only stage:raw — head is that node."""
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.flush()
+    g = store.read("run_test")
+    assert g.branches["main"].head_node_ids == ("stage:raw",)
 
 
 def test_record_stage_with_trust_and_decision_point(tmp_path: Path):

@@ -327,3 +327,56 @@ def test_write_creates_run_directory_if_needed(tmp_path: Path):
     assert (tmp_path / "run_auto_create" / "graph.json").is_file()
     loaded = store.read("run_auto_create")
     assert loaded == g
+
+
+def test_concurrent_mutate_serializes_correctly(tmp_path: Path):
+    """Two threads racing to mutate the same run must both land in the final
+    graph (no lost update, no partial JSON). Without locking, one thread's
+    read would precede the other's write and lose its update — the FileLock
+    in GraphStore.mutate() prevents that."""
+    import threading
+    import time
+
+    store = GraphStore(runs_root=tmp_path)
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_race")
+    store.write(g)
+
+    errors: list[BaseException] = []
+
+    def append_node(node_id: str, delay: float):
+        def fn(graph: Graph) -> Graph:
+            time.sleep(delay)  # widen the read-modify-write window
+            new_nodes = dict(graph.nodes)
+            new_nodes[node_id] = Node(
+                id=node_id, kind=NodeKind.OPERATION, display_label=node_id,
+                created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
+                branch_id="main",
+            )
+            return Graph(
+                schema_version=graph.schema_version,
+                run_id=graph.run_id,
+                nodes=new_nodes,
+                edges=graph.edges,
+                branches=graph.branches,
+                legacy=graph.legacy,
+            )
+        try:
+            store.mutate("run_race", fn)
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    t1 = threading.Thread(target=append_node, args=("op:A", 0.1))
+    t2 = threading.Thread(target=append_node, args=("op:B", 0.1))
+    t1.start(); t2.start()
+    t1.join(timeout=10); t2.join(timeout=10)
+    assert not errors, errors
+
+    final = store.read("run_race")
+    # If the lock failed, the second writer's `current` would predate the first
+    # writer's flush and one node would be missing on disk.
+    assert "op:A" in final.nodes
+    assert "op:B" in final.nodes
+    # JSON file is well-formed (not partial).
+    with (tmp_path / "run_race" / "graph.json").open() as fp:
+        json.load(fp)

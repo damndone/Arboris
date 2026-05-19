@@ -164,12 +164,21 @@ class GraphRecorder:
     # -- persistence -----------------------------------------------------------
 
     def flush(self) -> None:
-        """Persist the accumulated graph. Branch head = most-recent MODEL/REPORT."""
+        """Persist the accumulated graph.
+
+        Branch head = MODEL/REPORT nodes if any exist; otherwise the topological
+        leaves (nodes with no outgoing edges). Avoids relying on dict insertion
+        order, which gave misleading heads on blocked-path early-return flushes.
+        """
         head_candidates = tuple(
             n.id for n in self._nodes.values()
             if n.kind in (NodeKind.MODEL, NodeKind.REPORT)
         )
-        head_node_ids = head_candidates if head_candidates else tuple(self._nodes.keys())[-1:]
+        if head_candidates:
+            head_node_ids = head_candidates
+        else:
+            sources = {e.source_id for e in self._edges.values()}
+            head_node_ids = tuple(nid for nid in self._nodes if nid not in sources)
         graph = Graph(
             schema_version=1,
             run_id=self._run_id,

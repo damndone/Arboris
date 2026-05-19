@@ -16,6 +16,7 @@ from workbench.graph_model import (
     Node,
     NodeKind,
     Trust,
+    resolve_decision_id,
 )
 
 
@@ -425,3 +426,50 @@ def test_decision_source_and_reason_type_importable():
     assert DecisionSource is not None
     assert ReasonType is not None
     assert ReviewStatus is not None
+
+
+def _graph_with_dp(decision_id: str, aliases: tuple[str, ...] = ()) -> Graph:
+    dp = DecisionPoint(decision_id=decision_id, decision_id_alias=aliases)
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
+        branch_id="main", decision_point=dp,
+    )
+    return Graph(schema_version=1, run_id="r", nodes={"n1": node}, edges={}, branches={})
+
+
+def test_resolve_decision_id_via_canonical():
+    g = _graph_with_dp("model_type_auto_select")
+    assert resolve_decision_id(g, "model_type_auto_select") == "model_type_auto_select"
+
+
+def test_resolve_decision_id_via_alias():
+    g = _graph_with_dp("model_type_auto_select", aliases=("old_model_pick", "legacy_name"))
+    assert resolve_decision_id(g, "old_model_pick") == "model_type_auto_select"
+    assert resolve_decision_id(g, "legacy_name") == "model_type_auto_select"
+
+
+def test_resolve_decision_id_unknown_returns_none():
+    g = _graph_with_dp("model_type_auto_select", aliases=("old_model_pick",))
+    assert resolve_decision_id(g, "nonexistent") is None
+
+
+def test_resolve_decision_id_skips_nodes_without_dp():
+    node_no_dp = Node(
+        id="n2", kind=NodeKind.DATASET_STAGE, display_label="s",
+        created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
+        branch_id="main", decision_point=None,
+    )
+    dp = DecisionPoint(decision_id="x", decision_id_alias=("y",))
+    node_with_dp = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
+        branch_id="main", decision_point=dp,
+    )
+    g = Graph(
+        schema_version=1, run_id="r",
+        nodes={"n2": node_no_dp, "n1": node_with_dp},
+        edges={}, branches={},
+    )
+    assert resolve_decision_id(g, "y") == "x"
+    assert resolve_decision_id(g, "missing") is None
