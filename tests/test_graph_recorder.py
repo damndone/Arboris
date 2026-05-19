@@ -51,7 +51,7 @@ def test_record_model_with_decision_point(tmp_path: Path):
         selected="logit",
         candidates=("ols", "logit", "poisson"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("variable_role_inference",),
         ),
         reason=AutoChosenReason(

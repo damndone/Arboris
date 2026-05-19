@@ -20,7 +20,7 @@ def model_type_auto_select(*, selected: str, y_unique: int, y_dtype: str) -> Dec
         selected=selected,
         candidates=("ols", "logit", "poisson"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("variable_role_inference",),
             warnings=("Auto-selected based on y dtype and unique-value count; verify domain fit.",),
         ),
@@ -40,7 +40,7 @@ def categorical_auto_dummy(
         selected="dummy_encode",
         candidates=("dummy_encode", "leave_as_continuous", "drop"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("categorical_candidate",),
             warnings=("Column had ≤ threshold unique values; may be ordinal rather than categorical.",),
         ),
@@ -62,7 +62,7 @@ def ols_default_robust_se(*, variant: str = "HC1") -> DecisionPoint:
         selected=variant,
         candidates=(),
         source="system_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("breusch_pagan", "white_test"),
             warnings=("Robust SE is hardcoded default. Confirm heteroskedasticity or revisit.",),
         ),
@@ -82,7 +82,7 @@ def auto_coerce_to_numeric(
         selected="numeric",
         candidates=("numeric", "leave_as_string", "treat_as_categorical"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("variable_role_inference",),
             warnings=("Coerced object-dtype column to numeric. Verify column is continuous (vs. ordinal-as-integer).",),
         ),
@@ -126,7 +126,7 @@ def handle_missing_values(*, variables: list[str]) -> DecisionPoint:
         selected="drop_rows_with_missing_required_fields",
         candidates=_MISSING_VALUE_CANDIDATES,
         source="system_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("missingness_mechanism_audit",),
             warnings=(
                 "Listwise deletion assumes MCAR. May bias estimates under MAR/MNAR.",
@@ -162,7 +162,7 @@ def variable_silently_dropped(
         selected="drop_variable",
         candidates=("drop_variable", "drop_rows", "impute", "user_review"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             is_contestable=True,
             assumption_checks_needed=(),
             warnings=("Variable was dropped before model fit; downstream interpretation must acknowledge.",),

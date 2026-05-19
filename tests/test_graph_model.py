@@ -44,8 +44,28 @@ def test_contestability_review_status_default_when_checks_empty():
 
 
 def test_contestability_review_status_default_when_checks_present():
-    c = Contestability(assumption_checks_needed=("breusch_pagan",))
+    """Derive() infers 'needed' when checks are listed and no status given."""
+    c = Contestability.derive(assumption_checks_needed=("breusch_pagan",))
     assert c.review_status == "needed"
+
+
+def test_contestability_derive_with_explicit_status_passes_through():
+    c = Contestability.derive(
+        assumption_checks_needed=("breusch_pagan",),
+        review_status="passed",
+    )
+    assert c.review_status == "passed"
+
+
+def test_contestability_direct_construction_without_status_does_not_derive():
+    """Direct construction uses the literal default ('not_needed'); derivation
+    only happens via Contestability.derive(). This avoids object.__setattr__
+    on a frozen dataclass."""
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")  # the consistency check will warn; not our concern here
+        c = Contestability(assumption_checks_needed=("breusch_pagan",))
+    assert c.review_status == "not_needed"
 
 
 def test_contestability_review_status_explicit_passed_with_checks():
@@ -158,7 +178,7 @@ def test_decision_point_full():
         selected="logit",
         candidates=("ols", "logit", "poisson"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("variable_role_inference",),
         ),
         reason=AutoChosenReason(

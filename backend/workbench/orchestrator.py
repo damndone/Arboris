@@ -319,7 +319,13 @@ def _run_workflow(
 
     _categorical_dummy_dps: dict[str, Any] = {}
     for cat_var in categorical_vars:
-        ref = sorted(cleaned[cat_var].dropna().unique())[0] if cat_var in cleaned.columns else "?"
+        if cat_var in cleaned.columns:
+            uniques = cleaned[cat_var].dropna().unique()
+            # Mixed-dtype object columns can't be sorted directly (TypeError);
+            # coerce to str for the audit-trail reference level.
+            ref = sorted(map(str, uniques))[0] if len(uniques) else "?"
+        else:
+            ref = "?"
         _categorical_dummy_dps[cat_var] = dpf.categorical_auto_dummy(
             variable=cat_var,
             n_unique=int(cleaned[cat_var].nunique()) if cat_var in cleaned.columns else 0,

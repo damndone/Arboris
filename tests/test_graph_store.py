@@ -32,7 +32,7 @@ def _sample_graph() -> Graph:
         selected="logit",
         candidates=("ols", "logit", "poisson"),
         source="data_driven_default",
-        contestability=Contestability(
+        contestability=Contestability.derive(
             assumption_checks_needed=("variable_role_inference",),
         ),
         reason=AutoChosenReason(
@@ -327,6 +327,77 @@ def test_write_creates_run_directory_if_needed(tmp_path: Path):
     assert (tmp_path / "run_auto_create" / "graph.json").is_file()
     loaded = store.read("run_auto_create")
     assert loaded == g
+
+
+def test_read_rejects_oversized_graph_json(tmp_path: Path, monkeypatch):
+    """graph.json exceeding MAX_GRAPH_BYTES raises GraphDeserializationError
+    without invoking json.load (JSON-bomb defense)."""
+    store = GraphStore(runs_root=tmp_path)
+    monkeypatch.setattr(GraphStore, "MAX_GRAPH_BYTES", 128)
+
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_big")
+    store.write(g)  # write succeeds (no cap on write)
+
+    # File is well-formed JSON but exceeds cap.
+    path = tmp_path / "run_big" / "graph.json"
+    assert path.stat().st_size > 128
+
+    called = {"json_load": False}
+    orig_load = json.load
+
+    def spy_load(*a, **kw):
+        called["json_load"] = True
+        return orig_load(*a, **kw)
+    monkeypatch.setattr(json, "load", spy_load)
+
+    with pytest.raises(GraphDeserializationError, match="exceeds MAX_GRAPH_BYTES"):
+        store.read("run_big")
+    assert called["json_load"] is False, "size check must happen before json.load"
+
+
+def test_stale_tmp_files_cleaned_up_on_write(tmp_path: Path):
+    """Orphan .graph.*.tmp files (e.g. from SIGKILL'd writes) are swept on next write."""
+    import os
+    import time
+
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_tmp"
+    run_dir.mkdir()
+    stale = run_dir / ".graph.abc123.tmp"
+    stale.write_text("partial")
+    old = time.time() - GraphStore._TMP_STALE_SECONDS - 10
+    os.utime(stale, (old, old))
+    fresh = run_dir / ".graph.def456.tmp"
+    fresh.write_text("still writing")
+
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_tmp")
+    store.write(g)
+
+    assert not stale.exists(), "stale tmp should have been cleaned"
+    assert fresh.exists(), "fresh tmp must not be touched"
+
+
+def test_atomic_write_failure_does_not_leak_tmp(tmp_path: Path, monkeypatch):
+    """If os.replace fails, the freshly-created tmp file is cleaned up."""
+    import os
+
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_fail"
+    run_dir.mkdir()
+    g = _sample_graph()
+    object.__setattr__(g, "run_id", "run_fail")
+
+    def boom(*a, **kw):
+        raise OSError("simulated replace failure")
+    monkeypatch.setattr(os, "replace", boom)
+
+    with pytest.raises(OSError):
+        store.write(g)
+
+    leaked = list(run_dir.glob(".graph.*.tmp"))
+    assert leaked == [], f"tmp file leaked: {leaked}"
 
 
 def test_concurrent_mutate_serializes_correctly(tmp_path: Path):

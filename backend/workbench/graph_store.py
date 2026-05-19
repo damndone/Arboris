@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -88,6 +89,9 @@ class GraphStore:
     def __init__(self, runs_root: Path) -> None:
         self._runs_root = runs_root
 
+    MAX_GRAPH_BYTES = 32 * 1024 * 1024  # 32 MiB hard cap; protects against
+    # JSON-bombs and runaway graph growth. A real run produces ~10s of KiB.
+
     def read(self, run_id: str) -> Graph:
         path = self._graph_path(run_id)
         if not path.is_file():
@@ -98,6 +102,12 @@ class GraphStore:
                 edges={},
                 branches={},
                 legacy=True,
+            )
+        size = path.stat().st_size
+        if size > self.MAX_GRAPH_BYTES:
+            raise GraphDeserializationError(
+                f"graph.json for run {run_id} is {size} bytes, exceeds "
+                f"MAX_GRAPH_BYTES={self.MAX_GRAPH_BYTES}"
             )
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -147,21 +157,36 @@ class GraphStore:
         lock_dir.mkdir(parents=True, exist_ok=True)
         return FileLock(str(lock_dir / "graph.lock"))
 
+    _TMP_STALE_SECONDS = 300
+
     def _atomic_write_json(self, path: Path, data: dict[str, Any]) -> None:
-        # Write to a temp file in the same directory, then atomic rename.
+        # Sweep stale .graph.*.tmp siblings left by SIGKILL'd writes.
+        self._cleanup_stale_tmp(path.parent)
         fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=".graph.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, path)
         except Exception:
-            # Clean up temp file if rename failed; swallow cleanup errors
-            # so the original exception propagates unshadowed.
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
             raise
+
+    @classmethod
+    def _cleanup_stale_tmp(cls, run_dir: Path) -> None:
+        now = time.time()
+        try:
+            entries = list(run_dir.glob(".graph.*.tmp"))
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                if now - entry.stat().st_mtime > cls._TMP_STALE_SECONDS:
+                    entry.unlink()
+            except OSError:
+                pass
 
 
 # -- to_jsonable: walk dataclass tree, convert to plain dict/list/scalars ----
@@ -235,7 +260,8 @@ def _decision_point_from_json(d: dict[str, Any]) -> DecisionPoint:
 
 
 def _contestability_from_json(d: dict[str, Any]) -> Contestability:
-    return Contestability(
+    # Use .derive() so legacy JSON without review_status gets it derived.
+    return Contestability.derive(
         is_contestable=d.get("is_contestable", True),
         assumption_checks_needed=tuple(d.get("assumption_checks_needed", ())),
         warnings=tuple(d.get("warnings", ())),

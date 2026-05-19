@@ -95,21 +95,40 @@ class Contestability:
     `assumption_checks_needed` semantics: lists checks that, if implemented and
     passed, would justify this default. Does NOT mean checks have been run —
     see `review_status` for that.
+
+    Construction: prefer `Contestability.derive(...)` for the common case where
+    `review_status` follows from `assumption_checks_needed`. Direct construction
+    requires an explicit `review_status` value.
     """
     is_contestable: bool = True
     assumption_checks_needed: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
-    review_status: ReviewStatus | None = None
+    review_status: ReviewStatus = "not_needed"
 
     def __post_init__(self) -> None:
-        if self.review_status is None:
-            object.__setattr__(
-                self, "review_status",
-                _derive_review_status(self.assumption_checks_needed),
-            )
         _check_contestability_consistency(
             self.assumption_checks_needed,
-            self.review_status,  # type: ignore[arg-type]
+            self.review_status,
+        )
+
+    @classmethod
+    def derive(
+        cls,
+        *,
+        is_contestable: bool = True,
+        assumption_checks_needed: tuple[str, ...] = (),
+        warnings: tuple[str, ...] = (),
+        review_status: ReviewStatus | None = None,
+    ) -> "Contestability":
+        """Construct with `review_status` derived from `assumption_checks_needed`
+        when not given explicitly."""
+        if review_status is None:
+            review_status = _derive_review_status(assumption_checks_needed)
+        return cls(
+            is_contestable=is_contestable,
+            assumption_checks_needed=assumption_checks_needed,
+            warnings=warnings,
+            review_status=review_status,
         )
 
 
