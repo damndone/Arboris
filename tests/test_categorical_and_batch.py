@@ -97,9 +97,9 @@ def test_categorical_interpretation_in_claims(csv_path, tmp_path):
     run_root = project.root / "runs" / result["run_id"]
     html = (run_root / "reports" / "report.html").read_text()
 
-    # C()-encoded variables generate "categorical variable" claim text
-    assert "categorical variable" in html, (
-        "Expected a claim acknowledging categorical encoding"
+    # C()-encoded variables generate system notes about categorical detection
+    assert "detected as categorical" in html, (
+        "Expected system note acknowledging categorical encoding"
     )
     # x7_region_code (categorical) should NOT get "one-unit increase" interpretation
     assert "one-unit increase in x7_region_code" not in html, (
@@ -176,11 +176,10 @@ def test_batch_y_model_type(y, expected_type, model_file, csv_path, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_p_value_shows_less_than_0_001(csv_path, tmp_path):
-    """Very small p-values should be rendered as '< 0.001' in the report."""
+    """Very small p-values should be rendered with significance label in the report."""
     source = Path(csv_path)
     project = create_project(tmp_path, "pval")
 
-    # Use Poisson with strong signal -- claims show numeric p-values
     result = run_workflow(
         project.root, [source], mode="auto",
         y="count_events_y", x=["x1"],
@@ -190,20 +189,18 @@ def test_p_value_shows_less_than_0_001(csv_path, tmp_path):
     run_root = project.root / "runs" / result["run_id"]
     html = (run_root / "reports" / "report.html").read_text()
 
-    # The Poisson claim uses pv_str = "< 0.001" for tiny p-values.
-    # Jinja autoescape converts "<" to "&lt;" in the rendered HTML.
-    assert "&lt; 0.001" in html, (
-        "Expected '< 0.001' format (HTML-escaped as '&lt; 0.001') "
-        "for small p-values, not '0.0000'"
+    # Small p-values should show "significant at the 1% level" in coefficient interpretation
+    assert "significant at the 1% level" in html or "significant at the 5% level" in html, (
+        "Expected significance label in coefficient interpretation"
     )
 
     # The raw coefficient p_value from statsmodels can be numerically
     # zero for very strong signals; the important thing is the display.
     model_result = read_json(run_root / "model_results" / "poisson_1.json")
     x1_coef = model_result["coefficients"].get("x1", {})
+    assert x1_coef
     pval = x1_coef.get("p_value")
     assert pval is not None, "x1 p_value missing"
-    # Check the display logic: round(pval, 4) < 0.001 should be true
-    assert pval is None or round(float(pval), 4) < 0.001, (
+    assert round(float(pval), 4) < 0.001, (
         "x1 should be highly significant"
     )

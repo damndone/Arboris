@@ -33,6 +33,7 @@ class RunMode(str, Enum):
 class Severity(str, Enum):
     BLOCKER = "BLOCKER"
     WARNING = "WARNING"
+    CAUTION = "CAUTION"
     INFO = "INFO"
 
 
@@ -77,9 +78,21 @@ class GuardrailIssue:
     code: str
     message: str
     evidence: Mapping[str, Any] = field(default_factory=dict)
+    issue_id: str = ""
+    affected_stage: str = ""
+    variables: list[str] = field(default_factory=list)
+    metric: str = ""
+    value: float | None = None
+    threshold: float | None = None
+    template_key: str = ""
+    template_params: dict[str, Any] = field(default_factory=dict)
+    recommended_action_key: str = ""
+    is_user_action_required: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence", _freeze_value(self.evidence))
+        object.__setattr__(self, "variables", tuple(self.variables))
+        object.__setattr__(self, "template_params", _freeze_value(self.template_params))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +100,16 @@ class GuardrailIssue:
             "code": self.code,
             "message": self.message,
             "evidence": _to_plain(self.evidence),
+            "issue_id": self.issue_id,
+            "affected_stage": self.affected_stage,
+            "variables": list(self.variables),
+            "metric": self.metric,
+            "value": self.value,
+            "threshold": self.threshold,
+            "template_key": self.template_key,
+            "template_params": _to_plain(self.template_params),
+            "recommended_action_key": self.recommended_action_key,
+            "is_user_action_required": self.is_user_action_required,
         }
 
 

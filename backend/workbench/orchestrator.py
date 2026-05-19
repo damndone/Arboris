@@ -9,6 +9,7 @@ import pandas as pd
 from .artifacts import read_json, register_artifact, write_json
 from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
+from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
@@ -31,6 +32,7 @@ from .statistical_tests import (
     write_statistical_test_artifacts,
 )
 from .validation import has_blockers, validate_profile
+from .variable_roles import infer_variable_roles
 from .visualization import create_figures
 
 # ============================================================
@@ -283,6 +285,8 @@ def _run_workflow(
     # Detect categorical X variables for C() encoding in model formula
     categorical_vars = _detect_categorical_x_vars(cleaned, normalized_x)
 
+    variable_roles = infer_variable_roles(cleaned, normalized_x, y_type=y_type)
+
     # Detect exposure variable early for count models (needed before statistical tests and VIF)
     exposure_col = None
     if y_type == "count":
@@ -465,7 +469,7 @@ def _run_workflow(
             {"kind": routing["kind"], "model_type": primary_type},
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
-    descriptive_stats = _build_descriptive_stats(cleaned)
+    descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
     model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     if effective_exposure_col:
@@ -516,6 +520,7 @@ def _run_workflow(
     variable_importance = _build_variable_importance(
         statistical_tests, normalized_y, normalized_x, model_results,
         cleaned, primary_type, exposure_col=effective_exposure_col,
+        categorical_vars=categorical_vars,
     )
     facts.append(
         "Note: variable importance is based on marginal (univariate) association "
@@ -537,9 +542,51 @@ def _run_workflow(
         overdisp = poisson_diag.get("overdispersion", {})
         if isinstance(overdisp, dict) and overdisp:
             report["overdispersion"] = overdisp
+    # Generate issue IDs for all collected issues
+    for idx, issue in enumerate(issue_dicts):
+        if not issue.get("issue_id"):
+            issue["issue_id"] = f"diag_{idx + 1:03d}"
+
+    # Build diagnostic_summary.json
+    primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+    effective_exposure_col = exposure_col if primary_type == "poisson_rate" else None
+    diagnostic_summary = build_diagnostic_summary(
+        issue_dicts=issue_dicts,
+        model_results=[result for _, result in model_results],
+        routing=routing,
+        normalized_y=normalized_y,
+        normalized_x=normalized_x,
+        profile=profile,
+        categorical_vars=categorical_vars,
+        y_type=y_type,
+        primary_type=primary_type,
+        variable_roles=variable_roles,
+        run_id=run_id,
+        exposure_col=effective_exposure_col,
+        dropped_vars=dropped_vars,
+        coercions=coercion_actions,
+    )
+    write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
+    register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
+
+    # Write legacy errors.json with superseded_by pointer
+    write_json(run_root / "errors.json", {
+        "schema_version": "legacy",
+        "run_id": run_id,
+        "issues": issue_dicts,
+        "superseded_by": "diagnostic_summary.json",
+    })
+
+    # Render HTML report via view_model
     if _s: _s("reporting", "start", "Rendering report...")
     try:
-        render_html_report(report, run_root)
+        from .report_view_model import build_report_view_model
+        view_model = build_report_view_model(
+            diagnostic_summary, run_root,
+            descriptive_stats=descriptive_stats,
+            statistical_tests=statistical_test_summaries,
+        )
+        render_html_report(view_model, run_root)
         if _s: _s("reporting", "complete", "Rendered HTML report")
     except Exception as exc:
         issue_dicts.append(GuardrailIssue(
@@ -761,7 +808,9 @@ def _build_variable_importance(
     frame: pd.DataFrame | None = None,
     primary_type: str = "ols",
     exposure_col: str | None = None,
+    categorical_vars: set[str] | None = None,
 ) -> list[dict[str, Any]]:
+    cat_set = categorical_vars or set()
     importance: dict[str, dict[str, Any]] = {}
     for var in x_vars:
         if var == exposure_col:
@@ -781,6 +830,8 @@ def _build_variable_importance(
                         c = corr[y].get(var)
                         if pd.notna(c):
                             importance[var]["correlation"] = round(float(c), 3)
+                            if var in cat_set:
+                                importance[var]["correlation_note"] = "Pearson r on categorical codes — prefer ANOVA"
     for row in statistical_tests.get("correlations", {}).get("results", []):
         variables = row.get("variables", [])
         if isinstance(variables, list) and y in variables:
@@ -1270,7 +1321,8 @@ def _importance_sort_key(item: dict[str, Any]) -> float:
     return float(p)
 
 
-def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def _build_descriptive_stats(frame: pd.DataFrame, *, categorical_vars: set[str] | None = None) -> list[dict[str, Any]]:
+    cat_set = categorical_vars or set()
     stats: list[dict[str, Any]] = []
     for column in frame.columns:
         col_str = str(column)
@@ -1285,7 +1337,8 @@ def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
             "missing_rate": round((total - present) / total, 4) if total > 0 else 0.0,
             "unique_count": int(series.nunique()),
         }
-        if pd.api.types.is_numeric_dtype(series):
+        is_categorical = col_str in cat_set
+        if pd.api.types.is_numeric_dtype(series) and not is_categorical:
             row["mean"] = round(float(series.mean()), 4)
             row["std"] = round(float(series.std()), 4)
             row["min"] = round(float(series.min()), 4)
@@ -1295,6 +1348,8 @@ def _build_descriptive_stats(frame: pd.DataFrame) -> list[dict[str, Any]]:
             row["std"] = None
             row["min"] = None
             row["max"] = None
+            if is_categorical:
+                row["note"] = "categorical — mean/std not meaningful"
         stats.append(row)
     return stats
 

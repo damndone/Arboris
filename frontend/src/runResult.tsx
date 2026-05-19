@@ -7,9 +7,11 @@ import {
   fetchRunDetail,
   reportUrl,
   type ArtifactGroup,
+  type CoefficientRisk,
   type IssueRecord,
   type RunDetail,
 } from "./api";
+import { validateDiagnosticPreview } from "./contract/validateDiagnosticPreview";
 
 type Props = {
   projectRoot: string;
@@ -114,6 +116,9 @@ function autoDummyCodedIssue(column: string): IssueRecord {
     code: "CATEGORICAL_AUTO_DUMMY_CODED",
     message: `Column '${column}' was detected as categorical and automatically dummy-coded.`,
     evidence: { column, preprocessing: "dummy_coded" },
+    affected_stage: "data_cleaning",
+    variables: [column],
+    template_key: "categorical_auto_dummy",
   };
 }
 
@@ -241,11 +246,58 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
     return <p className="muted">Loading run…</p>;
   }
 
-  const issues: IssueRecord[] = normalizeIssues(detail);
+  const rawPreview = detail.diagnostic_summary_preview;
+  const validation = rawPreview === undefined
+    ? { valid: true as const, data: undefined }
+    : validateDiagnosticPreview(rawPreview);
+
+  if (validation.valid === false) {
+    if (typeof console !== "undefined") {
+      console.error("[runResult] diagnostic_summary_preview failed validation:", validation.errors);
+    }
+  }
+
+  const preview = validation.valid === true ? validation.data : undefined;
+  const hasPreview = preview?.available === true;
+  const previewInvalid = validation.valid === false;
+
+  // Backend normalizes CATEGORICAL_CANDIDATE→AUTO_DUMMY in _normalize_issue_stream.
+  // Frontend normalizeIssues is legacy fallback for old backends without preview.
+  const issues: IssueRecord[] = hasPreview
+    ? (detail.errors?.issues ?? [])
+    : normalizeIssues(detail);
   const problemIssues = issues.filter((issue) => issue.severity === "BLOCKER");
   const warningIssues = issues.filter((issue) => issue.severity === "WARNING");
+  const cautionIssues = issues.filter((issue) => issue.severity === "CAUTION");
   const infoIssues = issues.filter((issue) => issue.severity === "INFO");
   const coefficients = coefficientRows(detail);
+
+  // P0-1: Extract coefficient risk — primary model, non-empty groups only
+  const coefficientRisk: CoefficientRisk | undefined = preview?.coefficient_risk as CoefficientRisk | undefined;
+  const primaryModel = coefficientRisk?.models?.find((m) => m.is_primary);
+  const riskGroups = primaryModel?.risk_groups?.filter((g) => g.terms.length > 0) ?? [];
+
+  // P0-3: Report gating — browser never infers availability.
+  // V1.3.1 preview: require explicit artifact_manifest.report_html.available === true.
+  // Legacy (no preview): fall back to artifact_counts.report > 0.
+  const reportAvailable = hasPreview
+    ? (preview!.artifact_manifest as Record<string, {available?: boolean}> | undefined)
+        ?.report_html?.available === true
+    : (detail.artifact_counts?.report ?? 0) > 0;
+  const reportManifestMissing = hasPreview && (
+    !preview?.artifact_manifest ||
+    !(preview.artifact_manifest as Record<string, unknown>).report_html
+  );
+  const reportBlocked = hasPreview && preview?.run_status?.status === "blocked";
+  const reportDisabled = !reportAvailable || (hasPreview && preview?.run_status?.status === "failed");
+
+  // P0-2: Top 1-3 restrictions and actions
+  const restrictions = (preview?.interpretation_restrictions ?? []) as Array<{
+    restriction_type: string; severity: string; message: string;
+  }>;
+  const actions = (preview?.recommended_actions ?? []) as Array<{
+    action_key: string; severity: string; message: string;
+  }>;
 
   return (
     <section className="result-panel" aria-labelledby="run-detail-heading">
@@ -299,6 +351,98 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           <dd>{(detail.x ?? []).join(", ") || "—"}</dd>
         </div>
       </dl>
+      {hasPreview && preview && (
+        <section className="trust-summary" aria-label="trust status">
+          <div className={`trust-bar trust-${preview.trust_label}`}>
+            <strong>
+              {preview.trust_label === "ready_to_interpret" && "Ready to interpret"}
+              {preview.trust_label === "interpret_with_caution" && "Interpret with caution"}
+              {preview.trust_label === "not_ready_to_interpret" && "Not ready to interpret"}
+              {preview.trust_label === "run_failed" && "Run failed"}
+              {preview.trust_label === "analysis_running" && "Analysis running"}
+              {!["ready_to_interpret", "interpret_with_caution", "not_ready_to_interpret", "run_failed", "analysis_running"].includes(preview.trust_label) && "Trust status unavailable"}
+            </strong>
+            {preview.trust_counts && (
+              <span className="trust-counts">
+                {preview.trust_counts.blockers > 0 && <span className="count-blocker">{preview.trust_counts.blockers} blocking</span>}
+                {preview.trust_counts.warnings > 0 && <span className="count-warning">{preview.trust_counts.warnings} warnings</span>}
+                {preview.trust_counts.cautions > 0 && <span className="count-caution">{preview.trust_counts.cautions} cautions</span>}
+                {preview.trust_counts.info > 0 && <span className="count-info">{preview.trust_counts.info} notes</span>}
+              </span>
+            )}
+          </div>
+          {preview.primary_reasons.length > 0 && (
+            <div className="trust-reasons">
+              {preview.primary_reasons.map((r) => (
+                <div key={r.reason_id} className={`reason reason-${r.severity.toLowerCase()}`}>
+                  <strong>{r.severity}</strong>: {r.message}
+                </div>
+              ))}
+            </div>
+          )}
+          {preview.model_identity && (
+            <div className="trust-model-id">
+              {preview.model_identity.model_label} · y = {preview.model_identity.y_variable} · n = {preview.model_identity.n_observations}
+            </div>
+          )}
+        </section>
+      )}
+      {previewInvalid && (
+        <section className="trust-summary trust-summary-error">
+          <p>Invalid diagnostic data — see browser console for details.</p>
+        </section>
+      )}
+      {!hasPreview && !previewInvalid && detail.diagnostic_summary_preview && (
+        <section className="panel panel-neutral" aria-label="trust unavailable">
+          <strong>Trust preview unavailable</strong>
+          <p>{(detail.diagnostic_summary_preview.contract_warnings ?? []).join("; ") || "Diagnostic summary could not be loaded. Showing legacy results below."}</p>
+        </section>
+      )}
+      {hasPreview && riskGroups.length > 0 && (
+        <section className="coefficient-risk" aria-label="coefficient risk">
+          <h3 className="subhead">Coefficient risk</h3>
+          {riskGroups.map((group) => (
+            <div key={group.variable} className={`risk-group risk-${group.risk_level.toLowerCase()}`}>
+              <div className="risk-group-header">
+                <strong>{group.display_name}</strong>
+                <span className={`risk-badge badge-${group.risk_level.toLowerCase()}`}>{group.variable_kind}</span>
+                <span className="risk-level">{group.risk_level}</span>
+              </div>
+              {group.summary && <p className="risk-summary">{group.summary}</p>}
+              {group.terms.length > 0 && (
+                <table className="risk-terms-table">
+                  <thead><tr><th>Level</th><th>Reference</th><th>Estimate</th><th>p-value</th></tr></thead>
+                  <tbody>
+                    {group.terms.map((t) => (
+                      <tr key={t.source_id}>
+                        <td>{t.display_term}</td>
+                        <td>{t.reference_level ?? "—"}</td>
+                        <td>{formatNumber(t.estimate)}</td>
+                        <td>{formatNumber(t.p_value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
+      {hasPreview && (restrictions.length > 0 || actions.length > 0) && (
+        <section className="interpretation-guidance" aria-label="interpretation guidance">
+          <h3 className="subhead">Interpretation guidance</h3>
+          {restrictions.slice(0, 3).map((r, i) => (
+            <div key={`restriction-${i}`} className={`restriction restriction-${r.severity.toLowerCase()}`}>
+              <strong>Do not</strong>: {r.message}
+            </div>
+          ))}
+          {actions.slice(0, 3).map((a, i) => (
+            <div key={`action-${i}`} className={`action action-${a.severity.toLowerCase()}`}>
+              <strong>Recommended</strong>: {a.message}
+            </div>
+          ))}
+        </section>
+      )}
       <h3 className="subhead">Artifact counts</h3>
       <ul className="path-list" aria-label="artifact counts">
         {Object.entries(detail.artifact_counts).map(([type, count]) => (
@@ -364,9 +508,22 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           </ul>
         </section>
       )}
+      {cautionIssues.length > 0 && (
+        <section className="panel" aria-label="cautions">
+          <strong>Interpretation cautions</strong>
+          <ul>
+            {cautionIssues.map((issue, index) => (
+              <li key={index}>
+                <strong>{issue.code ?? "CAUTION"}</strong>:{" "}
+                <span>{issue.message ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {infoIssues.length > 0 && (
         <section className="panel" aria-label="diagnostics">
-          <strong>Diagnostics</strong>
+          <strong>System notes</strong>
           <ul>
             {infoIssues.map((issue, index) => (
               <li key={index}>
@@ -381,18 +538,33 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
         <h3 id="report-heading" className="subhead">
           Report
         </h3>
-        <button type="button" onClick={() => setShowReport((value) => !value)}>
-          {showReport ? "Hide report" : "View report"}
-        </button>
-        <a
-          className="report-link"
-          href={reportUrl(projectRoot, runId)}
-          target="_blank"
-          rel="noreferrer"
+        {reportManifestMissing && (
+          <p className="report-warning">Report availability cannot be verified — artifact manifest is incomplete. Viewing may show partial or legacy output.</p>
+        )}
+        {reportBlocked && (
+          <p className="report-warning">Blocking issues detected. Report is available for review but should not be treated as formal output.</p>
+        )}
+        {!reportAvailable && (
+          <p className="report-warning">Report artifact is not available for this run.</p>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowReport((value) => !value)}
+          disabled={reportDisabled}
         >
-          Open in new tab
-        </a>
-        {showReport && (
+          {reportDisabled ? "Report unavailable" : showReport ? "Hide report" : "View report"}
+        </button>
+        {reportAvailable && (
+          <a
+            className="report-link"
+            href={reportUrl(projectRoot, runId)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open in new tab
+          </a>
+        )}
+        {showReport && reportAvailable && (
           <iframe
             title="Run report"
             src={reportUrl(projectRoot, runId)}

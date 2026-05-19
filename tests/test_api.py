@@ -246,14 +246,148 @@ def test_get_run_detail_normalizes_stale_categorical_candidate(tmp_path: Path):
     assert detail_response.status_code == 200
     issues = detail_response.json()["errors"]["issues"]
     assert not any(issue["code"] == "CATEGORICAL_CANDIDATE" for issue in issues)
-    assert issues == [
+    auto_dummy = [i for i in issues if i["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"]
+    assert len(auto_dummy) == 1
+    assert auto_dummy[0]["severity"] == "INFO"
+    assert auto_dummy[0]["code"] == "CATEGORICAL_AUTO_DUMMY_CODED"
+    assert auto_dummy[0]["message"] == (
+        "Column 'x7_region_code' was detected as categorical and automatically dummy-coded."
+    )
+    assert auto_dummy[0]["evidence"] == {"column": "x7_region_code", "preprocessing": "dummy_coded"}
+    assert auto_dummy[0]["affected_stage"] == "data_cleaning"
+    assert auto_dummy[0]["variables"] == ["x7_region_code"]
+    assert auto_dummy[0]["template_key"] == "categorical_auto_dummy"
+    assert auto_dummy[0]["issue_id"] == ""
+    assert auto_dummy[0]["metric"] == ""
+    assert auto_dummy[0]["value"] is None
+    assert auto_dummy[0]["threshold"] is None
+    assert auto_dummy[0]["recommended_action_key"] == ""
+    assert auto_dummy[0]["is_user_action_required"] is False
+
+
+def test_get_run_detail_returns_diagnostic_summary_preview(completed_run):
+    client, project_root, run_id = completed_run
+
+    detail_response = client.get(
+        f"/runs/{run_id}", params={"project_root": project_root}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is True
+    assert preview["preview_contract_version"] == "1.0"
+    assert preview["preview_status"] == "complete"
+    assert preview["run_lifecycle_status"] == "completed"
+    assert "run_status" in preview
+    assert "trust_label" in preview
+    assert "trust_counts" in preview
+    assert "model_identity" in preview
+    assert "primary_reasons" in preview
+    assert "artifact_manifest" in preview
+    assert "diagnostic_highlights" in preview
+    assert "recommended_actions" in preview
+
+
+def test_running_run_returns_pending_preview(tmp_path: Path):
+    """A manually-written 'running' manifest returns preview_status=pending
+    only when the worker is still active."""
+    from workbench.artifacts import write_json
+    from workbench.events import get_event_manager
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
         {
-            "severity": "INFO",
-            "code": "CATEGORICAL_AUTO_DUMMY_CODED",
-            "message": "Column 'x7_region_code' was detected as categorical and automatically dummy-coded.",
-            "evidence": {"column": "x7_region_code", "preprocessing": "dummy_coded"},
-        }
-    ]
+            "run_id": run.run_id,
+            "status": "running",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+    # Register the run as active so _mark_interrupted_if_dead leaves it alone
+    events = get_event_manager()
+    events.register_run(run.run_id)
+    events.mark_active(run.run_id)
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "pending"
+    assert preview["trust_label"] == "analysis_running"
+    assert preview["run_lifecycle_status"] == "running"
+
+
+def test_legacy_run_without_diagnostic_summary_returns_legacy_fallback(tmp_path: Path):
+    """Completed run with no diagnostic_summary.json → legacy_unavailable."""
+    from workbench.artifacts import write_json
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "completed",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "unavailable"
+    assert preview["trust_label"] == "legacy_unavailable"
+    assert any("missing" in w for w in preview["contract_warnings"])
+
+
+def test_malformed_diagnostic_summary_via_api_returns_contract_unavailable(tmp_path: Path):
+    """diagnostic_summary.json with invalid JSON → contract_unavailable."""
+    from workbench.artifacts import write_json
+    from workbench.projects import create_project, create_run
+
+    client = TestClient(app)
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    write_json(
+        run.root / "run_manifest.json",
+        {
+            "run_id": run.run_id,
+            "status": "completed",
+            "mode": "auto",
+            "started_at": "2026-05-11T00:00:00+00:00",
+            "y": "y", "x": ["x1"],
+            "lineage": [],
+        },
+    )
+    (run.root / "diagnostic_summary.json").write_text("not json", encoding="utf-8")
+
+    detail_response = client.get(
+        f"/runs/{run.run_id}", params={"project_root": str(project.root)}
+    )
+
+    assert detail_response.status_code == 200
+    preview = detail_response.json()["diagnostic_summary_preview"]
+    assert preview["available"] is False
+    assert preview["preview_status"] == "malformed"
+    assert preview["trust_label"] == "contract_unavailable"
 
 
 def test_get_run_detail_returns_run_not_found(tmp_path: Path):

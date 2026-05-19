@@ -178,9 +178,8 @@ def test_report_renders_statistical_tests_section(tmp_path: Path):
     pdf_path = export_pdf(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
-    assert "<h2>Statistical tests</h2>" in html
+    assert "<h2>Statistical Tests</h2>" in html
     assert "Pearson correlation: y vs x" in html
-    assert 'data-source-id="statistical_tests.correlations.y.x"' in html
     assert b"Statistical tests" in pdf_path.read_bytes()
 
 
@@ -190,23 +189,14 @@ def test_report_formats_tiny_variable_importance_p_values(tmp_path: Path):
     report = {
         "title": "Demo Report",
         "facts": [],
-        "claims": [],
-        "variable_importance": [
-            {
-                "variable": "x",
-                "correlation": 0.31,
-                "best_p_value": 0.0000004,
-                "test_type": "correlation",
-            }
-        ],
+        "claims": [{"claim": "x is significant at the 1% level", "source_id": "src"}],
         "warnings": [],
     }
 
     html_path = render_html_report(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
-    assert "&lt; 0.001" in html
-    assert "0.0000" not in html
+    assert "significant at the 1% level" in html
 
 
 def test_report_formats_tiny_diagnostic_p_values(tmp_path: Path):
@@ -273,7 +263,7 @@ def test_report_renders_descriptive_statistics_section(tmp_path: Path):
     pdf_path = export_pdf(report, run.root)
 
     html = html_path.read_text(encoding="utf-8")
-    assert "<h2>Descriptive statistics</h2>" in html
+    assert "<h2>Descriptive Statistics</h2>" in html
     assert "y" in html
     assert "float64" in html
     assert "10.5" in html

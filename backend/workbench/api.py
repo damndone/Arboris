@@ -23,6 +23,8 @@ from .api_errors import (
 )
 from .artifacts import read_json, write_json
 from .config import load_config
+from .diagnostic_preview import build_diagnostic_summary_preview
+from .term_parser import parse_term, is_q_quoted_dummy
 from .domain import GuardrailIssue, Severity
 from .events import get_event_manager
 from .orchestrator import (
@@ -411,33 +413,21 @@ def _dummy_coded_columns(model_results: list[dict]) -> set[str]:
         for term in coefficients:
             if not isinstance(term, str):
                 continue
-            parsed = _parse_dummy_coded_column(term)
-            if parsed is not None:
-                columns.add(parsed)
+            if is_q_quoted_dummy(term):
+                columns.add(parse_term(term).source_id)
     return columns
 
 
-def _parse_dummy_coded_column(term: str) -> str | None:
-    prefix_single = "C(Q('"
-    prefix_double = 'C(Q("'
-    if term.startswith(prefix_single):
-        end = term.find("'))[T.")
-        if end != -1:
-            return term[len(prefix_single):end]
-    if term.startswith(prefix_double):
-        end = term.find('"))[T.')
-        if end != -1:
-            return term[len(prefix_double):end]
-    return None
-
-
 def _auto_dummy_coded_issue(column: str) -> dict:
-    return {
-        "severity": "INFO",
-        "code": "CATEGORICAL_AUTO_DUMMY_CODED",
-        "message": f"Column '{column}' was detected as categorical and automatically dummy-coded.",
-        "evidence": {"column": column, "preprocessing": "dummy_coded"},
-    }
+    return GuardrailIssue(
+        Severity.INFO,
+        "CATEGORICAL_AUTO_DUMMY_CODED",
+        f"Column '{column}' was detected as categorical and automatically dummy-coded.",
+        evidence={"column": column, "preprocessing": "dummy_coded"},
+        affected_stage="data_cleaning",
+        variables=[column],
+        template_key="categorical_auto_dummy",
+    ).to_dict()
 
 
 SUPPORTED_REGISTRY_VERSION = 1
@@ -549,12 +539,14 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
     model_results = _model_results(run_root)
     errors = _normalize_issue_stream(errors, model_results)
+    preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
     return {
         **summary,
         "lineage": manifest.get("lineage", []),
         "artifact_counts": _artifact_counts(run_root),
         "errors": errors,
         "model_results": model_results,
+        "diagnostic_summary_preview": preview,
     }
 
 
