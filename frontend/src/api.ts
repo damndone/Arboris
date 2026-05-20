@@ -245,6 +245,12 @@ export class ApiError extends Error {
   }
 }
 
+const API_PREFIX = "/api";
+
+function apiUrl(path: string): string {
+  return `${API_PREFIX}${path}`;
+}
+
 type FastApiValidationItem = {
   loc?: unknown;
   msg?: unknown;
@@ -307,7 +313,7 @@ export async function createProject(
   parent: string,
   name: string
 ): Promise<ProjectResponse> {
-  const response = await fetch("/projects", {
+  const response = await fetch(apiUrl("/projects"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ parent, name })
@@ -334,7 +340,7 @@ export async function runWorkflow(
   if (sheetName) form.append("sheet_name", sheetName);
   if (transpose) form.append("transpose", "true");
   form.append("file", file);
-  const response = await fetch("/runs", { method: "POST", body: form });
+  const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });
   return readResponse<RunResponse>(response);
 }
 
@@ -351,7 +357,10 @@ export async function runBatchWorkflow(
   form.append("y_list", yList.join(","));
   form.append("x", x.join(","));
   form.append("file", file);
-  const response = await fetch("/runs/batch", { method: "POST", body: form });
+  const response = await fetch(apiUrl("/runs/batch"), {
+    method: "POST",
+    body: form,
+  });
   return readResponse<BatchRunResponse>(response);
 }
 
@@ -556,7 +565,7 @@ export async function previewFile(
 }
 
 export async function fetchRuns(projectRoot: string): Promise<RunsListResponse> {
-  const url = `/runs?project_root=${encodeURIComponent(projectRoot)}`;
+  const url = apiUrl(`/runs?project_root=${encodeURIComponent(projectRoot)}`);
   const response = await fetch(url);
   return readResponse<RunsListResponse>(response);
 }
@@ -565,7 +574,9 @@ export async function fetchRunDetail(
   projectRoot: string,
   runId: string,
 ): Promise<RunDetail> {
-  const url = `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`;
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}?project_root=${encodeURIComponent(projectRoot)}`,
+  );
   const response = await fetch(url);
   return readResponse<RunDetail>(response);
 }
@@ -574,7 +585,9 @@ export async function fetchRunArtifacts(
   projectRoot: string,
   runId: string,
 ): Promise<ArtifactsResponse> {
-  const url = `/runs/${encodeURIComponent(runId)}/artifacts?project_root=${encodeURIComponent(projectRoot)}`;
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}/artifacts?project_root=${encodeURIComponent(projectRoot)}`,
+  );
   const response = await fetch(url);
   return readResponse<ArtifactsResponse>(response);
 }
@@ -584,18 +597,24 @@ export function artifactDownloadUrl(
   runId: string,
   artifactId: string,
 ): string {
-  return `/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}?project_root=${encodeURIComponent(projectRoot)}`;
+  return apiUrl(
+    `/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}?project_root=${encodeURIComponent(projectRoot)}`,
+  );
 }
 
 export function reportUrl(projectRoot: string, runId: string): string {
-  return `/runs/${encodeURIComponent(runId)}/report?project_root=${encodeURIComponent(projectRoot)}`;
+  return apiUrl(
+    `/runs/${encodeURIComponent(runId)}/report?project_root=${encodeURIComponent(projectRoot)}`,
+  );
 }
 
 export async function getRunGraph(
   projectRoot: string,
   runId: string,
 ): Promise<GraphResponse> {
-  const url = `/runs/${encodeURIComponent(runId)}/graph?project_root=${encodeURIComponent(projectRoot)}`;
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}/graph?project_root=${encodeURIComponent(projectRoot)}`,
+  );
   const response = await fetch(url);
   return readResponse<GraphResponse>(response);
 }
@@ -625,7 +644,9 @@ export function connectRunEvents(
   runId: string,
   callbacks: RunProgressCallbacks,
 ): () => void {
-  const url = `/runs/${encodeURIComponent(runId)}/events?project_root=${encodeURIComponent(projectRoot)}`;
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}/events?project_root=${encodeURIComponent(projectRoot)}`,
+  );
   const source = new EventSource(url);
 
   source.addEventListener("step_start", (e: MessageEvent) => {

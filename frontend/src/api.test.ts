@@ -48,7 +48,7 @@ test("fetchRuns sends project_root query and returns runs array", async () => {
 
   const result = await fetchRuns("/tmp/demo");
 
-  expect(fetch).toHaveBeenCalledWith("/runs?project_root=%2Ftmp%2Fdemo");
+  expect(fetch).toHaveBeenCalledWith("/api/runs?project_root=%2Ftmp%2Fdemo");
   expect(result.runs).toHaveLength(1);
   expect(result.runs[0].run_id).toBe("abc");
 });
@@ -71,7 +71,7 @@ test("fetchRunDetail returns artifact_counts and errors", async () => {
   const detail = await fetchRunDetail("/tmp/demo", "abc");
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/abc?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc?project_root=%2Ftmp%2Fdemo"
   );
   expect(detail.artifact_counts.report).toBe(1);
   expect(detail.errors.issues).toEqual([]);
@@ -100,7 +100,7 @@ test("fetchRunArtifacts returns groups array", async () => {
   const result = await fetchRunArtifacts("/tmp/demo", "abc");
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/abc/artifacts?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc/artifacts?project_root=%2Ftmp%2Fdemo"
   );
   expect(result.groups[0].artifact_type).toBe("report");
   expect(result.groups[0].items[0].artifact_id).toBe("report_html");
@@ -146,13 +146,13 @@ test("legacy FastAPI detail string is still parsed (POST /runs upload limit)", a
 test("artifactDownloadUrl encodes project_root and ids", () => {
   const url = artifactDownloadUrl("/tmp/demo", "abc 123", "report_html");
   expect(url).toBe(
-    "/runs/abc%20123/artifacts/report_html?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc%20123/artifacts/report_html?project_root=%2Ftmp%2Fdemo"
   );
 });
 
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
-  expect(url).toBe("/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+  expect(url).toBe("/api/runs/abc/report?project_root=%2Ftmp%2Fdemo");
 });
 
 test("runBatchWorkflow posts y_list and x as form data", async () => {
@@ -181,7 +181,7 @@ test("runBatchWorkflow posts y_list and x as form data", async () => {
   );
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/batch",
+    "/api/runs/batch",
     expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
   );
   const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1]
@@ -277,6 +277,9 @@ test("connectRunEvents wires step events and terminal close", () => {
   };
 
   const cleanup = connectRunEvents("/tmp/demo", "run-1", callbacks);
+  expect(globalThis.EventSource).toHaveBeenCalledWith(
+    "/api/runs/run-1/events?project_root=%2Ftmp%2Fdemo",
+  );
 
   // Simulate step_start
   listeners["step_start"]?.(
@@ -332,7 +335,7 @@ test("getRunGraph returns parsed GraphResponse on 200", async () => {
   expect(result.schema_version).toBe(2);
   expect(result.run_id).toBe("r1");
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/r1/graph?project_root=%2Fproj",
+    "/api/runs/r1/graph?project_root=%2Fproj",
   );
 });
 
