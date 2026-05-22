@@ -1,15 +1,11 @@
 import { useId } from "react";
 import "./lineage.css";
-import type { LineageNode, LineageEdge } from "./types";
+import type { LineageNode } from "./types";
 import { getDPDisplay } from "./dpRegistry";
 
 export interface InspectorProps {
   node: LineageNode;
   onClose: () => void;
-  graph?: {
-    nodes: Record<string, LineageNode>;
-    edges: Record<string, LineageEdge>;
-  };
 }
 
 function reviewCount(node: LineageNode): number {

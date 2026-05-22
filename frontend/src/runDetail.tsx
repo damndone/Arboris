@@ -36,8 +36,10 @@ function TabLink({
         padding: "12px 0",
         border: 0,
         background: "transparent",
-        color: isActive ? "#0a84ff" : "inherit",
-        borderBottom: isActive ? "2px solid #0a84ff" : "2px solid transparent",
+        color: isActive ? "var(--tint, #0a84ff)" : "inherit",
+        borderBottom: isActive
+          ? "2px solid var(--tint, #0a84ff)"
+          : "2px solid transparent",
         cursor: "pointer",
         fontSize: 14,
         fontWeight: isActive ? 600 : 400,
