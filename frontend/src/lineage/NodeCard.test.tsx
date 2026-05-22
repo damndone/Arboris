@@ -1,8 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { ReactFlowProvider } from "reactflow";
 import { NodeCard } from "./NodeCard";
 import type { DecisionPoint, LineageNode, ReviewStatus } from "./types";
+
+// NodeCard uses React Flow <Handle>, which requires ReactFlowProvider in tree.
+function render(ui: ReactElement) {
+  return rtlRender(<ReactFlowProvider>{ui}</ReactFlowProvider>);
+}
 
 function n(overrides: Partial<LineageNode> = {}): LineageNode {
   return {
