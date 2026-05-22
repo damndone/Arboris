@@ -138,7 +138,34 @@ describe("validateDiagnosticPreview", () => {
     }
   });
 
-  it("rejects model_identity that is non-string", () => {
+  it("accepts model_identity as a structured object (backend's actual shape)", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      model_identity: {
+        primary_model_id: "ols_1",
+        model_label: "OLS with robust standard errors",
+        model_type: "ols_robust",
+        y_variable: "continuous_score_y",
+        n_observations: 700,
+        x_variable_count: 10,
+        standard_error_type: "robust",
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects model_identity that is null when present", () => {
+    const result = validateDiagnosticPreview({
+      ...validPreview,
+      model_identity: null,
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.path === "model_identity")).toBe(true);
+    }
+  });
+
+  it("rejects model_identity that is a non-string / non-object primitive", () => {
     const result = validateDiagnosticPreview({
       ...validPreview,
       model_identity: 123,
