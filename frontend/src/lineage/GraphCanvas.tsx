@@ -182,7 +182,10 @@ export function GraphCanvas({
       return true;
     });
 
-    const layouted = layoutDagre([...realNodes, ...groupNodes], uniqEdges);
+    const layouted = layoutDagre(
+      [...realNodes, ...groupNodes, ...markerNodes],
+      uniqEdges,
+    );
     return { rfNodes: layouted, rfEdges: uniqEdges };
   }, [graph, selectedNodeId, expandedGroups]);
 
