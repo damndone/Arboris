@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LineageTab } from "./LineageTab";
 
@@ -64,7 +70,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => vi.clearAllMocks());
 
 describe("LineageTab", () => {
   it("renders loading then graph on 200", async () => {
@@ -128,5 +134,42 @@ describe("LineageTab", () => {
     expect(
       screen.getByRole("button", { name: /Try again/i }),
     ).toBeInTheDocument();
+  });
+
+  it("opens and closes Raw JSON with the global Cmd+J shortcut", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse(fixture),
+    );
+    render(
+      <MemoryRouter initialEntries={["/?node=model:ols_1"]}>
+        <LineageTab projectRoot="/p" runId="r1" />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog", { name: "Primary OLS" }),
+      ).toBeInTheDocument(),
+    );
+
+    const openEvent = createEvent.keyDown(window, {
+      key: "j",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const preventDefault = vi.spyOn(openEvent, "preventDefault");
+    fireEvent(window, openEvent);
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(
+      await screen.findByRole("dialog", { name: /Raw JSON/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "j", metaKey: true });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: /Raw JSON/i }),
+      ).not.toBeInTheDocument(),
+    );
   });
 });
