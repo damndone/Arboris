@@ -195,3 +195,83 @@ def test_get_graph_schema_version_is_2(project_root: Path):
     client = TestClient(app)
     response = client.get("/runs/run_present/graph", params={"project_root": str(project_root)})
     assert response.json()["schema_version"] == 2
+
+
+def test_get_graph_upcasts_v1_file_on_disk(project_root: Path):
+    """A V1.4.0-era graph.json (schema_version=1, decision_point singular) sitting
+    on disk must be read by the endpoint, upcast to schema_version=2, and
+    returned with legacy=False — the file IS lineage data, just an older shape.
+
+    Regression guard: bypasses GraphStore.write() (which stamps v2) by writing
+    raw v1 JSON directly, so this exercises the real on-disk legacy path that
+    real V1.4.0 users would hit after upgrading to V1.4.1.
+    """
+    import json as _json
+    runs_root = project_root / "runs"
+    run_dir = runs_root / "run_v1_legacy"
+    run_dir.mkdir(parents=True)
+    v1_payload = {
+        "schema_version": 1,
+        "run_id": "run_v1_legacy",
+        "nodes": {
+            "stage:raw": {
+                "id": "stage:raw",
+                "kind": "dataset_stage",
+                "display_label": "Raw",
+                "created_at": "2026-05-13T10:00:00+00:00",
+                "parent_stage_id": None,
+                "branch_id": "main",
+                "trust": "ok",
+                "trust_reason": None,
+                "archived": False,
+                "payload_ref": None,
+            },
+            "model:ols_1": {
+                "id": "model:ols_1",
+                "kind": "model",
+                "display_label": "OLS",
+                "created_at": "2026-05-13T10:01:00+00:00",
+                "parent_stage_id": None,
+                "branch_id": "main",
+                "trust": "ok",
+                "trust_reason": None,
+                "archived": False,
+                "payload_ref": None,
+                # V1.4.0 singular field shape — must round-trip via list.
+                "decision_point": {
+                    "decision_id": "model_type_auto_select",
+                    "decision_id_alias": [],
+                    "selected": "continuous",
+                    "candidates": [],
+                    "source": "data_driven_default",
+                    "contestability": {
+                        "is_contestable": True,
+                        "assumption_checks_needed": [],
+                        "warnings": [],
+                        "review_status": "needed",
+                    },
+                    "reason": None,
+                },
+            },
+        },
+        "edges": {},
+        "branches": {},
+    }
+    (run_dir / "graph.json").write_text(_json.dumps(v1_payload), encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.get(
+        "/runs/run_v1_legacy/graph", params={"project_root": str(project_root)}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    # The endpoint must upcast to v2 in the response shape ...
+    assert body["schema_version"] == 2
+    # ... while NOT marking the run as legacy (a v1 file IS data, it has
+    # nodes — legacy=True is reserved for completely-missing graph.json).
+    assert body["legacy"] is False
+    # ... and the singular decision_point must be promoted to a list.
+    assert "decision_points" in body["nodes"]["model:ols_1"]
+    dps = body["nodes"]["model:ols_1"]["decision_points"]
+    assert len(dps) == 1
+    assert dps[0]["decision_id"] == "model_type_auto_select"
