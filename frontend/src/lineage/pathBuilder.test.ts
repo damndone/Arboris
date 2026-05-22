@@ -131,6 +131,23 @@ describe("pathBuilder", () => {
     expect(out).toContain("truncated: too deep");
   });
 
+  it("does NOT mark truncated when chain depth is exactly 100", () => {
+    // 101 nodes (n0..n100), target n100 → 100 ancestors. Chain terminates
+    // naturally at n0 with no further parents. Before the fix, the loop
+    // set truncationReason="too deep" at hop=99 unconditionally even
+    // though the next iteration would have broken cleanly.
+    const nodes: LineageNode[] = [];
+    const edges: LineageEdge[] = [];
+    for (let i = 0; i < 101; i++) nodes.push(makeNode(`n${i}`));
+    for (let i = 0; i < 100; i++)
+      edges.push(makeEdge(`e${i}`, `n${i}`, `n${i + 1}`));
+    const g = makeGraph(nodes, edges);
+    const out = buildBranchPath(g, "n100");
+    expect(out).not.toContain("truncated");
+    expect(out).toContain("n0");
+    expect(out).toContain("n100");
+  });
+
   it("picks lexicographically smallest source when multi-parent", () => {
     const g = makeGraph(
       [makeNode("zzz"), makeNode("aaa"), makeNode("target")],

@@ -31,12 +31,14 @@ export function buildBranchPath(
   const chain: string[] = [];
   let truncationReason: string | null = null;
   let current = target;
+  let hop = 0;
 
-  for (let hop = 0; hop < MAX_HOPS; hop++) {
+  for (; hop < MAX_HOPS; hop++) {
     const incoming = Object.values(graph.edges).filter(
       (e) => e.target_id === current.id,
     );
     if (!incoming.length) break;
+    // Multi-parent: pick lex-smallest source_id deterministically.
     incoming.sort((a, b) => a.source_id.localeCompare(b.source_id));
     const parentEdge = incoming[0];
     const parent = graph.nodes[parentEdge.source_id];
@@ -48,9 +50,16 @@ export function buildBranchPath(
     visited.add(parent.id);
     chain.unshift(parent.id);
     current = parent;
-    if (hop === MAX_HOPS - 1) {
-      truncationReason = "too deep";
-    }
+  }
+
+  // Only mark "too deep" if we exhausted the loop *and* there's still more
+  // ancestry to walk — i.e. the cap actually bit. A chain of exactly
+  // MAX_HOPS ancestors that terminates naturally is NOT truncated.
+  if (hop === MAX_HOPS && truncationReason === null) {
+    const moreIncoming = Object.values(graph.edges).filter(
+      (e) => e.target_id === current.id,
+    );
+    if (moreIncoming.length > 0) truncationReason = "too deep";
   }
 
   const tokens: string[] = [];
