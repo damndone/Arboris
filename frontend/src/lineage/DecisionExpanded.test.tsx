@@ -36,4 +36,29 @@ describe("DecisionExpanded", () => {
     expect(screen.getByText("OLS")).toBeInTheDocument();
     expect(screen.getByText(/ID: model_type_auto_select/)).toBeInTheDocument();
   });
+
+  it("does not render literal 'undefined' when reason is null", () => {
+    // Registered DP with evidenceFields=['y_unique','y_dtype'] but
+    // reason is null → params is {} → evidence values would be undefined.
+    // Before the fix, the UI rendered "y_unique: undefined".
+    const dpNoReason: DecisionPoint = {
+      ...dp,
+      reason: null,
+    };
+    const { container } = render(<DecisionExpanded dp={dpNoReason} />);
+    expect(container.textContent ?? "").not.toMatch(/:\s*undefined/);
+  });
+
+  it("omits Evidence section entirely when no evidence values and no checks", () => {
+    // assumption_checks_needed empty AND reason null → both inputs empty
+    // → Evidence section gate (checks.length > 0 || evidence.length > 0)
+    // should evaluate false and the heading should not render.
+    const dpEmpty: DecisionPoint = {
+      ...dp,
+      contestability: { ...dp.contestability, assumption_checks_needed: [] },
+      reason: null,
+    };
+    render(<DecisionExpanded dp={dpEmpty} />);
+    expect(screen.queryByText(/^Evidence$/i)).toBeNull();
+  });
 });

@@ -12,10 +12,12 @@ export function DecisionExpanded({ dp }: DecisionExpandedProps) {
   const params = dp.reason?.chosen_params ?? {};
   const alts = d.displayAlternatives(params);
   const checks = dp.contestability.assumption_checks_needed;
-  const evidence = (d.evidenceFields ?? []).map((k) => ({
-    key: k,
-    value: params[k],
-  }));
+  // Skip evidence rows whose value is undefined — happens when dp.reason is
+  // null (so chosen_params is empty) but the registry declares evidenceFields.
+  // Before this filter the UI rendered literal "y_unique: undefined".
+  const evidence = (d.evidenceFields ?? [])
+    .map((k) => ({ key: k, value: params[k] }))
+    .filter((e) => e.value !== undefined);
 
   const sec = (label: string, content: ReactNode) => (
     <div style={{ marginTop: 16 }}>
