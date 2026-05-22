@@ -569,7 +569,7 @@ test("run detail shows artifact list with download links", async () => {
   const downloadLink = screen.getByRole("link", { name: /report_html/i });
   expect(downloadLink).toHaveAttribute(
     "href",
-    "/runs/run-1/artifacts/report_html?project_root=%2Ftmp%2Fdemo",
+    "/api/runs/run-1/artifacts/report_html?project_root=%2Ftmp%2Fdemo",
   );
 });
 
@@ -622,7 +622,7 @@ test("view report toggles iframe with report URL", async () => {
 
   const iframe = screen.getByTitle("Run report") as HTMLIFrameElement;
   expect(iframe.src).toContain(
-    "/runs/run-1/report?project_root=%2Ftmp%2Fdemo",
+    "/api/runs/run-1/report?project_root=%2Ftmp%2Fdemo",
   );
 });
 

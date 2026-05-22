@@ -178,7 +178,8 @@ class Node:
     trust_reason: str | None = None
     archived: bool = False
     payload_ref: str | None = None  # path relative to run root
-    decision_point: DecisionPoint | None = None
+    decision_points: tuple[DecisionPoint, ...] = ()
+    summary: str | None = None
     annotations: tuple = ()  # reserved for V1.6 AI; tuple of Annotation
 
 
@@ -220,11 +221,11 @@ def resolve_decision_id(graph: Graph, id_or_alias: str) -> str | None:
     Honors the rename invariant: when a decision_id is renamed, the old name
     is added to `decision_id_alias`. Consumers should resolve through this
     function rather than matching `decision_id` directly.
+
+    V1.4.1: iterates the decision_points tuple per node.
     """
     for node in graph.nodes.values():
-        dp = node.decision_point
-        if dp is None:
-            continue
-        if dp.decision_id == id_or_alias or id_or_alias in dp.decision_id_alias:
-            return dp.decision_id
+        for dp in node.decision_points:
+            if dp.decision_id == id_or_alias or id_or_alias in dp.decision_id_alias:
+                return dp.decision_id
     return None

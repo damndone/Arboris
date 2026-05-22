@@ -223,7 +223,7 @@ def test_node_minimal():
     assert n.trust_reason is None
     assert n.archived is False
     assert n.payload_ref is None
-    assert n.decision_point is None
+    assert n.decision_points == ()
     assert n.annotations == ()
 
 
@@ -241,10 +241,10 @@ def test_node_with_decision_point():
         created_at="2026-05-13T10:25:00+00:00",
         parent_stage_id=None,
         branch_id="main",
-        decision_point=dp,
+        decision_points=(dp,),
     )
-    assert n.decision_point is dp
-    assert n.decision_point.selected == "logit"
+    assert n.decision_points == (dp,)
+    assert n.decision_points[0].selected == "logit"
 
 
 def test_node_is_frozen():
@@ -355,7 +355,7 @@ def test_node_with_all_optional_fields():
     assert n.trust_reason == "auto-coerced from string"
     assert n.payload_ref == "processed/x_stats.json"
     assert n.annotations == ("outlier_flag",)
-    assert n.decision_point is None
+    assert n.decision_points == ()
 
 
 def test_node_archived_flag():
@@ -453,7 +453,7 @@ def _graph_with_dp(decision_id: str, aliases: tuple[str, ...] = ()) -> Graph:
     node = Node(
         id="n1", kind=NodeKind.MODEL, display_label="m",
         created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
-        branch_id="main", decision_point=dp,
+        branch_id="main", decision_points=(dp,),
     )
     return Graph(schema_version=1, run_id="r", nodes={"n1": node}, edges={}, branches={})
 
@@ -478,13 +478,13 @@ def test_resolve_decision_id_skips_nodes_without_dp():
     node_no_dp = Node(
         id="n2", kind=NodeKind.DATASET_STAGE, display_label="s",
         created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
-        branch_id="main", decision_point=None,
+        branch_id="main",
     )
     dp = DecisionPoint(decision_id="x", decision_id_alias=("y",))
     node_with_dp = Node(
         id="n1", kind=NodeKind.MODEL, display_label="m",
         created_at="2026-05-18T00:00:00Z", parent_stage_id=None,
-        branch_id="main", decision_point=dp,
+        branch_id="main", decision_points=(dp,),
     )
     g = Graph(
         schema_version=1, run_id="r",
@@ -493,3 +493,52 @@ def test_resolve_decision_id_skips_nodes_without_dp():
     )
     assert resolve_decision_id(g, "y") == "x"
     assert resolve_decision_id(g, "missing") is None
+
+
+def test_resolve_decision_id_walks_decision_points_tuple():
+    """resolve_decision_id iterates the new decision_points tuple."""
+    dp = DecisionPoint(decision_id="x", decision_id_alias=("old_x",))
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+        decision_points=(dp,),
+    )
+    g = Graph(schema_version=2, run_id="r", nodes={"n1": node}, edges={}, branches={})
+    assert resolve_decision_id(g, "old_x") == "x"
+
+
+def test_resolve_decision_id_finds_match_in_multi_dp_node():
+    """Match works when DP is not the first in the tuple."""
+    dp1 = DecisionPoint(decision_id="a")
+    dp2 = DecisionPoint(decision_id="b", decision_id_alias=("old_b",))
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+        decision_points=(dp1, dp2),
+    )
+    g = Graph(schema_version=2, run_id="r", nodes={"n1": node}, edges={}, branches={})
+    assert resolve_decision_id(g, "old_b") == "b"
+
+
+def test_node_has_decision_points_tuple_default():
+    """V1.4.1 Node uses decision_points tuple, not single decision_point."""
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+    )
+    assert node.decision_points == ()
+    assert hasattr(node, "decision_points")
+    assert not hasattr(node, "decision_point")
+
+
+def test_node_summary_field_default_none():
+    """V1.4.1 Node has nullable summary field."""
+    node = Node(
+        id="n1", kind=NodeKind.MODEL, display_label="m",
+        created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+        branch_id="main",
+    )
+    assert node.summary is None

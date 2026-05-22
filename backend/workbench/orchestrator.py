@@ -165,6 +165,46 @@ def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     return {"model_id": None, "model_type": None}
 
 
+def _variable_summary(cat_dp: Any, coer_dp: Any) -> str:
+    if cat_dp is not None:
+        params = cat_dp.reason.chosen_params if cat_dp.reason else {}
+        n_levels = params.get("n_unique", "?")
+        ref = params.get("reference_level", "?")
+        return f"Dummy-encoded ({n_levels} levels, ref={ref!r})"
+    if coer_dp is not None:
+        params = coer_dp.reason.chosen_params if coer_dp.reason else {}
+        conversion_rate = float(params.get("conversion_rate", 0))
+        return f"Coerced to numeric ({conversion_rate:.0%} convertible)"
+    return "Kept as numeric"
+
+
+def _model_summary(
+    model_type: str,
+    result: dict[str, Any],
+    *,
+    robust_se_dp: Any,
+    exposure_col: str | None,
+    fallback_n: int,
+) -> str | None:
+    n = int(result.get("nobs", fallback_n))
+    if model_type in ("ols", "ols_robust"):
+        if robust_se_dp is not None and robust_se_dp.reason is not None:
+            se_type = robust_se_dp.reason.chosen_params.get("variant", robust_se_dp.selected)
+        elif robust_se_dp is not None:
+            se_type = robust_se_dp.selected
+        else:
+            se_type = "HC1"
+        return f"OLS ({se_type}, n={n})"
+    if model_type == "logit":
+        return f"Logit (n={n})"
+    if model_type == "poisson_rate":
+        exp = result.get("exposure_col") or exposure_col
+        return f"Poisson rate (exposure={exp}, n={n})" if exp else f"Poisson (n={n})"
+    if model_type == "poisson":
+        return f"Poisson (n={n})"
+    return None
+
+
 def _run_workflow(
     run_root: Path,
     run_id: str,
@@ -183,11 +223,6 @@ def _run_workflow(
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
-    _recorder.record_stage(
-        node_id="stage:raw",
-        display_label="Raw input data",
-        payload_ref=None,
-    )
 
     if _s: _s("ingestion", "start", "Ingesting files...")
     frames = ingest_files([Path(path) for path in input_files], run_root, config, sheet_name, transpose)
@@ -197,6 +232,14 @@ def _run_workflow(
     schema = infer_schema("dataset_1", frames, run_root)
     if _s: _s("schema", "complete", f"Inferred schema with {len(schema.columns)} columns")
     frame = next(iter(frames.values()))
+    raw_row_count = len(frame)
+    raw_col_count = len(frame.columns)
+    _recorder.record_stage(
+        node_id="stage:raw",
+        display_label="Raw input data",
+        payload_ref=None,
+        summary=f"Raw: {raw_row_count} rows × {raw_col_count} cols",
+    )
 
     if _s: _s("cleaning", "start", "Cleaning data...")
     cleaned, actions = clean_frame(frame, list(schema.time_candidates))
@@ -320,8 +363,14 @@ def _run_workflow(
     coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
 
     _coerce_dps: dict[str, Any] = {}
-    for action in coercion_actions:
-        col = action["column"]
+    for action in [*actions, *coercion_actions]:
+        if action.get("action") != "coerce_to_numeric" and "conversion_rate" not in action:
+            continue
+        col = action.get("column")
+        if not col:
+            continue
+        if col not in normalized_x:
+            continue
         _coerce_dps[col] = dpf.auto_coerce_to_numeric(
             variable=col,
             conversion_rate=action["conversion_rate"],
@@ -422,18 +471,25 @@ def _run_workflow(
     dropped_vars = _check_dropped_variables(drop_check_x, model_results, cleaned, issue_dicts, run_root, categorical_vars=categorical_vars)
 
     _dropped_dps: dict[str, Any] = {}
+    _dropped_reason_display: dict[str, str] = {}
     for entry in dropped_vars:
         _dropped_dps[entry["variable"]] = dpf.variable_silently_dropped(
             variable=entry["variable"],
             drop_reason=entry["reason"],
         )
+        _dropped_reason_display[entry["variable"]] = entry["reason_display"]
 
     # -- Record lineage graph nodes with accumulated DecisionPoints ----------
+    _dropped_count = raw_row_count - len(cleaned)
     _recorder.record_stage(
         node_id="stage:cleaned",
         display_label="Cleaned data",
         payload_ref="processed/cleaned_dataset.parquet",
-        decision_point=_missing_values_dp,
+        decision_points=(_missing_values_dp,) if _missing_values_dp else (),
+        summary=(
+            f"Cleaned: {len(cleaned)} rows ({_dropped_count} dropped)"
+            if _dropped_count > 0 else f"Cleaned: {len(cleaned)} rows"
+        ),
     )
     _recorder.record_edge(
         edge_id="e:raw-cleaned",
@@ -450,17 +506,18 @@ def _run_workflow(
             import warnings as _warnings
             _warnings.warn(
                 f"Variable {var!r} has both categorical_dummy and auto_coerce "
-                f"DecisionPoints. Using categorical_dummy (coerce DP ignored). "
+                f"DecisionPoints. Recording both; summary prefers categorical_dummy. "
                 f"This is unexpected — a column should not be both categorical "
                 f"and coerced-to-numeric.",
                 UserWarning, stacklevel=2,
             )
-        _dp_for_var = _cat_dp or _coer_dp
+        _dps_for_var = tuple(dp for dp in (_cat_dp, _coer_dp) if dp is not None)
         _recorder.record_variable(
             node_id=f"var:{var}:cleaned",
             display_label=f"{var} (cleaned)",
             parent_stage_id="stage:cleaned",
-            decision_point=_dp_for_var,
+            decision_points=_dps_for_var,
+            summary=_variable_summary(_cat_dp, _coer_dp),
         )
 
     for var_name, dropped_dp in _dropped_dps.items():
@@ -468,29 +525,27 @@ def _run_workflow(
             node_id=f"var:{var_name}:dropped",
             display_label=f"{var_name} (dropped)",
             parent_stage_id="stage:cleaned",
-            decision_point=dropped_dp,
+            decision_points=(dropped_dp,),
+            summary=f"Dropped: {_dropped_reason_display.get(var_name, 'unknown')}",
         )
 
     if model_results:
         primary_model_id = model_results[0][0]
-        primary_model_type = model_results[0][1].get("model_type", "ols")
-        # Attach one DecisionPoint per node for V1.4.0:
-        # model_type_auto_select (data-driven) > ols_default_robust_se
-        if _model_type_dp is not None and _robust_se_dp is not None:
-            import warnings as _warnings
-            _warnings.warn(
-                "Both model_type_auto_select and ols_default_robust_se DPs "
-                "populated; recording only model_type_auto_select on MODEL "
-                "node (V1.4.0 limit: one DP per node). V1.4.1+ will support "
-                "multiple DPs.",
-                UserWarning, stacklevel=2,
-            )
-        _primary_dp = _model_type_dp or _robust_se_dp
+        primary_result = model_results[0][1]
+        primary_model_type = primary_result.get("model_type", "ols")
+        _dps_for_model = tuple(dp for dp in (_model_type_dp, _robust_se_dp) if dp is not None)
         _recorder.record_model(
             node_id=f"model:{primary_model_id}",
             display_label=f"{primary_model_type} (primary)",
             payload_ref=f"model_results/{primary_model_id}.json",
-            decision_point=_primary_dp,
+            decision_points=_dps_for_model,
+            summary=_model_summary(
+                primary_model_type,
+                primary_result,
+                robust_se_dp=_robust_se_dp,
+                exposure_col=exposure_col,
+                fallback_n=len(cleaned),
+            ),
         )
         _recorder.record_edge(
             edge_id="e:cleaned-model-primary",
@@ -503,6 +558,7 @@ def _run_workflow(
             node_id="report:html",
             display_label="HTML report",
             payload_ref="reports/report.html",
+            summary="HTML report",
         )
         _recorder.record_edge(
             edge_id="e:model-report",

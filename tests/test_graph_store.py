@@ -59,7 +59,7 @@ def _sample_graph() -> Graph:
         branch_id="main",
         trust=Trust.CAUTION,
         trust_reason="auto-selected model type",
-        decision_point=dp,
+        decision_points=(dp,),
     )
     edge = Edge(
         id="e1",
@@ -69,7 +69,7 @@ def _sample_graph() -> Graph:
         params={},
     )
     return Graph(
-        schema_version=1,
+        schema_version=2,
         run_id="run_test",
         nodes={node_raw.id: node_raw, node_model.id: node_model},
         edges={edge.id: edge},
@@ -114,7 +114,7 @@ def test_to_json_rejects_non_json_safe_payload():
         created_at="2026-05-13T10:00:00+00:00",
         parent_stage_id=None,
         branch_id="main",
-        decision_point=bad_dp,
+        decision_points=(bad_dp,),
     )
     g = Graph(
         schema_version=1, run_id="run_bad",
@@ -298,13 +298,13 @@ def test_roundtrip_preserves_decision_point_substructure():
 
     orig_node = g.nodes["model:primary"]
     rebuilt_node = rebuilt.nodes["model:primary"]
-    assert rebuilt_node.decision_point is not None
-    assert rebuilt_node.decision_point.contestability.warnings == \
-        orig_node.decision_point.contestability.warnings  # type: ignore[union-attr]
-    assert rebuilt_node.decision_point.contestability.assumption_checks_needed == \
-        orig_node.decision_point.contestability.assumption_checks_needed  # type: ignore[union-attr]
-    assert rebuilt_node.decision_point.reason.chosen_params == \
-        orig_node.decision_point.reason.chosen_params  # type: ignore[union-attr]
+    assert rebuilt_node.decision_points
+    assert rebuilt_node.decision_points[0].contestability.warnings == \
+        orig_node.decision_points[0].contestability.warnings
+    assert rebuilt_node.decision_points[0].contestability.assumption_checks_needed == \
+        orig_node.decision_points[0].contestability.assumption_checks_needed
+    assert rebuilt_node.decision_points[0].reason.chosen_params == \
+        orig_node.decision_points[0].reason.chosen_params  # type: ignore[union-attr]
 
 
 def test_empty_graph_serialization():
@@ -469,3 +469,184 @@ def test_concurrent_mutate_serializes_correctly(tmp_path: Path):
     # JSON file is well-formed (not partial).
     with (tmp_path / "run_race" / "graph.json").open() as fp:
         json.load(fp)
+
+
+def test_legacy_v1_single_dp_promoted_to_list(tmp_path: Path):
+    """V1.4.0 file with decision_point: {...} reads as decision_points: (DP,)."""
+    legacy = {
+        "schema_version": 1,
+        "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-18T00:00:00Z",
+                "parent_stage_id": None, "branch_id": "main",
+                "trust": "ok", "trust_reason": None, "archived": False,
+                "payload_ref": None,
+                "decision_point": {
+                    "decision_id": "dp1", "decision_id_alias": [],
+                    "selected": "x", "candidates": [], "source": "system_default",
+                    "contestability": {"is_contestable": True,
+                                       "assumption_checks_needed": [],
+                                       "warnings": [], "review_status": "not_needed"},
+                    "reason": None,
+                },
+            },
+        },
+        "edges": {},
+        "branches": {},
+        "legacy": False,
+    }
+    g = graph_from_json(legacy)
+    assert len(g.nodes["n1"].decision_points) == 1
+    assert g.nodes["n1"].decision_points[0].decision_id == "dp1"
+
+
+def test_v2_multi_dp_round_trips(tmp_path: Path):
+    """V1.4.1 file with decision_points: [...] reads unchanged."""
+    dp_dict = {
+        "decision_id": "dp1", "decision_id_alias": [],
+        "selected": "x", "candidates": [], "source": "system_default",
+        "contestability": {"is_contestable": True, "assumption_checks_needed": [],
+                           "warnings": [], "review_status": "not_needed"},
+        "reason": None,
+    }
+    v2 = {
+        "schema_version": 2,
+        "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z",
+                "parent_stage_id": None, "branch_id": "main",
+                "trust": "ok", "trust_reason": None, "archived": False,
+                "payload_ref": None,
+                "decision_points": [dp_dict, {**dp_dict, "decision_id": "dp2"}],
+                "summary": "OLS (HC1, n=10)",
+            },
+        },
+        "edges": {}, "branches": {}, "legacy": False,
+    }
+    g = graph_from_json(v2)
+    assert len(g.nodes["n1"].decision_points) == 2
+    assert g.nodes["n1"].decision_points[1].decision_id == "dp2"
+    assert g.nodes["n1"].summary == "OLS (HC1, n=10)"
+
+
+def test_dual_field_uses_decision_points(tmp_path: Path):
+    """Both decision_point and decision_points present -> decision_points wins."""
+    dp_old = {"decision_id": "old", "decision_id_alias": [],
+              "selected": "x", "candidates": [], "source": "system_default",
+              "contestability": {"is_contestable": True,
+                                 "assumption_checks_needed": [], "warnings": [],
+                                 "review_status": "not_needed"},
+              "reason": None}
+    dp_new = {**dp_old, "decision_id": "new"}
+    mixed = {
+        "schema_version": 2, "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z", "parent_stage_id": None,
+                "branch_id": "main", "trust": "ok", "trust_reason": None,
+                "archived": False, "payload_ref": None,
+                "decision_point": dp_old,
+                "decision_points": [dp_new],
+            }
+        },
+        "edges": {}, "branches": {}, "legacy": False,
+    }
+    g = graph_from_json(mixed)
+    assert len(g.nodes["n1"].decision_points) == 1
+    assert g.nodes["n1"].decision_points[0].decision_id == "new"
+
+
+def test_missing_dp_field_yields_empty_tuple(tmp_path: Path):
+    """Neither decision_point nor decision_points -> empty tuple."""
+    missing = {
+        "schema_version": 2, "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z", "parent_stage_id": None,
+                "branch_id": "main", "trust": "ok", "trust_reason": None,
+                "archived": False, "payload_ref": None,
+            }
+        },
+        "edges": {}, "branches": {}, "legacy": False,
+    }
+    g = graph_from_json(missing)
+    assert g.nodes["n1"].decision_points == ()
+
+
+@pytest.mark.parametrize("bad_value", [{}, ""])
+def test_v2_decision_points_must_be_list_shape(bad_value):
+    """V1.4.1 decision_points must be a JSON array, not another iterable."""
+    malformed = {
+        "schema_version": 2,
+        "run_id": "r1",
+        "nodes": {
+            "n1": {
+                "id": "n1", "kind": "model", "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z",
+                "parent_stage_id": None, "branch_id": "main",
+                "decision_points": bad_value,
+            }
+        },
+        "edges": {}, "branches": {}, "legacy": False,
+    }
+    with pytest.raises(GraphDeserializationError, match="decision_points"):
+        graph_from_json(malformed)
+
+
+def test_writer_emits_schema_version_2(tmp_path: Path):
+    """graph_to_json always emits schema_version: 2."""
+    g = _sample_graph()
+    object.__setattr__(g, "schema_version", 1)  # simulate old in-memory
+    data = graph_to_json(g)
+    assert data["schema_version"] == 2
+    for nd in data["nodes"].values():
+        assert "decision_point" not in nd
+        assert "decision_points" in nd
+
+
+def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
+    """Trust.WARNING and Trust.BLOCKER serialize and deserialize correctly."""
+    for trust_value in (Trust.WARNING, Trust.BLOCKER):
+        store = GraphStore(runs_root=tmp_path)
+        node = Node(
+            id="n1", kind=NodeKind.MODEL, display_label="m",
+            created_at="2026-05-19T00:00:00Z", parent_stage_id=None,
+            branch_id="main", trust=trust_value,
+            trust_reason=f"test reason for {trust_value.value}",
+        )
+        g = Graph(schema_version=2, run_id=f"run_{trust_value.value}",
+                  nodes={"n1": node}, edges={}, branches={})
+        store.write(g)
+        reloaded = store.read(f"run_{trust_value.value}")
+        assert reloaded.nodes["n1"].trust == trust_value
+        assert reloaded.nodes["n1"].trust_reason == f"test reason for {trust_value.value}"
+
+
+def test_mutate_returns_schema_version_2_after_write(tmp_path: Path):
+    """mutate() returns the post-serialization graph shape callers will read."""
+    store = GraphStore(runs_root=tmp_path)
+    run_dir = tmp_path / "run_v1"
+    run_dir.mkdir()
+    v1 = Graph(schema_version=1, run_id="run_v1", nodes={}, edges={}, branches={})
+    store.write(v1)
+
+    def keep_v1(graph: Graph) -> Graph:
+        return Graph(
+            schema_version=1,
+            run_id=graph.run_id,
+            nodes=graph.nodes,
+            edges=graph.edges,
+            branches=graph.branches,
+            legacy=graph.legacy,
+        )
+
+    returned = store.mutate("run_v1", keep_v1)
+
+    assert returned.schema_version == 2
+    assert store.read("run_v1").schema_version == 2

@@ -53,6 +53,7 @@ def graph_to_json(graph: Graph) -> dict[str, Any]:
         data = _to_jsonable(graph)
     except TypeError as exc:
         raise GraphSerializationError(f"Graph is not JSON-serializable: {exc}") from exc
+    data["schema_version"] = 2
     if __debug__:
         # Validate JSON-safety in dev/test; skipped with `python -O` in production
         try:
@@ -149,7 +150,7 @@ class GraphStore:
                 )
             data = graph_to_json(updated)
             self._atomic_write_json(self._graph_path(run_id), data)
-            return updated
+            return graph_from_json(data)
 
     # -- internals -------------------------------------------------------------
 
@@ -227,18 +228,28 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def _node_from_json(d: dict[str, Any]) -> Node:
+    dps_field = d.get("decision_points")
+    if dps_field is not None:
+        if not isinstance(dps_field, list):
+            raise TypeError("decision_points must be a list")
+        decision_points = tuple(_decision_point_from_json(x) for x in dps_field)
+    elif d.get("decision_point") is not None:
+        decision_points = (_decision_point_from_json(d["decision_point"]),)
+    else:
+        decision_points = ()
     return Node(
         id=d["id"],
         kind=NodeKind(d["kind"]),
         display_label=d["display_label"],
         created_at=d["created_at"],
         parent_stage_id=d.get("parent_stage_id"),
-        branch_id=d["branch_id"],
+        branch_id=d.get("branch_id", "main"),
         trust=Trust(d.get("trust", "ok")),
         trust_reason=d.get("trust_reason"),
         archived=d.get("archived", False),
         payload_ref=d.get("payload_ref"),
-        decision_point=_decision_point_from_json(d["decision_point"]) if d.get("decision_point") else None,
+        decision_points=decision_points,
+        summary=d.get("summary"),
         annotations=tuple(d.get("annotations", ())),
     )
 

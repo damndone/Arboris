@@ -66,6 +66,38 @@ export function validateDiagnosticPreview(raw: unknown): ValidationResult {
     validateRunStatus(obj.run_status, errors);
   }
 
+  if ("model_identity" in obj && obj.model_identity !== undefined) {
+    // V1.4.1 §F10: model_identity is present-and-non-null. Backend may serialize
+    // it as either a string id ("ols_1") or a structured object
+    // ({primary_model_id, model_label, model_type, ...}). Reject only null and
+    // empty-string degenerate shapes.
+    const mi = obj.model_identity;
+    if (mi === null) {
+      errors.push({
+        path: "model_identity",
+        reason: "must not be null when present",
+        expected: "string or object",
+        actual: "null",
+      });
+    } else if (typeof mi === "string") {
+      if (mi.trim() === "") {
+        errors.push({
+          path: "model_identity",
+          reason: "must be a non-empty string",
+          expected: "non-empty string",
+          actual: "empty string",
+        });
+      }
+    } else if (typeof mi !== "object") {
+      errors.push({
+        path: "model_identity",
+        reason: "wrong type",
+        expected: "string or object",
+        actual: typeOf(mi),
+      });
+    }
+  }
+
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true, data: obj as unknown as DiagnosticSummaryPreview };
 }

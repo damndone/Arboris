@@ -64,7 +64,7 @@ def test_record_model_with_decision_point(tmp_path: Path):
         node_id="model:primary",
         display_label="logit primary",
         payload_ref="model_results/primary.json",
-        decision_point=dp,
+        decision_points=(dp,),
         trust=Trust.CAUTION,
         trust_reason="auto-selected model type",
     )
@@ -72,8 +72,8 @@ def test_record_model_with_decision_point(tmp_path: Path):
     g = store.read("run_test")
     n = g.nodes["model:primary"]
     assert n.kind == NodeKind.MODEL
-    assert n.decision_point is not None
-    assert n.decision_point.selected == "logit"
+    assert n.decision_points
+    assert n.decision_points[0].selected == "logit"
 
 
 def test_record_edge_connects_nodes(tmp_path: Path):
@@ -283,15 +283,15 @@ def test_record_stage_with_trust_and_decision_point(tmp_path: Path):
         display_label="Cleaned",
         trust=Trust.CAUTION,
         trust_reason="MCAR assumption not verified",
-        decision_point=dp,
+        decision_points=(dp,),
     )
     recorder.flush()
     g = store.read("run_test")
     n = g.nodes["stage:cleaned"]
     assert n.trust == Trust.CAUTION
     assert n.trust_reason == "MCAR assumption not verified"
-    assert n.decision_point is not None
-    assert n.decision_point.decision_id == "handle_missing_values"
+    assert n.decision_points
+    assert n.decision_points[0].decision_id == "handle_missing_values"
 
 
 def test_record_edge_with_reversible_and_params(tmp_path: Path):
@@ -339,4 +339,34 @@ def test_record_variable_without_decision_point(tmp_path: Path):
     recorder.flush()
     v = store.read("run_test").nodes["var:income:cleaned"]
     assert v.kind == NodeKind.VARIABLE
-    assert v.decision_point is None
+    assert v.decision_points == ()
+
+
+def test_record_stage_persists_summary(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw",
+                          summary="Raw: 35 rows x 3 cols")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["stage:raw"].summary == "Raw: 35 rows x 3 cols"
+
+
+def test_record_model_persists_summary(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.record_model(node_id="m1", display_label="Primary OLS",
+                          summary="OLS (HC1, n=32)")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["m1"].summary == "OLS (HC1, n=32)"
+
+
+def test_record_with_no_summary_keeps_none(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="r1", store=store)
+    recorder.record_stage(node_id="stage:raw", display_label="Raw")
+    recorder.flush()
+    g = store.read("r1")
+    assert g.nodes["stage:raw"].summary is None

@@ -57,7 +57,8 @@ class GraphRecorder:
         payload_ref: str | None = None,
         trust: Trust = Trust.OK,
         trust_reason: str | None = None,
-        decision_point: DecisionPoint | None = None,
+        decision_points: tuple[DecisionPoint, ...] = (),
+        summary: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -67,7 +68,8 @@ class GraphRecorder:
             payload_ref=payload_ref,
             trust=trust,
             trust_reason=trust_reason,
-            decision_point=decision_point,
+            decision_points=decision_points,
+            summary=summary,
             created_at=_now_iso(),
         )
 
@@ -80,7 +82,8 @@ class GraphRecorder:
         payload_ref: str | None = None,
         trust: Trust = Trust.OK,
         trust_reason: str | None = None,
-        decision_point: DecisionPoint | None = None,
+        decision_points: tuple[DecisionPoint, ...] = (),
+        summary: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -90,7 +93,8 @@ class GraphRecorder:
             payload_ref=payload_ref,
             trust=trust,
             trust_reason=trust_reason,
-            decision_point=decision_point,
+            decision_points=decision_points,
+            summary=summary,
             created_at=_now_iso(),
         )
 
@@ -102,7 +106,8 @@ class GraphRecorder:
         payload_ref: str | None = None,
         trust: Trust = Trust.OK,
         trust_reason: str | None = None,
-        decision_point: DecisionPoint | None = None,
+        decision_points: tuple[DecisionPoint, ...] = (),
+        summary: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -112,7 +117,8 @@ class GraphRecorder:
             payload_ref=payload_ref,
             trust=trust,
             trust_reason=trust_reason,
-            decision_point=decision_point,
+            decision_points=decision_points,
+            summary=summary,
             created_at=_now_iso(),
         )
 
@@ -124,6 +130,7 @@ class GraphRecorder:
         payload_ref: str | None = None,
         trust: Trust = Trust.OK,
         trust_reason: str | None = None,
+        summary: str | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -133,7 +140,8 @@ class GraphRecorder:
             payload_ref=payload_ref,
             trust=trust,
             trust_reason=trust_reason,
-            decision_point=None,
+            decision_points=(),
+            summary=summary,
             created_at=_now_iso(),
         )
 
@@ -180,7 +188,7 @@ class GraphRecorder:
             sources = {e.source_id for e in self._edges.values()}
             head_node_ids = tuple(nid for nid in self._nodes if nid not in sources)
         graph = Graph(
-            schema_version=1,
+            schema_version=2,
             run_id=self._run_id,
             nodes=dict(self._nodes),
             edges=dict(self._edges),
@@ -206,7 +214,8 @@ class GraphRecorder:
         payload_ref: str | None,
         trust: Trust,
         trust_reason: str | None,
-        decision_point: DecisionPoint | None,
+        decision_points: tuple[DecisionPoint, ...],
+        summary: str | None,
         created_at: str,
     ) -> None:
         if id in self._nodes:
@@ -222,5 +231,6 @@ class GraphRecorder:
             trust_reason=trust_reason,
             archived=False,
             payload_ref=payload_ref,
-            decision_point=decision_point,
+            decision_points=decision_points,
+            summary=summary,
         )
