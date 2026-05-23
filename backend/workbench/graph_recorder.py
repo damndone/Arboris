@@ -27,6 +27,8 @@ from .graph_model import (
     Graph,
     Node,
     NodeKind,
+    SCHEMA_VERSION,
+    Stage,
     Trust,
 )
 from .graph_store import GraphStore
@@ -59,6 +61,7 @@ class GraphRecorder:
         trust_reason: str | None = None,
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
+        stage: Stage | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -70,6 +73,7 @@ class GraphRecorder:
             trust_reason=trust_reason,
             decision_points=decision_points,
             summary=summary,
+            stage=stage,
             created_at=_now_iso(),
         )
 
@@ -84,6 +88,7 @@ class GraphRecorder:
         trust_reason: str | None = None,
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
+        stage: Stage | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -95,6 +100,7 @@ class GraphRecorder:
             trust_reason=trust_reason,
             decision_points=decision_points,
             summary=summary,
+            stage=stage,
             created_at=_now_iso(),
         )
 
@@ -108,6 +114,7 @@ class GraphRecorder:
         trust_reason: str | None = None,
         decision_points: tuple[DecisionPoint, ...] = (),
         summary: str | None = None,
+        stage: Stage | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -119,6 +126,7 @@ class GraphRecorder:
             trust_reason=trust_reason,
             decision_points=decision_points,
             summary=summary,
+            stage=stage,
             created_at=_now_iso(),
         )
 
@@ -131,6 +139,7 @@ class GraphRecorder:
         trust: Trust = Trust.OK,
         trust_reason: str | None = None,
         summary: str | None = None,
+        stage: Stage | None = None,
     ) -> None:
         self._add_node(
             id=node_id,
@@ -142,6 +151,7 @@ class GraphRecorder:
             trust_reason=trust_reason,
             decision_points=(),
             summary=summary,
+            stage=stage,
             created_at=_now_iso(),
         )
 
@@ -188,7 +198,7 @@ class GraphRecorder:
             sources = {e.source_id for e in self._edges.values()}
             head_node_ids = tuple(nid for nid in self._nodes if nid not in sources)
         graph = Graph(
-            schema_version=2,
+            schema_version=SCHEMA_VERSION,
             run_id=self._run_id,
             nodes=dict(self._nodes),
             edges=dict(self._edges),
@@ -216,6 +226,7 @@ class GraphRecorder:
         trust_reason: str | None,
         decision_points: tuple[DecisionPoint, ...],
         summary: str | None,
+        stage: Stage | None,
         created_at: str,
     ) -> None:
         if id in self._nodes:
@@ -233,4 +244,5 @@ class GraphRecorder:
             payload_ref=payload_ref,
             decision_points=decision_points,
             summary=summary,
+            stage=stage,
         )

@@ -15,6 +15,7 @@ from workbench.graph_model import (
     Graph,
     Node,
     NodeKind,
+    Stage,
     Trust,
     resolve_decision_id,
 )
@@ -35,6 +36,19 @@ def test_trust_values():
     assert Trust.CAUTION.value == "caution"
     assert Trust.WARNING.value == "warning"
     assert Trust.BLOCKER.value == "blocker"
+
+
+def test_stage_values_match_schema_v3_contract():
+    assert {stage.value for stage in Stage} == {
+        "source",
+        "eda",
+        "clean",
+        "transform",
+        "model",
+        "diag",
+        "viz",
+        "report",
+    }
 
 
 def test_contestability_review_status_default_when_checks_empty():

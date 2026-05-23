@@ -14,6 +14,7 @@ from workbench.graph_model import (
     Contestability,
     DecisionPoint,
     NodeKind,
+    Stage,
     Trust,
 )
 from workbench.graph_recorder import GraphRecorder
@@ -132,6 +133,47 @@ def test_record_variable_includes_parent_stage(tmp_path: Path):
     v = g.nodes["var:income:cleaned"]
     assert v.kind == NodeKind.VARIABLE
     assert v.parent_stage_id == "stage:cleaned"
+
+
+def test_record_helpers_accept_stage(tmp_path: Path):
+    store = GraphStore(runs_root=tmp_path)
+    recorder = GraphRecorder(run_id="run_test", store=store)
+
+    recorder.record_stage(
+        node_id="stage:raw",
+        display_label="Raw",
+        stage=Stage.SOURCE,
+    )
+    recorder.record_stage(
+        node_id="stage:cleaned",
+        display_label="Cleaned",
+        stage=Stage.CLEAN,
+    )
+    recorder.record_variable(
+        node_id="var:x:cleaned",
+        display_label="x (cleaned)",
+        parent_stage_id="stage:cleaned",
+        stage=Stage.TRANSFORM,
+    )
+    recorder.record_model(
+        node_id="model:ols_1",
+        display_label="OLS",
+        stage=Stage.MODEL,
+    )
+    recorder.record_report(
+        node_id="report:html",
+        display_label="HTML report",
+        stage=Stage.REPORT,
+    )
+
+    recorder.flush()
+    graph = store.read("run_test")
+
+    assert graph.nodes["stage:raw"].stage == Stage.SOURCE
+    assert graph.nodes["stage:cleaned"].stage == Stage.CLEAN
+    assert graph.nodes["var:x:cleaned"].stage == Stage.TRANSFORM
+    assert graph.nodes["model:ols_1"].stage == Stage.MODEL
+    assert graph.nodes["report:html"].stage == Stage.REPORT
 
 
 def test_flush_updates_main_branch_head(tmp_path: Path):

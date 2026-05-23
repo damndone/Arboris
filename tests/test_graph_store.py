@@ -659,6 +659,39 @@ def test_writer_emits_schema_version_3(tmp_path: Path):
     assert graph_from_json(data).nodes["model:primary"].stage == Stage.TRANSFORM
 
 
+def test_v3_reader_ignores_unknown_top_level_and_node_fields():
+    payload = {
+        "schema_version": 3,
+        "run_id": "r1",
+        "pipeline_id": "future-pipeline",
+        "nodes": {
+            "n1": {
+                "id": "n1",
+                "kind": "model",
+                "display_label": "m",
+                "created_at": "2026-05-19T00:00:00Z",
+                "parent_stage_id": None,
+                "branch_id": "main",
+                "trust": "ok",
+                "trust_reason": None,
+                "archived": False,
+                "payload_ref": None,
+                "decision_points": [],
+                "stage": "model",
+                "editable_schema": [{"kind": "toggle", "key": "future", "label": "Future"}],
+            }
+        },
+        "edges": {},
+        "branches": {},
+        "legacy": False,
+    }
+
+    graph = graph_from_json(payload)
+
+    assert graph.nodes["n1"].stage == Stage.MODEL
+    assert not hasattr(graph.nodes["n1"], "editable_schema")
+
+
 def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
     """Trust.WARNING and Trust.BLOCKER serialize and deserialize correctly."""
     for trust_value in (Trust.WARNING, Trust.BLOCKER):
