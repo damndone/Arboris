@@ -96,8 +96,7 @@ function makeV3Graph(
 ): GraphResponse {
   return {
     ...makeV2Graph(nodes, edges),
-    // schema_version = 3 (cast through unknown because V1.4.x types still say 1|2)
-    schema_version: 3 as unknown as 1 | 2,
+    schema_version: 3,
   };
 }
 
@@ -210,10 +209,42 @@ describe("graphAdapter", () => {
     expect(m.nodes[0].createdAt).toBe("2026-05-22T12:34:56Z");
   });
 
+  it("v3 with unknown future fields → no throw, V1.5 fields adapt, extras don't leak", () => {
+    // Forward-compat: future backend versions may add fields the V1.5.0 adapter
+    // has not been taught about. The adapter must (a) not crash and (b) not
+    // surface those unknown fields in the GraphViewModel output.
+    const dp = makeDP({ decision_id: "model_type_auto_select", selected: "ols" });
+    const node = {
+      ...makeNode("n1", { stage: "model", trust: "warning", decision_points: [dp] }),
+      // Fabricated future-version field on the node payload:
+      editable_schema: [{ key: "alpha", type: "number" }],
+    } as LineageNode & { stage?: string | null };
+    const graph = {
+      ...makeV3Graph([node]),
+      // Fabricated future-version field at the top level:
+      pipeline_id: "pipe_xyz",
+    } as GraphResponse & { pipeline_id?: string };
+
+    const m = adaptRunGraph(graph);
+
+    // (a) V1.5.0 fields adapt correctly
+    expect(m.schemaVersion).toBe(3);
+    expect(m.nodes).toHaveLength(1);
+    const out = m.nodes[0];
+    expect(out.id).toBe("n1");
+    expect(out.stage).toBe("model");
+    expect(out.trust).toBe("review");
+    expect(out.decisions.map((d) => d.id)).toEqual(["model_type_auto_select"]);
+
+    // (b) unknown future-version fields are NOT leaked into GraphViewModel
+    expect((out as unknown as Record<string, unknown>).editable_schema).toBeUndefined();
+    expect((m as unknown as Record<string, unknown>).pipeline_id).toBeUndefined();
+  });
+
   it("unsupported schema_version throws UnsupportedGraphSchemaError", () => {
     const bad = {
       ...makeV2Graph([makeNode("a")]),
-      schema_version: 99 as unknown as 1 | 2,
+      schema_version: 99 as unknown as 1 | 2 | 3,
     };
     expect(() => adaptRunGraph(bad)).toThrow(UnsupportedGraphSchemaError);
     try {

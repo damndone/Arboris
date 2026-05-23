@@ -11,12 +11,29 @@ from .graph_model import (
     AutoChosenReason,
     Contestability,
     DecisionPoint,
+    Stage,
 )
 
 
+STAGE_BY_DECISION_ID: dict[str, Stage] = {
+    "model_type_auto_select": Stage.MODEL,
+    "categorical_auto_dummy": Stage.TRANSFORM,
+    "ols_default_robust_se": Stage.MODEL,
+    "auto_coerce_to_numeric": Stage.TRANSFORM,
+    "handle_missing_values": Stage.CLEAN,
+    "variable_silently_dropped": Stage.TRANSFORM,
+}
+
+
+def _assert_stage_configured(decision_id: str) -> None:
+    STAGE_BY_DECISION_ID[decision_id]
+
+
 def model_type_auto_select(*, selected: str, y_unique: int, y_dtype: str) -> DecisionPoint:
+    decision_id = "model_type_auto_select"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="model_type_auto_select",
+        decision_id=decision_id,
         selected=selected,
         candidates=("ols", "logit", "poisson"),
         source="data_driven_default",
@@ -35,8 +52,10 @@ def model_type_auto_select(*, selected: str, y_unique: int, y_dtype: str) -> Dec
 def categorical_auto_dummy(
     *, variable: str, n_unique: int, reference_level: str
 ) -> DecisionPoint:
+    decision_id = "categorical_auto_dummy"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="categorical_auto_dummy",
+        decision_id=decision_id,
         selected="dummy_encode",
         candidates=("dummy_encode", "leave_as_continuous", "drop"),
         source="data_driven_default",
@@ -57,8 +76,10 @@ def categorical_auto_dummy(
 
 
 def ols_default_robust_se(*, variant: str = "HC1") -> DecisionPoint:
+    decision_id = "ols_default_robust_se"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="ols_default_robust_se",
+        decision_id=decision_id,
         selected=variant,
         candidates=(),
         source="system_default",
@@ -77,8 +98,10 @@ def ols_default_robust_se(*, variant: str = "HC1") -> DecisionPoint:
 def auto_coerce_to_numeric(
     *, variable: str, conversion_rate: float, sample_unconvertible: tuple[str, ...] = (),
 ) -> DecisionPoint:
+    decision_id = "auto_coerce_to_numeric"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="auto_coerce_to_numeric",
+        decision_id=decision_id,
         selected="numeric",
         candidates=("numeric", "leave_as_string", "treat_as_categorical"),
         source="data_driven_default",
@@ -121,8 +144,10 @@ _MISSING_VALUE_CANDIDATES = (
 
 
 def handle_missing_values(*, variables: list[str]) -> DecisionPoint:
+    decision_id = "handle_missing_values"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="handle_missing_values",
+        decision_id=decision_id,
         selected="drop_rows_with_missing_required_fields",
         candidates=_MISSING_VALUE_CANDIDATES,
         source="system_default",
@@ -157,8 +182,10 @@ def variable_silently_dropped(
     n_unique_after_cleaning: int | None = None,
 ) -> DecisionPoint:
     """drop_reason is one of: zero_variance / all_missing / perfect_collinearity."""
+    decision_id = "variable_silently_dropped"
+    _assert_stage_configured(decision_id)
     return DecisionPoint(
-        decision_id="variable_silently_dropped",
+        decision_id=decision_id,
         selected="drop_variable",
         candidates=("drop_variable", "drop_rows", "impute", "user_review"),
         source="data_driven_default",

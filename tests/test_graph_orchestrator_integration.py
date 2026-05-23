@@ -66,6 +66,18 @@ def test_orchestrator_emits_graph_with_expected_structure(tmp_path: Path):
     assert len(cleaned_to_model) >= 1
 
 
+def test_freshly_generated_v3_graph_has_no_unstaged_nodes(tmp_path: Path):
+    """Newly generated V1.5 graphs must tag every emitted node with a stage."""
+    runs_root = tmp_path / "demo"
+    run_id = _run_fixture_analysis(runs_root=runs_root, tmp_path=tmp_path)
+
+    graph = GraphStore(runs_root=runs_root / "runs").read(run_id)
+
+    assert graph.schema_version == 3
+    assert graph.nodes
+    assert all(node.stage is not None for node in graph.nodes.values())
+
+
 def test_orchestrator_emits_handle_missing_values_decision_point(tmp_path: Path):
     """Cleaning stage must carry the handle_missing_values DecisionPoint."""
     runs_root = tmp_path / "demo"

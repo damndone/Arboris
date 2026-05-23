@@ -1,5 +1,15 @@
 // frontend/src/lineage/types.ts
-// Types matching backend GET /runs/:id/graph response (V1.4.1 schema_version=2).
+// Types matching backend GET /runs/:id/graph response (V1.5.0 schema_version up to 3).
+
+export type Stage =
+  | "source"
+  | "eda"
+  | "clean"
+  | "transform"
+  | "model"
+  | "diag"
+  | "viz"
+  | "report";
 
 export type NodeKind =
   | "dataset_stage"
@@ -72,6 +82,7 @@ export interface LineageNode {
   payload_ref: string | null;
   decision_points: DecisionPoint[];
   annotations: unknown[];
+  stage?: Stage | null;
 }
 
 export interface LineageEdge {
@@ -99,7 +110,7 @@ export interface GraphStats {
 }
 
 export interface GraphResponse {
-  schema_version: 1 | 2;
+  schema_version: 1 | 2 | 3;
   run_id: string;
   legacy: boolean;
   stats: GraphStats;

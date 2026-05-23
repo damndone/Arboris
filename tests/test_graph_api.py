@@ -189,20 +189,20 @@ def test_get_graph_response_has_summary_field_on_nodes(project_root: Path):
         assert "summary" in node
 
 
-def test_get_graph_schema_version_is_2(project_root: Path):
+def test_get_graph_schema_version_is_3(project_root: Path):
     runs_root = project_root / "runs"
     _seed_run(runs_root, "run_present", with_graph=True)
     client = TestClient(app)
     response = client.get("/runs/run_present/graph", params={"project_root": str(project_root)})
-    assert response.json()["schema_version"] == 2
+    assert response.json()["schema_version"] == 3
 
 
 def test_get_graph_upcasts_v1_file_on_disk(project_root: Path):
     """A V1.4.0-era graph.json (schema_version=1, decision_point singular) sitting
-    on disk must be read by the endpoint, upcast to schema_version=2, and
+    on disk must be read by the endpoint, upcast to schema_version=3, and
     returned with legacy=False — the file IS lineage data, just an older shape.
 
-    Regression guard: bypasses GraphStore.write() (which stamps v2) by writing
+    Regression guard: bypasses GraphStore.write() (which stamps v3) by writing
     raw v1 JSON directly, so this exercises the real on-disk legacy path that
     real V1.4.0 users would hit after upgrading to V1.4.1.
     """
@@ -265,8 +265,8 @@ def test_get_graph_upcasts_v1_file_on_disk(project_root: Path):
     )
     assert response.status_code == 200
     body = response.json()
-    # The endpoint must upcast to v2 in the response shape ...
-    assert body["schema_version"] == 2
+    # The endpoint must upcast to v3 in the response shape ...
+    assert body["schema_version"] == 3
     # ... while NOT marking the run as legacy (a v1 file IS data, it has
     # nodes — legacy=True is reserved for completely-missing graph.json).
     assert body["legacy"] is False

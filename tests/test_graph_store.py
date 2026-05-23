@@ -15,6 +15,7 @@ from workbench.graph_model import (
     Graph,
     Node,
     NodeKind,
+    Stage,
     Trust,
 )
 from workbench.graph_store import (
@@ -69,7 +70,7 @@ def _sample_graph() -> Graph:
         params={},
     )
     return Graph(
-        schema_version=2,
+        schema_version=3,
         run_id="run_test",
         nodes={node_raw.id: node_raw, node_model.id: node_model},
         edges={edge.id: edge},
@@ -83,6 +84,7 @@ def test_roundtrip_preserves_full_graph():
     g = _sample_graph()
     data = graph_to_json(g)
     rebuilt = graph_from_json(data)
+    object.__setattr__(g, "schema_version", 3)
     assert rebuilt == g
 
 
@@ -533,6 +535,50 @@ def test_v2_multi_dp_round_trips(tmp_path: Path):
     assert g.nodes["n1"].summary == "OLS (HC1, n=10)"
 
 
+def test_v2_file_loads_with_stage_none():
+    """V1.4.1 graph files read cleanly with stage=None for every node."""
+    v2 = {
+        "schema_version": 2,
+        "run_id": "r1",
+        "nodes": {
+            "stage:raw": {
+                "id": "stage:raw",
+                "kind": "dataset_stage",
+                "display_label": "Raw",
+                "created_at": "2026-05-19T00:00:00Z",
+                "parent_stage_id": None,
+                "branch_id": "main",
+                "trust": "ok",
+                "trust_reason": None,
+                "archived": False,
+                "payload_ref": None,
+                "decision_points": [],
+            },
+            "model:ols_1": {
+                "id": "model:ols_1",
+                "kind": "model",
+                "display_label": "OLS",
+                "created_at": "2026-05-19T00:01:00Z",
+                "parent_stage_id": None,
+                "branch_id": "main",
+                "trust": "ok",
+                "trust_reason": None,
+                "archived": False,
+                "payload_ref": None,
+                "decision_points": [],
+            },
+        },
+        "edges": {},
+        "branches": {},
+        "legacy": False,
+    }
+
+    graph = graph_from_json(v2)
+
+    assert graph.schema_version == 2
+    assert {node.stage for node in graph.nodes.values()} == {None}
+
+
 def test_dual_field_uses_decision_points(tmp_path: Path):
     """Both decision_point and decision_points present -> decision_points wins."""
     dp_old = {"decision_id": "old", "decision_id_alias": [],
@@ -599,15 +645,18 @@ def test_v2_decision_points_must_be_list_shape(bad_value):
         graph_from_json(malformed)
 
 
-def test_writer_emits_schema_version_2(tmp_path: Path):
-    """graph_to_json always emits schema_version: 2."""
+def test_writer_emits_schema_version_3(tmp_path: Path):
+    """graph_to_json always emits schema_version: 3."""
     g = _sample_graph()
     object.__setattr__(g, "schema_version", 1)  # simulate old in-memory
+    object.__setattr__(g.nodes["model:primary"], "stage", Stage.TRANSFORM)
     data = graph_to_json(g)
-    assert data["schema_version"] == 2
+    assert data["schema_version"] == 3
     for nd in data["nodes"].values():
         assert "decision_point" not in nd
         assert "decision_points" in nd
+    assert data["nodes"]["stage:raw"]["stage"] is None
+    assert graph_from_json(data).nodes["model:primary"].stage == Stage.TRANSFORM
 
 
 def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
@@ -628,7 +677,7 @@ def test_trust_warning_and_blocker_round_trip(tmp_path: Path):
         assert reloaded.nodes["n1"].trust_reason == f"test reason for {trust_value.value}"
 
 
-def test_mutate_returns_schema_version_2_after_write(tmp_path: Path):
+def test_mutate_returns_schema_version_3_after_write(tmp_path: Path):
     """mutate() returns the post-serialization graph shape callers will read."""
     store = GraphStore(runs_root=tmp_path)
     run_dir = tmp_path / "run_v1"
@@ -648,5 +697,5 @@ def test_mutate_returns_schema_version_2_after_write(tmp_path: Path):
 
     returned = store.mutate("run_v1", keep_v1)
 
-    assert returned.schema_version == 2
-    assert store.read("run_v1").schema_version == 2
+    assert returned.schema_version == 3
+    assert store.read("run_v1").schema_version == 3

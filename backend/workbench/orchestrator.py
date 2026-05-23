@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -12,6 +13,7 @@ from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .graph_recorder import GraphRecorder
+from .graph_model import Stage
 from .graph_store import GraphStore
 from . import graph_decision_factory as dpf
 from .econometrics.diagnostics import compute_diagnostics
@@ -150,6 +152,16 @@ def _safe_flush_recorder(recorder: GraphRecorder, *, context: str) -> None:
         )
 
 
+def _set_recorded_node_stage(
+    recorder: GraphRecorder,
+    *,
+    node_id: str,
+    stage: Stage,
+) -> None:
+    """Tag nodes at orchestrator trigger sites while legacy recorder callers stay nullable."""
+    recorder._nodes[node_id] = replace(recorder._nodes[node_id], stage=stage)
+
+
 def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     model_dir = run_root / "model_results"
     if not model_dir.is_dir():
@@ -240,6 +252,7 @@ def _run_workflow(
         payload_ref=None,
         summary=f"Raw: {raw_row_count} rows × {raw_col_count} cols",
     )
+    _set_recorded_node_stage(_recorder, node_id="stage:raw", stage=Stage.SOURCE)
 
     if _s: _s("cleaning", "start", "Cleaning data...")
     cleaned, actions = clean_frame(frame, list(schema.time_candidates))
@@ -491,6 +504,7 @@ def _run_workflow(
             if _dropped_count > 0 else f"Cleaned: {len(cleaned)} rows"
         ),
     )
+    _set_recorded_node_stage(_recorder, node_id="stage:cleaned", stage=Stage.CLEAN)
     _recorder.record_edge(
         edge_id="e:raw-cleaned",
         source_id="stage:raw",
@@ -519,6 +533,11 @@ def _run_workflow(
             decision_points=_dps_for_var,
             summary=_variable_summary(_cat_dp, _coer_dp),
         )
+        _set_recorded_node_stage(
+            _recorder,
+            node_id=f"var:{var}:cleaned",
+            stage=Stage.TRANSFORM,
+        )
 
     for var_name, dropped_dp in _dropped_dps.items():
         _recorder.record_variable(
@@ -527,6 +546,11 @@ def _run_workflow(
             parent_stage_id="stage:cleaned",
             decision_points=(dropped_dp,),
             summary=f"Dropped: {_dropped_reason_display.get(var_name, 'unknown')}",
+        )
+        _set_recorded_node_stage(
+            _recorder,
+            node_id=f"var:{var_name}:dropped",
+            stage=Stage.TRANSFORM,
         )
 
     if model_results:
@@ -547,6 +571,11 @@ def _run_workflow(
                 fallback_n=len(cleaned),
             ),
         )
+        _set_recorded_node_stage(
+            _recorder,
+            node_id=f"model:{primary_model_id}",
+            stage=Stage.MODEL,
+        )
         _recorder.record_edge(
             edge_id="e:cleaned-model-primary",
             source_id="stage:cleaned",
@@ -560,6 +589,7 @@ def _run_workflow(
             payload_ref="reports/report.html",
             summary="HTML report",
         )
+        _set_recorded_node_stage(_recorder, node_id="report:html", stage=Stage.REPORT)
         _recorder.record_edge(
             edge_id="e:model-report",
             source_id=f"model:{primary_model_id}",

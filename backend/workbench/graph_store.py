@@ -31,6 +31,8 @@ from .graph_model import (
     Graph,
     Node,
     NodeKind,
+    SCHEMA_VERSION,
+    Stage,
     Trust,
 )
 
@@ -53,7 +55,7 @@ def graph_to_json(graph: Graph) -> dict[str, Any]:
         data = _to_jsonable(graph)
     except TypeError as exc:
         raise GraphSerializationError(f"Graph is not JSON-serializable: {exc}") from exc
-    data["schema_version"] = 2
+    data["schema_version"] = SCHEMA_VERSION
     if __debug__:
         # Validate JSON-safety in dev/test; skipped with `python -O` in production
         try:
@@ -70,10 +72,14 @@ def graph_from_json(data: dict[str, Any]) -> Graph:
     wrong types, or an unknown enum value is encountered (e.g. future NodeKind).
     """
     try:
+        schema_version = data["schema_version"]
         return Graph(
-            schema_version=data["schema_version"],
+            schema_version=schema_version,
             run_id=data["run_id"],
-            nodes={k: _node_from_json(v) for k, v in data.get("nodes", {}).items()},
+            nodes={
+                k: _node_from_json(v, schema_version=schema_version)
+                for k, v in data.get("nodes", {}).items()
+            },
             edges={k: _edge_from_json(v) for k, v in data.get("edges", {}).items()},
             branches={k: _branch_from_json(v) for k, v in data.get("branches", {}).items()},
             legacy=data.get("legacy", False),
@@ -227,7 +233,7 @@ def _to_jsonable(value: Any) -> Any:
 # -- from_jsonable: rebuild dataclasses from plain dicts ---------------------
 
 
-def _node_from_json(d: dict[str, Any]) -> Node:
+def _node_from_json(d: dict[str, Any], *, schema_version: int) -> Node:
     dps_field = d.get("decision_points")
     if dps_field is not None:
         if not isinstance(dps_field, list):
@@ -237,6 +243,9 @@ def _node_from_json(d: dict[str, Any]) -> Node:
         decision_points = (_decision_point_from_json(d["decision_point"]),)
     else:
         decision_points = ()
+    stage = None
+    if schema_version >= 3 and d.get("stage") is not None:
+        stage = Stage(d["stage"])
     return Node(
         id=d["id"],
         kind=NodeKind(d["kind"]),
@@ -251,6 +260,7 @@ def _node_from_json(d: dict[str, Any]) -> Node:
         decision_points=decision_points,
         summary=d.get("summary"),
         annotations=tuple(d.get("annotations", ())),
+        stage=stage,
     )
 
 

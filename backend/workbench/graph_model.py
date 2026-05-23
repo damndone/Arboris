@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, Literal
+
+
+SCHEMA_VERSION = 3
 
 
 class NodeKind(str, Enum):
@@ -34,6 +37,17 @@ class Trust(str, Enum):
     CAUTION = "caution"
     WARNING = "warning"
     BLOCKER = "blocker"
+
+
+class Stage(StrEnum):
+    SOURCE = "source"
+    EDA = "eda"
+    CLEAN = "clean"
+    TRANSFORM = "transform"
+    MODEL = "model"
+    DIAG = "diag"
+    VIZ = "viz"
+    REPORT = "report"
 
 
 DecisionSource = Literal[
@@ -181,6 +195,7 @@ class Node:
     decision_points: tuple[DecisionPoint, ...] = ()
     summary: str | None = None
     annotations: tuple = ()  # reserved for V1.6 AI; tuple of Annotation
+    stage: Stage | None = None
 
 
 @dataclass(frozen=True)
@@ -229,3 +244,22 @@ def resolve_decision_id(graph: Graph, id_or_alias: str) -> str | None:
             if dp.decision_id == id_or_alias or id_or_alias in dp.decision_id_alias:
                 return dp.decision_id
     return None
+
+
+__all__ = [
+    "AutoChosenReason",
+    "BranchRef",
+    "Contestability",
+    "DecisionPoint",
+    "DecisionSource",
+    "Edge",
+    "Graph",
+    "Node",
+    "NodeKind",
+    "ReasonType",
+    "ReviewStatus",
+    "SCHEMA_VERSION",
+    "Stage",
+    "Trust",
+    "resolve_decision_id",
+]
