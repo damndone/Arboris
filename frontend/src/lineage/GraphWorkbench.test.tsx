@@ -82,9 +82,9 @@ describe("GraphWorkbench", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders drawer slot only when selectedKey is non-null", () => {
+  it("renders detail drawer only when selectedKey resolves to a real node (T6.11 swap)", () => {
     const { rerender } = renderWithCtx(makeCtx(rawGraph(), null));
-    expect(screen.queryByTestId("drawer-slot")).toBeNull();
+    expect(screen.queryByTestId("detail-drawer")).toBeNull();
 
     rerender(
       <MemoryRouter>
@@ -93,8 +93,9 @@ describe("GraphWorkbench", () => {
         </LineageContext.Provider>
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("drawer-slot")).toBeInTheDocument();
-    expect(screen.getByText(/detail drawer for stage:raw/i)).toBeInTheDocument();
+    expect(screen.getByTestId("detail-drawer")).toBeInTheDocument();
+    // Drawer renders the header h2 with the node's title.
+    expect(document.getElementById("detail-drawer-title")?.textContent).toBe("Raw");
   });
 
   it("clicking a node calls select(nodeId) from context", () => {

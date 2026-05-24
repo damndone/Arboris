@@ -1,11 +1,11 @@
 // frontend/src/lineage/GraphWorkbench.tsx
 //
-// V1.5.0 lineage workbench (Step 5, T5.6).
+// V1.5.0 lineage workbench (Step 5, T5.6 + Step 6, T6.11).
 //
-// Mounts GraphCanvas inside the LineageContext consumer and reserves a
-// right-side slot for the DetailDrawer. The drawer itself arrives in
-// Step 6 — this file currently renders a placeholder DrawerSlot when a
-// node is selected so the layout grid is observable in tests.
+// Mounts GraphCanvas inside the LineageContext consumer. When a node is
+// selected, the right rail mounts DetailDrawer (Step 6, T6.11 swap from
+// the T5.6 DrawerSlot placeholder). RawJsonModal is mounted at workbench
+// root and controlled by ⌘J via useGraphKeyboard.
 //
 // expandedGroups state lives here (not in the container) because it is
 // graph-render local — V1.5.1 may persist it to URL or context, but
@@ -15,24 +15,13 @@ import { useMemo, useState } from "react";
 import { GraphCanvas } from "./GraphCanvas";
 import { useLineage } from "./LineageContext";
 import { useGraphKeyboard } from "./hooks/useGraphKeyboard";
+import { DetailDrawer } from "./detail/DetailDrawer";
+import { RawJsonModal } from "./modals/RawJsonModal";
 
 export function GraphWorkbench() {
   const { model, selectedKey, select } = useLineage();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  // Step 6 wires the real RawJsonModal to this state. For now the toggle is
-  // a working state flip so ⌘J doesn't silently no-op in production. The
-  // modal itself isn't rendered yet — the toggle exists so the hook contract
-  // is observable and we don't regress vs V1.4.1's ⌘J behaviour.
-  // [REV-3 #1 — Step 5 adversarial review]
-  const [, setRawJsonOpen] = useState(false);
-
-  useGraphKeyboard({
-    onToggleRawJson: () => setRawJsonOpen((v) => !v),
-    onEscape: () => select(null),
-    onCmdK: () => {
-      /* parent search palette — Step 6 forwards */
-    },
-  });
+  const [rawJsonOpen, setRawJsonOpen] = useState(false);
 
   // Coerce selectedKey to null when it doesn't point at a real node in the
   // current model. Covers cross-run URL leak (/runs/A?node=x → /runs/B
@@ -44,6 +33,27 @@ export function GraphWorkbench() {
   );
   const effectiveSelectedKey =
     selectedKey !== null && nodeIndex.has(selectedKey) ? selectedKey : null;
+  const selectedNode =
+    effectiveSelectedKey !== null
+      ? (nodeIndex.get(effectiveSelectedKey) ?? null)
+      : null;
+
+  useGraphKeyboard({
+    onToggleRawJson: () => {
+      // Only open the modal when we actually have a node — otherwise it's
+      // a no-op rather than rendering an empty modal.
+      if (selectedNode === null && !rawJsonOpen) return;
+      setRawJsonOpen((v) => !v);
+    },
+    onEscape: () => {
+      // Modal owns its own Escape handler (capture phase, stops
+      // propagation) so this only fires when the modal is closed.
+      select(null);
+    },
+    onCmdK: () => {
+      /* parent search palette — wired in V1.5.x */
+    },
+  });
 
   const handleExpandGroup = (gid: string) => {
     setExpandedGroups((s) => {
@@ -73,29 +83,14 @@ export function GraphWorkbench() {
           onExpandGroup={handleExpandGroup}
         />
       </div>
-      {effectiveSelectedKey !== null && (
-        <DrawerSlot nodeId={effectiveSelectedKey} />
+      {selectedNode !== null && (
+        <DetailDrawer node={selectedNode} onClose={() => select(null)} />
       )}
-    </div>
-  );
-}
-
-/**
- * Placeholder until Step 6 introduces DetailDrawer. Keeps the workbench
- * layout testable end-to-end without forward-declaring the drawer API.
- */
-function DrawerSlot({ nodeId }: { nodeId: string }) {
-  return (
-    <div
-      data-testid="drawer-slot"
-      style={{
-        width: 460,
-        borderLeft: "1px solid var(--separator)",
-        padding: 24,
-        color: "var(--label-secondary)",
-      }}
-    >
-      Detail drawer for {nodeId} — arriving in Step 6.
+      <RawJsonModal
+        open={rawJsonOpen}
+        onClose={() => setRawJsonOpen(false)}
+        node={selectedNode}
+      />
     </div>
   );
 }
