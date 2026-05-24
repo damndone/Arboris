@@ -427,6 +427,54 @@ describe("GraphCanvas", () => {
       expect(count.className).toContain("--warn");
     });
 
+    // REV-2: explicitly verify non-triggering decision statuses do
+    // NOT contribute to the waiting count. Without this, we could
+    // accidentally count waived/passed/not_needed/unknown and the
+    // happy-path tests above wouldn't notice.
+    it("waitingReviewsCount=0 when all decisions are non-triggering [REV-2]", () => {
+      const benignStatuses = [
+        "passed",
+        "not_needed",
+        "waived",
+        "unknown",
+      ] as const;
+      const g: GraphResponse = {
+        schema_version: 2,
+        run_id: "r-benign",
+        legacy: false,
+        stats: {
+          node_count: 1,
+          edge_count: 0,
+          leaf_count: 1,
+          has_dp_count: 0,
+        },
+        nodes: {
+          N: node({
+            id: "N",
+            display_label: "N",
+            decision_points: benignStatuses.map((status, i) => ({
+              decision_id: `d${i}`,
+              decision_id_alias: [],
+              selected: null,
+              candidates: [],
+              source: "system_default",
+              contestability: {
+                is_contestable: true,
+                assumption_checks_needed: [],
+                warnings: [],
+                review_status: status,
+              },
+              reason: null,
+            })),
+          }),
+        },
+        edges: {},
+        branches: {},
+      };
+      const vm = model(g);
+      expect(waitingReviewsCount(vm)).toBe(0);
+    });
+
     it("waitingReviewsCount uses singular form for N=1", () => {
       const g: GraphResponse = {
         schema_version: 2,
@@ -498,6 +546,36 @@ describe("GraphCanvas", () => {
       expect(legend.className).not.toContain("--expanded");
     });
 
+    // REV-2: confirm the Chinese label text from uiux/panels.jsx
+    // stageLabel actually renders. Drift in our STAGE_LABEL constant
+    // (typo, missing entry) breaks user-visible copy silently.
+    it("renders the Chinese stage labels from uiux/panels.jsx [REV-2]", () => {
+      renderCanvas();
+      // Mapping per uiux/panels.jsx::stageLabel (L301-304).
+      const expected: Record<string, string> = {
+        source: "原始",
+        eda: "探索",
+        clean: "清洗",
+        transform: "变换",
+        model: "模型",
+        diag: "诊断",
+        viz: "可视化",
+        report: "报告",
+      };
+      for (const [, label] of Object.entries(expected)) {
+        expect(screen.getByText(label)).toBeInTheDocument();
+      }
+    });
+
+    // REV-2: the synthetic "unknown" stage (used for group + marker
+    // pseudo-nodes) must NOT appear in the user-facing legend.
+    it("does not render the synthetic 'unknown' stage in the legend [REV-2]", () => {
+      renderCanvas();
+      expect(
+        screen.queryByTestId("legend-swatch-unknown"),
+      ).toBeNull();
+    });
+
     it("legend expands on mouse enter, collapses on leave", () => {
       renderCanvas();
       const legend = screen.getByTestId("canvas-legend");
@@ -533,6 +611,20 @@ describe("GraphCanvas", () => {
       expect(
         document.querySelector(".react-flow__controls-fitview"),
       ).not.toBeNull();
+    });
+
+    // REV-3 [T8.6b]: the CSS override is scoped under .lineage-root.
+    // If a future refactor mounts <Controls> outside the lineage-root
+    // wrapper, the scoped CSS silently stops applying and the
+    // controls revert to RF's default (#fefefe / #eee). Verify the
+    // wrapper invariant holds.
+    it("Controls live inside .lineage-root so the scoped CSS applies [T8.6b]", () => {
+      renderCanvas();
+      const root = document.querySelector(".lineage-root");
+      const controls = document.querySelector(".react-flow__controls");
+      expect(root).not.toBeNull();
+      expect(controls).not.toBeNull();
+      expect(root!.contains(controls)).toBe(true);
     });
   });
 

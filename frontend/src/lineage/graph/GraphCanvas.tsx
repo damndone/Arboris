@@ -72,6 +72,11 @@ function CanvasToolbar({ containerRef }: CanvasToolbarProps) {
     // Fullscreen API may be unsupported (older browsers, embedded
     // contexts) or rejected (user gesture missing, security policy).
     // Both branches degrade gracefully — no banner, no throw.
+    //
+    // Target is the lineage-root container. If a future host layout
+    // ever wraps GraphCanvas with siblings the user expects to keep
+    // visible (e.g. a header bar) we'd hoist the ref upward; for
+    // V1.5.0 the lineage view IS the page content so this is fine.
     if (!document.fullscreenEnabled) return;
     try {
       if (document.fullscreenElement) {
