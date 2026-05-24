@@ -147,4 +147,77 @@ describe("GraphWorkbench", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(select).toHaveBeenCalledWith(null);
   });
+
+  describe("T6.12 legacy stage hint", () => {
+    function v2RawGraph(stages: Array<"source" | undefined>) {
+      // v2 disk graphs come through the adapter with stage="unknown" when
+      // omitted. Build a fixture that lets us control the unknown ratio.
+      const fixture = rawGraph();
+      const baseNode = fixture.nodes["stage:raw"];
+      fixture.nodes = {} as typeof fixture.nodes;
+      stages.forEach((stage, i) => {
+        const id = `n${i}`;
+        const next = { ...baseNode, id, display_label: id } as typeof baseNode;
+        if (stage !== undefined) {
+          (next as unknown as { stage?: string }).stage = stage;
+        } else {
+          delete (next as unknown as { stage?: string }).stage;
+        }
+        (fixture.nodes as Record<string, typeof baseNode>)[id] = next;
+      });
+      fixture.schema_version = stages.some((s) => s !== undefined) ? 3 : 2;
+      return fixture;
+    }
+
+    it("shows hint when ≥50% of nodes have stage='unknown' (DoD: 80% case)", () => {
+      // 4 nodes, 4 unknown (no stage field on v2) = 100% > 50%.
+      renderWithCtx(makeCtx(v2RawGraph([undefined, undefined, undefined, undefined])));
+      expect(screen.getByTestId("legacy-stage-hint")).toBeInTheDocument();
+      expect(
+        screen.getByText(/run predates stage tagging/i),
+      ).toBeInTheDocument();
+    });
+
+    it("does NOT show hint when 0% unknown (DoD: 0% case)", () => {
+      // 4 nodes, all stage='source' → ratio 0%.
+      renderWithCtx(
+        makeCtx(v2RawGraph(["source", "source", "source", "source"])),
+      );
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+
+    it("does NOT show hint when exactly 49% unknown (just below threshold)", () => {
+      // 100 nodes, 49 unknown.
+      const stages: Array<"source" | undefined> = [
+        ...Array(49).fill(undefined),
+        ...Array(51).fill("source"),
+      ];
+      renderWithCtx(makeCtx(v2RawGraph(stages)));
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+
+    it("shows hint at exactly 50% (boundary inclusive)", () => {
+      const stages: Array<"source" | undefined> = [
+        ...Array(2).fill(undefined),
+        ...Array(2).fill("source"),
+      ];
+      renderWithCtx(makeCtx(v2RawGraph(stages)));
+      expect(screen.getByTestId("legacy-stage-hint")).toBeInTheDocument();
+    });
+
+    it("Dismiss button hides the banner for the rest of the session", () => {
+      renderWithCtx(makeCtx(v2RawGraph([undefined, undefined])));
+      expect(screen.getByTestId("legacy-stage-hint")).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole("button", { name: /dismiss legacy stage hint/i }),
+      );
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+
+    it("legacy banner takes priority — model.legacy=true still shows LegacyBanner only", () => {
+      renderWithCtx(makeCtx(rawGraph({ legacy: true })));
+      expect(screen.getByTestId("legacy-banner")).toBeInTheDocument();
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+  });
 });
