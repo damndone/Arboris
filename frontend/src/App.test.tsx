@@ -1091,3 +1091,4 @@ test("run detail coefficient risk shows reference level column", async () => {
   // display_term shows "region_code = 2"
   expect(screen.getByText("region_code = 2")).toBeInTheDocument();
 });
+

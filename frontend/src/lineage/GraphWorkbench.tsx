@@ -11,13 +11,39 @@
 // graph-render local — V1.5.1 may persist it to URL or context, but
 // today it's transient component state.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { GraphCanvas } from "./GraphCanvas";
 import { useLineage } from "./LineageContext";
+import { useGraphKeyboard } from "./hooks/useGraphKeyboard";
 
 export function GraphWorkbench() {
   const { model, selectedKey, select } = useLineage();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Step 6 wires the real RawJsonModal to this state. For now the toggle is
+  // a working state flip so ⌘J doesn't silently no-op in production. The
+  // modal itself isn't rendered yet — the toggle exists so the hook contract
+  // is observable and we don't regress vs V1.4.1's ⌘J behaviour.
+  // [REV-3 #1 — Step 5 adversarial review]
+  const [, setRawJsonOpen] = useState(false);
+
+  useGraphKeyboard({
+    onToggleRawJson: () => setRawJsonOpen((v) => !v),
+    onEscape: () => select(null),
+    onCmdK: () => {
+      /* parent search palette — Step 6 forwards */
+    },
+  });
+
+  // Coerce selectedKey to null when it doesn't point at a real node in the
+  // current model. Covers cross-run URL leak (/runs/A?node=x → /runs/B
+  // would otherwise mount an orphan drawer) and any other stale URL state.
+  // [REV-3 #3 — Step 5 adversarial review]
+  const nodeIndex = useMemo(
+    () => new Map(model.nodes.map((n) => [n.id, n])),
+    [model.nodes],
+  );
+  const effectiveSelectedKey =
+    selectedKey !== null && nodeIndex.has(selectedKey) ? selectedKey : null;
 
   const handleExpandGroup = (gid: string) => {
     setExpandedGroups((s) => {
@@ -41,13 +67,15 @@ export function GraphWorkbench() {
       <div style={{ flex: 1 }}>
         <GraphCanvas
           model={model}
-          selectedNodeId={selectedKey}
+          selectedNodeId={effectiveSelectedKey}
           expandedGroups={expandedGroups}
           onSelect={select}
           onExpandGroup={handleExpandGroup}
         />
       </div>
-      {selectedKey !== null && <DrawerSlot nodeId={selectedKey} />}
+      {effectiveSelectedKey !== null && (
+        <DrawerSlot nodeId={effectiveSelectedKey} />
+      )}
     </div>
   );
 }

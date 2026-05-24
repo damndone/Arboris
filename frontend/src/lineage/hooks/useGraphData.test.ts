@@ -144,6 +144,28 @@ describe("useGraphData", () => {
     expect(result.current.model).toBeNull();
   });
 
+  it("unmount mid-fetch does not setState (no act warnings) [REV-2]", async () => {
+    // Hook's effect cleanup sets cancelled=true; the resolved promise's
+    // .then must skip its setState calls. Without the guard React would log
+    // "Can't perform a React state update on an unmounted component".
+    let resolve: (r: Response) => void = () => {};
+    const pending = new Promise<Response>((r) => {
+      resolve = r;
+    });
+    fetchMock.mockReturnValue(pending);
+
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderHook(() => useGraphData("/proj", "r-cancel"));
+    unmount();
+    resolve(jsonResponse(v3Graph()));
+    // Let the microtask queue drain so the .then would run if it were going to.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
+
   it("refetch resets state and fires fetch again", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ detail: "down" }, { status: 503 }),

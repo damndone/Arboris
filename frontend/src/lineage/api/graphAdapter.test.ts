@@ -211,6 +211,15 @@ describe("graphAdapter", () => {
     expect(m.nodes.find((n) => n.id === "child")?.parentStageId).toBe("root");
   });
 
+  it("parentStageId: missing parent_stage_id (undefined) coerces to null [REV-2]", () => {
+    // The adapter does `raw.parent_stage_id ?? null`. Cover the undefined
+    // branch explicitly (the existing test covers null and string).
+    const node = makeNode("orphan");
+    delete (node as { parent_stage_id?: unknown }).parent_stage_id;
+    const m = adaptRunGraph(makeV2Graph([node]));
+    expect(m.nodes[0].parentStageId).toBeNull();
+  });
+
   it("createdAt mapped from backend created_at", () => {
     const g = makeV2Graph([
       makeNode("a", { created_at: "2026-05-22T12:34:56Z" }),

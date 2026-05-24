@@ -22,7 +22,12 @@ export interface UseSelectedNodeResult {
 
 export function useSelectedNode(): UseSelectedNodeResult {
   const [params, setParams] = useSearchParams();
-  const selectedKey = params.get("node");
+  // URLSearchParams.get("node") on `?node=` returns "" (not null). Treat
+  // empty string as "no selection" so a stale URL like `?node=` doesn't
+  // wedge the UI into rendering an empty drawer for a non-existent node.
+  // [REV-3 #2 — Step 5 adversarial review]
+  const raw = params.get("node");
+  const selectedKey = raw === "" ? null : raw;
 
   const select = useCallback(
     (key: string | null) => {

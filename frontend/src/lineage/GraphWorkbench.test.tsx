@@ -1,7 +1,7 @@
 // frontend/src/lineage/GraphWorkbench.test.tsx
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { GraphWorkbench } from "./GraphWorkbench";
 import { LineageContext, type LineageContextValue } from "./LineageContext";
@@ -113,9 +113,37 @@ describe("GraphWorkbench", () => {
     errSpy.mockRestore();
   });
 
-  // Reference unused import to satisfy linter while keeping a forward-compat
-  // hook for future tests that need to assert URL state changes.
-  void useNavigate;
-  void Route;
-  void Routes;
+  it("selectedKey not in model → drawer slot is suppressed [REV-3 #3]", () => {
+    // Cross-run leak: user navigates /runs/A?node=x → /runs/B; the URL
+    // still says node=x but model B has no such node. Workbench must NOT
+    // mount an orphan drawer.
+    renderWithCtx(makeCtx(rawGraph(), "stage:ghost"));
+    expect(screen.queryByTestId("drawer-slot")).toBeNull();
+    // Canvas still renders the real model.
+    expect(screen.getByText("Raw")).toBeInTheDocument();
+  });
+
+  it("⌘J keydown is handled by the wired-in useGraphKeyboard [REV-3 #1]", () => {
+    // Regression guard: T5.7 unmounted V1.4.1 LineageTab which carried its
+    // own keydown listener. Without re-wiring useGraphKeyboard inside the
+    // workbench, ⌘J would silently no-op in production. The hook now lives
+    // here, so the keydown does not propagate to the browser default
+    // (preventDefault is called for ⌘J inside the hook).
+    renderWithCtx(makeCtx(rawGraph(), null));
+    const evt = new KeyboardEvent("keydown", {
+      key: "j",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    const prevented = !window.dispatchEvent(evt);
+    expect(prevented).toBe(true); // listener called preventDefault
+  });
+
+  it("Escape clears the selection via context.select(null) [REV-3 #1 follow-on]", () => {
+    const select = vi.fn();
+    renderWithCtx(makeCtx(rawGraph(), "stage:raw", select));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(select).toHaveBeenCalledWith(null);
+  });
 });

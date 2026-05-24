@@ -77,6 +77,14 @@ describe("useSelectedNode", () => {
     expect(params.get("filter")).toBe("warning");
   });
 
+  it("?node= (empty value) is normalised to null [REV-3 #2]", () => {
+    // URLSearchParams.get returns "" for `?node=`. Without the empty-string
+    // guard, downstream consumers would treat "" as a selection and render
+    // an empty drawer for a non-existent node.
+    renderAt("/?node=");
+    expect(ref.current!.selectedKey).toBeNull();
+  });
+
   it("probe DOM reflects the final state", () => {
     renderAt("/?node=initial");
     expect(screen.getByTestId("probe").textContent).toContain("key=initial");

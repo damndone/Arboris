@@ -100,6 +100,14 @@ export function GraphCanvas({
   onSelect,
   onExpandGroup,
 }: GraphCanvasProps) {
+  // Hoisted out of the main useMemo so a selection-only re-render (which
+  // bumps selectedNodeId but not model) doesn't pay an O(n) Map rebuild.
+  // [REV-3 #6 — Step 5 adversarial review]
+  const nodeById = useMemo(
+    () => new Map(model.nodes.map((n) => [n.id, n])),
+    [model.nodes],
+  );
+
   const { rfNodes, rfEdges } = useMemo(() => {
     const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
 
@@ -110,7 +118,6 @@ export function GraphCanvas({
     // (because its members are inlined), synthesize a fold-back marker node so
     // the user has an affordance to collapse the cluster again. The marker
     // shares the group id, so onExpandGroup's toggle naturally folds it.
-    const nodeById = new Map(model.nodes.map((n) => [n.id, n]));
     const expandedMarkers: Array<{
       gid: string;
       variantLabel: string;
@@ -196,7 +203,7 @@ export function GraphCanvas({
       uniqEdges,
     );
     return { rfNodes: layouted, rfEdges: uniqEdges };
-  }, [model, selectedNodeId, expandedGroups]);
+  }, [model, selectedNodeId, expandedGroups, nodeById]);
 
   return (
     <div
