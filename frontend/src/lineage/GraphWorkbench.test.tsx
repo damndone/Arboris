@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GraphWorkbench } from "./GraphWorkbench";
 import { LineageContext, type LineageContextValue } from "./LineageContext";
 import { adaptRunGraph } from "./api/graphAdapter";
@@ -149,6 +149,13 @@ describe("GraphWorkbench", () => {
   });
 
   describe("T6.12 legacy stage hint", () => {
+    beforeEach(() => {
+      // REV-3 P2: dismissal now persists in sessionStorage keyed by runId.
+      // Clear between tests so prior dismissals don't leak across cases.
+      sessionStorage.clear();
+    });
+
+
     function v2RawGraph(stages: Array<"source" | undefined>) {
       // v2 disk graphs come through the adapter with stage="unknown" when
       // omitted. Build a fixture that lets us control the unknown ratio.
@@ -212,6 +219,37 @@ describe("GraphWorkbench", () => {
         screen.getByRole("button", { name: /dismiss legacy stage hint/i }),
       );
       expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+
+    it("Dismissal persists across remount within the same session [REV-3 P2]", () => {
+      // Spec §19.4 "dismissible per session" — leaving the Lineage tab and
+      // returning must not resurrect the banner. We model the tab-leave as
+      // an unmount/remount of the workbench with the same runId.
+      const fixture = v2RawGraph([undefined, undefined]);
+      const { unmount } = renderWithCtx(makeCtx(fixture));
+      fireEvent.click(
+        screen.getByRole("button", { name: /dismiss legacy stage hint/i }),
+      );
+      unmount();
+      renderWithCtx(makeCtx(fixture));
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+    });
+
+    it("Dismissal is scoped per runId — other runs still show the banner [REV-3 P2]", () => {
+      const fixtureA = v2RawGraph([undefined, undefined]);
+      fixtureA.run_id = "run-A";
+      const fixtureB = v2RawGraph([undefined, undefined]);
+      fixtureB.run_id = "run-B";
+
+      const { unmount } = renderWithCtx(makeCtx(fixtureA));
+      fireEvent.click(
+        screen.getByRole("button", { name: /dismiss legacy stage hint/i }),
+      );
+      unmount();
+
+      // Different runId → banner re-appears, dismissal did not leak.
+      renderWithCtx(makeCtx(fixtureB));
+      expect(screen.getByTestId("legacy-stage-hint")).toBeInTheDocument();
     });
 
     it("legacy banner takes priority — model.legacy=true still shows LegacyBanner only", () => {
