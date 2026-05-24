@@ -80,21 +80,22 @@ describe("DetailDrawer", () => {
     expect(document.getElementById("detail-drawer-title")).not.toBeNull();
   });
 
-  it("ok-trust node with no DPs → only basic + lineage stub sections (no trust, no decision)", () => {
+  it("ok-trust node with no DPs → only basic + lineage sections (no trust, no decision)", () => {
     renderDrawer(makeCtx(makeNode()));
     expect(screen.getByTestId("basic-info-section-stub")).toBeInTheDocument();
-    expect(screen.getByTestId("lineage-chain-section-stub")).toBeInTheDocument();
-    expect(screen.queryByTestId("trust-banner-stub")).toBeNull();
+    expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
+    expect(screen.queryByTestId("trust-banner-review-suggested")).toBeNull();
+    expect(screen.queryByTestId("trust-banner-caution")).toBeNull();
     expect(screen.queryByTestId("decision-section-stub")).toBeNull();
   });
 
   it("node with decisions → all 4 sections render (DoD scenario)", () => {
-    // TrustBanner is real post-T6.4; the other three are still stubs until
-    // T6.5–T6.7 flesh them out.
+    // Trust banner + lineage chain are real post-T6.4/T6.5; basic + decision
+    // are still stubs until T6.6/T6.7 flesh them out.
     const node = makeNode({ trust: "review", decisions: [dp()] });
     renderDrawer(makeCtx(node));
     expect(screen.getByTestId("trust-banner-review-suggested")).toBeInTheDocument();
-    expect(screen.getByTestId("lineage-chain-section-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
     expect(screen.getByTestId("basic-info-section-stub")).toBeInTheDocument();
     expect(screen.getByTestId("decision-section-stub")).toBeInTheDocument();
   });
@@ -102,19 +103,24 @@ describe("DetailDrawer", () => {
   it("sections render in registry `order` regardless of array position", () => {
     const node = makeNode({ trust: "review", decisions: [dp()] });
     const { container } = renderDrawer(makeCtx(node));
-    // Collect each section's data-testid by its container element. Trust
-    // banner exposes a variant-suffixed testid post-T6.4; stubs still
-    // expose -stub. Until all four are real, accept either pattern.
+    // Collect by id-prefix patterns so this test survives stubs being
+    // replaced by real components across T6.5–T6.7. Each section is
+    // identified by its testid pattern.
     const tids = Array.from(
       container.querySelectorAll(
-        "[data-testid^='trust-banner-'], [data-testid$='-stub']",
+        "[data-testid^='trust-banner-']," +
+          "[data-testid='lineage-chain-section']," +
+          "[data-testid='basic-info-section-stub']," +
+          "[data-testid='basic-info-section']," +
+          "[data-testid='decision-section-stub']," +
+          "[data-testid='decision-section']",
       ),
     ).map((el) => el.getAttribute("data-testid"));
     expect(tids).toEqual([
-      "trust-banner-review-suggested", // order 10 (real component)
-      "lineage-chain-section-stub", // order 50
-      "basic-info-section-stub", // order 60
-      "decision-section-stub", // order 70
+      "trust-banner-review-suggested", // order 10
+      "lineage-chain-section", // order 50
+      "basic-info-section-stub", // order 60 (still stub)
+      "decision-section-stub", // order 70 (still stub)
     ]);
   });
 
