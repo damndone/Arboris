@@ -1,8 +1,50 @@
 // frontend/src/lineage/detail/DetailDrawer.test.tsx
 //
-// T6.10 fleshes out the Inspector-equivalence table; this file currently
-// covers T6.2 contract only (drawer chrome + section registry composition).
-// Section visual tests live in each section's own test file.
+// T6.10 equivalence map (plan §9 + §15.1): every V1.4.1 Inspector.test.tsx
+// scenario is reproduced in the V1.5.0 structure. The new structure
+// distributes assertions across the unit that owns the behavior; this
+// drawer-level file holds composition + integration tests only.
+//
+// ┌─────────────────────────────────────────────┬─────────────────────────────────────────────┐
+// │ V1.4.1 Inspector.test.tsx                   │ V1.5.0 location                             │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ "renders title and eyebrow"                 │ DetailHeader.test "title <h2> carries       │
+// │                                             │ DETAIL_HEADER_TITLE_ID" + "kind label"      │
+// │                                             │ + "breadcrumb shows runId · nodeKey"        │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ "renders About prose for MODEL kind"        │ DetailHeader.test "summary line renders     │
+// │                                             │ when node.summary is set"                   │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ 'renders green "All clear" callout when     │ sectionRegistry.test "ok trust + no DPs →   │
+// │  no review needed and trust ok'             │ only lineage+basic" + this file's           │
+// │                                             │ "ok-trust no DPs → only basic+lineage"      │
+// │                                             │ (no trust banner = "all clear" by absence)  │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ 'renders orange "Review required" when      │ TrustBanner.test "review-required wins"     │
+// │  DPs need review'                           │ + "multi-DP pluralises" + "body uses        │
+// │                                             │ dpRegistry-derived title"                   │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ "renders red trust callout when             │ TrustBanner.test "trust=caution → 'Caution' │
+// │  trust=warning and no DP"                   │ variant" + "trustReason used as body".      │
+// │                                             │ NOTE: V1.5.0 adapter normalises warning →   │
+// │                                             │ review (orange); caution/blocker → caution  │
+// │                                             │ (red). The red callout case is now caution. │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ "calls onClose when close button clicked"   │ DetailHeader.test "close button has         │
+// │                                             │ aria-label=Close and fires onClose"         │
+// ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
+// │ "has role=dialog and aria-labelledby"       │ This file: "renders role=dialog with        │
+// │                                             │ aria-labelledby pointing at the header h2"  │
+// └─────────────────────────────────────────────┴─────────────────────────────────────────────┘
+//
+// Section-system tests (NEW in V1.5.0, no V1.4.1 equivalent):
+//   - "ok-trust node with no DPs → only basic + lineage sections"
+//   - "node with decisions → all 4 sections render (DoD scenario)"
+//   - "sections render in registry `order` regardless of array position"
+//   - "explicit node prop wins over context selection"
+//   - "renders nothing when context yields no node / orphan selectedKey"
+//   - "full integration: trust + lineage + basic + decision sections
+//      mount together with realistic content" (T6.10 — this file)
 
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
@@ -148,5 +190,51 @@ describe("DetailDrawer", () => {
     renderDrawer(makeCtx(ctxNode, "ctx-node"), { node: propNode });
     expect(screen.getByText("From prop")).toBeInTheDocument();
     expect(screen.queryByText("From context")).toBeNull();
+  });
+
+  it("integration: trust + lineage + basic + decision sections all mount together (T6.10)", () => {
+    // End-to-end check that the four real sections + the header chrome
+    // co-exist without conflicting. Uses a node that triggers all four
+    // gates simultaneously.
+    const decisions = [
+      dp({
+        id: "model_type_auto_select",
+        question: "Which model type?",
+        reviewStatus: "needed",
+      }),
+      dp({
+        id: "ols_default_robust_se",
+        question: "Robust SE?",
+        reviewStatus: "not_needed",
+      }),
+    ];
+    const fullNode = makeNode({
+      title: "Primary OLS",
+      summary: "OLS · HC1 · n=10",
+      trust: "review",
+      decisions,
+    });
+    renderDrawer(makeCtx(fullNode));
+
+    // Header chrome
+    expect(document.getElementById("detail-drawer-title")).not.toBeNull();
+    expect(screen.getByText("Primary OLS")).toBeInTheDocument();
+    expect(screen.getByText(/OLS · HC1 · n=10/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    // Trust banner — review-required wins over trust=review (TrustBanner contract)
+    expect(
+      screen.getByTestId("trust-banner-review-required"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 choice needs confirmation/i)).toBeInTheDocument();
+    // Lineage chain (heading)
+    expect(screen.getByText("Lineage path")).toBeInTheDocument();
+    // Basic info K/V (3 rows)
+    expect(screen.getByTestId("basic-info-kind").textContent).toBe("model");
+    expect(screen.getByTestId("basic-info-stage").textContent).toBe("Model");
+    expect(screen.getByTestId("basic-info-created").textContent).toBe(
+      new Date("2026-05-22T00:00:00Z").toLocaleString(),
+    );
+    // Decision section heading with count
+    expect(screen.getByText("Decisions (2)")).toBeInTheDocument();
   });
 });
