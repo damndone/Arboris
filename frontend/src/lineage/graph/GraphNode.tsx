@@ -34,8 +34,18 @@ import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
 import type { GraphViewNode, Stage, Trust } from "../api/graphViewTypes";
 
+// T8.5: tri-state highlighting. When a node is selected, its
+// neighbourhood (incoming + outgoing edges + the selected node itself)
+// stays at full opacity; everything else dims. Computed and passed in
+// by GraphCanvas; "related" is also the default when nothing is
+// selected (all nodes full opacity).
+export type GraphNodeState = "selected" | "related" | "dim";
+
 export interface GraphNodeProps {
-  data: { node: GraphViewNode };
+  data: { node: GraphViewNode; state: GraphNodeState };
+  // React Flow also passes its own `selected` for accessibility / focus
+  // styles on the wrapper, but our internal outline is driven by
+  // data.state so the tri-state stays consistent under all paths.
   selected: boolean;
 }
 
@@ -67,10 +77,12 @@ function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
   return null;
 }
 
-export function GraphNode({ data, selected }: GraphNodeProps) {
-  const { node } = data;
+export function GraphNode({ data }: GraphNodeProps) {
+  const { node, state } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
+  const isSelected = state === "selected";
+  const isDim = state === "dim";
 
   // React Flow needs explicit handles on custom nodes for edges to attach. We
   // hide them visually (they're just connection anchors, not interactive).
@@ -85,10 +97,11 @@ export function GraphNode({ data, selected }: GraphNodeProps) {
 
   return (
     <div
-      className={`ln-graph-node ${selected ? "ln-graph-node--selected" : ""}`}
+      className={`ln-graph-node${isSelected ? " ln-graph-node--selected" : ""}${isDim ? " ln-graph-node--dim" : ""}`}
       data-testid="graph-node"
       data-stage={node.stage}
       data-trust={node.trust}
+      data-state={state}
       style={{ ["--node-color" as string]: colorVar }}
     >
       <Handle

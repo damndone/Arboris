@@ -134,34 +134,65 @@ export function GraphCanvas({
       visible.add(gid);
     }
 
+    // memberToGroup collapses each variable inside a folded cluster
+    // to its group id so edge logic + tri-state highlighting can
+    // address groups by their member ids interchangeably.
+    const memberToGroup = new Map<string, string>();
+    groups.forEach((g) =>
+      g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
+    );
+
+    // T8.5: compute the "related" set for tri-state highlighting.
+    //   inIds  = edge.source ∀ edges where edge.target === selectedNodeId
+    //   outIds = edge.target ∀ edges where edge.source === selectedNodeId
+    //   related = inIds ∪ outIds ∪ {selectedNodeId}
+    // Edges run over model.edges (logical, pre-folding); memberToGroup
+    // remaps endpoints so a selected group highlights via any of its
+    // members' real edges.
+    const related = new Set<string>();
+    if (selectedNodeId !== null) {
+      related.add(selectedNodeId);
+      for (const e of model.edges) {
+        const src = memberToGroup.get(e.source) ?? e.source;
+        const tgt = memberToGroup.get(e.target) ?? e.target;
+        if (tgt === selectedNodeId) related.add(src);
+        if (src === selectedNodeId) related.add(tgt);
+      }
+    }
+    const stateFor = (id: string): "selected" | "related" | "dim" => {
+      if (selectedNodeId === null) return "related";
+      if (id === selectedNodeId) return "selected";
+      if (related.has(id)) return "related";
+      return "dim";
+    };
+
     const realNodes: RFNode[] = kept.map((n) => ({
       id: n.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
       // T8.3: GraphNode now consumes the V1.5.0 GraphViewNode directly.
       // Adapter is the only consumer of backend LineageNode shape.
-      data: { node: n },
+      // T8.5: also carries the tri-state highlight state.
+      data: { node: n, state: stateFor(n.id) },
       selected: n.id === selectedNodeId,
     }));
     const groupNodes: RFNode[] = groups.map((g) => ({
       id: g.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      data: { node: groupAsNode(g) },
+      data: { node: groupAsNode(g), state: stateFor(g.id) },
       selected: false,
     }));
     const markerNodes: RFNode[] = expandedMarkers.map((m) => ({
       id: m.gid,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      data: { node: markerAsNode(m.gid, m.variantLabel, m.parent) },
+      data: {
+        node: markerAsNode(m.gid, m.variantLabel, m.parent),
+        state: stateFor(m.gid),
+      },
       selected: false,
     }));
-
-    const memberToGroup = new Map<string, string>();
-    groups.forEach((g) =>
-      g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
-    );
 
     const candidateEdges: RFEdge[] = [];
 

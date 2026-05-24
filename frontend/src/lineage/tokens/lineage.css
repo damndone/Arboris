@@ -268,6 +268,13 @@
   outline-offset: 2px;
 }
 
+/* Dim state (T8.5) — nodes outside the selected neighbourhood drop
+ * to 0.4 opacity. Selection-driven; default state is "related" (full
+ * opacity) when no node is selected. */
+.ln-graph-node--dim {
+  opacity: 0.4;
+}
+
 /* ─── Hover tooltip (T8.4) ──────────────────────────────────────────
  * Screen-space (position:fixed) and portaled to document.body so
  * React Flow's canvas zoom never affects tooltip pixel position.

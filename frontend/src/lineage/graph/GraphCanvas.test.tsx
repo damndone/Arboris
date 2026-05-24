@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GraphCanvas } from "./GraphCanvas";
 import { adaptRunGraph } from "../api/graphAdapter";
-import type { GraphResponse, LineageNode } from "../types";
+import type { GraphResponse, LineageEdge, LineageNode } from "../types";
 
 // Bridge: tests still build the raw backend GraphResponse fixture (so they
 // exercise the real adapter path), and pass `adaptRunGraph(g)` into the
@@ -140,6 +140,119 @@ describe("GraphCanvas", () => {
     expect(screen.getByText("Dropped variables (4)")).toBeInTheDocument();
     // And no individual dropped variable leaked through.
     expect(screen.queryByText("y1 (dropped)")).not.toBeInTheDocument();
+  });
+
+  describe("tri-state highlighting (T8.5)", () => {
+    // 4-node graph for the DoD test: A → B, plus C and D with no edges.
+    // Select B → A & B related; C & D dim (the 2 unrelated). Per plan
+    // T8.5 step 1: related = inIds ∪ outIds ∪ {selectedKey}.
+    function fourNodeGraph(): GraphResponse {
+      const nodes: Record<string, LineageNode> = {
+        A: node({
+          id: "A",
+          kind: "dataset_stage",
+          display_label: "A",
+          summary: "source",
+        }),
+        B: node({
+          id: "B",
+          kind: "dataset_stage",
+          display_label: "B",
+          summary: "middle",
+        }),
+        C: node({
+          id: "C",
+          kind: "dataset_stage",
+          display_label: "C",
+          summary: "loose",
+        }),
+        D: node({
+          id: "D",
+          kind: "dataset_stage",
+          display_label: "D",
+          summary: "loose",
+        }),
+      };
+      const edges: Record<string, LineageEdge> = {
+        "A->B": {
+          id: "A->B",
+          source_id: "A",
+          target_id: "B",
+          op: "noop",
+          params: {},
+          reversible: false,
+          inverse_op: null,
+        },
+      };
+      return {
+        schema_version: 2,
+        run_id: "r1",
+        legacy: false,
+        stats: {
+          node_count: 4,
+          edge_count: 1,
+          leaf_count: 2,
+          has_dp_count: 0,
+        },
+        nodes,
+        edges,
+        branches: {},
+      };
+    }
+
+    it("DoD: select middle node → in/out neighbours related, unrelated dim", () => {
+      render(
+        <GraphCanvas
+          model={model(fourNodeGraph())}
+          selectedNodeId={"B"}
+          expandedGroups={new Set()}
+          onSelect={vi.fn()}
+          onExpandGroup={vi.fn()}
+        />,
+      );
+
+      const ofId = (id: string) =>
+        document
+          .querySelectorAll<HTMLElement>('[data-testid="graph-node"]')
+          [
+            // Cannot rely on document.order; use data-attribute on the title text
+            Array.from(
+              document.querySelectorAll<HTMLElement>(
+                '[data-testid="graph-node"]',
+              ),
+            ).findIndex((el) => el.textContent?.includes(id))
+          ];
+
+      const a = ofId("A");
+      const b = ofId("B");
+      const c = ofId("C");
+      const d = ofId("D");
+
+      expect(b).toHaveAttribute("data-state", "selected");
+      expect(a).toHaveAttribute("data-state", "related");
+      expect(c).toHaveAttribute("data-state", "dim");
+      expect(d).toHaveAttribute("data-state", "dim");
+    });
+
+    it("no selection → all nodes default to related (full opacity)", () => {
+      render(
+        <GraphCanvas
+          model={model(fourNodeGraph())}
+          selectedNodeId={null}
+          expandedGroups={new Set()}
+          onSelect={vi.fn()}
+          onExpandGroup={vi.fn()}
+        />,
+      );
+
+      const allNodes = document.querySelectorAll<HTMLElement>(
+        '[data-testid="graph-node"]',
+      );
+      expect(allNodes.length).toBe(4);
+      for (const el of allNodes) {
+        expect(el).toHaveAttribute("data-state", "related");
+      }
+    });
   });
 
   it("does not render a fold-back marker for a stale expanded id whose parent is missing", async () => {

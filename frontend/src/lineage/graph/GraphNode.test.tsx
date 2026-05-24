@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { render as rtlRender, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ReactFlowProvider } from "reactflow";
-import { GraphNode } from "./GraphNode";
+import { GraphNode, type GraphNodeState } from "./GraphNode";
 import type {
   DecisionReviewStatus,
   DecisionViewModel,
@@ -45,59 +45,56 @@ function vd(reviewStatus: DecisionReviewStatus = "needed"): DecisionViewModel {
   };
 }
 
-describe("GraphNode (T8.3 visual refresh)", () => {
+// Helper: render GraphNode with state defaulted to "related" (the
+// no-selection default) and the React Flow `selected` prop derived from
+// state, so test sites only have to specify what they're actually
+// testing (the node + optional tri-state).
+function mountNode(
+  node: GraphViewNode,
+  state: GraphNodeState = "related",
+): void {
+  render(
+    <GraphNode data={{ node, state }} selected={state === "selected"} />,
+  );
+}
+
+describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
   it("renders kind label, title, and summary", () => {
-    render(<GraphNode data={{ node: vn() }} selected={false} />);
+    mountNode(vn());
     expect(screen.getByText("Primary OLS")).toBeInTheDocument();
     expect(screen.getByText("OLS · HC1 · n = 32")).toBeInTheDocument();
     expect(screen.getByText("model")).toBeInTheDocument();
   });
 
   it("hides meta line when summary is undefined", () => {
-    render(<GraphNode data={{ node: vn({ summary: undefined }) }} selected={false} />);
+    mountNode(vn({ summary: undefined }));
     expect(screen.queryByTestId("node-summary")).toBeNull();
   });
 
   it("shows no badge when trust=ok and no review needed", () => {
-    render(<GraphNode data={{ node: vn() }} selected={false} />);
+    mountNode(vn());
     expect(screen.queryByTestId("node-badge")).toBeNull();
   });
 
   it("shows review badge when trust=review", () => {
-    render(<GraphNode data={{ node: vn({ trust: "review" }) }} selected={false} />);
+    mountNode(vn({ trust: "review" }));
     const badge = screen.getByTestId("node-badge");
     expect(badge).toHaveTextContent("Review");
     expect(badge.className).toContain("ln-graph-node__badge--review");
   });
 
   it("shows review badge when any decision needs review (even if trust=ok)", () => {
-    render(
-      <GraphNode
-        data={{ node: vn({ decisions: [vd("needed")] }) }}
-        selected={false}
-      />,
-    );
-    const badge = screen.getByTestId("node-badge");
-    expect(badge).toHaveTextContent("Review");
+    mountNode(vn({ decisions: [vd("needed")] }));
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
   });
 
   it("shows review badge when any decision failed review (even if trust=ok)", () => {
-    render(
-      <GraphNode
-        data={{ node: vn({ decisions: [vd("failed")] }) }}
-        selected={false}
-      />,
-    );
+    mountNode(vn({ decisions: [vd("failed")] }));
     expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
   });
 
   it("shows caution badge when trust=caution (takes priority over review)", () => {
-    render(
-      <GraphNode
-        data={{ node: vn({ trust: "caution", decisions: [vd("needed")] }) }}
-        selected={false}
-      />,
-    );
+    mountNode(vn({ trust: "caution", decisions: [vd("needed")] }));
     const badge = screen.getByTestId("node-badge");
     expect(badge).toHaveTextContent("Caution");
     expect(badge.className).toContain("ln-graph-node__badge--caution");
@@ -113,31 +110,14 @@ describe("GraphNode (T8.3 visual refresh)", () => {
   ];
   for (const status of benign) {
     it(`shows no badge when trust=ok and decision.reviewStatus=${status}`, () => {
-      render(
-        <GraphNode
-          data={{ node: vn({ decisions: [vd(status)] }) }}
-          selected={false}
-        />,
-      );
+      mountNode(vn({ decisions: [vd(status)] }));
       expect(screen.queryByTestId("node-badge")).toBeNull();
     });
   }
 
   it("shows review badge when trust=review even with no decisions [REV-2]", () => {
-    render(
-      <GraphNode
-        data={{ node: vn({ trust: "review", decisions: [] }) }}
-        selected={false}
-      />,
-    );
+    mountNode(vn({ trust: "review", decisions: [] }));
     expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
-  });
-
-  it("applies selected outline class when selected", () => {
-    render(<GraphNode data={{ node: vn() }} selected={true} />);
-    expect(screen.getByTestId("graph-node").className).toContain(
-      "ln-graph-node--selected",
-    );
   });
 
   describe("stage × trust matrix (DoD T8.3)", () => {
@@ -156,9 +136,7 @@ describe("GraphNode (T8.3 visual refresh)", () => {
     for (const stage of stages) {
       for (const trust of trusts) {
         it(`renders stage=${stage} trust=${trust} without crashing`, () => {
-          render(
-            <GraphNode data={{ node: vn({ stage, trust }) }} selected={false} />,
-          );
+          mountNode(vn({ stage, trust }));
           const node = screen.getByTestId("graph-node");
           expect(node).toHaveAttribute("data-stage", stage);
           expect(node).toHaveAttribute("data-trust", trust);
@@ -171,16 +149,37 @@ describe("GraphNode (T8.3 visual refresh)", () => {
     }
 
     it("stage=unknown falls back to neutral --label-tertiary (not a stage token)", () => {
-      render(
-        <GraphNode
-          data={{ node: vn({ stage: "unknown" }) }}
-          selected={false}
-        />,
-      );
+      mountNode(vn({ stage: "unknown" }));
       const node = screen.getByTestId("graph-node");
       expect(node.style.getPropertyValue("--node-color")).toBe(
         "var(--label-tertiary)",
       );
+    });
+  });
+
+  describe("tri-state highlighting (T8.5)", () => {
+    it("state=selected applies selected outline class", () => {
+      mountNode(vn(), "selected");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--selected");
+      expect(node.className).not.toContain("ln-graph-node--dim");
+      expect(node).toHaveAttribute("data-state", "selected");
+    });
+
+    it("state=related applies no extra classes (default opacity)", () => {
+      mountNode(vn(), "related");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).not.toContain("ln-graph-node--selected");
+      expect(node.className).not.toContain("ln-graph-node--dim");
+      expect(node).toHaveAttribute("data-state", "related");
+    });
+
+    it("state=dim applies the dim class", () => {
+      mountNode(vn(), "dim");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--dim");
+      expect(node.className).not.toContain("ln-graph-node--selected");
+      expect(node).toHaveAttribute("data-state", "dim");
     });
   });
 });
