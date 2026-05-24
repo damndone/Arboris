@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { Handle, Position } from "reactflow";
-import "./tokens/lineage.css";
-import type { LineageNode } from "./types";
+import "../tokens/lineage.css";
+import type { LineageNode } from "../types";
 
-export interface NodeCardProps {
+export interface GraphNodeProps {
   data: { node: LineageNode };
   selected: boolean;
 }
@@ -16,7 +16,7 @@ function reviewCount(node: LineageNode): number {
   ).length;
 }
 
-export function NodeCard({ data, selected }: NodeCardProps) {
+export function GraphNode({ data, selected }: GraphNodeProps) {
   const { node } = data;
   const reviewN = reviewCount(node);
   const trustNeedsBadge =

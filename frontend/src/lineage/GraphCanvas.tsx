@@ -4,12 +4,12 @@ import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
 import "./tokens/lineage.css";
-import { NodeCard } from "./NodeCard";
+import { GraphNode } from "./graph/GraphNode";
 import type { LineageNode } from "./types";
 import type { GraphViewModel } from "./api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "./folding";
 
-const nodeTypes = { lineageNode: NodeCard };
+const nodeTypes = { lineageNode: GraphNode };
 
 interface GraphCanvasProps {
   model: GraphViewModel;
@@ -33,9 +33,9 @@ function layoutDagre<T extends RFNode>(nodes: T[], edges: RFEdge[]): T[] {
 }
 
 /**
- * NodeCard (V1.5.0) still consumes raw LineageNode shape via `data.node`.
+ * GraphNode (V1.5.0) still consumes raw LineageNode shape via `data.node`.
  * Synthesize the LineageNode payload for group + marker pseudo-nodes; real
- * graph nodes pass their `.raw` payload directly. NodeCard rewrites in Step 8
+ * graph nodes pass their `.raw` payload directly. GraphNode rewrites in Step 8
  * will retire this LineageNode dependency.
  */
 function groupAsNode(g: GroupNode): LineageNode {
@@ -139,7 +139,7 @@ export function GraphCanvas({
       id: n.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      // NodeCard consumes the raw LineageNode shape via data.node. Adapter
+      // GraphNode consumes the raw LineageNode shape via data.node. Adapter
       // preserves it on GraphViewNode.raw so we can hand it through verbatim.
       data: { node: n.raw as LineageNode },
       selected: n.id === selectedNodeId,

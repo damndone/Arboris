@@ -1,8 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { NodeTooltip } from "./NodeTooltip";
-import type { LineageNode } from "./types";
+import { GraphTooltip } from "./GraphTooltip";
+import type { LineageNode } from "../types";
 
 const node: LineageNode = {
   id: "n1",
@@ -35,14 +35,14 @@ const node: LineageNode = {
   annotations: [],
 };
 
-describe("NodeTooltip", () => {
+describe("GraphTooltip", () => {
   it("renders nothing when invisible", () => {
-    const { container } = render(<NodeTooltip node={node} visible={false} />);
+    const { container } = render(<GraphTooltip node={node} visible={false} />);
     expect(container.firstChild).toBeNull();
   });
 
   it("renders title, summary, review count and CTA when visible", () => {
-    render(<NodeTooltip node={node} visible={true} />);
+    render(<GraphTooltip node={node} visible={true} />);
     expect(screen.getByText("Primary OLS")).toBeInTheDocument();
     expect(screen.getByText("OLS · n = 32")).toBeInTheDocument();
     expect(screen.getByText("1 choice needs review")).toBeInTheDocument();

@@ -3,10 +3,10 @@ import { describe, it, expect } from "vitest";
 import { render as rtlRender, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ReactFlowProvider } from "reactflow";
-import { NodeCard } from "./NodeCard";
-import type { DecisionPoint, LineageNode, ReviewStatus } from "./types";
+import { GraphNode } from "./GraphNode";
+import type { DecisionPoint, LineageNode, ReviewStatus } from "../types";
 
-// NodeCard uses React Flow <Handle>, which requires ReactFlowProvider in tree.
+// GraphNode uses React Flow <Handle>, which requires ReactFlowProvider in tree.
 function render(ui: ReactElement) {
   return rtlRender(<ReactFlowProvider>{ui}</ReactFlowProvider>);
 }
@@ -47,21 +47,21 @@ function dp(review: ReviewStatus = "needed"): DecisionPoint {
   };
 }
 
-describe("NodeCard", () => {
+describe("GraphNode", () => {
   it("renders title and summary", () => {
-    render(<NodeCard data={{ node: n() }} selected={false} />);
+    render(<GraphNode data={{ node: n() }} selected={false} />);
     expect(screen.getByText("Primary OLS")).toBeInTheDocument();
     expect(screen.getByText("OLS · HC1 · n = 32")).toBeInTheDocument();
   });
 
   it("hides second line when summary is null", () => {
-    render(<NodeCard data={{ node: n({ summary: null }) }} selected={false} />);
+    render(<GraphNode data={{ node: n({ summary: null }) }} selected={false} />);
     expect(screen.queryByTestId("node-summary")).toBeNull();
   });
 
   it("shows ⚠ Review pill when review_count > 0", () => {
     render(
-      <NodeCard
+      <GraphNode
         data={{ node: n({ decision_points: [dp(), dp()] }) }}
         selected={false}
       />,
@@ -70,18 +70,18 @@ describe("NodeCard", () => {
   });
 
   it("shows trust pill when trust=warning and no DP needs review", () => {
-    render(<NodeCard data={{ node: n({ trust: "warning" }) }} selected={false} />);
+    render(<GraphNode data={{ node: n({ trust: "warning" }) }} selected={false} />);
     expect(screen.getByText(/warning/i)).toBeInTheDocument();
   });
 
   it("shows no pill when clean", () => {
-    render(<NodeCard data={{ node: n() }} selected={false} />);
+    render(<GraphNode data={{ node: n() }} selected={false} />);
     expect(screen.queryByTestId("node-pill")).toBeNull();
   });
 
   it("applies selected class when selected", () => {
     const { container } = render(
-      <NodeCard data={{ node: n() }} selected={true} />,
+      <GraphNode data={{ node: n() }} selected={true} />,
     );
     expect(container.querySelector(".ln-node--selected")).toBeInTheDocument();
   });

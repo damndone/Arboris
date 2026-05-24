@@ -1,11 +1,11 @@
-import type { LineageNode } from "./types";
+import type { LineageNode } from "../types";
 
-export interface NodeTooltipProps {
+export interface GraphTooltipProps {
   node: LineageNode;
   visible: boolean; // false when node is selected (Inspector open)
 }
 
-export function NodeTooltip({ node, visible }: NodeTooltipProps) {
+export function GraphTooltip({ node, visible }: GraphTooltipProps) {
   if (!visible) return null;
   const reviewN = node.decision_points.filter(
     (dp) =>
