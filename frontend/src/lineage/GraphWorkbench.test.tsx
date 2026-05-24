@@ -220,4 +220,43 @@ describe("GraphWorkbench", () => {
       expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
     });
   });
+
+  describe("REV-3 follow-ups (Step 6)", () => {
+    it("H1: opening RawJsonModal then externally clearing selection closes the modal", () => {
+      // Mount with a selected node, ⌘J to open the modal, then re-render
+      // with selectedKey=null. The modal must close so subsequent ⌘J
+      // doesn't toggle invisibly.
+      const { rerender } = renderWithCtx(makeCtx(rawGraph(), "stage:raw"));
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
+
+      // External selection clear: re-render with selectedKey=null
+      rerender(
+        <MemoryRouter>
+          <LineageContext.Provider value={makeCtx(rawGraph(), null)}>
+            <GraphWorkbench />
+          </LineageContext.Provider>
+        </MemoryRouter>,
+      );
+      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
+    });
+
+    it("S1: Escape with RawJsonModal open closes only the modal, not the selection", () => {
+      const select = vi.fn();
+      renderWithCtx(makeCtx(rawGraph(), "stage:raw", select));
+      // Open the modal
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
+      // Escape: closes the modal but must NOT call select(null)
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("⌘J with no selected node is a no-op (modal does not appear)", () => {
+      renderWithCtx(makeCtx(rawGraph(), null));
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
+    });
+  });
 });

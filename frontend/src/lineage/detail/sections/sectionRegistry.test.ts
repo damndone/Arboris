@@ -4,6 +4,10 @@ import {
   _needsTrust,
   sectionRegistry,
 } from "./sectionRegistry";
+import { TrustBanner } from "./TrustBanner";
+import { LineageChainSection } from "./LineageChainSection";
+import { BasicInfoSection } from "./BasicInfoSection";
+import { DecisionSection } from "./DecisionSection";
 import type {
   DecisionViewModel,
   GraphViewNode,
@@ -116,5 +120,29 @@ describe("sectionRegistry", () => {
   it("orders are monotonically increasing as authored (catches accidental reordering)", () => {
     const sorted = [...sectionRegistry].sort((a, b) => a.order - b.order);
     expect(sorted.map((s) => s.id)).toEqual(sectionRegistry.map((s) => s.id));
+  });
+
+  it("Component refs match the imported section components [REV-2 #5]", () => {
+    // Locks the wiring: registry[i].Component must point at the actual
+    // exported component, not a stub or a wrong reference. Drift here
+    // means the drawer would render the wrong section.
+    const byId = Object.fromEntries(sectionRegistry.map((s) => [s.id, s]));
+    expect(byId.trust.Component).toBe(TrustBanner);
+    expect(byId.lineage.Component).toBe(LineageChainSection);
+    expect(byId.basic.Component).toBe(BasicInfoSection);
+    expect(byId.decision.Component).toBe(DecisionSection);
+  });
+
+  describe("needsTrust — non-needed/failed review statuses suppress banner [REV-2 #6]", () => {
+    it.each(["passed", "waived", "unknown", "not_needed"] as const)(
+      "trust=ok + DP.reviewStatus=%s → false",
+      (status) => {
+        expect(
+          _needsTrust(
+            node({ trust: "ok", decisions: [dp({ reviewStatus: status })] }),
+          ),
+        ).toBe(false);
+      },
+    );
   });
 });

@@ -47,18 +47,25 @@ export function DecisionSection({ node }: { node: GraphViewNode }) {
       <div className="ln-section-label" style={{ marginBottom: 8 }}>
         Decisions ({vmCount})
       </div>
-      {dps.map((dp) =>
-        expanded.has(dp.decision_id) ? (
-          <DecisionExpanded key={dp.decision_id} dp={dp} />
+      {dps.map((dp, i) => {
+        // REV-2 #4: if a node ever carries two DPs with the same
+        // decision_id (adapter doesn't dedupe), React keys must still be
+        // unique. Suffix with index. Expansion state still keys on
+        // decision_id so both copies expand together — that's acceptable
+        // for the rare duplicate case (no UX has been designed around
+        // distinguishing them).
+        const key = `${dp.decision_id}:${i}`;
+        return expanded.has(dp.decision_id) ? (
+          <DecisionExpanded key={key} dp={dp} />
         ) : (
           <DecisionCard
-            key={dp.decision_id}
+            key={key}
             dp={dp}
             expanded={false}
             onToggle={() => toggle(dp.decision_id)}
           />
-        ),
-      )}
+        );
+      })}
     </section>
   );
 }

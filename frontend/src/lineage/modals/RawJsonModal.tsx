@@ -34,13 +34,18 @@ export function RawJsonModal({ open, onClose, node }: RawJsonModalProps) {
   // Internal Escape listener (modal-scoped). Parent's useGraphKeyboard
   // already forwards Escape → context.select(null); this listener is
   // independent so closing the modal doesn't also clear node selection.
+  //
+  // REV-3 S1: stopPropagation() is unreliable when both listeners are
+  // on the same target (window). Use stopImmediatePropagation() to
+  // guarantee the parent's window listener doesn't also fire. The
+  // parent (GraphWorkbench) also guards `if (rawJsonOpen) return` —
+  // belt-and-braces, since the two parts ship in different commits and
+  // could drift.
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // Stop propagation so the parent's Escape handler (which clears
-        // node selection) doesn't also fire and dismount the drawer.
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         onClose();
       }
     };

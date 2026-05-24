@@ -34,8 +34,10 @@ function makeNode(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
 }
 
 const writeText = vi.fn();
+let _origClipboard: PropertyDescriptor | undefined;
 beforeEach(() => {
   writeText.mockReset().mockResolvedValue(undefined);
+  _origClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText },
@@ -43,6 +45,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // REV-3 S2: restore clipboard so other test files don't inherit our mock.
+  if (_origClipboard) {
+    Object.defineProperty(navigator, "clipboard", _origClipboard);
+  } else {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
   vi.useRealTimers();
 });
 
@@ -110,14 +118,19 @@ describe("RawJsonModal (spec §9.3 — 6 required tests)", () => {
     expect(written).toContain("\n");
   });
 
-  it("6. Does not render dangerouslySetInnerHTML (anti-regression for <span class=)", () => {
+  it("6. Does not render dangerouslySetInnerHTML highlighter (anti-regression)", () => {
     const { container } = render(
       <RawJsonModal open={true} onClose={vi.fn()} node={makeNode()} />,
     );
-    // The prototype hand-rolled JSON highlighter would inject
-    // <span class="..."> markup. V1.5.0 modal uses plain <pre>{string}</pre>
-    // so the outerHTML must NOT contain that pattern.
-    expect(container.outerHTML).not.toContain("<span class=");
+    // The prototype hand-rolled JSON highlighter injected specific class
+    // names: json-key, json-string, json-number, json-bool. V1.5.0 modal
+    // uses plain <pre>{string}</pre>, so none of those markers should
+    // appear. Tighter than `<span class=` per REV-2 #10 — that pattern
+    // could false-pass on unrelated future styling.
+    expect(container.outerHTML).not.toContain("json-key");
+    expect(container.outerHTML).not.toContain("json-string");
+    expect(container.outerHTML).not.toContain("json-number");
+    expect(container.outerHTML).not.toContain("json-bool");
   });
 
   // Supplementary tests beyond spec §9.3, kept lightweight:

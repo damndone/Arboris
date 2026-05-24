@@ -11,7 +11,7 @@
 // graph-render local — V1.5.1 may persist it to URL or context, but
 // today it's transient component state.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GraphCanvas } from "./GraphCanvas";
 import { useLineage } from "./LineageContext";
 import { useGraphKeyboard } from "./hooks/useGraphKeyboard";
@@ -50,16 +50,29 @@ export function GraphWorkbench() {
       ? (nodeIndex.get(effectiveSelectedKey) ?? null)
       : null;
 
+  // REV-3 H1: when selectedNode becomes null externally (URL change,
+  // cross-run nav), the modal must close — otherwise rawJsonOpen stays
+  // true while the modal renders null body, and the next ⌘J appears to
+  // do nothing (it's actually toggling a hidden modal). Worse: if a
+  // node selection comes back, the modal pops open unexpectedly.
+  useEffect(() => {
+    if (selectedNode === null && rawJsonOpen) setRawJsonOpen(false);
+  }, [selectedNode, rawJsonOpen]);
+
   useGraphKeyboard({
     onToggleRawJson: () => {
-      // Only open the modal when we actually have a node — otherwise it's
-      // a no-op rather than rendering an empty modal.
-      if (selectedNode === null && !rawJsonOpen) return;
+      // No-op when there's no node to inspect.
+      if (selectedNode === null) return;
       setRawJsonOpen((v) => !v);
     },
     onEscape: () => {
-      // Modal owns its own Escape handler (capture phase, stops
-      // propagation) so this only fires when the modal is closed.
+      // REV-3 S1: skip when the modal is open. The modal owns its own
+      // Escape handler; if we let this fire too, we'd clear node
+      // selection underneath the modal and dismount the drawer.
+      // (Relying on stopImmediatePropagation in the modal isn't enough
+      //  because the two listeners are on the same `window` target —
+      //  stopPropagation between same-target listeners is unreliable.)
+      if (rawJsonOpen) return;
       select(null);
     },
     onCmdK: () => {

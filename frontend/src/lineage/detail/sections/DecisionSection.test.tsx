@@ -153,6 +153,37 @@ describe("DecisionSection", () => {
     expect(screen.getByText("Decisions (2)")).toBeInTheDocument();
   });
 
+  it("duplicate decision_id in raw → both render without React key collision [REV-2 #4]", () => {
+    // Adapter doesn't dedupe; two DPs with the same decision_id must
+    // still render. Key uses :index suffix so React doesn't warn.
+    const dupe = rawDP({ decision_id: "model_type_auto_select" });
+    const n = node([dupe, { ...dupe }]);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<DecisionSection node={n} />);
+    // No React "Encountered two children with the same key" warning.
+    const reactKeyWarnings = errSpy.mock.calls.filter((args) =>
+      String(args[0]).match(/two children with the same key/i),
+    );
+    expect(reactKeyWarnings).toHaveLength(0);
+    expect(screen.getByText("Decisions (2)")).toBeInTheDocument();
+    errSpy.mockRestore();
+  });
+
+  it("count comes from VM even when raw has different length [REV-2 #3 desync guard]", () => {
+    // Defensive: if adapter ever drops a DP or duplicates one, the
+    // heading reflects what the VM says (registry contract) rather than
+    // the raw payload count. Cards reflect raw — UI may look mismatched
+    // but the section doesn't crash.
+    const dpRaw = rawDP({ decision_id: "model_type_auto_select" });
+    const n: GraphViewNode = {
+      ...node([dpRaw]),
+      decisions: [vmDP(), vmDP({ id: "categorical_auto_dummy" })], // VM says 2
+    };
+    render(<DecisionSection node={n} />);
+    // Heading reflects VM (the registry's shouldRender contract).
+    expect(screen.getByText("Decisions (2)")).toBeInTheDocument();
+  });
+
   it("stable React key uses decision_id (rerender doesn't remount)", () => {
     const dp = rawDP({ decision_id: "model_type_auto_select" });
     const { rerender, container } = render(

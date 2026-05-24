@@ -79,8 +79,10 @@ function renderMenu(
 }
 
 const writeText = vi.fn();
+let _origClipboard: PropertyDescriptor | undefined;
 beforeEach(() => {
   writeText.mockReset().mockResolvedValue(undefined);
+  _origClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText },
@@ -88,7 +90,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // fresh provider each test
+  // REV-3 S2: restore clipboard so other test files don't inherit our mock.
+  if (_origClipboard) {
+    Object.defineProperty(navigator, "clipboard", _origClipboard);
+  } else {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
 });
 
 describe("NodeActionMenu", () => {
