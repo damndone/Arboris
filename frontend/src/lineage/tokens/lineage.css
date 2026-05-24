@@ -275,6 +275,100 @@
   opacity: 0.4;
 }
 
+/* ─── Canvas chrome (T8.6a) ─────────────────────────────────────────
+ * Rendered as <Panel> children of <ReactFlow>. RF handles absolute
+ * positioning per `position` prop; we style the inner contents.
+ */
+.ln-canvas-toolbar {
+  display: inline-flex;
+  gap: 0;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.ln-canvas-toolbar button {
+  background: transparent;
+  color: var(--label-secondary);
+  border: 0;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+  border-right: 1px solid var(--separator);
+}
+.ln-canvas-toolbar button:last-child {
+  border-right: 0;
+}
+.ln-canvas-toolbar button:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+.ln-canvas-toolbar button:disabled[aria-pressed="true"] {
+  /* The "Auto layout" indicator: not clickable but visually pressed,
+   * communicating that auto-layout is currently the only mode. */
+  background: var(--bg-elev);
+  color: var(--label);
+  cursor: default;
+}
+
+.ln-canvas-status {
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--label-secondary);
+  letter-spacing: -0.005em;
+}
+.ln-canvas-status__count--warn {
+  color: var(--review);
+}
+
+.ln-canvas-legend {
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--label-secondary);
+  overflow: hidden;
+  transition: width 0.15s ease;
+}
+.ln-canvas-legend__chip {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: default;
+}
+.ln-canvas-legend__list {
+  display: none;
+  padding: 4px 10px 8px;
+}
+.ln-canvas-legend--expanded .ln-canvas-legend__list {
+  display: block;
+}
+.ln-canvas-legend--expanded .ln-canvas-legend__chip {
+  border-bottom: 1px solid var(--separator);
+  margin-bottom: 4px;
+}
+.ln-canvas-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.ln-canvas-legend__swatch {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 /* ─── Hover tooltip (T8.4) ──────────────────────────────────────────
  * Screen-space (position:fixed) and portaled to document.body so
  * React Flow's canvas zoom never affects tooltip pixel position.

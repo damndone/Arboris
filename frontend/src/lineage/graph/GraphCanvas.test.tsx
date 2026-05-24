@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { GraphCanvas } from "./GraphCanvas";
+import { GraphCanvas, waitingReviewsCount } from "./GraphCanvas";
 import { adaptRunGraph } from "../api/graphAdapter";
 import type { GraphResponse, LineageEdge, LineageNode } from "../types";
 
@@ -252,6 +252,259 @@ describe("GraphCanvas", () => {
       for (const el of allNodes) {
         expect(el).toHaveAttribute("data-state", "related");
       }
+    });
+  });
+
+  describe("canvas chrome (T8.6a)", () => {
+    function renderCanvas() {
+      return render(
+        <GraphCanvas
+          model={model(graph())}
+          selectedNodeId={null}
+          expandedGroups={new Set()}
+          onSelect={vi.fn()}
+          onExpandGroup={vi.fn()}
+        />,
+      );
+    }
+
+    it("renders the toolbar with Auto / Fit / Fullscreen buttons", () => {
+      renderCanvas();
+      const toolbar = screen.getByTestId("canvas-toolbar");
+      expect(toolbar).toBeInTheDocument();
+      // Auto layout is a disabled pressed indicator — not a clickable
+      // no-op (per the T8.6a guidance: avoid behaviourless buttons).
+      const auto = screen.getByTestId("toolbar-auto-layout");
+      expect(auto).toBeDisabled();
+      expect(auto).toHaveAttribute("aria-pressed", "true");
+      // Fit and Fullscreen are real actions.
+      expect(screen.getByTestId("toolbar-fit")).toBeEnabled();
+      expect(screen.getByTestId("toolbar-fullscreen")).toBeEnabled();
+    });
+
+    it("Fullscreen button no-ops gracefully when API unsupported", () => {
+      // jsdom doesn't implement Fullscreen API. Asserting the click
+      // doesn't throw is the contract: graceful degradation per
+      // T8.6a guidance.
+      renderCanvas();
+      expect(() =>
+        fireEvent.click(screen.getByTestId("toolbar-fullscreen")),
+      ).not.toThrow();
+    });
+
+    it("Fullscreen handler silently swallows a rejected requestFullscreen", async () => {
+      // Simulate a browser that exposes the API but rejects (e.g. no
+      // user gesture, security policy). The click must not surface
+      // an unhandled rejection.
+      const origEnabled = Object.getOwnPropertyDescriptor(
+        document,
+        "fullscreenEnabled",
+      );
+      Object.defineProperty(document, "fullscreenEnabled", {
+        configurable: true,
+        get: () => true,
+      });
+      const elProto = HTMLElement.prototype as unknown as {
+        requestFullscreen?: () => Promise<void>;
+      };
+      const origReq = elProto.requestFullscreen;
+      elProto.requestFullscreen = () =>
+        Promise.reject(new Error("user gesture required"));
+
+      try {
+        renderCanvas();
+        fireEvent.click(screen.getByTestId("toolbar-fullscreen"));
+        // Flush microtasks so the rejected promise resolves inside the
+        // try/catch in the handler.
+        await Promise.resolve();
+      } finally {
+        if (origReq) elProto.requestFullscreen = origReq;
+        else delete elProto.requestFullscreen;
+        if (origEnabled)
+          Object.defineProperty(document, "fullscreenEnabled", origEnabled);
+      }
+    });
+
+    it("renders the status badge with run id and 0 waiting (clean graph)", () => {
+      renderCanvas();
+      const status = screen.getByTestId("canvas-status");
+      expect(status).toHaveTextContent("run_r1");
+      const count = screen.getByTestId("canvas-status-count");
+      expect(count).toHaveTextContent("waiting 0 reviews");
+      // No warn styling at zero.
+      expect(count.className).not.toContain("--warn");
+    });
+
+    it("counts decisions with reviewStatus ∈ {needed, failed} across all nodes", () => {
+      // Build a graph with mixed review states; verify the badge text +
+      // warn class. waitingReviewsCount itself is the pure unit.
+      const g: GraphResponse = {
+        schema_version: 2,
+        run_id: "r-mix",
+        legacy: false,
+        stats: {
+          node_count: 2,
+          edge_count: 0,
+          leaf_count: 2,
+          has_dp_count: 0,
+        },
+        nodes: {
+          N1: node({
+            id: "N1",
+            kind: "model",
+            display_label: "N1",
+            decision_points: [
+              {
+                decision_id: "d1",
+                decision_id_alias: [],
+                selected: null,
+                candidates: [],
+                source: "system_default",
+                contestability: {
+                  is_contestable: true,
+                  assumption_checks_needed: [],
+                  warnings: [],
+                  review_status: "needed",
+                },
+                reason: null,
+              },
+              {
+                decision_id: "d2",
+                decision_id_alias: [],
+                selected: null,
+                candidates: [],
+                source: "system_default",
+                contestability: {
+                  is_contestable: true,
+                  assumption_checks_needed: [],
+                  warnings: [],
+                  review_status: "passed",
+                },
+                reason: null,
+              },
+            ],
+          }),
+          N2: node({
+            id: "N2",
+            kind: "model",
+            display_label: "N2",
+            decision_points: [
+              {
+                decision_id: "d3",
+                decision_id_alias: [],
+                selected: null,
+                candidates: [],
+                source: "system_default",
+                contestability: {
+                  is_contestable: true,
+                  assumption_checks_needed: [],
+                  warnings: [],
+                  review_status: "failed",
+                },
+                reason: null,
+              },
+            ],
+          }),
+        },
+        edges: {},
+        branches: {},
+      };
+      const vm = model(g);
+      // Pure-function spot check: 1 needed (N1.d1) + 1 failed (N2.d3) = 2.
+      expect(waitingReviewsCount(vm)).toBe(2);
+
+      render(
+        <GraphCanvas
+          model={vm}
+          selectedNodeId={null}
+          expandedGroups={new Set()}
+          onSelect={vi.fn()}
+          onExpandGroup={vi.fn()}
+        />,
+      );
+      const count = screen.getByTestId("canvas-status-count");
+      expect(count).toHaveTextContent("waiting 2 reviews");
+      expect(count.className).toContain("--warn");
+    });
+
+    it("waitingReviewsCount uses singular form for N=1", () => {
+      const g: GraphResponse = {
+        schema_version: 2,
+        run_id: "r-single",
+        legacy: false,
+        stats: {
+          node_count: 1,
+          edge_count: 0,
+          leaf_count: 1,
+          has_dp_count: 0,
+        },
+        nodes: {
+          N: node({
+            id: "N",
+            display_label: "N",
+            decision_points: [
+              {
+                decision_id: "d",
+                decision_id_alias: [],
+                selected: null,
+                candidates: [],
+                source: "system_default",
+                contestability: {
+                  is_contestable: true,
+                  assumption_checks_needed: [],
+                  warnings: [],
+                  review_status: "needed",
+                },
+                reason: null,
+              },
+            ],
+          }),
+        },
+        edges: {},
+        branches: {},
+      };
+      render(
+        <GraphCanvas
+          model={model(g)}
+          selectedNodeId={null}
+          expandedGroups={new Set()}
+          onSelect={vi.fn()}
+          onExpandGroup={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId("canvas-status-count")).toHaveTextContent(
+        "waiting 1 review",
+      );
+    });
+
+    it("renders all 8 stage swatches in the legend (collapsed by default)", () => {
+      renderCanvas();
+      const legend = screen.getByTestId("canvas-legend");
+      expect(legend).toBeInTheDocument();
+      // 8 swatches always rendered; expanded toggles their visibility
+      // via CSS (display:none on the wrapping list).
+      for (const s of [
+        "source",
+        "eda",
+        "clean",
+        "transform",
+        "model",
+        "diag",
+        "viz",
+        "report",
+      ]) {
+        expect(screen.getByTestId(`legend-swatch-${s}`)).toBeInTheDocument();
+      }
+      expect(legend.className).not.toContain("--expanded");
+    });
+
+    it("legend expands on mouse enter, collapses on leave", () => {
+      renderCanvas();
+      const legend = screen.getByTestId("canvas-legend");
+      fireEvent.mouseEnter(legend);
+      expect(legend.className).toContain("ln-canvas-legend--expanded");
+      fireEvent.mouseLeave(legend);
+      expect(legend.className).not.toContain("ln-canvas-legend--expanded");
     });
   });
 

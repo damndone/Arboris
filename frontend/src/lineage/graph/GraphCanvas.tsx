@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactFlow, { Background, Controls } from "reactflow";
+import ReactFlow, {
+  Background,
+  Controls,
+  Panel,
+  useReactFlow,
+} from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
@@ -9,12 +14,160 @@ import { GraphTooltip } from "./GraphTooltip";
 import type {
   GraphViewModel,
   GraphViewNode,
+  Stage,
 } from "../api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "../folding";
 
 // T8.4: 240ms hover delay before the tooltip mounts. Matches V1.4.1
 // NodeTooltip and the prototype (uiux/graph.jsx L228).
 export const TOOLTIP_HOVER_DELAY_MS = 240;
+
+// T8.6a: stage labels from uiux/panels.jsx::stageLabel (L301-304). All
+// 8 V1.5.0 stages have an entry. Synthetic "unknown" doesn't appear in
+// the legend by design.
+const STAGE_LABEL: Record<Exclude<Stage, "unknown">, string> = {
+  source: "原始",
+  eda: "探索",
+  clean: "清洗",
+  transform: "变换",
+  model: "模型",
+  diag: "诊断",
+  viz: "可视化",
+  report: "报告",
+};
+const LEGEND_STAGES: Array<Exclude<Stage, "unknown">> = [
+  "source",
+  "eda",
+  "clean",
+  "transform",
+  "model",
+  "diag",
+  "viz",
+  "report",
+];
+
+// Count of decisions across the whole view model whose reviewStatus
+// is "needed" or "failed". Used by the canvas status badge (T8.6a).
+// Iterates model.nodes — never affected by folding or viewport.
+export function waitingReviewsCount(model: GraphViewModel): number {
+  let n = 0;
+  for (const node of model.nodes) {
+    for (const d of node.decisions) {
+      if (d.reviewStatus === "needed" || d.reviewStatus === "failed") n += 1;
+    }
+  }
+  return n;
+}
+
+interface CanvasToolbarProps {
+  containerRef: React.RefObject<HTMLDivElement>;
+}
+
+function CanvasToolbar({ containerRef }: CanvasToolbarProps) {
+  const { fitView } = useReactFlow();
+  const onFit = () => fitView({ padding: 0.2, duration: 200 });
+  const onFullscreen = async () => {
+    const el = containerRef.current;
+    if (!el) return;
+    // Fullscreen API may be unsupported (older browsers, embedded
+    // contexts) or rejected (user gesture missing, security policy).
+    // Both branches degrade gracefully — no banner, no throw.
+    if (!document.fullscreenEnabled) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await el.requestFullscreen();
+      }
+    } catch {
+      /* user rejected or feature blocked — silent no-op */
+    }
+  };
+  return (
+    <Panel position="top-left">
+      <div className="ln-canvas-toolbar" data-testid="canvas-toolbar">
+        {/* "Auto layout" is currently the only layout mode (dagre runs
+         * unconditionally). Render as a disabled pressed indicator
+         * rather than a clickable no-op so the affordance honestly
+         * reflects current capability. */}
+        <button
+          type="button"
+          disabled
+          aria-pressed="true"
+          data-testid="toolbar-auto-layout"
+          title="Auto layout (always on)"
+        >
+          Auto
+        </button>
+        <button
+          type="button"
+          onClick={onFit}
+          data-testid="toolbar-fit"
+          title="Fit to screen"
+        >
+          Fit
+        </button>
+        <button
+          type="button"
+          onClick={onFullscreen}
+          data-testid="toolbar-fullscreen"
+          title="Toggle fullscreen"
+        >
+          Fullscreen
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function CanvasStatus({ model }: { model: GraphViewModel }) {
+  const waiting = waitingReviewsCount(model);
+  return (
+    <Panel position="top-right">
+      <div className="ln-canvas-status" data-testid="canvas-status">
+        run_{model.runId} ·{" "}
+        <span
+          className={
+            waiting > 0
+              ? "ln-canvas-status__count ln-canvas-status__count--warn"
+              : "ln-canvas-status__count"
+          }
+          data-testid="canvas-status-count"
+        >
+          waiting {waiting} {waiting === 1 ? "review" : "reviews"}
+        </span>
+      </div>
+    </Panel>
+  );
+}
+
+function CanvasLegend() {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <Panel position="bottom-right">
+      <div
+        className={`ln-canvas-legend${expanded ? " ln-canvas-legend--expanded" : ""}`}
+        data-testid="canvas-legend"
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
+      >
+        <div className="ln-canvas-legend__chip">Stages</div>
+        <div className="ln-canvas-legend__list">
+          {LEGEND_STAGES.map((s) => (
+            <div key={s} className="ln-canvas-legend__row">
+              <span
+                className="ln-canvas-legend__swatch"
+                style={{ background: `var(--stage-${s})` }}
+                data-testid={`legend-swatch-${s}`}
+              />
+              <span>{STAGE_LABEL[s]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 const nodeTypes = { lineageNode: GraphNode };
 
@@ -299,8 +452,13 @@ export function GraphCanvas({
     }
   }, [selectedNodeId]);
 
+  // Container ref for the Fullscreen API target (T8.6a). Wraps the
+  // whole lineage-root so RF + chrome go fullscreen together.
+  const rootRef = useRef<HTMLDivElement>(null);
+
   return (
     <div
+      ref={rootRef}
       className="lineage-root"
       style={{ width: "100%", height: "100%", minHeight: 480 }}
     >
@@ -322,6 +480,9 @@ export function GraphCanvas({
       >
         <Background gap={20} />
         <Controls showInteractive={false} />
+        <CanvasToolbar containerRef={rootRef} />
+        <CanvasStatus model={model} />
+        <CanvasLegend />
       </ReactFlow>
       <GraphTooltip
         node={hover?.node ?? null}
