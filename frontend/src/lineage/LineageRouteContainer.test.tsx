@@ -88,6 +88,28 @@ describe("LineageRouteContainer", () => {
     expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
   });
 
+  it("error branch (422 corrupt): shows 'Lineage data is corrupt' with Try again button", async () => {
+    // Subsumes V1.4.1 LineageTab.test.tsx "shows 422 error state with Try again
+    // button" — confirms the corrupt error kind renders its specific copy and
+    // retry affordance (not just classification, which useGraphData covers).
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ detail: "graph payload malformed" }, { status: 422 }),
+    );
+    renderContainer();
+    await waitFor(() =>
+      expect(screen.getByText(/lineage data is corrupt/i)).toBeTruthy(),
+    );
+    const retry = screen.getByRole("button", { name: /try again/i });
+    expect(retry).toBeTruthy();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(v3Graph()));
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(screen.getByTestId("graph-workbench")).toBeTruthy(),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("error branch (network): shows title with Try again button that refetches", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ detail: "down" }, { status: 503 }),
