@@ -88,10 +88,12 @@ describe("DetailDrawer", () => {
     expect(screen.queryByTestId("decision-section-stub")).toBeNull();
   });
 
-  it("node with decisions → all 4 stub sections render (DoD scenario)", () => {
+  it("node with decisions → all 4 sections render (DoD scenario)", () => {
+    // TrustBanner is real post-T6.4; the other three are still stubs until
+    // T6.5–T6.7 flesh them out.
     const node = makeNode({ trust: "review", decisions: [dp()] });
     renderDrawer(makeCtx(node));
-    expect(screen.getByTestId("trust-banner-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("trust-banner-review-suggested")).toBeInTheDocument();
     expect(screen.getByTestId("lineage-chain-section-stub")).toBeInTheDocument();
     expect(screen.getByTestId("basic-info-section-stub")).toBeInTheDocument();
     expect(screen.getByTestId("decision-section-stub")).toBeInTheDocument();
@@ -100,11 +102,16 @@ describe("DetailDrawer", () => {
   it("sections render in registry `order` regardless of array position", () => {
     const node = makeNode({ trust: "review", decisions: [dp()] });
     const { container } = renderDrawer(makeCtx(node));
+    // Collect each section's data-testid by its container element. Trust
+    // banner exposes a variant-suffixed testid post-T6.4; stubs still
+    // expose -stub. Until all four are real, accept either pattern.
     const tids = Array.from(
-      container.querySelectorAll("[data-testid$='-stub']"),
+      container.querySelectorAll(
+        "[data-testid^='trust-banner-'], [data-testid$='-stub']",
+      ),
     ).map((el) => el.getAttribute("data-testid"));
     expect(tids).toEqual([
-      "trust-banner-stub", // order 10
+      "trust-banner-review-suggested", // order 10 (real component)
       "lineage-chain-section-stub", // order 50
       "basic-info-section-stub", // order 60
       "decision-section-stub", // order 70
