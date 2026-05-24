@@ -5,7 +5,7 @@ import { GraphCanvas } from "./GraphCanvas";
 import { Inspector } from "./Inspector";
 import { DecisionCard } from "./DecisionCard";
 import { DecisionExpanded } from "./DecisionExpanded";
-import { MoreMenu } from "./MoreMenu";
+import { NodeActionMenu } from "./graph/NodeActionMenu";
 import { buildBranchPath } from "./pathBuilder";
 import { adaptRunGraph } from "./api/graphAdapter";
 import type { GraphResponse } from "./types";
@@ -192,10 +192,20 @@ export function LineageTab({ projectRoot, runId }: LineageTabProps) {
             <button className="ln-btn-primary" onClick={handleCopyPath}>
               {copyFlash ? "✓ Copied" : "📋 Copy path"}
             </button>
-            <MoreMenu
-              node={selectedNode}
-              onShowJson={() => setShowJson(true)}
-            />
+            {/* V1.5.0 bridge: NodeActionMenu takes GraphViewNode + model;
+                look the VM node up from viewModel. T9 deletes LineageTab. */}
+            {(() => {
+              const vmNode = viewModel?.nodes.find(
+                (n) => n.id === selectedNode.id,
+              );
+              return viewModel && vmNode ? (
+                <NodeActionMenu
+                  node={vmNode}
+                  model={viewModel}
+                  onShowJson={() => setShowJson(true)}
+                />
+              ) : null;
+            })()}
           </div>
           <div
             style={{
