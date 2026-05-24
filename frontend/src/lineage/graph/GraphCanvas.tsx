@@ -5,8 +5,10 @@ import "reactflow/dist/style.css";
 import dagre from "dagre";
 import "../tokens/lineage.css";
 import { GraphNode } from "./GraphNode";
-import type { LineageNode } from "../types";
-import type { GraphViewModel } from "../api/graphViewTypes";
+import type {
+  GraphViewModel,
+  GraphViewNode,
+} from "../api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "../folding";
 
 const nodeTypes = { lineageNode: GraphNode };
@@ -33,26 +35,21 @@ function layoutDagre<T extends RFNode>(nodes: T[], edges: RFEdge[]): T[] {
 }
 
 /**
- * GraphNode (V1.5.0) still consumes raw LineageNode shape via `data.node`.
- * Synthesize the LineageNode payload for group + marker pseudo-nodes; real
- * graph nodes pass their `.raw` payload directly. GraphNode rewrites in Step 8
- * will retire this LineageNode dependency.
+ * Synthesize a GraphViewNode for a folded group pseudo-node. Stage is
+ * "unknown" → neutral grey bar. Trust is "ok" → no badge.
  */
-function groupAsNode(g: GroupNode): LineageNode {
+function groupAsNode(g: GroupNode): GraphViewNode {
   return {
     id: g.id,
+    nodeKey: g.id,
+    raw: null,
+    stage: "unknown",
     kind: "operation",
-    display_label: g.display_label,
+    title: g.display_label,
     summary: "Tap to expand",
-    created_at: "",
-    parent_stage_id: g.parentStageId,
-    branch_id: "main",
+    parentStageId: g.parentStageId,
     trust: "ok",
-    trust_reason: null,
-    archived: false,
-    payload_ref: null,
-    decision_points: [],
-    annotations: [],
+    decisions: [],
   };
 }
 
@@ -75,21 +72,18 @@ function markerAsNode(
   gid: string,
   variantLabel: string,
   parent: string,
-): LineageNode {
+): GraphViewNode {
   return {
     id: gid,
+    nodeKey: gid,
+    raw: null,
+    stage: "unknown",
     kind: "operation",
-    display_label: `▼ ${variantLabel} (expanded)`,
+    title: `▼ ${variantLabel} (expanded)`,
     summary: "Tap to fold back",
-    created_at: "",
-    parent_stage_id: parent,
-    branch_id: "main",
+    parentStageId: parent,
     trust: "ok",
-    trust_reason: null,
-    archived: false,
-    payload_ref: null,
-    decision_points: [],
-    annotations: [],
+    decisions: [],
   };
 }
 
@@ -139,9 +133,9 @@ export function GraphCanvas({
       id: n.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      // GraphNode consumes the raw LineageNode shape via data.node. Adapter
-      // preserves it on GraphViewNode.raw so we can hand it through verbatim.
-      data: { node: n.raw as LineageNode },
+      // T8.3: GraphNode now consumes the V1.5.0 GraphViewNode directly.
+      // Adapter is the only consumer of backend LineageNode shape.
+      data: { node: n },
       selected: n.id === selectedNodeId,
     }));
     const groupNodes: RFNode[] = groups.map((g) => ({

@@ -177,3 +177,87 @@
    * dark and light themes (was a literal V1.4.1 bright system-blue). */
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--tint) 22%, transparent);
 }
+
+/* ─── Node card (T8.3) ──────────────────────────────────────────────
+ * Editorial card: 8px left colour bar (per stage) + body container with
+ * row1 (kind label uppercase mono + optional trust badge) → title
+ * (serif) → meta (mono dim). Uses only design tokens; no hex colours.
+ */
+.ln-graph-node {
+  display: flex;
+  width: 240px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+}
+.ln-graph-node__bar {
+  width: 8px;
+  flex: 0 0 8px;
+  background: var(--node-color, var(--label-tertiary));
+}
+.ln-graph-node__body {
+  flex: 1 1 auto;
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+.ln-graph-node__row1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.ln-graph-node__kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  font-weight: 600;
+}
+.ln-graph-node__title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--label);
+  line-height: 1.2;
+  margin-bottom: 3px;
+  letter-spacing: -0.005em;
+}
+.ln-graph-node__meta {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--label-secondary);
+  line-height: 1.3;
+}
+
+/* Trust badge — small uppercase pill, token-coloured */
+.ln-graph-node__badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--separator);
+}
+.ln-graph-node__badge--review {
+  color: var(--review);
+  border-color: color-mix(in oklch, var(--review) 35%, transparent);
+}
+.ln-graph-node__badge--caution {
+  color: var(--caution);
+  border-color: color-mix(in oklch, var(--caution) 35%, transparent);
+}
+
+/* Selected outline — derives from --tint to stay theme-consistent */
+.ln-graph-node--selected {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}

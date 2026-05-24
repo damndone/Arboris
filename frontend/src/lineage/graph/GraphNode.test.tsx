@@ -4,85 +4,153 @@ import { render as rtlRender, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { ReactFlowProvider } from "reactflow";
 import { GraphNode } from "./GraphNode";
-import type { DecisionPoint, LineageNode, ReviewStatus } from "../types";
+import type {
+  DecisionReviewStatus,
+  DecisionViewModel,
+  GraphViewNode,
+  Stage,
+  Trust,
+} from "../api/graphViewTypes";
 
 // GraphNode uses React Flow <Handle>, which requires ReactFlowProvider in tree.
 function render(ui: ReactElement) {
   return rtlRender(<ReactFlowProvider>{ui}</ReactFlowProvider>);
 }
 
-function n(overrides: Partial<LineageNode> = {}): LineageNode {
+function vn(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
   return {
     id: "n1",
+    nodeKey: "n1",
+    raw: null,
+    stage: "model",
     kind: "model",
-    display_label: "Primary OLS",
+    title: "Primary OLS",
     summary: "OLS · HC1 · n = 32",
-    created_at: "2026-05-19T00:00:00Z",
-    parent_stage_id: null,
-    branch_id: "main",
+    parentStageId: null,
     trust: "ok",
-    trust_reason: null,
-    archived: false,
-    payload_ref: null,
-    decision_points: [],
-    annotations: [],
+    decisions: [],
     ...overrides,
   };
 }
 
-function dp(review: ReviewStatus = "needed"): DecisionPoint {
+function vd(reviewStatus: DecisionReviewStatus = "needed"): DecisionViewModel {
   return {
-    decision_id: "d1",
-    decision_id_alias: [],
-    selected: "x",
-    candidates: [],
-    source: "system_default",
-    contestability: {
-      is_contestable: true,
-      assumption_checks_needed: [],
-      warnings: [],
-      review_status: review,
-    },
-    reason: null,
+    id: "d1",
+    question: "Model type",
+    picked: "OLS",
+    alternatives: [],
+    why: "",
+    evidence: [],
+    reviewStatus,
   };
 }
 
-describe("GraphNode", () => {
-  it("renders title and summary", () => {
-    render(<GraphNode data={{ node: n() }} selected={false} />);
+describe("GraphNode (T8.3 visual refresh)", () => {
+  it("renders kind label, title, and summary", () => {
+    render(<GraphNode data={{ node: vn() }} selected={false} />);
     expect(screen.getByText("Primary OLS")).toBeInTheDocument();
     expect(screen.getByText("OLS · HC1 · n = 32")).toBeInTheDocument();
+    expect(screen.getByText("model")).toBeInTheDocument();
   });
 
-  it("hides second line when summary is null", () => {
-    render(<GraphNode data={{ node: n({ summary: null }) }} selected={false} />);
+  it("hides meta line when summary is undefined", () => {
+    render(<GraphNode data={{ node: vn({ summary: undefined }) }} selected={false} />);
     expect(screen.queryByTestId("node-summary")).toBeNull();
   });
 
-  it("shows ⚠ Review pill when review_count > 0", () => {
+  it("shows no badge when trust=ok and no review needed", () => {
+    render(<GraphNode data={{ node: vn() }} selected={false} />);
+    expect(screen.queryByTestId("node-badge")).toBeNull();
+  });
+
+  it("shows review badge when trust=review", () => {
+    render(<GraphNode data={{ node: vn({ trust: "review" }) }} selected={false} />);
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Review");
+    expect(badge.className).toContain("ln-graph-node__badge--review");
+  });
+
+  it("shows review badge when any decision needs review (even if trust=ok)", () => {
     render(
       <GraphNode
-        data={{ node: n({ decision_points: [dp(), dp()] }) }}
+        data={{ node: vn({ decisions: [vd("needed")] }) }}
         selected={false}
       />,
     );
-    expect(screen.getByText(/Review · 2/)).toBeInTheDocument();
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Review");
   });
 
-  it("shows trust pill when trust=warning and no DP needs review", () => {
-    render(<GraphNode data={{ node: n({ trust: "warning" }) }} selected={false} />);
-    expect(screen.getByText(/warning/i)).toBeInTheDocument();
-  });
-
-  it("shows no pill when clean", () => {
-    render(<GraphNode data={{ node: n() }} selected={false} />);
-    expect(screen.queryByTestId("node-pill")).toBeNull();
-  });
-
-  it("applies selected class when selected", () => {
-    const { container } = render(
-      <GraphNode data={{ node: n() }} selected={true} />,
+  it("shows review badge when any decision failed review (even if trust=ok)", () => {
+    render(
+      <GraphNode
+        data={{ node: vn({ decisions: [vd("failed")] }) }}
+        selected={false}
+      />,
     );
-    expect(container.querySelector(".ln-node--selected")).toBeInTheDocument();
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
+  });
+
+  it("shows caution badge when trust=caution (takes priority over review)", () => {
+    render(
+      <GraphNode
+        data={{ node: vn({ trust: "caution", decisions: [vd("needed")] }) }}
+        selected={false}
+      />,
+    );
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Caution");
+    expect(badge.className).toContain("ln-graph-node__badge--caution");
+  });
+
+  it("applies selected outline class when selected", () => {
+    render(<GraphNode data={{ node: vn() }} selected={true} />);
+    expect(screen.getByTestId("graph-node").className).toContain(
+      "ln-graph-node--selected",
+    );
+  });
+
+  describe("stage × trust matrix (DoD T8.3)", () => {
+    const stages: Stage[] = [
+      "source",
+      "eda",
+      "clean",
+      "transform",
+      "model",
+      "diag",
+      "viz",
+      "report",
+    ];
+    const trusts: Trust[] = ["ok", "review", "caution"];
+
+    for (const stage of stages) {
+      for (const trust of trusts) {
+        it(`renders stage=${stage} trust=${trust} without crashing`, () => {
+          render(
+            <GraphNode data={{ node: vn({ stage, trust }) }} selected={false} />,
+          );
+          const node = screen.getByTestId("graph-node");
+          expect(node).toHaveAttribute("data-stage", stage);
+          expect(node).toHaveAttribute("data-trust", trust);
+          // Bar uses a CSS var (via --node-color); verify the inline style sets it.
+          expect(node.style.getPropertyValue("--node-color")).toBe(
+            `var(--stage-${stage})`,
+          );
+        });
+      }
+    }
+
+    it("stage=unknown falls back to neutral --label-tertiary (not a stage token)", () => {
+      render(
+        <GraphNode
+          data={{ node: vn({ stage: "unknown" }) }}
+          selected={false}
+        />,
+      );
+      const node = screen.getByTestId("graph-node");
+      expect(node.style.getPropertyValue("--node-color")).toBe(
+        "var(--label-tertiary)",
+      );
+    });
   });
 });
