@@ -86,7 +86,7 @@ describe("DetailDrawer", () => {
     expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
     expect(screen.queryByTestId("trust-banner-review-suggested")).toBeNull();
     expect(screen.queryByTestId("trust-banner-caution")).toBeNull();
-    expect(screen.queryByTestId("decision-section-stub")).toBeNull();
+    expect(screen.queryByTestId("decision-section")).toBeNull();
   });
 
   it("node with decisions → all 4 sections render (DoD scenario)", () => {
@@ -97,7 +97,7 @@ describe("DetailDrawer", () => {
     expect(screen.getByTestId("trust-banner-review-suggested")).toBeInTheDocument();
     expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
     expect(screen.getByTestId("basic-info-section")).toBeInTheDocument();
-    expect(screen.getByTestId("decision-section-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("decision-section")).toBeInTheDocument();
   });
 
   it("sections render in registry `order` regardless of array position", () => {
@@ -112,7 +112,7 @@ describe("DetailDrawer", () => {
           "[data-testid='lineage-chain-section']," +
           "[data-testid='basic-info-section']," +
           "[data-testid='basic-info-section']," +
-          "[data-testid='decision-section-stub']," +
+          "[data-testid='decision-section']," +
           "[data-testid='decision-section']",
       ),
     ).map((el) => el.getAttribute("data-testid"));
@@ -120,7 +120,7 @@ describe("DetailDrawer", () => {
       "trust-banner-review-suggested", // order 10
       "lineage-chain-section", // order 50
       "basic-info-section", // order 60 (still stub)
-      "decision-section-stub", // order 70 (still stub)
+      "decision-section", // order 70 (still stub)
     ]);
   });
 
