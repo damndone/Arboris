@@ -133,6 +133,12 @@ function adaptNode(
     stageSource === "v2" ? "unknown" : coerceStage(raw.stage);
   const subtitle = stage !== "unknown" ? `${stage} · ${raw.kind}` : undefined;
 
+  // Defensive coalesce (REV-3 #4): if a future backend ever stamps v3 but
+  // omits decision_points entirely, fall back to [] instead of crashing on
+  // `.map of undefined`. The contract requires the field, but production
+  // shouldn't melt over a missing additive.
+  const dps = raw.decision_points ?? [];
+
   return {
     id: raw.id,
     nodeKey: raw.id, // V1.5.0: same; V2.0 may diverge
@@ -144,7 +150,7 @@ function adaptNode(
     summary: raw.summary ?? undefined,
     trust: normalizeTrust(raw.trust as BackendTrust),
     trustReason: raw.trust_reason ?? undefined,
-    decisions: raw.decision_points.map(adaptDecisionPoint),
+    decisions: dps.map(adaptDecisionPoint),
     createdAt: raw.created_at,
   };
 }

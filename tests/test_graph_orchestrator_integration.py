@@ -78,6 +78,58 @@ def test_freshly_generated_v3_graph_has_no_unstaged_nodes(tmp_path: Path):
     assert all(node.stage is not None for node in graph.nodes.values())
 
 
+def test_freshly_generated_v3_graph_tags_dropped_variable_with_stage(
+    tmp_path: Path, monkeypatch
+):
+    """The dropped-variable trigger site (Stage.TRANSFORM) is emitted on a
+    pristine pipeline only when _check_dropped_variables fires; the happy-path
+    fixture data doesn't trigger it, so REV-2 #1 flagged this gap. Force-emit
+    via the same monkeypatch pattern used in test_orchestrator_summary.py.
+    """
+    import workbench.orchestrator as orch
+    from workbench.graph_model import Stage
+
+    def fake_dropped(*args, **kwargs):
+        return [{
+            "variable": "x_zero",
+            "reason": "zero_variance",
+            "reason_display": "dropped due to zero variance",
+        }]
+
+    monkeypatch.setattr(orch, "_check_dropped_variables", fake_dropped)
+
+    proot = tmp_path / "demo"
+    create_project(tmp_path, proot.name)
+    run = create_run(proot, mode="auto")
+    data = tmp_path / "data.csv"
+    pd.DataFrame({
+        "y": [1 + 2 * i for i in range(35)],
+        "x": list(range(35)),
+        "x_zero": [1] * 35,
+    }).to_csv(data, index=False)
+
+    config = load_config(proot / "config.yml")
+    started_at = datetime.now(timezone.utc).isoformat()
+    _write_manifest(
+        run.root, run.run_id, "auto", "running",
+        _lineage([data]),
+        started_at=started_at, y="y", x=["x", "x_zero"],
+    )
+
+    _run_workflow(
+        run.root, run.run_id, [data],
+        "auto", "y", ["x", "x_zero"], config, started_at,
+        model_type="auto",
+    )
+
+    graph = GraphStore(runs_root=proot / "runs").read(run.run_id)
+
+    assert "var:x_zero:dropped" in graph.nodes
+    assert graph.nodes["var:x_zero:dropped"].stage == Stage.TRANSFORM
+    # Plus the headline invariant still holds in this branched pipeline:
+    assert all(node.stage is not None for node in graph.nodes.values())
+
+
 def test_orchestrator_emits_handle_missing_values_decision_point(tmp_path: Path):
     """Cleaning stage must carry the handle_missing_values DecisionPoint."""
     runs_root = tmp_path / "demo"

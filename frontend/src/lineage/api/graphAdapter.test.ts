@@ -209,6 +209,30 @@ describe("graphAdapter", () => {
     expect(m.nodes[0].createdAt).toBe("2026-05-22T12:34:56Z");
   });
 
+  it.each([
+    ["future_super_stage", "unknown"],
+    ["", "unknown"],
+    [null, "unknown"],
+    [undefined, "unknown"],
+  ] as const)(
+    "v3 stage=%p → coerced to %p without throwing",
+    (rawStage, expected) => {
+      const node = makeNode("n", { stage: rawStage as string | null });
+      const m = adaptRunGraph(makeV3Graph([node]));
+      expect(m.nodes[0].stage).toBe(expected);
+    },
+  );
+
+  it("v3 with missing decision_points (forward-compat) → decisions: [] without crash", () => {
+    // REV-3 #4: defensive coalesce so a future backend that omits an additive
+    // field doesn't melt the UI. Production v3 always sends decision_points,
+    // but the adapter shouldn't crash if it's stripped by a transform layer.
+    const node = makeNode("n", { stage: "model" });
+    delete (node as { decision_points?: unknown }).decision_points;
+    const m = adaptRunGraph(makeV3Graph([node]));
+    expect(m.nodes[0].decisions).toEqual([]);
+  });
+
   it("v3 with unknown future fields → no throw, V1.5 fields adapt, extras don't leak", () => {
     // Forward-compat: future backend versions may add fields the V1.5.0 adapter
     // has not been taught about. The adapter must (a) not crash and (b) not

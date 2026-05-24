@@ -536,37 +536,33 @@ def test_v2_multi_dp_round_trips(tmp_path: Path):
 
 
 def test_v2_file_loads_with_stage_none():
-    """V1.4.1 graph files read cleanly with stage=None for every node."""
+    """V1.4.1 graph files read cleanly with stage=None for every node kind
+    the orchestrator emits (REV-2 #5: was covering only dataset_stage + model;
+    now extended to variable and report — the other two kinds emitted today).
+    """
+    def _node(node_id: str, kind: str, label: str) -> dict[str, object]:
+        return {
+            "id": node_id,
+            "kind": kind,
+            "display_label": label,
+            "created_at": "2026-05-19T00:00:00Z",
+            "parent_stage_id": None,
+            "branch_id": "main",
+            "trust": "ok",
+            "trust_reason": None,
+            "archived": False,
+            "payload_ref": None,
+            "decision_points": [],
+        }
+
     v2 = {
         "schema_version": 2,
         "run_id": "r1",
         "nodes": {
-            "stage:raw": {
-                "id": "stage:raw",
-                "kind": "dataset_stage",
-                "display_label": "Raw",
-                "created_at": "2026-05-19T00:00:00Z",
-                "parent_stage_id": None,
-                "branch_id": "main",
-                "trust": "ok",
-                "trust_reason": None,
-                "archived": False,
-                "payload_ref": None,
-                "decision_points": [],
-            },
-            "model:ols_1": {
-                "id": "model:ols_1",
-                "kind": "model",
-                "display_label": "OLS",
-                "created_at": "2026-05-19T00:01:00Z",
-                "parent_stage_id": None,
-                "branch_id": "main",
-                "trust": "ok",
-                "trust_reason": None,
-                "archived": False,
-                "payload_ref": None,
-                "decision_points": [],
-            },
+            "stage:raw":    _node("stage:raw",    "dataset_stage", "Raw"),
+            "var:x:cleaned": _node("var:x:cleaned", "variable",   "x"),
+            "model:ols_1":  _node("model:ols_1",  "model",         "OLS"),
+            "report:html":  _node("report:html",  "report",        "HTML report"),
         },
         "edges": {},
         "branches": {},
@@ -577,6 +573,10 @@ def test_v2_file_loads_with_stage_none():
 
     assert graph.schema_version == 2
     assert {node.stage for node in graph.nodes.values()} == {None}
+    # Sanity: kinds round-tripped (so the test fails fast if NodeKind drifts)
+    assert {n.kind.value for n in graph.nodes.values()} == {
+        "dataset_stage", "variable", "model", "report",
+    }
 
 
 def test_dual_field_uses_decision_points(tmp_path: Path):

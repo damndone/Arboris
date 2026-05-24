@@ -1,10 +1,13 @@
 """Unit tests for lineage decision factory stage metadata."""
 from __future__ import annotations
 
+import inspect
+import typing
 from collections.abc import Callable
 
 import pytest
 
+import workbench.graph_decision_factory as factory_module
 from workbench.graph_decision_factory import (
     STAGE_BY_DECISION_ID,
     auto_coerce_to_numeric,
@@ -61,3 +64,35 @@ def test_factory_decision_id_has_expected_stage(
     decision_point: DecisionPoint = factory()
 
     assert STAGE_BY_DECISION_ID[decision_point.decision_id] == expected_stage
+
+
+def test_stage_by_decision_id_covers_every_factory() -> None:
+    """REV-2 #2: if a new factory is added without updating STAGE_BY_DECISION_ID,
+    the per-factory parametrized test still passes (it only checks known names).
+    Catch drift by counting public factories that return DecisionPoint and
+    asserting the count matches the table size.
+    """
+    type_hints_cache: dict[str, dict[str, typing.Any]] = {}
+
+    def returns_decision_point(fn: Callable[..., object]) -> bool:
+        if fn.__name__.startswith("_"):
+            return False
+        try:
+            hints = type_hints_cache.setdefault(
+                fn.__name__, typing.get_type_hints(fn)
+            )
+        except Exception:
+            return False
+        return hints.get("return") is DecisionPoint
+
+    public_factories = [
+        fn for _, fn in inspect.getmembers(factory_module, inspect.isfunction)
+        if returns_decision_point(fn)
+    ]
+
+    assert len(public_factories) == len(STAGE_BY_DECISION_ID), (
+        f"STAGE_BY_DECISION_ID has {len(STAGE_BY_DECISION_ID)} entries but "
+        f"{len(public_factories)} public DecisionPoint factories exist "
+        f"({sorted(fn.__name__ for fn in public_factories)}). "
+        f"A new factory was likely added without registering its stage."
+    )

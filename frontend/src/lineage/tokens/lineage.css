@@ -173,5 +173,7 @@
 /* Node selected state */
 .ln-node--selected {
   border-color: var(--tint);
-  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.13);
+  /* REV-3 #1: halo derives from --tint so it matches the border in both
+   * dark and light themes (was a literal V1.4.1 bright system-blue). */
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--tint) 22%, transparent);
 }
