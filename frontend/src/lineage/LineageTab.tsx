@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRunGraph, ApiError } from "../api";
-import { GraphCanvas } from "./GraphCanvas";
+import { GraphCanvas } from "./graph/GraphCanvas";
 import { Inspector } from "./Inspector";
 import { DecisionCard } from "./decisions/DecisionCard";
 import { DecisionExpanded } from "./decisions/DecisionExpanded";

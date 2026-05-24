@@ -3,11 +3,11 @@ import ReactFlow, { Background, Controls } from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
-import "./tokens/lineage.css";
-import { GraphNode } from "./graph/GraphNode";
-import type { LineageNode } from "./types";
-import type { GraphViewModel } from "./api/graphViewTypes";
-import { foldVariableClusters, type GroupNode } from "./folding";
+import "../tokens/lineage.css";
+import { GraphNode } from "./GraphNode";
+import type { LineageNode } from "../types";
+import type { GraphViewModel } from "../api/graphViewTypes";
+import { foldVariableClusters, type GroupNode } from "../folding";
 
 const nodeTypes = { lineageNode: GraphNode };
 

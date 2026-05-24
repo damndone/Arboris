@@ -2,8 +2,8 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GraphCanvas } from "./GraphCanvas";
-import { adaptRunGraph } from "./api/graphAdapter";
-import type { GraphResponse, LineageNode } from "./types";
+import { adaptRunGraph } from "../api/graphAdapter";
+import type { GraphResponse, LineageNode } from "../types";
 
 // Bridge: tests still build the raw backend GraphResponse fixture (so they
 // exercise the real adapter path), and pass `adaptRunGraph(g)` into the

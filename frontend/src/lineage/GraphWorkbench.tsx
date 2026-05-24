@@ -12,7 +12,7 @@
 // today it's transient component state.
 
 import { useEffect, useMemo, useState } from "react";
-import { GraphCanvas } from "./GraphCanvas";
+import { GraphCanvas } from "./graph/GraphCanvas";
 import { useLineage } from "./LineageContext";
 import { useGraphKeyboard } from "./hooks/useGraphKeyboard";
 import { DetailDrawer } from "./detail/DetailDrawer";
