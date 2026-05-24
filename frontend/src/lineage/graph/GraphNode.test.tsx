@@ -103,6 +103,36 @@ describe("GraphNode (T8.3 visual refresh)", () => {
     expect(badge.className).toContain("ln-graph-node__badge--caution");
   });
 
+  // REV-2: non-triggering decision states must not surface a badge when
+  // trust=ok. Otherwise we'd over-flag nodes whose DPs are already cleared.
+  const benign: DecisionReviewStatus[] = [
+    "passed",
+    "not_needed",
+    "waived",
+    "unknown",
+  ];
+  for (const status of benign) {
+    it(`shows no badge when trust=ok and decision.reviewStatus=${status}`, () => {
+      render(
+        <GraphNode
+          data={{ node: vn({ decisions: [vd(status)] }) }}
+          selected={false}
+        />,
+      );
+      expect(screen.queryByTestId("node-badge")).toBeNull();
+    });
+  }
+
+  it("shows review badge when trust=review even with no decisions [REV-2]", () => {
+    render(
+      <GraphNode
+        data={{ node: vn({ trust: "review", decisions: [] }) }}
+        selected={false}
+      />,
+    );
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
+  });
+
   it("applies selected outline class when selected", () => {
     render(<GraphNode data={{ node: vn() }} selected={true} />);
     expect(screen.getByTestId("graph-node").className).toContain(

@@ -24,6 +24,13 @@
   --tint:             oklch(0.72 0.08 240);
   --tint-hover:       oklch(0.78 0.08 240);
 
+  /* Editorial ink — stroke / selected-node outline (plan T8.3 step 3,
+   * spec §19.5). Mirrors prototype `--c-ink` (uiux/styles.css). Equal
+   * to --tint in V1.5.0 but kept as a separate token so the semantic
+   * (ink stroke vs accent fill) stays addressable. May diverge in
+   * V1.5.x without churning every --tint consumer. */
+  --ink:              oklch(0.72 0.08 240);
+
   /* Burnished status colours (never bright) */
   --orange:           oklch(0.74 0.10 65);
   --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
@@ -72,6 +79,7 @@
 
   --tint:             oklch(0.48 0.10 240);
   --tint-hover:       oklch(0.54 0.10 240);
+  --ink:              oklch(0.48 0.10 240);
 
   --orange:           oklch(0.62 0.12 65);
   --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
@@ -170,14 +178,6 @@
   font-weight: 600;
 }
 
-/* Node selected state */
-.ln-node--selected {
-  border-color: var(--tint);
-  /* REV-3 #1: halo derives from --tint so it matches the border in both
-   * dark and light themes (was a literal V1.4.1 bright system-blue). */
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--tint) 22%, transparent);
-}
-
 /* ─── Node card (T8.3) ──────────────────────────────────────────────
  * Editorial card: 8px left colour bar (per stage) + body container with
  * row1 (kind label uppercase mono + optional trust badge) → title
@@ -191,6 +191,10 @@
   border-radius: 10px;
   overflow: hidden;
   font-family: var(--font-sans);
+  /* REV-3 T8.3: React Flow <Handle> uses position:absolute. Anchor to
+   * the node container (not a transient flex ancestor) so top/bottom
+   * resolves to the node's bounding box and edges attach correctly. */
+  position: relative;
 }
 .ln-graph-node__bar {
   width: 8px;
@@ -256,8 +260,10 @@
   border-color: color-mix(in oklch, var(--caution) 35%, transparent);
 }
 
-/* Selected outline — derives from --tint to stay theme-consistent */
+/* Selected outline — editorial --ink stroke (plan T8.3 step 3, spec
+ * §19.5). --ink ≡ --tint in V1.5.0 but uses the ink token to track
+ * spec/prototype vocabulary. */
 .ln-graph-node--selected {
-  outline: 2px solid var(--tint);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }

@@ -9,9 +9,26 @@
 //   │     │  Title (serif)              │
 //   │     │  meta line                  │  ← summary or fallback
 //   └─────┴─────────────────────────────┘
-// The 8px left bar is coloured per stage via `var(--stage-${stage})`; the
-// trust badge appears for review / caution only ("ok" → no badge).
-// Selected state adds an outline derived from --tint.
+//
+// ── Design decision (recorded T8.3 REV-2) ───────────────────────────
+// The 8px left bar carries STAGE colour (var(--stage-${stage})), not
+// trust. Spec §19.5 footnote ("--review left bar for review/needed,
+// --caution left bar for caution/failed") and plan §10 T8.3 step 1
+// ("background: var(--stage-${stage})") were in conflict; plan wins
+// because (a) prototype uiux/graph.jsx L350 is also stage-driven,
+// (b) spec L18's "tri-state visually distinguishable" requirement is
+// satisfied by selected-outline + trust badge alone. Trust signal
+// lives in the row1 badge.
+//
+// Badge precedence: caution > review (trust=review OR any decision
+// reviewStatus ∈ {needed,failed}) > none. The decision-fallback
+// inherits V1.4.1 NodeCard behaviour so a trust=ok node with a
+// "needed" DP still flags for review — adapter's normalizeTrust does
+// not consider decisions, so this fallback prevents a missed signal.
+//
+// Selected outline uses var(--ink) (≡ var(--tint) in V1.5.0; named
+// separately to track spec/prototype vocabulary — see lineage.css).
+// ────────────────────────────────────────────────────────────────────
 
 import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
