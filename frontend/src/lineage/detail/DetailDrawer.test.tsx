@@ -82,7 +82,7 @@ describe("DetailDrawer", () => {
 
   it("ok-trust node with no DPs → only basic + lineage sections (no trust, no decision)", () => {
     renderDrawer(makeCtx(makeNode()));
-    expect(screen.getByTestId("basic-info-section-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("basic-info-section")).toBeInTheDocument();
     expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
     expect(screen.queryByTestId("trust-banner-review-suggested")).toBeNull();
     expect(screen.queryByTestId("trust-banner-caution")).toBeNull();
@@ -96,7 +96,7 @@ describe("DetailDrawer", () => {
     renderDrawer(makeCtx(node));
     expect(screen.getByTestId("trust-banner-review-suggested")).toBeInTheDocument();
     expect(screen.getByTestId("lineage-chain-section")).toBeInTheDocument();
-    expect(screen.getByTestId("basic-info-section-stub")).toBeInTheDocument();
+    expect(screen.getByTestId("basic-info-section")).toBeInTheDocument();
     expect(screen.getByTestId("decision-section-stub")).toBeInTheDocument();
   });
 
@@ -110,7 +110,7 @@ describe("DetailDrawer", () => {
       container.querySelectorAll(
         "[data-testid^='trust-banner-']," +
           "[data-testid='lineage-chain-section']," +
-          "[data-testid='basic-info-section-stub']," +
+          "[data-testid='basic-info-section']," +
           "[data-testid='basic-info-section']," +
           "[data-testid='decision-section-stub']," +
           "[data-testid='decision-section']",
@@ -119,7 +119,7 @@ describe("DetailDrawer", () => {
     expect(tids).toEqual([
       "trust-banner-review-suggested", // order 10
       "lineage-chain-section", // order 50
-      "basic-info-section-stub", // order 60 (still stub)
+      "basic-info-section", // order 60 (still stub)
       "decision-section-stub", // order 70 (still stub)
     ]);
   });
