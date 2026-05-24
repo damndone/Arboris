@@ -506,6 +506,34 @@ describe("GraphCanvas", () => {
       fireEvent.mouseLeave(legend);
       expect(legend.className).not.toContain("ln-canvas-legend--expanded");
     });
+
+    // T8.6b: structural guard for the scoped CSS override of React
+    // Flow's <Controls>. We do NOT assert computed CSS (jsdom doesn't
+    // resolve stylesheets meaningfully) — that needs browser smoke.
+    // What this test pins is the class-name contract: if RF ever
+    // renames .react-flow__controls / .react-flow__controls-button
+    // the override silently breaks visually but this test fails
+    // immediately, flagging the regression.
+    it("React Flow Controls render with the expected class hooks [T8.6b]", () => {
+      renderCanvas();
+      const controls = document.querySelector(".react-flow__controls");
+      expect(controls).not.toBeNull();
+      const buttons = document.querySelectorAll(
+        ".react-flow__controls-button",
+      );
+      // Default Controls renders zoom-in, zoom-out, fit-view (3
+      // buttons — interactive is suppressed by showInteractive=false).
+      expect(buttons.length).toBe(3);
+      expect(
+        document.querySelector(".react-flow__controls-zoomin"),
+      ).not.toBeNull();
+      expect(
+        document.querySelector(".react-flow__controls-zoomout"),
+      ).not.toBeNull();
+      expect(
+        document.querySelector(".react-flow__controls-fitview"),
+      ).not.toBeNull();
+    });
   });
 
   it("does not render a fold-back marker for a stale expanded id whose parent is missing", async () => {

@@ -369,6 +369,61 @@
   flex-shrink: 0;
 }
 
+/* ─── React Flow Controls zoom-pill restyle (T8.6b) ────────────────
+ * Scoped CSS override of the default <Controls> appearance. We do
+ * NOT replace the component — RF still owns zoom-in/out/fit logic +
+ * disabled state at min/max zoom. Class names verified against
+ * @reactflow/controls v11.x (LL: react-flow__controls /
+ * react-flow__controls-button).
+ *
+ * Layout: horizontal pill (prototype look) instead of the default
+ * vertical stack. Tokens replace the literal #fefefe / #eee / #f4f4f4
+ * defaults so the controls track our dark/light themes via OKLCH.
+ *
+ * IMPORTANT: this rule lives under .lineage-root so it never leaks
+ * into other React Flow instances elsewhere in the app.
+ */
+.lineage-root .react-flow__controls {
+  display: flex;
+  flex-direction: row;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.lineage-root .react-flow__controls-button {
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--separator);
+  /* Default has border-bottom; we flipped to border-right for the
+   * horizontal layout. Clear the bottom border to avoid double rules
+   * stacking with the parent border. */
+  border-bottom: 0;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  color: var(--label-secondary);
+  fill: currentColor;
+}
+.lineage-root .react-flow__controls-button:last-child {
+  border-right: 0;
+}
+.lineage-root .react-flow__controls-button:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+.lineage-root .react-flow__controls-button svg {
+  fill: currentColor;
+}
+.lineage-root .react-flow__controls-button:disabled {
+  color: var(--label-tertiary);
+  cursor: default;
+}
+.lineage-root .react-flow__controls-button:disabled svg {
+  fill-opacity: 0.5;
+}
+
 /* ─── Hover tooltip (T8.4) ──────────────────────────────────────────
  * Screen-space (position:fixed) and portaled to document.body so
  * React Flow's canvas zoom never affects tooltip pixel position.
