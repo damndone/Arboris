@@ -4,19 +4,27 @@
 // per spec §8.2 — it hosts the dialog's aria-labelledby target and the
 // close button, both of which are invariant across node kinds. Section
 // changes must not be able to remove it.
+//
+// When `onShowJson` is provided the header also mounts NodeActionMenu
+// next to the close button — this is the V1.5.0 Step-6 reachability
+// path for the 4 actionable items (Step 8 will additionally mount the
+// menu on RF node ⋯ affordances). REV-3 F2.
 
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
+import { NodeActionMenu } from "../graph/NodeActionMenu";
 
 interface DetailHeaderProps {
   node: GraphViewNode;
   onClose: () => void;
+  /** When set, the header renders NodeActionMenu and forwards "View Raw JSON". */
+  onShowJson?: () => void;
 }
 
 /** Element id consumed by `<aside aria-labelledby=...>` in DetailDrawer. */
 export const DETAIL_HEADER_TITLE_ID = "detail-drawer-title";
 
-export function DetailHeader({ node, onClose }: DetailHeaderProps) {
+export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
   const { model } = useLineage();
 
   return (
@@ -47,26 +55,41 @@ export function DetailHeader({ node, onClose }: DetailHeaderProps) {
         >
           {model.runId} · {node.nodeKey}
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
+        <div
           style={{
             marginLeft: "auto",
-            border: "none",
-            background: "var(--bg-elev)",
-            color: "var(--label-secondary)",
-            width: 24,
-            height: 24,
-            borderRadius: 6,
-            cursor: "pointer",
             display: "inline-flex",
             alignItems: "center",
-            justifyContent: "center",
+            gap: 6,
           }}
         >
-          ×
-        </button>
+          {onShowJson && (
+            <NodeActionMenu
+              node={node}
+              model={model}
+              onShowJson={onShowJson}
+            />
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "var(--bg-elev)",
+              color: "var(--label-secondary)",
+              width: 24,
+              height: 24,
+              borderRadius: 6,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ×
+          </button>
+        </div>
       </div>
       <h2
         id={DETAIL_HEADER_TITLE_ID}

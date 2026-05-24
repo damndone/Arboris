@@ -113,7 +113,11 @@ export function GraphWorkbench() {
           />
         </div>
         {selectedNode !== null && (
-          <DetailDrawer node={selectedNode} onClose={() => select(null)} />
+          <DetailDrawer
+            node={selectedNode}
+            onClose={() => select(null)}
+            onShowJson={() => setRawJsonOpen(true)}
+          />
         )}
       </div>
       <RawJsonModal

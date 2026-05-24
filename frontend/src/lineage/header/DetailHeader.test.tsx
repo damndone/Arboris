@@ -41,11 +41,12 @@ function renderHeader(
   node: GraphViewNode,
   onClose: () => void = vi.fn(),
   model: GraphViewModel = makeModel(),
+  onShowJson?: () => void,
 ) {
   const ctx: LineageContextValue = { model, selectedKey: node.id, select: vi.fn() };
   return render(
     <LineageContext.Provider value={ctx}>
-      <DetailHeader node={node} onClose={onClose} />
+      <DetailHeader node={node} onClose={onClose} onShowJson={onShowJson} />
     </LineageContext.Provider>,
   );
 }
@@ -85,6 +86,26 @@ describe("DetailHeader", () => {
     const btn = screen.getByRole("button", { name: "Close" });
     fireEvent.click(btn);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT mount NodeActionMenu when onShowJson is omitted", () => {
+    renderHeader(makeNode());
+    expect(screen.queryByRole("button", { name: /node actions/i })).toBeNull();
+  });
+
+  it("mounts NodeActionMenu when onShowJson is provided (REV-3 F2 reachability)", () => {
+    renderHeader(makeNode(), vi.fn(), makeModel(), vi.fn());
+    expect(
+      screen.getByRole("button", { name: /node actions/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("NodeActionMenu's View Raw JSON forwards to the onShowJson prop", () => {
+    const onShowJson = vi.fn();
+    renderHeader(makeNode(), vi.fn(), makeModel(), onShowJson);
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    fireEvent.click(screen.getByText("View Raw JSON"));
+    expect(onShowJson).toHaveBeenCalledTimes(1);
   });
 
   it("throws if mounted outside LineageContext (uses runId)", () => {

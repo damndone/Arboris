@@ -25,9 +25,15 @@ interface DetailDrawerProps {
   /** Optional explicit node; falls back to LineageContext's selectedKey. */
   node?: GraphViewNode;
   onClose: () => void;
+  /**
+   * Forwarded to DetailHeader. When set, the header mounts NodeActionMenu
+   * and uses this callback for the "View Raw JSON" item. Wired by
+   * GraphWorkbench to open RawJsonModal.
+   */
+  onShowJson?: () => void;
 }
 
-export function DetailDrawer({ node: nodeProp, onClose }: DetailDrawerProps) {
+export function DetailDrawer({ node: nodeProp, onClose, onShowJson }: DetailDrawerProps) {
   const { model, selectedKey } = useLineage();
 
   // Either the caller passes a node, or we resolve it from context.
@@ -60,7 +66,7 @@ export function DetailDrawer({ node: nodeProp, onClose }: DetailDrawerProps) {
         background: "var(--bg-canvas)",
       }}
     >
-      <DetailHeader node={resolved} onClose={onClose} />
+      <DetailHeader node={resolved} onClose={onClose} onShowJson={onShowJson} />
       {visibleSections.map((s) => (
         <s.Component key={s.id} node={resolved} />
       ))}

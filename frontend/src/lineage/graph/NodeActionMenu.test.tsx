@@ -185,6 +185,39 @@ describe("NodeActionMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("clicking inside the portal-rendered popup does NOT close it (REV-3 F1)", () => {
+    // Pre-portal the popup lived inside the wrapper, so wrapper.contains
+    // covered both. After F1 the popup is in document.body — the
+    // outside-click handler must check the popup ref explicitly or
+    // every menuitem mousedown would close the menu before its click
+    // fires.
+    renderMenu(makeNode());
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    const popup = screen.getByTestId("node-action-menu-popup");
+    fireEvent.mouseDown(popup);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("popup is portaled to document.body, not nested in the wrapper (REV-3 F1)", () => {
+    // Step 8 mounts NodeActionMenu inside React Flow node containers
+    // which have overflow:hidden and their own stacking context. The
+    // popup must live outside that subtree to escape clipping.
+    renderMenu(makeNode());
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    const wrapper = screen.getByTestId("node-action-menu");
+    const popup = screen.getByTestId("node-action-menu-popup");
+    expect(wrapper.contains(popup)).toBe(false);
+    expect(document.body.contains(popup)).toBe(true);
+  });
+
+  it("scroll closes the menu", () => {
+    renderMenu(makeNode());
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.scroll(window);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   it("Escape closes the menu", () => {
     renderMenu(makeNode());
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
