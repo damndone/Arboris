@@ -10,8 +10,8 @@
 // adapter, so the two arrays line up 1:1.
 
 import { useState } from "react";
-import { DecisionCard } from "../../DecisionCard";
-import { DecisionExpanded } from "../../DecisionExpanded";
+import { DecisionCard } from "../../decisions/DecisionCard";
+import { DecisionExpanded } from "../../decisions/DecisionExpanded";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import type { LineageNode } from "../../types";
 

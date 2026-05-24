@@ -51,13 +51,13 @@ describe("TrustBanner", () => {
       expect(_deriveCopy(n)?.variant).toBe("review-required");
     });
 
-    it("review-required body uses dpRegistry-derived title", () => {
+    it("review-required body uses decisionRegistry-derived title", () => {
       const n = node({
         decisions: [dp({ id: "model_type_auto_select", reviewStatus: "needed" })],
       });
       const copy = _deriveCopy(n);
       expect(copy?.body).toMatch(/1 choice needs confirmation:/);
-      // dpRegistry title for model_type_auto_select is lowercased in the body
+      // decisionRegistry title for model_type_auto_select is lowercased in the body
       expect(copy?.body.toLowerCase()).toContain("model type");
     });
 

@@ -17,7 +17,7 @@ import type {
   LineageNode,
   Trust as BackendTrust,
 } from "../types";
-import { getDPDisplay } from "../dpRegistry";
+import { getDPDisplay } from "../decisions/decisionRegistry";
 import type {
   DecisionReviewStatus,
   DecisionViewModel,

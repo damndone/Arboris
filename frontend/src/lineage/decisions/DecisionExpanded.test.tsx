@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DecisionExpanded } from "./DecisionExpanded";
-import type { DecisionPoint } from "./types";
+import type { DecisionPoint } from "../types";
 
 const dp: DecisionPoint = {
   decision_id: "model_type_auto_select",

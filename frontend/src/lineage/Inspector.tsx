@@ -1,7 +1,7 @@
 import { useId } from "react";
 import "./tokens/lineage.css";
 import type { LineageNode } from "./types";
-import { getDPDisplay } from "./dpRegistry";
+import { getDPDisplay } from "./decisions/decisionRegistry";
 
 export interface InspectorProps {
   node: LineageNode;

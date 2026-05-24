@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { DP_REGISTRY, getDPDisplay } from "./dpRegistry";
+import { DP_REGISTRY, getDPDisplay } from "./decisionRegistry";
 
-describe("dpRegistry", () => {
+describe("decisionRegistry", () => {
   it("has entries for all 6 V1.4.0 decision IDs", () => {
     const expected = [
       "model_type_auto_select",

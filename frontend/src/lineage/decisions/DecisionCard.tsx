@@ -1,6 +1,6 @@
-import "./tokens/lineage.css";
-import type { DecisionPoint } from "./types";
-import { getDPDisplay } from "./dpRegistry";
+import "../tokens/lineage.css";
+import type { DecisionPoint } from "../types";
+import { getDPDisplay } from "./decisionRegistry";
 
 export interface DecisionCardProps {
   dp: DecisionPoint;

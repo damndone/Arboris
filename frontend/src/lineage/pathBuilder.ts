@@ -2,7 +2,7 @@ import type {
   GraphViewModel,
   GraphViewNode,
 } from "./api/graphViewTypes";
-import { getDPDisplay } from "./dpRegistry";
+import { getDPDisplay } from "./decisions/decisionRegistry";
 
 const MAX_HOPS = 100;
 

@@ -13,7 +13,7 @@
 // aria-live="polite" so screen readers announce the banner when it
 // appears after a refetch flips trust state.
 
-import { getDPDisplay } from "../../dpRegistry";
+import { getDPDisplay } from "../../decisions/decisionRegistry";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 
 type Variant = "review-required" | "review-suggested" | "caution";

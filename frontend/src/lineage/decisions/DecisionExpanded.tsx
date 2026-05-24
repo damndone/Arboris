@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import "./tokens/lineage.css";
-import type { DecisionPoint } from "./types";
-import { getDPDisplay } from "./dpRegistry";
+import "../tokens/lineage.css";
+import type { DecisionPoint } from "../types";
+import { getDPDisplay } from "./decisionRegistry";
 
 export interface DecisionExpandedProps {
   dp: DecisionPoint;

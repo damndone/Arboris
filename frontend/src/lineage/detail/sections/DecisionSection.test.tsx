@@ -85,7 +85,7 @@ describe("DecisionSection", () => {
   it("single-DP node renders 1 card with heading 'Decisions (1)'", () => {
     render(<DecisionSection node={node([rawDP()])} />);
     expect(screen.getByText("Decisions (1)")).toBeInTheDocument();
-    // Each DecisionCard renders the decision_id-derived title (via dpRegistry);
+    // Each DecisionCard renders the decision_id-derived title (via decisionRegistry);
     // verifying exact text would couple to registry copy, so just assert one
     // card-style heading exists by counting buttons.
     const cards = screen.getAllByRole("button");
@@ -126,7 +126,7 @@ describe("DecisionSection", () => {
     // Both decision_ids should still appear in the rendered DOM somewhere
     // (DecisionExpanded shows the title; DecisionCard shows the title).
     // Test indirectly via text presence — both DP titles are derived from
-    // dpRegistry and contain "model type" / "robust" hints.
+    // decisionRegistry and contain "model type" / "robust" hints.
     expect(section.children.length).toBeGreaterThan(1);
   });
 

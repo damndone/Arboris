@@ -22,7 +22,7 @@
 // ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
 // │ 'renders orange "Review required" when      │ TrustBanner.test "review-required wins"     │
 // │  DPs need review'                           │ + "multi-DP pluralises" + "body uses        │
-// │                                             │ dpRegistry-derived title"                   │
+// │                                             │ decisionRegistry-derived title"             │
 // ├─────────────────────────────────────────────┼─────────────────────────────────────────────┤
 // │ "renders red trust callout when             │ TrustBanner.test "trust=caution → 'Caution' │
 // │  trust=warning and no DP"                   │ variant" + "trustReason used as body".      │
