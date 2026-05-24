@@ -314,6 +314,16 @@
 }
 
 .ln-canvas-status {
+  /* T8.6a hotfix (browser smoke): inline-flex + max-width so the
+   * badge shrink-wraps to content and doesn't stretch edge-to-edge
+   * under React Flow's Panel. The default display:block would
+   * overlap the top-left toolbar in narrow viewports (e.g. when the
+   * lineage view is embedded in a History column). The 60%
+   * cap keeps the right-anchored badge from overrunning the left
+   * half on cramped layouts; long run_id ellipsises gracefully. */
+  display: inline-flex;
+  align-items: center;
+  max-width: 60%;
   background: var(--bg-card-2);
   border: 1px solid var(--separator);
   border-radius: 8px;
@@ -322,6 +332,13 @@
   font-size: 11.5px;
   color: var(--label-secondary);
   letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ln-canvas-status__count {
+  flex-shrink: 0;
+  margin-left: 4px;
 }
 .ln-canvas-status__count--warn {
   color: var(--review);
