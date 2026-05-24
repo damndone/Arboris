@@ -1,0 +1,177 @@
+/* frontend/src/lineage/tokens/lineage.css
+ * V1.5.0 design tokens, OKLCH-derived from uiux/handoff/tokens.ts (dark default).
+ * V1.4.1 variable names preserved (--bg-canvas / --tint / --separator / ...)
+ * so the class rules below this block stay identical.
+ * New tokens: 8 --stage-*, 3 status (--ok/--review/--caution), 3 font.
+ * Light theme overrides live in [data-theme="light"] .lineage-root.
+ */
+
+.lineage-root {
+  /* Surfaces — warm near-black, slight olive cast (printer's ink) */
+  --bg-canvas:        oklch(0.165 0.006 70);
+  --bg-card:          oklch(0.20  0.006 70);
+  --bg-card-2:        oklch(0.24  0.006 70);
+  --bg-elev:          oklch(0.28  0.006 70);
+  --separator:        rgba(255, 250, 240, 0.08);
+  --separator-faint:  rgba(255, 250, 240, 0.045);
+
+  /* Typography — warm cream */
+  --label:            oklch(0.94 0.008 75);
+  --label-secondary:  oklch(0.72 0.008 75);
+  --label-tertiary:   oklch(0.50 0.008 75);
+
+  /* Editorial accent — muted ink-blue (replaces V1.4.1 system blue) */
+  --tint:             oklch(0.72 0.08 240);
+  --tint-hover:       oklch(0.78 0.08 240);
+
+  /* Burnished status colours (never bright) */
+  --orange:           oklch(0.74 0.10 65);
+  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
+  --red:              oklch(0.62 0.13 25);
+  --green:            oklch(0.70 0.07 155);
+
+  /* Stage colours — near-mono with subtle hue rotation.
+   * Differentiation comes from position + label, not chroma. */
+  --stage-source:     oklch(0.58 0.008 75);
+  --stage-eda:        oklch(0.66 0.04 220);
+  --stage-clean:      oklch(0.66 0.04 250);
+  --stage-transform:  oklch(0.72 0.10 65);
+  --stage-model:      oklch(0.70 0.06 200);
+  --stage-diag:       oklch(0.62 0.04 280);
+  --stage-viz:        oklch(0.66 0.04 320);
+  --stage-report:     oklch(0.74 0.06 75);
+
+  /* Trust status — adapter buckets (ok / review / caution) */
+  --ok:               oklch(0.70 0.07 155);
+  --review:           oklch(0.74 0.10 65);
+  --caution:          oklch(0.62 0.13 25);
+
+  /* Typeface stacks */
+  --font-serif:       "Iowan Old Style", "Source Serif Pro", "Charter", Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+  --font-sans:        -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono:        ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum";
+  color: var(--label);
+  background: var(--bg-canvas);
+}
+
+/* Light theme — warm paper, FT/research-deck cream */
+[data-theme="light"] .lineage-root {
+  --bg-canvas:        oklch(0.965 0.012 80);
+  --bg-card:          oklch(0.99  0.012 80);
+  --bg-card-2:        oklch(0.95  0.014 78);
+  --bg-elev:          oklch(0.92  0.014 78);
+  --separator:        rgba(20, 18, 16, 0.10);
+  --separator-faint:  rgba(20, 18, 16, 0.06);
+
+  --label:            oklch(0.22 0.010 75);
+  --label-secondary:  oklch(0.40 0.010 75);
+  --label-tertiary:   oklch(0.55 0.008 75);
+
+  --tint:             oklch(0.48 0.10 240);
+  --tint-hover:       oklch(0.54 0.10 240);
+
+  --orange:           oklch(0.62 0.12 65);
+  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
+  --red:              oklch(0.55 0.16 25);
+  --green:            oklch(0.55 0.08 155);
+
+  --stage-source:     oklch(0.50 0.010 75);
+  --stage-eda:        oklch(0.50 0.04 220);
+  --stage-clean:      oklch(0.48 0.05 250);
+  --stage-transform:  oklch(0.55 0.13 65);
+  --stage-model:      oklch(0.50 0.06 200);
+  --stage-diag:       oklch(0.48 0.06 280);
+  --stage-viz:        oklch(0.52 0.05 320);
+  --stage-report:     oklch(0.55 0.08 75);
+
+  --ok:               oklch(0.55 0.08 155);
+  --review:           oklch(0.62 0.12 65);
+  --caution:          oklch(0.55 0.16 25);
+}
+
+/* Card */
+.ln-card {
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+/* Pill */
+.ln-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ln-pill--orange {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+.ln-pill--red {
+  background: rgba(255, 69, 58, 0.10);
+  color: var(--red);
+}
+
+/* Button */
+.ln-btn-primary {
+  background: var(--tint);
+  color: #fff;
+  border: 0;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-primary:hover { background: var(--tint-hover); }
+
+.ln-btn-secondary {
+  background: var(--bg-card-2);
+  color: var(--label);
+  border: 0;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-secondary:hover { background: var(--bg-elev); }
+
+/* Status callout */
+.ln-callout {
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ln-callout--orange { background: var(--orange-bg); }
+.ln-callout--orange .ln-callout-title { color: var(--orange); }
+.ln-callout--red { background: rgba(255, 69, 58, 0.10); }
+.ln-callout--red .ln-callout-title { color: var(--red); }
+.ln-callout--green { background: rgba(48, 209, 88, 0.10); }
+.ln-callout--green .ln-callout-title { color: var(--green); }
+.ln-callout-title { font-weight: 600; font-size: 14px; }
+.ln-callout-body { color: var(--label); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
+
+/* Section label (SMALL CAPS) */
+.ln-section-label {
+  color: var(--label-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* Node selected state */
+.ln-node--selected {
+  border-color: var(--tint);
+  box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.13);
+}

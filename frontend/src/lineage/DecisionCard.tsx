@@ -1,4 +1,4 @@
-import "./lineage.css";
+import "./tokens/lineage.css";
 import type { DecisionPoint } from "./types";
 import { getDPDisplay } from "./dpRegistry";
 

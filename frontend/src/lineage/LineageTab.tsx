@@ -8,7 +8,7 @@ import { DecisionExpanded } from "./DecisionExpanded";
 import { MoreMenu } from "./MoreMenu";
 import { buildBranchPath } from "./pathBuilder";
 import type { GraphResponse } from "./types";
-import "./lineage.css";
+import "./tokens/lineage.css";
 
 interface LineageTabProps {
   projectRoot: string;

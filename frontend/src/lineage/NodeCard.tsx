@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Handle, Position } from "reactflow";
-import "./lineage.css";
+import "./tokens/lineage.css";
 import type { LineageNode } from "./types";
 
 export interface NodeCardProps {

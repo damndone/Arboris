@@ -1,5 +1,5 @@
 import { useId } from "react";
-import "./lineage.css";
+import "./tokens/lineage.css";
 import type { LineageNode } from "./types";
 import { getDPDisplay } from "./dpRegistry";
 

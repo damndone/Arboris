@@ -3,7 +3,7 @@ import ReactFlow, { Background, Controls } from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
-import "./lineage.css";
+import "./tokens/lineage.css";
 import { NodeCard } from "./NodeCard";
 import type { GraphResponse, LineageNode } from "./types";
 import { foldVariableClusters, type GroupNode } from "./folding";

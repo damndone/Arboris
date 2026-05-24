@@ -1,5 +1,5 @@
 import { useState } from "react";
-import "./lineage.css";
+import "./tokens/lineage.css";
 import type { LineageNode } from "./types";
 
 export interface MoreMenuProps {
