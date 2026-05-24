@@ -201,6 +201,16 @@ describe("graphAdapter", () => {
     expect(v3.schemaVersion).toBe(3);
   });
 
+  it("parentStageId mapped from backend parent_stage_id (string and null cases)", () => {
+    const g = makeV2Graph([
+      makeNode("root"), // parent_stage_id default is null in makeNode
+      makeNode("child", { parent_stage_id: "root" }),
+    ]);
+    const m = adaptRunGraph(g);
+    expect(m.nodes.find((n) => n.id === "root")?.parentStageId).toBeNull();
+    expect(m.nodes.find((n) => n.id === "child")?.parentStageId).toBe("root");
+  });
+
   it("createdAt mapped from backend created_at", () => {
     const g = makeV2Graph([
       makeNode("a", { created_at: "2026-05-22T12:34:56Z" }),

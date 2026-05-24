@@ -89,6 +89,7 @@ export interface GraphViewNode {
   title: string; // ← display_label
   subtitle?: string; // adapter-derived from existing fields only
   summary?: string; // ← summary
+  parentStageId: string | null; // ← parent_stage_id (used by folding + path builder)
 
   // ── trust (V1.5.0 populated; adapter normalised — see graphAdapter.normalizeTrust) ──
   trust: Trust;

@@ -1,11 +1,16 @@
-import type { LineageNode } from "./types";
+// frontend/src/lineage/folding.ts
+//
+// Variable-cluster folding (V1.5.0). Consumes GraphViewNode[] post-T5.5
+// signature swap (was raw LineageNode[] in V1.4.1).
+
+import type { GraphViewNode } from "./api/graphViewTypes";
 
 const FOLD_THRESHOLD = 3; // strictly more than 3 → fold
 
 export interface GroupNode {
   id: string;
   display_label: string;
-  parent_stage_id: string;
+  parentStageId: string;
   member_ids: string[];
   /** Discriminator: 'cleaned' (kept) vs 'dropped'. Drives group title prefix. */
   variant: "cleaned" | "dropped";
@@ -18,17 +23,17 @@ function variantOf(id: string): "cleaned" | "dropped" | null {
 }
 
 export function foldVariableClusters(
-  nodes: LineageNode[],
+  nodes: GraphViewNode[],
   expanded: Set<string>,
-): { kept: LineageNode[]; groups: GroupNode[] } {
+): { kept: GraphViewNode[]; groups: GroupNode[] } {
   const buckets = new Map<
     string,
-    { variant: "cleaned" | "dropped"; parent: string; nodes: LineageNode[] }
+    { variant: "cleaned" | "dropped"; parent: string; nodes: GraphViewNode[] }
   >();
-  const other: LineageNode[] = [];
+  const other: GraphViewNode[] = [];
 
   for (const n of nodes) {
-    if (n.kind !== "variable" || !n.parent_stage_id) {
+    if (n.kind !== "variable" || !n.parentStageId) {
       other.push(n);
       continue;
     }
@@ -37,16 +42,16 @@ export function foldVariableClusters(
       other.push(n);
       continue;
     }
-    const key = `${variant}|${n.parent_stage_id}`;
+    const key = `${variant}|${n.parentStageId}`;
     let bucket = buckets.get(key);
     if (!bucket) {
-      bucket = { variant, parent: n.parent_stage_id, nodes: [] };
+      bucket = { variant, parent: n.parentStageId, nodes: [] };
       buckets.set(key, bucket);
     }
     bucket.nodes.push(n);
   }
 
-  const kept: LineageNode[] = [...other];
+  const kept: GraphViewNode[] = [...other];
   const groups: GroupNode[] = [];
 
   for (const { variant, parent, nodes: bucket } of buckets.values()) {
@@ -61,7 +66,7 @@ export function foldVariableClusters(
       groups.push({
         id,
         display_label: `${variant === "cleaned" ? "Variables" : "Dropped variables"} (${bucket.length})`,
-        parent_stage_id: parent,
+        parentStageId: parent,
         member_ids: bucket.map((n) => n.id),
         variant,
       });

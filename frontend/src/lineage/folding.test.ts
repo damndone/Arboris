@@ -1,26 +1,24 @@
 import { describe, it, expect } from "vitest";
 import { foldVariableClusters } from "./folding";
-import type { LineageNode } from "./types";
+import type { GraphViewNode } from "./api/graphViewTypes";
 
 function v(
   id: string,
   kindAffix: "cleaned" | "dropped",
   parent: string,
-): LineageNode {
+): GraphViewNode {
   return {
     id: `var:${id}:${kindAffix}`,
+    nodeKey: `var:${id}:${kindAffix}`,
+    raw: null,
     kind: "variable",
-    display_label: `${id} (${kindAffix})`,
-    summary: null,
-    created_at: "2026-05-19T00:00:00Z",
-    parent_stage_id: parent,
-    branch_id: "main",
+    title: `${id} (${kindAffix})`,
+    summary: undefined,
+    parentStageId: parent,
+    stage: "transform",
     trust: "ok",
-    trust_reason: null,
-    archived: false,
-    payload_ref: null,
-    decision_points: [],
-    annotations: [],
+    decisions: [],
+    createdAt: "2026-05-19T00:00:00Z",
   };
 }
 
@@ -48,6 +46,7 @@ describe("foldVariableClusters", () => {
     expect(groups.length).toBe(1);
     expect(groups[0].id).toBe("group:variables:stage:cleaned");
     expect(groups[0].display_label).toBe("Variables (4)");
+    expect(groups[0].parentStageId).toBe("stage:cleaned");
   });
 
   it("folds dropped cluster separately from kept", () => {
@@ -78,5 +77,16 @@ describe("foldVariableClusters", () => {
     const { kept, groups } = foldVariableClusters(nodes, expanded);
     expect(kept.length).toBe(4);
     expect(groups.length).toBe(0);
+  });
+
+  it("nodes whose kind ≠ 'variable' fall through to kept untouched", () => {
+    const stage = {
+      ...v("a", "cleaned", "stage:cleaned"),
+      kind: "dataset_stage",
+      id: "stage:cleaned",
+    } as GraphViewNode;
+    const { kept, groups } = foldVariableClusters([stage], new Set());
+    expect(kept).toEqual([stage]);
+    expect(groups).toEqual([]);
   });
 });

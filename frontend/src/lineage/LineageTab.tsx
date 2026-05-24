@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getRunGraph, ApiError } from "../api";
 import { GraphCanvas } from "./GraphCanvas";
@@ -7,6 +7,7 @@ import { DecisionCard } from "./DecisionCard";
 import { DecisionExpanded } from "./DecisionExpanded";
 import { MoreMenu } from "./MoreMenu";
 import { buildBranchPath } from "./pathBuilder";
+import { adaptRunGraph } from "./api/graphAdapter";
 import type { GraphResponse } from "./types";
 import "./tokens/lineage.css";
 
@@ -32,6 +33,15 @@ export function LineageTab({ projectRoot, runId }: LineageTabProps) {
   const [expandedDP, setExpandedDP] = useState<Set<string>>(new Set());
   const [showJson, setShowJson] = useState(false);
   const [copyFlash, setCopyFlash] = useState(false);
+
+  // V1.5.0 bridge: GraphCanvas + pathBuilder consume GraphViewModel post-T5.5.
+  // Computed unconditionally to satisfy Rules of Hooks; returns null while
+  // loading or on error. T5.7 swaps this whole component out for
+  // LineageRouteContainer, retiring the bridge.
+  const viewModel = useMemo(
+    () => (state.kind === "ok" ? adaptRunGraph(state.graph) : null),
+    [state],
+  );
 
   const load = useCallback(() => {
     setState({ kind: "loading" });
@@ -149,10 +159,8 @@ export function LineageTab({ projectRoot, runId }: LineageTabProps) {
     });
   };
   const handleCopyPath = () => {
-    if (!selectedNode) return;
-    navigator.clipboard.writeText(
-      buildBranchPath(state.graph, selectedNode.id),
-    );
+    if (!selectedNode || !viewModel) return;
+    navigator.clipboard.writeText(buildBranchPath(viewModel, selectedNode.id));
     setCopyFlash(true);
     setTimeout(() => setCopyFlash(false), 1500);
   };
@@ -163,13 +171,15 @@ export function LineageTab({ projectRoot, runId }: LineageTabProps) {
       style={{ display: "flex", gap: 0, minHeight: 600 }}
     >
       <div style={{ flex: 1 }}>
-        <GraphCanvas
-          graph={state.graph}
-          selectedNodeId={selectedNodeId}
-          expandedGroups={expandedGroups}
-          onSelect={handleSelect}
-          onExpandGroup={handleExpandGroup}
-        />
+        {viewModel && (
+          <GraphCanvas
+            model={viewModel}
+            selectedNodeId={selectedNodeId}
+            expandedGroups={expandedGroups}
+            onSelect={handleSelect}
+            onExpandGroup={handleExpandGroup}
+          />
+        )}
       </div>
       {selectedNode && (
         <div

@@ -5,13 +5,14 @@ import "reactflow/dist/style.css";
 import dagre from "dagre";
 import "./tokens/lineage.css";
 import { NodeCard } from "./NodeCard";
-import type { GraphResponse, LineageNode } from "./types";
+import type { LineageNode } from "./types";
+import type { GraphViewModel } from "./api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "./folding";
 
 const nodeTypes = { lineageNode: NodeCard };
 
 interface GraphCanvasProps {
-  graph: GraphResponse;
+  model: GraphViewModel;
   selectedNodeId: string | null;
   expandedGroups: Set<string>;
   onSelect: (nodeId: string) => void;
@@ -31,6 +32,12 @@ function layoutDagre<T extends RFNode>(nodes: T[], edges: RFEdge[]): T[] {
   });
 }
 
+/**
+ * NodeCard (V1.5.0) still consumes raw LineageNode shape via `data.node`.
+ * Synthesize the LineageNode payload for group + marker pseudo-nodes; real
+ * graph nodes pass their `.raw` payload directly. NodeCard rewrites in Step 8
+ * will retire this LineageNode dependency.
+ */
 function groupAsNode(g: GroupNode): LineageNode {
   return {
     id: g.id,
@@ -38,7 +45,7 @@ function groupAsNode(g: GroupNode): LineageNode {
     display_label: g.display_label,
     summary: "Tap to expand",
     created_at: "",
-    parent_stage_id: g.parent_stage_id,
+    parent_stage_id: g.parentStageId,
     branch_id: "main",
     trust: "ok",
     trust_reason: null,
@@ -50,7 +57,7 @@ function groupAsNode(g: GroupNode): LineageNode {
 }
 
 /**
- * Parse a synthesized fold-marker group id back into (variant, parent_stage_id).
+ * Parse a synthesized fold-marker group id back into (variant, parentStageId).
  * Group ids have shape `group:variables:<parent>` or `group:dropped-variables:<parent>`.
  */
 function parseGroupId(
@@ -87,15 +94,14 @@ function markerAsNode(
 }
 
 export function GraphCanvas({
-  graph,
+  model,
   selectedNodeId,
   expandedGroups,
   onSelect,
   onExpandGroup,
 }: GraphCanvasProps) {
   const { rfNodes, rfEdges } = useMemo(() => {
-    const allNodes = Object.values(graph.nodes);
-    const { kept, groups } = foldVariableClusters(allNodes, expandedGroups);
+    const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
 
     const visible = new Set<string>(kept.map((n) => n.id));
     groups.forEach((g) => visible.add(g.id));
@@ -104,6 +110,7 @@ export function GraphCanvas({
     // (because its members are inlined), synthesize a fold-back marker node so
     // the user has an affordance to collapse the cluster again. The marker
     // shares the group id, so onExpandGroup's toggle naturally folds it.
+    const nodeById = new Map(model.nodes.map((n) => [n.id, n]));
     const expandedMarkers: Array<{
       gid: string;
       variantLabel: string;
@@ -116,7 +123,7 @@ export function GraphCanvas({
       if (!parsed) continue;
       // Only show the marker if the parent stage is itself rendered; otherwise
       // dagre has nowhere to anchor it.
-      if (!graph.nodes[parsed.parent]) continue;
+      if (!nodeById.has(parsed.parent)) continue;
       expandedMarkers.push({ gid, ...parsed });
       visible.add(gid);
     }
@@ -125,7 +132,9 @@ export function GraphCanvas({
       id: n.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      data: { node: n },
+      // NodeCard consumes the raw LineageNode shape via data.node. Adapter
+      // preserves it on GraphViewNode.raw so we can hand it through verbatim.
+      data: { node: n.raw as LineageNode },
       selected: n.id === selectedNodeId,
     }));
     const groupNodes: RFNode[] = groups.map((g) => ({
@@ -162,9 +171,9 @@ export function GraphCanvas({
         style: { strokeDasharray: "4 4", opacity: 0.4 },
       });
     }
-    for (const e of Object.values(graph.edges)) {
-      const src = memberToGroup.get(e.source_id) ?? e.source_id;
-      const tgt = memberToGroup.get(e.target_id) ?? e.target_id;
+    for (const e of model.edges) {
+      const src = memberToGroup.get(e.source) ?? e.source;
+      const tgt = memberToGroup.get(e.target) ?? e.target;
       if (src === tgt) continue;
       if (!visible.has(src) || !visible.has(tgt)) continue;
       candidateEdges.push({
@@ -187,7 +196,7 @@ export function GraphCanvas({
       uniqEdges,
     );
     return { rfNodes: layouted, rfEdges: uniqEdges };
-  }, [graph, selectedNodeId, expandedGroups]);
+  }, [model, selectedNodeId, expandedGroups]);
 
   return (
     <div

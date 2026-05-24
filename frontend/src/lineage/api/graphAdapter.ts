@@ -148,6 +148,7 @@ function adaptNode(
     title: raw.display_label,
     subtitle,
     summary: raw.summary ?? undefined,
+    parentStageId: raw.parent_stage_id ?? null,
     trust: normalizeTrust(raw.trust as BackendTrust),
     trustReason: raw.trust_reason ?? undefined,
     decisions: dps.map(adaptDecisionPoint),

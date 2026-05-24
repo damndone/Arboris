@@ -2,7 +2,15 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { GraphCanvas } from "./GraphCanvas";
+import { adaptRunGraph } from "./api/graphAdapter";
 import type { GraphResponse, LineageNode } from "./types";
+
+// Bridge: tests still build the raw backend GraphResponse fixture (so they
+// exercise the real adapter path), and pass `adaptRunGraph(g)` into the
+// canvas which now requires a V1.5.0 GraphViewModel.
+function model(g: GraphResponse) {
+  return adaptRunGraph(g);
+}
 
 function node(overrides: Partial<LineageNode>): LineageNode {
   return {
@@ -93,7 +101,7 @@ describe("GraphCanvas", () => {
   it("renders a fold-back marker for expanded variable groups", async () => {
     render(
       <GraphCanvas
-        graph={graph()}
+        model={model(graph())}
         selectedNodeId={null}
         expandedGroups={new Set(["group:variables:stage:cleaned"])}
         onSelect={vi.fn()}
@@ -113,7 +121,7 @@ describe("GraphCanvas", () => {
     // hotfixes 88dcf70 + c7bd35e which introduced the synthesized marker.
     render(
       <GraphCanvas
-        graph={mixedVariantGraph()}
+        model={model(mixedVariantGraph())}
         selectedNodeId={null}
         expandedGroups={new Set(["group:variables:stage:cleaned"])}
         onSelect={vi.fn()}
@@ -140,7 +148,7 @@ describe("GraphCanvas", () => {
     // marker should be suppressed — dagre has nowhere to anchor it.
     render(
       <GraphCanvas
-        graph={graph()}
+        model={model(graph())}
         selectedNodeId={null}
         expandedGroups={new Set(["group:variables:stage:does_not_exist"])}
         onSelect={vi.fn()}
