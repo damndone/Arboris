@@ -102,7 +102,7 @@ describe("LineageRouteContainer", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(v3Graph()));
     fireEvent.click(retry);
     await waitFor(() =>
-      expect(screen.getByTestId("workbench-slot")).toBeTruthy(),
+      expect(screen.getByTestId("graph-workbench")).toBeTruthy(),
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -122,7 +122,7 @@ describe("LineageRouteContainer", () => {
     fetchMock.mockResolvedValue(jsonResponse(v3Graph()));
     renderContainer();
     await waitFor(() =>
-      expect(screen.getByTestId("workbench-slot")).toBeTruthy(),
+      expect(screen.getByTestId("graph-workbench")).toBeTruthy(),
     );
     expect(screen.queryByText(/loading lineage/i)).toBeNull();
   });

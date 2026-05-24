@@ -1,16 +1,13 @@
 // frontend/src/lineage/LineageRouteContainer.tsx
 //
-// V1.5.0 lineage route shell (Step 5, T5.4).
+// V1.5.0 lineage route shell (Step 5, T5.4 + T5.6).
 //
 // Reads projectRoot + runId from props, drives the data + URL hooks, and
-// renders exactly one of: <Loading />, <ErrorBanner />, or the workbench
-// inside <LineageContext.Provider>. Per plan §8 T5.4 DoD: file < 80 LOC,
-// no imports from lineage/graph/* or lineage/detail/*.
-//
-// The success-branch body is currently a placeholder (<WorkbenchSlot />)
-// because GraphWorkbench arrives in T5.6. T5.7 then flips runDetail.tsx
-// from LineageTab to this container.
+// renders exactly one of: <Loading />, <ErrorBanner />, or
+// <GraphWorkbench /> inside <LineageContext.Provider>. T5.7 flips
+// runDetail.tsx from LineageTab to this container.
 
+import { GraphWorkbench } from "./GraphWorkbench";
 import { useGraphData } from "./hooks/useGraphData";
 import { useSelectedNode } from "./hooks/useSelectedNode";
 import { LineageContext } from "./LineageContext";
@@ -35,23 +32,7 @@ export function LineageRouteContainer({
 
   return (
     <LineageContext.Provider value={{ model, selectedKey, select }}>
-      <WorkbenchSlot />
+      <GraphWorkbench />
     </LineageContext.Provider>
-  );
-}
-
-/**
- * Placeholder until T5.6 introduces GraphWorkbench. Renders a minimal
- * confirmation so the success branch is reachable in tests.
- */
-function WorkbenchSlot() {
-  return (
-    <div
-      className="lineage-root"
-      style={{ padding: 24 }}
-      data-testid="workbench-slot"
-    >
-      Lineage loaded.
-    </div>
   );
 }
