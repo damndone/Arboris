@@ -267,3 +267,63 @@
   outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
+
+/* ─── Hover tooltip (T8.4) ──────────────────────────────────────────
+ * Screen-space (position:fixed) and portaled to document.body so
+ * React Flow's canvas zoom never affects tooltip pixel position.
+ * Parent (GraphCanvas) drives the 240ms hover delay and clientX/Y.
+ */
+.ln-graph-tooltip {
+  position: fixed;
+  width: 240px;
+  padding: 10px 12px 12px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 1000;
+  font-family: var(--font-sans);
+  color: var(--label);
+}
+.ln-graph-tooltip__title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.ln-graph-tooltip__sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  margin-bottom: 8px;
+}
+.ln-graph-tooltip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ln-graph-tooltip__k {
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+}
+.ln-graph-tooltip__v {
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  text-align: right;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ln-graph-tooltip__hint {
+  margin-top: 8px;
+  color: var(--label-tertiary);
+  font-size: 11px;
+  font-style: italic;
+}

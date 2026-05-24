@@ -1,15 +1,20 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, { Background, Controls } from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
 import "../tokens/lineage.css";
 import { GraphNode } from "./GraphNode";
+import { GraphTooltip } from "./GraphTooltip";
 import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "../folding";
+
+// T8.4: 240ms hover delay before the tooltip mounts. Matches V1.4.1
+// NodeTooltip and the prototype (uiux/graph.jsx L228).
+export const TOOLTIP_HOVER_DELAY_MS = 240;
 
 const nodeTypes = { lineageNode: GraphNode };
 
@@ -199,6 +204,70 @@ export function GraphCanvas({
     return { rfNodes: layouted, rfEdges: uniqEdges };
   }, [model, selectedNodeId, expandedGroups, nodeById]);
 
+  // ── T8.4 hover tooltip ──────────────────────────────────────────
+  // Tracks the candidate node under the cursor + screen-space coords.
+  // After TOOLTIP_HOVER_DELAY_MS the candidate becomes the visible
+  // hover state. Suppressed entirely when a node is selected (the
+  // DetailDrawer takes over) and for synthetic group/marker pseudo-
+  // nodes (no useful tooltip content). Portaled to document.body via
+  // GraphTooltip so canvas zoom doesn't shift the pixel position.
+  const [hover, setHover] = useState<{
+    node: GraphViewNode;
+    x: number;
+    y: number;
+  } | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    },
+    [],
+  );
+
+  const onNodeMouseEnter = useCallback(
+    (event: React.MouseEvent, rfNode: RFNode) => {
+      if (selectedNodeId !== null) return;
+      if (rfNode.id.startsWith("group:")) return;
+      const vm = nodeById.get(rfNode.id);
+      if (!vm) return;
+      const clientX = event.clientX;
+      const clientY = event.clientY;
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      hoverTimer.current = setTimeout(() => {
+        setHover({ node: vm, x: clientX, y: clientY });
+      }, TOOLTIP_HOVER_DELAY_MS);
+    },
+    [nodeById, selectedNodeId],
+  );
+
+  const onNodeMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      // Once visible, follow the cursor. Before visible, the pending
+      // setTimeout already captured the original entry coords — that's
+      // intentional; rapid swipes shouldn't continuously reset the
+      // timer.
+      setHover((h) =>
+        h === null ? null : { ...h, x: event.clientX, y: event.clientY },
+      );
+    },
+    [],
+  );
+
+  const onNodeMouseLeave = useCallback(() => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    setHover(null);
+  }, []);
+
+  // Selection clears any in-flight hover (the drawer takes over).
+  useEffect(() => {
+    if (selectedNodeId !== null) {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+      setHover(null);
+    }
+  }, [selectedNodeId]);
+
   return (
     <div
       className="lineage-root"
@@ -215,11 +284,19 @@ export function GraphCanvas({
           if (n.id.startsWith("group:")) onExpandGroup(n.id);
           else onSelect(n.id);
         }}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseMove={onNodeMouseMove}
+        onNodeMouseLeave={onNodeMouseLeave}
         fitView
       >
         <Background gap={20} />
         <Controls showInteractive={false} />
       </ReactFlow>
+      <GraphTooltip
+        node={hover?.node ?? null}
+        x={hover?.x ?? 0}
+        y={hover?.y ?? 0}
+      />
     </div>
   );
 }

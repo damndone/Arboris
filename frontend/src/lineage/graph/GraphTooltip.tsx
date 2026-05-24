@@ -1,63 +1,77 @@
-import type { LineageNode } from "../types";
+// frontend/src/lineage/graph/GraphTooltip.tsx
+//
+// V1.5.0 hover tooltip (Step 8, T8.4). Screen-space, portaled to
+// document.body so React Flow's canvas zoom transform doesn't scale
+// or shift the tooltip — pixel position derives from raw clientX/Y.
+//
+// The parent (GraphCanvas) owns the 240ms hover delay, mouse-position
+// tracking, and selection-suppression — this component is a pure
+// presentational portal.
+//
+// Content (plan T8.4 step 3): title, kind, id, runtime (if known),
+// up to 2 stats samples, trust badge, keyboard hint. Forward-compat
+// slots (runtime, stats) gracefully omit rows when undefined.
+
+import { createPortal } from "react-dom";
+import "../tokens/lineage.css";
+import type { GraphViewNode, Trust } from "../api/graphViewTypes";
 
 export interface GraphTooltipProps {
-  node: LineageNode;
-  visible: boolean; // false when node is selected (Inspector open)
+  node: GraphViewNode | null;
+  x: number; // clientX from MouseEvent (screen-space)
+  y: number; // clientY from MouseEvent
 }
 
-export function GraphTooltip({ node, visible }: GraphTooltipProps) {
-  if (!visible) return null;
-  const reviewN = node.decision_points.filter(
-    (dp) =>
-      dp.contestability.review_status === "needed" ||
-      dp.contestability.review_status === "failed",
-  ).length;
-  return (
+const TRUST_LABEL: Record<Trust, string> = {
+  ok: "OK",
+  review: "Review",
+  caution: "Caution",
+};
+
+function formatStatValue(v: unknown): string {
+  if (typeof v === "number") return v.toLocaleString();
+  if (typeof v === "string") return v;
+  return String(v);
+}
+
+export function GraphTooltip({ node, x, y }: GraphTooltipProps) {
+  if (!node) return null;
+  const statsEntries = node.stats
+    ? Object.entries(node.stats).slice(0, 2)
+    : [];
+
+  const content = (
     <div
-      className="ln-card"
+      className="ln-graph-tooltip"
       role="tooltip"
-      style={{
-        position: "absolute",
-        left: 260,
-        top: -4,
-        width: 200,
-        padding: 12,
-        background: "var(--bg-card-2)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.55)",
-        pointerEvents: "none",
-        zIndex: 5,
-      }}
+      data-testid="graph-tooltip"
+      style={{ left: x + 18, top: y + 14 }}
     >
-      <div style={{ fontWeight: 600 }}>{node.display_label}</div>
-      {node.summary && (
-        <div
-          style={{
-            color: "var(--label-secondary)",
-            fontSize: 11.5,
-            marginTop: 2,
-          }}
-        >
-          {node.summary}
-        </div>
-      )}
-      {reviewN > 0 && (
-        <div
-          style={{ color: "var(--orange)", fontSize: 11.5, marginTop: 6 }}
-        >
-          {reviewN}{" "}
-          {reviewN === 1 ? "choice needs" : "choices need"} review
-        </div>
-      )}
-      <div
-        style={{
-          color: "var(--label-tertiary)",
-          fontSize: 11,
-          marginTop: 6,
-          fontStyle: "italic",
-        }}
-      >
-        Tap to inspect
+      <div className="ln-graph-tooltip__title">{node.title}</div>
+      <div className="ln-graph-tooltip__sub">{node.kind}</div>
+      <div className="ln-graph-tooltip__row">
+        <span className="ln-graph-tooltip__k">id</span>
+        <span className="ln-graph-tooltip__v">{node.id}</span>
       </div>
+      {typeof node.runtimeMs === "number" && (
+        <div className="ln-graph-tooltip__row">
+          <span className="ln-graph-tooltip__k">runtime</span>
+          <span className="ln-graph-tooltip__v">{node.runtimeMs} ms</span>
+        </div>
+      )}
+      {statsEntries.map(([k, v]) => (
+        <div key={k} className="ln-graph-tooltip__row">
+          <span className="ln-graph-tooltip__k">{k}</span>
+          <span className="ln-graph-tooltip__v">{formatStatValue(v)}</span>
+        </div>
+      ))}
+      <div className="ln-graph-tooltip__row">
+        <span className="ln-graph-tooltip__k">trust</span>
+        <span className="ln-graph-tooltip__v">{TRUST_LABEL[node.trust]}</span>
+      </div>
+      <div className="ln-graph-tooltip__hint">Click to inspect</div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }
