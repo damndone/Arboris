@@ -14,6 +14,7 @@ import {
   fetchRuns,
   previewFile,
   runWorkflow,
+  waitForRunTerminal,
   type FilePreview,
   type RunResponse,
   type RunSummary,
@@ -51,6 +52,7 @@ function useAppContext(): AppContextValue {
 function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
+  const navigate = useNavigate();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
@@ -68,7 +70,32 @@ function SubmitRoute() {
   >("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
-  const [lastRun, setLastRun] = useState<RunResponse | null>(null);
+  // V1.5.0.1 HF4: persist lastRun in sessionStorage so the "Open
+  // Lineage" affordance and inline RunResultView survive when the
+  // user navigates away (e.g. to History or to /runs/:id and back)
+  // and the SubmitRoute component re-mounts. Before this, lastRun
+  // lived in plain useState and was discarded on every unmount.
+  const [lastRun, setLastRunState] = useState<RunResponse | null>(() => {
+    try {
+      const raw = sessionStorage.getItem("workbench:lastRun");
+      return raw ? (JSON.parse(raw) as RunResponse) : null;
+    } catch {
+      return null;
+    }
+  });
+  const setLastRun = useCallback((run: RunResponse | null) => {
+    setLastRunState(run);
+    try {
+      if (run) {
+        sessionStorage.setItem("workbench:lastRun", JSON.stringify(run));
+      } else {
+        sessionStorage.removeItem("workbench:lastRun");
+      }
+    } catch {
+      // sessionStorage unavailable (private mode, quota): silently
+      // degrade to in-memory only. The user just loses persistence.
+    }
+  }, []);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -183,10 +210,44 @@ function SubmitRoute() {
         transpose,
       );
       setLastRun(result);
+      // P0 + race fix: POST /runs returns immediately with
+      // status="running" because the orchestrator executes in a
+      // background thread. If we navigate now, the Lineage view's
+      // graph fetch beats graph.json being written → the user sees
+      // the `legacy=true` empty-graph fallback (false "no lineage"
+      // state). Poll the run-detail endpoint until terminal first.
+      // V1.5.0.1 HF1: do NOT auto-navigate to /runs/:id?tab=lineage.
+      // The V1.5.0 P0 behaviour flipped users from the light Submit
+      // surface to the dark Lineage view without warning, skipping
+      // past the V1.4 result summary (coefficients, trust, diagnostics)
+      // that lives in the "Last run" section below. Users complained
+      // they couldn't see the result they just ran. We still wait for
+      // the run to terminate (so RunResultView fetches a finished run,
+      // not a half-baked one), but we stay on Submit and let the user
+      // click "Open Lineage →" themselves if they want the graph.
+      let finalStatus = result.status;
+      if (result.run_id && result.status === "running") {
+        setActivity("Running workflow — waiting for completion");
+        try {
+          const terminal = await waitForRunTerminal(
+            projectRoot.trim(),
+            result.run_id,
+          );
+          finalStatus = terminal.status;
+        } catch (waitError) {
+          const msg =
+            waitError instanceof Error
+              ? waitError.message
+              : "Polling failed";
+          setError(msg);
+        }
+      }
       setActivity(
-        result.status === "blocked"
+        finalStatus === "blocked"
           ? "Workflow returned blocked"
-          : "Workflow completed"
+          : finalStatus === "running"
+            ? "Workflow still running"
+            : "Workflow completed"
       );
     } catch (error) {
       const message =
@@ -507,11 +568,22 @@ function SubmitRoute() {
       <section className="panel" aria-labelledby="result-heading">
         <div className="panel-heading">
           <h2 id="result-heading">Last run</h2>
-          <span>
-            {lastRun
-              ? "Workflow output is available below."
-              : "No run yet."}
-          </span>
+          {lastRun ? (
+            <button
+              type="button"
+              onClick={() => {
+                const params = new URLSearchParams({
+                  project_root: projectRoot,
+                  tab: "lineage",
+                });
+                navigate(`/runs/${lastRun.run_id}?${params.toString()}`);
+              }}
+            >
+              Open Lineage →
+            </button>
+          ) : (
+            <span>No run yet.</span>
+          )}
         </div>
         {lastRun ? (
           <RunResultView
@@ -533,8 +605,8 @@ function SubmitRoute() {
 
 function RunHistoryRoute() {
   const { projectRoot, setError } = useAppContext();
+  const navigate = useNavigate();
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
@@ -543,7 +615,6 @@ function RunHistoryRoute() {
   useEffect(() => {
     if (!projectRoot) {
       setRuns(null);
-      setSelectedRunId(null);
       return;
     }
     let cancelled = false;
@@ -575,23 +646,28 @@ function RunHistoryRoute() {
     );
   }
 
+  // V1.5.0.1 HF3: clicking a run row navigates to /runs/:id?tab=overview
+  // instead of inline-rendering RunResultView below the list. This
+  // unifies the entry path with the post-run flow (HF1's "Open Lineage"
+  // button also lands on /runs/:id), and it lets the user reach the
+  // Lineage tab — which the inline-render pattern did not.
   return (
-    <>
-      <section className="panel" aria-labelledby="history-heading">
-        <div className="panel-heading">
-          <h2 id="history-heading">Run history</h2>
-          <span>{projectRoot}</span>
-        </div>
-        <RunHistoryPanel runs={runs} onSelect={setSelectedRunId} />
-      </section>
-      {selectedRunId && (
-        <RunResultView
-          projectRoot={projectRoot}
-          runId={selectedRunId}
-          onError={setError}
-        />
-      )}
-    </>
+    <section className="panel" aria-labelledby="history-heading">
+      <div className="panel-heading">
+        <h2 id="history-heading">Run history</h2>
+        <span>{projectRoot}</span>
+      </div>
+      <RunHistoryPanel
+        runs={runs}
+        onSelect={(runId) => {
+          const params = new URLSearchParams({
+            project_root: projectRoot,
+            tab: "overview",
+          });
+          navigate(`/runs/${runId}?${params.toString()}`);
+        }}
+      />
+    </section>
   );
 }
 
@@ -646,9 +722,22 @@ function AppShell() {
 
   const isSubmitActive = location.pathname === "/";
   const isHistoryActive = location.pathname.startsWith("/runs");
+  // V1.5.0.1 HF2: dark shell is scoped to /runs/:id?tab=lineage,
+  // not the whole run-detail route. The V1.5.0 P1 implementation
+  // applied dark chrome to the entire /runs/:id route, which left
+  // the Overview tab — using V1.4 light .panel/.result-panel styles
+  // — with white text on white backgrounds (functionally unreadable).
+  // Scoping to the lineage tab means Overview returns to its native
+  // V1.4 light styling while Lineage retains the V1.5.0 dark
+  // editorial surface. Submit (/) and History (/runs) remain light.
+  const tabParam = searchParams.get("tab") ?? "overview";
+  const isLineageDarkScope =
+    /^\/runs\/[^/?#]+$/.test(location.pathname) && tabParam === "lineage";
 
   return (
-    <main className="workbench-shell">
+    <main
+      className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}`}
+    >
       <header className="workbench-header">
         <h1>Local Econometrics Workbench</h1>
         <span className="activity" aria-live="polite">

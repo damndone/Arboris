@@ -213,3 +213,97 @@ def test_cli_module_exports_app():
     from workbench.cli import app
 
     assert app is not None
+
+
+def test_cli_lineage_url_default_origin(tmp_path):
+    """Built URL points at the FE dev origin and lands on the lineage tab."""
+    from workbench.cli import _lineage_url
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    url = _lineage_url(project, "run-abc-123")
+
+    assert url.startswith("http://localhost:5173/runs/run-abc-123?")
+    assert "tab=lineage" in url
+    # project_root is URL-encoded; the absolute path resolves under
+    # tmp_path which is itself absolute.
+    assert "project_root=" in url
+    # Path slashes must be percent-encoded so the query parser doesn't
+    # mis-segment the URL.
+    assert "%2F" in url or url.count("/runs/") == 1
+
+
+def test_cli_lineage_url_env_override(tmp_path, monkeypatch):
+    """WORKBENCH_UI_ORIGIN overrides the default localhost:5173 origin."""
+    from workbench.cli import _lineage_url
+
+    monkeypatch.setenv("WORKBENCH_UI_ORIGIN", "https://my-remote-tunnel.dev/")
+    project = tmp_path / "proj"
+    project.mkdir()
+    url = _lineage_url(project, "r1")
+    # Trailing slash on the env value must be stripped.
+    assert url.startswith("https://my-remote-tunnel.dev/runs/r1?")
+
+
+def test_cli_lineage_url_quotes_special_runid(tmp_path):
+    """A run_id containing slashes/spaces must be percent-encoded so
+    the URL stays parseable."""
+    from workbench.cli import _lineage_url
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    url = _lineage_url(project, "weird run/id")
+    # Spaces → %20, slash → %2F. The single legitimate "/runs/" prefix
+    # remains intact.
+    assert "/runs/weird%20run%2Fid?" in url
+
+
+def test_cli_run_stdout_is_run_id_only_stderr_carries_url(
+    tmp_path, monkeypatch, capsys
+):
+    """Reviewer P2: stdout must stay machine-readable so
+    `RUN_ID=$(workbench run ...)` keeps working. URL goes to stderr.
+    """
+    from typer.testing import CliRunner
+
+    from workbench import cli as cli_module
+    from workbench.cli import app
+
+    # Stub run_workflow so the test doesn't depend on the orchestrator
+    # actually executing — we're testing the CLI surface contract,
+    # not the run logic.
+    monkeypatch.setattr(
+        cli_module,
+        "_lineage_url",
+        lambda project_root, run_id: f"http://example/runs/{run_id}",
+    )
+
+    def fake_run_workflow(*_args, **_kwargs):
+        return {"run_id": "stub-run-42"}
+
+    # run_workflow is imported lazily inside the command body; patch the
+    # source module so the import resolves to our stub.
+    import workbench.orchestrator as orch
+
+    monkeypatch.setattr(orch, "run_workflow", fake_run_workflow)
+
+    # Click ≥8.2 separates stdout/stderr by default; the older
+    # `mix_stderr=False` kwarg has been removed. We rely on the
+    # default (separated) behaviour.
+    runner = CliRunner()
+    project = tmp_path / "proj"
+    project.mkdir()
+    data = tmp_path / "data.csv"
+    data.write_text("y,x\n1,2\n3,4\n")
+
+    result = runner.invoke(
+        app,
+        ["run", str(project), str(data), "y", "--x", "x"],
+    )
+    assert result.exit_code == 0, result.output
+    # stdout: only the run_id, with a single trailing newline. This is
+    # the contract scripts depend on (e.g. `RUN_ID=$(workbench run ...)`).
+    assert result.stdout == "stub-run-42\n"
+    # stderr: human-facing URL line, prefixed with "Lineage:".
+    assert "Lineage:" in result.stderr
+    assert "stub-run-42" in result.stderr

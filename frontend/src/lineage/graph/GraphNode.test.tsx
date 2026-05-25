@@ -1,0 +1,185 @@
+import "@testing-library/jest-dom/vitest";
+import { describe, it, expect } from "vitest";
+import { render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { ReactFlowProvider } from "reactflow";
+import { GraphNode, type GraphNodeState } from "./GraphNode";
+import type {
+  DecisionReviewStatus,
+  DecisionViewModel,
+  GraphViewNode,
+  Stage,
+  Trust,
+} from "../api/graphViewTypes";
+
+// GraphNode uses React Flow <Handle>, which requires ReactFlowProvider in tree.
+function render(ui: ReactElement) {
+  return rtlRender(<ReactFlowProvider>{ui}</ReactFlowProvider>);
+}
+
+function vn(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
+  return {
+    id: "n1",
+    nodeKey: "n1",
+    raw: null,
+    stage: "model",
+    kind: "model",
+    title: "Primary OLS",
+    summary: "OLS · HC1 · n = 32",
+    parentStageId: null,
+    trust: "ok",
+    decisions: [],
+    ...overrides,
+  };
+}
+
+function vd(reviewStatus: DecisionReviewStatus = "needed"): DecisionViewModel {
+  return {
+    id: "d1",
+    question: "Model type",
+    picked: "OLS",
+    alternatives: [],
+    why: "",
+    evidence: [],
+    reviewStatus,
+  };
+}
+
+// Helper: render GraphNode with state defaulted to "related" (the
+// no-selection default) and the React Flow `selected` prop derived from
+// state, so test sites only have to specify what they're actually
+// testing (the node + optional tri-state).
+function mountNode(
+  node: GraphViewNode,
+  state: GraphNodeState = "related",
+): void {
+  render(
+    <GraphNode data={{ node, state }} selected={state === "selected"} />,
+  );
+}
+
+describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
+  it("renders kind label, title, and summary", () => {
+    mountNode(vn());
+    expect(screen.getByText("Primary OLS")).toBeInTheDocument();
+    expect(screen.getByText("OLS · HC1 · n = 32")).toBeInTheDocument();
+    expect(screen.getByText("model")).toBeInTheDocument();
+  });
+
+  it("hides meta line when summary is undefined", () => {
+    mountNode(vn({ summary: undefined }));
+    expect(screen.queryByTestId("node-summary")).toBeNull();
+  });
+
+  it("shows no badge when trust=ok and no review needed", () => {
+    mountNode(vn());
+    expect(screen.queryByTestId("node-badge")).toBeNull();
+  });
+
+  it("shows review badge when trust=review", () => {
+    mountNode(vn({ trust: "review" }));
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Review");
+    expect(badge.className).toContain("ln-graph-node__badge--review");
+  });
+
+  it("shows review badge when any decision needs review (even if trust=ok)", () => {
+    mountNode(vn({ decisions: [vd("needed")] }));
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
+  });
+
+  it("shows review badge when any decision failed review (even if trust=ok)", () => {
+    mountNode(vn({ decisions: [vd("failed")] }));
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
+  });
+
+  it("shows caution badge when trust=caution (takes priority over review)", () => {
+    mountNode(vn({ trust: "caution", decisions: [vd("needed")] }));
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Caution");
+    expect(badge.className).toContain("ln-graph-node__badge--caution");
+  });
+
+  // REV-2: non-triggering decision states must not surface a badge when
+  // trust=ok. Otherwise we'd over-flag nodes whose DPs are already cleared.
+  const benign: DecisionReviewStatus[] = [
+    "passed",
+    "not_needed",
+    "waived",
+    "unknown",
+  ];
+  for (const status of benign) {
+    it(`shows no badge when trust=ok and decision.reviewStatus=${status}`, () => {
+      mountNode(vn({ decisions: [vd(status)] }));
+      expect(screen.queryByTestId("node-badge")).toBeNull();
+    });
+  }
+
+  it("shows review badge when trust=review even with no decisions [REV-2]", () => {
+    mountNode(vn({ trust: "review", decisions: [] }));
+    expect(screen.getByTestId("node-badge")).toHaveTextContent("Review");
+  });
+
+  describe("stage × trust matrix (DoD T8.3)", () => {
+    const stages: Stage[] = [
+      "source",
+      "eda",
+      "clean",
+      "transform",
+      "model",
+      "diag",
+      "viz",
+      "report",
+    ];
+    const trusts: Trust[] = ["ok", "review", "caution"];
+
+    for (const stage of stages) {
+      for (const trust of trusts) {
+        it(`renders stage=${stage} trust=${trust} without crashing`, () => {
+          mountNode(vn({ stage, trust }));
+          const node = screen.getByTestId("graph-node");
+          expect(node).toHaveAttribute("data-stage", stage);
+          expect(node).toHaveAttribute("data-trust", trust);
+          // Bar uses a CSS var (via --node-color); verify the inline style sets it.
+          expect(node.style.getPropertyValue("--node-color")).toBe(
+            `var(--stage-${stage})`,
+          );
+        });
+      }
+    }
+
+    it("stage=unknown falls back to neutral --label-tertiary (not a stage token)", () => {
+      mountNode(vn({ stage: "unknown" }));
+      const node = screen.getByTestId("graph-node");
+      expect(node.style.getPropertyValue("--node-color")).toBe(
+        "var(--label-tertiary)",
+      );
+    });
+  });
+
+  describe("tri-state highlighting (T8.5)", () => {
+    it("state=selected applies selected outline class", () => {
+      mountNode(vn(), "selected");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--selected");
+      expect(node.className).not.toContain("ln-graph-node--dim");
+      expect(node).toHaveAttribute("data-state", "selected");
+    });
+
+    it("state=related applies no extra classes (default opacity)", () => {
+      mountNode(vn(), "related");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).not.toContain("ln-graph-node--selected");
+      expect(node.className).not.toContain("ln-graph-node--dim");
+      expect(node).toHaveAttribute("data-state", "related");
+    });
+
+    it("state=dim applies the dim class", () => {
+      mountNode(vn(), "dim");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--dim");
+      expect(node.className).not.toContain("ln-graph-node--selected");
+      expect(node).toHaveAttribute("data-state", "dim");
+    });
+  });
+});

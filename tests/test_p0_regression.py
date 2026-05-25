@@ -77,7 +77,7 @@ def test_dropped_variables_reported(tmp_path):
     dropped = _check_dropped_variables(
         ["x1", "x2"], model_results, frame, issue_dicts, tmp_path
     )
-    assert any("x2" in d for d in dropped)
+    assert any(d["variable"] == "x2" for d in dropped)
     assert any(
         issue["code"] == "VARIABLE_DROPPED" and "x2" in issue["message"]
         for issue in issue_dicts

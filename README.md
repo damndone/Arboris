@@ -16,7 +16,7 @@ Create a project and run a sample dataset:
 
 ```bash
 workbench create /tmp workbench-demo
-workbench run /tmp/workbench-demo examples/datasets/cross_section.csv --y wage --x education
+workbench run /tmp/workbench-demo examples/datasets/cross_section.csv wage --x education
 ```
 
 Start the local API:

@@ -5,10 +5,12 @@ import {
   fetchRunDetail,
   fetchRuns,
   fetchRunArtifacts,
+  getRunGraph,
   runBatchWorkflow,
   previewFile,
   reportUrl,
   artifactDownloadUrl,
+  waitForRunTerminal,
 } from "./api";
 import * as XLSX from "xlsx";
 
@@ -47,7 +49,7 @@ test("fetchRuns sends project_root query and returns runs array", async () => {
 
   const result = await fetchRuns("/tmp/demo");
 
-  expect(fetch).toHaveBeenCalledWith("/runs?project_root=%2Ftmp%2Fdemo");
+  expect(fetch).toHaveBeenCalledWith("/api/runs?project_root=%2Ftmp%2Fdemo");
   expect(result.runs).toHaveLength(1);
   expect(result.runs[0].run_id).toBe("abc");
 });
@@ -70,7 +72,7 @@ test("fetchRunDetail returns artifact_counts and errors", async () => {
   const detail = await fetchRunDetail("/tmp/demo", "abc");
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/abc?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc?project_root=%2Ftmp%2Fdemo"
   );
   expect(detail.artifact_counts.report).toBe(1);
   expect(detail.errors.issues).toEqual([]);
@@ -99,7 +101,7 @@ test("fetchRunArtifacts returns groups array", async () => {
   const result = await fetchRunArtifacts("/tmp/demo", "abc");
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/abc/artifacts?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc/artifacts?project_root=%2Ftmp%2Fdemo"
   );
   expect(result.groups[0].artifact_type).toBe("report");
   expect(result.groups[0].items[0].artifact_id).toBe("report_html");
@@ -145,13 +147,13 @@ test("legacy FastAPI detail string is still parsed (POST /runs upload limit)", a
 test("artifactDownloadUrl encodes project_root and ids", () => {
   const url = artifactDownloadUrl("/tmp/demo", "abc 123", "report_html");
   expect(url).toBe(
-    "/runs/abc%20123/artifacts/report_html?project_root=%2Ftmp%2Fdemo"
+    "/api/runs/abc%20123/artifacts/report_html?project_root=%2Ftmp%2Fdemo"
   );
 });
 
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
-  expect(url).toBe("/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+  expect(url).toBe("/api/runs/abc/report?project_root=%2Ftmp%2Fdemo");
 });
 
 test("runBatchWorkflow posts y_list and x as form data", async () => {
@@ -180,7 +182,7 @@ test("runBatchWorkflow posts y_list and x as form data", async () => {
   );
 
   expect(fetch).toHaveBeenCalledWith(
-    "/runs/batch",
+    "/api/runs/batch",
     expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
   );
   const body = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1]
@@ -276,6 +278,9 @@ test("connectRunEvents wires step events and terminal close", () => {
   };
 
   const cleanup = connectRunEvents("/tmp/demo", "run-1", callbacks);
+  expect(globalThis.EventSource).toHaveBeenCalledWith(
+    "/api/runs/run-1/events?project_root=%2Ftmp%2Fdemo",
+  );
 
   // Simulate step_start
   listeners["step_start"]?.(
@@ -312,4 +317,120 @@ test("connectRunEvents wires step events and terminal close", () => {
   cleanup();
 
   (globalThis as any).EventSource = origEventSource;
+});
+
+// ── waitForRunTerminal ──────────────────────────────────────────────
+// Race fix for the P0 auto-navigation. Reviewer findings:
+//   - POST /runs returns status="running" immediately because the
+//     orchestrator backgrounds the work; without polling the FE
+//     navigates and the graph fetch beats graph.json being written,
+//     landing the user on a legacy=true empty graph.
+//   - These tests pin the polling contract (returns on terminal,
+//     respects intervalMs, caps via maxMs).
+
+test("waitForRunTerminal returns immediately when first poll is terminal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "r1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+  const start = Date.now();
+  const result = await waitForRunTerminal("/tmp/p", "r1", { intervalMs: 0 });
+  // No setTimeout fired — first GET already returned completed.
+  expect(Date.now() - start).toBeLessThan(50);
+  expect(result.status).toBe("completed");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test("waitForRunTerminal polls until status flips to terminal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  const base = {
+    run_id: "r2",
+    mode: "auto",
+    started_at: "2026-05-01T00:00:00+00:00",
+    y: "y",
+    x: ["x"],
+  };
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "running" }));
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "running" }));
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "blocked" }));
+
+  const result = await waitForRunTerminal("/tmp/p", "r2", { intervalMs: 0 });
+  expect(result.status).toBe("blocked");
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+test("waitForRunTerminal throws when maxMs cap is reached", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  const base = {
+    run_id: "r3",
+    status: "running",
+    mode: "auto",
+    started_at: "2026-05-01T00:00:00+00:00",
+    y: "y",
+    x: ["x"],
+  };
+  // Keep returning running; the cap should kick in after the first
+  // iteration since maxMs is 0 (deadline crossed immediately).
+  fetchMock.mockResolvedValue(jsonResponse(base));
+
+  await expect(
+    waitForRunTerminal("/tmp/p", "r3", { intervalMs: 0, maxMs: 0 }),
+  ).rejects.toThrow(/still running/i);
+});
+
+test("waitForRunTerminal honors AbortSignal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(
+    jsonResponse({
+      run_id: "r4",
+      status: "running",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+  const ctrl = new AbortController();
+  ctrl.abort();
+  await expect(
+    waitForRunTerminal("/tmp/p", "r4", {
+      intervalMs: 0,
+      signal: ctrl.signal,
+    }),
+  ).rejects.toThrow(/abort/i);
+});
+
+test("getRunGraph returns parsed GraphResponse on 200", async () => {
+  const fake = {
+    schema_version: 2,
+    run_id: "r1",
+    legacy: false,
+    stats: { node_count: 0, edge_count: 0, leaf_count: 0, has_dp_count: 0 },
+    nodes: {},
+    edges: {},
+    branches: {},
+  };
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse(fake),
+  );
+  const result = await getRunGraph("/proj", "r1");
+  expect(result.schema_version).toBe(2);
+  expect(result.run_id).toBe("r1");
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/runs/r1/graph?project_root=%2Fproj",
+  );
+});
+
+test("getRunGraph throws ApiError on 404", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+    jsonResponse({ detail: "Run not found" }, 404),
+  );
+  await expect(getRunGraph("/proj", "missing")).rejects.toBeInstanceOf(ApiError);
 });

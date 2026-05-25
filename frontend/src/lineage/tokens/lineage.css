@@ -1,0 +1,502 @@
+/* frontend/src/lineage/tokens/lineage.css
+ * V1.5.0 design tokens, OKLCH-derived from uiux/handoff/tokens.ts (dark default).
+ * V1.4.1 variable names preserved (--bg-canvas / --tint / --separator / ...)
+ * so the class rules below this block stay identical.
+ * New tokens: 8 --stage-*, 3 status (--ok/--review/--caution), 3 font.
+ * Light theme overrides live in [data-theme="light"] .lineage-root.
+ */
+
+.lineage-root {
+  /* Surfaces — warm near-black, slight olive cast (printer's ink) */
+  --bg-canvas:        oklch(0.165 0.006 70);
+  --bg-card:          oklch(0.20  0.006 70);
+  --bg-card-2:        oklch(0.24  0.006 70);
+  --bg-elev:          oklch(0.28  0.006 70);
+  --separator:        rgba(255, 250, 240, 0.08);
+  --separator-faint:  rgba(255, 250, 240, 0.045);
+
+  /* Typography — warm cream */
+  --label:            oklch(0.94 0.008 75);
+  --label-secondary:  oklch(0.72 0.008 75);
+  --label-tertiary:   oklch(0.50 0.008 75);
+
+  /* Editorial accent — muted ink-blue (replaces V1.4.1 system blue) */
+  --tint:             oklch(0.72 0.08 240);
+  --tint-hover:       oklch(0.78 0.08 240);
+
+  /* Editorial ink — stroke / selected-node outline (plan T8.3 step 3,
+   * spec §19.5). Mirrors prototype `--c-ink` (uiux/styles.css). Equal
+   * to --tint in V1.5.0 but kept as a separate token so the semantic
+   * (ink stroke vs accent fill) stays addressable. May diverge in
+   * V1.5.x without churning every --tint consumer. */
+  --ink:              oklch(0.72 0.08 240);
+
+  /* Burnished status colours (never bright) */
+  --orange:           oklch(0.74 0.10 65);
+  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
+  --red:              oklch(0.62 0.13 25);
+  --green:            oklch(0.70 0.07 155);
+
+  /* Stage colours — near-mono with subtle hue rotation.
+   * Differentiation comes from position + label, not chroma. */
+  --stage-source:     oklch(0.58 0.008 75);
+  --stage-eda:        oklch(0.66 0.04 220);
+  --stage-clean:      oklch(0.66 0.04 250);
+  --stage-transform:  oklch(0.72 0.10 65);
+  --stage-model:      oklch(0.70 0.06 200);
+  --stage-diag:       oklch(0.62 0.04 280);
+  --stage-viz:        oklch(0.66 0.04 320);
+  --stage-report:     oklch(0.74 0.06 75);
+
+  /* Trust status — adapter buckets (ok / review / caution) */
+  --ok:               oklch(0.70 0.07 155);
+  --review:           oklch(0.74 0.10 65);
+  --caution:          oklch(0.62 0.13 25);
+
+  /* Typeface stacks */
+  --font-serif:       "Iowan Old Style", "Source Serif Pro", "Charter", Georgia, "Songti SC", "Noto Serif CJK SC", serif;
+  --font-sans:        -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono:        ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum";
+  color: var(--label);
+  background: var(--bg-canvas);
+}
+
+/* Light theme — warm paper, FT/research-deck cream */
+[data-theme="light"] .lineage-root {
+  --bg-canvas:        oklch(0.965 0.012 80);
+  --bg-card:          oklch(0.99  0.012 80);
+  --bg-card-2:        oklch(0.95  0.014 78);
+  --bg-elev:          oklch(0.92  0.014 78);
+  --separator:        rgba(20, 18, 16, 0.10);
+  --separator-faint:  rgba(20, 18, 16, 0.06);
+
+  --label:            oklch(0.22 0.010 75);
+  --label-secondary:  oklch(0.40 0.010 75);
+  --label-tertiary:   oklch(0.55 0.008 75);
+
+  --tint:             oklch(0.48 0.10 240);
+  --tint-hover:       oklch(0.54 0.10 240);
+  --ink:              oklch(0.48 0.10 240);
+
+  --orange:           oklch(0.62 0.12 65);
+  --orange-bg:        color-mix(in oklch, var(--orange) 18%, transparent);
+  --red:              oklch(0.55 0.16 25);
+  --green:            oklch(0.55 0.08 155);
+
+  --stage-source:     oklch(0.50 0.010 75);
+  --stage-eda:        oklch(0.50 0.04 220);
+  --stage-clean:      oklch(0.48 0.05 250);
+  --stage-transform:  oklch(0.55 0.13 65);
+  --stage-model:      oklch(0.50 0.06 200);
+  --stage-diag:       oklch(0.48 0.06 280);
+  --stage-viz:        oklch(0.52 0.05 320);
+  --stage-report:     oklch(0.55 0.08 75);
+
+  --ok:               oklch(0.55 0.08 155);
+  --review:           oklch(0.62 0.12 65);
+  --caution:          oklch(0.55 0.16 25);
+}
+
+/* Card */
+.ln-card {
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+/* Pill */
+.ln-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.ln-pill--orange {
+  background: var(--orange-bg);
+  color: var(--orange);
+}
+.ln-pill--red {
+  background: rgba(255, 69, 58, 0.10);
+  color: var(--red);
+}
+
+/* Button */
+.ln-btn-primary {
+  background: var(--tint);
+  color: #fff;
+  border: 0;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-primary:hover { background: var(--tint-hover); }
+
+.ln-btn-secondary {
+  background: var(--bg-card-2);
+  color: var(--label);
+  border: 0;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ln-btn-secondary:hover { background: var(--bg-elev); }
+
+/* Status callout */
+.ln-callout {
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ln-callout--orange { background: var(--orange-bg); }
+.ln-callout--orange .ln-callout-title { color: var(--orange); }
+.ln-callout--red { background: rgba(255, 69, 58, 0.10); }
+.ln-callout--red .ln-callout-title { color: var(--red); }
+.ln-callout--green { background: rgba(48, 209, 88, 0.10); }
+.ln-callout--green .ln-callout-title { color: var(--green); }
+.ln-callout-title { font-weight: 600; font-size: 14px; }
+.ln-callout-body { color: var(--label); font-size: 13.5px; margin-top: 6px; line-height: 1.5; }
+
+/* Section label (SMALL CAPS) */
+.ln-section-label {
+  color: var(--label-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+/* ─── Node card (T8.3) ──────────────────────────────────────────────
+ * Editorial card: 8px left colour bar (per stage) + body container with
+ * row1 (kind label uppercase mono + optional trust badge) → title
+ * (serif) → meta (mono dim). Uses only design tokens; no hex colours.
+ */
+.ln-graph-node {
+  display: flex;
+  width: 240px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  /* REV-3 T8.3: React Flow <Handle> uses position:absolute. Anchor to
+   * the node container (not a transient flex ancestor) so top/bottom
+   * resolves to the node's bounding box and edges attach correctly. */
+  position: relative;
+}
+.ln-graph-node__bar {
+  width: 8px;
+  flex: 0 0 8px;
+  background: var(--node-color, var(--label-tertiary));
+}
+.ln-graph-node__body {
+  flex: 1 1 auto;
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+.ln-graph-node__row1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.ln-graph-node__kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  font-weight: 600;
+}
+.ln-graph-node__title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--label);
+  line-height: 1.2;
+  margin-bottom: 3px;
+  letter-spacing: -0.005em;
+}
+.ln-graph-node__meta {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--label-secondary);
+  line-height: 1.3;
+}
+
+/* Trust badge — small uppercase pill, token-coloured */
+.ln-graph-node__badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--separator);
+}
+.ln-graph-node__badge--review {
+  color: var(--review);
+  border-color: color-mix(in oklch, var(--review) 35%, transparent);
+}
+.ln-graph-node__badge--caution {
+  color: var(--caution);
+  border-color: color-mix(in oklch, var(--caution) 35%, transparent);
+}
+
+/* Selected outline — editorial --ink stroke (plan T8.3 step 3, spec
+ * §19.5). --ink ≡ --tint in V1.5.0 but uses the ink token to track
+ * spec/prototype vocabulary. */
+.ln-graph-node--selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Dim state (T8.5) — nodes outside the selected neighbourhood drop
+ * to 0.4 opacity. Selection-driven; default state is "related" (full
+ * opacity) when no node is selected. */
+.ln-graph-node--dim {
+  opacity: 0.4;
+}
+
+/* ─── Canvas chrome (T8.6a) ─────────────────────────────────────────
+ * Rendered as <Panel> children of <ReactFlow>. RF handles absolute
+ * positioning per `position` prop; we style the inner contents.
+ */
+.ln-canvas-toolbar {
+  display: inline-flex;
+  gap: 0;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.ln-canvas-toolbar button {
+  background: transparent;
+  color: var(--label-secondary);
+  border: 0;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+  border-right: 1px solid var(--separator);
+}
+.ln-canvas-toolbar button:last-child {
+  border-right: 0;
+}
+.ln-canvas-toolbar button:hover:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+.ln-canvas-toolbar button:disabled[aria-pressed="true"] {
+  /* The "Auto layout" indicator: not clickable but visually pressed,
+   * communicating that auto-layout is currently the only mode. */
+  background: var(--bg-elev);
+  color: var(--label);
+  cursor: default;
+}
+
+.ln-canvas-status {
+  /* T8.6a hotfix (browser smoke): inline-flex + max-width so the
+   * badge shrink-wraps to content and doesn't stretch edge-to-edge
+   * under React Flow's Panel. The default display:block would
+   * overlap the top-left toolbar in narrow viewports (e.g. when the
+   * lineage view is embedded in a History column). The 60%
+   * cap keeps the right-anchored badge from overrunning the left
+   * half on cramped layouts; long run_id ellipsises gracefully. */
+  display: inline-flex;
+  align-items: center;
+  max-width: 60%;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--label-secondary);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ln-canvas-status__count {
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.ln-canvas-status__count--warn {
+  color: var(--review);
+}
+
+.ln-canvas-legend {
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: var(--label-secondary);
+  overflow: hidden;
+  transition: width 0.15s ease;
+}
+.ln-canvas-legend__chip {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: default;
+}
+.ln-canvas-legend__list {
+  display: none;
+  padding: 4px 10px 8px;
+}
+.ln-canvas-legend--expanded .ln-canvas-legend__list {
+  display: block;
+}
+.ln-canvas-legend--expanded .ln-canvas-legend__chip {
+  border-bottom: 1px solid var(--separator);
+  margin-bottom: 4px;
+}
+.ln-canvas-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.ln-canvas-legend__swatch {
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ─── React Flow Controls zoom-pill restyle (T8.6b) ────────────────
+ * Scoped CSS override of the default <Controls> appearance. We do
+ * NOT replace the component — RF still owns zoom-in/out/fit logic +
+ * disabled state at min/max zoom. Class names verified against
+ * @reactflow/controls v11.x (LL: react-flow__controls /
+ * react-flow__controls-button).
+ *
+ * Layout: horizontal pill (prototype look) instead of the default
+ * vertical stack. Tokens replace the literal #fefefe / #eee / #f4f4f4
+ * defaults so the controls track our dark/light themes via OKLCH.
+ *
+ * IMPORTANT: this rule lives under .lineage-root so it never leaks
+ * into other React Flow instances elsewhere in the app.
+ */
+.lineage-root .react-flow__controls {
+  display: flex;
+  flex-direction: row;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.lineage-root .react-flow__controls-button {
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--separator);
+  /* Default has border-bottom; we flipped to border-right for the
+   * horizontal layout. Clear the bottom border to avoid double rules
+   * stacking with the parent border. */
+  border-bottom: 0;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  color: var(--label-secondary);
+  fill: currentColor;
+}
+.lineage-root .react-flow__controls-button:last-child {
+  border-right: 0;
+}
+.lineage-root .react-flow__controls-button:hover {
+  background: var(--bg-elev);
+  color: var(--label);
+}
+.lineage-root .react-flow__controls-button svg {
+  fill: currentColor;
+}
+.lineage-root .react-flow__controls-button:disabled {
+  color: var(--label-tertiary);
+  cursor: default;
+}
+.lineage-root .react-flow__controls-button:disabled svg {
+  fill-opacity: 0.5;
+}
+
+/* ─── Hover tooltip (T8.4) ──────────────────────────────────────────
+ * Screen-space (position:fixed) and portaled to document.body so
+ * React Flow's canvas zoom never affects tooltip pixel position.
+ * Parent (GraphCanvas) drives the 240ms hover delay and clientX/Y.
+ */
+.ln-graph-tooltip {
+  position: fixed;
+  width: 240px;
+  padding: 10px 12px 12px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  z-index: 1000;
+  font-family: var(--font-sans);
+  color: var(--label);
+}
+.ln-graph-tooltip__title {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.ln-graph-tooltip__sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  margin-bottom: 8px;
+}
+.ln-graph-tooltip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ln-graph-tooltip__k {
+  color: var(--label-tertiary);
+  font-family: var(--font-mono);
+}
+.ln-graph-tooltip__v {
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  text-align: right;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ln-graph-tooltip__hint {
+  margin-top: 8px;
+  color: var(--label-tertiary);
+  font-size: 11px;
+  font-style: italic;
+}
