@@ -14,6 +14,7 @@ import {
   fetchRuns,
   previewFile,
   runWorkflow,
+  waitForRunTerminal,
   type FilePreview,
   type RunResponse,
   type RunSummary,
@@ -184,16 +185,44 @@ function SubmitRoute() {
         transpose,
       );
       setLastRun(result);
+      // P0 + race fix: POST /runs returns immediately with
+      // status="running" because the orchestrator executes in a
+      // background thread. If we navigate now, the Lineage view's
+      // graph fetch beats graph.json being written → the user sees
+      // the `legacy=true` empty-graph fallback (false "no lineage"
+      // state). Poll the run-detail endpoint until terminal first.
+      let finalStatus = result.status;
+      if (result.run_id && result.status === "running") {
+        setActivity("Running workflow — waiting for completion");
+        try {
+          const terminal = await waitForRunTerminal(
+            projectRoot.trim(),
+            result.run_id,
+          );
+          finalStatus = terminal.status;
+        } catch (waitError) {
+          // 5-min cap reached or fetch failure. Surface but still
+          // navigate — useGraphData renders its own loading/error
+          // state and the user can refresh manually.
+          const msg =
+            waitError instanceof Error
+              ? waitError.message
+              : "Polling failed";
+          setError(`${msg} — opening lineage anyway.`);
+        }
+      }
       setActivity(
-        result.status === "blocked"
+        finalStatus === "blocked"
           ? "Workflow returned blocked"
-          : "Workflow completed"
+          : finalStatus === "running"
+            ? "Workflow still running"
+            : "Workflow completed"
       );
-      // V1.5.0 P0: main path after a run is the Lineage view. Navigate
-      // even on "blocked" — a partially-built graph is still inspectable
-      // and is often the most useful surface for diagnosing the block.
-      // The "Last run" section on the Submit route is preserved as a
-      // secondary affordance (still visible if the user navigates back).
+      // Main path after a run is the Lineage view. Navigate even on
+      // "blocked" — a partially-built graph is still inspectable and
+      // is often the most useful surface for diagnosing the block.
+      // "Last run" on the Submit route is preserved as a secondary
+      // affordance.
       if (result.run_id) {
         const params = new URLSearchParams({
           project_root: projectRoot.trim(),

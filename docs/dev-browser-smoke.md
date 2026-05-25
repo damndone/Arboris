@@ -120,12 +120,17 @@ reviewers don't file them as defects.
 
 | Gap | Status |
 |---|---|
-| AppShell header + Submit/History/Overview/Lineage tabs render against a light page background instead of full-bleed dark editorial | P1 — outer-chrome theming patch tracked separately |
 | Left rail (stage navigation with counts) | Deferred to V1.5.1 |
 | Top-row workspace breadcrumb / search-K / rerun / generate-report buttons | Deferred to V1.5.1+ |
 | Bottom terminal panel | Deferred to V1.5.1+ |
 | Drawer header uses flat text path instead of breadcrumb chip path | Cosmetic, deferred |
 | Trust banner has no inline action buttons (查看产物 / 回滚 / 标记为坏决策) | Deferred — rerun + AI are V1.5.1+ features |
+
+The outer-chrome dark theming on `/runs/<id>` was P1 and has landed
+in commit `e039adf`. AppShell header + Submit/History tabs +
+Overview/Lineage tabs now flip to the dark editorial surface when
+the route matches `/^\/runs\/[^/?#]+$/`. Submit (`/`) and the
+History list (`/runs`) intentionally stay on the V1.4 light surface.
 
 The lineage interior (graph, drawer, tooltip, chrome) matches the
 design intent for V1.5.0 scope.

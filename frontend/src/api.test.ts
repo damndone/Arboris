@@ -10,6 +10,7 @@ import {
   previewFile,
   reportUrl,
   artifactDownloadUrl,
+  waitForRunTerminal,
 } from "./api";
 import * as XLSX from "xlsx";
 
@@ -316,6 +317,94 @@ test("connectRunEvents wires step events and terminal close", () => {
   cleanup();
 
   (globalThis as any).EventSource = origEventSource;
+});
+
+// ── waitForRunTerminal ──────────────────────────────────────────────
+// Race fix for the P0 auto-navigation. Reviewer findings:
+//   - POST /runs returns status="running" immediately because the
+//     orchestrator backgrounds the work; without polling the FE
+//     navigates and the graph fetch beats graph.json being written,
+//     landing the user on a legacy=true empty graph.
+//   - These tests pin the polling contract (returns on terminal,
+//     respects intervalMs, caps via maxMs).
+
+test("waitForRunTerminal returns immediately when first poll is terminal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "r1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+  const start = Date.now();
+  const result = await waitForRunTerminal("/tmp/p", "r1", { intervalMs: 0 });
+  // No setTimeout fired — first GET already returned completed.
+  expect(Date.now() - start).toBeLessThan(50);
+  expect(result.status).toBe("completed");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+test("waitForRunTerminal polls until status flips to terminal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  const base = {
+    run_id: "r2",
+    mode: "auto",
+    started_at: "2026-05-01T00:00:00+00:00",
+    y: "y",
+    x: ["x"],
+  };
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "running" }));
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "running" }));
+  fetchMock.mockResolvedValueOnce(jsonResponse({ ...base, status: "blocked" }));
+
+  const result = await waitForRunTerminal("/tmp/p", "r2", { intervalMs: 0 });
+  expect(result.status).toBe("blocked");
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+test("waitForRunTerminal throws when maxMs cap is reached", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  const base = {
+    run_id: "r3",
+    status: "running",
+    mode: "auto",
+    started_at: "2026-05-01T00:00:00+00:00",
+    y: "y",
+    x: ["x"],
+  };
+  // Keep returning running; the cap should kick in after the first
+  // iteration since maxMs is 0 (deadline crossed immediately).
+  fetchMock.mockResolvedValue(jsonResponse(base));
+
+  await expect(
+    waitForRunTerminal("/tmp/p", "r3", { intervalMs: 0, maxMs: 0 }),
+  ).rejects.toThrow(/still running/i);
+});
+
+test("waitForRunTerminal honors AbortSignal", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(
+    jsonResponse({
+      run_id: "r4",
+      status: "running",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+  const ctrl = new AbortController();
+  ctrl.abort();
+  await expect(
+    waitForRunTerminal("/tmp/p", "r4", {
+      intervalMs: 0,
+      signal: ctrl.signal,
+    }),
+  ).rejects.toThrow(/abort/i);
 });
 
 test("getRunGraph returns parsed GraphResponse on 200", async () => {

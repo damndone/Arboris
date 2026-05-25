@@ -56,8 +56,12 @@ def run(
 
     result = run_workflow(project_root, [data_file], mode=mode, y=y, x=x)
     run_id = result["run_id"]
+    # stdout: machine-readable run_id only — preserves the long-standing
+    # `RUN_ID=$(workbench run ...)` shell contract.
     typer.echo(run_id)
-    typer.echo(f"Lineage: {_lineage_url(project_root, run_id)}")
+    # stderr: human-facing copyable URL — visible in terminals, doesn't
+    # pollute scripts capturing stdout.
+    typer.echo(f"Lineage: {_lineage_url(project_root, run_id)}", err=True)
 
 
 if __name__ == "__main__":

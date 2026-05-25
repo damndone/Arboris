@@ -581,6 +581,47 @@ export async function fetchRunDetail(
   return readResponse<RunDetail>(response);
 }
 
+/**
+ * Poll fetchRunDetail until the run reaches a terminal status
+ * (anything other than `"running"`). The POST /runs endpoint returns
+ * immediately with `status="running"` because the orchestrator
+ * executes in a background thread — without this guard the Submit
+ * page's auto-navigation lands on the lineage view before
+ * graph.json is written, and `/runs/<id>/graph` returns the
+ * `legacy=true` empty-graph fallback (false "no lineage" state).
+ *
+ * Defaults: 500 ms cadence, 5 min total cap. Test sites override
+ * `intervalMs` to avoid timer waits.
+ */
+export async function waitForRunTerminal(
+  projectRoot: string,
+  runId: string,
+  opts: {
+    intervalMs?: number;
+    maxMs?: number;
+    onTick?: (detail: RunDetail) => void;
+    signal?: AbortSignal;
+  } = {},
+): Promise<RunDetail> {
+  const intervalMs = opts.intervalMs ?? 500;
+  const maxMs = opts.maxMs ?? 5 * 60 * 1000;
+  const deadline = Date.now() + maxMs;
+  while (true) {
+    if (opts.signal?.aborted) {
+      throw new DOMException("waitForRunTerminal aborted", "AbortError");
+    }
+    const detail = await fetchRunDetail(projectRoot, runId);
+    if (detail.status !== "running") return detail;
+    opts.onTick?.(detail);
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Run ${runId} still running after ${maxMs} ms; giving up on poll.`,
+      );
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 export async function fetchRunArtifacts(
   projectRoot: string,
   runId: string,

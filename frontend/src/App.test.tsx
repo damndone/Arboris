@@ -163,51 +163,122 @@ function minimalGraphResponse(runId: string) {
   };
 }
 
-test("runWorkflow navigates to the lineage tab on success [P0]", async () => {
+// Route mocked fetches by URL so the polling-aware flow (POST → poll
+// runDetail → GET graph) doesn't have to be encoded as a fragile
+// sequential chain.
+type RouteFn = (url: string, init?: RequestInit) => Response | Promise<Response>;
+function installFetchRouter(fetchMock: ReturnType<typeof vi.fn>, route: RouteFn) {
+  fetchMock.mockImplementation((url, init) => {
+    const u = typeof url === "string" ? url : String(url);
+    return Promise.resolve(route(u, init));
+  });
+}
+
+// RunResultView reads several optional fields (errors.issues,
+// artifact_counts, lineage, model_results). When the Submit route is
+// rendered mid-poll the inline RunResultView crashes if these are
+// missing, even though the test only cares about the navigation
+// contract. Build a fully-populated minimal RunDetail so the inline
+// render doesn't blow up while we wait for polling to complete.
+function fullRunDetail(
+  runId: string,
+  status: string,
+): Record<string, unknown> {
+  return {
+    run_id: runId,
+    status,
+    mode: "auto",
+    started_at: "2026-05-01T00:00:00+00:00",
+    y: "y",
+    x: ["x1", "x2"],
+    lineage: [],
+    artifact_counts: {},
+    errors: { issues: [] },
+    model_results: [],
+  };
+}
+
+test("runWorkflow polls until terminal then navigates to lineage [P0/P1]", async () => {
+  // Race fix: POST /runs returns status=running while the orchestrator
+  // is still in a background thread. If we navigate now, the graph
+  // fetch beats graph.json being written and the user sees the
+  // legacy=true empty graph. Verify the flow waits for the run-detail
+  // endpoint to flip out of "running" before navigating.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ run_id: "abc-123", status: "running" })
-  );
-  // After navigation, LineageRouteContainer fetches /runs/<id>/graph.
-  fetchMock.mockResolvedValue(jsonResponse(minimalGraphResponse("abc-123")));
+  let runDetailCalls = 0;
+  let graphFetched = false;
+  installFetchRouter(fetchMock, (url) => {
+    if (url.includes("/projects"))
+      return jsonResponse({ project_root: "/tmp/demo" });
+    if (/\/runs\/abc-123\/graph(\?|$)/.test(url)) {
+      // Assert ordering: detail must have returned "completed"
+      // before we hit graph. The route-fn tracks this state.
+      graphFetched = true;
+      expect(runDetailCalls).toBeGreaterThanOrEqual(1);
+      return jsonResponse(minimalGraphResponse("abc-123"));
+    }
+    if (/\/runs\/abc-123\/artifacts(\?|$)/.test(url)) {
+      return jsonResponse({ groups: [] });
+    }
+    if (/\/runs\/abc-123(\?|$)/.test(url)) {
+      runDetailCalls += 1;
+      // First detail GET → still running. Subsequent → completed.
+      // The inline RunResultView ALSO calls this endpoint; either
+      // status keeps it from crashing thanks to fullRunDetail's
+      // zero-shaped fields.
+      return jsonResponse(
+        fullRunDetail("abc-123", runDetailCalls === 1 ? "running" : "completed"),
+      );
+    }
+    if (/\/runs(\?|$)/.test(url)) {
+      // POST /runs from runWorkflow — kick off the background run.
+      return jsonResponse({ run_id: "abc-123", status: "running" });
+    }
+    return jsonResponse({});
+  });
 
   renderAt("/");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
-  // Navigation is detectable via RunDetailRoute's tablist appearing —
-  // it doesn't exist on the SubmitRoute. Lineage tab must be selected.
-  await waitFor(() => {
-    expect(
-      screen.getByRole("tab", { name: "Lineage" }),
-    ).toHaveAttribute("aria-selected", "true");
-  });
-  // Submit page heading is gone (we navigated away).
-  expect(
-    screen.queryByRole("heading", { name: /last run/i }),
-  ).not.toBeInTheDocument();
-  // The graph endpoint was called with the new run id and project_root.
-  const graphCall = fetchMock.mock.calls.find(([url]) =>
-    typeof url === "string" && url.includes("/runs/abc-123/graph"),
+  // Polling cadence default is 500 ms, so allow a generous waitFor.
+  await waitFor(
+    () => {
+      expect(
+        screen.getByRole("tab", { name: "Lineage" }),
+      ).toHaveAttribute("aria-selected", "true");
+    },
+    { timeout: 4000 },
   );
-  expect(graphCall).toBeDefined();
-  expect(String(graphCall![0])).toContain(
-    "project_root=" + encodeURIComponent("/tmp/demo"),
-  );
+  // The graph fetch must have happened AFTER at least one run-detail
+  // poll — the assertion inside the route-fn enforces this.
+  expect(graphFetched).toBe(true);
+  expect(runDetailCalls).toBeGreaterThanOrEqual(2);
 });
 
-test("runWorkflow navigates to lineage even when status=blocked [P0]", async () => {
-  // A blocked run still has a (partial) graph; lineage is the most
-  // useful diagnostic surface. Navigation must not gate on
-  // status=completed.
+test("runWorkflow navigates to lineage when POST already returns blocked [P0]", async () => {
+  // A run that lands as blocked from the POST itself has finished —
+  // no polling needed. Navigation must still happen.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ run_id: "blk-1", status: "blocked" })
-  );
-  fetchMock.mockResolvedValue(jsonResponse(minimalGraphResponse("blk-1")));
+  installFetchRouter(fetchMock, (url) => {
+    if (url.includes("/projects")) {
+      return jsonResponse({ project_root: "/tmp/demo" });
+    }
+    if (/\/runs\/blk-1\/graph(\?|$)/.test(url)) {
+      return jsonResponse(minimalGraphResponse("blk-1"));
+    }
+    if (/\/runs\/blk-1\/artifacts(\?|$)/.test(url)) {
+      return jsonResponse({ groups: [] });
+    }
+    if (/\/runs\/blk-1(\?|$)/.test(url)) {
+      return jsonResponse(fullRunDetail("blk-1", "blocked"));
+    }
+    if (/\/runs(\?|$)/.test(url)) {
+      return jsonResponse({ run_id: "blk-1", status: "blocked" });
+    }
+    return jsonResponse({});
+  });
 
   renderAt("/");
   await fillProject();
