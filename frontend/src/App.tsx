@@ -51,6 +51,7 @@ function useAppContext(): AppContextValue {
 function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
+  const navigate = useNavigate();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
@@ -188,6 +189,18 @@ function SubmitRoute() {
           ? "Workflow returned blocked"
           : "Workflow completed"
       );
+      // V1.5.0 P0: main path after a run is the Lineage view. Navigate
+      // even on "blocked" — a partially-built graph is still inspectable
+      // and is often the most useful surface for diagnosing the block.
+      // The "Last run" section on the Submit route is preserved as a
+      // secondary affordance (still visible if the user navigates back).
+      if (result.run_id) {
+        const params = new URLSearchParams({
+          project_root: projectRoot.trim(),
+          tab: "lineage",
+        });
+        navigate(`/runs/${result.run_id}?${params.toString()}`);
+      }
     } catch (error) {
       const message =
         error instanceof ApiError

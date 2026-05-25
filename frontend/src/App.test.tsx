@@ -53,7 +53,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  // NOTE: don't call vi.unstubAllGlobals() — it would wipe the
+  // ResizeObserver / DOMRect stubs that vitest.setup.ts installs once
+  // for the whole suite. The next beforeEach re-stubs fetch, which is
+  // the only global this file touches.
   vi.restoreAllMocks();
 });
 
@@ -144,70 +147,67 @@ test("createProject success populates project_root", async () => {
   expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
 });
 
-test("runWorkflow shows run result inline on submit page", async () => {
+// V1.5.0 P0: after a successful run, the Submit page must auto-navigate
+// to /runs/<id>?project_root=...&tab=lineage so the user lands directly
+// on the lineage view. The "Last run" section on /‍ is preserved as
+// secondary, but the main product path is now the lineage tab.
+function minimalGraphResponse(runId: string) {
+  return {
+    schema_version: 3,
+    run_id: runId,
+    legacy: false,
+    stats: { node_count: 0, edge_count: 0, leaf_count: 0, has_dp_count: 0 },
+    nodes: {},
+    edges: {},
+    branches: {},
+  };
+}
+
+test("runWorkflow navigates to the lineage tab on success [P0]", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  // POST returns running (async)
   fetchMock.mockResolvedValueOnce(
     jsonResponse({ run_id: "abc-123", status: "running" })
   );
-  // GET run detail
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      run_id: "abc-123", status: "completed", mode: "auto",
-      started_at: "2026-05-01T00:00:00+00:00", y: "y", x: ["x1", "x2"],
-      lineage: [], artifact_counts: { report: 1 }, errors: { issues: [] },
-      model_results: [
-        {
-          model_id: "ols_1",
-          r_squared: 0.9,
-          coefficients: {
-            x1: { estimate: 2, std_error: 0.1, p_value: 0.01 },
-          },
-        },
-      ],
-    })
-  );
-  // GET run artifacts
-  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
+  // After navigation, LineageRouteContainer fetches /runs/<id>/graph.
+  fetchMock.mockResolvedValue(jsonResponse(minimalGraphResponse("abc-123")));
 
   renderAt("/");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
+  // Navigation is detectable via RunDetailRoute's tablist appearing —
+  // it doesn't exist on the SubmitRoute. Lineage tab must be selected.
   await waitFor(() => {
     expect(
-      screen.getByRole("heading", { name: /run detail/i })
-    ).toBeInTheDocument();
+      screen.getByRole("tab", { name: "Lineage" }),
+    ).toHaveAttribute("aria-selected", "true");
   });
-  expect(screen.getByRole("heading", { name: "Project" })).toBeInTheDocument();
-  expect(screen.getByText("abc-123")).toBeInTheDocument();
-  expect(screen.getAllByText("Completed").length).toBeGreaterThan(0);
-  expect(screen.getByRole("heading", { name: /coefficients/i })).toBeInTheDocument();
-  expect(document.body).toHaveTextContent("ols_1");
-  expect(document.body).toHaveTextContent("x1");
+  // Submit page heading is gone (we navigated away).
+  expect(
+    screen.queryByRole("heading", { name: /last run/i }),
+  ).not.toBeInTheDocument();
+  // The graph endpoint was called with the new run id and project_root.
+  const graphCall = fetchMock.mock.calls.find(([url]) =>
+    typeof url === "string" && url.includes("/runs/abc-123/graph"),
+  );
+  expect(graphCall).toBeDefined();
+  expect(String(graphCall![0])).toContain(
+    "project_root=" + encodeURIComponent("/tmp/demo"),
+  );
 });
 
-test("runWorkflow blocked shows run result inline with blocked status", async () => {
+test("runWorkflow navigates to lineage even when status=blocked [P0]", async () => {
+  // A blocked run still has a (partial) graph; lineage is the most
+  // useful diagnostic surface. Navigation must not gate on
+  // status=completed.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  // POST returns running (workflow is async, blocked result comes later)
   fetchMock.mockResolvedValueOnce(
-    jsonResponse({ run_id: "blk-1", status: "running" })
+    jsonResponse({ run_id: "blk-1", status: "blocked" })
   );
-  // GET run detail shows blocked
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      run_id: "blk-1", status: "blocked", mode: "auto",
-      started_at: "2026-05-01T00:00:00+00:00", y: "y", x: ["x1", "x2"],
-      lineage: [], artifact_counts: {}, errors: {
-        issues: [{ severity: "BLOCKER", code: "DATA_QUALITY", message: "Bad data" }],
-      },
-    })
-  );
-  // GET artifacts
-  fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
+  fetchMock.mockResolvedValue(jsonResponse(minimalGraphResponse("blk-1")));
 
   renderAt("/");
   await fillProject();
@@ -216,12 +216,9 @@ test("runWorkflow blocked shows run result inline with blocked status", async ()
 
   await waitFor(() => {
     expect(
-      screen.getByRole("heading", { name: /run detail/i })
-    ).toBeInTheDocument();
+      screen.getByRole("tab", { name: "Lineage" }),
+    ).toHaveAttribute("aria-selected", "true");
   });
-  expect(screen.getByRole("heading", { name: "Project" })).toBeInTheDocument();
-  expect(screen.getByText("blk-1")).toBeInTheDocument();
-  expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
 });
 
 test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {
