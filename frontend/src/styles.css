@@ -454,6 +454,78 @@ dd {
   cursor: not-allowed;
 }
 
+/* ─── V1.5.0 P1: Lineage route dark chrome ──────────────────────────
+ * Applied when AppShell detects pathname `/runs/<id>`. Goal: kill the
+ * "light V1-form page over dark canvas" visual break that the smoke
+ * surfaced. We DO NOT introduce a left rail, bottom terminal, top
+ * workspace breadcrumb, or any other V1.5.1+ deferred chrome — only
+ * re-skin what already exists (header + outer tabs + inner tablist).
+ *
+ * The OKLCH tokens here are redeclared from lineage/tokens/lineage.css
+ * so they cascade into RunDetailRoute's inline `var(--tint)` styles
+ * without the components needing to know whether they're under a
+ * `.lineage-root`. The lineage canvas itself still owns its own
+ * `.lineage-root` scope inside <LineageRouteContainer>; nesting is
+ * intentional and harmless (variables resolve at use site).
+ */
+html:has(.workbench-shell--lineage),
+body:has(.workbench-shell--lineage) {
+  background: oklch(0.165 0.006 70);
+}
+.workbench-shell--lineage {
+  /* Make the shell carry its own background instead of letting the
+   * page peek through the centered max-width column. */
+  background: oklch(0.165 0.006 70);
+  color: oklch(0.94 0.008 75);
+  min-height: 100vh;
+  width: 100%;
+  max-width: none;
+  padding: 16px 24px 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+  /* Cascade tokens to children — including RunDetailRoute's inner
+   * TabLink whose inline styles read var(--tint, #0a84ff). */
+  --label:            oklch(0.94 0.008 75);
+  --label-secondary:  oklch(0.72 0.008 75);
+  --label-tertiary:   oklch(0.50 0.008 75);
+  --separator:        rgba(255, 250, 240, 0.08);
+  --tint:             oklch(0.72 0.08 240);
+  --ink:              oklch(0.72 0.08 240);
+}
+.workbench-shell--lineage .workbench-header {
+  border-bottom: 1px solid var(--separator);
+  padding-bottom: 12px;
+  margin-bottom: 10px;
+}
+.workbench-shell--lineage h1 {
+  color: var(--label);
+  font-weight: 600;
+}
+.workbench-shell--lineage .activity {
+  color: var(--label-secondary);
+}
+
+/* Outer Submit/History tabs — re-skin without restructuring. */
+.workbench-shell--lineage .tabs button[role="tab"] {
+  color: var(--label-secondary);
+}
+.workbench-shell--lineage .tabs button[role="tab"]:hover:not(:disabled) {
+  color: var(--label);
+}
+.workbench-shell--lineage .tabs button[aria-selected="true"] {
+  color: var(--label);
+  border-bottom-color: var(--ink);
+}
+.workbench-shell--lineage .tabs button[role="tab"]:disabled {
+  opacity: 0.35;
+}
+
+/* The inner Overview/Lineage tablist in RunDetailRoute uses inline
+ * `var(--tint, …)` and `var(--separator, …)` — both cascade from the
+ * shell tokens above. No additional rule needed. */
+
 .runs-table {
   width: 100%;
   border-collapse: collapse;

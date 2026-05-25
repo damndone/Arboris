@@ -659,9 +659,19 @@ function AppShell() {
 
   const isSubmitActive = location.pathname === "/";
   const isHistoryActive = location.pathname.startsWith("/runs");
+  // V1.5.0 P1: when on the run-detail route (/runs/<id>), flip the
+  // outer chrome (header + AppShell tabs + inner Overview/Lineage
+  // tabs) to the dark editorial surface so the page stops looking
+  // like a light V1-form layer pasted above the dark canvas. The
+  // history list (/runs) and Submit (/) stay on the light surface
+  // because they're V1.4-era list/form pages with no design-spec
+  // dark-mode contract.
+  const isLineageDetailRoute = /^\/runs\/[^/?#]+$/.test(location.pathname);
 
   return (
-    <main className="workbench-shell">
+    <main
+      className={`workbench-shell${isLineageDetailRoute ? " workbench-shell--lineage" : ""}`}
+    >
       <header className="workbench-header">
         <h1>Local Econometrics Workbench</h1>
         <span className="activity" aria-live="polite">
