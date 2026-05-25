@@ -4,6 +4,7 @@ import ReactFlow, {
   Controls,
   Panel,
   useReactFlow,
+  useNodesState,
 } from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
@@ -265,16 +266,17 @@ export function GraphCanvas({
     [model.nodes],
   );
 
-  const { rfNodes, rfEdges } = useMemo(() => {
+  // V1.5.0.1 HF5: the seed layout (positions + edges) depends only on
+  // graph structure — model.nodes, model.edges, expandedGroups. Selection
+  // and the related-set are applied as a decoration overlay (below)
+  // without rebuilding positions, so dragged cards don't snap back to
+  // dagre on every selection change.
+  const { seedNodes, rfEdges, memberToGroup } = useMemo(() => {
     const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
 
     const visible = new Set<string>(kept.map((n) => n.id));
     groups.forEach((g) => visible.add(g.id));
 
-    // For each currently-expanded group id that folding.ts no longer returns
-    // (because its members are inlined), synthesize a fold-back marker node so
-    // the user has an affordance to collapse the cluster again. The marker
-    // shares the group id, so onExpandGroup's toggle naturally folds it.
     const expandedMarkers: Array<{
       gid: string;
       variantLabel: string;
@@ -285,60 +287,30 @@ export function GraphCanvas({
       if (stillFolded.has(gid)) continue;
       const parsed = parseGroupId(gid);
       if (!parsed) continue;
-      // Only show the marker if the parent stage is itself rendered; otherwise
-      // dagre has nowhere to anchor it.
       if (!nodeById.has(parsed.parent)) continue;
       expandedMarkers.push({ gid, ...parsed });
       visible.add(gid);
     }
 
-    // memberToGroup collapses each variable inside a folded cluster
-    // to its group id so edge logic + tri-state highlighting can
-    // address groups by their member ids interchangeably.
     const memberToGroup = new Map<string, string>();
     groups.forEach((g) =>
       g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
     );
 
-    // T8.5: compute the "related" set for tri-state highlighting.
-    //   inIds  = edge.source ∀ edges where edge.target === selectedNodeId
-    //   outIds = edge.target ∀ edges where edge.source === selectedNodeId
-    //   related = inIds ∪ outIds ∪ {selectedNodeId}
-    // Edges run over model.edges (logical, pre-folding); memberToGroup
-    // remaps endpoints so a selected group highlights via any of its
-    // members' real edges.
-    const related = new Set<string>();
-    if (selectedNodeId !== null) {
-      related.add(selectedNodeId);
-      for (const e of model.edges) {
-        const src = memberToGroup.get(e.source) ?? e.source;
-        const tgt = memberToGroup.get(e.target) ?? e.target;
-        if (tgt === selectedNodeId) related.add(src);
-        if (src === selectedNodeId) related.add(tgt);
-      }
-    }
-    const stateFor = (id: string): "selected" | "related" | "dim" => {
-      if (selectedNodeId === null) return "related";
-      if (id === selectedNodeId) return "selected";
-      if (related.has(id)) return "related";
-      return "dim";
-    };
-
     const realNodes: RFNode[] = kept.map((n) => ({
       id: n.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      // T8.3: GraphNode now consumes the V1.5.0 GraphViewNode directly.
-      // Adapter is the only consumer of backend LineageNode shape.
-      // T8.5: also carries the tri-state highlight state.
-      data: { node: n, state: stateFor(n.id) },
-      selected: n.id === selectedNodeId,
+      // T8.3: GraphNode consumes V1.5.0 GraphViewNode directly. Selection
+      // state is overlaid by the decoratedNodes useMemo, not here.
+      data: { node: n, state: "related" },
+      selected: false,
     }));
     const groupNodes: RFNode[] = groups.map((g) => ({
       id: g.id,
       type: "lineageNode",
       position: { x: 0, y: 0 },
-      data: { node: groupAsNode(g), state: stateFor(g.id) },
+      data: { node: groupAsNode(g), state: "related" },
       selected: false,
     }));
     const markerNodes: RFNode[] = expandedMarkers.map((m) => ({
@@ -347,16 +319,12 @@ export function GraphCanvas({
       position: { x: 0, y: 0 },
       data: {
         node: markerAsNode(m.gid, m.variantLabel, m.parent),
-        state: stateFor(m.gid),
+        state: "related",
       },
       selected: false,
     }));
 
     const candidateEdges: RFEdge[] = [];
-
-    // Synthetic dashed edges from each expanded group's parent stage to its
-    // fold-marker, so dagre places markers next to their siblings rather than
-    // floating in a void.
     for (const m of expandedMarkers) {
       candidateEdges.push({
         id: `${m.parent}->${m.gid}`,
@@ -390,8 +358,49 @@ export function GraphCanvas({
       [...realNodes, ...groupNodes, ...markerNodes],
       uniqEdges,
     );
-    return { rfNodes: layouted, rfEdges: uniqEdges };
-  }, [model, selectedNodeId, expandedGroups, nodeById]);
+    return { seedNodes: layouted, rfEdges: uniqEdges, memberToGroup };
+  }, [model, expandedGroups, nodeById]);
+
+  // V1.5.0.1 HF5: useNodesState lets React Flow own the live position
+  // state, so node drag mutations stick. We re-seed from layoutDagre
+  // ONLY when the graph identity changes (i.e., the set of node ids
+  // changes). Selection changes do NOT re-seed.
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState(seedNodes);
+  const lastSeedKey = useRef<string>("");
+  useEffect(() => {
+    const key = seedNodes.map((n) => n.id).join("|");
+    if (key !== lastSeedKey.current) {
+      setRfNodes(seedNodes);
+      lastSeedKey.current = key;
+    }
+  }, [seedNodes, setRfNodes]);
+
+  // T8.5: tri-state highlight + selected flag overlaid on top of the
+  // RF-owned node state. Re-runs cheaply on selection change without
+  // touching positions.
+  const decoratedNodes = useMemo(() => {
+    const related = new Set<string>();
+    if (selectedNodeId !== null) {
+      related.add(selectedNodeId);
+      for (const e of model.edges) {
+        const src = memberToGroup.get(e.source) ?? e.source;
+        const tgt = memberToGroup.get(e.target) ?? e.target;
+        if (tgt === selectedNodeId) related.add(src);
+        if (src === selectedNodeId) related.add(tgt);
+      }
+    }
+    const stateFor = (id: string): "selected" | "related" | "dim" => {
+      if (selectedNodeId === null) return "related";
+      if (id === selectedNodeId) return "selected";
+      if (related.has(id)) return "related";
+      return "dim";
+    };
+    return rfNodes.map((n) => ({
+      ...n,
+      selected: n.id === selectedNodeId,
+      data: { ...n.data, state: stateFor(n.id) },
+    }));
+  }, [rfNodes, selectedNodeId, model.edges, memberToGroup]);
 
   // ── T8.4 hover tooltip ──────────────────────────────────────────
   // Tracks the candidate node under the cursor + screen-space coords.
@@ -468,10 +477,19 @@ export function GraphCanvas({
       style={{ width: "100%", height: "100%", minHeight: 480 }}
     >
       <ReactFlow
-        nodes={rfNodes}
+        nodes={decoratedNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
-        nodesDraggable={false}
+        // V1.5.0.1 HF5: free node drag matches the prototype's contract
+        // (uiux/app.jsx TWEAK_DEFAULTS layout=free; uiux/panels.jsx empty
+        // drawer hint "拖拽 = 重排"). Positions are owned by RF state
+        // via useNodesState above; dagre is the initial seed only.
+        nodesDraggable={true}
+        // V1.5.0.1 HF5: pin edge type to RF's bezier default so a future
+        // RF upgrade can't silently switch us to step / smoothstep.
+        // Matches uiux/app.jsx TWEAK_DEFAULTS edgeStyle="bezier".
+        defaultEdgeOptions={{ type: "default" }}
+        onNodesChange={onNodesChange}
         nodesConnectable={false}
         elementsSelectable={true}
         onNodeClick={(_, n) => {

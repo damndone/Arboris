@@ -643,4 +643,45 @@ describe("GraphCanvas", () => {
     );
     expect(screen.queryByText(/expanded/i)).not.toBeInTheDocument();
   });
+
+  // V1.5.0.1 HF5: the V1.5.0 implementation re-ran layoutDagre on
+  // every selectedNodeId change, which would have snapped any user-
+  // dragged position back to the dagre seed (functionally killing
+  // drag). HF5 splits seed layout from selection decoration so user
+  // drags survive. This test verifies the seed positions don't churn
+  // across a selection-only change — the underlying contract for
+  // drag-persistence in the real browser.
+  it("preserves RF node positions across a selection change [HF5]", async () => {
+    const m = model(graph());
+    const { rerender } = render(
+      <GraphCanvas
+        model={m}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    const stageNode = await screen.findByText("Cleaned data");
+    const stageRfWrapper = stageNode.closest(".react-flow__node") as HTMLElement;
+    expect(stageRfWrapper).not.toBeNull();
+    const initialTransform = stageRfWrapper.style.transform;
+    expect(initialTransform).toBeTruthy();
+
+    // Re-render with a different selectedNodeId. The seed layout
+    // must NOT re-run, so the transform on stage:cleaned stays the
+    // same byte-for-byte.
+    rerender(
+      <GraphCanvas
+        model={m}
+        selectedNodeId="stage:cleaned"
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const afterSelection = stageNode.closest(".react-flow__node") as HTMLElement;
+    expect(afterSelection.style.transform).toBe(initialTransform);
+  });
 });

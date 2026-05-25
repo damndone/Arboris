@@ -50,6 +50,14 @@ beforeEach(() => {
   } catch {
     // ignore
   }
+  try {
+    // V1.5.0.1 HF4: lastRun is persisted in sessionStorage; clear
+    // it between tests so a previous test's run cannot leak into the
+    // next test's SubmitRoute mount.
+    sessionStorage.clear();
+  } catch {
+    // ignore
+  }
 });
 
 afterEach(() => {
@@ -147,10 +155,12 @@ test("createProject success populates project_root", async () => {
   expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
 });
 
-// V1.5.0 P0: after a successful run, the Submit page must auto-navigate
-// to /runs/<id>?project_root=...&tab=lineage so the user lands directly
-// on the lineage view. The "Last run" section on /‍ is preserved as
-// secondary, but the main product path is now the lineage tab.
+// V1.5.0.1 HF1: after a successful run, the Submit page stays on /
+// and renders the V1.4 result summary inline. The "Open Lineage →"
+// button on the Last run heading is the explicit user gesture that
+// navigates to the dark lineage view. The V1.5.0 P0 forced auto-nav
+// was removed because users lost sight of the result they just ran
+// and were jarred by the light → dark flip.
 function minimalGraphResponse(runId: string) {
   return {
     schema_version: 3,
@@ -198,41 +208,28 @@ function fullRunDetail(
   };
 }
 
-test("runWorkflow polls until terminal then navigates to lineage [P0/P1]", async () => {
-  // Race fix: POST /runs returns status=running while the orchestrator
-  // is still in a background thread. If we navigate now, the graph
-  // fetch beats graph.json being written and the user sees the
-  // legacy=true empty graph. Verify the flow waits for the run-detail
-  // endpoint to flip out of "running" before navigating.
+test("runWorkflow polls until terminal then stays on Submit with Open Lineage button [HF1]", async () => {
+  // V1.5.0.1 HF1: do NOT auto-navigate after a run completes. The
+  // run-detail polling still gates against the orchestrator's
+  // background race, but the user stays on Submit and sees the
+  // V1.4 result summary inline. An "Open Lineage →" button on the
+  // Last run heading is the explicit gesture for entering lineage.
+  // Use POST /runs that returns "completed" directly (no polling)
+  // to keep the test deterministic; the polling gate is exercised
+  // by api.test.ts waitForRunTerminal suite. This test focuses on
+  // the post-run UI contract.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  let runDetailCalls = 0;
-  let graphFetched = false;
   installFetchRouter(fetchMock, (url) => {
     if (url.includes("/projects"))
       return jsonResponse({ project_root: "/tmp/demo" });
-    if (/\/runs\/abc-123\/graph(\?|$)/.test(url)) {
-      // Assert ordering: detail must have returned "completed"
-      // before we hit graph. The route-fn tracks this state.
-      graphFetched = true;
-      expect(runDetailCalls).toBeGreaterThanOrEqual(1);
-      return jsonResponse(minimalGraphResponse("abc-123"));
-    }
     if (/\/runs\/abc-123\/artifacts(\?|$)/.test(url)) {
       return jsonResponse({ groups: [] });
     }
     if (/\/runs\/abc-123(\?|$)/.test(url)) {
-      runDetailCalls += 1;
-      // First detail GET → still running. Subsequent → completed.
-      // The inline RunResultView ALSO calls this endpoint; either
-      // status keeps it from crashing thanks to fullRunDetail's
-      // zero-shaped fields.
-      return jsonResponse(
-        fullRunDetail("abc-123", runDetailCalls === 1 ? "running" : "completed"),
-      );
+      return jsonResponse(fullRunDetail("abc-123", "completed"));
     }
     if (/\/runs(\?|$)/.test(url)) {
-      // POST /runs from runWorkflow — kick off the background run.
-      return jsonResponse({ run_id: "abc-123", status: "running" });
+      return jsonResponse({ run_id: "abc-123", status: "completed" });
     }
     return jsonResponse({});
   });
@@ -242,24 +239,20 @@ test("runWorkflow polls until terminal then navigates to lineage [P0/P1]", async
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
-  // Polling cadence default is 500 ms, so allow a generous waitFor.
-  await waitFor(
-    () => {
-      expect(
-        screen.getByRole("tab", { name: "Lineage" }),
-      ).toHaveAttribute("aria-selected", "true");
-    },
-    { timeout: 4000 },
-  );
-  // The graph fetch must have happened AFTER at least one run-detail
-  // poll — the assertion inside the route-fn enforces this.
-  expect(graphFetched).toBe(true);
-  expect(runDetailCalls).toBeGreaterThanOrEqual(2);
+  // After the run terminates, the Submit tab stays selected and the
+  // Open Lineage button appears on the Last run heading.
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: /Open Lineage/ }),
+    ).toBeInTheDocument();
+  });
+  // Submit tab still active, NOT Lineage.
+  expect(
+    screen.getByRole("tab", { name: "Submit" }),
+  ).toHaveAttribute("aria-selected", "true");
 });
 
-test("runWorkflow navigates to lineage when POST already returns blocked [P0]", async () => {
-  // A run that lands as blocked from the POST itself has finished —
-  // no polling needed. Navigation must still happen.
+test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   installFetchRouter(fetchMock, (url) => {
     if (url.includes("/projects")) {
@@ -275,6 +268,9 @@ test("runWorkflow navigates to lineage when POST already returns blocked [P0]", 
       return jsonResponse(fullRunDetail("blk-1", "blocked"));
     }
     if (/\/runs(\?|$)/.test(url)) {
+      // A run that lands as blocked from the POST itself has finished
+      // — no polling needed. The button still appears and lets the
+      // user enter the lineage view if they want to inspect.
       return jsonResponse({ run_id: "blk-1", status: "blocked" });
     }
     return jsonResponse({});
@@ -285,6 +281,14 @@ test("runWorkflow navigates to lineage when POST already returns blocked [P0]", 
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
 
+  // Wait for the Open Lineage button to appear (run terminated).
+  const openBtn = await waitFor(
+    () => screen.getByRole("button", { name: /Open Lineage/ }),
+    { timeout: 4000 },
+  );
+  fireEvent.click(openBtn);
+
+  // After the explicit click, the Lineage tab is selected.
   await waitFor(() => {
     expect(
       screen.getByRole("tab", { name: "Lineage" }),
@@ -411,7 +415,10 @@ test("clicking a history row loads run detail with errors", async () => {
       screen.getByRole("heading", { name: /run detail/i })
     ).toBeInTheDocument();
   });
-  expect(screen.getByRole("heading", { name: /run history/i })).toBeInTheDocument();
+  // V1.5.0.1 HF3: clicking a history row now navigates to /runs/:id
+  // (instead of inline-rendering RunResultView below the list), so
+  // the "Run history" heading is no longer on screen after the click.
+  expect(screen.queryByRole("heading", { name: /run history/i })).not.toBeInTheDocument();
   expect(screen.getByText("Bad column")).toBeInTheDocument();
   expect(screen.getByText("DATA_QUALITY")).toBeInTheDocument();
 });
@@ -1158,5 +1165,131 @@ test("run detail coefficient risk shows reference level column", async () => {
   expect(screen.getByText("1")).toBeInTheDocument();
   // display_term shows "region_code = 2"
   expect(screen.getByText("region_code = 2")).toBeInTheDocument();
+});
+
+// V1.5.0.1 HF2: dark editorial chrome is scoped to ?tab=lineage,
+// not the entire /runs/:id route. Overview returns to V1.4 light
+// styling (fixes the white-on-white bug); Lineage keeps dark.
+// The shell class is computed from URL alone, so we don't need to
+// wait for any fetch to complete — querying immediately after
+// renderAt is sufficient.
+function stubRunDetailAndArtifacts(runId: string) {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.includes(`/runs/${runId}/artifacts`)) {
+      return Promise.resolve(jsonResponse({ groups: [] }));
+    }
+    if (url.includes(`/runs/${runId}/graph`)) {
+      return Promise.resolve(jsonResponse({ nodes: [], edges: [], legacy: true }));
+    }
+    if (url.includes(`/runs/${runId}`)) {
+      return Promise.resolve(
+        jsonResponse({
+          run_id: runId,
+          status: "completed",
+          mode: "auto",
+          started_at: "2026-05-01T00:00:00+00:00",
+          y: "y",
+          x: ["x"],
+          lineage: [],
+          artifact_counts: {},
+          errors: { issues: [] },
+          model_results: [],
+        }),
+      );
+    }
+    return Promise.resolve(jsonResponse({ runs: [] }));
+  });
+}
+
+// V1.5.0.1 HF3: clicking a run row in History navigates to
+// /runs/:id?tab=overview. Replaces the V1.4 inline-render pattern
+// that left URL at /runs and prevented Lineage tab access.
+test("HF3: clicking a history row navigates to /runs/:id with tab=overview", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.includes("/projects")) {
+      return Promise.resolve(jsonResponse({ project_root: "/tmp/demo" }));
+    }
+    if (/\/runs\/run-1\/artifacts/.test(url)) {
+      return Promise.resolve(jsonResponse({ groups: [] }));
+    }
+    if (/\/runs\/run-1(\?|$)/.test(url)) {
+      return Promise.resolve(jsonResponse(fullRunDetail("run-1", "completed")));
+    }
+    if (/\/runs(\?|$)/.test(url)) {
+      return Promise.resolve(jsonResponse({ runs: [makeRun("run-1")] }));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+
+  renderAt("/");
+  await fillProject();
+  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  await waitFor(() => screen.getByText("run-1"));
+
+  fireEvent.click(screen.getByText("run-1"));
+
+  // RunDetailRoute is mounted — Overview tab is active (matches
+  // tab=overview from the URL) and Lineage tab is reachable.
+  await waitFor(() => {
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+  expect(screen.getByRole("tab", { name: "Lineage" })).toBeInTheDocument();
+  // History panel is gone (no longer inline-rendered).
+  expect(screen.queryByRole("heading", { name: /run history/i })).not.toBeInTheDocument();
+});
+
+test("HF2: /runs/:id?tab=overview does NOT apply lineage dark shell", () => {
+  stubRunDetailAndArtifacts("run-hf2");
+  renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=overview");
+  const shell = document.querySelector("main.workbench-shell");
+  expect(shell).not.toBeNull();
+  expect(shell?.classList.contains("workbench-shell--lineage")).toBe(false);
+});
+
+// V1.5.0.1 HF4: lastRun survives SubmitRoute remount via sessionStorage.
+// Before this fix it was plain useState and was discarded on navigation.
+test("HF4: lastRun persisted in sessionStorage survives SubmitRoute remount", async () => {
+  // Seed sessionStorage as if a previous session had completed run-prev.
+  sessionStorage.setItem(
+    "workbench:lastRun",
+    JSON.stringify({ run_id: "run-prev", status: "completed" }),
+  );
+
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.includes("/projects")) {
+      return Promise.resolve(jsonResponse({ project_root: "/tmp/demo" }));
+    }
+    if (/\/runs\/run-prev\/artifacts/.test(url)) {
+      return Promise.resolve(jsonResponse({ groups: [] }));
+    }
+    if (/\/runs\/run-prev(\?|$)/.test(url)) {
+      return Promise.resolve(jsonResponse(fullRunDetail("run-prev", "completed")));
+    }
+    return Promise.resolve(jsonResponse({}));
+  });
+
+  renderAt("/");
+
+  // Without HF4, lastRun starts as null and Open Lineage doesn't render.
+  // With HF4, the seeded value is restored and the button appears.
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: /Open Lineage/ }),
+    ).toBeInTheDocument();
+  });
+});
+
+test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
+  stubRunDetailAndArtifacts("run-hf2");
+  renderAt("/runs/run-hf2?project_root=/tmp/demo&tab=lineage");
+  const shell = document.querySelector("main.workbench-shell");
+  expect(shell).not.toBeNull();
+  expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
 });
 
