@@ -22,6 +22,7 @@ import {
 import { RunHistoryPanel } from "./runHistory";
 import { RunDetailRoute } from "./runDetail";
 import { RunResultView } from "./runResult";
+import { ThemeProvider, ThemeToggle } from "./theme";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
@@ -740,9 +741,12 @@ function AppShell() {
     >
       <header className="workbench-header">
         <h1>Local Econometrics Workbench</h1>
-        <span className="activity" aria-live="polite">
-          {activity}
-        </span>
+        <div className="workbench-header__right">
+          <span className="activity" aria-live="polite">
+            {activity}
+          </span>
+          <ThemeToggle />
+        </div>
       </header>
 
       {errorMessage && (
@@ -783,13 +787,18 @@ function AppShell() {
 // --- App (router root) ---
 
 export default function App() {
+  // V1.5.1 T6 — ThemeProvider lives here (not main.tsx) so App.test.tsx
+  // and any other consumer that renders <App /> directly gets the theme
+  // context for free. main.tsx no longer wraps to avoid a double-listener.
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<SubmitRoute />} />
-        <Route path="runs" element={<RunHistoryRoute />} />
-        <Route path="runs/:runId" element={<RunDetailRoute />} />
-      </Route>
-    </Routes>
+    <ThemeProvider>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<SubmitRoute />} />
+          <Route path="runs" element={<RunHistoryRoute />} />
+          <Route path="runs/:runId" element={<RunDetailRoute />} />
+        </Route>
+      </Routes>
+    </ThemeProvider>
   );
 }
