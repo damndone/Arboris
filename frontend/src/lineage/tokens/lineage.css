@@ -382,6 +382,152 @@
   color: var(--label);
 }
 
+/* ─── V1.5.1 T3' — RunHistoryRail ────────────────────────────────────
+ * Left rail (240px) of the lineage view. List of recent runs for the
+ * current project; active row highlights the URL :runId. Token-only,
+ * adapts to dark/light via the global :root theme.
+ */
+.run-rail {
+  width: 240px;
+  flex: 0 0 240px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--separator);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--label-secondary);
+  overflow: hidden;
+}
+.run-rail__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--separator-faint);
+}
+.run-rail__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  margin: 0;
+}
+.run-rail__viewall {
+  color: var(--tint);
+  font-size: 11px;
+  text-decoration: none;
+}
+.run-rail__viewall:hover {
+  color: var(--tint-hover);
+}
+.run-rail__empty {
+  padding: 14px;
+  color: var(--label-tertiary);
+  font-size: 12px;
+}
+.run-rail__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+.run-rail__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--separator-faint);
+  border-radius: 0;
+  padding: 9px 14px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--label-secondary);
+  font-family: inherit;
+  font-size: inherit;
+  min-height: auto;
+}
+.run-rail__row:hover {
+  background: var(--bg-card-2);
+  color: var(--label);
+}
+.run-rail__row[data-active="true"] {
+  background: var(--bg-elev);
+  color: var(--label);
+  border-left: 3px solid var(--ink);
+  padding-left: 11px; /* 14 - 3 to keep visual alignment */
+}
+.run-rail__id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--label);
+}
+.run-rail__time {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--label-tertiary);
+  text-align: left;
+  white-space: nowrap;
+}
+.run-rail__pill {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.run-rail__pill--ok {
+  color: var(--badge-ok-fg);
+  background: var(--badge-ok-bg);
+  border-color: var(--badge-ok-border);
+}
+.run-rail__pill--warn {
+  color: var(--badge-warn-fg);
+  background: var(--badge-warn-bg);
+  border-color: var(--badge-warn-border);
+}
+.run-rail__pill--red {
+  color: var(--field-error-fg);
+  background: color-mix(in oklch, var(--red) 16%, var(--bg-card));
+  border-color: color-mix(in oklch, var(--red) 40%, transparent);
+}
+.run-rail__pill--info {
+  color: var(--tint);
+  background: color-mix(in oklch, var(--tint) 14%, var(--bg-card));
+  border-color: color-mix(in oklch, var(--tint) 38%, transparent);
+}
+.run-rail__pill--neutral {
+  color: var(--badge-neutral-fg);
+  background: var(--badge-neutral-bg);
+  border-color: var(--badge-neutral-border);
+}
+
+/* Lineage 2-column shell — rail on the left, GraphCanvas (+ Drawer when
+ * a node is selected) on the right. Used by GraphWorkbench's outer wrap. */
+.lineage-with-rail {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  width: 100%;
+  min-height: 600px;
+}
+.lineage-with-rail__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .ln-canvas-status {
   /* T8.6a hotfix (browser smoke): inline-flex + max-width so the
    * badge shrink-wraps to content and doesn't stretch edge-to-edge

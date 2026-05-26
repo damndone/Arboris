@@ -18,6 +18,7 @@ import { useLineage } from "./LineageContext";
 import { useGraphKeyboard } from "./hooks/useGraphKeyboard";
 import { DetailDrawer } from "./detail/DetailDrawer";
 import { RawJsonModal } from "./modals/RawJsonModal";
+import { RunHistoryRail } from "./runRail/RunHistoryRail";
 
 export function GraphWorkbench() {
   const { model, selectedKey, select } = useLineage();
@@ -119,32 +120,37 @@ export function GraphWorkbench() {
 
   return (
     <div
-      className="lineage-root"
-      style={{ display: "flex", flexDirection: "column", minHeight: 600 }}
+      className="lineage-root lineage-with-rail"
       data-testid="graph-workbench"
     >
-      {showLegacyHint && (
-        <LegacyStageHint onDismiss={dismissLegacyHint} />
-      )}
-      <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
-        <div style={{ flex: 1 }}>
-          <GraphCanvas
-            model={model}
-            selectedNodeId={effectiveSelectedKey}
-            expandedGroups={expandedGroups}
-            onSelect={select}
-            onExpandGroup={handleExpandGroup}
-            layout={layout}
-            onLayoutChange={setLayout}
-          />
-        </div>
-        {selectedNode !== null && (
-          <DetailDrawer
-            node={selectedNode}
-            onClose={() => select(null)}
-            onShowJson={() => setRawJsonOpen(true)}
-          />
+      {/* V1.5.1 T3' — Run history rail on the left (240px). Replaces the
+       * planned 8-stage rail (deferred to V1.5.2 followup). Lets the user
+       * jump between recent runs without leaving the lineage view. */}
+      <RunHistoryRail />
+      <div className="lineage-with-rail__main">
+        {showLegacyHint && (
+          <LegacyStageHint onDismiss={dismissLegacyHint} />
         )}
+        <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1 }}>
+            <GraphCanvas
+              model={model}
+              selectedNodeId={effectiveSelectedKey}
+              expandedGroups={expandedGroups}
+              onSelect={select}
+              onExpandGroup={handleExpandGroup}
+              layout={layout}
+              onLayoutChange={setLayout}
+            />
+          </div>
+          {selectedNode !== null && (
+            <DetailDrawer
+              node={selectedNode}
+              onClose={() => select(null)}
+              onShowJson={() => setRawJsonOpen(true)}
+            />
+          )}
+        </div>
       </div>
       <RawJsonModal
         open={rawJsonOpen}
