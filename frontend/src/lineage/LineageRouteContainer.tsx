@@ -25,7 +25,10 @@ export function LineageRouteContainer({
   runId,
 }: LineageRouteContainerProps) {
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
-  const { selectedKey, select } = useSelectedNode();
+  const { selectedKey, select } = useSelectedNode(
+    model?.nodes ?? null,
+    model?.runId ?? null,
+  );
 
   // Stabilise the context value across renders so consumers (DetailDrawer,
   // future panels) only re-render when one of model / selectedKey / select

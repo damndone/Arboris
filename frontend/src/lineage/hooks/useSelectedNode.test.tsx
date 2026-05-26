@@ -1,5 +1,5 @@
 // frontend/src/lineage/hooks/useSelectedNode.test.tsx
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   MemoryRouter,
@@ -8,6 +8,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { useSelectedNode } from "./useSelectedNode";
+import type { GraphViewNode } from "../api/graphViewTypes";
 
 // We exercise the hook through a tiny harness that surfaces both the hook's
 // return value AND the active URL — that lets us assert URL mutations
@@ -21,8 +22,28 @@ interface HarnessRef {
 
 const ref: { current: HarnessRef | null } = { current: null };
 
-function Harness() {
-  const { selectedKey, select } = useSelectedNode();
+function node(id: string, trust: GraphViewNode["trust"] = "ok"): GraphViewNode {
+  return {
+    id,
+    nodeKey: id,
+    raw: null,
+    stage: "unknown",
+    kind: "dataset_stage",
+    title: id,
+    parentStageId: null,
+    trust,
+    decisions: [],
+  };
+}
+
+function Harness({
+  nodes,
+  autoSelectScope,
+}: {
+  nodes?: GraphViewNode[];
+  autoSelectScope?: string | null;
+}) {
+  const { selectedKey, select } = useSelectedNode(nodes, autoSelectScope);
   const location = useLocation();
   ref.current = { selectedKey, select, search: location.search };
   return (
@@ -32,13 +53,26 @@ function Harness() {
   );
 }
 
-function renderAt(initialPath: string) {
+function routeElement(nodes?: GraphViewNode[], autoSelectScope?: string | null) {
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={<Harness nodes={nodes} autoSelectScope={autoSelectScope} />}
+      />
+    </Routes>
+  );
+}
+
+function renderAt(
+  initialPath: string,
+  nodes?: GraphViewNode[],
+  autoSelectScope?: string | null,
+) {
   ref.current = null;
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <Routes>
-        <Route path="/" element={<Harness />} />
-      </Routes>
+      {routeElement(nodes, autoSelectScope)}
     </MemoryRouter>,
   );
 }
@@ -90,5 +124,64 @@ describe("useSelectedNode", () => {
     expect(screen.getByTestId("probe").textContent).toContain("key=initial");
     act(() => ref.current!.select("changed"));
     expect(screen.getByTestId("probe").textContent).toContain("key=changed");
+  });
+
+  it("auto-selects the first review node when no ?node= is present", async () => {
+    renderAt("/", [
+      node("ok"),
+      node("caution", "caution"),
+      node("review", "review"),
+    ]);
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("review"));
+    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("review");
+  });
+
+  it("auto-selects the first caution node when no review node exists", async () => {
+    renderAt("/", [node("ok"), node("caution", "caution")]);
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("caution"));
+    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("caution");
+  });
+
+  it("does not auto-select when every node is ok", async () => {
+    renderAt("/", [node("ok-1"), node("ok-2")]);
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBeNull());
+    expect(ref.current!.search).toBe("");
+  });
+
+  it("does not override an explicit ?node= value", async () => {
+    renderAt("/?node=other", [node("review", "review")]);
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("other"));
+    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("other");
+  });
+
+  it("does not re-select after the user clears an explicit selection", async () => {
+    renderAt("/?node=review", [node("review", "review")]);
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("review"));
+
+    act(() => ref.current!.select(null));
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBeNull());
+    expect(ref.current!.search).toBe("");
+  });
+
+  it("re-arms auto-select when the run scope changes", async () => {
+    const view = renderAt("/", [node("review-a", "review")], "run-a");
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("review-a"));
+
+    act(() => ref.current!.select(null));
+    await waitFor(() => expect(ref.current!.selectedKey).toBeNull());
+
+    view.rerender(
+      <MemoryRouter initialEntries={["/"]}>
+        {routeElement([node("review-b", "review")], "run-b")}
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("review-b"));
+    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("review-b");
   });
 });
