@@ -368,11 +368,18 @@
   color: var(--label);
 }
 .ln-canvas-toolbar button:disabled[aria-pressed="true"] {
-  /* The "Auto layout" indicator: not clickable but visually pressed,
-   * communicating that auto-layout is currently the only mode. */
+  /* Legacy: V1.5.0 "Auto layout" disabled indicator. Kept for any
+   * caller still rendering a disabled pressed button. */
   background: var(--bg-elev);
   color: var(--label);
   cursor: default;
+}
+/* V1.5.1 T4' — Layout segmented control active state. The active
+ * variant uses --bg-elev to match the prototype's segmented control
+ * affordance. aria-pressed reflects current layout mode (free/LR/TB). */
+.ln-canvas-toolbar button[aria-pressed="true"]:not(:disabled) {
+  background: var(--bg-elev);
+  color: var(--label);
 }
 
 .ln-canvas-status {

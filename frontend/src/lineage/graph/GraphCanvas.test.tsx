@@ -268,18 +268,55 @@ describe("GraphCanvas", () => {
       );
     }
 
-    it("renders the toolbar with Auto / Fit / Fullscreen buttons", () => {
+    it("renders the toolbar with Free/Horizontal/Vertical/Fit/Fullscreen", () => {
       renderCanvas();
       const toolbar = screen.getByTestId("canvas-toolbar");
       expect(toolbar).toBeInTheDocument();
-      // Auto layout is a disabled pressed indicator — not a clickable
-      // no-op (per the T8.6a guidance: avoid behaviourless buttons).
-      const auto = screen.getByTestId("toolbar-auto-layout");
-      expect(auto).toBeDisabled();
-      expect(auto).toHaveAttribute("aria-pressed", "true");
-      // Fit and Fullscreen are real actions.
+      // V1.5.1 T4': segmented layout control replaces the disabled
+      // Auto-layout indicator. Free is the default per user spec.
+      expect(screen.getByTestId("toolbar-layout-free")).toBeEnabled();
+      expect(screen.getByTestId("toolbar-layout-lr")).toBeEnabled();
+      expect(screen.getByTestId("toolbar-layout-tb")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fit")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fullscreen")).toBeEnabled();
+    });
+
+    it("defaults to Free layout (Free button aria-pressed=true)", () => {
+      renderCanvas();
+      expect(screen.getByTestId("toolbar-layout-free")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByTestId("toolbar-layout-lr")).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.getByTestId("toolbar-layout-tb")).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    it("clicking Horizontal flips aria-pressed to LR", () => {
+      renderCanvas();
+      fireEvent.click(screen.getByTestId("toolbar-layout-lr"));
+      expect(screen.getByTestId("toolbar-layout-lr")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByTestId("toolbar-layout-free")).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    it("clicking Vertical flips aria-pressed to TB", () => {
+      renderCanvas();
+      fireEvent.click(screen.getByTestId("toolbar-layout-tb"));
+      expect(screen.getByTestId("toolbar-layout-tb")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     });
 
     it("Fullscreen button no-ops gracefully when API unsupported", () => {
