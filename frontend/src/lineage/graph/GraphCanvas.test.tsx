@@ -329,6 +329,41 @@ describe("GraphCanvas", () => {
       ).not.toThrow();
     });
 
+    it("edge handles are horizontal (left/right) in Free/LR layouts", () => {
+      // React Flow's <Handle> renders a div with class
+      // .react-flow__handle-{left|right|top|bottom}. Default mode is Free,
+      // which maps to horizontal axis → left for target, right for source.
+      renderCanvas();
+      // Wait synchronously: jsdom renders the handles inline.
+      expect(
+        document.querySelectorAll(".react-flow__handle-left").length,
+      ).toBeGreaterThan(0);
+      expect(
+        document.querySelectorAll(".react-flow__handle-right").length,
+      ).toBeGreaterThan(0);
+      // No vertical handles in the default state.
+      expect(
+        document.querySelectorAll(".react-flow__handle-top").length,
+      ).toBe(0);
+      expect(
+        document.querySelectorAll(".react-flow__handle-bottom").length,
+      ).toBe(0);
+    });
+
+    it("clicking Vertical flips handles to top/bottom", () => {
+      renderCanvas();
+      fireEvent.click(screen.getByTestId("toolbar-layout-tb"));
+      expect(
+        document.querySelectorAll(".react-flow__handle-top").length,
+      ).toBeGreaterThan(0);
+      expect(
+        document.querySelectorAll(".react-flow__handle-bottom").length,
+      ).toBeGreaterThan(0);
+      expect(
+        document.querySelectorAll(".react-flow__handle-left").length,
+      ).toBe(0);
+    });
+
     it("Fullscreen handler silently swallows a rejected requestFullscreen", async () => {
       // Simulate a browser that exposes the API but rejects (e.g. no
       // user gesture, security policy). The click must not surface

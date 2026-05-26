@@ -436,6 +436,10 @@ export function GraphCanvas({
   // T8.5: tri-state highlight + selected flag overlaid on top of the
   // RF-owned node state. Re-runs cheaply on selection change without
   // touching positions.
+  // V1.5.1 T4': handleAxis flips edge anchor sides so LR layout edges
+  // come out the right side (not bottom) — kills the S-curve look the
+  // user flagged 2026-05-25.
+  const handleAxis = layout === "TB" ? "vertical" : "horizontal";
   const decoratedNodes = useMemo(() => {
     const related = new Set<string>();
     if (selectedNodeId !== null) {
@@ -456,9 +460,9 @@ export function GraphCanvas({
     return rfNodes.map((n) => ({
       ...n,
       selected: n.id === selectedNodeId,
-      data: { ...n.data, state: stateFor(n.id) },
+      data: { ...n.data, state: stateFor(n.id), handleAxis },
     }));
-  }, [rfNodes, selectedNodeId, model.edges, memberToGroup]);
+  }, [rfNodes, selectedNodeId, model.edges, memberToGroup, handleAxis]);
 
   // ── T8.4 hover tooltip ──────────────────────────────────────────
   // Tracks the candidate node under the cursor + screen-space coords.

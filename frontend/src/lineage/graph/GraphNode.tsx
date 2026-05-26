@@ -41,8 +41,19 @@ import type { GraphViewNode, Stage, Trust } from "../api/graphViewTypes";
 // selected (all nodes full opacity).
 export type GraphNodeState = "selected" | "related" | "dim";
 
+// V1.5.1: edge anchor orientation. Vertical (top→bottom) for TB
+// layout; horizontal (left→right) for LR/free layout. Driven by
+// GraphCanvas based on the current layout mode — embedding it in
+// node data (rather than reading a context here) keeps the renderer
+// pure and lets React Flow's diffing notice the change.
+export type HandleAxis = "vertical" | "horizontal";
+
 export interface GraphNodeProps {
-  data: { node: GraphViewNode; state: GraphNodeState };
+  data: {
+    node: GraphViewNode;
+    state: GraphNodeState;
+    handleAxis?: HandleAxis;
+  };
   // React Flow also passes its own `selected` for accessibility / focus
   // styles on the wrapper, but our internal outline is driven by
   // data.state so the tri-state stays consistent under all paths.
@@ -78,11 +89,18 @@ function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
 }
 
 export function GraphNode({ data }: GraphNodeProps) {
-  const { node, state } = data;
+  const { node, state, handleAxis = "horizontal" } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
   const isSelected = state === "selected";
   const isDim = state === "dim";
+  // V1.5.1: edges enter on the upstream-facing side and leave on the
+  // downstream-facing side. Without this, an LR layout produced
+  // S-shaped curves (bottom→top across horizontally-spaced cards).
+  const targetPos =
+    handleAxis === "vertical" ? Position.Top : Position.Left;
+  const sourcePos =
+    handleAxis === "vertical" ? Position.Bottom : Position.Right;
 
   // React Flow needs explicit handles on custom nodes for edges to attach. We
   // hide them visually (they're just connection anchors, not interactive).
@@ -106,7 +124,7 @@ export function GraphNode({ data }: GraphNodeProps) {
     >
       <Handle
         type="target"
-        position={Position.Top}
+        position={targetPos}
         isConnectable={false}
         style={handleStyle}
       />
@@ -132,7 +150,7 @@ export function GraphNode({ data }: GraphNodeProps) {
       </div>
       <Handle
         type="source"
-        position={Position.Bottom}
+        position={sourcePos}
         isConnectable={false}
         style={handleStyle}
       />
