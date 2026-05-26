@@ -56,6 +56,7 @@ import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
+import type { TabState } from "../hooks/useTabs";
 
 function dp(overrides: Partial<DecisionViewModel> = {}): DecisionViewModel {
   return {
@@ -100,6 +101,42 @@ function makeCtx(
     stats: { nodeCount: node ? 1 : 0, edgeCount: 0, leafCount: 0, hasDpCount: 0 },
   };
   return { model, selectedKey, select: vi.fn() };
+}
+
+function makeTabbedCtx(
+  nodes: GraphViewNode[],
+  selectedKey: string | null,
+  overrides: Partial<LineageContextValue> = {},
+): LineageContextValue {
+  const model: GraphViewModel = {
+    schemaVersion: 3,
+    runId: "run-1",
+    legacy: false,
+    nodes,
+    edges: [],
+    stats: {
+      nodeCount: nodes.length,
+      edgeCount: 0,
+      leafCount: nodes.length,
+      hasDpCount: 0,
+    },
+  };
+  const tabs: TabState[] = nodes.map((n, index) => ({
+    id: n.id,
+    nodeKey: n.nodeKey,
+    openedAt: index + 1,
+  }));
+  return {
+    model,
+    selectedKey,
+    select: vi.fn(),
+    tabs,
+    activeTabId: selectedKey,
+    setActiveTab: vi.fn(),
+    closeTab: vi.fn(),
+    lastEvictedTabId: null,
+    ...overrides,
+  };
 }
 
 function renderDrawer(
@@ -236,5 +273,59 @@ describe("DetailDrawer", () => {
     );
     // Decision section heading with count
     expect(screen.getByText("Decisions (2)")).toBeInTheDocument();
+  });
+
+  it("T7 renders a tab for each open node and marks the active tab", () => {
+    const nodes = [
+      makeNode({ id: "raw", nodeKey: "raw", title: "Raw" }),
+      makeNode({ id: "model", nodeKey: "model", title: "Model" }),
+      makeNode({ id: "report", nodeKey: "report", title: "Report" }),
+    ];
+    renderDrawer(makeTabbedCtx(nodes, "model"));
+
+    expect(screen.getByTestId("detail-drawer-tabs")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Raw" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Model" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Report" })).toBeInTheDocument();
+    expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+      "Model",
+    );
+  });
+
+  it("T7 tab clicks and closes dispatch tab actions", () => {
+    const nodes = [
+      makeNode({ id: "raw", nodeKey: "raw", title: "Raw" }),
+      makeNode({ id: "model", nodeKey: "model", title: "Model" }),
+    ];
+    const setActiveTab = vi.fn();
+    const closeTab = vi.fn();
+    renderDrawer(
+      makeTabbedCtx(nodes, "raw", {
+        setActiveTab,
+        closeTab,
+      }),
+    );
+
+    screen.getByRole("tab", { name: "Model" }).click();
+    screen.getByRole("button", { name: "Close Raw tab" }).click();
+
+    expect(setActiveTab).toHaveBeenCalledWith("model");
+    expect(closeTab).toHaveBeenCalledWith("raw");
+  });
+
+  it("T7 renders the eviction notice from tab state", () => {
+    const node = makeNode({ id: "model", nodeKey: "model", title: "Model" });
+    renderDrawer(
+      makeTabbedCtx([node], "model", {
+        lastEvictedTabId: "oldest",
+      }),
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Oldest tab closed to keep 8 tabs.",
+    );
   });
 });

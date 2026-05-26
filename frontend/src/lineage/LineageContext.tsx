@@ -10,11 +10,17 @@
 
 import { createContext, useContext } from "react";
 import type { GraphViewModel } from "./api/graphViewTypes";
+import type { TabState } from "./hooks/useTabs";
 
 export interface LineageContextValue {
   model: GraphViewModel;
   selectedKey: string | null;
   select: (key: string | null) => void;
+  tabs?: TabState[];
+  activeTabId?: string | null;
+  setActiveTab?: (id: string) => void;
+  closeTab?: (id: string) => void;
+  lastEvictedTabId?: string | null;
 }
 
 /**

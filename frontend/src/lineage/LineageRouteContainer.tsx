@@ -25,7 +25,15 @@ export function LineageRouteContainer({
   runId,
 }: LineageRouteContainerProps) {
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
-  const { selectedKey, select } = useSelectedNode(
+  const {
+    selectedKey,
+    select,
+    tabs,
+    activeTabId,
+    setActiveTab,
+    closeTab,
+    lastEvictedTabId,
+  } = useSelectedNode(
     model?.nodes ?? null,
     model?.runId ?? null,
   );
@@ -35,8 +43,29 @@ export function LineageRouteContainer({
   // actually changes — not on every container render.
   // [REV-3 #7 — Step 5 adversarial review]
   const ctx = useMemo<LineageContextValue | null>(
-    () => (model === null ? null : { model, selectedKey, select }),
-    [model, selectedKey, select],
+    () =>
+      model === null
+        ? null
+        : {
+            model,
+            selectedKey,
+            select,
+            tabs,
+            activeTabId,
+            setActiveTab,
+            closeTab,
+            lastEvictedTabId,
+          },
+    [
+      model,
+      selectedKey,
+      select,
+      tabs,
+      activeTabId,
+      setActiveTab,
+      closeTab,
+      lastEvictedTabId,
+    ],
   );
 
   if (loading) return <Loading />;

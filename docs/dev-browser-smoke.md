@@ -70,6 +70,12 @@ Walks the spec §16 L1–L20 items plus V1.5.0 product-path adds.
 
 - [ ] Click a node → drawer slides in from the right
 - [ ] Header: `KIND` eyebrow + serif title + actions menu + close
+- [ ] T7 L32: Open three different nodes → drawer shows three tabs
+- [ ] T7 L33: Click a drawer tab → that tab becomes active and the
+      body switches to that node
+- [ ] T7 L34: Close the active tab → the neighbouring tab becomes active
+- [ ] T7 L35: Open a 9th node tab → the oldest tab is evicted and a
+      short eviction notice appears
 - [ ] `REVIEW REQUIRED` callout when decisions need confirmation
 - [ ] `LINEAGE PATH` row with copy button
 - [ ] `BASIC INFO` section (KIND / STAGE / CREATED)
@@ -120,7 +126,7 @@ reviewers don't file them as defects.
 
 | Gap | Status |
 |---|---|
-| Left rail (stage navigation with counts) | Deferred to V1.5.1 |
+| Left rail (stage navigation with counts) | Replaced by V1.5.1 Run History rail |
 | Top-row workspace breadcrumb / search-K / rerun / generate-report buttons | Deferred to V1.5.1+ |
 | Bottom terminal panel | Deferred to V1.5.1+ |
 | Drawer header uses flat text path instead of breadcrumb chip path | Cosmetic, deferred |

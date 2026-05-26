@@ -12,7 +12,12 @@ interface HarnessProps {
 
 function Harness(props: HarnessProps) {
   useGraphKeyboard(props);
-  return null;
+  return (
+    <div>
+      <div data-testid="graph-surface" data-graph="true" tabIndex={0} />
+      <div data-testid="drawer-surface" tabIndex={0} />
+    </div>
+  );
 }
 
 function dispatch(key: string, opts: KeyboardEventInit = {}): void {
@@ -134,5 +139,28 @@ describe("useGraphKeyboard", () => {
     unmount();
     dispatch("j", { metaKey: true });
     expect(toggle).toHaveBeenCalledTimes(1); // no second call
+  });
+
+  it("ignores key events from outside the graph surface", () => {
+    const toggle = vi.fn();
+    const esc = vi.fn();
+    render(
+      <Harness
+        onToggleRawJson={toggle}
+        onEscape={esc}
+        onCmdK={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(document.querySelector("[data-graph='true']")!, {
+      key: "j",
+      metaKey: true,
+    });
+    fireEvent.keyDown(document.querySelector("[data-testid='drawer-surface']")!, {
+      key: "Escape",
+    });
+
+    expect(toggle).toHaveBeenCalledTimes(1);
+    expect(esc).not.toHaveBeenCalled();
   });
 });

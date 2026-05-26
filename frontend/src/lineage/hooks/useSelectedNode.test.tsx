@@ -22,10 +22,14 @@ interface HarnessRef {
 
 const ref: { current: HarnessRef | null } = { current: null };
 
-function node(id: string, trust: GraphViewNode["trust"] = "ok"): GraphViewNode {
+function node(
+  id: string,
+  trust: GraphViewNode["trust"] = "ok",
+  nodeKey = id,
+): GraphViewNode {
   return {
     id,
-    nodeKey: id,
+    nodeKey,
     raw: null,
     stage: "unknown",
     kind: "dataset_stage",
@@ -78,25 +82,33 @@ function renderAt(
 }
 
 describe("useSelectedNode", () => {
-  it("returns null when ?node= is absent", () => {
+  it("returns null when no node selection params are present", () => {
     renderAt("/");
     expect(ref.current!.selectedKey).toBeNull();
   });
 
-  it("reads ?node=foo from the URL", () => {
+  it("reads legacy ?node=foo from the URL", () => {
     renderAt("/?node=foo");
     expect(ref.current!.selectedKey).toBe("foo");
   });
 
-  it("select('k1') writes ?node=k1", () => {
+  it("reads ?tabs and ?active from the URL", () => {
+    renderAt("/?tabs=foo,bar&active=bar");
+    expect(ref.current!.selectedKey).toBe("bar");
+  });
+
+  it("select('k1') writes tabs/active URL state", () => {
     renderAt("/");
     act(() => ref.current!.select("k1"));
     expect(ref.current!.selectedKey).toBe("k1");
-    expect(ref.current!.search).toBe("?node=k1");
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("tabs")).toBe("k1");
+    expect(params.get("active")).toBe("k1");
+    expect(params.get("node")).toBeNull();
   });
 
-  it("select(null) removes the ?node= param", () => {
-    renderAt("/?node=k1");
+  it("select(null) closes the active tab", () => {
+    renderAt("/?tabs=k1&active=k1");
     act(() => ref.current!.select(null));
     expect(ref.current!.selectedKey).toBeNull();
     expect(ref.current!.search).toBe("");
@@ -106,7 +118,8 @@ describe("useSelectedNode", () => {
     renderAt("/?tab=lineage&filter=warning");
     act(() => ref.current!.select("k2"));
     const params = new URLSearchParams(ref.current!.search);
-    expect(params.get("node")).toBe("k2");
+    expect(params.get("tabs")).toBe("k2");
+    expect(params.get("active")).toBe("k2");
     expect(params.get("tab")).toBe("lineage");
     expect(params.get("filter")).toBe("warning");
   });
@@ -134,14 +147,27 @@ describe("useSelectedNode", () => {
     ]);
 
     await waitFor(() => expect(ref.current!.selectedKey).toBe("review"));
-    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("review");
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("tabs")).toBe("review");
+    expect(params.get("active")).toBe("review");
+  });
+
+  it("auto-selects by stable id when nodeKey differs", async () => {
+    renderAt("/", [node("uuid-review", "review", "logical:review")]);
+
+    await waitFor(() => expect(ref.current!.selectedKey).toBe("uuid-review"));
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("tabs")).toBe("uuid-review");
+    expect(params.get("active")).toBe("uuid-review");
   });
 
   it("auto-selects the first caution node when no review node exists", async () => {
     renderAt("/", [node("ok"), node("caution", "caution")]);
 
     await waitFor(() => expect(ref.current!.selectedKey).toBe("caution"));
-    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("caution");
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("tabs")).toBe("caution");
+    expect(params.get("active")).toBe("caution");
   });
 
   it("does not auto-select when every node is ok", async () => {
@@ -159,7 +185,7 @@ describe("useSelectedNode", () => {
   });
 
   it("does not re-select after the user clears an explicit selection", async () => {
-    renderAt("/?node=review", [node("review", "review")]);
+    renderAt("/?tabs=review&active=review", [node("review", "review")]);
     await waitFor(() => expect(ref.current!.selectedKey).toBe("review"));
 
     act(() => ref.current!.select(null));
@@ -182,6 +208,8 @@ describe("useSelectedNode", () => {
     );
 
     await waitFor(() => expect(ref.current!.selectedKey).toBe("review-b"));
-    expect(new URLSearchParams(ref.current!.search).get("node")).toBe("review-b");
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("tabs")).toBe("review-b");
+    expect(params.get("active")).toBe("review-b");
   });
 });

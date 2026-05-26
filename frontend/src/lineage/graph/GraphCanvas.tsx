@@ -536,6 +536,7 @@ export function GraphCanvas({
     <div
       ref={rootRef}
       className="lineage-root"
+      data-graph="true"
       style={{ width: "100%", height: "100%", minHeight: 480 }}
     >
       <ReactFlow

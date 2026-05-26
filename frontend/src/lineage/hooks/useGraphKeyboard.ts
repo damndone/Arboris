@@ -37,6 +37,12 @@ export function useGraphKeyboard(opts: UseGraphKeyboardOptions): void {
     if (!enabled) return undefined;
 
     const onKey = (e: KeyboardEvent): void => {
+      if (
+        e.target instanceof Element &&
+        !e.target.closest("[data-graph='true']")
+      ) {
+        return;
+      }
       const cmd = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
 

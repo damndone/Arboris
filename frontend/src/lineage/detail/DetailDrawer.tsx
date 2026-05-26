@@ -19,6 +19,7 @@ import { useMemo } from "react";
 import { DetailHeader, DETAIL_HEADER_TITLE_ID } from "../header/DetailHeader";
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
+import { DetailDrawerTabs } from "./DetailDrawerTabs";
 import { sectionRegistry } from "./sections/sectionRegistry";
 
 interface DetailDrawerProps {
@@ -33,8 +34,20 @@ interface DetailDrawerProps {
   onShowJson?: () => void;
 }
 
-export function DetailDrawer({ node: nodeProp, onClose, onShowJson }: DetailDrawerProps) {
-  const { model, selectedKey } = useLineage();
+export function DetailDrawer({
+  node: nodeProp,
+  onClose,
+  onShowJson,
+}: DetailDrawerProps) {
+  const {
+    model,
+    selectedKey,
+    tabs = [],
+    activeTabId = selectedKey,
+    setActiveTab,
+    closeTab,
+    lastEvictedTabId,
+  } = useLineage();
 
   // Either the caller passes a node, or we resolve it from context.
   const resolved: GraphViewNode | null = useMemo(() => {
@@ -66,6 +79,16 @@ export function DetailDrawer({ node: nodeProp, onClose, onShowJson }: DetailDraw
         background: "var(--bg-canvas)",
       }}
     >
+      {tabs.length > 0 && setActiveTab && closeTab && (
+        <DetailDrawerTabs
+          tabs={tabs}
+          nodes={model.nodes}
+          activeTabId={activeTabId}
+          onActive={setActiveTab}
+          onClose={closeTab}
+          lastEvictedTabId={lastEvictedTabId}
+        />
+      )}
       <DetailHeader node={resolved} onClose={onClose} onShowJson={onShowJson} />
       {visibleSections.map((s) => (
         <s.Component key={s.id} node={resolved} />
