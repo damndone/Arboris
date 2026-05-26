@@ -407,6 +407,156 @@ test("waitForRunTerminal honors AbortSignal", async () => {
   ).rejects.toThrow(/abort/i);
 });
 
+// ── waitForRunTerminal SSE path (T1.2) ─────────────────────────────
+// jsdom doesn't ship EventSource, so the 4 polling tests above rely on
+// `typeof EventSource === "undefined"` to skip straight to polling.
+// These tests stub a MockEventSource so the SSE branch is exercised.
+//
+// MockEventSource captures listeners by event name and lets the test
+// fire them on demand. Mirrors the addEventListener / onerror surface
+// of the real EventSource that `connectRunEvents` uses.
+class MockEventSource {
+  url: string;
+  listeners = new Map<string, ((e: MessageEvent) => void)[]>();
+  onerror: ((e: Event) => void) | null = null;
+  closed = false;
+  close = vi.fn(() => {
+    this.closed = true;
+  });
+  static instances: MockEventSource[] = [];
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, fn: (e: MessageEvent) => void) {
+    const list = this.listeners.get(type) ?? [];
+    list.push(fn);
+    this.listeners.set(type, list);
+  }
+
+  fire(type: string, data: unknown) {
+    for (const fn of this.listeners.get(type) ?? []) {
+      fn({ data: JSON.stringify(data) } as MessageEvent);
+    }
+  }
+
+  fireError() {
+    this.onerror?.(new Event("error"));
+  }
+
+  static reset() {
+    this.instances = [];
+  }
+}
+
+test("T1.2.a — waitForRunTerminal SSE happy path resolves on terminal event", async () => {
+  MockEventSource.reset();
+  vi.stubGlobal("EventSource", MockEventSource);
+
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  // Single fetch only — the terminal-detail lookup. Intermediate
+  // step events must NOT trigger fetches on the SSE path.
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "sse-1",
+      status: "completed",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+
+  const onTick = vi.fn();
+  const promise = waitForRunTerminal("/tmp/p", "sse-1", { onTick });
+
+  // Constructor runs synchronously inside the async function, so the
+  // mock instance exists before we hand control back to the awaiter.
+  const source = MockEventSource.instances.at(-1)!;
+  expect(source).toBeDefined();
+  expect(source.url).toContain("/runs/sse-1/events");
+
+  source.fire("step_start", {
+    event: "step_start",
+    run_id: "sse-1",
+    sequence: 1,
+    timestamp: "2026-05-01T00:00:01+00:00",
+    step: "describe",
+    message: "Building summary",
+    status: null,
+  });
+
+  source.fire("workflow_completed", {
+    event: "workflow_completed",
+    run_id: "sse-1",
+    sequence: 2,
+    timestamp: "2026-05-01T00:00:05+00:00",
+    step: null,
+    message: "Done",
+    status: "completed",
+  });
+
+  const result = await promise;
+  expect(result.status).toBe("completed");
+  expect(fetchMock).toHaveBeenCalledTimes(1); // only the terminal-detail GET
+  // onTick must have been called with the synthesized lastEvent so
+  // T1.3 (Submit page) can render "└─ describe: Building summary".
+  expect(onTick).toHaveBeenCalled();
+  const firstCall = onTick.mock.calls[0];
+  expect(firstCall[0]).toBeNull(); // detail unavailable on intermediate ticks
+  expect(firstCall[1]).toMatchObject({
+    event: "step_start",
+    step: "describe",
+    message: "Building summary",
+  });
+});
+
+test("T1.2.b — waitForRunTerminal falls back to polling on SSE error", async () => {
+  MockEventSource.reset();
+  vi.stubGlobal("EventSource", MockEventSource);
+
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  // First fetch (after SSE error → polling kicks in) returns terminal.
+  fetchMock.mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "sse-2",
+      status: "blocked",
+      mode: "auto",
+      started_at: "2026-05-01T00:00:00+00:00",
+      y: "y",
+      x: ["x"],
+    }),
+  );
+
+  const promise = waitForRunTerminal("/tmp/p", "sse-2", { intervalMs: 0 });
+  const source = MockEventSource.instances.at(-1)!;
+  source.fireError();
+
+  const result = await promise;
+  expect(result.status).toBe("blocked");
+  // Polling fallback fetched exactly once before reaching terminal.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // EventSource was closed by the fallback path so the stream doesn't leak.
+  expect(source.close).toHaveBeenCalled();
+});
+
+test("T1.2.c — waitForRunTerminal abort closes EventSource and rejects", async () => {
+  MockEventSource.reset();
+  vi.stubGlobal("EventSource", MockEventSource);
+
+  const ctrl = new AbortController();
+  const promise = waitForRunTerminal("/tmp/p", "sse-3", { signal: ctrl.signal });
+  const source = MockEventSource.instances.at(-1)!;
+  expect(source.closed).toBe(false);
+
+  ctrl.abort();
+
+  await expect(promise).rejects.toThrow(/abort/i);
+  expect(source.close).toHaveBeenCalled();
+});
+
 test("getRunGraph returns parsed GraphResponse on 200", async () => {
   const fake = {
     schema_version: 2,

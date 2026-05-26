@@ -71,6 +71,10 @@ function SubmitRoute() {
   >("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
+  // V1.5.1 T1.3: live progress line under the Run button. Populated
+  // from SSE step events (or a 3 s "connecting…" placeholder if no
+  // event arrives — usually means we fell back to polling).
+  const [progressLine, setProgressLine] = useState<string | null>(null);
   // V1.5.0.1 HF4: persist lastRun in sessionStorage so the "Open
   // Lineage" affordance and inline RunResultView survive when the
   // user navigates away (e.g. to History or to /runs/:id and back)
@@ -229,10 +233,26 @@ function SubmitRoute() {
       let finalStatus = result.status;
       if (result.run_id && result.status === "running") {
         setActivity("Running workflow — waiting for completion");
+        setProgressLine(null);
+        let sawEvent = false;
+        const connectingTimer = window.setTimeout(() => {
+          if (!sawEvent) setProgressLine("Connecting to event stream…");
+        }, 3000);
         try {
           const terminal = await waitForRunTerminal(
             projectRoot.trim(),
             result.run_id,
+            {
+              onTick: (_detail, lastEvent) => {
+                if (!lastEvent) return;
+                sawEvent = true;
+                window.clearTimeout(connectingTimer);
+                const step = lastEvent.step?.trim() ?? "";
+                setProgressLine(
+                  step ? `${step}: ${lastEvent.message}` : lastEvent.message,
+                );
+              },
+            },
           );
           finalStatus = terminal.status;
         } catch (waitError) {
@@ -241,6 +261,9 @@ function SubmitRoute() {
               ? waitError.message
               : "Polling failed";
           setError(msg);
+        } finally {
+          window.clearTimeout(connectingTimer);
+          setProgressLine(null);
         }
       }
       setActivity(
@@ -482,6 +505,15 @@ function SubmitRoute() {
               : "Run workflow"}
           </button>
         </div>
+        {progressLine && (
+          <p
+            className="run-progress-line"
+            aria-live="polite"
+            data-testid="run-progress-line"
+          >
+            └─ {progressLine}
+          </p>
+        )}
         {runErrors.projectRoot && (
           <p className="field-error inline-error">{runErrors.projectRoot}</p>
         )}
