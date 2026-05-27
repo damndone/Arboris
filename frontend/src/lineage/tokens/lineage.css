@@ -330,11 +330,38 @@
   outline-offset: 2px;
 }
 
+/* V1.5.2 P6 — focus ring. Plan §8 priority #2: distinct from
+ * --selected so "right side reading A, middle pinning B's upstream"
+ * is visually unambiguous. --review (orange-ish) is the V1.5.0 trust
+ * token; reusing it here keeps palette discipline. */
+.ln-graph-node--focus {
+  outline: 2px dashed var(--review);
+  outline-offset: 2px;
+}
+
+/* Focus-upstream — slightly above the related/dim baseline. Plan §8
+ * priority #3 (between focus and related). Uses a single-side accent
+ * on the same --review hue at lower intensity. */
+.ln-graph-node--focus-upstream {
+  outline: 1px solid color-mix(in oklch, var(--review) 55%, transparent);
+  outline-offset: 1px;
+  opacity: 0.85;
+}
+
 /* Dim state (T8.5) — nodes outside the selected neighbourhood drop
  * to 0.4 opacity. Selection-driven; default state is "related" (full
  * opacity) when no node is selected. */
 .ln-graph-node--dim {
   opacity: 0.4;
+}
+
+/* V1.5.2 P6 — search hit overlay. Plan §8 last bullet: short-lived
+ * transient highlight that does NOT displace selected/focus. Layered
+ * via class — applies on top of any other state class. Uses
+ * --tint (accent) so it reads as "system-suggested" rather than
+ * stage-coloured. */
+.ln-graph-node--search-hit {
+  box-shadow: 0 0 0 2px var(--tint, #0a84ff);
 }
 
 /* ─── Canvas chrome (T8.6a) ─────────────────────────────────────────

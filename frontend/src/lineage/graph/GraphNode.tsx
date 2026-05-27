@@ -34,12 +34,25 @@ import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
 import type { GraphViewNode, Stage, Trust } from "../api/graphViewTypes";
 
-// T8.5: tri-state highlighting. When a node is selected, its
-// neighbourhood (incoming + outgoing edges + the selected node itself)
-// stays at full opacity; everything else dims. Computed and passed in
-// by GraphCanvas; "related" is also the default when nothing is
-// selected (all nodes full opacity).
-export type GraphNodeState = "selected" | "related" | "dim";
+// T8.5 + V1.5.2 P6: 5-level highlight model. Plan §8.
+//
+// Priority high → low:
+//   1. selected         — strongest ring (drawer's active tab)
+//   2. focus            — pin/focus ring (when focus key ≠ selected)
+//   3. focus-upstream   — above related but below focus itself
+//   4. related          — selected's immediate neighbours (V1.5.0 behaviour)
+//   5. dim              — everything else
+//
+// Search hits are NOT a state — they layer on top via `isSearchHit`
+// so they never displace selected/focus. When nothing is selected AND
+// nothing is focused, every node stays "related" (no dimming) — same
+// V1.5.0 default.
+export type GraphNodeState =
+  | "selected"
+  | "focus"
+  | "focus-upstream"
+  | "related"
+  | "dim";
 
 // V1.5.1: edge anchor orientation. Vertical (top→bottom) for TB
 // layout; horizontal (left→right) for LR/free layout. Driven by
@@ -53,6 +66,9 @@ export interface GraphNodeProps {
     node: GraphViewNode;
     state: GraphNodeState;
     handleAxis?: HandleAxis;
+    /** V1.5.2 P6 — search overlay flag. Layered on top of state
+     *  (does not displace selected/focus). Tier 3 / transient. */
+    isSearchHit?: boolean;
   };
   // React Flow also passes its own `selected` for accessibility / focus
   // styles on the wrapper, but our internal outline is driven by
@@ -89,10 +105,12 @@ function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
 }
 
 export function GraphNode({ data }: GraphNodeProps) {
-  const { node, state, handleAxis = "horizontal" } = data;
+  const { node, state, handleAxis = "horizontal", isSearchHit = false } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
   const isSelected = state === "selected";
+  const isFocus = state === "focus";
+  const isFocusUpstream = state === "focus-upstream";
   const isDim = state === "dim";
   // V1.5.1: edges enter on the upstream-facing side and leave on the
   // downstream-facing side. Without this, an LR layout produced
@@ -115,11 +133,21 @@ export function GraphNode({ data }: GraphNodeProps) {
 
   return (
     <div
-      className={`ln-graph-node${isSelected ? " ln-graph-node--selected" : ""}${isDim ? " ln-graph-node--dim" : ""}`}
+      className={[
+        "ln-graph-node",
+        isSelected && "ln-graph-node--selected",
+        isFocus && "ln-graph-node--focus",
+        isFocusUpstream && "ln-graph-node--focus-upstream",
+        isDim && "ln-graph-node--dim",
+        isSearchHit && "ln-graph-node--search-hit",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-testid="graph-node"
       data-stage={node.stage}
       data-trust={node.trust}
       data-state={state}
+      data-search-hit={isSearchHit ? "true" : undefined}
       style={{ ["--node-color" as string]: colorVar }}
     >
       <Handle

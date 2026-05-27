@@ -28,14 +28,39 @@ import { DetailDrawer } from "../../lineage/detail/DetailDrawer";
 import { RawJsonModal } from "../../lineage/modals/RawJsonModal";
 import { RunHistoryRail } from "../../lineage/runRail/RunHistoryRail";
 import { useWorkbenchOptional } from "../WorkbenchStateProvider";
+import { buildRunSnapshot } from "../RunSnapshotAdapter";
 
 export function GraphView() {
   const { model, selectedKey, select } = useLineage();
   // useWorkbenchOptional() lets GraphView work both inside the new
   // WorkbenchRouteContainer (P3) and inside V1.5.0/1.5.1 test
-  // harnesses that mount it bare. When the provider is absent, the
-  // context menu hook is simply a no-op.
+  // harnesses that mount it bare. When the provider is absent,
+  // focus/search/context-menu features degrade to no-op while
+  // selected/related/dim still works.
   const wb = useWorkbenchOptional();
+
+  // V1.5.2 P6 — compute focus + upstream + search highlight sets from
+  // the workbench state. Memoised on (model, focusKey, searchQuery,
+  // searchCursor) so React Flow doesn't re-render on hover changes.
+  const snapshot = useMemo(() => buildRunSnapshot(model), [model]);
+  const focusKey = wb?.state.focusKey ?? null;
+  const searchQuery = wb?.state.searchQuery ?? "";
+  const focusUpstreamKeys = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (focusKey === null) return undefined;
+    return new Set(snapshot.upstreamOf(focusKey).map((n) => n.nodeKey));
+  }, [snapshot, focusKey]);
+  const searchHitKeys = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!searchQuery) return undefined;
+    const q = searchQuery.toLowerCase();
+    // Reuse the same searchIndex P5's RunSnapshotAdapter built.
+    // Multiple haystack rows can map to the same nodeKey (node +
+    // variable + decision) — Set dedupes naturally.
+    const hits = new Set<string>();
+    for (const item of snapshot.searchIndex) {
+      if (item.haystack.includes(q)) hits.add(item.nodeKey);
+    }
+    return hits;
+  }, [snapshot, searchQuery]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
   // V1.5.1 T4' — per-run sessionStorage-backed layout choice.
@@ -145,6 +170,9 @@ export function GraphView() {
                       wb.dispatch.openContextMenu({ nodeKey: nodeId, x, y })
                   : undefined
               }
+              focusNodeKey={focusKey}
+              focusUpstreamKeys={focusUpstreamKeys}
+              searchHitKeys={searchHitKeys}
             />
           </div>
           {selectedNode !== null && (

@@ -182,4 +182,49 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
       expect(node).toHaveAttribute("data-state", "dim");
     });
   });
+
+  // V1.5.2 P6 — 5-level highlight model. Plan §8.
+  describe("V1.5.2 focus / focus-upstream / search overlay", () => {
+    it("state=focus applies the focus class (distinct from selected)", () => {
+      mountNode(vn(), "focus");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--focus");
+      expect(node.className).not.toContain("ln-graph-node--selected");
+      expect(node).toHaveAttribute("data-state", "focus");
+    });
+
+    it("state=focus-upstream applies its own class (above related, below focus)", () => {
+      mountNode(vn(), "focus-upstream");
+      const node = screen.getByTestId("graph-node");
+      const classes = node.className.split(/\s+/);
+      expect(classes).toContain("ln-graph-node--focus-upstream");
+      // Whole-class check — "--focus" alone must not be present even though
+      // it's a substring of "--focus-upstream".
+      expect(classes).not.toContain("ln-graph-node--focus");
+      expect(node).toHaveAttribute("data-state", "focus-upstream");
+    });
+
+    it("isSearchHit layers on top of any state (does not displace it)", () => {
+      // Search hit + selected → both classes apply.
+      rtlRender(
+        <ReactFlowProvider>
+          <GraphNode
+            data={{ node: vn(), state: "selected", isSearchHit: true }}
+            selected
+          />
+        </ReactFlowProvider>,
+      );
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).toContain("ln-graph-node--selected");
+      expect(node.className).toContain("ln-graph-node--search-hit");
+      expect(node).toHaveAttribute("data-search-hit", "true");
+    });
+
+    it("isSearchHit absent → no search-hit class, no data attr", () => {
+      mountNode(vn(), "related");
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).not.toContain("ln-graph-node--search-hit");
+      expect(node.getAttribute("data-search-hit")).toBeNull();
+    });
+  });
 });

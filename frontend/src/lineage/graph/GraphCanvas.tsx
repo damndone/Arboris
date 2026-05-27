@@ -205,6 +205,19 @@ interface GraphCanvasProps {
    *  viewport-coordinate event so a portal context menu can position
    *  itself. Omit to disable right-click in tests / legacy consumers. */
   onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
+  /** V1.5.2 P6 — focus anchor (plan §8 priority #2). When set AND
+   *  different from `selectedNodeId`, the node renders with a distinct
+   *  focus ring. */
+  focusNodeKey?: string | null;
+  /** V1.5.2 P6 — caller-computed upstream set of `focusNodeKey`.
+   *  GraphCanvas doesn't walk the graph itself; GraphView passes a
+   *  ReadonlySet built from RunSnapshotAdapter.upstreamOf so walk
+   *  semantics match Drawer chips + AI scope. */
+  focusUpstreamKeys?: ReadonlySet<string>;
+  /** V1.5.2 P6 — search-hit overlay set (Tier 3). Layered on top of
+   *  the state class, never displaces selected/focus. Empty when no
+   *  search is active. */
+  searchHitKeys?: ReadonlySet<string>;
 }
 
 function layoutDagre<T extends RFNode>(
@@ -290,6 +303,9 @@ export function GraphCanvas({
   layout: layoutProp,
   onLayoutChange,
   onNodeContextMenu,
+  focusNodeKey = null,
+  focusUpstreamKeys,
+  searchHitKeys,
 }: GraphCanvasProps) {
   // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
   // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
@@ -446,6 +462,7 @@ export function GraphCanvas({
   // user flagged 2026-05-25.
   const handleAxis = layout === "TB" ? "vertical" : "horizontal";
   const decoratedNodes = useMemo(() => {
+    // Selected's immediate neighbours (V1.5.0 behaviour, unchanged).
     const related = new Set<string>();
     if (selectedNodeId !== null) {
       related.add(selectedNodeId);
@@ -456,18 +473,42 @@ export function GraphCanvas({
         if (src === selectedNodeId) related.add(tgt);
       }
     }
-    const stateFor = (id: string): "selected" | "related" | "dim" => {
-      if (selectedNodeId === null) return "related";
+    // V1.5.2 P6 — 5-level state per plan §8.
+    const stateFor = (
+      id: string,
+    ): "selected" | "focus" | "focus-upstream" | "related" | "dim" => {
       if (id === selectedNodeId) return "selected";
+      // focus only wins when it's distinct from selected (so a node
+      // that is both stays "selected" — the stronger ring wins).
+      if (focusNodeKey !== null && id === focusNodeKey) return "focus";
+      if (focusUpstreamKeys?.has(id)) return "focus-upstream";
+      // Fallback: when nothing is selected AND nothing is focused,
+      // every node is "related" (no dimming) — same V1.5.0 default
+      // so empty-state graphs look unchanged.
+      if (selectedNodeId === null && focusNodeKey === null) return "related";
       if (related.has(id)) return "related";
       return "dim";
     };
     return rfNodes.map((n) => ({
       ...n,
       selected: n.id === selectedNodeId,
-      data: { ...n.data, state: stateFor(n.id), handleAxis },
+      data: {
+        ...n.data,
+        state: stateFor(n.id),
+        handleAxis,
+        isSearchHit: searchHitKeys?.has(n.id) ?? false,
+      },
     }));
-  }, [rfNodes, selectedNodeId, model.edges, memberToGroup, handleAxis]);
+  }, [
+    rfNodes,
+    selectedNodeId,
+    focusNodeKey,
+    focusUpstreamKeys,
+    searchHitKeys,
+    model.edges,
+    memberToGroup,
+    handleAxis,
+  ]);
 
   // ── T8.4 hover tooltip ──────────────────────────────────────────
   // Tracks the candidate node under the cursor + screen-space coords.
