@@ -201,6 +201,10 @@ interface GraphCanvasProps {
   /** V1.5.1 T4' — controlled layout. Defaults to "free" when omitted. */
   layout?: LayoutMode;
   onLayoutChange?: (mode: LayoutMode) => void;
+  /** V1.5.2 P4 — right-click on a node. Receives the node id + the
+   *  viewport-coordinate event so a portal context menu can position
+   *  itself. Omit to disable right-click in tests / legacy consumers. */
+  onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
 }
 
 function layoutDagre<T extends RFNode>(
@@ -285,6 +289,7 @@ export function GraphCanvas({
   onExpandGroup,
   layout: layoutProp,
   onLayoutChange,
+  onNodeContextMenu,
 }: GraphCanvasProps) {
   // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
   // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
@@ -558,6 +563,15 @@ export function GraphCanvas({
         onNodeClick={(_, n) => {
           if (n.id.startsWith("group:")) onExpandGroup(n.id);
           else onSelect(n.id);
+        }}
+        onNodeContextMenu={(e, n) => {
+          // V1.5.2 P4 — open the workbench context menu. Suppress the
+          // browser default so the registry menu is the only one shown.
+          // Group nodes don't have actions so we ignore them.
+          if (n.id.startsWith("group:")) return;
+          if (!onNodeContextMenu) return;
+          e.preventDefault();
+          onNodeContextMenu(n.id, e.clientX, e.clientY);
         }}
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseMove={onNodeMouseMove}

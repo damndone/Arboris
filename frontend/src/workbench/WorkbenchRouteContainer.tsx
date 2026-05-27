@@ -28,6 +28,8 @@ import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
+import { ContextMenu } from "./ContextMenu";
+import { BottomPanel } from "./BottomPanel";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -103,6 +105,8 @@ export function WorkbenchRouteContainer({
         >
           <WorkbenchTopbar />
           <WorkbenchMain />
+          <BottomPanel runId={runId} projectRoot={projectRoot} />
+          <ContextMenu />
         </div>
       </LineageContext.Provider>
     </WorkbenchStateProvider>

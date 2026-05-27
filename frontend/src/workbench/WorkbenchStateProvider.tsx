@@ -125,6 +125,18 @@ export function useWorkbench(): WorkbenchContextValue {
   return ctx;
 }
 
+/**
+ * Variant that returns null when no provider is mounted. Use this when
+ * a consumer must work both inside the new WorkbenchRouteContainer
+ * AND inside V1.5.0/1.5.1 test harnesses that mount components with
+ * only LineageContext.Provider. Currently used by GraphView to wire
+ * the right-click context menu — when mounted bare in legacy tests,
+ * right-click is simply a no-op.
+ */
+export function useWorkbenchOptional(): WorkbenchContextValue | null {
+  return useContext(WorkbenchContext);
+}
+
 // ─── provider ───────────────────────────────────────────────────────
 
 export interface WorkbenchStateProviderProps {

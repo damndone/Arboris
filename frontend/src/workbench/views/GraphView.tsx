@@ -27,9 +27,15 @@ import { useGraphKeyboard } from "../../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../../lineage/detail/DetailDrawer";
 import { RawJsonModal } from "../../lineage/modals/RawJsonModal";
 import { RunHistoryRail } from "../../lineage/runRail/RunHistoryRail";
+import { useWorkbenchOptional } from "../WorkbenchStateProvider";
 
 export function GraphView() {
   const { model, selectedKey, select } = useLineage();
+  // useWorkbenchOptional() lets GraphView work both inside the new
+  // WorkbenchRouteContainer (P3) and inside V1.5.0/1.5.1 test
+  // harnesses that mount it bare. When the provider is absent, the
+  // context menu hook is simply a no-op.
+  const wb = useWorkbenchOptional();
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
   // V1.5.1 T4' — per-run sessionStorage-backed layout choice.
@@ -133,6 +139,12 @@ export function GraphView() {
               onExpandGroup={handleExpandGroup}
               layout={layout}
               onLayoutChange={setLayout}
+              onNodeContextMenu={
+                wb
+                  ? (nodeId, x, y) =>
+                      wb.dispatch.openContextMenu({ nodeKey: nodeId, x, y })
+                  : undefined
+              }
             />
           </div>
           {selectedNode !== null && (

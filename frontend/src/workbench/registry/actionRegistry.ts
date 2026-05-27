@@ -1,59 +1,60 @@
 // frontend/src/workbench/registry/actionRegistry.ts
 //
-// V1.5.2 — NodeActionRegistry. Plan §11.
+// V1.5.2 P4 — NodeActionRegistry, populated. Plan §11.
 //
-// Single source of truth for actions exposed via right-click menu,
-// DetailDrawer header menu, Topbar buttons, keyboard shortcuts, and
-// (future) command palette. Wiring each surface into the registry
-// keeps action additions to a one-line change.
+// Single source of truth for actions exposed via:
+//   - graph-context-menu (right-click on a node)
+//   - drawer-header-menu (V1.5.0 NodeActionMenu's ⋯ button)
+//   - topbar (V1.5.2 P3 right-side slot)
+//   - shortcut (keyboard)
+//   - command-palette (future)
 //
-// V1.5.2 ships the *contract* and the safe read-only actions (open,
-// copy, focus). Mutating actions (rerun, AI, mark-review) are
-// registered as `disabled: true` placeholders so their slots and
-// shortcuts are reserved — they get real handlers in V1.5.3+.
+// Read-only actions (open / pin tab / copy / focus / pin upstream)
+// ship live. Mutating placeholders (ask AI / rerun / mark review)
+// register as `disabled` so their slots, ordering, and shortcuts are
+// reserved — V1.5.3+ flips the disabled function to return `false`
+// once the backends land.
 
 import type { ReactNode } from "react";
 import type { GraphViewNode } from "../../lineage/api/graphViewTypes";
+import { buildBranchPath } from "../../lineage/pathBuilder";
+import type { GraphViewModel } from "../../lineage/api/graphViewTypes";
 import type { RegistryEntry } from "./registryTypes";
 
-/**
- * The context an action receives. Concrete handlers + the right-click
- * menu component are wired in P4. V1.5.2-P1 only locks the shape so
- * other modules (provider, drawer) can import the type now.
- */
 export interface ActionContext {
   node: GraphViewNode;
-  /** Selected (drawer's active tab) — may differ from `node` when
-   *  the action is dispatched from a right-click on a non-active node. */
+  /** The full model — actions like Copy lineage path need it. */
+  model: GraphViewModel;
   selectedKey: string | null;
-  /** Pinned focus anchor — drives upstream overlay. */
   focusKey: string | null;
   pinned: boolean;
-  /** Imperative handles exposed by WorkbenchStateProvider (wired P2/P4). */
   dispatch: ActionDispatch;
 }
 
 export interface ActionDispatch {
+  /** Open/activate a tab AND set selected (handled by provider via
+   *  selectByCanvasClick semantics — no separate selected setter). */
   openDetail(nodeKey: string): void;
+  /** Same as openDetail today; named for the user-facing verb. */
   pinTab(nodeKey: string): void;
-  setFocus(nodeKey: string | null, opts?: { pinned?: boolean }): void;
-  setSearchQuery(q: string): void;
+  /** Pin upstream — sets focus + pinned=1 without touching selected. */
+  pinUpstream(nodeKey: string): void;
+  /** Set focus without pinning — focus follows tab switches. */
+  focusUpstream(nodeKey: string): void;
 }
 
 export interface ActionEntry extends RegistryEntry<ActionContext> {
-  /** i18n-ready label (English in V1.5.2). */
+  /** Human label. */
   label: string;
-  /** Optional keyboard shortcut hint (e.g. "⌘C"). Display only. */
+  /** Optional shortcut hint, display only. */
   shortcut?: string;
-  /** Where this action surfaces. Multiple surfaces = registered once,
-   *  rendered from many places. */
+  /** Surfaces this action appears in. Registered once, rendered N times. */
   surfaces: ActionSurface[];
-  /** Optional icon. Component is rendered next to the label. */
+  /** Optional icon next to label. */
   icon?: ReactNode;
-  /** Disabled actions still render (greyed out + reason tooltip) so
-   *  users can discover capabilities arriving in later versions. */
+  /** Disabled actions render greyed out with reason as tooltip. */
   disabled?: (ctx: ActionContext) => false | { reason: string };
-  /** Imperative handler. V1.5.2-P1 leaves bodies as TODO; P4 wires them. */
+  /** Imperative handler. */
   invoke: (ctx: ActionContext) => void;
 }
 
@@ -64,6 +65,125 @@ export type ActionSurface =
   | "shortcut"
   | "command-palette";
 
-// V1.5.2-P1: registry is exported empty. P4 fills it with the
-// initial action set listed in plan §11.
-export const actionRegistry: ActionEntry[] = [];
+// ─── helpers ────────────────────────────────────────────────────────
+
+function copyToClipboard(text: string) {
+  // navigator.clipboard isn't available in jsdom; tests mock it.
+  // Fall back to a no-op so production-only API absence never throws.
+  try {
+    void navigator.clipboard?.writeText(text);
+  } catch {
+    /* silent — user can right-click to copy as fallback */
+  }
+}
+
+// ─── registry ───────────────────────────────────────────────────────
+
+export const actionRegistry: ActionEntry[] = [
+  {
+    id: "openDetail",
+    order: 10,
+    label: "Open detail",
+    surfaces: ["graph-context-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
+  },
+  {
+    id: "pinTab",
+    order: 20,
+    label: "Pin as tab",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) => ctx.dispatch.pinTab(ctx.node.nodeKey),
+  },
+  {
+    id: "copyNodeId",
+    order: 30,
+    label: "Copy node ID",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) => copyToClipboard(ctx.node.nodeKey),
+  },
+  {
+    id: "copyAsJson",
+    order: 40,
+    label: "Copy as JSON",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) =>
+      copyToClipboard(JSON.stringify(ctx.node.raw, null, 2)),
+  },
+  {
+    id: "copyLineagePath",
+    order: 50,
+    label: "Copy lineage path",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) =>
+      copyToClipboard(buildBranchPath(ctx.model, ctx.node.id)),
+  },
+  {
+    id: "focusUpstream",
+    order: 60,
+    label: "Focus upstream path",
+    surfaces: ["graph-context-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) => ctx.dispatch.focusUpstream(ctx.node.nodeKey),
+  },
+  {
+    id: "pinUpstream",
+    order: 70,
+    label: "Pin upstream path",
+    surfaces: ["graph-context-menu"],
+    shouldRender: () => true,
+    invoke: (ctx) => ctx.dispatch.pinUpstream(ctx.node.nodeKey),
+  },
+  {
+    id: "askAiAboutNode",
+    order: 80,
+    label: "Ask AI about this node",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    disabled: () => ({ reason: "AI backend lands in V1.5.3" }),
+    invoke: () => {
+      /* placeholder — wired in V1.5.3 with /llm/chat */
+    },
+  },
+  {
+    id: "rerunFromNode",
+    order: 90,
+    label: "Rerun from here",
+    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    shouldRender: () => true,
+    disabled: () => ({ reason: "Partial rerun backend lands in V1.5.3" }),
+    invoke: () => {
+      /* placeholder — wired in V1.5.3 with /runs/<id>/rerun */
+    },
+  },
+  {
+    id: "markNeedsReview",
+    order: 100,
+    label: "Mark needs review",
+    surfaces: ["drawer-header-menu"],
+    shouldRender: () => true,
+    disabled: () => ({ reason: "Review workflow lands in V1.5.3" }),
+    invoke: () => {
+      /* placeholder — wired in V1.5.3 */
+    },
+  },
+];
+
+/**
+ * Filter registry entries for a specific surface, then by
+ * `shouldRender(ctx)`, then sort by order. Returns a new array each
+ * call — fine for the small N (≤ 10 actions in V1.5.2).
+ */
+export function actionsForSurface(
+  surface: ActionSurface,
+  ctx: ActionContext,
+): ActionEntry[] {
+  return actionRegistry
+    .filter((e) => e.surfaces.includes(surface))
+    .filter((e) => e.shouldRender(ctx))
+    .sort((a, b) => a.order - b.order);
+}
