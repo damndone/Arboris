@@ -14,7 +14,12 @@ import type { ReactNode } from "react";
 import {
   useWorkbench,
 } from "./WorkbenchStateProvider";
+import { useLineage } from "../lineage/LineageContext";
 import type { ViewMode } from "./state/urlSchema";
+import {
+  actionsForSurface,
+  type ActionContext,
+} from "./registry/actionRegistry";
 
 interface TabSpec {
   id: ViewMode;
@@ -29,6 +34,36 @@ const VIEW_TABS: TabSpec[] = [
 
 export function WorkbenchTopbar() {
   const { state, dispatch } = useWorkbench();
+  const { model } = useLineage();
+
+  // V1.5.2 P7 — topbar action slot, plan §15. Driven by actionRegistry
+  // filtered by surface="topbar". The action context needs a node;
+  // when no tab is selected we fall back to the first node in the
+  // model so disabled placeholders still render their tooltips.
+  // Once Rerun lands in V1.5.3 with a real handler, it'll likely
+  // need a different context shape — handle that when it lands.
+  const ctxNode =
+    model.nodes.find((n) => n.nodeKey === state.selectedKey) ??
+    model.nodes[0];
+  const actionCtx: ActionContext | null = ctxNode
+    ? {
+        node: ctxNode,
+        model,
+        selectedKey: state.selectedKey,
+        focusKey: state.focusKey,
+        pinned: state.pinned,
+        dispatch: {
+          openDetail: dispatch.selectByCanvasClick,
+          pinTab: dispatch.selectByCanvasClick,
+          pinUpstream: dispatch.pinFocus,
+          focusUpstream: dispatch.selectByCanvasClick,
+        },
+      }
+    : null;
+  const topbarActions = actionCtx
+    ? actionsForSurface("topbar", actionCtx)
+    : [];
+
   return (
     <div
       data-testid="workbench-topbar"
@@ -60,11 +95,43 @@ export function WorkbenchTopbar() {
           </ViewTabButton>
         ))}
       </div>
-      {/* Right-side action slot — reserved for P4 Rerun / Generate report */}
+      {/* Right-side action slot — V1.5.2 P7 plan §15. Driven by
+       *  actionRegistry surface="topbar". V1.5.2 only has disabled
+       *  Rerun + Generate report placeholders. */}
       <div
         data-testid="workbench-topbar-actions"
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}
-      />
+      >
+        {topbarActions.map((action) => {
+          const disabled = action.disabled?.(actionCtx!);
+          return (
+            <button
+              key={action.id}
+              type="button"
+              data-testid={`topbar-action-${action.id}`}
+              data-disabled={disabled ? "true" : undefined}
+              title={disabled ? disabled.reason : undefined}
+              disabled={!!disabled}
+              onClick={() => {
+                if (disabled || !actionCtx) return;
+                action.invoke(actionCtx);
+              }}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--separator)",
+                background: "transparent",
+                color: disabled ? "var(--label-tertiary)" : "var(--label)",
+                cursor: disabled ? "not-allowed" : "pointer",
+                fontSize: 12,
+                opacity: disabled ? 0.7 : 1,
+              }}
+            >
+              {action.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

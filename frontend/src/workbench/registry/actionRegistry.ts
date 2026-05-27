@@ -171,6 +171,33 @@ export const actionRegistry: ActionEntry[] = [
       /* placeholder — wired in V1.5.3 */
     },
   },
+  // V1.5.2 P7 — topbar action slots (plan §15). Both ship disabled
+  // in V1.5.2 because real backends are V1.5.3+/V2.0. Registering
+  // them now reserves their slot + ordering so the topbar can show
+  // them as greyed buttons (with reason tooltips) instead of having
+  // a hardcoded list.
+  {
+    id: "rerun",
+    order: 110,
+    label: "Rerun",
+    surfaces: ["topbar"],
+    shouldRender: () => true,
+    disabled: () => ({ reason: "Full rerun backend lands in V1.5.3" }),
+    invoke: () => {
+      /* placeholder — wired in V1.5.3 with POST /runs/<id>/rerun */
+    },
+  },
+  {
+    id: "generateReport",
+    order: 120,
+    label: "Generate report",
+    surfaces: ["topbar"],
+    shouldRender: () => true,
+    disabled: () => ({ reason: "Report generation lands in V2.0" }),
+    invoke: () => {
+      /* placeholder — wired in V2.0 */
+    },
+  },
 ];
 
 /**

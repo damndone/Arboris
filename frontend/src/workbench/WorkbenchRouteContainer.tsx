@@ -30,6 +30,7 @@ import { WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
 import { ContextMenu } from "./ContextMenu";
 import { BottomPanel } from "./BottomPanel";
+import { SearchPalette } from "./SearchPalette";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -107,6 +108,7 @@ export function WorkbenchRouteContainer({
           <WorkbenchMain />
           <BottomPanel runId={runId} projectRoot={projectRoot} />
           <ContextMenu />
+          <SearchPalette />
         </div>
       </LineageContext.Provider>
     </WorkbenchStateProvider>

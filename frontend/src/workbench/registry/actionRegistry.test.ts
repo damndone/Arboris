@@ -61,7 +61,7 @@ function ctx(overrides: Partial<ActionContext> = {}): ActionContext {
 }
 
 describe("actionRegistry", () => {
-  it("registers the 10 V1.5.2 actions", () => {
+  it("registers the 12 V1.5.2 actions (P4 + P7 topbar additions)", () => {
     expect(actionRegistry.map((a) => a.id).sort()).toEqual(
       [
         "askAiAboutNode",
@@ -69,13 +69,26 @@ describe("actionRegistry", () => {
         "copyLineagePath",
         "copyNodeId",
         "focusUpstream",
+        "generateReport",
         "markNeedsReview",
         "openDetail",
         "pinTab",
         "pinUpstream",
+        "rerun",
         "rerunFromNode",
       ].sort(),
     );
+  });
+
+  it("topbar surface yields rerun + generateReport (both disabled in V1.5.2)", () => {
+    const topbarIds = actionsForSurface("topbar", ctx()).map((a) => a.id);
+    expect(topbarIds).toEqual(["rerun", "generateReport"]);
+    for (const id of topbarIds) {
+      const entry = actionRegistry.find((a) => a.id === id)!;
+      expect(entry.disabled?.(ctx())).toMatchObject({
+        reason: expect.any(String),
+      });
+    }
   });
 
   it("orders are unique (no slot collisions)", () => {
