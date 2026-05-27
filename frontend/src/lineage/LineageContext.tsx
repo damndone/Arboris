@@ -34,7 +34,8 @@ export function useLineage(): LineageContextValue {
   if (ctx === null) {
     throw new Error(
       "useLineage() must be called inside <LineageContext.Provider>. " +
-        "Did you forget to wrap the tree in <LineageRouteContainer>?",
+        "Did you forget to wrap the tree in <WorkbenchRouteContainer> " +
+        "(or the legacy <LineageRouteContainer> shim)?",
     );
   }
   return ctx;
