@@ -43,24 +43,31 @@ function node(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
 }
 
 describe("sectionRegistry", () => {
-  it("exposes exactly the 4 V1.5.0 sections (trust/lineage/basic/decision)", () => {
+  it("exposes the V1.5.2 P5 section set (V1.5.0 four + V1.5.2 three placeholders)", () => {
     expect(sectionRegistry.map((s) => s.id)).toEqual([
       "trust",
+      "askAi",
+      "operation",
+      "code",
       "lineage",
       "basic",
       "decision",
     ]);
   });
 
-  it("orders match spec §8.1: 10/50/60/70", () => {
-    expect(sectionRegistry.map((s) => s.order)).toEqual([10, 50, 60, 70]);
+  it("orders match spec §8.1 + P5 additions: 10/20/30/40/50/60/70", () => {
+    expect(sectionRegistry.map((s) => s.order)).toEqual([
+      10, 20, 30, 40, 50, 60, 70,
+    ]);
   });
 
-  it(".filter(s => s.shouldRender(node)) works on a ViewModel fixture", () => {
-    // ok trust + no decisions → only lineage + basic render
+  it(".filter(s => s.shouldRender(node)) on a plain node yields askAi/lineage/basic", () => {
+    // ok trust + no decisions + no code + no editableSchema → askAi
+    // (always on) + lineage + basic render. Operation + Code are
+    // data-gated.
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
-    expect(visible.map((s) => s.id)).toEqual(["lineage", "basic"]);
+    expect(visible.map((s) => s.id)).toEqual(["askAi", "lineage", "basic"]);
   });
 
   it("decision section renders when decisions.length > 0", () => {
@@ -131,6 +138,43 @@ describe("sectionRegistry", () => {
     expect(byId.lineage.Component).toBe(LineageChainSection);
     expect(byId.basic.Component).toBe(BasicInfoSection);
     expect(byId.decision.Component).toBe(DecisionSection);
+  });
+
+  describe("V1.5.2 P5 placeholders", () => {
+    it("askAi always renders (visible 'AI is coming' surface)", () => {
+      const visible = sectionRegistry
+        .filter((s) => s.shouldRender(node()))
+        .map((s) => s.id);
+      expect(visible).toContain("askAi");
+    });
+
+    it("operation renders only when editableSchema is non-empty", () => {
+      const withoutSchema = sectionRegistry.find((s) => s.id === "operation")!;
+      expect(withoutSchema.shouldRender(node())).toBe(false);
+      expect(
+        withoutSchema.shouldRender(
+          node({
+            editableSchema: [
+              { kind: "toggle", key: "log_transform", label: "log" },
+            ],
+          }),
+        ),
+      ).toBe(true);
+    });
+
+    it("code renders only when node.code.body is present", () => {
+      const codeEntry = sectionRegistry.find((s) => s.id === "code")!;
+      expect(codeEntry.shouldRender(node())).toBe(false);
+      expect(
+        codeEntry.shouldRender(
+          node({ code: { lang: "python", body: "x = 1" } }),
+        ),
+      ).toBe(true);
+      // Empty body counts as absent.
+      expect(
+        codeEntry.shouldRender(node({ code: { lang: "python", body: "" } })),
+      ).toBe(false);
+    });
   });
 
   describe("needsTrust — non-needed/failed review statuses suppress banner [REV-2 #6]", () => {

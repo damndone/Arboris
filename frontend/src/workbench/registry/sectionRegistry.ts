@@ -30,6 +30,9 @@ import { TrustBanner } from "../../lineage/detail/sections/TrustBanner";
 import { LineageChainSection } from "../../lineage/detail/sections/LineageChainSection";
 import { BasicInfoSection } from "../../lineage/detail/sections/BasicInfoSection";
 import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
+import { AskAISection } from "../../lineage/detail/sections/AskAISection";
+import { OperationSection } from "../../lineage/detail/sections/OperationSection";
+import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import type { RegistryEntry } from "./registryTypes";
 
 /**
@@ -56,6 +59,28 @@ function needsTrust(n: GraphViewNode): boolean {
 
 export const sectionRegistry: SectionEntry[] = [
   { id: "trust", order: 10, shouldRender: needsTrust, Component: TrustBanner },
+  // V1.5.2 P5 — AskAI is the only always-on placeholder; its visible
+  // disabled CTA is the V1.5.2 surface for "AI is coming". Operation
+  // + Code are data-gated so they don't pollute the drawer when no
+  // editable schema / source code is present.
+  {
+    id: "askAi",
+    order: 20,
+    shouldRender: () => true,
+    Component: AskAISection,
+  },
+  {
+    id: "operation",
+    order: 30,
+    shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0,
+    Component: OperationSection,
+  },
+  {
+    id: "code",
+    order: 40,
+    shouldRender: (n) => Boolean(n.code?.body),
+    Component: CodeSection,
+  },
   {
     id: "lineage",
     order: 50,
