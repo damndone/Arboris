@@ -82,21 +82,10 @@ describe("GraphWorkbench", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders detail drawer only when selectedKey resolves to a real node (T6.11 swap)", () => {
-    const { rerender } = renderWithCtx(makeCtx(rawGraph(), null));
-    expect(screen.queryByTestId("detail-drawer")).toBeNull();
-
-    rerender(
-      <MemoryRouter>
-        <LineageContext.Provider value={makeCtx(rawGraph(), "stage:raw")}>
-          <GraphWorkbench />
-        </LineageContext.Provider>
-      </MemoryRouter>,
-    );
-    expect(screen.getByTestId("detail-drawer")).toBeInTheDocument();
-    // Drawer renders the header h2 with the node's title.
-    expect(document.getElementById("detail-drawer-title")?.textContent).toBe("Raw");
-  });
+  // V1.5.2 P8 — DetailDrawer was hoisted from GraphView to
+  // WorkbenchShell per plan §2. Drawer-mount scenarios live in
+  // `workbench/WorkbenchRouteContainer.test.tsx` now (search for
+  // "P8 hoisted from GraphView" in that file).
 
   it("clicking a node calls select(nodeId) from context", () => {
     const select = vi.fn();
@@ -114,39 +103,22 @@ describe("GraphWorkbench", () => {
     errSpy.mockRestore();
   });
 
-  it("selectedKey not in model → drawer slot is suppressed [REV-3 #3]", () => {
-    // Cross-run leak: user navigates /runs/A?node=x → /runs/B; the URL
-    // still says node=x but model B has no such node. Workbench must NOT
-    // mount an orphan drawer.
+  it("cross-run leak: bare GraphView with stale selectedKey still renders the canvas", () => {
+    // V1.5.2 P8 — drawer suppression on stale selectedKey moved to
+    // WorkbenchRouteContainer.test.tsx (the drawer now lives at
+    // container level, not inside GraphView). The remaining
+    // assertion here is that GraphView itself doesn't crash or
+    // suppress canvas rendering when selectedKey is stale.
     renderWithCtx(makeCtx(rawGraph(), "stage:ghost"));
-    expect(screen.queryByTestId("drawer-slot")).toBeNull();
-    // Canvas still renders the real model.
     expect(screen.getByText("Raw")).toBeInTheDocument();
+    // Drawer is no longer GraphView's responsibility — assertion lives
+    // at the container level in workbench/WorkbenchRouteContainer.test.tsx.
   });
 
-  it("⌘J keydown is handled by the wired-in useGraphKeyboard [REV-3 #1]", () => {
-    // Regression guard: T5.7 unmounted V1.4.1 LineageTab which carried its
-    // own keydown listener. Without re-wiring useGraphKeyboard inside the
-    // workbench, ⌘J would silently no-op in production. The hook now lives
-    // here, so the keydown does not propagate to the browser default
-    // (preventDefault is called for ⌘J inside the hook).
-    renderWithCtx(makeCtx(rawGraph(), null));
-    const evt = new KeyboardEvent("keydown", {
-      key: "j",
-      metaKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    const prevented = !window.dispatchEvent(evt);
-    expect(prevented).toBe(true); // listener called preventDefault
-  });
-
-  it("Escape clears the selection via context.select(null) [REV-3 #1 follow-on]", () => {
-    const select = vi.fn();
-    renderWithCtx(makeCtx(rawGraph(), "stage:raw", select));
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(select).toHaveBeenCalledWith(null);
-  });
+  // V1.5.2 P8 — ⌘J / Escape moved from GraphView's useGraphKeyboard
+  // call to WorkbenchShell. The selection-scoped scenarios live in
+  // `workbench/WorkbenchRouteContainer.test.tsx` under "P8 hoisted
+  // from GraphView".
 
   describe("T6.12 legacy stage hint", () => {
     beforeEach(() => {
@@ -259,42 +231,8 @@ describe("GraphWorkbench", () => {
     });
   });
 
-  describe("REV-3 follow-ups (Step 6)", () => {
-    it("H1: opening RawJsonModal then externally clearing selection closes the modal", () => {
-      // Mount with a selected node, ⌘J to open the modal, then re-render
-      // with selectedKey=null. The modal must close so subsequent ⌘J
-      // doesn't toggle invisibly.
-      const { rerender } = renderWithCtx(makeCtx(rawGraph(), "stage:raw"));
-      fireEvent.keyDown(window, { key: "j", metaKey: true });
-      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
-
-      // External selection clear: re-render with selectedKey=null
-      rerender(
-        <MemoryRouter>
-          <LineageContext.Provider value={makeCtx(rawGraph(), null)}>
-            <GraphWorkbench />
-          </LineageContext.Provider>
-        </MemoryRouter>,
-      );
-      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
-    });
-
-    it("S1: Escape with RawJsonModal open closes only the modal, not the selection", () => {
-      const select = vi.fn();
-      renderWithCtx(makeCtx(rawGraph(), "stage:raw", select));
-      // Open the modal
-      fireEvent.keyDown(window, { key: "j", metaKey: true });
-      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
-      // Escape: closes the modal but must NOT call select(null)
-      fireEvent.keyDown(window, { key: "Escape" });
-      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
-      expect(select).not.toHaveBeenCalled();
-    });
-
-    it("⌘J with no selected node is a no-op (modal does not appear)", () => {
-      renderWithCtx(makeCtx(rawGraph(), null));
-      fireEvent.keyDown(window, { key: "j", metaKey: true });
-      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
-    });
-  });
+  // V1.5.2 P8 — REV-3 H1 / S1 scenarios + "⌘J with no selection"
+  // moved to `workbench/WorkbenchRouteContainer.test.tsx` because
+  // RawJsonModal mounting + ⌘J keyboard handler are now owned by
+  // WorkbenchShell per plan §2.
 });

@@ -102,4 +102,75 @@ describe("WorkbenchRouteContainer", () => {
       "false",
     );
   });
+
+  // V1.5.2 P8 — these scenarios moved from GraphWorkbench.test.tsx
+  // because DetailDrawer / RawJsonModal / ⌘J / Escape were hoisted
+  // out of GraphView up to WorkbenchShell (plan §2 final layout).
+  // Behaviour preserved; tests now mount the full container.
+  describe("selection / drawer / modal — P8 hoisted from GraphView", () => {
+    it("renders DetailDrawer when ?tabs=...&active=... resolves to a real node", async () => {
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Raw",
+      );
+    });
+
+    it("suppresses DetailDrawer when ?tabs= points at a node not in this run (cross-run leak guard)", async () => {
+      mountAt("/?tab=lineage&tabs=ghost&active=ghost");
+      // Wait for the canvas to mount so we know the load resolved.
+      await screen.findByTestId("graph-workbench");
+      expect(screen.queryByTestId("detail-drawer")).toBeNull();
+    });
+
+    it("⌘J keydown opens RawJsonModal when a node is selected", async () => {
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      await screen.findByTestId("detail-drawer");
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
+    });
+
+    it("⌘J with no selected node is a no-op (modal does not appear)", async () => {
+      mountAt("/?tab=lineage");
+      await screen.findByTestId("graph-workbench");
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
+    });
+
+    it("S1: Escape with modal open closes only the modal, NOT the selection", async () => {
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      await screen.findByTestId("detail-drawer");
+      fireEvent.keyDown(window, { key: "j", metaKey: true });
+      expect(screen.getByTestId("raw-json-modal")).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByTestId("raw-json-modal")).toBeNull();
+      // Drawer still mounted = selection survived Escape.
+      expect(screen.getByTestId("detail-drawer")).toBeInTheDocument();
+    });
+
+    it("Escape with no modal clears the selection (drawer dismounts)", async () => {
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      await screen.findByTestId("detail-drawer");
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByTestId("detail-drawer")).toBeNull();
+    });
+  });
+
+  describe("layout — P8 plan §2 hoisting", () => {
+    it("mounts RunHistoryRail at the container level (not inside GraphView)", async () => {
+      mountAt("/?tab=lineage");
+      // RunHistoryRail's testid is owned by the rail component; this
+      // just asserts it's reachable from any view, which is the whole
+      // point of hoisting it.
+      await screen.findByTestId("graph-workbench");
+      expect(screen.getByTestId("run-rail")).toBeInTheDocument();
+    });
+
+    it("rail and BottomPanel persist when switching to Table view", async () => {
+      mountAt("/?tab=lineage&view=table");
+      await screen.findByTestId("view-table");
+      expect(screen.getByTestId("run-rail")).toBeInTheDocument();
+      expect(screen.getByTestId("bottom-panel")).toBeInTheDocument();
+    });
+  });
 });
