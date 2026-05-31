@@ -9,6 +9,9 @@ from workbench.econometrics.runner import (
     run_negative_binomial,
     run_probit,
 )
+from workbench.artifacts import read_json
+from workbench.orchestrator import run_workflow
+from workbench.projects import create_project
 
 
 def test_run_probit_binary_y_returns_normalized_result():
@@ -132,3 +135,43 @@ def test_normalize_statsmodels_result_caps_preview_conversion():
 
     assert len(result["fitted_values_preview"]) == 500
     assert len(result["residuals_preview"]) == 500
+
+
+def test_run_workflow_explicit_probit_writes_model_result(tmp_path):
+    rng = np.random.default_rng(45)
+    n = 80
+    x = rng.normal(size=n)
+    y = (-0.1 + 0.8 * x + rng.normal(size=n) > 0).astype(int)
+    source = tmp_path / "binary.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "explicit_probit")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="probit",
+    )
+
+    model_path = project.root / "runs" / result["run_id"] / "model_results" / "probit_1.json"
+    model_result = read_json(model_path)
+    assert model_result["model_type"] == "probit"
+    assert model_result["engine"] == "statsmodels"
+
+
+def test_run_workflow_auto_still_routes_binary_to_logit(tmp_path):
+    rng = np.random.default_rng(46)
+    n = 80
+    x = rng.normal(size=n)
+    y = (-0.1 + 0.8 * x + rng.normal(size=n) > 0).astype(int)
+    source = tmp_path / "binary.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "auto_binary")
+
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+
+    model_dir = project.root / "runs" / result["run_id"] / "model_results"
+    assert (model_dir / "logit_1.json").exists()
+    assert not (model_dir / "probit_1.json").exists()

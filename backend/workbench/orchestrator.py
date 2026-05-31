@@ -13,9 +13,12 @@ from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
+    run_glm,
     run_logit,
+    run_negative_binomial,
     run_ols,
     run_poisson,
+    run_probit,
     run_time_series_diagnostics,
 )
 from .exports import export_pdf, export_xlsx
@@ -57,6 +60,7 @@ def run_workflow(
     mode: str,
     y: str,
     x: list[str],
+    model_type: str = "auto",
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -71,7 +75,7 @@ def run_workflow(
         started_at=started_at,
         y=y,
         x=x,
-        requested_model_type="auto",
+        requested_model_type=model_type,
     )
 
     try:
@@ -84,6 +88,7 @@ def run_workflow(
             x,
             config,
             started_at,
+            model_type=model_type,
         )
     except Exception as exc:
         issue = GuardrailIssue(
@@ -102,7 +107,7 @@ def run_workflow(
             started_at=started_at,
             y=y,
             x=x,
-            requested_model_type="auto",
+            requested_model_type=model_type,
         )
         raise
 
@@ -228,6 +233,7 @@ def _run_workflow(
             started_at=started_at,
             y=y,
             x=x,
+            requested_model_type=model_type,
         )
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("validation", "complete", "Validation passed")
@@ -276,6 +282,7 @@ def _run_workflow(
             started_at=started_at,
             y=y,
             x=x,
+            requested_model_type=model_type,
         )
         return {"run_id": run_id, "status": "blocked"}
     if _s: _s("model_check", "complete", "Model columns valid")
@@ -316,7 +323,41 @@ def _run_workflow(
         poisson_x = [v for v in normalized_x if v != exposure_col]
 
     try:
-        if y_type == "binary":
+        if model_type == "probit":
+            primary, primary_fitted = run_probit(
+                cleaned,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="probit_1",
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "probit_1", primary)
+            model_results.append(("probit_1", primary))
+            fitted_models["probit_1"] = primary_fitted
+        elif model_type == "negative_binomial":
+            primary, primary_fitted = run_negative_binomial(
+                cleaned,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="negative_binomial_1",
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "negative_binomial_1", primary)
+            model_results.append(("negative_binomial_1", primary))
+            fitted_models["negative_binomial_1"] = primary_fitted
+        elif model_type.startswith("glm:"):
+            primary, primary_fitted = run_glm(
+                cleaned,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="glm_1",
+                family_name=model_type.split(":", 1)[1],
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "glm_1", primary)
+            model_results.append(("glm_1", primary))
+            fitted_models["glm_1"] = primary_fitted
+        elif y_type == "binary":
             primary, primary_fitted = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
             _write_model_result(run_root, "logit_1", primary)
             model_results.append(("logit_1", primary))
@@ -790,7 +831,13 @@ def _write_manifest(
 _BINARY_CORRELATION_WARN = 0.7  # |r| > 0.7 > Severity.WARNING
 _BINARY_CORRELATION_INFO = 0.5  # 0.5 < |r| <= 0.7 > Severity.INFO
 _TREATMENT_PROXY_CORRELATION_WARN = 0.7
-_MODEL_TYPE_MAP = {"ols": "continuous", "logit": "binary", "poisson": "count"}
+_MODEL_TYPE_MAP = {
+    "ols": "continuous",
+    "logit": "binary",
+    "probit": "binary",
+    "poisson": "count",
+    "negative_binomial": "count",
+}
 
 
 def _map_model_type(model_type: str) -> str:
