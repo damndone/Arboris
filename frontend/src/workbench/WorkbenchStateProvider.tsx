@@ -88,6 +88,10 @@ export interface WorkbenchDispatch {
   /** Forces `pinned=0`. */
   selectBySearchCommit(nodeKey: string, query: string): void;
   pinFocus(nodeKey: string): void;
+  /** F1: sets focus WITHOUT touching tabs/active/selected; forces
+   *  pinned=0. The "look at A, highlight B's upstream" case — distinct
+   *  from selectByCanvasClick, which also opens/activates a tab. */
+  setFocusOnly(nodeKey: string): void;
   /** Sends focus back to selected (or null when no tab is active). */
   unpinFocus(): void;
   closeTab(tabId: string): void;
@@ -293,6 +297,21 @@ export function WorkbenchStateProvider({
     [commit],
   );
 
+  const setFocusOnly = useCallback(
+    (nodeKey: string) => {
+      // Only focus + pinned change. tabs / active / selected are left
+      // exactly as they were — this is the whole point versus
+      // selectByCanvasClick.
+      const slice: WorkbenchUrlSlice = {
+        ...urlRef.current,
+        focusKey: nodeKey,
+        pinned: false,
+      };
+      commit({ slice });
+    },
+    [commit],
+  );
+
   const unpinFocus = useCallback(() => {
     const activeId = tabsRef.current.activeTabId;
     const fallback =
@@ -391,6 +410,7 @@ export function WorkbenchStateProvider({
         selectByTabSwitch,
         selectBySearchCommit,
         pinFocus,
+        setFocusOnly,
         unpinFocus,
         closeTab,
         setView,
@@ -415,6 +435,7 @@ export function WorkbenchStateProvider({
       selectByTabSwitch,
       selectBySearchCommit,
       pinFocus,
+      setFocusOnly,
       unpinFocus,
       closeTab,
       setView,

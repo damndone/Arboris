@@ -115,7 +115,8 @@ export function NodeActionMenu({
       openDetail: wb?.dispatch.selectByCanvasClick ?? (() => {}),
       pinTab: wb?.dispatch.selectByCanvasClick ?? (() => {}),
       pinUpstream: wb?.dispatch.pinFocus ?? (() => {}),
-      focusUpstream: wb?.dispatch.selectByCanvasClick ?? (() => {}),
+      // F1: focus-only (see ContextMenu) — don't move selection.
+      focusUpstream: wb?.dispatch.setFocusOnly ?? (() => {}),
     },
   };
   const registryActions = actionsForSurface("drawer-header-menu", ctx);

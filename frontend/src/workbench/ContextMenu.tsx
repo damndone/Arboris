@@ -78,18 +78,11 @@ export function ContextMenu() {
       openDetail: dispatch.selectByCanvasClick,
       pinTab: dispatch.selectByCanvasClick,
       pinUpstream: dispatch.pinFocus,
-      focusUpstream: (key) => {
-        // "Focus without pinning" — pin then immediately unpin would
-        // collapse to selected; instead set focus directly via a
-        // dispatch the provider doesn't expose explicitly. We achieve
-        // it by calling pinFocus then unpin only when intent is
-        // permanent — for "focus" alone, just write focusKey via
-        // the provider's selectByCanvasClick path, which sets focus
-        // when !pinned. That requires the user to already be unpinned;
-        // if pinned, focus stays. P5 may add a dedicated setFocus
-        // dispatch if this turns out to be confusing.
-        dispatch.selectByCanvasClick(key);
-      },
+      // F1: focus-only. Sets focusKey + pinned=0 without touching the
+      // selected tab — the drawer stays on the current node while the
+      // graph highlights `key`'s upstream. Previously reused
+      // selectByCanvasClick, which wrongly moved selection too.
+      focusUpstream: dispatch.setFocusOnly,
     },
   };
 
