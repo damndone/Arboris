@@ -843,8 +843,10 @@ def _map_model_type(model_type: str) -> str | None:
 
 
 def _validate_requested_model_type(model_type: str) -> str | None:
-    if not model_type.startswith("glm:"):
+    if model_type == "auto" or model_type in _MODEL_TYPE_MAP:
         return None
+    if not model_type.startswith("glm:"):
+        raise ValueError(f"Unsupported model type: {model_type}")
     family_name = model_type.split(":", 1)[1]
     if family_name not in _SUPPORTED_GLM_FAMILIES:
         raise ValueError(f"Unsupported GLM family: {family_name}")

@@ -294,3 +294,32 @@ def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
     assert manifest["requested_model_type"] == "glm:poissonn"
     assert not (run_root / "model_results" / "ols_1.json").exists()
     assert "Unsupported GLM family: poissonn" in errors["issues"][0]["evidence"]["error"]
+
+
+def test_unsupported_explicit_model_type_fails_before_ols_fallback(tmp_path):
+    rng = np.random.default_rng(51)
+    n = 80
+    x = rng.normal(size=n)
+    y = (-0.1 + 0.8 * x + rng.normal(size=n) > 0).astype(int)
+    source = tmp_path / "binary.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "unsupported_model_type")
+
+    with pytest.raises(ValueError, match="Unsupported model type: probt"):
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type="probt",
+        )
+
+    run_root = next((project.root / "runs").iterdir())
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+
+    assert manifest["status"] == "failed"
+    assert manifest["requested_model_type"] == "probt"
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+    assert "Unsupported model type: probt" in errors["issues"][0]["evidence"]["error"]
