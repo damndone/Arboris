@@ -37,3 +37,24 @@ def test_require_optional_dependency_raises_structured_error_for_missing_package
     assert payload["error_code"] == "OPTIONAL_DEPENDENCY_MISSING"
     assert payload["model_type"] == "panel_ols"
     assert payload["details"]["extra"] == "panel"
+
+
+def test_require_optional_dependency_preserves_nested_missing_import(
+    tmp_path, monkeypatch
+):
+    module_path = tmp_path / "broken_optional_module.py"
+    module_path.write_text(
+        "import definitely_missing_internal_dependency\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        require_optional_dependency(
+            "broken_optional_module",
+            extra="panel",
+            engine="broken_optional_module",
+            model_type="panel_ols",
+        )
+
+    assert exc_info.value.name == "definitely_missing_internal_dependency"

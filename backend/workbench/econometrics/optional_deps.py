@@ -61,7 +61,10 @@ def require_optional_dependency(
 ) -> ModuleType:
     try:
         return import_module(module_name)
-    except ImportError as exc:
+    except ModuleNotFoundError as exc:
+        requested_top_level = module_name.partition(".")[0]
+        if exc.name not in {module_name, requested_top_level}:
+            raise
         raise OptionalDependencyNotInstalled(
             extra=extra,
             package=module_name,
