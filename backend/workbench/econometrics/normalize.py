@@ -46,6 +46,23 @@ def _json_safe_sequence(values: Any) -> list[float | None]:
     return [_json_safe_float(value) for value in iterable]
 
 
+def _json_safe_sequence_preview(values: Any, limit: int = 500) -> list[float | None]:
+    if limit <= 0:
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    preview: list[float | None] = []
+    for _ in range(limit):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        preview.append(_json_safe_float(value))
+    return preview
+
+
 def _labelled_values(fitted: Any, name: str) -> dict[str, Any]:
     values = getattr(fitted, name)
     if hasattr(values, "items"):
@@ -207,8 +224,6 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
             coef_entry["display_estimate"] = formatted
         coefficients[term] = coef_entry
 
-    fitted_values = _json_safe_sequence(getattr(fitted, "fittedvalues", []))
-    residuals = _json_safe_sequence(getattr(fitted, "resid", []))
     result: dict[str, Any] = {
         "schema_version": 1,
         "model_id": model_id,
@@ -218,8 +233,10 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "llf": _json_safe_float(getattr(fitted, "llf", None)),
         "aic": _json_safe_float(getattr(fitted, "aic", None)),
         "bic": _json_safe_float(getattr(fitted, "bic", None)),
-        "fitted_values_preview": fitted_values[:500],
-        "residuals_preview": residuals[:500],
+        "fitted_values_preview": _json_safe_sequence_preview(
+            getattr(fitted, "fittedvalues", [])
+        ),
+        "residuals_preview": _json_safe_sequence_preview(getattr(fitted, "resid", [])),
         "coefficients": coefficients,
     }
 

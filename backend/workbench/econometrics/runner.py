@@ -54,6 +54,13 @@ def _add_engine(result: dict[str, Any], *, engine: str = "statsmodels") -> dict[
     return result
 
 
+def _root_cause_suffix(exc: Exception) -> str:
+    message = " ".join(str(exc).split())
+    if not message:
+        message = type(exc).__name__
+    return f" Root cause: {message[:200]}"
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
@@ -109,7 +116,8 @@ def run_probit(
         fitted = smf.probit(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
         raise ValueError(
-            f"Probit model {model_id} failed to fit. Check binary outcome values and predictors."
+            f"Probit model {model_id} failed to fit. "
+            f"Check binary outcome values and predictors.{_root_cause_suffix(exc)}"
         ) from exc
     if not getattr(fitted, "converged", True):
         raise ValueError(f"Probit model {model_id} did not converge.")
@@ -202,7 +210,9 @@ def run_negative_binomial(
     try:
         fitted = smf.negativebinomial(formula=formula, data=frame).fit(disp=False, maxiter=100)
     except Exception as exc:
-        raise ValueError(f"Negative Binomial model {model_id} failed to fit.") from exc
+        raise ValueError(
+            f"Negative Binomial model {model_id} failed to fit.{_root_cause_suffix(exc)}"
+        ) from exc
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "negative_binomial"
     return _add_engine(result), fitted
@@ -230,7 +240,12 @@ def run_glm(
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    fitted = smf.glm(formula=formula, data=frame, family=family_cls()).fit(maxiter=100)
+    try:
+        fitted = smf.glm(formula=formula, data=frame, family=family_cls()).fit(maxiter=100)
+    except Exception as exc:
+        raise ValueError(
+            f"GLM model {model_id} failed to fit.{_root_cause_suffix(exc)}"
+        ) from exc
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "glm"
     result["glm_family"] = family_name
