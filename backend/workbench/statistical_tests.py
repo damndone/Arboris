@@ -210,8 +210,8 @@ def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[
     })
     statistic, p_value = stats.kendalltau(pair[left], pair[right])
     rows.append({
-        "test_id": f"kendall_rank_correlation:{left}:{right}",
-        "test_type": "kendall_rank_correlation",
+        "test_id": f"kendall_correlation:{left}:{right}",
+        "test_type": "kendall_correlation",
         "variables": [left, right],
         "nobs": int(len(pair)),
         "statistic": _safe_float(statistic),
@@ -265,7 +265,7 @@ def _mann_whitney_u(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, 
         return None
     left = pd.to_numeric(pair.loc[group_series == group_values[0], outcome], errors="coerce").dropna()
     right = pd.to_numeric(pair.loc[group_series == group_values[1], outcome], errors="coerce").dropna()
-    if len(left) < 1 or len(right) < 1:
+    if len(left) < 2 or len(right) < 2:
         return None
     statistic, p_value = stats.mannwhitneyu(left, right, alternative="two-sided")
     median_left = float(left.median())
@@ -332,8 +332,7 @@ def _kruskal_wallis(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, 
         pd.to_numeric(pair.loc[group_series == value, outcome], errors="coerce").dropna()
         for value in group_values
     ]
-    samples = [sample for sample in samples if len(sample) >= 1]
-    if len(samples) < 2:
+    if len(samples) < 2 or any(len(sample) < 2 for sample in samples):
         return None
     statistic, p_value = stats.kruskal(*samples)
     group_medians = {
@@ -465,8 +464,8 @@ def _summary_row(row: dict[str, Any]) -> dict[str, Any]:
         label = f"Pearson correlation: {row['variables'][0]} vs {row['variables'][1]}"
     elif test_type == "spearman_correlation":
         label = f"Spearman correlation: {row['variables'][0]} vs {row['variables'][1]}"
-    elif test_type == "kendall_rank_correlation":
-        label = f"Kendall rank correlation: {row['variables'][0]} vs {row['variables'][1]}"
+    elif test_type == "kendall_correlation":
+        label = f"Kendall correlation: {row['variables'][0]} vs {row['variables'][1]}"
     elif test_type == "welch_t_test":
         label = f"Welch t-test: {row['outcome']} by {row['group']}"
     elif test_type == "one_way_anova":

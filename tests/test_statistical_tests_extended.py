@@ -14,7 +14,7 @@ def test_rank_correlations_report_spearman_and_kendall_rows():
 
     rows = results["rank_correlations"]["results"]
     by_type = {row["test_type"]: row for row in rows}
-    assert set(by_type) == {"spearman_correlation", "kendall_rank_correlation"}
+    assert set(by_type) == {"spearman_correlation", "kendall_correlation"}
 
     spearman = by_type["spearman_correlation"]
     assert spearman["variables"] == ["x", "y"]
@@ -22,7 +22,7 @@ def test_rank_correlations_report_spearman_and_kendall_rows():
     assert spearman["statistic"] == pytest.approx(0.9047619)
     assert spearman["effect"]["rho"] == pytest.approx(spearman["statistic"])
 
-    kendall = by_type["kendall_rank_correlation"]
+    kendall = by_type["kendall_correlation"]
     assert kendall["variables"] == ["x", "y"]
     assert kendall["nobs"] == 8
     assert kendall["statistic"] == pytest.approx(0.7142857)
@@ -57,6 +57,23 @@ def test_nonparametric_reports_mann_whitney_u_and_kruskal_wallis():
     assert kruskal["groups"] == ["north", "south", "west"]
     assert kruskal["p_value"] < 0.05
     assert kruskal["effect"]["group_medians"]["north"] == 1.0
+
+
+def test_nonparametric_skips_groups_with_single_observation():
+    frame = pd.DataFrame({
+        "score": [1, 10, 11, 20, 21, 30, 31],
+        "binary_group": ["control", "treated", "treated", "treated", "treated", "treated", "treated"],
+        "region": ["north", "south", "south", "west", "west", "east", "east"],
+    })
+
+    results = run_statistical_tests(
+        frame,
+        analysis_columns=["score", "binary_group", "region"],
+    )
+
+    rows = results["nonparametric"]["results"]
+    assert all(row["test_type"] != "mann_whitney_u" for row in rows)
+    assert all(row["test_type"] != "kruskal_wallis" for row in rows)
 
 
 def test_fisher_exact_reports_two_by_two_categorical_association():
