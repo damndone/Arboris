@@ -56,7 +56,8 @@ export function WorkbenchTopbar() {
           openDetail: dispatch.selectByCanvasClick,
           pinTab: dispatch.selectByCanvasClick,
           pinUpstream: dispatch.pinFocus,
-          focusUpstream: dispatch.selectByCanvasClick,
+          // F1: focus-only (see ContextMenu) — don't move selection.
+          focusUpstream: dispatch.setFocusOnly,
         },
       }
     : null;
