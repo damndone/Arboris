@@ -175,6 +175,38 @@ describe("SearchPalette", () => {
     expect(lastSearch).toContain("q=raw");
   });
 
+  it("F4: ⌘K is ignored while a textarea is focused (does NOT open)", () => {
+    mountAt("/");
+    // Simulate the user editing text elsewhere (e.g. detail drawer).
+    const textarea = document.createElement("textarea");
+    document.body.appendChild(textarea);
+    textarea.focus();
+    expect(document.activeElement).toBe(textarea);
+
+    act(() => {
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    });
+    // Palette must stay closed — the keystroke belongs to the textarea.
+    expect(screen.queryByTestId("search-palette")).toBeNull();
+
+    document.body.removeChild(textarea);
+  });
+
+  it("F4: ⌘K still toggles closed when the palette's own input is focused", () => {
+    mountAt("/");
+    // Open it (focus is on body here, so the guard doesn't trip).
+    act(() => {
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    });
+    expect(screen.getByTestId("search-palette")).toBeInTheDocument();
+    // The palette autofocuses its input — even though that's an
+    // editable target, ⌘K should close it because `open` is true.
+    act(() => {
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    });
+    expect(screen.queryByTestId("search-palette")).toBeNull();
+  });
+
   it("ArrowDown moves the cursor; cursor row has data-active=true", () => {
     mountAt("/");
     act(() => {

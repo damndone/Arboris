@@ -28,6 +28,7 @@ import { createPortal } from "react-dom";
 import { useLineage } from "../lineage/LineageContext";
 import { buildRunSnapshot, type SearchItem } from "./RunSnapshotAdapter";
 import { useWorkbench } from "./WorkbenchStateProvider";
+import { isEditableTarget } from "./keyboard";
 
 const MAX_RESULTS = 25;
 
@@ -79,6 +80,12 @@ export function SearchPalette() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        // F4: don't hijack ⌘K while the user is typing into an
+        // input/textarea/contenteditable (e.g. editing text in the
+        // detail drawer). Exception: when the palette is already open
+        // the focused element is the palette's own input, and ⌘K
+        // should still toggle it closed.
+        if (!open && isEditableTarget(document.activeElement)) return;
         e.preventDefault();
         setOpen((o) => !o);
       } else if (e.key === "Escape" && open) {
