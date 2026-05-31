@@ -49,6 +49,11 @@ def _ensure_numeric_x(frame: pd.DataFrame, x: list[str]) -> pd.DataFrame:
     return frame
 
 
+def _add_engine(result: dict[str, Any], *, engine: str = "statsmodels") -> dict[str, Any]:
+    result["engine"] = engine
+    return result
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
@@ -61,7 +66,7 @@ def run_ols(
     fitted = original.get_robustcov_results(cov_type="HC1") if robust else original
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "ols_robust" if robust else "ols"
-    return result, original
+    return _add_engine(result), original
 
 
 def run_logit(
@@ -86,7 +91,31 @@ def run_logit(
         )
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "logit"
-    return result, fitted
+    return _add_engine(result), fitted
+
+
+def run_probit(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    model_id: str,
+    categorical_x: set[str] | None = None,
+) -> tuple[dict[str, Any], Any]:
+    frame = _ensure_numeric_y(frame, y)
+    frame = _ensure_numeric_x(frame, x)
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+    try:
+        fitted = smf.probit(formula=formula, data=frame).fit(disp=False, maxiter=100)
+    except Exception as exc:
+        raise ValueError(
+            f"Probit model {model_id} failed to fit. Check binary outcome values and predictors."
+        ) from exc
+    if not getattr(fitted, "converged", True):
+        raise ValueError(f"Probit model {model_id} did not converge.")
+    result = normalize_statsmodels_result(fitted, model_id)
+    result["model_type"] = "probit"
+    return _add_engine(result), fitted
 
 
 def run_poisson(
@@ -147,7 +176,65 @@ def run_poisson(
         result["exposure_col"] = exposure_col
     else:
         result["model_type"] = "poisson"
-    return result, fitted
+    return _add_engine(result), fitted
+
+
+def run_negative_binomial(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    model_id: str,
+    categorical_x: set[str] | None = None,
+) -> tuple[dict[str, Any], Any]:
+    frame = _ensure_numeric_y(frame, y)
+    frame = _ensure_numeric_x(frame, x)
+    series = frame[y].dropna()
+    if (series < 0).any():
+        raise ValueError(
+            f"Negative Binomial model requires non-negative y, but '{y}' has negative values."
+        )
+    if not (series == series.astype(int)).all():
+        raise ValueError(
+            f"Negative Binomial model requires integer count y, but '{y}' has non-integer values."
+        )
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+    try:
+        fitted = smf.negativebinomial(formula=formula, data=frame).fit(disp=False, maxiter=100)
+    except Exception as exc:
+        raise ValueError(f"Negative Binomial model {model_id} failed to fit.") from exc
+    result = normalize_statsmodels_result(fitted, model_id)
+    result["model_type"] = "negative_binomial"
+    return _add_engine(result), fitted
+
+
+def run_glm(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    model_id: str,
+    family_name: str,
+    categorical_x: set[str] | None = None,
+) -> tuple[dict[str, Any], Any]:
+    from statsmodels.genmod import families
+
+    family_map = {
+        "binomial": families.Binomial,
+        "poisson": families.Poisson,
+        "negative_binomial": families.NegativeBinomial,
+    }
+    family_cls = family_map.get(family_name)
+    if family_cls is None:
+        raise ValueError(f"Unsupported GLM family: {family_name}")
+    frame = _ensure_numeric_y(frame, y)
+    frame = _ensure_numeric_x(frame, x)
+    cat = categorical_x or set()
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+    fitted = smf.glm(formula=formula, data=frame, family=family_cls()).fit(maxiter=100)
+    result = normalize_statsmodels_result(fitted, model_id)
+    result["model_type"] = "glm"
+    result["glm_family"] = family_name
+    return _add_engine(result), fitted
 
 
 def run_fixed_effects(
@@ -168,7 +255,7 @@ def run_fixed_effects(
     fitted = smf.ols(formula=_ols_formula(y, terms), data=frame).fit()
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "fixed_effects"
-    return result, fitted
+    return _add_engine(result), fitted
 
 
 def run_time_series_diagnostics(
