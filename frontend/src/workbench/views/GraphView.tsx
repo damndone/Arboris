@@ -56,12 +56,28 @@ export function GraphView() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const { layout, setLayout } = useLayoutMode(model.runId);
 
-  // T6.12 legacy stage hint — V1.5.0 behaviour preserved exactly.
-  const dismissalKey = `lineage:legacy-hint-dismissed:${model.runId}`;
+  // T6.12 legacy stage hint dismissal.
+  //
+  // F8 (V1.5.3): unify the sessionStorage namespace on `workbench:`.
+  // V1.5.0 wrote `lineage:legacy-hint-dismissed:<runId>`; every other
+  // key in the app already uses the `workbench:` prefix (see
+  // useSessionByRunId / useLayoutMode / ThemeProvider). We read the new
+  // key, and on first access migrate a pre-existing `lineage:` value
+  // forward (then delete it) so a user who dismissed the hint under
+  // V1.5.0/1.5.2 doesn't see it resurrected after upgrading.
+  const dismissalKey = `workbench:legacy-hint-dismissed:${model.runId}`;
+  const legacyDismissalKey = `lineage:legacy-hint-dismissed:${model.runId}`;
   const [legacyHintDismissed, setLegacyHintDismissed] = useState<boolean>(
     () => {
       try {
-        return sessionStorage.getItem(dismissalKey) === "1";
+        if (sessionStorage.getItem(dismissalKey) === "1") return true;
+        // One-time migration from the V1.5.0-era namespace.
+        if (sessionStorage.getItem(legacyDismissalKey) === "1") {
+          sessionStorage.setItem(dismissalKey, "1");
+          sessionStorage.removeItem(legacyDismissalKey);
+          return true;
+        }
+        return false;
       } catch {
         return false;
       }

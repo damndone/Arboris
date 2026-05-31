@@ -229,6 +229,29 @@ describe("GraphWorkbench", () => {
       expect(screen.getByTestId("legacy-banner")).toBeInTheDocument();
       expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
     });
+
+    it("F8: migrates a V1.5.0 `lineage:` dismissal into the `workbench:` namespace", () => {
+      // A user dismissed the hint under V1.5.0, which wrote the old key.
+      const fixture = v2RawGraph([undefined, undefined]);
+      fixture.run_id = "run-migrate";
+      sessionStorage.setItem(
+        "lineage:legacy-hint-dismissed:run-migrate",
+        "1",
+      );
+
+      renderWithCtx(makeCtx(fixture));
+
+      // Hint stays dismissed (not resurrected) …
+      expect(screen.queryByTestId("legacy-stage-hint")).toBeNull();
+      // … and the value migrated forward to the unified namespace,
+      // with the stale key removed.
+      expect(
+        sessionStorage.getItem("workbench:legacy-hint-dismissed:run-migrate"),
+      ).toBe("1");
+      expect(
+        sessionStorage.getItem("lineage:legacy-hint-dismissed:run-migrate"),
+      ).toBeNull();
+    });
   });
 
   // V1.5.2 P8 — REV-3 H1 / S1 scenarios + "⌘J with no selection"
