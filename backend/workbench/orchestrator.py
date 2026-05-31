@@ -261,6 +261,7 @@ def _run_workflow(
         data_detected_y_type = detect_y_kind(cleaned, normalized_y).value
     else:
         data_detected_y_type = "continuous"
+    glm_family = _validate_requested_model_type(model_type)
     y_type = _map_model_type(model_type) or data_detected_y_type
     if _s: _s("y_type", "complete", f"y classified as {y_type}")
 
@@ -348,7 +349,7 @@ def _run_workflow(
                 y=normalized_y,
                 x=normalized_x,
                 model_id="glm_1",
-                family_name=model_type.split(":", 1)[1],
+                family_name=glm_family or "",
                 categorical_x=categorical_vars,
             )
             _write_model_result(run_root, "glm_1", primary)
@@ -389,6 +390,7 @@ def _run_workflow(
         _write_model_result(run_root, "ols_1", ols_result)
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
+        y_type = "continuous"
 
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     drop_check_x = poisson_x if primary_type == "poisson_rate" else normalized_x
@@ -400,11 +402,9 @@ def _run_workflow(
     diagnostic_artifacts: dict[str, dict[str, Any]] = {}
     for model_id, fitted in fitted_models.items():
         result_dict = dict(model_results)
-        fitted_model_type = next(
-            (r.get("model_type", "ols") for mid, r in model_results if mid == model_id),
-            "ols",
-        )
-        family = "poisson" if fitted_model_type == "poisson_rate" else ("ols" if fitted_model_type in ("ols", "ols_robust", "fixed_effects") else fitted_model_type)
+        result = result_dict.get(model_id, {})
+        fitted_model_type = result.get("model_type", "ols")
+        family = _diagnostic_family(result)
         diag = compute_diagnostics(fitted, exog, model_id, model_family=family)
         diag["model_type"] = fitted_model_type
         diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
@@ -419,7 +419,7 @@ def _run_workflow(
         )
         diagnostic_artifacts[model_id] = diag
         _check_model_validity(diag, model_id, issue_dicts, run_root)
-        if fitted_model_type in ("poisson", "poisson_rate"):
+        if family == "poisson":
             _check_overdispersion_issue(diag, model_id, issue_dicts, run_root)
         sep = diag.get("separation", {})
         if isinstance(sep, dict) and sep.get("warning"):
@@ -835,10 +835,32 @@ _MODEL_TYPE_MAP = {
     "poisson": "count",
     "negative_binomial": "count",
 }
+_SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 
 
 def _map_model_type(model_type: str) -> str | None:
     return _MODEL_TYPE_MAP.get(model_type)
+
+
+def _validate_requested_model_type(model_type: str) -> str | None:
+    if not model_type.startswith("glm:"):
+        return None
+    family_name = model_type.split(":", 1)[1]
+    if family_name not in _SUPPORTED_GLM_FAMILIES:
+        raise ValueError(f"Unsupported GLM family: {family_name}")
+    return family_name
+
+
+def _diagnostic_family(model_result: dict[str, Any]) -> str:
+    model_type = model_result.get("model_type", "ols")
+    if model_type == "glm":
+        family = model_result.get("glm_family")
+        return str(family) if family else "glm"
+    if model_type == "poisson_rate":
+        return "poisson"
+    if model_type in ("ols", "ols_robust", "fixed_effects"):
+        return "ols"
+    return str(model_type)
 
 
 def _build_variable_importance(

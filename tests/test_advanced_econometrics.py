@@ -203,6 +203,8 @@ def test_run_workflow_glm_poisson_keeps_data_driven_y_type(tmp_path):
     assert model_result["glm_family"] == "poisson"
     assert manifest["model_routing"]["requested_model_type"] == "glm:poisson"
     assert manifest["model_routing"]["effective_y_type"] == "count"
+    diagnostics = read_json(run_root / "model_results" / "diagnostics_glm_1.json")
+    assert "overdispersion" in diagnostics
 
 
 def test_run_workflow_explicit_negative_binomial_writes_model_result(tmp_path):
@@ -234,3 +236,61 @@ def test_run_workflow_explicit_negative_binomial_writes_model_result(tmp_path):
     assert model_result["engine"] == "statsmodels"
     assert manifest["model_routing"]["requested_model_type"] == "negative_binomial"
     assert manifest["model_routing"]["effective_y_type"] == "count"
+
+
+def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
+    rng = np.random.default_rng(49)
+    n = 80
+    x = rng.normal(size=n)
+    y = 0.2 + 0.5 * x + rng.normal(size=n)
+    source = tmp_path / "continuous.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "negative_binomial_fallback")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="negative_binomial",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    manifest = read_json(run_root / "run_manifest.json")
+    summary = read_json(run_root / "diagnostic_summary.json")
+
+    assert (run_root / "model_results" / "ols_1.json").exists()
+    assert manifest["model_routing"]["effective_model_type"] == "ols_robust"
+    assert manifest["model_routing"]["effective_y_type"] == "continuous"
+    assert summary["model_identity"]["model_family"] == "ols_robust"
+    assert "r_squared" in summary["model_quality"]["primary_metric_keys"]
+
+
+def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
+    rng = np.random.default_rng(50)
+    n = 80
+    x = rng.uniform(0, 2, n)
+    y = rng.poisson(np.exp(0.2 + 0.3 * x))
+    source = tmp_path / "counts.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "unsupported_glm_family")
+
+    with pytest.raises(ValueError, match="Unsupported GLM family: poissonn"):
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type="glm:poissonn",
+        )
+
+    run_root = next((project.root / "runs").iterdir())
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+
+    assert manifest["status"] == "failed"
+    assert manifest["requested_model_type"] == "glm:poissonn"
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+    assert "Unsupported GLM family: poissonn" in errors["issues"][0]["evidence"]["error"]
