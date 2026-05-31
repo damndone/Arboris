@@ -261,10 +261,7 @@ def _run_workflow(
         data_detected_y_type = detect_y_kind(cleaned, normalized_y).value
     else:
         data_detected_y_type = "continuous"
-    if model_type != "auto":
-        y_type = _map_model_type(model_type)
-    else:
-        y_type = data_detected_y_type
+    y_type = _map_model_type(model_type) or data_detected_y_type
     if _s: _s("y_type", "complete", f"y classified as {y_type}")
 
     if _s: _s("model_check", "start", "Checking model columns...")
@@ -840,11 +837,8 @@ _MODEL_TYPE_MAP = {
 }
 
 
-def _map_model_type(model_type: str) -> str:
-    y_type = _MODEL_TYPE_MAP.get(model_type)
-    if y_type is None:
-        return "continuous"
-    return y_type
+def _map_model_type(model_type: str) -> str | None:
+    return _MODEL_TYPE_MAP.get(model_type)
 
 
 def _build_variable_importance(

@@ -175,3 +175,62 @@ def test_run_workflow_auto_still_routes_binary_to_logit(tmp_path):
     model_dir = project.root / "runs" / result["run_id"] / "model_results"
     assert (model_dir / "logit_1.json").exists()
     assert not (model_dir / "probit_1.json").exists()
+
+
+def test_run_workflow_glm_poisson_keeps_data_driven_y_type(tmp_path):
+    rng = np.random.default_rng(47)
+    n = 80
+    x = rng.uniform(0, 2, n)
+    y = rng.poisson(np.exp(0.2 + 0.3 * x))
+    source = tmp_path / "counts.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "glm_poisson")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="glm:poisson",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    model_result = read_json(run_root / "model_results" / "glm_1.json")
+    manifest = read_json(run_root / "run_manifest.json")
+
+    assert model_result["model_type"] == "glm"
+    assert model_result["glm_family"] == "poisson"
+    assert manifest["model_routing"]["requested_model_type"] == "glm:poisson"
+    assert manifest["model_routing"]["effective_y_type"] == "count"
+
+
+def test_run_workflow_explicit_negative_binomial_writes_model_result(tmp_path):
+    rng = np.random.default_rng(48)
+    n = 120
+    x = rng.uniform(0, 2, n)
+    mu = np.exp(0.2 + 0.4 * x)
+    y = rng.negative_binomial(n=2, p=2 / (2 + mu))
+    source = tmp_path / "counts.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "explicit_negative_binomial")
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="negative_binomial",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    model_result = read_json(
+        run_root / "model_results" / "negative_binomial_1.json"
+    )
+    manifest = read_json(run_root / "run_manifest.json")
+
+    assert model_result["model_type"] == "negative_binomial"
+    assert model_result["engine"] == "statsmodels"
+    assert manifest["model_routing"]["requested_model_type"] == "negative_binomial"
+    assert manifest["model_routing"]["effective_y_type"] == "count"
