@@ -29,6 +29,7 @@ from .imputation import run_mice_imputation
 from .metadata import infer_schema
 from .narrative import build_claims
 from .profiling import profile_frame
+from .prediction import run_prediction_model
 from .projects import create_run
 from .reporting import render_html_report
 from .router import classify_dataset, detect_y_kind
@@ -497,6 +498,25 @@ def _run_workflow(
             write_json(run_root / "errors.json", {"issues": issue_dicts})
     if _s: _s("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
+    prediction_model_type = (
+        model_type
+        if model_type in _PREDICTION_MODEL_TYPES
+        else config.prediction_model_type if config.prediction_enabled else ""
+    )
+    if prediction_model_type:
+        prediction_model_id = f"{prediction_model_type}_1"
+        run_prediction_model(
+            modeling_frame,
+            run_root,
+            y=normalized_y,
+            x=normalized_x,
+            model_type=prediction_model_type,
+            model_id=prediction_model_id,
+            cv_folds=config.prediction_cv_folds,
+            random_seed=config.random_seed,
+            inputs=model_input_ids,
+        )
+
     if routing["kind"] == "time_series" and time_candidates:
         diagnostics = run_time_series_diagnostics(
             cleaned, normalized_y, time_candidates[0]
@@ -920,6 +940,11 @@ _MODEL_TYPE_MAP = {
     "panel_ols": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
+_PREDICTION_MODEL_TYPES = {
+    "prediction_lasso",
+    "prediction_ridge",
+    "prediction_random_forest",
+}
 
 
 def _map_model_type(model_type: str) -> str | None:
@@ -927,7 +952,7 @@ def _map_model_type(model_type: str) -> str | None:
 
 
 def _validate_requested_model_type(model_type: str) -> str | None:
-    if model_type == "auto" or model_type in _MODEL_TYPE_MAP:
+    if model_type == "auto" or model_type in _MODEL_TYPE_MAP or model_type in _PREDICTION_MODEL_TYPES:
         return None
     if not model_type.startswith("glm:"):
         raise ValueError(f"Unsupported model type: {model_type}")

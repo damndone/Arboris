@@ -23,6 +23,9 @@ class WorkbenchConfig:
     imputation_method: str = ""
     imputation_m: int = 5
     imputation_max_iter: int = 10
+    prediction_enabled: bool = False
+    prediction_model_type: str = ""
+    prediction_cv_folds: int = 5
 
 
 def load_config(path: Path | None) -> WorkbenchConfig:

@@ -29,18 +29,29 @@ def test_default_config_matches_v1_boundaries():
     assert config.imputation_method == ""
     assert config.imputation_m == 5
     assert config.imputation_max_iter == 10
+    assert config.prediction_enabled is False
+    assert config.prediction_model_type == ""
+    assert config.prediction_cv_folds == 5
 
 
 def test_load_config_allows_project_override(tmp_path: Path):
     path = tmp_path / "config.yml"
     path.write_text(
-        "max_rows: 100\nmin_join_overlap: 0.8\nimputation_method: mice\n",
+        "max_rows: 100\n"
+        "min_join_overlap: 0.8\n"
+        "imputation_method: mice\n"
+        "prediction_enabled: true\n"
+        "prediction_model_type: prediction_ridge\n"
+        "prediction_cv_folds: 3\n",
         encoding="utf-8",
     )
     config = load_config(path)
     assert config.max_rows == 100
     assert config.min_join_overlap == 0.8
     assert config.imputation_method == "mice"
+    assert config.prediction_enabled is True
+    assert config.prediction_model_type == "prediction_ridge"
+    assert config.prediction_cv_folds == 3
     assert config.max_upload_files == 20
 
 
