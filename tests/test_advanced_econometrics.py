@@ -70,6 +70,64 @@ def test_run_glm_poisson_returns_requested_family():
     assert result["engine"] == "statsmodels"
 
 
+def test_run_panel_ols_requires_entity_or_time():
+    from workbench.econometrics.runner import run_panel_ols
+
+    frame = pd.DataFrame({"y": [1.0, 2.0], "x1": [0.1, 0.2]})
+
+    with pytest.raises(ValueError, match="PANEL_FIELDS_MISSING"):
+        run_panel_ols(
+            frame,
+            y="y",
+            x=["x1"],
+            entity=None,
+            time=None,
+            model_id="panel_ols_1",
+        )
+
+
+def test_run_panel_ols_with_linearmodels_if_installed():
+    pytest.importorskip("linearmodels")
+    from workbench.econometrics.runner import run_panel_ols
+
+    frame = pd.DataFrame(
+        {
+            "firm_id": ["a", "a", "a", "b", "b", "b", "c", "c", "c"],
+            "year": [2020, 2021, 2022, 2020, 2021, 2022, 2020, 2021, 2022],
+            "y": [1.0, 1.4, 1.8, 2.0, 2.5, 3.0, 1.5, 1.9, 2.4],
+            "x1": [0.2, 0.5, 0.8, 0.3, 0.7, 1.0, 0.1, 0.4, 0.9],
+        }
+    )
+
+    result, _ = run_panel_ols(
+        frame,
+        y="y",
+        x=["x1"],
+        entity="firm_id",
+        time="year",
+        model_id="panel_ols_1",
+    )
+
+    assert result["model_type"] == "panel_ols"
+    assert result["engine"] == "linearmodels"
+
+
+def test_run_iv_2sls_requires_complete_spec():
+    from workbench.econometrics.runner import run_iv_2sls
+
+    frame = pd.DataFrame({"y": [1.0, 2.0], "x1": [0.1, 0.2]})
+
+    with pytest.raises(ValueError, match="IV_SPEC_INCOMPLETE"):
+        run_iv_2sls(
+            frame,
+            y="y",
+            exog=["x1"],
+            endog=[],
+            instruments=[],
+            model_id="iv_2sls_1",
+        )
+
+
 class _FailingModel:
     def fit(self, **kwargs):
         raise RuntimeError("singular matrix")
@@ -238,8 +296,37 @@ def test_run_workflow_explicit_negative_binomial_writes_model_result(tmp_path):
     assert manifest["model_routing"]["effective_y_type"] == "count"
 
 
-def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
+def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
     rng = np.random.default_rng(49)
+    n = 80
+    x = rng.normal(size=n)
+    y = 0.2 + 0.5 * x + rng.normal(size=n)
+    source = tmp_path / "cross_section.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "panel_missing_fields")
+
+    with pytest.raises(ValueError, match="PANEL_FIELDS_MISSING"):
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type="panel_ols",
+        )
+
+    run_root = next((project.root / "runs").iterdir())
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+
+    assert manifest["status"] == "failed"
+    assert manifest["requested_model_type"] == "panel_ols"
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+    assert "PANEL_FIELDS_MISSING" in errors["issues"][0]["evidence"]["error"]
+
+
+def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
+    rng = np.random.default_rng(50)
     n = 80
     x = rng.normal(size=n)
     y = 0.2 + 0.5 * x + rng.normal(size=n)
@@ -268,7 +355,7 @@ def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
 
 
 def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
-    rng = np.random.default_rng(50)
+    rng = np.random.default_rng(51)
     n = 80
     x = rng.uniform(0, 2, n)
     y = rng.poisson(np.exp(0.2 + 0.3 * x))
@@ -297,7 +384,7 @@ def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
 
 
 def test_unsupported_explicit_model_type_fails_before_ols_fallback(tmp_path):
-    rng = np.random.default_rng(51)
+    rng = np.random.default_rng(52)
     n = 80
     x = rng.normal(size=n)
     y = (-0.1 + 0.8 * x + rng.normal(size=n) > 0).astype(int)

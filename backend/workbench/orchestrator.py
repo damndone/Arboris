@@ -17,6 +17,7 @@ from .econometrics.runner import (
     run_logit,
     run_negative_binomial,
     run_ols,
+    run_panel_ols,
     run_poisson,
     run_probit,
     run_time_series_diagnostics,
@@ -320,8 +321,25 @@ def _run_workflow(
     if exposure_col:
         poisson_x = [v for v in normalized_x if v != exposure_col]
 
+    if model_type == "panel_ols" and not id_candidates and not time_candidates:
+        raise ValueError("PANEL_FIELDS_MISSING: panel_ols requires entity or time.")
+
     try:
-        if model_type == "probit":
+        if model_type == "panel_ols":
+            entity = id_candidates[0] if id_candidates else None
+            time = time_candidates[0] if time_candidates else None
+            primary, primary_fitted = run_panel_ols(
+                cleaned,
+                y=normalized_y,
+                x=normalized_x,
+                entity=entity,
+                time=time,
+                model_id="panel_ols_1",
+            )
+            _write_model_result(run_root, "panel_ols_1", primary)
+            model_results.append(("panel_ols_1", primary))
+            fitted_models["panel_ols_1"] = primary_fitted
+        elif model_type == "probit":
             primary, primary_fitted = run_probit(
                 cleaned,
                 y=normalized_y,
@@ -498,7 +516,7 @@ def _run_workflow(
         run_root,
         encoded_categorical_vars=categorical_vars,
     )
-    if routing["kind"] == "panel" and primary_type != "fixed_effects":
+    if routing["kind"] == "panel" and primary_type not in ("fixed_effects", "panel_ols"):
         issue_dicts.append(GuardrailIssue(
             Severity.INFO,
             "PANEL_POOLED_MODEL",
@@ -508,7 +526,7 @@ def _run_workflow(
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
     descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
-    model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)"}
+    model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)", "panel_ols": "Panel OLS"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     if effective_exposure_col:
         facts = [
@@ -834,6 +852,7 @@ _MODEL_TYPE_MAP = {
     "probit": "binary",
     "poisson": "count",
     "negative_binomial": "count",
+    "panel_ols": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 
@@ -860,7 +879,7 @@ def _diagnostic_family(model_result: dict[str, Any]) -> str:
         return str(family) if family else "glm"
     if model_type == "poisson_rate":
         return "poisson"
-    if model_type in ("ols", "ols_robust", "fixed_effects"):
+    if model_type in ("ols", "ols_robust", "fixed_effects", "panel_ols"):
         return "ols"
     return str(model_type)
 

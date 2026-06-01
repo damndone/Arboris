@@ -6,6 +6,7 @@ import pandas as pd
 import statsmodels.formula.api as smf
 
 from .normalize import _json_safe_float, normalize_statsmodels_result
+from .optional_deps import require_optional_dependency
 
 
 def _formula_term(column: str, categorical: bool = False) -> str:
@@ -17,6 +18,12 @@ def _formula_term(column: str, categorical: bool = False) -> str:
 
 def _ols_formula(y: str, terms: list[str]) -> str:
     return f"{_formula_term(y)} ~ {' + '.join(terms)}"
+
+
+def _linearmodels_term(column: str) -> str:
+    if column.isidentifier():
+        return column
+    return f"`{column.replace('`', '``')}`"
 
 
 def _ensure_numeric_y(frame: pd.DataFrame, y: str) -> pd.DataFrame:
@@ -52,6 +59,43 @@ def _ensure_numeric_x(frame: pd.DataFrame, x: list[str]) -> pd.DataFrame:
 def _add_engine(result: dict[str, Any], *, engine: str = "statsmodels") -> dict[str, Any]:
     result["engine"] = engine
     return result
+
+
+def _normalize_linearmodels_result(
+    fitted: Any,
+    model_id: str,
+    model_type: str,
+) -> dict[str, Any]:
+    params = getattr(fitted, "params", {})
+    std_errors = getattr(fitted, "std_errors", {})
+    pvalues = getattr(fitted, "pvalues", {})
+    coefficients: dict[str, dict[str, Any]] = {}
+
+    items = params.items() if hasattr(params, "items") else enumerate(params)
+    for label, estimate in items:
+        term = str(label)
+        p_value = _json_safe_float(
+            pvalues.get(label) if hasattr(pvalues, "get") else None
+        )
+        coefficients[term] = {
+            "estimate": _json_safe_float(estimate),
+            "std_error": _json_safe_float(
+                std_errors.get(label) if hasattr(std_errors, "get") else None
+            ),
+            "p_value": round(p_value, 6) if p_value is not None else None,
+            "source_id": f"model_results.{model_id}.coefficients.{term}",
+        }
+
+    return {
+        "schema_version": 1,
+        "model_id": model_id,
+        "model_type": model_type,
+        "engine": "linearmodels",
+        "nobs": int(getattr(fitted, "nobs")),
+        "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
+        "coefficients": coefficients,
+        "warnings": [],
+    }
 
 
 def _root_cause_suffix(exc: Exception) -> str:
@@ -271,6 +315,90 @@ def run_fixed_effects(
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = "fixed_effects"
     return _add_engine(result), fitted
+
+
+def run_panel_ols(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    entity: str | None,
+    time: str | None,
+    model_id: str,
+    covariance: str = "robust",
+) -> tuple[dict[str, Any], Any]:
+    if entity is None and time is None:
+        raise ValueError(
+            "PANEL_FIELDS_MISSING: PanelOLS requires at least an entity or time field."
+        )
+
+    panel_module = require_optional_dependency(
+        "linearmodels.panel",
+        extra="panel",
+        engine="linearmodels",
+        model_type="panel_ols",
+    )
+    data = _ensure_numeric_y(frame.copy(), y)
+    data = _ensure_numeric_x(data, x)
+
+    index_cols: list[str] = []
+    if entity is None:
+        entity = "_panel_entity"
+        data[entity] = "entity"
+    index_cols.append(entity)
+    if time is None:
+        time = "_panel_time"
+        data[time] = range(len(data))
+    index_cols.append(time)
+    data = data.set_index(index_cols)
+
+    terms = ["1", *[_linearmodels_term(column) for column in x]]
+    if index_cols[0] != "_panel_entity":
+        terms.append("EntityEffects")
+    if index_cols[1] != "_panel_time":
+        terms.append("TimeEffects")
+    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
+    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
+        cov_type=covariance
+    )
+    return _normalize_linearmodels_result(fitted, model_id, "panel_ols"), fitted
+
+
+def run_iv_2sls(
+    frame: pd.DataFrame,
+    y: str,
+    exog: list[str],
+    endog: list[str],
+    instruments: list[str],
+    model_id: str,
+    covariance: str = "robust",
+) -> tuple[dict[str, Any], Any]:
+    if not endog or not instruments:
+        raise ValueError(
+            "IV_SPEC_INCOMPLETE: IV2SLS requires endogenous variables and instruments."
+        )
+
+    iv_module = require_optional_dependency(
+        "linearmodels.iv",
+        extra="panel",
+        engine="linearmodels",
+        model_type="iv_2sls",
+    )
+    data = _ensure_numeric_y(frame.copy(), y)
+    data = _ensure_numeric_x(data, [*exog, *endog, *instruments])
+
+    rhs_terms = ["1", *[_linearmodels_term(column) for column in exog]]
+    iv_terms = " + ".join(_linearmodels_term(column) for column in endog)
+    instrument_terms = " + ".join(
+        _linearmodels_term(column) for column in instruments
+    )
+    formula = (
+        f"{_linearmodels_term(y)} ~ {' + '.join(rhs_terms)} "
+        f"[{iv_terms} ~ {instrument_terms}]"
+    )
+    fitted = iv_module.IV2SLS.from_formula(formula, data=data).fit(
+        cov_type=covariance
+    )
+    return _normalize_linearmodels_result(fitted, model_id, "iv_2sls"), fitted
 
 
 def run_time_series_diagnostics(
