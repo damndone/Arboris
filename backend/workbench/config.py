@@ -26,6 +26,7 @@ class WorkbenchConfig:
     prediction_enabled: bool = False
     prediction_model_type: str = ""
     prediction_cv_folds: int = 5
+    prediction_sampling_method: str = ""
 
 
 def load_config(path: Path | None) -> WorkbenchConfig:

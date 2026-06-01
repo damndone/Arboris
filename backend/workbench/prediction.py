@@ -13,6 +13,7 @@ _SUPPORTED_PREDICTION_MODEL_TYPES = {
     "prediction_ridge",
     "prediction_random_forest",
 }
+_SUPPORTED_SAMPLING_METHODS = {"smote", "oversample", "undersample"}
 
 
 def run_prediction_model(
@@ -26,6 +27,7 @@ def run_prediction_model(
     cv_folds: int = 5,
     random_seed: int = 20260429,
     inputs: list[str] | None = None,
+    sampling_method: str = "",
 ) -> dict[str, Any]:
     if model_type not in _SUPPORTED_PREDICTION_MODEL_TYPES:
         raise ValueError(f"Unsupported prediction model_type: {model_type}")
@@ -109,6 +111,15 @@ def run_prediction_model(
         test_size=test_size,
         random_state=random_seed,
     )
+    if sampling_method:
+        _validate_sampling_target(target, sampling_method)
+    sampler = build_sampler(
+        sampling_method,
+        model_type=model_type,
+        random_seed=random_seed,
+    )
+    if sampler is not None:
+        X_train, y_train = sampler.fit_resample(X_train, y_train)
     pipeline.fit(X_train, y_train)
     predictions = pipeline.predict(X_test)
     cv_scores = sklearn_model_selection.cross_val_score(
@@ -127,6 +138,7 @@ def run_prediction_model(
         "nobs": int(len(data)),
         "input_columns": {"y": y, "x": x},
         "cv_folds": int(folds),
+        "sampling_method": sampling_method or None,
         "metrics": {
             "test_r2": _safe_metric(sklearn_metrics.r2_score(y_test, predictions)),
             "test_rmse": _rmse(sklearn_metrics, y_test, predictions),
@@ -151,6 +163,39 @@ def run_prediction_model(
     return result
 
 
+def build_sampler(
+    sampling_method: str,
+    *,
+    model_type: str,
+    random_seed: int,
+) -> Any | None:
+    if not sampling_method:
+        return None
+    if not model_type.startswith("prediction_"):
+        raise ValueError("Imbalanced sampling is prediction-only and cannot feed inference models.")
+    if sampling_method not in _SUPPORTED_SAMPLING_METHODS:
+        raise ValueError(f"Unsupported sampling method: {sampling_method}")
+    imblearn_over = require_optional_dependency(
+        "imblearn.over_sampling",
+        extra="imbalanced",
+        engine="imbalanced-learn",
+        model_type=model_type,
+        step="prediction",
+    )
+    imblearn_under = require_optional_dependency(
+        "imblearn.under_sampling",
+        extra="imbalanced",
+        engine="imbalanced-learn",
+        model_type=model_type,
+        step="prediction",
+    )
+    if sampling_method == "smote":
+        return imblearn_over.SMOTE(random_state=random_seed)
+    if sampling_method == "oversample":
+        return imblearn_over.RandomOverSampler(random_state=random_seed)
+    return imblearn_under.RandomUnderSampler(random_state=random_seed)
+
+
 def _rmse(sklearn_metrics: Any, y_true: Any, predictions: Any) -> float | None:
     try:
         value = sklearn_metrics.mean_squared_error(
@@ -171,3 +216,14 @@ def _safe_metric(value: Any) -> float | None:
         return number if math.isfinite(number) else None
     except (TypeError, ValueError):
         return None
+
+
+def _validate_sampling_target(target: pd.Series, sampling_method: str) -> None:
+    unique_count = int(target.nunique(dropna=True))
+    if unique_count < 2:
+        raise ValueError("Imbalanced sampling requires at least two target classes.")
+    if pd.api.types.is_float_dtype(target) and unique_count > min(10, max(len(target) // 2, 2)):
+        raise ValueError(
+            f"Imbalanced sampling requires a discrete target; {sampling_method} "
+            "cannot be applied to a continuous prediction target."
+        )

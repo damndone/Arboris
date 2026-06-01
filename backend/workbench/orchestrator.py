@@ -515,6 +515,7 @@ def _run_workflow(
             cv_folds=config.prediction_cv_folds,
             random_seed=config.random_seed,
             inputs=model_input_ids,
+            sampling_method=config.prediction_sampling_method,
         )
 
     if routing["kind"] == "time_series" and time_candidates:

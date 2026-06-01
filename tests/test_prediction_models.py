@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from workbench.artifacts import read_json, write_json
 from workbench.econometrics.optional_deps import OptionalDependencyNotInstalled
@@ -41,6 +42,7 @@ def test_run_prediction_model_writes_lightweight_artifact(tmp_path: Path):
     assert result["status"] == "completed"
     assert result["cv_folds"] <= 5
     assert result["nobs"] == 6
+    assert result["sampling_method"] is None
     assert "predictions" not in result
     assert result["warnings"] == [
         "Prediction results are not causal effects and are not regression inference."
@@ -206,3 +208,125 @@ def test_unsupported_prediction_model_type_fails_before_optional_import(monkeypa
         assert "Unsupported prediction model_type: prediction_rigde" in str(exc)
     else:
         raise AssertionError("Expected unsupported prediction model_type error")
+
+
+def test_prediction_sampling_requires_prediction_context():
+    from workbench.prediction import build_sampler
+
+    sampler = build_sampler("", model_type="prediction_random_forest", random_seed=42)
+    assert sampler is None
+
+    try:
+        build_sampler("smote", model_type="ols", random_seed=42)
+    except ValueError as exc:
+        assert "prediction-only" in str(exc)
+    else:
+        raise AssertionError("Expected prediction-only validation error")
+
+
+def test_unsupported_sampling_method_fails_before_optional_import(monkeypatch):
+    import workbench.prediction as prediction
+
+    def fail_if_called(module_name: str, **kwargs):
+        raise AssertionError(f"optional import should not run for unsupported sampling: {module_name}")
+
+    monkeypatch.setattr(prediction, "require_optional_dependency", fail_if_called)
+
+    try:
+        prediction.build_sampler(
+            "bad_sampling",
+            model_type="prediction_random_forest",
+            random_seed=42,
+        )
+    except ValueError as exc:
+        assert "Unsupported sampling method: bad_sampling" in str(exc)
+    else:
+        raise AssertionError("Expected unsupported sampling method error")
+
+
+def test_prediction_sampling_missing_imblearn_raises_structured_optional_dependency(monkeypatch):
+    import workbench.prediction as prediction
+
+    def fake_require(module_name: str, **kwargs):
+        raise OptionalDependencyNotInstalled(
+            extra=kwargs["extra"],
+            package=module_name,
+            model_type=kwargs["model_type"],
+            step=kwargs["step"],
+            engine=kwargs["engine"],
+        )
+
+    monkeypatch.setattr(prediction, "require_optional_dependency", fake_require)
+
+    try:
+        prediction.build_sampler(
+            "oversample",
+            model_type="prediction_random_forest",
+            random_seed=42,
+        )
+    except OptionalDependencyNotInstalled as exc:
+        details = exc.to_issue_details()
+        assert details["step"] == "prediction"
+        assert details["engine"] == "imbalanced-learn"
+        assert details["model_type"] == "prediction_random_forest"
+        assert details["details"]["extra"] == "imbalanced"
+    else:
+        raise AssertionError("Expected structured optional dependency error")
+
+
+def test_run_prediction_model_applies_oversampling_when_imblearn_installed(tmp_path: Path):
+    pytest.importorskip("imblearn")
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    _init_artifacts(run_root)
+    frame = pd.DataFrame(
+        {
+            "y": [0.0] * 24 + [1.0] * 8,
+            "x1": [float(i) for i in range(32)],
+            "x2": [float(i % 5) for i in range(32)],
+        }
+    )
+
+    result = run_prediction_model(
+        frame,
+        run_root,
+        y="y",
+        x=["x1", "x2"],
+        model_type="prediction_random_forest",
+        model_id="prediction_random_forest_1",
+        sampling_method="oversample",
+        random_seed=42,
+    )
+
+    assert result["status"] == "completed"
+    assert result["sampling_method"] == "oversample"
+    saved = read_json(run_root / "prediction_results" / "prediction_random_forest_1.json")
+    assert saved["sampling_method"] == "oversample"
+
+
+def test_prediction_sampling_rejects_continuous_target(tmp_path: Path):
+    pytest.importorskip("imblearn")
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    _init_artifacts(run_root)
+    frame = pd.DataFrame(
+        {
+            "y": [float(i) for i in range(24)],
+            "x": [float(i % 4) for i in range(24)],
+        }
+    )
+
+    try:
+        run_prediction_model(
+            frame,
+            run_root,
+            y="y",
+            x=["x"],
+            model_type="prediction_random_forest",
+            model_id="prediction_random_forest_1",
+            sampling_method="oversample",
+        )
+    except ValueError as exc:
+        assert "requires a discrete target" in str(exc)
+    else:
+        raise AssertionError("Expected sampling target validation error")

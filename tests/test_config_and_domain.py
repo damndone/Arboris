@@ -32,6 +32,7 @@ def test_default_config_matches_v1_boundaries():
     assert config.prediction_enabled is False
     assert config.prediction_model_type == ""
     assert config.prediction_cv_folds == 5
+    assert config.prediction_sampling_method == ""
 
 
 def test_load_config_allows_project_override(tmp_path: Path):
@@ -42,7 +43,8 @@ def test_load_config_allows_project_override(tmp_path: Path):
         "imputation_method: mice\n"
         "prediction_enabled: true\n"
         "prediction_model_type: prediction_ridge\n"
-        "prediction_cv_folds: 3\n",
+        "prediction_cv_folds: 3\n"
+        "prediction_sampling_method: oversample\n",
         encoding="utf-8",
     )
     config = load_config(path)
@@ -52,6 +54,7 @@ def test_load_config_allows_project_override(tmp_path: Path):
     assert config.prediction_enabled is True
     assert config.prediction_model_type == "prediction_ridge"
     assert config.prediction_cv_folds == 3
+    assert config.prediction_sampling_method == "oversample"
     assert config.max_upload_files == 20
 
 
