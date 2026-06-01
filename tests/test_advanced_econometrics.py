@@ -325,6 +325,111 @@ def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
     assert "PANEL_FIELDS_MISSING" in errors["issues"][0]["evidence"]["error"]
 
 
+def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_path):
+    import workbench.orchestrator as orchestrator
+
+    def fake_panel_ols(frame, y, x, entity, time, model_id):
+        assert entity == "firm_id"
+        assert time == "year"
+        return (
+            {
+                "schema_version": 1,
+                "model_id": model_id,
+                "model_type": "panel_ols",
+                "engine": "linearmodels",
+                "nobs": len(frame),
+                "r_squared": 0.5,
+                "coefficients": {
+                    "x": {"estimate": 1.0, "std_error": 0.1, "p_value": 0.01}
+                },
+                "warnings": [],
+            },
+            object(),
+        )
+
+    source = tmp_path / "panel.csv"
+    firms = [f"firm_{idx:02d}" for idx in range(30)]
+    pd.DataFrame(
+        {
+            "firm_id": [firm for firm in firms for _ in range(2)],
+            "year": [2020, 2021] * len(firms),
+            "y": [1.0 + idx * 0.1 for idx in range(len(firms) * 2)],
+            "x": [float(idx % 2) for idx in range(len(firms) * 2)],
+        }
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "panel_success_without_diagnostics")
+    monkeypatch.setattr(orchestrator, "run_panel_ols", fake_panel_ols)
+
+    result = run_workflow(
+        project.root,
+        [source],
+        mode="auto",
+        y="y",
+        x=["x"],
+        model_type="panel_ols",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    model_result = read_json(run_root / "model_results" / "panel_ols_1.json")
+    manifest = read_json(run_root / "run_manifest.json")
+
+    assert result["status"] == "completed"
+    assert model_result["model_type"] == "panel_ols"
+    assert manifest["model_routing"]["effective_model_type"] == "panel_ols"
+    assert not (run_root / "model_results" / "diagnostics_panel_ols_1.json").exists()
+
+
+def test_run_workflow_panel_ols_missing_dependency_writes_structured_issue(
+    monkeypatch,
+    tmp_path,
+):
+    import workbench.orchestrator as orchestrator
+    from workbench.econometrics.optional_deps import OptionalDependencyNotInstalled
+
+    def missing_panel(*args, **kwargs):
+        raise OptionalDependencyNotInstalled(
+            extra="panel",
+            package="linearmodels.panel",
+            model_type="panel_ols",
+            engine="linearmodels",
+        )
+
+    source = tmp_path / "panel.csv"
+    firms = [f"firm_{idx:02d}" for idx in range(30)]
+    pd.DataFrame(
+        {
+            "firm_id": [firm for firm in firms for _ in range(2)],
+            "year": [2020, 2021] * len(firms),
+            "y": [1.0 + idx * 0.1 for idx in range(len(firms) * 2)],
+            "x": [float(idx % 2) for idx in range(len(firms) * 2)],
+        }
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "panel_missing_dependency")
+    monkeypatch.setattr(orchestrator, "run_panel_ols", missing_panel)
+
+    with pytest.raises(OptionalDependencyNotInstalled):
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type="panel_ols",
+        )
+
+    run_root = next((project.root / "runs").iterdir())
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+    issue = errors["issues"][0]
+
+    assert manifest["status"] == "failed"
+    assert manifest["requested_model_type"] == "panel_ols"
+    assert issue["code"] == "OPTIONAL_DEPENDENCY_MISSING"
+    assert issue["evidence"]["engine"] == "linearmodels"
+    assert issue["evidence"]["model_type"] == "panel_ols"
+    assert issue["evidence"]["extra"] == "panel"
+
+
 def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
     rng = np.random.default_rng(50)
     n = 80

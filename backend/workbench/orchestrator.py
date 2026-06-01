@@ -11,6 +11,7 @@ from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
+from .econometrics.optional_deps import OptionalDependencyNotInstalled
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
     run_glm,
@@ -91,6 +92,32 @@ def run_workflow(
             started_at,
             model_type=model_type,
         )
+    except OptionalDependencyNotInstalled as exc:
+        details = exc.to_issue_details()
+        issue = GuardrailIssue(
+            Severity.BLOCKER,
+            details["error_code"],
+            details["message"],
+            {
+                "step": details["step"],
+                "engine": details["engine"],
+                "model_type": details["model_type"],
+                **details["details"],
+            },
+        )
+        write_json(run.root / "errors.json", {"issues": [issue.to_dict()]})
+        _write_manifest(
+            run.root,
+            run.run_id,
+            mode,
+            "failed",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+            requested_model_type=model_type,
+        )
+        raise
     except Exception as exc:
         issue = GuardrailIssue(
             Severity.BLOCKER,
@@ -338,7 +365,6 @@ def _run_workflow(
             )
             _write_model_result(run_root, "panel_ols_1", primary)
             model_results.append(("panel_ols_1", primary))
-            fitted_models["panel_ols_1"] = primary_fitted
         elif model_type == "probit":
             primary, primary_fitted = run_probit(
                 cleaned,
