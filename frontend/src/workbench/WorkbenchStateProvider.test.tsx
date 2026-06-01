@@ -164,6 +164,35 @@ describe("§7 row: Pin upstream path", () => {
   });
 });
 
+describe("§7 row: F1 setFocusOnly (focus, not selection)", () => {
+  it("sets focus + pinned=0 WITHOUT touching tabs/active/selected", () => {
+    renderAt("/?tabs=nA&active=nA");
+    act(() => dispatch().setFocusOnly("nB"));
+    // The whole point vs selectByCanvasClick: selection is untouched.
+    expect(state().tabs.map((t) => t.id)).toEqual(["nA"]);
+    expect(state().activeTabId).toBe("nA");
+    expect(state().selectedKey).toBe("nA");
+    // Only focus moved; never pinned.
+    expect(state().focusKey).toBe("nB");
+    expect(state().pinned).toBe(false);
+  });
+
+  it("overrides an existing pinned focus back to unpinned", () => {
+    renderAt("/?tabs=nA&active=nA&focus=nC&pinned=1");
+    act(() => dispatch().setFocusOnly("nB"));
+    expect(state().focusKey).toBe("nB");
+    expect(state().pinned).toBe(false);
+    expect(state().selectedKey).toBe("nA"); // still untouched
+    expect(state().activeTabId).toBe("nA");
+  });
+
+  it("does not create or activate a tab for the focused node", () => {
+    renderAt("/?tabs=nA&active=nA");
+    act(() => dispatch().setFocusOnly("nB"));
+    expect(state().tabs.find((t) => t.id === "nB")).toBeUndefined();
+  });
+});
+
 describe("§7 row: Unpin path", () => {
   it("focus → selected, pinned → 0", () => {
     renderAt("/?tabs=nA&active=nA&focus=nB&pinned=1");
