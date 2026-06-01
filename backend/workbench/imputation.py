@@ -116,7 +116,13 @@ def run_mice_imputation(
             summary["persisted_datasets"] = 1
 
     summary["warnings"].extend(
-        _imputation_warnings(selected_columns, imputed_columns, skipped_columns, m)
+        _imputation_warnings(
+            selected_columns,
+            imputed_columns,
+            skipped_columns,
+            m,
+            int(summary["persisted_datasets"]),
+        )
     )
 
     summary_path = imputation_dir / "mice_summary.json"
@@ -147,6 +153,7 @@ def _imputation_warnings(
     imputed_columns: list[str],
     skipped_columns: list[dict[str, Any]],
     m: int,
+    persisted_datasets: int,
 ) -> list[str]:
     warnings: list[str] = []
     if not selected_columns:
@@ -158,9 +165,9 @@ def _imputation_warnings(
     if skipped_columns:
         names = ", ".join(str(item["column"]) for item in skipped_columns)
         warnings.append(f"Skipped unsupported columns during MICE: {names}.")
-    if m != 1:
+    if m != 1 and persisted_datasets == 1:
         warnings.append(
-            "This preprocessing step persists one imputed dataset; pooled multiple-imputation "
+            "This preprocessing step persisted one imputed dataset; pooled multiple-imputation "
             "estimates are not produced."
         )
     return warnings

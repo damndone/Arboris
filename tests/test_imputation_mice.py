@@ -98,12 +98,13 @@ def test_mice_imputation_skips_single_numeric_column_with_missing_values(tmp_pat
     run = create_run(project.root, mode="auto")
     frame = pd.DataFrame({"x": [1.0, None, 3.0, 4.0]})
 
-    summary = run_mice_imputation(frame, run.root, columns=["x"])
+    summary = run_mice_imputation(frame, run.root, columns=["x"], m=2)
 
     assert summary["status"] == "skipped"
     assert summary["imputed_columns"] == ["x"]
     assert summary["persisted_datasets"] == 0
     assert "MICE requires at least two supported numeric columns." in summary["warnings"]
+    assert not any("persists one imputed dataset" in warning for warning in summary["warnings"])
     assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
 
 
@@ -141,6 +142,15 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
         if artifact["artifact_id"] == "ols_1"
     )
     assert ols_record["inputs"] == ["imputed_dataset"]
+    diagnostics_record = next(
+        artifact
+        for artifact in artifact_index["artifacts"]
+        if artifact["artifact_id"] == "diagnostics_ols_1"
+    )
+    assert diagnostics_record["inputs"] == ["imputed_dataset"]
+    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
+    assert "MICE imputation: one persisted imputed dataset" in report_html
+    assert "pooled estimates were not produced" in report_html
 
 
 def test_workflow_does_not_impute_by_default(tmp_path: Path):

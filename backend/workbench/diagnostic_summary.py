@@ -19,6 +19,7 @@ def build_diagnostic_summary(
     exposure_col: str | None = None,
     dropped_vars: list[str] | None = None,
     coercions: list[dict[str, Any]] | None = None,
+    imputation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers: list[dict] = []
     warnings: list[dict] = []
@@ -171,6 +172,7 @@ def build_diagnostic_summary(
             "exposure_variable": exposure_col,
             "variables_dropped": drop,
             "coercions_applied": coerc,
+            "imputation": imputation or {},
             "column_count_after_encoding": profile.get("column_count", 0) + encoded_count,
         },
         "diagnostics": {

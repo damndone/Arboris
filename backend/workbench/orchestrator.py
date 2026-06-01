@@ -342,6 +342,7 @@ def _run_workflow(
 
     modeling_frame = cleaned
     model_input_ids = ["cleaned_dataset"]
+    imputation_summary: dict[str, Any] | None = None
     if config.imputation_method == "mice":
         imputation_summary = run_mice_imputation(
             cleaned,
@@ -459,7 +460,7 @@ def _run_workflow(
 
     if _s: _s("diagnostics", "start", "Running regression diagnostics...")
     diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
-    exog = cleaned[diag_x] if diag_x else pd.DataFrame(index=cleaned.index)
+    exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
     diagnostic_artifacts: dict[str, dict[str, Any]] = {}
     for model_id, fitted in fitted_models.items():
         result_dict = dict(model_results)
@@ -476,7 +477,7 @@ def _run_workflow(
             diag_path,
             "model_diagnostic",
             "econometrics",
-            ["cleaned_dataset"],
+            model_input_ids,
         )
         diagnostic_artifacts[model_id] = diag
         _check_model_validity(diag, model_id, issue_dicts, run_root)
@@ -599,6 +600,8 @@ def _run_workflow(
             f"(positive rate: {reliability_info['positive_rate']:.1%}, "
             f"events per predictor: {reliability_info['events_per_predictor']:.1f})"
         )
+    if imputation_summary and imputation_summary.get("status") == "completed":
+        facts.append(_mice_imputation_fact(imputation_summary))
     if primary_type in ("poisson", "poisson_rate"):
         poisson_diag = diagnostic_artifacts.get("poisson_1", {})
         overdisp = poisson_diag.get("overdispersion", {})
@@ -664,6 +667,7 @@ def _run_workflow(
         exposure_col=effective_exposure_col,
         dropped_vars=dropped_vars,
         coercions=coercion_actions,
+        imputation=imputation_summary,
     )
     write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
     register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
@@ -762,6 +766,18 @@ def _write_model_result(
         "model_result",
         "econometrics",
         inputs or ["cleaned_dataset"],
+    )
+
+
+def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
+    columns = imputation.get("imputed_columns", [])
+    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
+    persisted = imputation.get("persisted_datasets", 0)
+    persisted_text = "one" if persisted == 1 else str(persisted)
+    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    return (
+        f"MICE imputation: {persisted_text} persisted imputed dataset; "
+        f"imputed columns: {columns_text}; pooled estimates {pooled}."
     )
 
 
