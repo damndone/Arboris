@@ -305,7 +305,7 @@ def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
     pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
     project = create_project(tmp_path, "panel_missing_fields")
 
-    with pytest.raises(ValueError, match="PANEL_FIELDS_MISSING"):
+    with pytest.raises(ValueError, match="panel_ols requires entity or time"):
         run_workflow(
             project.root,
             [source],
@@ -322,7 +322,10 @@ def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
     assert manifest["status"] == "failed"
     assert manifest["requested_model_type"] == "panel_ols"
     assert not (run_root / "model_results" / "ols_1.json").exists()
-    assert "PANEL_FIELDS_MISSING" in errors["issues"][0]["evidence"]["error"]
+    issue = errors["issues"][0]
+    assert issue["code"] == "PANEL_FIELDS_MISSING"
+    assert "panel_ols requires entity or time" in issue["message"]
+    assert issue["evidence"]["model_type"] == "panel_ols"
 
 
 def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_path):
@@ -430,14 +433,15 @@ def test_run_workflow_panel_ols_missing_dependency_writes_structured_issue(
     assert issue["evidence"]["extra"] == "panel"
 
 
-def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
+def test_explicit_model_fit_failure_on_wrong_y_type_fails_no_fallback(tmp_path):
+    """Explicit model_type on incompatible y must fail with structured issue, no OLS fallback."""
     rng = np.random.default_rng(50)
     n = 80
     x = rng.normal(size=n)
     y = 0.2 + 0.5 * x + rng.normal(size=n)
     source = tmp_path / "continuous.csv"
     pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
-    project = create_project(tmp_path, "negative_binomial_fallback")
+    project = create_project(tmp_path, "negative_binomial_no_fallback")
 
     result = run_workflow(
         project.root,
@@ -450,13 +454,24 @@ def test_explicit_negative_binomial_fallback_updates_effective_y_type(tmp_path):
 
     run_root = project.root / "runs" / result["run_id"]
     manifest = read_json(run_root / "run_manifest.json")
-    summary = read_json(run_root / "diagnostic_summary.json")
+    errors = read_json(run_root / "errors.json")
 
-    assert (run_root / "model_results" / "ols_1.json").exists()
-    assert manifest["model_routing"]["effective_model_type"] == "ols_robust"
-    assert manifest["model_routing"]["effective_y_type"] == "continuous"
-    assert summary["model_identity"]["model_family"] == "ols_robust"
-    assert "r_squared" in summary["model_quality"]["primary_metric_keys"]
+    assert result["status"] == "failed"
+    assert manifest["status"] == "failed"
+    assert manifest["requested_model_type"] == "negative_binomial"
+    # No OLS fallback for explicit model
+    assert not (run_root / "model_results" / "ols_1.json").exists()
+    assert not (run_root / "model_results" / "negative_binomial_1.json").exists()
+    issue = errors["issues"][0]
+    assert issue["code"] == "MODEL_FIT_FAILED"
+    assert issue["severity"] == "BLOCKER"
+    assert issue["evidence"]["model_type"] == "negative_binomial"
+    assert issue["evidence"]["model_id"] == "negative_binomial_1"
+    assert issue["evidence"]["engine"] == "statsmodels"
+    assert issue["evidence"]["step"] == "estimation"
+    assert "y" in issue["evidence"]
+    assert "x" in issue["evidence"]
+    assert "root_cause" in issue["evidence"]
 
 
 def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
@@ -485,7 +500,12 @@ def test_unsupported_glm_family_fails_before_ols_fallback(tmp_path):
     assert manifest["status"] == "failed"
     assert manifest["requested_model_type"] == "glm:poissonn"
     assert not (run_root / "model_results" / "ols_1.json").exists()
-    assert "Unsupported GLM family: poissonn" in errors["issues"][0]["evidence"]["error"]
+    issue = errors["issues"][0]
+    assert issue["code"] == "UNSUPPORTED_GLM_FAMILY"
+    assert "Unsupported GLM family: poissonn" in issue["message"]
+    assert issue["evidence"]["model_type"] == "glm:poissonn"
+    assert issue["evidence"]["glm_family"] == "poissonn"
+    assert "binomial" in issue["evidence"]["supported_families"]
 
 
 def test_unsupported_explicit_model_type_fails_before_ols_fallback(tmp_path):
@@ -514,4 +534,225 @@ def test_unsupported_explicit_model_type_fails_before_ols_fallback(tmp_path):
     assert manifest["status"] == "failed"
     assert manifest["requested_model_type"] == "probt"
     assert not (run_root / "model_results" / "ols_1.json").exists()
-    assert "Unsupported model type: probt" in errors["issues"][0]["evidence"]["error"]
+    issue = errors["issues"][0]
+    assert issue["code"] == "UNSUPPORTED_MODEL_TYPE"
+    assert "Unsupported model type: probt" in issue["message"]
+    assert issue["evidence"]["model_type"] == "probt"
+    assert "supported_types" in issue["evidence"]
+
+
+# ============================================================
+# Task 10: Structured model failure issues
+# ============================================================
+
+
+def test_auto_mode_fallback_writes_structured_model_fit_failed(monkeypatch, tmp_path):
+    """Auto mode fallback to OLS must write a structured MODEL_FIT_FAILED issue."""
+    import workbench.orchestrator as orchestrator
+
+    def fake_logit(*args, **kwargs):
+        raise ValueError("Logit perfect separation")
+
+    monkeypatch.setattr(orchestrator, "run_logit", fake_logit)
+
+    rng = np.random.default_rng(53)
+    n = 80
+    x = rng.normal(size=n)
+    y = (-0.1 + 0.8 * x + rng.normal(size=n) > 0).astype(int)
+    source = tmp_path / "binary.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "auto_fallback")
+
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x"],
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+
+    # Auto mode falls back to OLS, so workflow completes
+    assert result["status"] == "completed"
+    assert manifest["status"] == "completed"
+    assert (run_root / "model_results" / "ols_1.json").exists()
+
+    # Structured MODEL_FIT_FAILED issue must be present
+    model_issues = [i for i in errors["issues"] if i["code"] == "MODEL_FIT_FAILED"]
+    assert len(model_issues) >= 1
+    issue = model_issues[0]
+    assert issue["severity"] == "WARNING"  # auto mode: warning, not blocker
+    assert "y" in issue["evidence"]
+    assert "x" in issue["evidence"]
+    assert "root_cause" in issue["evidence"]
+    assert "y_type" in issue["evidence"]
+    # H-1: auto mode must report the actual model attempted, not y_type
+    assert issue["evidence"]["model_type"] == "logit"
+    assert issue["evidence"]["model_id"] == "logit_1"
+    assert issue["evidence"]["engine"] == "statsmodels"
+
+
+def test_explicit_model_failure_includes_all_required_context(tmp_path):
+    """Explicit model fit failure issue must contain model_type, model_id,
+    engine, step, y, x, and root_cause."""
+    rng = np.random.default_rng(54)
+    n = 80
+    x = rng.normal(size=n)
+    y = 0.2 + 0.5 * x + rng.normal(size=n)
+    source = tmp_path / "cont.csv"
+    pd.DataFrame({"y": y, "x": x}).to_csv(source, index=False)
+    project = create_project(tmp_path, "explicit_failure_context")
+
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x"],
+        model_type="negative_binomial",
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    manifest = read_json(run_root / "run_manifest.json")
+    errors = read_json(run_root / "errors.json")
+
+    assert result["status"] == "failed"
+    assert manifest["status"] == "failed"
+    issue = errors["issues"][0]
+    assert issue["code"] == "MODEL_FIT_FAILED"
+    assert issue["severity"] == "BLOCKER"
+    evidence = issue["evidence"]
+    assert evidence["model_type"] == "negative_binomial"
+    assert evidence["model_id"] == "negative_binomial_1"
+    assert evidence["engine"] == "statsmodels"
+    assert evidence["step"] == "estimation"
+    assert evidence["y"] is not None
+    assert isinstance(evidence["x"], list)
+    assert "root_cause" in evidence
+    assert "requested_model_type" in evidence
+
+
+def test_workflow_model_failure_details_helper():
+    """Unit test for _model_failure_details producing consistent evidence."""
+    from workbench.orchestrator import _model_failure_details
+
+    details = _model_failure_details(
+        model_type="probit",
+        y="outcome",
+        x=["x1", "x2"],
+        root_cause="Perfect separation detected",
+        step="estimation",
+    )
+
+    assert details["model_type"] == "probit"
+    assert details["model_id"] == "probit_1"
+    assert details["engine"] == "statsmodels"
+    assert details["step"] == "estimation"
+    assert details["y"] == "outcome"
+    assert details["x"] == ["x1", "x2"]
+    assert details["root_cause"] == "Perfect separation detected"
+
+
+def test_workflow_model_failure_details_for_glm():
+    """_model_failure_details for glm:<family> resolves model_id and engine."""
+    from workbench.orchestrator import _model_failure_details
+
+    details = _model_failure_details(
+        model_type="glm:binomial",
+        y="y",
+        x=["x"],
+        root_cause="LinAlgError",
+    )
+
+    assert details["model_id"] == "glm_1"
+    assert details["engine"] == "statsmodels"
+    assert details["model_type"] == "glm:binomial"
+
+
+def test_prediction_failure_in_workflow_writes_structured_issue_and_continues(
+    monkeypatch, tmp_path,
+):
+    """Prediction ValueError must not crash the econometric workflow."""
+    import workbench.orchestrator as orchestrator
+
+    def fake_prediction(*args, **kwargs):
+        raise ValueError("Too few samples for prediction")
+
+    monkeypatch.setattr(orchestrator, "run_prediction_model", fake_prediction)
+
+    source = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [float(i) for i in range(40)], "x": [float(i) for i in range(40)]}
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "prediction_failure")
+    (project.root / "config.yml").write_text(
+        "prediction_enabled: true\n"
+        "prediction_model_type: prediction_lasso\n",
+        encoding="utf-8",
+    )
+
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x"],
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    errors = read_json(run_root / "errors.json")
+
+    # Econometric workflow must still complete
+    assert result["status"] == "completed"
+    assert (run_root / "model_results" / "ols_1.json").exists()
+
+    # Prediction failure issue must be present
+    pred_issues = [i for i in errors["issues"] if i["code"] == "PREDICTION_FAILED"]
+    assert len(pred_issues) >= 1
+    issue = pred_issues[0]
+    assert issue["severity"] == "WARNING"
+    assert "Too few samples" in issue["message"]
+    assert issue["evidence"]["model_type"] == "prediction_lasso"
+    assert issue["evidence"]["step"] == "prediction"
+
+
+def test_prediction_missing_dependency_in_workflow_continues_workflow(
+    monkeypatch, tmp_path,
+):
+    """Prediction OptionalDependencyNotInstalled must not crash the workflow."""
+    import workbench.orchestrator as orchestrator
+    from workbench.econometrics.optional_deps import OptionalDependencyNotInstalled
+
+    def fake_prediction(*args, **kwargs):
+        raise OptionalDependencyNotInstalled(
+            extra="ml", package="sklearn", model_type="prediction_lasso",
+        )
+
+    monkeypatch.setattr(orchestrator, "run_prediction_model", fake_prediction)
+
+    source = tmp_path / "data.csv"
+    pd.DataFrame(
+        {"y": [float(i) for i in range(40)], "x": [float(i) for i in range(40)]}
+    ).to_csv(source, index=False)
+    project = create_project(tmp_path, "prediction_missing_dep")
+    (project.root / "config.yml").write_text(
+        "prediction_enabled: true\n"
+        "prediction_model_type: prediction_lasso\n",
+        encoding="utf-8",
+    )
+
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x"],
+    )
+
+    run_root = project.root / "runs" / result["run_id"]
+    errors = read_json(run_root / "errors.json")
+
+    assert result["status"] == "completed"
+    assert (run_root / "model_results" / "ols_1.json").exists()
+    dep_issues = [
+        i for i in errors["issues"]
+        if i["code"] == "OPTIONAL_DEPENDENCY_MISSING"
+    ]
+    assert len(dep_issues) >= 1
+    assert dep_issues[0]["severity"] == "WARNING"
+    # M-3: evidence uses _model_failure_details (includes y, x, root_cause)
+    evidence = dep_issues[0]["evidence"]
+    assert evidence["model_type"] == "prediction_lasso"
+    assert evidence["step"] == "prediction"
+    assert evidence["y"] is not None
+    assert "x" in evidence
+    assert evidence["extra"] == "ml"
+    assert evidence["package"] == "sklearn"
+    assert "install" in evidence

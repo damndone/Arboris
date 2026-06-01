@@ -57,6 +57,103 @@ from .visualization import create_figures
 # ============================================================
 
 
+class WorkflowValidationError(ValueError):
+    """Structured validation error with error code and evidence context.
+
+    Raised when a workflow cannot proceed due to a known, diagnosable
+    configuration or input issue (unsupported model, bad GLM family,
+    etc.).  The error code and evidence are used to write a structured
+    ``errors.json`` entry so the failure is machine-readable, not a
+    generic ``WORKFLOW_FAILED``.
+    """
+
+    def __init__(
+        self,
+        error_code: str,
+        message: str,
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.evidence = evidence or {}
+
+
+# ---------------------------------------------------------------------------
+# Per-model-type metadata used to build structured failure details.
+# ---------------------------------------------------------------------------
+_MODEL_METADATA: dict[str, dict[str, str]] = {
+    "ols":               {"model_id": "ols_1",               "engine": "statsmodels"},
+    "logit":             {"model_id": "logit_1",             "engine": "statsmodels"},
+    "probit":            {"model_id": "probit_1",            "engine": "statsmodels"},
+    "poisson":           {"model_id": "poisson_1",           "engine": "statsmodels"},
+    "negative_binomial": {"model_id": "negative_binomial_1", "engine": "statsmodels"},
+    "panel_ols":         {"model_id": "panel_ols_1",         "engine": "linearmodels"},
+    "prediction_lasso":          {"model_id": "prediction_lasso_1",          "engine": "scikit-learn"},
+    "prediction_ridge":          {"model_id": "prediction_ridge_1",          "engine": "scikit-learn"},
+    "prediction_random_forest":  {"model_id": "prediction_random_forest_1",  "engine": "scikit-learn"},
+}
+
+# Map auto-detected y_type back to the model type actually attempted,
+# so that failure evidence names the correct model (e.g. "logit",
+# not "binary").
+_Y_TYPE_TO_ATTEMPTED_MODEL: dict[str, str] = {
+    "binary": "logit",
+    "count": "poisson",
+    "continuous": "ols",
+}
+
+# Maximum length of root_cause string in failure evidence to avoid
+# leaking verbose stack traces into errors.json.
+_ROOT_CAUSE_MAX_LENGTH = 300
+
+
+def _model_id_for_type(model_type: str) -> str:
+    """Return the canonical model_id for a given model_type string."""
+    meta = _MODEL_METADATA.get(model_type)
+    if meta is not None:
+        return meta["model_id"]
+    if model_type.startswith("glm:"):
+        return "glm_1"
+    return f"{model_type}_1"
+
+
+def _engine_for_type(model_type: str) -> str:
+    """Return the engine string for a given model_type."""
+    meta = _MODEL_METADATA.get(model_type)
+    if meta is not None:
+        return meta["engine"]
+    if model_type.startswith("glm:"):
+        return "statsmodels"
+    return "unknown"
+
+
+def _model_failure_details(
+    *,
+    model_type: str,
+    y: str,
+    x: list[str],
+    root_cause: str,
+    step: str = "estimation",
+) -> dict[str, Any]:
+    """Build a consistent evidence dict for model-failure issues.
+
+    Every ``MODEL_FIT_FAILED``, ``UNSUPPORTED_MODEL_TYPE``, etc. issue
+    must include at least ``model_type``, ``model_id``, ``engine``,
+    ``step``, ``y``, ``x``, and ``root_cause`` so that downstream
+    consumers (diagnostic summary, report view-model) can render the
+    failure without guessing context.
+    """
+    return {
+        "model_type": model_type,
+        "model_id": _model_id_for_type(model_type),
+        "engine": _engine_for_type(model_type),
+        "step": step,
+        "y": y,
+        "x": list(x),
+        "root_cause": root_cause[:_ROOT_CAUSE_MAX_LENGTH],
+    }
+
+
 def run_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -108,6 +205,42 @@ def run_workflow(
             },
         )
         write_json(run.root / "errors.json", {"issues": [issue.to_dict()]})
+        _write_manifest(
+            run.root,
+            run.run_id,
+            mode,
+            "failed",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+            requested_model_type=model_type,
+        )
+        raise
+    except WorkflowValidationError as exc:
+        evidence = dict(exc.evidence)
+        # Only fill model_id/engine when the model_type is known and not
+        # "auto" (which would produce meaningless "auto_1" / "unknown").
+        if model_type != "auto":
+            evidence.setdefault("model_type", model_type)
+            evidence.setdefault("model_id", _model_id_for_type(model_type))
+            evidence.setdefault("engine", _engine_for_type(model_type))
+        issue = GuardrailIssue(
+            Severity.BLOCKER,
+            exc.error_code,
+            str(exc),
+            evidence,
+        )
+        # Merge with existing validation issues instead of overwriting.
+        # Validation may have already written INFO/WARNING issues before
+        # this blocker was raised.
+        errors_path = run.root / "errors.json"
+        existing_issues: list[dict[str, Any]] = []
+        if errors_path.exists():
+            existing = read_json(errors_path)
+            if isinstance(existing, dict):
+                existing_issues = existing.get("issues", [])
+        write_json(errors_path, {"issues": [*existing_issues, issue.to_dict()]})
         _write_manifest(
             run.root,
             run.run_id,
@@ -368,7 +501,15 @@ def _run_workflow(
         poisson_x = [v for v in normalized_x if v != exposure_col]
 
     if model_type == "panel_ols" and not id_candidates and not time_candidates:
-        raise ValueError("PANEL_FIELDS_MISSING: panel_ols requires entity or time.")
+        raise WorkflowValidationError(
+            "PANEL_FIELDS_MISSING",
+            "panel_ols requires entity or time.",
+            {
+                "model_type": "panel_ols",
+                "has_entity": bool(id_candidates),
+                "has_time": bool(time_candidates),
+            },
+        )
 
     try:
         if model_type == "panel_ols":
@@ -439,17 +580,80 @@ def _run_workflow(
             model_results.append(("ols_1", primary))
             fitted_models["ols_1"] = primary_fitted
     except ValueError as exc:
+        failure_evidence = _model_failure_details(
+            model_type=(
+                model_type
+                if model_type != "auto"
+                else _Y_TYPE_TO_ATTEMPTED_MODEL.get(y_type, y_type)
+            ),
+            y=normalized_y,
+            x=normalized_x,
+            root_cause=str(exc),
+            step="estimation",
+        )
+        # Add y_type for diagnostic context (not in the standard helper)
+        failure_evidence["y_type"] = y_type
+        if model_type != "auto":
+            failure_evidence["requested_model_type"] = model_type
+
         model_issue = GuardrailIssue(
-            Severity.WARNING,
+            Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
             "MODEL_FIT_FAILED",
             str(exc),
-            {"y": normalized_y, "x": normalized_x, "y_type": y_type},
+            failure_evidence,
         )
         issue_dicts.append(model_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
-        # Fall back to OLS
-        ols_result, ols_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+
+        if model_type != "auto":
+            # Explicit model request: do NOT silently fall back to OLS.
+            # The user asked for a specific model and it failed:
+            # surface the structured failure instead of masking it.
+            _write_manifest(
+                run_root,
+                run_id,
+                mode,
+                "failed",
+                _lineage(input_files),
+                started_at=started_at,
+                y=y,
+                x=x,
+                requested_model_type=model_type,
+            )
+            return {"run_id": run_id, "status": "failed"}
+
+        # Auto mode: fall back to OLS (conservative default)
+        try:
+            ols_result, ols_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+        except ValueError as ols_exc:
+            # OLS fallback itself failed: surface both the original
+            # model failure and the fallback failure.
+            issue_dicts.append(GuardrailIssue(
+                Severity.BLOCKER,
+                "MODEL_FIT_FAILED",
+                f"OLS fallback also failed: {ols_exc}",
+                _model_failure_details(
+                    model_type="ols",
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(ols_exc),
+                    step="estimation",
+                ),
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+            _write_manifest(
+                run_root,
+                run_id,
+                mode,
+                "failed",
+                _lineage(input_files),
+                started_at=started_at,
+                y=y,
+                x=x,
+                requested_model_type=model_type,
+            )
+            return {"run_id": run_id, "status": "failed"}
         _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
@@ -505,18 +709,53 @@ def _run_workflow(
     )
     if prediction_model_type:
         prediction_model_id = f"{prediction_model_type}_1"
-        run_prediction_model(
-            modeling_frame,
-            run_root,
-            y=normalized_y,
-            x=normalized_x,
-            model_type=prediction_model_type,
-            model_id=prediction_model_id,
-            cv_folds=config.prediction_cv_folds,
-            random_seed=config.random_seed,
-            inputs=model_input_ids,
-            sampling_method=config.prediction_sampling_method,
-        )
+        try:
+            run_prediction_model(
+                modeling_frame,
+                run_root,
+                y=normalized_y,
+                x=normalized_x,
+                model_type=prediction_model_type,
+                model_id=prediction_model_id,
+                cv_folds=config.prediction_cv_folds,
+                random_seed=config.random_seed,
+                inputs=model_input_ids,
+                sampling_method=config.prediction_sampling_method,
+            )
+        except OptionalDependencyNotInstalled as dep_exc:
+            # Prediction is supplementary; missing optional deps should
+            # not block the econometric workflow.  Write a structured
+            # issue and continue.
+            details = dep_exc.to_issue_details()
+            evidence = _model_failure_details(
+                model_type=prediction_model_type,
+                y=normalized_y,
+                x=normalized_x,
+                root_cause=str(dep_exc),
+                step="prediction",
+            )
+            evidence.update(details["details"])
+            issue_dicts.append(GuardrailIssue(
+                Severity.WARNING,
+                "OPTIONAL_DEPENDENCY_MISSING",
+                str(dep_exc),
+                evidence,
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+        except ValueError as exc:
+            issue_dicts.append(GuardrailIssue(
+                Severity.WARNING,
+                "PREDICTION_FAILED",
+                str(exc),
+                _model_failure_details(
+                    model_type=prediction_model_type,
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(exc),
+                    step="prediction",
+                ),
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
 
     if routing["kind"] == "time_series" and time_candidates:
         diagnostics = run_time_series_diagnostics(
@@ -956,10 +1195,29 @@ def _validate_requested_model_type(model_type: str) -> str | None:
     if model_type == "auto" or model_type in _MODEL_TYPE_MAP or model_type in _PREDICTION_MODEL_TYPES:
         return None
     if not model_type.startswith("glm:"):
-        raise ValueError(f"Unsupported model type: {model_type}")
+        raise WorkflowValidationError(
+            "UNSUPPORTED_MODEL_TYPE",
+            f"Unsupported model type: {model_type}",
+            {
+                "model_type": model_type,
+                "supported_types": sorted(
+                    list(_MODEL_TYPE_MAP.keys())
+                    + list(_PREDICTION_MODEL_TYPES)
+                    + ["glm:<family>"]
+                ),
+            },
+        )
     family_name = model_type.split(":", 1)[1]
     if family_name not in _SUPPORTED_GLM_FAMILIES:
-        raise ValueError(f"Unsupported GLM family: {family_name}")
+        raise WorkflowValidationError(
+            "UNSUPPORTED_GLM_FAMILY",
+            f"Unsupported GLM family: {family_name}",
+            {
+                "model_type": model_type,
+                "glm_family": family_name,
+                "supported_families": sorted(_SUPPORTED_GLM_FAMILIES),
+            },
+        )
     return family_name
 
 
