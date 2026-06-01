@@ -26,14 +26,21 @@ def test_default_config_matches_v1_boundaries():
     assert config.max_panel_missing_cells == 0.5
     assert config.min_variable_role_confidence == 0.65
     assert config.random_seed == 20260429
+    assert config.imputation_method == ""
+    assert config.imputation_m == 5
+    assert config.imputation_max_iter == 10
 
 
 def test_load_config_allows_project_override(tmp_path: Path):
     path = tmp_path / "config.yml"
-    path.write_text("max_rows: 100\nmin_join_overlap: 0.8\n", encoding="utf-8")
+    path.write_text(
+        "max_rows: 100\nmin_join_overlap: 0.8\nimputation_method: mice\n",
+        encoding="utf-8",
+    )
     config = load_config(path)
     assert config.max_rows == 100
     assert config.min_join_overlap == 0.8
+    assert config.imputation_method == "mice"
     assert config.max_upload_files == 20
 
 

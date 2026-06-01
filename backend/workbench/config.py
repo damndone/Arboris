@@ -20,6 +20,9 @@ class WorkbenchConfig:
     max_panel_missing_cells: float = 0.5
     min_variable_role_confidence: float = 0.65
     random_seed: int = 20260429
+    imputation_method: str = ""
+    imputation_m: int = 5
+    imputation_max_iter: int = 10
 
 
 def load_config(path: Path | None) -> WorkbenchConfig:

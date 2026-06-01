@@ -25,6 +25,7 @@ from .econometrics.runner import (
 )
 from .exports import export_pdf, export_xlsx
 from .ingestion import ingest_files
+from .imputation import run_mice_imputation
 from .metadata import infer_schema
 from .narrative import build_claims
 from .profiling import profile_frame
@@ -339,6 +340,20 @@ def _run_workflow(
     if _s:
         _s("statistical_tests", "complete", "Statistical tests completed")
 
+    modeling_frame = cleaned
+    if config.imputation_method == "mice":
+        imputation_summary = run_mice_imputation(
+            cleaned,
+            run_root,
+            [normalized_y, *normalized_x],
+            m=config.imputation_m,
+            max_iter=config.imputation_max_iter,
+            random_seed=config.random_seed,
+            max_missing_rate=config.max_missing_rate,
+        )
+        if imputation_summary.get("status") == "completed":
+            modeling_frame = pd.read_parquet(run_root / "processed" / "imputed_dataset.parquet")
+
     model_results: list[tuple[str, dict[str, Any]]] = []
     fitted_models: dict[str, Any] = {}
 
@@ -356,7 +371,7 @@ def _run_workflow(
             entity = id_candidates[0] if id_candidates else None
             time = time_candidates[0] if time_candidates else None
             primary, primary_fitted = run_panel_ols(
-                cleaned,
+                modeling_frame,
                 y=normalized_y,
                 x=normalized_x,
                 entity=entity,
@@ -367,7 +382,7 @@ def _run_workflow(
             model_results.append(("panel_ols_1", primary))
         elif model_type == "probit":
             primary, primary_fitted = run_probit(
-                cleaned,
+                modeling_frame,
                 y=normalized_y,
                 x=normalized_x,
                 model_id="probit_1",
@@ -378,7 +393,7 @@ def _run_workflow(
             fitted_models["probit_1"] = primary_fitted
         elif model_type == "negative_binomial":
             primary, primary_fitted = run_negative_binomial(
-                cleaned,
+                modeling_frame,
                 y=normalized_y,
                 x=normalized_x,
                 model_id="negative_binomial_1",
@@ -389,7 +404,7 @@ def _run_workflow(
             fitted_models["negative_binomial_1"] = primary_fitted
         elif model_type.startswith("glm:"):
             primary, primary_fitted = run_glm(
-                cleaned,
+                modeling_frame,
                 y=normalized_y,
                 x=normalized_x,
                 model_id="glm_1",
@@ -400,14 +415,14 @@ def _run_workflow(
             model_results.append(("glm_1", primary))
             fitted_models["glm_1"] = primary_fitted
         elif y_type == "binary":
-            primary, primary_fitted = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
+            primary, primary_fitted = run_logit(modeling_frame, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
             _write_model_result(run_root, "logit_1", primary)
             model_results.append(("logit_1", primary))
             fitted_models["logit_1"] = primary_fitted
         elif y_type == "count":
             poisson_cat = {v for v in categorical_vars if v in poisson_x}
             primary, primary_fitted = run_poisson(
-                cleaned, y=normalized_y, x=poisson_x, model_id="poisson_1",
+                modeling_frame, y=normalized_y, x=poisson_x, model_id="poisson_1",
                 exposure_col=exposure_col,
                 categorical_x=poisson_cat,
             )
@@ -415,7 +430,7 @@ def _run_workflow(
             model_results.append(("poisson_1", primary))
             fitted_models["poisson_1"] = primary_fitted
         else:
-            primary, primary_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+            primary, primary_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
             _write_model_result(run_root, "ols_1", primary)
             model_results.append(("ols_1", primary))
             fitted_models["ols_1"] = primary_fitted
@@ -430,7 +445,7 @@ def _run_workflow(
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
         # Fall back to OLS
-        ols_result, ols_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+        ols_result, ols_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
         _write_model_result(run_root, "ols_1", ols_result)
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
