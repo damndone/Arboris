@@ -56,6 +56,10 @@ def test_mice_imputation_writes_artifacts_without_overwriting_cleaned_dataset(tm
     assert summary["m"] == 2
     assert "group" in summary["skipped_columns"]
     assert "mostly_missing" in summary["skipped_columns"]
+    assert any("group" in warning for warning in summary["warnings"])
+    assert summary["persisted_datasets"] == 1
+    assert summary["pooled_estimates"] is False
+    assert any("pooled multiple-imputation estimates" in warning for warning in summary["warnings"])
     assert summary["selected_columns"] == ["y", "x"]
     persisted_summary = read_json(summary_path)
     decisions = read_json(decisions_path)
@@ -82,9 +86,24 @@ def test_mice_imputation_skips_when_no_numeric_columns(tmp_path: Path):
 
     assert summary["status"] == "skipped"
     assert summary["selected_columns"] == []
-    assert summary["warnings"] == ["No supported numeric columns were available for MICE."]
+    assert summary["persisted_datasets"] == 0
+    assert "No supported numeric columns were available for MICE." in summary["warnings"]
     assert (run.root / "imputation" / "mice_summary.json").exists()
     assert (run.root / "imputation" / "mice_decisions.json").exists()
+    assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
+
+
+def test_mice_imputation_skips_single_numeric_column_with_missing_values(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    frame = pd.DataFrame({"x": [1.0, None, 3.0, 4.0]})
+
+    summary = run_mice_imputation(frame, run.root, columns=["x"])
+
+    assert summary["status"] == "skipped"
+    assert summary["imputed_columns"] == ["x"]
+    assert summary["persisted_datasets"] == 0
+    assert "MICE requires at least two supported numeric columns." in summary["warnings"]
     assert not (run.root / "processed" / "imputed_dataset.parquet").exists()
 
 
@@ -115,3 +134,28 @@ def test_workflow_uses_mice_only_when_configured(tmp_path: Path):
     assert read_json(run_root / "imputation" / "mice_summary.json")["status"] == "completed"
     model_result = read_json(run_root / "model_results" / "ols_1.json")
     assert model_result["nobs"] == 40
+    artifact_index = read_json(run_root / "artifacts_index.json")
+    ols_record = next(
+        artifact
+        for artifact in artifact_index["artifacts"]
+        if artifact["artifact_id"] == "ols_1"
+    )
+    assert ols_record["inputs"] == ["imputed_dataset"]
+
+
+def test_workflow_does_not_impute_by_default(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    source = tmp_path / "data.csv"
+    pd.DataFrame(
+        {
+            "y": [float(i) for i in range(40)],
+            "x": [float(i * 2) for i in range(40)],
+        }
+    ).to_csv(source, index=False)
+
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+
+    run_root = project.root / "runs" / result["run_id"]
+    assert result["status"] == "completed"
+    assert not (run_root / "processed" / "imputed_dataset.parquet").exists()
+    assert not (run_root / "imputation").exists()

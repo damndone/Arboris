@@ -27,6 +27,7 @@ def run_mice_imputation(
     processed_dir.mkdir(parents=True, exist_ok=True)
 
     selected_columns: list[str] = []
+    imputed_columns: list[str] = []
     skipped_columns: list[dict[str, Any]] = []
     seen: set[str] = set()
     for column in columns:
@@ -51,28 +52,33 @@ def run_mice_imputation(
             )
             continue
         selected_columns.append(column)
+        if missing_rate > 0:
+            imputed_columns.append(column)
 
     summary: dict[str, Any] = {
         "schema_version": 1,
         "method": "mice",
-        "status": "skipped" if not selected_columns else "completed",
-        "imputed_columns": selected_columns,
+        "status": "skipped",
+        "imputed_columns": imputed_columns,
         "selected_columns": selected_columns,
         "skipped_columns": [item["column"] for item in skipped_columns],
         "m": m,
+        "persisted_datasets": 0,
+        "pooled_estimates": False,
         "max_iter": max_iter,
         "random_seed": random_seed,
         "max_missing_rate": max_missing_rate,
         "row_count": int(len(frame)),
-        "warnings": [] if selected_columns else ["No supported numeric columns were available for MICE."],
+        "warnings": [],
     }
     decisions = {
         "method": "mice",
         "selected_columns": selected_columns,
+        "imputed_columns": imputed_columns,
         "skipped_columns": skipped_columns,
     }
 
-    if selected_columns:
+    if imputed_columns and len(selected_columns) >= 2:
         from statsmodels.imputation.mice import MICEData
 
         imputed = frame.copy()
@@ -87,16 +93,31 @@ def run_mice_imputation(
         finally:
             np.random.set_state(random_state)
 
-        imputed_path = processed_dir / "imputed_dataset.parquet"
-        imputed.to_parquet(imputed_path, index=False)
-        register_artifact(
-            run_root,
-            "imputed_dataset",
-            imputed_path,
-            "processed_data",
-            "imputation",
-            ["cleaned_dataset"],
-        )
+        remaining_missing = [
+            column for column in imputed_columns if int(imputed[column].isna().sum()) > 0
+        ]
+        if remaining_missing:
+            summary["warnings"].append(
+                "MICE did not fill all selected missing values; no imputed dataset was persisted."
+            )
+            summary["remaining_missing_columns"] = remaining_missing
+        else:
+            imputed_path = processed_dir / "imputed_dataset.parquet"
+            imputed.to_parquet(imputed_path, index=False)
+            register_artifact(
+                run_root,
+                "imputed_dataset",
+                imputed_path,
+                "processed_data",
+                "imputation",
+                ["cleaned_dataset"],
+            )
+            summary["status"] = "completed"
+            summary["persisted_datasets"] = 1
+
+    summary["warnings"].extend(
+        _imputation_warnings(selected_columns, imputed_columns, skipped_columns, m)
+    )
 
     summary_path = imputation_dir / "mice_summary.json"
     decisions_path = imputation_dir / "mice_decisions.json"
@@ -119,3 +140,27 @@ def run_mice_imputation(
         ["cleaned_dataset"],
     )
     return summary
+
+
+def _imputation_warnings(
+    selected_columns: list[str],
+    imputed_columns: list[str],
+    skipped_columns: list[dict[str, Any]],
+    m: int,
+) -> list[str]:
+    warnings: list[str] = []
+    if not selected_columns:
+        warnings.append("No supported numeric columns were available for MICE.")
+    elif not imputed_columns:
+        warnings.append("No selected numeric columns had missing values to impute.")
+    elif len(selected_columns) < 2:
+        warnings.append("MICE requires at least two supported numeric columns.")
+    if skipped_columns:
+        names = ", ".join(str(item["column"]) for item in skipped_columns)
+        warnings.append(f"Skipped unsupported columns during MICE: {names}.")
+    if m != 1:
+        warnings.append(
+            "This preprocessing step persists one imputed dataset; pooled multiple-imputation "
+            "estimates are not produced."
+        )
+    return warnings
