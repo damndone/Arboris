@@ -285,6 +285,78 @@ describe("View / panel / search dispatch", () => {
   });
 });
 
+describe("selectedKey single-source invariant (F3 lock-in)", () => {
+  it("selectedKey equals active tab's nodeKey", () => {
+    renderAt("/?tabs=n1,n2&active=n2");
+    expect(state().selectedKey).toBe("n2");
+    const active = state().tabs.find((t) => t.id === state().activeTabId);
+    expect(active?.nodeKey).toBe(state().selectedKey);
+  });
+
+  it("selectedKey is null when no active tab", () => {
+    renderAt("/");
+    expect(state().activeTabId).toBeNull();
+    expect(state().selectedKey).toBeNull();
+  });
+
+  it("selectedKey stays in sync after tab switch", () => {
+    renderAt("/?tabs=n1,n2&active=n1");
+    act(() => dispatch().selectByTabSwitch("n2"));
+    expect(state().activeTabId).toBe("n2");
+    expect(state().selectedKey).toBe("n2");
+    const active = state().tabs.find((t) => t.id === "n2");
+    expect(active?.nodeKey).toBe(state().selectedKey);
+  });
+
+  it("selectedKey stays in sync after closeTab promotes new active", () => {
+    renderAt("/?tabs=n1,n2,n3&active=n2");
+    act(() => dispatch().closeTab("n2"));
+    // n3 should be promoted (right neighbour takes slot)
+    expect(state().activeTabId).toBe("n3");
+    expect(state().selectedKey).toBe("n3");
+  });
+
+  it("selectedKey unchanged by pinFocus (focus ≠ selection)", () => {
+    renderAt("/?tabs=nA&active=nA");
+    const before = state().selectedKey;
+    act(() => dispatch().pinFocus("nB"));
+    expect(state().selectedKey).toBe(before);
+    expect(state().focusKey).toBe("nB"); // focus moved, selection didn't
+  });
+
+  it("selectedKey unchanged by setFocusOnly (focus ≠ selection)", () => {
+    renderAt("/?tabs=nA&active=nA");
+    const before = state().selectedKey;
+    act(() => dispatch().setFocusOnly("nB"));
+    expect(state().selectedKey).toBe(before);
+    expect(state().focusKey).toBe("nB"); // focus moved, selection didn't
+  });
+
+  it("selectedKey tracks first tab after canvas click from empty state", () => {
+    renderAt("/");
+    act(() => dispatch().selectByCanvasClick("nA"));
+    expect(state().tabs.map((t) => t.id)).toEqual(["nA"]);
+    expect(state().activeTabId).toBe("nA");
+    expect(state().selectedKey).toBe("nA");
+  });
+
+  it("selectedKey survives LRU eviction correctly", () => {
+    // Open 8 tabs (max), then open 9th — oldest evicted
+    renderAt("/");
+    for (const key of ["a", "b", "c", "d", "e", "f", "g", "h"]) {
+      act(() => dispatch().selectByCanvasClick(key));
+    }
+    expect(state().tabs.length).toBe(8);
+    expect(state().activeTabId).toBe("h");
+    // Open 9th — "a" evicted
+    act(() => dispatch().selectByCanvasClick("i"));
+    expect(state().tabs.length).toBe(8);
+    expect(state().tabs.find((t) => t.id === "a")).toBeUndefined();
+    expect(state().activeTabId).toBe("i");
+    expect(state().selectedKey).toBe("i");
+  });
+});
+
 describe("contextMenu (Tier 3)", () => {
   it("open + close are memory-only", () => {
     renderAt("/");
