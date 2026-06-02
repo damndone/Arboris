@@ -21,7 +21,12 @@
 //                 └── <LineageContext.Provider>
 //                       └── <WorkbenchShell>  ← unchanged, useLineage()
 
-import { useCallback, useMemo, type ReactNode } from "react";
+// LineageBridge also inherits the auto-select behaviour from
+// `useSelectedNode`: on first load (or when the run scope changes), if no
+// tab is active, it auto-opens the first review (or caution) node so the
+// drawer isn't empty on initial render.
+
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { LineageContext, type LineageContextValue } from "../lineage/LineageContext";
 import type { GraphViewModel } from "../lineage/api/graphViewTypes";
 import { useWorkbench } from "./WorkbenchStateProvider";
@@ -33,6 +38,40 @@ export interface LineageBridgeProps {
 
 export function LineageBridge({ model, children }: LineageBridgeProps) {
   const { state, dispatch } = useWorkbench();
+
+  // ── auto-select (migrated from useSelectedNode) ──────────────────
+  // On first render (or when the run changes), if the drawer would be
+  // empty, auto-open the first review/caution node. This matches the
+  // V1.5.1 behaviour exactly — auto-select never overrides an existing
+  // user selection and re-arms when the run scope changes.
+  const didAutoSelectRef = useRef(false);
+  const lastAutoSelectScopeRef = useRef<string | null>(null);
+  const autoSelectScope = model.runId ?? null;
+
+  // Re-arm auto-select when the scope (run) changes.
+  useEffect(() => {
+    if (lastAutoSelectScopeRef.current === autoSelectScope) return;
+    lastAutoSelectScopeRef.current = autoSelectScope;
+    didAutoSelectRef.current = false;
+  }, [autoSelectScope]);
+
+  // Execute auto-select: pick first review (then caution) node when no
+  // tab is active. Uses selectByCanvasClick so focus follows selection
+  // on initial load (correct: user hasn't pinned anything yet).
+  useEffect(() => {
+    if (didAutoSelectRef.current) return;
+    if (model.nodes.length === 0) return;
+    didAutoSelectRef.current = true;
+
+    if (state.activeTabId !== null) return;
+
+    const pick =
+      model.nodes.find((n) => n.trust === "review") ??
+      model.nodes.find((n) => n.trust === "caution");
+    if (!pick) return;
+
+    dispatch.selectByCanvasClick(pick.id);
+  }, [state.activeTabId, model.nodes, dispatch]);
 
   // select(key) → open/activate a tab + set focus (normal UX for user clicks)
   // select(null) → close the active tab (drawer close / Escape)
