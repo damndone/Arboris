@@ -12,6 +12,7 @@ from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .engine.context import DataHandle, ModelingContext, RunEnv
+from .engine.stages.cleaning import CleaningStage
 from .engine.stages.source import SourceStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
@@ -419,30 +420,11 @@ def _run_workflow(
     raw_row_count = ctx.artifacts["_raw_row_count"]
     raw_col_count = ctx.artifacts["_raw_col_count"]
 
-    if _s: _s("cleaning", "start", "Cleaning data...")
-    cleaned, actions = clean_frame(frame, list(schema.time_candidates))
-    if _s: _s("cleaning", "complete", f"Applied {len(actions)} cleaning actions")
-    raw_inputs = [f"raw_{path.name}" for path in input_files]
-    cleaning_path = run_root / "processed" / "cleaning_actions.json"
-    write_json(cleaning_path, {"actions": actions})
-    register_artifact(
-        run_root,
-        "cleaning_actions",
-        cleaning_path,
-        "metadata",
-        "cleaning",
-        raw_inputs,
-    )
-    cleaned_path = run_root / "processed" / "cleaned_dataset.parquet"
-    cleaned.to_parquet(cleaned_path, index=False)
-    register_artifact(
-        run_root,
-        "cleaned_dataset",
-        cleaned_path,
-        "processed_data",
-        "cleaning",
-        raw_inputs,
-    )
+    ctx = CleaningStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    cleaned = ctx.data.frame
+    actions = ctx.artifacts["_actions"]
+    raw_inputs = ctx.artifacts["_raw_inputs"]
 
     if _s: _s("profiling", "start", "Profiling data...")
     profile = profile_frame(cleaned)

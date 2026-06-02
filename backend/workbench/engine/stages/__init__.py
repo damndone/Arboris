@@ -7,6 +7,7 @@ class Stage(Protocol):
     def run(self, ctx: ModelingContext, env: RunEnv) -> ModelingContext: ...
 
 from .source import SourceStage
+from .cleaning import CleaningStage
 
 # Stages are appended in pipeline order as each is extracted.
-PIPELINE: list[Stage] = [SourceStage()]
+PIPELINE: list[Stage] = [SourceStage(), CleaningStage()]
