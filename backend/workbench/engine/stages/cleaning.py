@@ -54,4 +54,8 @@ class CleaningStage:
         )
         ctx.artifacts["_actions"] = actions
         ctx.artifacts["_raw_inputs"] = raw_inputs
+        # Stash the cleaned frame separately so post-imputation stages
+        # (diagnostics, reliability, report) can read it even after
+        # ImputationStage swaps ``ctx.data`` to the imputed handle.
+        ctx.artifacts["_cleaned"] = cleaned
         return ctx

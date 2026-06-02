@@ -405,7 +405,12 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
 ) -> dict[str, str]:
-    _s = on_step  # shorthand
+    """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
+    terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
+    — this function only assembles inputs, drives the loop, and returns the
+    final status.
+    """
+    from .engine.stages import PIPELINE
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
@@ -431,117 +436,11 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
 
-    ctx = SourceStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    frames = ctx.artifacts["_frames"]
-    schema = ctx.artifacts["_schema"]
-    frame = ctx.data.frame
-    raw_row_count = ctx.artifacts["_raw_row_count"]
-    raw_col_count = ctx.artifacts["_raw_col_count"]
+    for stage in PIPELINE:
+        ctx = stage.run(ctx, env)
+        if ctx.terminal_status in ("blocked", "failed"):
+            return {"run_id": run_id, "status": ctx.terminal_status}
 
-    ctx = CleaningStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    cleaned = ctx.data.frame
-    actions = ctx.artifacts["_actions"]
-    raw_inputs = ctx.artifacts["_raw_inputs"]
-
-    ctx = ProfileStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    profile = ctx.artifacts["_profile"]
-
-    ctx = ValidationStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects, short-circuit on blockers
-    issues = ctx.artifacts["_issues"]
-    issue_dicts = ctx.artifacts["_issue_dicts"]
-    if ctx.terminal_status == "blocked":
-        return {"run_id": run_id, "status": "blocked"}
-
-    ctx = RoutingStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    routing = ctx.artifacts["_routing"]
-    time_candidates = ctx.artifacts["_time_candidates"]
-    id_candidates = ctx.artifacts["_id_candidates"]
-
-    ctx = YTypeStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    normalized_y = ctx.artifacts["_normalized_y"]
-    normalized_x = ctx.artifacts["_normalized_x"]
-    y_type = ctx.y_type
-    _missing_values_dp = ctx.artifacts["_missing_values_dp"]
-    data_detected_y_type = ctx.artifacts["_data_detected_y_type"]
-    glm_family = ctx.artifacts["_glm_family"]
-    _model_type_dp = ctx.artifacts["_model_type_dp"]
-
-    ctx = PreEstimationChecksStage().run(ctx, env)
-    if ctx.terminal_status == "blocked":
-        return {"run_id": run_id, "status": "blocked"}
-    # bridge: re-bind names the still-inline code below expects
-    coercion_actions = ctx.artifacts["_coercion_actions"]
-    _coerce_dps = ctx.artifacts["_coerce_dps"]
-    categorical_vars = ctx.artifacts["_categorical_vars"]
-    _categorical_dummy_dps = ctx.artifacts["_categorical_dummy_dps"]
-
-    ctx = RoleInferenceStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    variable_roles = ctx.roles
-
-    ctx = ExposureDetectionStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    exposure_col = ctx.exposure_col
-
-    ctx = StatisticalTestsStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    statistical_tests = ctx.artifacts["_statistical_tests"]
-    statistical_test_summaries = ctx.artifacts["_statistical_test_summaries"]
-
-    ctx = ImputationStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects. modeling_frame
-    # and model_input_ids now come from the SINGLE working handle, so the data
-    # the model is fit on and its lineage id cannot drift. Do NOT re-bind
-    # `cleaned` here — it must keep pointing at the cleaned frame already used by
-    # the statistical tests above.
-    modeling_frame = ctx.data.frame
-    model_input_ids = [ctx.data.artifact_id]
-    imputation_summary = ctx.artifacts["_imputation_summary"]
-
-    # Stash the artifacts EstimationStage reads. The pre-estimation stash MUST
-    # cover everything the stage uses (categorical vars, issue dicts, cleaned
-    # frame for downstream stages). `_normalized_y`, `_normalized_x`,
-    # `_categorical_vars`, `_glm_family`, `_id_candidates`, `_time_candidates`
-    # are already in ctx.artifacts from earlier stages.
-    ctx.exposure_col = exposure_col
-    ctx.y_type = y_type
-    ctx.artifacts["_cleaned"] = cleaned
-    ctx.artifacts["_issue_dicts"] = issue_dicts
-    ctx.artifacts["_categorical_vars"] = categorical_vars
-    ctx.artifacts["_categorical_dummy_dps"] = _categorical_dummy_dps
-    ctx.artifacts["_coerce_dps"] = _coerce_dps
-    ctx.artifacts["_model_input_ids"] = model_input_ids
-    ctx.artifacts["_statistical_tests"] = statistical_tests
-    ctx.artifacts["_statistical_test_summaries"] = statistical_test_summaries
-    ctx.artifacts["_coercion_actions"] = coercion_actions
-
-    ctx = EstimationStage().run(ctx, env)
-    if ctx.terminal_status == "failed":
-        return {"run_id": run_id, "status": "failed"}
-
-    # bridge: re-bind locals that the post-estimation inline code reads.
-    model_results = ctx.artifacts["_model_results"]
-    fitted_models = ctx.artifacts["_fitted_models"]
-    _robust_se_dp = ctx.artifacts["_robust_se_dp"]
-    y_type = ctx.y_type  # auto fallback may have set it to "continuous"
-    poisson_x = ctx.artifacts["_poisson_x"]
-    issue_dicts = ctx.artifacts["_issue_dicts"]
-    _model_type_dp = ctx.artifacts["_model_type_dp"]  # may be cleared by auto fallback
-
-    ctx = RecordingStage().run(ctx, env)
-    # bridge: re-bind names the still-inline code below expects
-    primary_type = ctx.primary_type
-    dropped_vars = ctx.artifacts["_dropped_vars"]
-
-    ctx = DiagnosticsStage().run(ctx, env)
-    ctx = ReliabilityStage().run(ctx, env)
-    ctx = ReportStage().run(ctx, env)
     return {"run_id": run_id, "status": ctx.terminal_status}
 
 

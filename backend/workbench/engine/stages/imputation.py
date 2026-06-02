@@ -55,4 +55,10 @@ class ImputationStage:
                 )
 
         ctx.artifacts["_imputation_summary"] = imputation_summary
+        # Stash the modeling-handle id list for downstream stages
+        # (Diagnostics needs it for lineage ``inputs=`` references).
+        # After this stage ctx.data.artifact_id is either "cleaned_dataset"
+        # (baseline path) or "imputed_dataset" (MICE completed); the list
+        # must reflect whichever handle the model is fit on.
+        ctx.artifacts["_model_input_ids"] = [ctx.data.artifact_id]
         return ctx
