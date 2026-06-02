@@ -18,6 +18,7 @@ from .imputation import ImputationStage
 from .recording import RecordingStage
 from .diagnostics import DiagnosticsStage
 from .reliability import ReliabilityStage
+from .report import ReportStage
 
 # Stages are appended in pipeline order as each is extracted.
 PIPELINE: list[Stage] = [
@@ -33,4 +34,5 @@ PIPELINE: list[Stage] = [
     RecordingStage(),
     DiagnosticsStage(),
     ReliabilityStage(),
+    ReportStage(),
 ]
