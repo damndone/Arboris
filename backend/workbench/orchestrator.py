@@ -11,6 +11,7 @@ from .cleaning import clean_frame, normalize_column_name
 from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
+from .engine.context import DataHandle, ModelingContext, RunEnv
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -392,6 +393,22 @@ def _run_workflow(
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
+
+    env = RunEnv(run_root=run_root, run_id=run_id, recorder=_recorder, on_step=on_step)
+    ctx = ModelingContext(
+        data=DataHandle(
+            frame=pd.DataFrame(),
+            artifact_id="raw",
+            provenance=tuple(f"raw_{p.name}" for p in input_files),
+        ),
+        y_col=y,
+        x_cols=list(x),
+        requested_model_type=model_type,
+    )
+    ctx.artifacts["_input_files"] = input_files
+    ctx.artifacts["_config"] = config
+    ctx.artifacts["_sheet_name"] = sheet_name
+    ctx.artifacts["_transpose"] = transpose
 
     if _s: _s("ingestion", "start", "Ingesting files...")
     frames = ingest_files([Path(path) for path in input_files], run_root, config, sheet_name, transpose)
