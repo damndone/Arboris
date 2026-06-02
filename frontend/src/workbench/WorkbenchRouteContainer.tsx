@@ -27,12 +27,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useGraphData } from "../lineage/hooks/useGraphData";
-import { useSelectedNode } from "../lineage/hooks/useSelectedNode";
-import {
-  LineageContext,
-  type LineageContextValue,
-  useLineage,
-} from "../lineage/LineageContext";
+import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
 import { useGraphKeyboard } from "../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../lineage/detail/DetailDrawer";
@@ -40,6 +35,7 @@ import { RawJsonModal } from "../lineage/modals/RawJsonModal";
 import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
+import { LineageBridge } from "./LineageBridge";
 import { WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
 import { ContextMenu } from "./ContextMenu";
@@ -56,41 +52,6 @@ export function WorkbenchRouteContainer({
   runId,
 }: WorkbenchRouteContainerProps) {
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
-  const {
-    selectedKey,
-    select,
-    tabs,
-    activeTabId,
-    setActiveTab,
-    closeTab,
-    lastEvictedTabId,
-  } = useSelectedNode(model?.nodes ?? null, model?.runId ?? null);
-
-  const lineageCtx = useMemo<LineageContextValue | null>(
-    () =>
-      model === null
-        ? null
-        : {
-            model,
-            selectedKey,
-            select,
-            tabs,
-            activeTabId,
-            setActiveTab,
-            closeTab,
-            lastEvictedTabId,
-          },
-    [
-      model,
-      selectedKey,
-      select,
-      tabs,
-      activeTabId,
-      setActiveTab,
-      closeTab,
-      lastEvictedTabId,
-    ],
-  );
 
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(() => {
     if (model === null) return undefined;
@@ -99,13 +60,13 @@ export function WorkbenchRouteContainer({
 
   if (loading) return <Loading />;
   if (error !== null) return <ErrorBanner error={error} onRetry={refetch} />;
-  if (lineageCtx === null) return <Loading />;
+  if (model === null) return <Loading />;
 
   return (
     <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
-      <LineageContext.Provider value={lineageCtx}>
+      <LineageBridge model={model}>
         <WorkbenchShell runId={runId} projectRoot={projectRoot} />
-      </LineageContext.Provider>
+      </LineageBridge>
     </WorkbenchStateProvider>
   );
 }
