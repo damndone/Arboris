@@ -14,6 +14,7 @@ from .domain import GuardrailIssue, Severity
 from .engine.context import DataHandle, ModelingContext, RunEnv
 from .engine.stages.cleaning import CleaningStage
 from .engine.stages.profile import ProfileStage
+from .engine.stages.routing import RoutingStage
 from .engine.stages.source import SourceStage
 from .engine.stages.validation import ValidationStage
 from .graph_recorder import GraphRecorder
@@ -444,21 +445,11 @@ def _run_workflow(
     if ctx.terminal_status == "blocked":
         return {"run_id": run_id, "status": "blocked"}
 
-    if _s: _s("routing", "start", "Classifying dataset...")
-    time_candidates = _normalized_existing(schema.time_candidates, cleaned)
-    id_candidates = _normalized_existing(schema.id_candidates, cleaned)
-    routing = classify_dataset(cleaned, id_candidates, time_candidates)
-    if _s: _s("routing", "complete", f"Classified as {routing['kind']}")
-    routing_path = run_root / "staged" / "analysis_router.json"
-    write_json(routing_path, routing)
-    register_artifact(
-        run_root,
-        "analysis_router",
-        routing_path,
-        "metadata",
-        "analysis_router",
-        ["data_profile"],
-    )
+    ctx = RoutingStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    routing = ctx.artifacts["_routing"]
+    time_candidates = ctx.artifacts["_time_candidates"]
+    id_candidates = ctx.artifacts["_id_candidates"]
 
     if _s: _s("y_type", "start", "Detecting y variable type...")
     normalized_y = normalize_column_name(y)
