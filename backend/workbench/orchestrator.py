@@ -21,6 +21,7 @@ from .engine.stages.ytype import YTypeStage
 from .engine.stages.roles import RoleInferenceStage
 from .engine.stages.exposure import ExposureDetectionStage
 from .engine.stages.imputation import ImputationStage
+from .engine.stages.estimation import EstimationStage
 from .engine.stages.recording import RecordingStage
 from .engine.stages.diagnostics import DiagnosticsStage
 from .engine.stages.reliability import ReliabilityStage
@@ -554,202 +555,35 @@ def _run_workflow(
     model_input_ids = [ctx.data.artifact_id]
     imputation_summary = ctx.artifacts["_imputation_summary"]
 
-    model_results: list[tuple[str, dict[str, Any]]] = []
-    fitted_models: dict[str, Any] = {}
-
-    if _s: _s("estimation", "start", f"Fitting {y_type} model (y type: {y_type})...")
-
-    poisson_x = list(normalized_x)
-    if exposure_col:
-        poisson_x = [v for v in normalized_x if v != exposure_col]
-
-    _robust_se_dp = None
-
-    if model_type == "panel_ols" and not id_candidates and not time_candidates:
-        raise WorkflowValidationError(
-            "PANEL_FIELDS_MISSING",
-            "panel_ols requires entity or time.",
-            {
-                "model_type": "panel_ols",
-                "has_entity": bool(id_candidates),
-                "has_time": bool(time_candidates),
-            },
-        )
-
-    try:
-        if model_type == "panel_ols":
-            entity = id_candidates[0] if id_candidates else None
-            time = time_candidates[0] if time_candidates else None
-            primary, primary_fitted = run_panel_ols(
-                modeling_frame,
-                y=normalized_y,
-                x=normalized_x,
-                entity=entity,
-                time=time,
-                model_id="panel_ols_1",
-            )
-            _write_model_result(run_root, "panel_ols_1", primary, inputs=model_input_ids)
-            model_results.append(("panel_ols_1", primary))
-        elif model_type == "probit":
-            primary, primary_fitted = run_probit(
-                modeling_frame,
-                y=normalized_y,
-                x=normalized_x,
-                model_id="probit_1",
-                categorical_x=categorical_vars,
-            )
-            _write_model_result(run_root, "probit_1", primary, inputs=model_input_ids)
-            model_results.append(("probit_1", primary))
-            fitted_models["probit_1"] = primary_fitted
-        elif model_type == "negative_binomial":
-            primary, primary_fitted = run_negative_binomial(
-                modeling_frame,
-                y=normalized_y,
-                x=normalized_x,
-                model_id="negative_binomial_1",
-                categorical_x=categorical_vars,
-            )
-            _write_model_result(run_root, "negative_binomial_1", primary, inputs=model_input_ids)
-            model_results.append(("negative_binomial_1", primary))
-            fitted_models["negative_binomial_1"] = primary_fitted
-        elif model_type.startswith("glm:"):
-            primary, primary_fitted = run_glm(
-                modeling_frame,
-                y=normalized_y,
-                x=normalized_x,
-                model_id="glm_1",
-                family_name=glm_family or "",
-                categorical_x=categorical_vars,
-            )
-            _write_model_result(run_root, "glm_1", primary, inputs=model_input_ids)
-            model_results.append(("glm_1", primary))
-            fitted_models["glm_1"] = primary_fitted
-        elif y_type == "binary":
-            primary, primary_fitted = run_logit(modeling_frame, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
-            _write_model_result(run_root, "logit_1", primary, inputs=model_input_ids)
-            model_results.append(("logit_1", primary))
-            fitted_models["logit_1"] = primary_fitted
-        elif y_type == "count":
-            poisson_cat = {v for v in categorical_vars if v in poisson_x}
-            primary, primary_fitted = run_poisson(
-                modeling_frame, y=normalized_y, x=poisson_x, model_id="poisson_1",
-                exposure_col=exposure_col,
-                categorical_x=poisson_cat,
-            )
-            _write_model_result(run_root, "poisson_1", primary, inputs=model_input_ids)
-            model_results.append(("poisson_1", primary))
-            fitted_models["poisson_1"] = primary_fitted
-        else:
-            primary, primary_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
-            _write_model_result(run_root, "ols_1", primary, inputs=model_input_ids)
-            model_results.append(("ols_1", primary))
-            fitted_models["ols_1"] = primary_fitted
-            _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
-    except ValueError as exc:
-        failure_evidence = _model_failure_details(
-            model_type=(
-                model_type
-                if model_type != "auto"
-                else _Y_TYPE_TO_ATTEMPTED_MODEL.get(y_type, y_type)
-            ),
-            y=normalized_y,
-            x=normalized_x,
-            root_cause=str(exc),
-            step="estimation",
-        )
-        # Add y_type for diagnostic context (not in the standard helper)
-        failure_evidence["y_type"] = y_type
-        if model_type != "auto":
-            failure_evidence["requested_model_type"] = model_type
-
-        model_issue = GuardrailIssue(
-            Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
-            "MODEL_FIT_FAILED",
-            str(exc),
-            failure_evidence,
-        )
-        issue_dicts.append(model_issue.to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
-        if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
-
-        if model_type != "auto":
-            # Explicit model request: do NOT silently fall back to OLS.
-            # The user asked for a specific model and it failed:
-            # surface the structured failure instead of masking it.
-            _write_manifest(
-                run_root,
-                run_id,
-                mode,
-                "failed",
-                _lineage(input_files),
-                started_at=started_at,
-                y=y,
-                x=x,
-                requested_model_type=model_type,
-            )
-            _safe_flush_recorder(_recorder, context="failed@estimation")
-            return {"run_id": run_id, "status": "failed"}
-
-        # Auto mode: fall back to OLS (conservative default).
-        # Clear the auto model_type DP since it no longer applies.
-        _model_type_dp = None
-        try:
-            ols_result, ols_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
-        except ValueError as ols_exc:
-            # OLS fallback itself failed: surface both the original
-            # model failure and the fallback failure.
-            issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER,
-                "MODEL_FIT_FAILED",
-                f"OLS fallback also failed: {ols_exc}",
-                _model_failure_details(
-                    model_type="ols",
-                    y=normalized_y,
-                    x=normalized_x,
-                    root_cause=str(ols_exc),
-                    step="estimation",
-                ),
-            ).to_dict())
-            write_json(run_root / "errors.json", {"issues": issue_dicts})
-            _write_manifest(
-                run_root,
-                run_id,
-                mode,
-                "failed",
-                _lineage(input_files),
-                started_at=started_at,
-                y=y,
-                x=x,
-                requested_model_type=model_type,
-            )
-            _safe_flush_recorder(_recorder, context="failed@estimation")
-            return {"run_id": run_id, "status": "failed"}
-        _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
-        _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
-        model_results.append(("ols_1", ols_result))
-        fitted_models["ols_1"] = ols_fitted
-        y_type = "continuous"
-
-    # pre-bridge: stash inline estimation + pre-estimation locals that the
-    # post-estimation stages (recording/diagnostics/reliability/report) read.
-    # Estimation is still inline, so this must run before the first stage call.
+    # Stash the artifacts EstimationStage reads. The pre-estimation stash MUST
+    # cover everything the stage uses (categorical vars, issue dicts, cleaned
+    # frame for downstream stages). `_normalized_y`, `_normalized_x`,
+    # `_categorical_vars`, `_glm_family`, `_id_candidates`, `_time_candidates`
+    # are already in ctx.artifacts from earlier stages.
     ctx.exposure_col = exposure_col
     ctx.y_type = y_type
-    # `cleaned` is the cleaned frame (NOT the modeling handle ctx.data.frame);
-    # the post-estimation stats / rare-event / figures read it, so stash it.
     ctx.artifacts["_cleaned"] = cleaned
-    ctx.artifacts["_model_results"] = model_results
-    ctx.artifacts["_fitted_models"] = fitted_models
     ctx.artifacts["_issue_dicts"] = issue_dicts
-    ctx.artifacts["_poisson_x"] = poisson_x
     ctx.artifacts["_categorical_vars"] = categorical_vars
     ctx.artifacts["_categorical_dummy_dps"] = _categorical_dummy_dps
     ctx.artifacts["_coerce_dps"] = _coerce_dps
-    ctx.artifacts["_robust_se_dp"] = _robust_se_dp
     ctx.artifacts["_model_input_ids"] = model_input_ids
     ctx.artifacts["_statistical_tests"] = statistical_tests
     ctx.artifacts["_statistical_test_summaries"] = statistical_test_summaries
     ctx.artifacts["_coercion_actions"] = coercion_actions
+
+    ctx = EstimationStage().run(ctx, env)
+    if ctx.terminal_status == "failed":
+        return {"run_id": run_id, "status": "failed"}
+
+    # bridge: re-bind locals that the post-estimation inline code reads.
+    model_results = ctx.artifacts["_model_results"]
+    fitted_models = ctx.artifacts["_fitted_models"]
+    _robust_se_dp = ctx.artifacts["_robust_se_dp"]
+    y_type = ctx.y_type  # auto fallback may have set it to "continuous"
+    poisson_x = ctx.artifacts["_poisson_x"]
+    issue_dicts = ctx.artifacts["_issue_dicts"]
+    _model_type_dp = ctx.artifacts["_model_type_dp"]  # may be cleared by auto fallback
 
     ctx = RecordingStage().run(ctx, env)
     # bridge: re-bind names the still-inline code below expects
