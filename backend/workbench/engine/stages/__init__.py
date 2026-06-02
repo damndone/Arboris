@@ -8,6 +8,7 @@ class Stage(Protocol):
 
 from .source import SourceStage
 from .cleaning import CleaningStage
+from .profile import ProfileStage
 
 # Stages are appended in pipeline order as each is extracted.
-PIPELINE: list[Stage] = [SourceStage(), CleaningStage()]
+PIPELINE: list[Stage] = [SourceStage(), CleaningStage(), ProfileStage()]

@@ -13,6 +13,7 @@ from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .engine.context import DataHandle, ModelingContext, RunEnv
 from .engine.stages.cleaning import CleaningStage
+from .engine.stages.profile import ProfileStage
 from .engine.stages.source import SourceStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
@@ -426,19 +427,9 @@ def _run_workflow(
     actions = ctx.artifacts["_actions"]
     raw_inputs = ctx.artifacts["_raw_inputs"]
 
-    if _s: _s("profiling", "start", "Profiling data...")
-    profile = profile_frame(cleaned)
-    if _s: _s("profiling", "complete", f"Profiled {profile['row_count']} rows")
-    profile_path = run_root / "staged" / "data_profile.json"
-    write_json(profile_path, profile)
-    register_artifact(
-        run_root,
-        "data_profile",
-        profile_path,
-        "profile",
-        "profiling",
-        ["cleaned_dataset"],
-    )
+    ctx = ProfileStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    profile = ctx.artifacts["_profile"]
 
     if _s: _s("validation", "start", "Validating profile...")
     issues = validate_profile(profile, config)
