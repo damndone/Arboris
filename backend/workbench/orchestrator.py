@@ -15,6 +15,7 @@ from .engine.context import DataHandle, ModelingContext, RunEnv
 from .engine.stages.cleaning import CleaningStage
 from .engine.stages.profile import ProfileStage
 from .engine.stages.source import SourceStage
+from .engine.stages.validation import ValidationStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -412,6 +413,11 @@ def _run_workflow(
     ctx.artifacts["_config"] = config
     ctx.artifacts["_sheet_name"] = sheet_name
     ctx.artifacts["_transpose"] = transpose
+    ctx.artifacts["_mode"] = mode
+    ctx.artifacts["_y"] = y
+    ctx.artifacts["_x"] = x
+    ctx.artifacts["_model_type"] = model_type
+    ctx.artifacts["_started_at"] = started_at
 
     ctx = SourceStage().run(ctx, env)
     # bridge: re-bind names the still-inline code below expects
@@ -431,26 +437,12 @@ def _run_workflow(
     # bridge: re-bind names the still-inline code below expects
     profile = ctx.artifacts["_profile"]
 
-    if _s: _s("validation", "start", "Validating profile...")
-    issues = validate_profile(profile, config)
-    issue_dicts = [issue.to_dict() for issue in issues]
-    write_json(run_root / "errors.json", {"issues": issue_dicts})
-    if has_blockers(issues):
-        if _s: _s("validation", "blocked", "Validation found blocker issues")
-        _write_manifest(
-            run_root,
-            run_id,
-            mode,
-            "blocked",
-            _lineage(input_files),
-            started_at=started_at,
-            y=y,
-            x=x,
-            requested_model_type=model_type,
-        )
-        _safe_flush_recorder(_recorder, context="blocked@validation")
+    ctx = ValidationStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects, short-circuit on blockers
+    issues = ctx.artifacts["_issues"]
+    issue_dicts = ctx.artifacts["_issue_dicts"]
+    if ctx.terminal_status == "blocked":
         return {"run_id": run_id, "status": "blocked"}
-    if _s: _s("validation", "complete", "Validation passed")
 
     if _s: _s("routing", "start", "Classifying dataset...")
     time_candidates = _normalized_existing(schema.time_candidates, cleaned)
