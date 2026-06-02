@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
+from ..pack import AnalysisPack, register_pack
 from ..registry import (
     ModelHandler,
-    MODEL_REGISTRY,
-    register_model,
-    set_default,
     resolve,
 )
 
@@ -111,20 +109,29 @@ def _fit_ols(ctx, env):
 
 
 # ---- core pack registration (dogfood the registry) ----
-# Both auto-default names AND explicit aliases share the same handlers.
-register_model(ModelHandler("panel_ols", "panel_ols_1", ("continuous",), _fit_panel_ols))
-register_model(ModelHandler("probit", "probit_1", ("binary",), _fit_probit))
-register_model(ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial))
-register_model(ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm))
-register_model(ModelHandler("logit", "logit_1", ("binary",), _fit_logit))
-# Explicit `poisson` and auto `poisson_rate` both route to the same handler.
-register_model(ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson))
-register_model(ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson))
-register_model(ModelHandler("ols", "ols_1", ("continuous",), _fit_ols))
-
-set_default("continuous", "ols")
-set_default("binary", "logit")
-set_default("count", "poisson_rate")
+# Built-in handlers reach MODEL_REGISTRY via the SAME AnalysisPack mechanism
+# that third-party / future packs (Panel / DID / RDD / TimeSeries / ML) use.
+# Both auto-default names AND explicit aliases share the same handlers; the
+# explicit `poisson` alias and auto `poisson_rate` both route to _fit_poisson.
+CORE_PACK = AnalysisPack(
+    pack_id="core",
+    model_handlers=[
+        ModelHandler("panel_ols", "panel_ols_1", ("continuous",), _fit_panel_ols),
+        ModelHandler("probit", "probit_1", ("binary",), _fit_probit),
+        ModelHandler("negative_binomial", "negative_binomial_1", ("count",), _fit_negative_binomial),
+        ModelHandler("glm", "glm_1", ("count", "continuous", "binary"), _fit_glm),
+        ModelHandler("logit", "logit_1", ("binary",), _fit_logit),
+        ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson),
+        ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
+        ModelHandler("ols", "ols_1", ("continuous",), _fit_ols),
+    ],
+    defaults_by_y_type={
+        "continuous": "ols",
+        "binary": "logit",
+        "count": "poisson_rate",
+    },
+)
+register_pack(CORE_PACK)
 
 
 # Prediction model types are dispatched by DiagnosticsStage as a supplementary
