@@ -42,6 +42,7 @@ import { ContextMenu } from "./ContextMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
+import { CommandPalette } from "./CommandPalette";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -162,6 +163,7 @@ function WorkbenchShell({
       <BottomPanel runId={runId} projectRoot={projectRoot} />
       <ContextMenu />
       <SearchPalette />
+      <CommandPalette />
       <RawJsonModal
         open={rawJsonOpen}
         onClose={() => setRawJsonOpen(false)}
