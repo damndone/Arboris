@@ -393,22 +393,28 @@ def test_auto_ols_path_records_both_dps_on_model_node(tmp_path: Path):
     assert "ols_default_robust_se" in dp_ids
 
 
-def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):
-    """When the primary fit raises ValueError (orchestrator.py:393-398), the
-    fallback retries OLS and clears _model_type_dp; only ols_default_robust_se
-    remains on the MODEL node."""
+def test_explicit_model_fit_failure_does_not_silently_fall_back_to_ols(tmp_path: Path):
+    """V1.5.3.2 contract change (integration plan §4.6): when an *explicit*
+    model_type fails to fit, the run is surfaced as a structured failure —
+    it must NOT silently fall back to OLS.
+
+    This supersedes the v1.5.x behavior where an explicit poisson failure
+    retried OLS and recorded a ``model:ols_1`` node. Under the merged
+    contract the explicit failure returns status="failed" with a structured
+    MODEL_FIT_FAILED issue and no OLS fallback node is created.
+    """
     from workbench.projects import create_project as cp, create_run as cr
     from workbench.config import load_config as lc
     from workbench.orchestrator import _run_workflow as rw, _lineage as li, _write_manifest as wm
+    from workbench.artifacts import read_json
 
     proot = tmp_path / "demo"
     cp(tmp_path, "demo")
     run = cr(proot, mode="auto")
     data = tmp_path / "data.csv"
-    # model_type="poisson" with continuous (non-count) y forces _map → "count",
-    # but run_poisson should reject non-integer / negative-friendly continuous
-    # values; the except block at orchestrator.py:383 catches the ValueError
-    # and retries OLS, clearing _model_type_dp.
+    # model_type="poisson" with continuous (non-count) y maps to y_type "count",
+    # but run_poisson rejects non-integer y and raises ValueError. As an explicit
+    # model request, this must surface as a structured failure (no OLS fallback).
     pd.DataFrame({
         "y": [1.5 + 0.3 * i for i in range(35)],
         "x1": list(range(35)),
@@ -419,13 +425,22 @@ def test_model_fit_failed_fallback_clears_model_type_dp(tmp_path: Path):
     wm(run.root, run.run_id, "auto", "running", li([data]),
        started_at=started_at, y="y", x=["x1"])
 
-    rw(run.root, run.run_id, [data], "auto", "y", ["x1"], config, started_at,
-       model_type="poisson")
+    result = rw(run.root, run.run_id, [data], "auto", "y", ["x1"], config,
+                started_at, model_type="poisson")
 
+    # No silent fallback: run is reported as failed.
+    assert result["status"] == "failed"
+
+    # Structured MODEL_FIT_FAILED issue is recorded with model routing context.
+    issues = read_json(run.root / "errors.json")["issues"]
+    fit_failures = [i for i in issues if i["code"] == "MODEL_FIT_FAILED"]
+    assert fit_failures, "expected a structured MODEL_FIT_FAILED issue"
+    issue = fit_failures[0]
+    assert issue["severity"] == "BLOCKER"
+    assert issue["evidence"]["requested_model_type"] == "poisson"
+    assert issue["evidence"]["step"] == "estimation"
+
+    # No OLS fallback model node was created.
     store = GraphStore(runs_root=tmp_path / "demo" / "runs")
     graph = store.read(run.run_id)
-    # OLS fallback ran. _model_type_dp was None (non-auto path). After fit failure,
-    # it stays None and only _robust_se_dp populates the MODEL DP.
-    model_node = graph.nodes["model:ols_1"]
-    assert model_node.decision_points
-    assert model_node.decision_points[0].decision_id == "ols_default_robust_se"
+    assert "model:ols_1" not in graph.nodes

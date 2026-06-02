@@ -25,6 +25,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.2", "httpx>=0.27"]
+panel = ["linearmodels>=6"]
+ml = ["scikit-learn>=1.5"]
+imbalanced = ["imbalanced-learn>=0.12"]
+imputation = ["statsmodels>=0.14"]
 
 [project.scripts]
 workbench = "workbench.cli:app"
