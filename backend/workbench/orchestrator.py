@@ -23,6 +23,7 @@ from .engine.stages.exposure import ExposureDetectionStage
 from .engine.stages.imputation import ImputationStage
 from .engine.stages.recording import RecordingStage
 from .engine.stages.diagnostics import DiagnosticsStage
+from .engine.stages.reliability import ReliabilityStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -758,40 +759,14 @@ def _run_workflow(
     # bridge: re-bind names the still-inline code below expects
     diagnostic_artifacts = ctx.artifacts["_diagnostic_artifacts"]
 
-    if _s: _s("narrative", "start", "Building claims...")
-    binary_vars = _detect_binary_vars(cleaned, normalized_x)
-    _check_binary_correlations(cleaned, binary_vars, issue_dicts, run_root)
-    _check_treatment_proxy_correlations(cleaned, normalized_x, issue_dicts, run_root)
-    suspicious_vars = _detect_suspicious_vars(normalized_x)
-    primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
-    effective_exposure_col = exposure_col if primary_type == "poisson_rate" else None
-    reliability_info = _check_rare_event(cleaned, normalized_y, primary_type, len(normalized_x), issue_dicts, run_root)
-    caveat = ""
-    if reliability_info and reliability_info.get("reliability", "").startswith("Low"):
-        caveat = "Reliability is limited due to rare events; interpret with caution"
-    claims = build_claims(
-        [result for _, result in model_results], issue_dicts,
-        binary_vars=binary_vars, suspicious_vars=suspicious_vars,
-        model_type=primary_type, reliability_caveat=caveat,
-        categorical_vars=categorical_vars,
-    )
-    if _s: _s("narrative", "complete", f"Built {len(claims)} claims")
-    _check_suspicious_dtypes(cleaned, normalized_x, issue_dicts, run_root)
-    _check_categorical_candidates(
-        cleaned,
-        issue_dicts,
-        run_root,
-        encoded_categorical_vars=categorical_vars,
-    )
-    if routing["kind"] == "panel" and primary_type not in ("fixed_effects", "panel_ols"):
-        issue_dicts.append(GuardrailIssue(
-            Severity.INFO,
-            "PANEL_POOLED_MODEL",
-            f"Dataset detected as panel-like, but this run used a pooled {primary_type} model "
-            f"without fixed effects or clustered standard errors.",
-            {"kind": routing["kind"], "model_type": primary_type},
-        ).to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
+    ctx = ReliabilityStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    primary_type = ctx.primary_type
+    reliability_info = ctx.artifacts["_reliability_info"]
+    caveat = ctx.artifacts["_caveat"]
+    claims = ctx.artifacts["_claims"]
+    effective_exposure_col = ctx.artifacts["_effective_exposure_col"]
+
     descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
     model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)", "panel_ols": "Panel OLS"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
