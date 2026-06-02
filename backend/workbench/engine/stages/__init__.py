@@ -12,6 +12,7 @@ from .profile import ProfileStage
 from .validation import ValidationStage
 from .routing import RoutingStage
 from .ytype import YTypeStage
+from .pre_estimation_checks import PreEstimationChecksStage
 from .roles import RoleInferenceStage
 from .exposure import ExposureDetectionStage
 from .imputation import ImputationStage
@@ -29,6 +30,7 @@ PIPELINE: list[Stage] = [
     ValidationStage(),
     RoutingStage(),
     YTypeStage(),
+    PreEstimationChecksStage(),
     RoleInferenceStage(),
     ExposureDetectionStage(),
     ImputationStage(),

@@ -18,6 +18,7 @@ from .engine.stages.routing import RoutingStage
 from .engine.stages.source import SourceStage
 from .engine.stages.validation import ValidationStage
 from .engine.stages.ytype import YTypeStage
+from .engine.stages.pre_estimation_checks import PreEstimationChecksStage
 from .engine.stages.roles import RoleInferenceStage
 from .engine.stages.exposure import ExposureDetectionStage
 from .engine.stages.imputation import ImputationStage
@@ -470,60 +471,14 @@ def _run_workflow(
     glm_family = ctx.artifacts["_glm_family"]
     _model_type_dp = ctx.artifacts["_model_type_dp"]
 
-    if _s: _s("model_check", "start", "Checking model columns...")
-    model_issue = _model_column_issue(cleaned, normalized_y, normalized_x, y, x)
-    if model_issue is not None:
-        issue_dicts.append(model_issue.to_dict())
-        write_json(run_root / "errors.json", {"issues": issue_dicts})
-        if _s: _s("model_check", "blocked", "Requested model columns not found")
-        _write_manifest(
-            run_root,
-            run_id,
-            mode,
-            "blocked",
-            _lineage(input_files),
-            started_at=started_at,
-            y=y,
-            x=x,
-            requested_model_type=model_type,
-        )
-        _safe_flush_recorder(_recorder, context="blocked@model_check")
+    ctx = PreEstimationChecksStage().run(ctx, env)
+    if ctx.terminal_status == "blocked":
         return {"run_id": run_id, "status": "blocked"}
-    if _s: _s("model_check", "complete", "Model columns valid")
-
-    coercion_actions = _coerce_x_columns_to_numeric(cleaned, normalized_x, run_root)
-
-    _coerce_dps: dict[str, Any] = {}
-    for action in [*actions, *coercion_actions]:
-        if action.get("action") != "coerce_to_numeric" and "conversion_rate" not in action:
-            continue
-        col = action.get("column")
-        if not col:
-            continue
-        if col not in normalized_x:
-            continue
-        _coerce_dps[col] = dpf.auto_coerce_to_numeric(
-            variable=col,
-            conversion_rate=action["conversion_rate"],
-        )
-
-    # Detect categorical X variables for C() encoding in model formula
-    categorical_vars = _detect_categorical_x_vars(cleaned, normalized_x)
-
-    _categorical_dummy_dps: dict[str, Any] = {}
-    for cat_var in categorical_vars:
-        if cat_var in cleaned.columns:
-            uniques = cleaned[cat_var].dropna().unique()
-            # Mixed-dtype object columns can't be sorted directly (TypeError);
-            # coerce to str for the audit-trail reference level.
-            ref = sorted(map(str, uniques))[0] if len(uniques) else "?"
-        else:
-            ref = "?"
-        _categorical_dummy_dps[cat_var] = dpf.categorical_auto_dummy(
-            variable=cat_var,
-            n_unique=int(cleaned[cat_var].nunique()) if cat_var in cleaned.columns else 0,
-            reference_level=str(ref),
-        )
+    # bridge: re-bind names the still-inline code below expects
+    coercion_actions = ctx.artifacts["_coercion_actions"]
+    _coerce_dps = ctx.artifacts["_coerce_dps"]
+    categorical_vars = ctx.artifacts["_categorical_vars"]
+    _categorical_dummy_dps = ctx.artifacts["_categorical_dummy_dps"]
 
     ctx = RoleInferenceStage().run(ctx, env)
     # bridge: re-bind names the still-inline code below expects
