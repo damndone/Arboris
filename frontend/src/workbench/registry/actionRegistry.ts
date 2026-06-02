@@ -43,11 +43,27 @@ export interface ActionDispatch {
   focusUpstream(nodeKey: string): void;
 }
 
+/** F6: structured keybinding, matched against a KeyboardEvent. Kept
+ *  separate from the display-only `shortcut` string so the matcher
+ *  never has to parse "⌘⇧C". `key` is compared case-insensitively
+ *  against KeyboardEvent.key. Modifiers default to false; `meta`
+ *  matches ⌘ (mac) OR Ctrl so bindings are cross-platform. */
+export interface ShortcutKeys {
+  key: string;
+  meta?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+}
+
 export interface ActionEntry extends RegistryEntry<ActionContext> {
   /** Human label. */
   label: string;
-  /** Optional shortcut hint, display only. */
+  /** Optional shortcut hint, display only (e.g. "⌘⇧C"). */
   shortcut?: string;
+  /** F6: structured keybinding for the global dispatcher. An action
+   *  is keyboard-triggerable iff it has `keys` AND lists the
+   *  "shortcut" surface. */
+  keys?: ShortcutKeys;
   /** Surfaces this action appears in. Registered once, rendered N times. */
   surfaces: ActionSurface[];
   /** Optional icon next to label. */
@@ -100,7 +116,13 @@ export const actionRegistry: ActionEntry[] = [
     id: "copyNodeId",
     order: 30,
     label: "Copy node ID",
-    surfaces: ["graph-context-menu", "drawer-header-menu"],
+    // F6: first action wired to the global shortcut dispatcher. ⌘⇧C
+    // avoids the taken ⌘J (raw JSON) / ⌘K (search) / Escape bindings.
+    // Other actions stay keyboard-less until the keymap is reviewed
+    // (handoff A.5 #3) — adding `keys` here proves the mechanism.
+    shortcut: "⌘⇧C",
+    keys: { key: "c", meta: true, shift: true },
+    surfaces: ["graph-context-menu", "drawer-header-menu", "shortcut"],
     shouldRender: () => true,
     invoke: (ctx) => copyToClipboard(ctx.node.nodeKey),
   },
@@ -213,4 +235,54 @@ export function actionsForSurface(
     .filter((e) => e.surfaces.includes(surface))
     .filter((e) => e.shouldRender(ctx))
     .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * F6: does a keyboard event match this binding? `meta` matches ⌘ OR
+ * Ctrl (cross-platform). Unspecified modifiers must be absent, so
+ * ⌘⇧C does NOT fire on plain ⌘C. Key compare is case-insensitive.
+ */
+export function matchesKeys(
+  keys: ShortcutKeys,
+  e: {
+    key: string;
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+    altKey: boolean;
+  },
+): boolean {
+  if (e.key.toLowerCase() !== keys.key.toLowerCase()) return false;
+  const wantMeta = keys.meta ?? false;
+  const hasMeta = e.metaKey || e.ctrlKey;
+  if (hasMeta !== wantMeta) return false;
+  if ((keys.shift ?? false) !== e.shiftKey) return false;
+  if ((keys.alt ?? false) !== e.altKey) return false;
+  return true;
+}
+
+/**
+ * F6: find the keyboard-triggerable action matching an event. Only
+ * entries that list the "shortcut" surface AND have `keys` are
+ * considered. Disabled / non-rendering actions are skipped so a
+ * bound key silently no-ops when its action isn't available.
+ * Returns the first match by `order`, or null.
+ */
+export function actionForShortcut(
+  e: {
+    key: string;
+    metaKey: boolean;
+    ctrlKey: boolean;
+    shiftKey: boolean;
+    altKey: boolean;
+  },
+  ctx: ActionContext,
+): ActionEntry | null {
+  const match = actionRegistry
+    .filter((a) => a.surfaces.includes("shortcut") && a.keys)
+    .filter((a) => a.shouldRender(ctx))
+    .filter((a) => !a.disabled?.(ctx))
+    .sort((a, b) => a.order - b.order)
+    .find((a) => matchesKeys(a.keys!, e));
+  return match ?? null;
 }

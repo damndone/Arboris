@@ -39,6 +39,7 @@ import { LineageBridge } from "./LineageBridge";
 import { WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
 import { ContextMenu } from "./ContextMenu";
+import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 
@@ -124,6 +125,10 @@ function WorkbenchShell({
       /* SearchPalette owns its own ⌘K listener (V1.5.2 P7) */
     },
   });
+
+  // F6: global action-registry shortcut dispatcher (e.g. ⌘⇧C copy id).
+  // Reuses F4's editable-target guard; acts on the selected node.
+  useGlobalShortcuts();
 
   return (
     <div

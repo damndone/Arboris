@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   actionRegistry,
   actionsForSurface,
+  actionForShortcut,
+  matchesKeys,
   type ActionContext,
   type ActionDispatch,
 } from "./actionRegistry";
@@ -177,5 +179,60 @@ describe("invoke handlers", () => {
     actionRegistry.find((a) => a.id === "focusUpstream")!.invoke(c);
     expect(d.pinUpstream).toHaveBeenCalledWith("n1");
     expect(d.focusUpstream).toHaveBeenCalledWith("n1");
+  });
+});
+
+describe("F6 — shortcut matching", () => {
+  const ev = (o: Partial<KeyboardEvent>) => ({
+    key: "c",
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    ...o,
+  });
+
+  it("matchesKeys: ⌘⇧C fires on meta+shift+c (and ctrl+shift+c)", () => {
+    const keys = { key: "c", meta: true, shift: true };
+    expect(matchesKeys(keys, ev({ metaKey: true, shiftKey: true }))).toBe(true);
+    expect(matchesKeys(keys, ev({ ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
+  it("matchesKeys: does NOT fire on plain ⌘C (missing shift)", () => {
+    const keys = { key: "c", meta: true, shift: true };
+    expect(matchesKeys(keys, ev({ metaKey: true }))).toBe(false);
+  });
+
+  it("matchesKeys: does NOT fire when an extra modifier is held", () => {
+    const keys = { key: "c", meta: true, shift: true };
+    expect(
+      matchesKeys(keys, ev({ metaKey: true, shiftKey: true, altKey: true })),
+    ).toBe(false);
+  });
+
+  it("matchesKeys: key compare is case-insensitive", () => {
+    const keys = { key: "c", meta: true, shift: true };
+    expect(matchesKeys(keys, ev({ key: "C", metaKey: true, shiftKey: true }))).toBe(
+      true,
+    );
+  });
+
+  it("actionForShortcut: ⌘⇧C resolves to copyNodeId", () => {
+    const a = actionForShortcut(
+      ev({ metaKey: true, shiftKey: true }),
+      ctx(),
+    );
+    expect(a?.id).toBe("copyNodeId");
+  });
+
+  it("actionForShortcut: unbound combo resolves to null", () => {
+    const a = actionForShortcut(ev({ key: "x", metaKey: true }), ctx());
+    expect(a).toBeNull();
+  });
+
+  it("copyNodeId declares the shortcut surface + structured keys", () => {
+    const a = actionRegistry.find((x) => x.id === "copyNodeId")!;
+    expect(a.surfaces).toContain("shortcut");
+    expect(a.keys).toEqual({ key: "c", meta: true, shift: true });
   });
 });
