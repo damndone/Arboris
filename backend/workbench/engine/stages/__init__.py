@@ -15,6 +15,7 @@ from .ytype import YTypeStage
 from .roles import RoleInferenceStage
 from .exposure import ExposureDetectionStage
 from .imputation import ImputationStage
+from .recording import RecordingStage
 
 # Stages are appended in pipeline order as each is extracted.
 PIPELINE: list[Stage] = [
@@ -27,4 +28,5 @@ PIPELINE: list[Stage] = [
     RoleInferenceStage(),
     ExposureDetectionStage(),
     ImputationStage(),
+    RecordingStage(),
 ]
