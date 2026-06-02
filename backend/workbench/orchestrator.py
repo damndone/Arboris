@@ -19,6 +19,7 @@ from .engine.stages.source import SourceStage
 from .engine.stages.validation import ValidationStage
 from .engine.stages.ytype import YTypeStage
 from .engine.stages.roles import RoleInferenceStage
+from .engine.stages.exposure import ExposureDetectionStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -522,12 +523,9 @@ def _run_workflow(
     # bridge: re-bind names the still-inline code below expects
     variable_roles = ctx.roles
 
-    # Detect exposure variable early for count models (needed before statistical tests and VIF)
-    exposure_col = None
-    if y_type == "count":
-        exposure_candidates = _detect_exposure_candidates(normalized_x)
-        if exposure_candidates:
-            exposure_col = _select_valid_exposure_col(cleaned, exposure_candidates)
+    ctx = ExposureDetectionStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    exposure_col = ctx.exposure_col
 
     if _s:
         _s("statistical_tests", "start", "Running statistical tests...")
