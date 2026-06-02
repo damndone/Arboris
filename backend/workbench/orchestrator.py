@@ -21,6 +21,7 @@ from .engine.stages.ytype import YTypeStage
 from .engine.stages.pre_estimation_checks import PreEstimationChecksStage
 from .engine.stages.roles import RoleInferenceStage
 from .engine.stages.exposure import ExposureDetectionStage
+from .engine.stages.statistical_tests import StatisticalTestsStage
 from .engine.stages.imputation import ImputationStage
 from .engine.stages.estimation import EstimationStage
 from .engine.stages.recording import RecordingStage
@@ -488,17 +489,10 @@ def _run_workflow(
     # bridge: re-bind names the still-inline code below expects
     exposure_col = ctx.exposure_col
 
-    if _s:
-        _s("statistical_tests", "start", "Running statistical tests...")
-    stat_analysis_columns = [normalized_y] + [v for v in normalized_x if v != (exposure_col or "")]
-    statistical_tests = run_statistical_tests(
-        cleaned,
-        analysis_columns=stat_analysis_columns,
-    )
-    write_statistical_test_artifacts(run_root, statistical_tests)
-    statistical_test_summaries = summarize_statistical_tests(statistical_tests, y=normalized_y)
-    if _s:
-        _s("statistical_tests", "complete", "Statistical tests completed")
+    ctx = StatisticalTestsStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    statistical_tests = ctx.artifacts["_statistical_tests"]
+    statistical_test_summaries = ctx.artifacts["_statistical_test_summaries"]
 
     ctx = ImputationStage().run(ctx, env)
     # bridge: re-bind names the still-inline code below expects. modeling_frame

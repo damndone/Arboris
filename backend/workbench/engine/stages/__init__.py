@@ -15,6 +15,7 @@ from .ytype import YTypeStage
 from .pre_estimation_checks import PreEstimationChecksStage
 from .roles import RoleInferenceStage
 from .exposure import ExposureDetectionStage
+from .statistical_tests import StatisticalTestsStage
 from .imputation import ImputationStage
 from .estimation import EstimationStage
 from .recording import RecordingStage
@@ -33,6 +34,7 @@ PIPELINE: list[Stage] = [
     PreEstimationChecksStage(),
     RoleInferenceStage(),
     ExposureDetectionStage(),
+    StatisticalTestsStage(),
     ImputationStage(),
     EstimationStage(),
     RecordingStage(),
