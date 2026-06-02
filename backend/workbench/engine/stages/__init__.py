@@ -12,6 +12,7 @@ from .profile import ProfileStage
 from .validation import ValidationStage
 from .routing import RoutingStage
 from .ytype import YTypeStage
+from .roles import RoleInferenceStage
 
 # Stages are appended in pipeline order as each is extracted.
 PIPELINE: list[Stage] = [
@@ -21,4 +22,5 @@ PIPELINE: list[Stage] = [
     ValidationStage(),
     RoutingStage(),
     YTypeStage(),
+    RoleInferenceStage(),
 ]

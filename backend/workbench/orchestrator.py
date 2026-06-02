@@ -18,6 +18,7 @@ from .engine.stages.routing import RoutingStage
 from .engine.stages.source import SourceStage
 from .engine.stages.validation import ValidationStage
 from .engine.stages.ytype import YTypeStage
+from .engine.stages.roles import RoleInferenceStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -517,7 +518,9 @@ def _run_workflow(
             reference_level=str(ref),
         )
 
-    variable_roles = infer_variable_roles(cleaned, normalized_x, y_type=y_type)
+    ctx = RoleInferenceStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    variable_roles = ctx.roles
 
     # Detect exposure variable early for count models (needed before statistical tests and VIF)
     exposure_col = None
