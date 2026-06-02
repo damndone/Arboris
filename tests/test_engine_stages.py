@@ -69,3 +69,37 @@ def test_source_stage_populates_frame_and_schema(tmp_path: Path):
     assert ctx.data.artifact_id == "raw"
     assert ctx.artifacts["_schema"] is not None
     assert "_frames" in ctx.artifacts
+
+
+def test_imputation_stage_baseline_is_noop_when_not_mice(tmp_path: Path):
+    """Without MICE the working handle stays the cleaned handle — the modeling
+    frame keeps its cleaned_dataset lineage id and cannot drift."""
+    from workbench.config import load_config
+    from workbench.engine.stages.imputation import ImputationStage
+
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, "auto")
+    run_root = run.root
+
+    config = load_config(project.root / "config.yml")
+    assert config.imputation_method != "mice"  # default config
+
+    store = GraphStore(runs_root=run_root.parent)
+    recorder = GraphRecorder(run_id=run.run_id, store=store)
+    env = RunEnv(run_root=run_root, run_id=run.run_id, recorder=recorder, on_step=None)
+
+    cleaned = pd.DataFrame({"y": [1, 2, 3], "x": [0, 1, 2]})
+    ctx = ModelingContext(
+        data=DataHandle.of(cleaned, artifact_id="cleaned_dataset", provenance=("raw_demo.csv",)),
+        y_col="y",
+        x_cols=["x"],
+    )
+    ctx.artifacts["_config"] = config
+    ctx.artifacts["_normalized_y"] = "y"
+    ctx.artifacts["_normalized_x"] = ["x"]
+
+    ctx = ImputationStage().run(ctx, env)
+
+    assert ctx.data.artifact_id == "cleaned_dataset"
+    assert ctx.data.frame is cleaned
+    assert ctx.artifacts["_imputation_summary"] is None

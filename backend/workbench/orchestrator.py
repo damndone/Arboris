@@ -20,6 +20,7 @@ from .engine.stages.validation import ValidationStage
 from .engine.stages.ytype import YTypeStage
 from .engine.stages.roles import RoleInferenceStage
 from .engine.stages.exposure import ExposureDetectionStage
+from .engine.stages.imputation import ImputationStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -539,22 +540,15 @@ def _run_workflow(
     if _s:
         _s("statistical_tests", "complete", "Statistical tests completed")
 
-    modeling_frame = cleaned
-    model_input_ids = ["cleaned_dataset"]
-    imputation_summary: dict[str, Any] | None = None
-    if config.imputation_method == "mice":
-        imputation_summary = run_mice_imputation(
-            cleaned,
-            run_root,
-            [normalized_y, *normalized_x],
-            m=config.imputation_m,
-            max_iter=config.imputation_max_iter,
-            random_seed=config.random_seed,
-            max_missing_rate=config.max_missing_rate,
-        )
-        if imputation_summary.get("status") == "completed":
-            modeling_frame = pd.read_parquet(run_root / "processed" / "imputed_dataset.parquet")
-            model_input_ids = ["imputed_dataset"]
+    ctx = ImputationStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects. modeling_frame
+    # and model_input_ids now come from the SINGLE working handle, so the data
+    # the model is fit on and its lineage id cannot drift. Do NOT re-bind
+    # `cleaned` here — it must keep pointing at the cleaned frame already used by
+    # the statistical tests above.
+    modeling_frame = ctx.data.frame
+    model_input_ids = [ctx.data.artifact_id]
+    imputation_summary = ctx.artifacts["_imputation_summary"]
 
     model_results: list[tuple[str, dict[str, Any]]] = []
     fitted_models: dict[str, Any] = {}
