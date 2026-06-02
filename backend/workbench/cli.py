@@ -127,10 +127,18 @@ def run(
         help="Regressor column. Repeat for multiple columns.",
     ),
     mode: str = typer.Option("auto", "--mode"),
+    model_type: str = typer.Option("auto", "--model-type"),
 ) -> None:
     from .orchestrator import run_workflow
 
-    result = run_workflow(project_root, [data_file], mode=mode, y=y, x=x)
+    result = run_workflow(
+        project_root,
+        [data_file],
+        mode=mode,
+        y=y,
+        x=x,
+        model_type=model_type,
+    )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing
     # `RUN_ID=$(workbench run ...)` shell contract.

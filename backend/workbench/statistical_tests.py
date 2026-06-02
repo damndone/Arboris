@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
 from .artifacts import register_artifact, write_json
 
@@ -14,9 +15,12 @@ CATEGORY_MAX_UNIQUE = 20
 
 TEST_FAMILIES = {
     "correlations": "correlations.json",
+    "rank_correlations": "rank_correlations.json",
     "t_tests": "t_tests.json",
     "anova": "anova.json",
+    "nonparametric": "nonparametric.json",
     "chi_square": "chi_square.json",
+    "fisher_exact": "fisher_exact.json",
 }
 
 
@@ -42,6 +46,8 @@ def run_statistical_tests(
         row = _pearson(frame, left, right)
         if row is not None:
             results["correlations"]["results"].append(row)
+        for rank_row in _rank_correlations(frame, left, right):
+            results["rank_correlations"]["results"].append(rank_row)
 
     for outcome in numeric:
         for group in binary:
@@ -50,6 +56,9 @@ def run_statistical_tests(
             row = _welch_t_test(frame, outcome, group)
             if row is not None:
                 results["t_tests"]["results"].append(row)
+            row = _mann_whitney_u(frame, outcome, group)
+            if row is not None:
+                results["nonparametric"]["results"].append(row)
 
     for outcome in numeric:
         for group in multi:
@@ -58,12 +67,19 @@ def run_statistical_tests(
             row = _anova(frame, outcome, group)
             if row is not None:
                 results["anova"]["results"].append(row)
+            row = _kruskal_wallis(frame, outcome, group)
+            if row is not None:
+                results["nonparametric"]["results"].append(row)
 
     for left, right in combinations(categorical, 2):
         row = _chi_square(frame, left, right)
         if row is not None:
             results["chi_square"]["results"].append(row)
+        row = _fisher_exact(frame, left, right)
+        if row is not None:
+            results["fisher_exact"]["results"].append(row)
 
+    _apply_multiple_testing_correction(results)
     return results
 
 
@@ -95,7 +111,7 @@ def summarize_statistical_tests(
 ) -> dict[str, list[dict[str, Any]]]:
     y_related: list[dict[str, Any]] = []
     other: list[dict[str, Any]] = []
-    for family in ("correlations", "t_tests", "anova", "chi_square"):
+    for family in TEST_FAMILIES:
         for row in results.get(family, {}).get("results", []):
             summary = _summary_row(row)
             if y and _involves_variable(row, y):
@@ -176,6 +192,36 @@ def _pearson(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | Non
     }
 
 
+def _rank_correlations(frame: pd.DataFrame, left: str, right: str) -> list[dict[str, Any]]:
+    pair = _pairwise(frame, [left, right])
+    if len(pair) < 3:
+        return []
+    rows: list[dict[str, Any]] = []
+    statistic, p_value = stats.spearmanr(pair[left], pair[right])
+    rows.append({
+        "test_id": f"spearman_correlation:{left}:{right}",
+        "test_type": "spearman_correlation",
+        "variables": [left, right],
+        "nobs": int(len(pair)),
+        "statistic": _safe_float(statistic),
+        "p_value": _safe_float(p_value),
+        "effect": {"rho": _safe_float(statistic)},
+        "source_id": f"statistical_tests.rank_correlations.spearman.{left}.{right}",
+    })
+    statistic, p_value = stats.kendalltau(pair[left], pair[right])
+    rows.append({
+        "test_id": f"kendall_correlation:{left}:{right}",
+        "test_type": "kendall_correlation",
+        "variables": [left, right],
+        "nobs": int(len(pair)),
+        "statistic": _safe_float(statistic),
+        "p_value": _safe_float(p_value),
+        "effect": {"tau": _safe_float(statistic)},
+        "source_id": f"statistical_tests.rank_correlations.kendall.{left}.{right}",
+    })
+    return rows
+
+
 def _welch_t_test(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, Any] | None:
     pair = _pairwise(frame, [outcome, group])
     group_series = _as_series(pair, group)
@@ -206,6 +252,39 @@ def _welch_t_test(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, An
             "difference": mean_right - mean_left,
         },
         "source_id": f"statistical_tests.t_tests.{outcome}.{group}",
+    }
+
+
+def _mann_whitney_u(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, Any] | None:
+    pair = _pairwise(frame, [outcome, group])
+    group_series = _as_series(pair, group)
+    if group_series is None:
+        return None
+    group_values = sorted(group_series.dropna().unique().tolist(), key=str)
+    if len(group_values) != 2:
+        return None
+    left = pd.to_numeric(pair.loc[group_series == group_values[0], outcome], errors="coerce").dropna()
+    right = pd.to_numeric(pair.loc[group_series == group_values[1], outcome], errors="coerce").dropna()
+    if len(left) < 2 or len(right) < 2:
+        return None
+    statistic, p_value = stats.mannwhitneyu(left, right, alternative="two-sided")
+    median_left = float(left.median())
+    median_right = float(right.median())
+    return {
+        "test_id": f"mann_whitney_u:{outcome}:{group}",
+        "test_type": "mann_whitney_u",
+        "outcome": outcome,
+        "group": group,
+        "groups": [str(group_values[0]), str(group_values[1])],
+        "nobs": int(len(left) + len(right)),
+        "statistic": _safe_float(statistic),
+        "p_value": _safe_float(p_value),
+        "effect": {
+            f"median_{group_values[0]}": median_left,
+            f"median_{group_values[1]}": median_right,
+            "median_difference": median_right - median_left,
+        },
+        "source_id": f"statistical_tests.nonparametric.mann_whitney_u.{outcome}.{group}",
     }
 
 
@@ -243,6 +322,39 @@ def _anova(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, Any] | No
     }
 
 
+def _kruskal_wallis(frame: pd.DataFrame, outcome: str, group: str) -> dict[str, Any] | None:
+    pair = _pairwise(frame, [outcome, group])
+    group_series = _as_series(pair, group)
+    if group_series is None:
+        return None
+    group_values = sorted(group_series.dropna().unique().tolist(), key=str)
+    samples = [
+        pd.to_numeric(pair.loc[group_series == value, outcome], errors="coerce").dropna()
+        for value in group_values
+    ]
+    if len(samples) < 2 or any(len(sample) < 2 for sample in samples):
+        return None
+    statistic, p_value = stats.kruskal(*samples)
+    group_medians = {
+        str(value): float(pd.to_numeric(
+            pair.loc[group_series == value, outcome], errors="coerce"
+        ).median())
+        for value in group_values
+    }
+    return {
+        "test_id": f"kruskal_wallis:{outcome}:{group}",
+        "test_type": "kruskal_wallis",
+        "outcome": outcome,
+        "group": group,
+        "groups": [str(value) for value in group_values],
+        "nobs": int(sum(len(sample) for sample in samples)),
+        "statistic": _safe_float(statistic),
+        "p_value": _safe_float(p_value),
+        "effect": {"group_medians": group_medians},
+        "source_id": f"statistical_tests.nonparametric.kruskal_wallis.{outcome}.{group}",
+    }
+
+
 def _chi_square(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | None:
     pair = _pairwise(frame, [left, right])
     if len(pair) < 2:
@@ -269,12 +381,62 @@ def _chi_square(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | 
     }
 
 
+def _fisher_exact(frame: pd.DataFrame, left: str, right: str) -> dict[str, Any] | None:
+    pair = _pairwise(frame, [left, right])
+    if len(pair) < 2:
+        return None
+    table = pd.crosstab(pair[left], pair[right])
+    if table.shape != (2, 2):
+        return None
+    statistic, p_value = stats.fisher_exact(table)
+    return {
+        "test_id": f"fisher_exact:{left}:{right}",
+        "test_type": "fisher_exact",
+        "variables": [left, right],
+        "nobs": int(table.to_numpy().sum()),
+        "statistic": _safe_float(statistic),
+        "p_value": _safe_float(p_value),
+        "effect": {
+            "odds_ratio": _safe_float(statistic),
+            "contingency_table": {
+                str(index): {str(column): int(value) for column, value in row.items()}
+                for index, row in table.to_dict(orient="index").items()
+            },
+        },
+        "source_id": f"statistical_tests.fisher_exact.{left}.{right}",
+    }
+
+
+def _apply_multiple_testing_correction(results: dict[str, dict[str, Any]]) -> None:
+    rows: list[dict[str, Any]] = []
+    p_values: list[float] = []
+    for family in results.values():
+        for row in family.get("results", []):
+            p_value = _safe_float(row.get("p_value"))
+            if p_value is None:
+                continue
+            rows.append(row)
+            p_values.append(p_value)
+    if not p_values:
+        return
+    _rejected, corrected, _alpha_sidak, _alpha_bonf = multipletests(
+        p_values,
+        method="fdr_bh",
+    )
+    for row, p_value_corrected in zip(rows, corrected, strict=True):
+        row["p_value_corrected"] = _safe_float(p_value_corrected)
+        row["correction_method"] = "fdr_bh"
+
+
 def _involves_variable(row: dict[str, Any], var: str) -> bool:
     variables = row.get("variables", [])
     if isinstance(variables, list) and var in variables:
         return True
     outcome = row.get("outcome")
     if outcome == var:
+        return True
+    group = row.get("group")
+    if group == var:
         return True
     return False
 
@@ -300,10 +462,20 @@ def _summary_row(row: dict[str, Any]) -> dict[str, Any]:
     test_type = row.get("test_type")
     if test_type == "pearson_correlation":
         label = f"Pearson correlation: {row['variables'][0]} vs {row['variables'][1]}"
+    elif test_type == "spearman_correlation":
+        label = f"Spearman correlation: {row['variables'][0]} vs {row['variables'][1]}"
+    elif test_type == "kendall_correlation":
+        label = f"Kendall correlation: {row['variables'][0]} vs {row['variables'][1]}"
     elif test_type == "welch_t_test":
         label = f"Welch t-test: {row['outcome']} by {row['group']}"
     elif test_type == "one_way_anova":
         label = f"ANOVA: {row['outcome']} by {row['group']}"
+    elif test_type == "mann_whitney_u":
+        label = f"Mann-Whitney U: {row['outcome']} by {row['group']}"
+    elif test_type == "kruskal_wallis":
+        label = f"Kruskal-Wallis: {row['outcome']} by {row['group']}"
+    elif test_type == "fisher_exact":
+        label = f"Fisher exact: {row['variables'][0]} vs {row['variables'][1]}"
     else:
         label = f"Chi-square: {row['variables'][0]} vs {row['variables'][1]}"
     return {

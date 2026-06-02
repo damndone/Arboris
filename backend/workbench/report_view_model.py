@@ -132,11 +132,26 @@ def _build_facts_list(summary: dict[str, Any]) -> list[str]:
         f"Rows used: {mi.get('n_observations', 0)} · Columns: {pp.get('column_count_after_encoding', mi.get('n_predictors_after_encoding', 0) + 1)}",
         f"Dataset kind: {mi.get('dataset_kind', 'unknown')}",
     ])
+    imputation = pp.get("imputation", {})
+    if isinstance(imputation, dict) and imputation.get("method") == "mice" and imputation.get("status") == "completed":
+        facts.append(_mice_imputation_fact(imputation))
     encoded = pp.get("categorical_encoded", [])
     if encoded:
         names = ", ".join(e["variable"] for e in encoded)
         facts.append(f"Categorical variable(s): {names} (dummy-coded in model)")
     return facts
+
+
+def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
+    columns = imputation.get("imputed_columns", [])
+    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
+    persisted = imputation.get("persisted_datasets", 0)
+    persisted_text = "one" if persisted == 1 else str(persisted)
+    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    return (
+        f"MICE imputation: {persisted_text} persisted imputed dataset; "
+        f"imputed columns: {columns_text}; pooled estimates {pooled}."
+    )
 
 
 def _format_estimate(estimate: Any) -> str:

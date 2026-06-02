@@ -15,18 +15,25 @@ from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
 from . import graph_decision_factory as dpf
+from .econometrics.optional_deps import OptionalDependencyNotInstalled
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
+    run_glm,
     run_logit,
+    run_negative_binomial,
     run_ols,
+    run_panel_ols,
     run_poisson,
+    run_probit,
     run_time_series_diagnostics,
 )
 from .exports import export_pdf, export_xlsx
 from .ingestion import ingest_files
+from .imputation import run_mice_imputation
 from .metadata import infer_schema
 from .narrative import build_claims
 from .profiling import profile_frame
+from .prediction import run_prediction_model
 from .projects import create_run
 from .reporting import render_html_report
 from .router import classify_dataset, detect_y_kind
@@ -54,6 +61,103 @@ from .visualization import create_figures
 # ============================================================
 
 
+class WorkflowValidationError(ValueError):
+    """Structured validation error with error code and evidence context.
+
+    Raised when a workflow cannot proceed due to a known, diagnosable
+    configuration or input issue (unsupported model, bad GLM family,
+    etc.).  The error code and evidence are used to write a structured
+    ``errors.json`` entry so the failure is machine-readable, not a
+    generic ``WORKFLOW_FAILED``.
+    """
+
+    def __init__(
+        self,
+        error_code: str,
+        message: str,
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.evidence = evidence or {}
+
+
+# ---------------------------------------------------------------------------
+# Per-model-type metadata used to build structured failure details.
+# ---------------------------------------------------------------------------
+_MODEL_METADATA: dict[str, dict[str, str]] = {
+    "ols":               {"model_id": "ols_1",               "engine": "statsmodels"},
+    "logit":             {"model_id": "logit_1",             "engine": "statsmodels"},
+    "probit":            {"model_id": "probit_1",            "engine": "statsmodels"},
+    "poisson":           {"model_id": "poisson_1",           "engine": "statsmodels"},
+    "negative_binomial": {"model_id": "negative_binomial_1", "engine": "statsmodels"},
+    "panel_ols":         {"model_id": "panel_ols_1",         "engine": "linearmodels"},
+    "prediction_lasso":          {"model_id": "prediction_lasso_1",          "engine": "scikit-learn"},
+    "prediction_ridge":          {"model_id": "prediction_ridge_1",          "engine": "scikit-learn"},
+    "prediction_random_forest":  {"model_id": "prediction_random_forest_1",  "engine": "scikit-learn"},
+}
+
+# Map auto-detected y_type back to the model type actually attempted,
+# so that failure evidence names the correct model (e.g. "logit",
+# not "binary").
+_Y_TYPE_TO_ATTEMPTED_MODEL: dict[str, str] = {
+    "binary": "logit",
+    "count": "poisson",
+    "continuous": "ols",
+}
+
+# Maximum length of root_cause string in failure evidence to avoid
+# leaking verbose stack traces into errors.json.
+_ROOT_CAUSE_MAX_LENGTH = 300
+
+
+def _model_id_for_type(model_type: str) -> str:
+    """Return the canonical model_id for a given model_type string."""
+    meta = _MODEL_METADATA.get(model_type)
+    if meta is not None:
+        return meta["model_id"]
+    if model_type.startswith("glm:"):
+        return "glm_1"
+    return f"{model_type}_1"
+
+
+def _engine_for_type(model_type: str) -> str:
+    """Return the engine string for a given model_type."""
+    meta = _MODEL_METADATA.get(model_type)
+    if meta is not None:
+        return meta["engine"]
+    if model_type.startswith("glm:"):
+        return "statsmodels"
+    return "unknown"
+
+
+def _model_failure_details(
+    *,
+    model_type: str,
+    y: str,
+    x: list[str],
+    root_cause: str,
+    step: str = "estimation",
+) -> dict[str, Any]:
+    """Build a consistent evidence dict for model-failure issues.
+
+    Every ``MODEL_FIT_FAILED``, ``UNSUPPORTED_MODEL_TYPE``, etc. issue
+    must include at least ``model_type``, ``model_id``, ``engine``,
+    ``step``, ``y``, ``x``, and ``root_cause`` so that downstream
+    consumers (diagnostic summary, report view-model) can render the
+    failure without guessing context.
+    """
+    return {
+        "model_type": model_type,
+        "model_id": _model_id_for_type(model_type),
+        "engine": _engine_for_type(model_type),
+        "step": step,
+        "y": y,
+        "x": list(x),
+        "root_cause": root_cause[:_ROOT_CAUSE_MAX_LENGTH],
+    }
+
+
 def run_workflow(
     project_root: Path,
     input_files: list[Path],
@@ -61,6 +165,7 @@ def run_workflow(
     mode: str,
     y: str,
     x: list[str],
+    model_type: str = "auto",
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -75,7 +180,7 @@ def run_workflow(
         started_at=started_at,
         y=y,
         x=x,
-        requested_model_type="auto",
+        requested_model_type=model_type,
     )
 
     try:
@@ -88,7 +193,70 @@ def run_workflow(
             x,
             config,
             started_at,
+            model_type=model_type,
         )
+    except OptionalDependencyNotInstalled as exc:
+        details = exc.to_issue_details()
+        issue = GuardrailIssue(
+            Severity.BLOCKER,
+            details["error_code"],
+            details["message"],
+            {
+                "step": details["step"],
+                "engine": details["engine"],
+                "model_type": details["model_type"],
+                **details["details"],
+            },
+        )
+        write_json(run.root / "errors.json", {"issues": [issue.to_dict()]})
+        _write_manifest(
+            run.root,
+            run.run_id,
+            mode,
+            "failed",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+            requested_model_type=model_type,
+        )
+        raise
+    except WorkflowValidationError as exc:
+        evidence = dict(exc.evidence)
+        # Only fill model_id/engine when the model_type is known and not
+        # "auto" (which would produce meaningless "auto_1" / "unknown").
+        if model_type != "auto":
+            evidence.setdefault("model_type", model_type)
+            evidence.setdefault("model_id", _model_id_for_type(model_type))
+            evidence.setdefault("engine", _engine_for_type(model_type))
+        issue = GuardrailIssue(
+            Severity.BLOCKER,
+            exc.error_code,
+            str(exc),
+            evidence,
+        )
+        # Merge with existing validation issues instead of overwriting.
+        # Validation may have already written INFO/WARNING issues before
+        # this blocker was raised.
+        errors_path = run.root / "errors.json"
+        existing_issues: list[dict[str, Any]] = []
+        if errors_path.exists():
+            existing = read_json(errors_path)
+            if isinstance(existing, dict):
+                existing_issues = existing.get("issues", [])
+        write_json(errors_path, {"issues": [*existing_issues, issue.to_dict()]})
+        _write_manifest(
+            run.root,
+            run.run_id,
+            mode,
+            "failed",
+            _lineage(input_files),
+            started_at=started_at,
+            y=y,
+            x=x,
+            requested_model_type=model_type,
+        )
+        raise
     except Exception as exc:
         issue = GuardrailIssue(
             Severity.BLOCKER,
@@ -106,7 +274,7 @@ def run_workflow(
             started_at=started_at,
             y=y,
             x=x,
-            requested_model_type="auto",
+            requested_model_type=model_type,
         )
         raise
 
@@ -297,6 +465,7 @@ def _run_workflow(
             started_at=started_at,
             y=y,
             x=x,
+            requested_model_type=model_type,
         )
         _safe_flush_recorder(_recorder, context="blocked@validation")
         return {"run_id": run_id, "status": "blocked"}
@@ -330,8 +499,12 @@ def _run_workflow(
         data_detected_y_type = detect_y_kind(cleaned, normalized_y).value
     else:
         data_detected_y_type = "continuous"
+    glm_family = _validate_requested_model_type(model_type)
     if model_type != "auto":
-        y_type = _map_model_type(model_type)
+        # Explicit model type: use its mapped y_type when defined; for
+        # data-driven types (e.g. glm:*) _map_model_type returns None, so
+        # fall back to the detected y_type (keeps y_type data-driven per spec §5).
+        y_type = _map_model_type(model_type) or data_detected_y_type
         _model_type_dp = None
     else:
         y_type = data_detected_y_type
@@ -357,6 +530,7 @@ def _run_workflow(
             started_at=started_at,
             y=y,
             x=x,
+            requested_model_type=model_type,
         )
         _safe_flush_recorder(_recorder, context="blocked@model_check")
         return {"run_id": run_id, "status": "blocked"}
@@ -417,6 +591,23 @@ def _run_workflow(
     if _s:
         _s("statistical_tests", "complete", "Statistical tests completed")
 
+    modeling_frame = cleaned
+    model_input_ids = ["cleaned_dataset"]
+    imputation_summary: dict[str, Any] | None = None
+    if config.imputation_method == "mice":
+        imputation_summary = run_mice_imputation(
+            cleaned,
+            run_root,
+            [normalized_y, *normalized_x],
+            m=config.imputation_m,
+            max_iter=config.imputation_max_iter,
+            random_seed=config.random_seed,
+            max_missing_rate=config.max_missing_rate,
+        )
+        if imputation_summary.get("status") == "completed":
+            modeling_frame = pd.read_parquet(run_root / "processed" / "imputed_dataset.parquet")
+            model_input_ids = ["imputed_dataset"]
+
     model_results: list[tuple[str, dict[str, Any]]] = []
     fitted_models: dict[str, Any] = {}
 
@@ -428,45 +619,170 @@ def _run_workflow(
 
     _robust_se_dp = None
 
+    if model_type == "panel_ols" and not id_candidates and not time_candidates:
+        raise WorkflowValidationError(
+            "PANEL_FIELDS_MISSING",
+            "panel_ols requires entity or time.",
+            {
+                "model_type": "panel_ols",
+                "has_entity": bool(id_candidates),
+                "has_time": bool(time_candidates),
+            },
+        )
+
     try:
-        if y_type == "binary":
-            primary, primary_fitted = run_logit(cleaned, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
-            _write_model_result(run_root, "logit_1", primary)
+        if model_type == "panel_ols":
+            entity = id_candidates[0] if id_candidates else None
+            time = time_candidates[0] if time_candidates else None
+            primary, primary_fitted = run_panel_ols(
+                modeling_frame,
+                y=normalized_y,
+                x=normalized_x,
+                entity=entity,
+                time=time,
+                model_id="panel_ols_1",
+            )
+            _write_model_result(run_root, "panel_ols_1", primary, inputs=model_input_ids)
+            model_results.append(("panel_ols_1", primary))
+        elif model_type == "probit":
+            primary, primary_fitted = run_probit(
+                modeling_frame,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="probit_1",
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "probit_1", primary, inputs=model_input_ids)
+            model_results.append(("probit_1", primary))
+            fitted_models["probit_1"] = primary_fitted
+        elif model_type == "negative_binomial":
+            primary, primary_fitted = run_negative_binomial(
+                modeling_frame,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="negative_binomial_1",
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "negative_binomial_1", primary, inputs=model_input_ids)
+            model_results.append(("negative_binomial_1", primary))
+            fitted_models["negative_binomial_1"] = primary_fitted
+        elif model_type.startswith("glm:"):
+            primary, primary_fitted = run_glm(
+                modeling_frame,
+                y=normalized_y,
+                x=normalized_x,
+                model_id="glm_1",
+                family_name=glm_family or "",
+                categorical_x=categorical_vars,
+            )
+            _write_model_result(run_root, "glm_1", primary, inputs=model_input_ids)
+            model_results.append(("glm_1", primary))
+            fitted_models["glm_1"] = primary_fitted
+        elif y_type == "binary":
+            primary, primary_fitted = run_logit(modeling_frame, y=normalized_y, x=normalized_x, model_id="logit_1", categorical_x=categorical_vars)
+            _write_model_result(run_root, "logit_1", primary, inputs=model_input_ids)
             model_results.append(("logit_1", primary))
             fitted_models["logit_1"] = primary_fitted
         elif y_type == "count":
             poisson_cat = {v for v in categorical_vars if v in poisson_x}
             primary, primary_fitted = run_poisson(
-                cleaned, y=normalized_y, x=poisson_x, model_id="poisson_1",
+                modeling_frame, y=normalized_y, x=poisson_x, model_id="poisson_1",
                 exposure_col=exposure_col,
                 categorical_x=poisson_cat,
             )
-            _write_model_result(run_root, "poisson_1", primary)
+            _write_model_result(run_root, "poisson_1", primary, inputs=model_input_ids)
             model_results.append(("poisson_1", primary))
             fitted_models["poisson_1"] = primary_fitted
         else:
-            primary, primary_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
-            _write_model_result(run_root, "ols_1", primary)
+            primary, primary_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+            _write_model_result(run_root, "ols_1", primary, inputs=model_input_ids)
             model_results.append(("ols_1", primary))
             fitted_models["ols_1"] = primary_fitted
             _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
     except ValueError as exc:
+        failure_evidence = _model_failure_details(
+            model_type=(
+                model_type
+                if model_type != "auto"
+                else _Y_TYPE_TO_ATTEMPTED_MODEL.get(y_type, y_type)
+            ),
+            y=normalized_y,
+            x=normalized_x,
+            root_cause=str(exc),
+            step="estimation",
+        )
+        # Add y_type for diagnostic context (not in the standard helper)
+        failure_evidence["y_type"] = y_type
+        if model_type != "auto":
+            failure_evidence["requested_model_type"] = model_type
+
         model_issue = GuardrailIssue(
-            Severity.WARNING,
+            Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
             "MODEL_FIT_FAILED",
             str(exc),
-            {"y": normalized_y, "x": normalized_x, "y_type": y_type},
+            failure_evidence,
         )
         issue_dicts.append(model_issue.to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
         if _s: _s("estimation", "blocked", f"Model fit failed: {exc}")
-        # Fall back to OLS — clear auto model_type DP since it no longer applies
+
+        if model_type != "auto":
+            # Explicit model request: do NOT silently fall back to OLS.
+            # The user asked for a specific model and it failed:
+            # surface the structured failure instead of masking it.
+            _write_manifest(
+                run_root,
+                run_id,
+                mode,
+                "failed",
+                _lineage(input_files),
+                started_at=started_at,
+                y=y,
+                x=x,
+                requested_model_type=model_type,
+            )
+            _safe_flush_recorder(_recorder, context="failed@estimation")
+            return {"run_id": run_id, "status": "failed"}
+
+        # Auto mode: fall back to OLS (conservative default).
+        # Clear the auto model_type DP since it no longer applies.
         _model_type_dp = None
-        ols_result, ols_fitted = run_ols(cleaned, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+        try:
+            ols_result, ols_fitted = run_ols(modeling_frame, y=normalized_y, x=normalized_x, robust=True, model_id="ols_1", categorical_x=categorical_vars)
+        except ValueError as ols_exc:
+            # OLS fallback itself failed: surface both the original
+            # model failure and the fallback failure.
+            issue_dicts.append(GuardrailIssue(
+                Severity.BLOCKER,
+                "MODEL_FIT_FAILED",
+                f"OLS fallback also failed: {ols_exc}",
+                _model_failure_details(
+                    model_type="ols",
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(ols_exc),
+                    step="estimation",
+                ),
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+            _write_manifest(
+                run_root,
+                run_id,
+                mode,
+                "failed",
+                _lineage(input_files),
+                started_at=started_at,
+                y=y,
+                x=x,
+                requested_model_type=model_type,
+            )
+            _safe_flush_recorder(_recorder, context="failed@estimation")
+            return {"run_id": run_id, "status": "failed"}
         _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
-        _write_model_result(run_root, "ols_1", ols_result)
+        _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
         model_results.append(("ols_1", ols_result))
         fitted_models["ols_1"] = ols_fitted
+        y_type = "continuous"
 
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     drop_check_x = poisson_x if primary_type == "poisson_rate" else normalized_x
@@ -576,15 +892,13 @@ def _run_workflow(
 
     if _s: _s("diagnostics", "start", "Running regression diagnostics...")
     diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
-    exog = cleaned[diag_x] if diag_x else pd.DataFrame(index=cleaned.index)
+    exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
     diagnostic_artifacts: dict[str, dict[str, Any]] = {}
     for model_id, fitted in fitted_models.items():
         result_dict = dict(model_results)
-        fitted_model_type = next(
-            (r.get("model_type", "ols") for mid, r in model_results if mid == model_id),
-            "ols",
-        )
-        family = "poisson" if fitted_model_type == "poisson_rate" else ("ols" if fitted_model_type in ("ols", "ols_robust", "fixed_effects") else fitted_model_type)
+        result = result_dict.get(model_id, {})
+        fitted_model_type = result.get("model_type", "ols")
+        family = _diagnostic_family(result)
         diag = compute_diagnostics(fitted, exog, model_id, model_family=family)
         diag["model_type"] = fitted_model_type
         diag_path = run_root / "model_results" / f"diagnostics_{model_id}.json"
@@ -595,11 +909,11 @@ def _run_workflow(
             diag_path,
             "model_diagnostic",
             "econometrics",
-            ["cleaned_dataset"],
+            model_input_ids,
         )
         diagnostic_artifacts[model_id] = diag
         _check_model_validity(diag, model_id, issue_dicts, run_root)
-        if fitted_model_type in ("poisson", "poisson_rate"):
+        if family == "poisson":
             _check_overdispersion_issue(diag, model_id, issue_dicts, run_root)
         sep = diag.get("separation", {})
         if isinstance(sep, dict) and sep.get("warning"):
@@ -614,6 +928,61 @@ def _run_workflow(
             ).to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
     if _s: _s("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
+
+    prediction_model_type = (
+        model_type
+        if model_type in _PREDICTION_MODEL_TYPES
+        else config.prediction_model_type if config.prediction_enabled else ""
+    )
+    if prediction_model_type:
+        prediction_model_id = f"{prediction_model_type}_1"
+        try:
+            run_prediction_model(
+                modeling_frame,
+                run_root,
+                y=normalized_y,
+                x=normalized_x,
+                model_type=prediction_model_type,
+                model_id=prediction_model_id,
+                cv_folds=config.prediction_cv_folds,
+                random_seed=config.random_seed,
+                inputs=model_input_ids,
+                sampling_method=config.prediction_sampling_method,
+            )
+        except OptionalDependencyNotInstalled as dep_exc:
+            # Prediction is supplementary; missing optional deps should
+            # not block the econometric workflow.  Write a structured
+            # issue and continue.
+            details = dep_exc.to_issue_details()
+            evidence = _model_failure_details(
+                model_type=prediction_model_type,
+                y=normalized_y,
+                x=normalized_x,
+                root_cause=str(dep_exc),
+                step="prediction",
+            )
+            evidence.update(details["details"])
+            issue_dicts.append(GuardrailIssue(
+                Severity.WARNING,
+                "OPTIONAL_DEPENDENCY_MISSING",
+                str(dep_exc),
+                evidence,
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
+        except ValueError as exc:
+            issue_dicts.append(GuardrailIssue(
+                Severity.WARNING,
+                "PREDICTION_FAILED",
+                str(exc),
+                _model_failure_details(
+                    model_type=prediction_model_type,
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(exc),
+                    step="prediction",
+                ),
+            ).to_dict())
+            write_json(run_root / "errors.json", {"issues": issue_dicts})
 
     if routing["kind"] == "time_series" and time_candidates:
         diagnostics = run_time_series_diagnostics(
@@ -678,7 +1047,7 @@ def _run_workflow(
         run_root,
         encoded_categorical_vars=categorical_vars,
     )
-    if routing["kind"] == "panel" and primary_type != "fixed_effects":
+    if routing["kind"] == "panel" and primary_type not in ("fixed_effects", "panel_ols"):
         issue_dicts.append(GuardrailIssue(
             Severity.INFO,
             "PANEL_POOLED_MODEL",
@@ -688,7 +1057,7 @@ def _run_workflow(
         ).to_dict())
         write_json(run_root / "errors.json", {"issues": issue_dicts})
     descriptive_stats = _build_descriptive_stats(cleaned, categorical_vars=categorical_vars)
-    model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)"}
+    model_family_display = {"ols": "OLS", "ols_robust": "OLS (robust SE)", "logit": "Logit", "poisson": "Poisson", "poisson_rate": "Poisson (rate model)", "panel_ols": "Panel OLS"}
     primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
     if effective_exposure_col:
         facts = [
@@ -721,6 +1090,8 @@ def _run_workflow(
             f"(positive rate: {reliability_info['positive_rate']:.1%}, "
             f"events per predictor: {reliability_info['events_per_predictor']:.1f})"
         )
+    if imputation_summary and imputation_summary.get("status") == "completed":
+        facts.append(_mice_imputation_fact(imputation_summary))
     if primary_type in ("poisson", "poisson_rate"):
         poisson_diag = diagnostic_artifacts.get("poisson_1", {})
         overdisp = poisson_diag.get("overdispersion", {})
@@ -786,6 +1157,7 @@ def _run_workflow(
         exposure_col=effective_exposure_col,
         dropped_vars=dropped_vars,
         coercions=coercion_actions,
+        imputation=imputation_summary,
     )
     write_json(run_root / "diagnostic_summary.json", diagnostic_summary)
     register_artifact(run_root, "diagnostic_summary", run_root / "diagnostic_summary.json", "metadata", "diagnostics", [])
@@ -870,7 +1242,13 @@ def _normalized_existing(candidates: tuple[str, ...], frame: pd.DataFrame) -> li
     ]
 
 
-def _write_model_result(run_root: Path, model_id: str, model_result: dict[str, Any]) -> None:
+def _write_model_result(
+    run_root: Path,
+    model_id: str,
+    model_result: dict[str, Any],
+    *,
+    inputs: list[str] | None = None,
+) -> None:
     model_path = run_root / "model_results" / f"{model_id}.json"
     write_json(model_path, model_result)
     register_artifact(
@@ -879,7 +1257,19 @@ def _write_model_result(run_root: Path, model_id: str, model_result: dict[str, A
         model_path,
         "model_result",
         "econometrics",
-        ["cleaned_dataset"],
+        inputs or ["cleaned_dataset"],
+    )
+
+
+def _mice_imputation_fact(imputation: dict[str, Any]) -> str:
+    columns = imputation.get("imputed_columns", [])
+    columns_text = ", ".join(str(column) for column in columns) if columns else "none"
+    persisted = imputation.get("persisted_datasets", 0)
+    persisted_text = "one" if persisted == 1 else str(persisted)
+    pooled = "were produced" if imputation.get("pooled_estimates") else "were not produced"
+    return (
+        f"MICE imputation: {persisted_text} persisted imputed dataset; "
+        f"imputed columns: {columns_text}; pooled estimates {pooled}."
     )
 
 
@@ -1013,14 +1403,66 @@ def _write_manifest(
 _BINARY_CORRELATION_WARN = 0.7  # |r| > 0.7 > Severity.WARNING
 _BINARY_CORRELATION_INFO = 0.5  # 0.5 < |r| <= 0.7 > Severity.INFO
 _TREATMENT_PROXY_CORRELATION_WARN = 0.7
-_MODEL_TYPE_MAP = {"ols": "continuous", "logit": "binary", "poisson": "count"}
+_MODEL_TYPE_MAP = {
+    "ols": "continuous",
+    "logit": "binary",
+    "probit": "binary",
+    "poisson": "count",
+    "negative_binomial": "count",
+    "panel_ols": "continuous",
+}
+_SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
+_PREDICTION_MODEL_TYPES = {
+    "prediction_lasso",
+    "prediction_ridge",
+    "prediction_random_forest",
+}
 
 
-def _map_model_type(model_type: str) -> str:
-    y_type = _MODEL_TYPE_MAP.get(model_type)
-    if y_type is None:
-        return "continuous"
-    return y_type
+def _map_model_type(model_type: str) -> str | None:
+    return _MODEL_TYPE_MAP.get(model_type)
+
+
+def _validate_requested_model_type(model_type: str) -> str | None:
+    if model_type == "auto" or model_type in _MODEL_TYPE_MAP or model_type in _PREDICTION_MODEL_TYPES:
+        return None
+    if not model_type.startswith("glm:"):
+        raise WorkflowValidationError(
+            "UNSUPPORTED_MODEL_TYPE",
+            f"Unsupported model type: {model_type}",
+            {
+                "model_type": model_type,
+                "supported_types": sorted(
+                    list(_MODEL_TYPE_MAP.keys())
+                    + list(_PREDICTION_MODEL_TYPES)
+                    + ["glm:<family>"]
+                ),
+            },
+        )
+    family_name = model_type.split(":", 1)[1]
+    if family_name not in _SUPPORTED_GLM_FAMILIES:
+        raise WorkflowValidationError(
+            "UNSUPPORTED_GLM_FAMILY",
+            f"Unsupported GLM family: {family_name}",
+            {
+                "model_type": model_type,
+                "glm_family": family_name,
+                "supported_families": sorted(_SUPPORTED_GLM_FAMILIES),
+            },
+        )
+    return family_name
+
+
+def _diagnostic_family(model_result: dict[str, Any]) -> str:
+    model_type = model_result.get("model_type", "ols")
+    if model_type == "glm":
+        family = model_result.get("glm_family")
+        return str(family) if family else "glm"
+    if model_type == "poisson_rate":
+        return "poisson"
+    if model_type in ("ols", "ols_robust", "fixed_effects", "panel_ols"):
+        return "ols"
+    return str(model_type)
 
 
 def _build_variable_importance(
