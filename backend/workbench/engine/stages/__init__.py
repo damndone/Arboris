@@ -11,6 +11,7 @@ from .cleaning import CleaningStage
 from .profile import ProfileStage
 from .validation import ValidationStage
 from .routing import RoutingStage
+from .ytype import YTypeStage
 
 # Stages are appended in pipeline order as each is extracted.
 PIPELINE: list[Stage] = [
@@ -19,4 +20,5 @@ PIPELINE: list[Stage] = [
     ProfileStage(),
     ValidationStage(),
     RoutingStage(),
+    YTypeStage(),
 ]

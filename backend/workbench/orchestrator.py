@@ -17,6 +17,7 @@ from .engine.stages.profile import ProfileStage
 from .engine.stages.routing import RoutingStage
 from .engine.stages.source import SourceStage
 from .engine.stages.validation import ValidationStage
+from .engine.stages.ytype import YTypeStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -451,33 +452,15 @@ def _run_workflow(
     time_candidates = ctx.artifacts["_time_candidates"]
     id_candidates = ctx.artifacts["_id_candidates"]
 
-    if _s: _s("y_type", "start", "Detecting y variable type...")
-    normalized_y = normalize_column_name(y)
-    normalized_x = [normalize_column_name(column) for column in x]
-
-    _missing_values_dp = dpf.handle_missing_values(
-        variables=[normalized_y, *normalized_x],
-    )
-
-    if normalized_y in cleaned.columns:
-        data_detected_y_type = detect_y_kind(cleaned, normalized_y).value
-    else:
-        data_detected_y_type = "continuous"
-    glm_family = _validate_requested_model_type(model_type)
-    if model_type != "auto":
-        # Explicit model type: use its mapped y_type when defined; for
-        # data-driven types (e.g. glm:*) _map_model_type returns None, so
-        # fall back to the detected y_type (keeps y_type data-driven per spec §5).
-        y_type = _map_model_type(model_type) or data_detected_y_type
-        _model_type_dp = None
-    else:
-        y_type = data_detected_y_type
-        _model_type_dp = dpf.model_type_auto_select(
-            selected=y_type,
-            y_unique=int(cleaned[normalized_y].nunique()) if normalized_y in cleaned.columns else 0,
-            y_dtype=str(cleaned[normalized_y].dtype) if normalized_y in cleaned.columns else "unknown",
-        )
-    if _s: _s("y_type", "complete", f"y classified as {y_type}")
+    ctx = YTypeStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    normalized_y = ctx.artifacts["_normalized_y"]
+    normalized_x = ctx.artifacts["_normalized_x"]
+    y_type = ctx.y_type
+    _missing_values_dp = ctx.artifacts["_missing_values_dp"]
+    data_detected_y_type = ctx.artifacts["_data_detected_y_type"]
+    glm_family = ctx.artifacts["_glm_family"]
+    _model_type_dp = ctx.artifacts["_model_type_dp"]
 
     if _s: _s("model_check", "start", "Checking model columns...")
     model_issue = _model_column_issue(cleaned, normalized_y, normalized_x, y, x)
