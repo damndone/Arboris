@@ -10,7 +10,7 @@
 
 import { createContext, useContext } from "react";
 import type { GraphViewModel } from "./api/graphViewTypes";
-import type { TabState } from "./hooks/useTabs";
+import type { TabState } from "../workbench/state/tabsSchema";
 
 export interface LineageContextValue {
   model: GraphViewModel;

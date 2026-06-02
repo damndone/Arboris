@@ -16,7 +16,11 @@
 // consumers (useSelectedNode, GraphWorkbench tests). It will become a
 // thin wrapper around this module in P3 once GraphView migrates.
 
-import type { TabState } from "../../lineage/hooks/useTabs";
+export interface TabState {
+  id: string;
+  nodeKey: string;
+  openedAt: number;
+}
 
 export const MAX_TABS = 8;
 

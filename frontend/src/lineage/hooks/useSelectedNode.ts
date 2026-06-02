@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { GraphViewNode } from "../api/graphViewTypes";
-import { useTabs, type TabState } from "./useTabs";
+import { useTabs } from "./useTabs";
+import type { TabState } from "../../workbench/state/tabsSchema";
 
 export interface UseSelectedNodeResult {
   selectedKey: string | null;

@@ -3,11 +3,7 @@ import { useSearchParams } from "react-router-dom";
 
 const MAX_TABS = 8;
 
-export interface TabState {
-  id: string;
-  nodeKey: string;
-  openedAt: number;
-}
+import type { TabState } from "../../workbench/state/tabsSchema";
 
 interface TabsState {
   tabs: TabState[];

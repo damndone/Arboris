@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from "react";
 import type { GraphViewNode } from "../api/graphViewTypes";
-import type { TabState } from "../hooks/useTabs";
+import type { TabState } from "../../workbench/state/tabsSchema";
 
 export interface DetailDrawerTabsProps {
   tabs: TabState[];

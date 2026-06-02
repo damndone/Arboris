@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DetailDrawerTabs } from "./DetailDrawerTabs";
 import type { GraphViewNode } from "../api/graphViewTypes";
-import type { TabState } from "../hooks/useTabs";
+import type { TabState } from "../../workbench/state/tabsSchema";
 
 function tab(id: string, openedAt = 1, nodeKey = id): TabState {
   return { id, nodeKey, openedAt };

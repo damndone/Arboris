@@ -56,7 +56,7 @@ import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
-import type { TabState } from "../hooks/useTabs";
+import type { TabState } from "../../workbench/state/tabsSchema";
 
 function dp(overrides: Partial<DecisionViewModel> = {}): DecisionViewModel {
   return {

@@ -50,7 +50,7 @@ import {
   type ViewMode,
   type WorkbenchUrlSlice,
 } from "./state/urlSchema";
-import type { TabState } from "../lineage/hooks/useTabs";
+import type { TabState } from "./state/tabsSchema";
 import type { BottomPanelId } from "./registry/bottomPanelRegistry";
 
 // ─── public types ───────────────────────────────────────────────────
