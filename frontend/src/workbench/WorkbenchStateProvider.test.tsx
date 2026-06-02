@@ -274,14 +274,29 @@ describe("View / panel / search dispatch", () => {
     expect(state().bottomPanel).toEqual({ id: "shell", open: true });
   });
 
-  it("clearSearch removes q and resets searchCursor", () => {
+  it("clearSearch removes q and resets searchCursor + searchCursorKey", () => {
     renderAt("/?q=income");
     act(() => dispatch().setSearchCursor(3));
+    act(() => dispatch().setSearchCursorKey("model:ols"));
     expect(state().searchCursor).toBe(3);
+    expect(state().searchCursorKey).toBe("model:ols");
     act(() => dispatch().clearSearch());
     expect(state().searchQuery).toBe("");
     expect(state().searchCursor).toBeNull();
+    expect(state().searchCursorKey).toBeNull();
     expect(new URLSearchParams(ref.current!.search).get("q")).toBeNull();
+  });
+
+  it("F5: setSearchCursorKey stores/clears the cursor nodeKey (Tier 3, no URL)", () => {
+    renderAt("/");
+    expect(state().searchCursorKey).toBeNull();
+    const before = ref.current!.search;
+    act(() => dispatch().setSearchCursorKey("model:ols"));
+    expect(state().searchCursorKey).toBe("model:ols");
+    // Tier 3 — never touches the URL.
+    expect(ref.current!.search).toBe(before);
+    act(() => dispatch().setSearchCursorKey(null));
+    expect(state().searchCursorKey).toBeNull();
   });
 });
 

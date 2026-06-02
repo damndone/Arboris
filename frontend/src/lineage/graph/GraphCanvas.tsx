@@ -218,6 +218,11 @@ interface GraphCanvasProps {
    *  the state class, never displaces selected/focus. Empty when no
    *  search is active. */
   searchHitKeys?: ReadonlySet<string>;
+  /** V1.5.3 F5 — the single "current cursor" search hit (the row the
+   *  user is on in the ⌘K palette). Rendered one tier stronger than
+   *  the other searchHits so ↑/↓ navigation is visible on the canvas.
+   *  null when the palette is closed or has no results. */
+  searchCursorKey?: string | null;
 }
 
 function layoutDagre<T extends RFNode>(
@@ -306,6 +311,7 @@ export function GraphCanvas({
   focusNodeKey = null,
   focusUpstreamKeys,
   searchHitKeys,
+  searchCursorKey = null,
 }: GraphCanvasProps) {
   // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
   // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
@@ -497,6 +503,8 @@ export function GraphCanvas({
         state: stateFor(n.id),
         handleAxis,
         isSearchHit: searchHitKeys?.has(n.id) ?? false,
+        // F5: exactly one node (the palette cursor) gets this flag.
+        isSearchCursor: searchCursorKey !== null && n.id === searchCursorKey,
       },
     }));
   }, [
@@ -505,6 +513,7 @@ export function GraphCanvas({
     focusNodeKey,
     focusUpstreamKeys,
     searchHitKeys,
+    searchCursorKey,
     model.edges,
     memberToGroup,
     handleAxis,

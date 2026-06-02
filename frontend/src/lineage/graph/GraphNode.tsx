@@ -69,6 +69,10 @@ export interface GraphNodeProps {
     /** V1.5.2 P6 — search overlay flag. Layered on top of state
      *  (does not displace selected/focus). Tier 3 / transient. */
     isSearchHit?: boolean;
+    /** V1.5.3 F5 — the single current ⌘K cursor result. Layered on
+     *  top of (and stronger than) isSearchHit so ↑/↓ navigation is
+     *  visible. Tier 3 / transient. */
+    isSearchCursor?: boolean;
   };
   // React Flow also passes its own `selected` for accessibility / focus
   // styles on the wrapper, but our internal outline is driven by
@@ -105,7 +109,13 @@ function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
 }
 
 export function GraphNode({ data }: GraphNodeProps) {
-  const { node, state, handleAxis = "horizontal", isSearchHit = false } = data;
+  const {
+    node,
+    state,
+    handleAxis = "horizontal",
+    isSearchHit = false,
+    isSearchCursor = false,
+  } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
   const isSelected = state === "selected";
@@ -140,6 +150,7 @@ export function GraphNode({ data }: GraphNodeProps) {
         isFocusUpstream && "ln-graph-node--focus-upstream",
         isDim && "ln-graph-node--dim",
         isSearchHit && "ln-graph-node--search-hit",
+        isSearchCursor && "ln-graph-node--search-cursor",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -148,6 +159,7 @@ export function GraphNode({ data }: GraphNodeProps) {
       data-trust={node.trust}
       data-state={state}
       data-search-hit={isSearchHit ? "true" : undefined}
+      data-search-cursor={isSearchCursor ? "true" : undefined}
       style={{ ["--node-color" as string]: colorVar }}
     >
       <Handle

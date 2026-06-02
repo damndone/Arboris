@@ -78,6 +78,10 @@ export interface WorkbenchState {
   // Tier 3
   hoverKey: string | null;
   searchCursor: number | null;
+  /** F5: nodeKey of the current ⌘K search cursor (the highlighted
+   *  result row). The graph highlights it one tier above the other
+   *  search hits. null when the palette is closed/empty. */
+  searchCursorKey: string | null;
   contextMenu: ContextMenuState | null;
 }
 
@@ -103,6 +107,8 @@ export interface WorkbenchDispatch {
   // Tier 3 (memory) ──────────────────────────────────────────────
   setHover(nodeKey: string | null): void;
   setSearchCursor(index: number | null): void;
+  /** F5: set the current search-cursor nodeKey (Tier 3, memory). */
+  setSearchCursorKey(nodeKey: string | null): void;
   openContextMenu(menu: ContextMenuState): void;
   closeContextMenu(): void;
 }
@@ -199,6 +205,9 @@ export function WorkbenchStateProvider({
   // Tier 3 — memory only.
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [searchCursor, _setSearchCursor] = useState<number | null>(null);
+  const [searchCursorKey, _setSearchCursorKey] = useState<string | null>(
+    null,
+  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(
     null,
   );
@@ -373,6 +382,7 @@ export function WorkbenchStateProvider({
   const clearSearch = useCallback(() => {
     commit({ slice: { ...urlRef.current, searchQuery: "" } });
     _setSearchCursor(null);
+    _setSearchCursorKey(null);
   }, [commit]);
 
   const setHover = useCallback((nodeKey: string | null) => {
@@ -381,6 +391,10 @@ export function WorkbenchStateProvider({
 
   const setSearchCursor = useCallback((index: number | null) => {
     _setSearchCursor(index);
+  }, []);
+
+  const setSearchCursorKey = useCallback((nodeKey: string | null) => {
+    _setSearchCursorKey(nodeKey);
   }, []);
 
   const openContextMenu = useCallback((menu: ContextMenuState) => {
@@ -403,6 +417,7 @@ export function WorkbenchStateProvider({
         lastEvictedTabId,
         hoverKey,
         searchCursor,
+        searchCursorKey,
         contextMenu,
       },
       dispatch: {
@@ -419,6 +434,7 @@ export function WorkbenchStateProvider({
         clearSearch,
         setHover,
         setSearchCursor,
+        setSearchCursorKey,
         openContextMenu,
         closeContextMenu,
       },
@@ -430,6 +446,7 @@ export function WorkbenchStateProvider({
       lastEvictedTabId,
       hoverKey,
       searchCursor,
+      searchCursorKey,
       contextMenu,
       selectByCanvasClick,
       selectByTabSwitch,
@@ -444,6 +461,7 @@ export function WorkbenchStateProvider({
       clearSearch,
       setHover,
       setSearchCursor,
+      setSearchCursorKey,
       openContextMenu,
       closeContextMenu,
     ],

@@ -16,7 +16,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
+import { WorkbenchStateProvider, useWorkbench } from "./WorkbenchStateProvider";
 import { SearchPalette } from "./SearchPalette";
 import { LineageContext, type LineageContextValue } from "../lineage/LineageContext";
 import type {
@@ -64,7 +64,16 @@ function CaptureLocation() {
   return null;
 }
 
+// F5: capture the Tier-3 searchCursorKey the palette publishes, so we
+// can assert the graph would receive the current cursor's nodeKey.
+let lastCursorKey: string | null = null;
+function CaptureCursorKey() {
+  lastCursorKey = useWorkbench().state.searchCursorKey;
+  return null;
+}
+
 function mountAt(path: string) {
+  lastCursorKey = null;
   lastSearch = "";
   const ctx: LineageContextValue = {
     model: model(),
@@ -81,6 +90,7 @@ function mountAt(path: string) {
               <LineageContext.Provider value={ctx}>
                 <SearchPalette />
                 <CaptureLocation />
+                <CaptureCursorKey />
               </LineageContext.Provider>
             </WorkbenchStateProvider>
           }
@@ -226,5 +236,42 @@ describe("SearchPalette", () => {
       "data-active",
       "true",
     );
+  });
+
+  it("F5: publishes the cursor's nodeKey to Tier 3 and moves it with ↑/↓", () => {
+    mountAt("/");
+    act(() => {
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    });
+    const input = screen.getByTestId("search-palette-input");
+    fireEvent.change(input, { target: { value: "income" } });
+
+    // Cursor starts at result 0 — its nodeKey is published.
+    const hit0 = screen.getByTestId("search-palette-hit-0").textContent ?? "";
+    expect(lastCursorKey).not.toBeNull();
+    expect(hit0).toContain(lastCursorKey!);
+
+    // ↓ moves the cursor → published key follows.
+    act(() => {
+      fireEvent.keyDown(input, { key: "ArrowDown" });
+    });
+    const hit1 = screen.getByTestId("search-palette-hit-1").textContent ?? "";
+    expect(hit1).toContain(lastCursorKey!);
+  });
+
+  it("F5: clears the cursor nodeKey when the palette closes", () => {
+    mountAt("/");
+    act(() => {
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    });
+    const input = screen.getByTestId("search-palette-input");
+    fireEvent.change(input, { target: { value: "income" } });
+    expect(lastCursorKey).not.toBeNull();
+
+    // Escape closes the palette → cursor key must reset to null.
+    act(() => {
+      fireEvent.keyDown(window, { key: "Escape" });
+    });
+    expect(lastCursorKey).toBeNull();
   });
 });

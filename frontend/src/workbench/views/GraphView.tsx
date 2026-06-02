@@ -39,6 +39,8 @@ export function GraphView() {
   const snapshot = useMemo(() => buildRunSnapshot(model), [model]);
   const focusKey = wb?.state.focusKey ?? null;
   const searchQuery = wb?.state.searchQuery ?? "";
+  // F5: the current ⌘K cursor result, highlighted above the other hits.
+  const searchCursorKey = wb?.state.searchCursorKey ?? null;
   const focusUpstreamKeys = useMemo<ReadonlySet<string> | undefined>(() => {
     if (focusKey === null) return undefined;
     return new Set(snapshot.upstreamOf(focusKey).map((n) => n.nodeKey));
@@ -149,6 +151,7 @@ export function GraphView() {
           focusNodeKey={focusKey}
           focusUpstreamKeys={focusUpstreamKeys}
           searchHitKeys={searchHitKeys}
+          searchCursorKey={searchCursorKey}
         />
       </div>
     </div>

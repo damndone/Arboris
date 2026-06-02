@@ -364,6 +364,16 @@
   box-shadow: 0 0 0 2px var(--tint, #0a84ff);
 }
 
+/* F5: the current ⌘K cursor result — stronger than a plain search hit
+ * (thicker ring + soft glow) so ↑/↓ navigation is visible on canvas.
+ * Declared after --search-hit so it wins when both classes are present
+ * (the cursor node is always also a hit). */
+.ln-graph-node--search-cursor {
+  box-shadow:
+    0 0 0 3px var(--amber, #ffc107),
+    0 0 12px 2px var(--amber-glow, rgba(255, 193, 7, 0.5));
+}
+
 /* ─── Canvas chrome (T8.6a) ─────────────────────────────────────────
  * Rendered as <Panel> children of <ReactFlow>. RF handles absolute
  * positioning per `position` prop; we style the inner contents.

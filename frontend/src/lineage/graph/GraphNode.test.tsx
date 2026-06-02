@@ -226,5 +226,38 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
       expect(node.className).not.toContain("ln-graph-node--search-hit");
       expect(node.getAttribute("data-search-hit")).toBeNull();
     });
+
+    it("F5: isSearchCursor adds the cursor class + data attr", () => {
+      rtlRender(
+        <ReactFlowProvider>
+          <GraphNode
+            data={{
+              node: vn(),
+              state: "related",
+              isSearchHit: true,
+              isSearchCursor: true,
+            }}
+          />
+        </ReactFlowProvider>,
+      );
+      const node = screen.getByTestId("graph-node");
+      // Cursor is also a hit — both classes present, cursor wins via CSS.
+      expect(node.className).toContain("ln-graph-node--search-hit");
+      expect(node.className).toContain("ln-graph-node--search-cursor");
+      expect(node).toHaveAttribute("data-search-cursor", "true");
+    });
+
+    it("F5: isSearchCursor absent → no cursor class, no data attr", () => {
+      rtlRender(
+        <ReactFlowProvider>
+          <GraphNode
+            data={{ node: vn(), state: "related", isSearchHit: true }}
+          />
+        </ReactFlowProvider>,
+      );
+      const node = screen.getByTestId("graph-node");
+      expect(node.className).not.toContain("ln-graph-node--search-cursor");
+      expect(node.getAttribute("data-search-cursor")).toBeNull();
+    });
   });
 });

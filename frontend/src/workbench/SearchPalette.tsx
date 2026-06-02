@@ -64,16 +64,19 @@ export function SearchPalette() {
     if (cursor >= results.length) setCursor(Math.max(0, results.length - 1));
   }, [results, cursor]);
 
-  // Mirror cursor into Tier 3 so the graph search-hit overlay (P6)
-  // can highlight the cursor's nodeKey separately if it wants. Today
-  // it just highlights all hits; cursor is reserved for future use.
+  // Mirror cursor into Tier 3. F5: publish both the index AND the
+  // cursor's nodeKey so the graph can highlight the *current* result
+  // one tier above the other (dimmer) search hits. Both clear when the
+  // palette closes or has no results.
   useEffect(() => {
     if (open && results.length > 0) {
       dispatch.setSearchCursor(cursor);
+      dispatch.setSearchCursorKey(results[cursor]?.nodeKey ?? null);
     } else {
       dispatch.setSearchCursor(null);
+      dispatch.setSearchCursorKey(null);
     }
-  }, [open, cursor, results.length, dispatch]);
+  }, [open, cursor, results, dispatch]);
 
   // ⌘K / Ctrl+K toggle. Listener owned here (not in
   // WorkbenchRouteContainer) so the palette is self-contained.
