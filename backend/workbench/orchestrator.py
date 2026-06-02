@@ -12,6 +12,7 @@ from .config import load_config
 from .diagnostic_summary import build_diagnostic_summary
 from .domain import GuardrailIssue, Severity
 from .engine.context import DataHandle, ModelingContext, RunEnv
+from .engine.stages.source import SourceStage
 from .graph_recorder import GraphRecorder
 from .graph_model import Stage
 from .graph_store import GraphStore
@@ -410,23 +411,13 @@ def _run_workflow(
     ctx.artifacts["_sheet_name"] = sheet_name
     ctx.artifacts["_transpose"] = transpose
 
-    if _s: _s("ingestion", "start", "Ingesting files...")
-    frames = ingest_files([Path(path) for path in input_files], run_root, config, sheet_name, transpose)
-    if _s: _s("ingestion", "complete", f"Ingested {len(frames)} file(s)")
-
-    if _s: _s("schema", "start", "Inferring schema...")
-    schema = infer_schema("dataset_1", frames, run_root)
-    if _s: _s("schema", "complete", f"Inferred schema with {len(schema.columns)} columns")
-    frame = next(iter(frames.values()))
-    raw_row_count = len(frame)
-    raw_col_count = len(frame.columns)
-    _recorder.record_stage(
-        node_id="stage:raw",
-        display_label="Raw input data",
-        payload_ref=None,
-        summary=f"Raw: {raw_row_count} rows × {raw_col_count} cols",
-        stage=Stage.SOURCE,
-    )
+    ctx = SourceStage().run(ctx, env)
+    # bridge: re-bind names the still-inline code below expects
+    frames = ctx.artifacts["_frames"]
+    schema = ctx.artifacts["_schema"]
+    frame = ctx.data.frame
+    raw_row_count = ctx.artifacts["_raw_row_count"]
+    raw_col_count = ctx.artifacts["_raw_col_count"]
 
     if _s: _s("cleaning", "start", "Cleaning data...")
     cleaned, actions = clean_frame(frame, list(schema.time_candidates))
