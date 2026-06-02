@@ -2191,8 +2191,8 @@ Expected: PASS. Optional-extra tests that require uninstalled extras should skip
 Create a temporary project and run existing auto:
 
 ```bash
-workbench create /tmp workbench-v1531-smoke
-workbench run /tmp/workbench-v1531-smoke examples/datasets/cross_section.csv --y wage --x education
+env PYTHONPATH=backend .venv/bin/python -m workbench.cli create /tmp workbench-v1531-smoke
+env PYTHONPATH=backend .venv/bin/python -m workbench.cli run /tmp/workbench-v1531-smoke examples/datasets/cross_section.csv wage --x education
 ```
 
 Expected: run completes and writes the same default model family as before.
@@ -2200,7 +2200,7 @@ Expected: run completes and writes the same default model family as before.
 Run explicit advanced model:
 
 ```bash
-workbench run /tmp/workbench-v1531-smoke examples/datasets/cross_section.csv --y wage --x education --model-type glm:poisson
+env PYTHONPATH=backend .venv/bin/python -m workbench.cli run /tmp/workbench-v1531-smoke examples/datasets/cross_section.csv wage --x education --model-type glm:poisson
 ```
 
 Expected: run completes or writes a structured model-fit warning; it must not crash with an unstructured traceback.
