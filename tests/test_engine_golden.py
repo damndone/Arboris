@@ -71,3 +71,67 @@ def test_golden_continuous_ols(tmp_path):
     assert snap["models"]["ols_1"]["model_type"] in {"ols", "ols_robust", "continuous"}
     assert "x" in snap["models"]["ols_1"]["coef_keys"]
     _assert_or_write_golden("continuous_ols", snap)
+
+
+def test_golden_binary_logit(tmp_path):
+    frame = pd.DataFrame({"y": [0, 1] * 25, "x": [i * 0.5 for i in range(50)], "firm_id": list(range(200, 250))})
+    run_root, _ = _run(tmp_path, frame, y="y", x=["x"])
+    _assert_or_write_golden("binary_logit", _capture(run_root))
+
+
+def test_golden_count_poisson(tmp_path):
+    frame = pd.DataFrame({"y": [i % 5 for i in range(50)], "x": [i * 0.3 for i in range(50)], "firm_id": list(range(300, 350))})
+    run_root, _ = _run(tmp_path, frame, y="y", x=["x"])
+    _assert_or_write_golden("count_poisson", _capture(run_root))
+
+
+def test_golden_panel(tmp_path):
+    rows = []
+    for firm_id in range(6):
+        for year in range(2018, 2025):
+            x = firm_id + year - 2018
+            rows.append({"firm_id": firm_id, "year": year, "x": x, "y": 1.0 + 2.0 * x + firm_id * 0.1})
+    run_root, _ = _run(tmp_path, pd.DataFrame(rows), y="y", x=["x"])
+    _assert_or_write_golden("panel", _capture(run_root))
+
+
+def test_golden_blocked_missing_column(tmp_path):
+    frame = pd.DataFrame({"y": [1.0 * i for i in range(35)], "x": list(range(35))})
+    run_root, result = _run(tmp_path, frame, y="y", x=["missing"])
+    assert result["status"] == "blocked"
+    _assert_or_write_golden("blocked_missing_column", _capture(run_root))
+
+
+def test_golden_imputation(tmp_path):
+    # The imputation (MICE) branch is config-gated in run_workflow: it fires only
+    # when project config.yml sets imputation_method=mice (not by missing-value
+    # proportion alone). We enable it test-side and feed columns with NaNs so the
+    # imputed_dataset lineage actually appears. Mirrors test_imputation_mice.py.
+    ys = [1.0 + 2.0 * i for i in range(40)]
+    xs = [float(i) for i in range(40)]
+    for index in (5, 11, 17, 23):
+        ys[index] = None
+    for index in (7, 13, 19, 29):
+        xs[index] = None
+    frame = pd.DataFrame({"y": ys, "x": xs, "firm_id": list(range(100, 140))})
+
+    source = tmp_path / "data.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    (project.root / "config.yml").write_text(
+        "imputation_method: mice\nimputation_m: 2\nimputation_max_iter: 2\n",
+        encoding="utf-8",
+    )
+    result = run_workflow(project.root, [source], mode="auto", y="y", x=["x"])
+    run_root = project.root / "runs" / result["run_id"]
+
+    snap = _capture(run_root)
+    # Guard: the imputation branch must have fired for this golden to be meaningful.
+    assert "imputed_dataset" in snap["artifacts"]
+    _assert_or_write_golden("imputation", snap)
+
+
+def test_golden_explicit_model_type_logit(tmp_path):
+    frame = pd.DataFrame({"y": [0, 1] * 25, "x": [i * 0.5 for i in range(50)], "firm_id": list(range(200, 250))})
+    run_root, _ = _run(tmp_path, frame, y="y", x=["x"], model_type="logit")
+    _assert_or_write_golden("explicit_logit", _capture(run_root))

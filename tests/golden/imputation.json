@@ -1,0 +1,76 @@
+{
+  "artifacts": {
+    "analysis_router": [
+      "data_profile"
+    ],
+    "cleaned_dataset": [
+      "raw_data.csv"
+    ],
+    "cleaning_actions": [
+      "raw_data.csv"
+    ],
+    "coef_plot": [],
+    "correlation_heatmap": [],
+    "data_profile": [
+      "cleaned_dataset"
+    ],
+    "diagnostic_summary": [],
+    "diagnostics_ols_1": [
+      "imputed_dataset"
+    ],
+    "imputed_dataset": [
+      "cleaned_dataset"
+    ],
+    "mice_decisions": [
+      "cleaned_dataset"
+    ],
+    "mice_summary": [
+      "cleaned_dataset"
+    ],
+    "ols_1": [
+      "imputed_dataset"
+    ],
+    "qq_residuals": [],
+    "raw_data.csv": [],
+    "report_html": [],
+    "report_pdf": [],
+    "residuals_fitted": [],
+    "statistical_tests_anova": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_chi_square": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_fisher_exact": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_nonparametric": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_rank_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_t_tests": [
+      "cleaned_dataset"
+    ],
+    "tables_xlsx": []
+  },
+  "error_codes": [],
+  "models": {
+    "ols_1": {
+      "coef_keys": [
+        "Intercept",
+        "x"
+      ],
+      "coef_rounded": {
+        "Intercept": 0.333795,
+        "x": 1.980518
+      },
+      "model_type": "ols_robust"
+    }
+  },
+  "status": "completed"
+}

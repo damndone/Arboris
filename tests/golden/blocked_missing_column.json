@@ -1,0 +1,22 @@
+{
+  "artifacts": {
+    "analysis_router": [
+      "data_profile"
+    ],
+    "cleaned_dataset": [
+      "raw_data.csv"
+    ],
+    "cleaning_actions": [
+      "raw_data.csv"
+    ],
+    "data_profile": [
+      "cleaned_dataset"
+    ],
+    "raw_data.csv": []
+  },
+  "error_codes": [
+    "MODEL_COLUMNS_NOT_FOUND"
+  ],
+  "models": {},
+  "status": "blocked"
+}
