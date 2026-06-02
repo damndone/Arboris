@@ -3,10 +3,8 @@
 // V1.5.2 P2 — Tier 1 URL contract. Plan §6.
 //
 // Single source of truth for parsing / serialising every URL-backed
-// workbench field except `tabs / active`, which remain owned by
-// `lineage/hooks/useTabs.ts` (P3 will fold its writes through the
-// provider; in P2 the two are siblings and don't fight because each
-// touches different params).
+// workbench field. V1.5.3: tabs/active are now also owned by the
+// provider (via tabsSchema), folded into the single commit() call.
 //
 // Schema:
 //
@@ -18,7 +16,7 @@
 //   pinned      ∈ {"0","1"}                       default "0"       (omitted from URL when 0)
 //
 // Unknown query parameters are preserved on every write — there are
-// other consumers (`tab=lineage`, `project_root`, useTabs) and the
+// other consumers (`tab=lineage`, `project_root`) and the
 // workbench is not authoritative over them.
 
 import type { BottomPanelId } from "../registry/bottomPanelRegistry";

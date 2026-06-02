@@ -7,8 +7,7 @@
 // for P4 (NodeActionRegistry wiring); P3 keeps the topbar minimal.
 //
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
-// which goes through the provider's single-commit URL writer — so
-// switching never collides with useTabs's tabs/active writes.
+// which goes through the provider's single-commit URL writer.
 
 import type { ReactNode } from "react";
 import {

@@ -12,9 +12,9 @@
 // same dispatch without losing one update. Centralising the reducer
 // here lets the provider apply tabs + view + focus + q in one write.
 //
-// `useTabs` keeps its public API for back-compat with V1.5.0/1.5.1
-// consumers (useSelectedNode, GraphWorkbench tests). It will become a
-// thin wrapper around this module in P3 once GraphView migrates.
+// V1.5.3: `useTabs` and `useSelectedNode` have been retired. TabState
+// now lives here as the single source of truth. All tabs/active writes
+// flow through WorkbenchStateProvider.commit().
 
 export interface TabState {
   id: string;
