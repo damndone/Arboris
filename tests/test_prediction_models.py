@@ -15,6 +15,7 @@ def _init_artifacts(run_root: Path) -> None:
 
 
 def test_run_prediction_model_writes_lightweight_artifact(tmp_path: Path):
+    pytest.importorskip("sklearn")
     run_root = tmp_path / "run"
     run_root.mkdir()
     _init_artifacts(run_root)
@@ -61,6 +62,7 @@ def test_run_prediction_model_writes_lightweight_artifact(tmp_path: Path):
 
 
 def test_workflow_writes_prediction_artifact_only_when_configured(tmp_path: Path):
+    pytest.importorskip("sklearn")
     project = create_project(tmp_path, "demo")
     (project.root / "config.yml").write_text(
         "prediction_enabled: true\n"
@@ -91,6 +93,7 @@ def test_workflow_writes_prediction_artifact_only_when_configured(tmp_path: Path
 
 
 def test_workflow_accepts_explicit_prediction_model_type(tmp_path: Path):
+    pytest.importorskip("sklearn")
     project = create_project(tmp_path, "explicit_prediction")
     source = tmp_path / "data.csv"
     pd.DataFrame(
@@ -158,6 +161,7 @@ def test_prediction_missing_sklearn_raises_structured_optional_dependency(monkey
 
 
 def test_prediction_requires_enough_complete_rows(tmp_path: Path):
+    pytest.importorskip("sklearn")
     run_root = tmp_path / "run"
     run_root.mkdir()
     _init_artifacts(run_root)
