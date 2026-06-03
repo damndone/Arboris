@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2", "httpx>=0.27"]
+dev = ["pytest>=8.2", "httpx>=0.27", "jsonschema>=4.0"]
 panel = ["linearmodels>=6"]
 ml = ["scikit-learn>=1.5"]
 imbalanced = ["imbalanced-learn>=0.12"]
