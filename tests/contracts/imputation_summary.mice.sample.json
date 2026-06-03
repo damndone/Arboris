@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "method": "mice",
+  "status": "completed",
+  "rows_imputed": 17,
+  "imputed_columns": ["education", "experience"],
+  "selected_columns": ["education", "experience"],
+  "skipped_columns": [],
+  "m": 5,
+  "persisted_datasets": 5,
+  "pooled_estimates": false,
+  "max_iter": 10,
+  "random_seed": 20260429,
+  "max_missing_rate": 0.4,
+  "row_count": 200,
+  "warnings": [],
+  "input_artifact": "cleaned_dataset",
+  "output_artifact": "imputed_dataset"
+}
