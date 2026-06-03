@@ -1,0 +1,19 @@
+[
+  {
+    "key": "rerun_auto",
+    "label": "Re-run with auto",
+    "severity": "primary",
+    "form_overrides": {"model_type": "auto"}
+  },
+  {
+    "key": "change_model",
+    "label": "Change model type",
+    "severity": "secondary"
+  },
+  {
+    "key": "check_y_column",
+    "label": "Check y column",
+    "severity": "secondary",
+    "hint": "Your y appears continuous; logit needs a binary 0/1 column."
+  }
+]
