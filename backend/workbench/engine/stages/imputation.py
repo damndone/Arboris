@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from ...artifacts import register_artifact, write_json
 from ...imputation import run_mice_imputation
 from ..context import DataHandle, ModelingContext, RunEnv
 from ..imputation_registry import ImputationMethod, register_imputation_method
@@ -66,6 +67,25 @@ class ImputationStage:
                         provenance=("cleaned_dataset",),
                     )
                 )
+            imputation_summary = {
+                **imputation_summary,
+                "input_artifact": "cleaned_dataset",
+                "output_artifact": (
+                    "imputed_dataset"
+                    if imputation_summary.get("status") == "completed"
+                    else None
+                ),
+            }
+            summary_path = run_root / "imputation_summary.json"
+            write_json(summary_path, imputation_summary)
+            register_artifact(
+                run_root,
+                "imputation_summary",
+                summary_path,
+                "metadata",
+                "imputation",
+                ["cleaned_dataset"],
+            )
 
         ctx.artifacts["_imputation_summary"] = imputation_summary
         # Stash the modeling-handle id list for downstream stages
