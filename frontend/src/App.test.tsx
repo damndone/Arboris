@@ -2,6 +2,26 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+
+vi.mock("./capabilities/useCapabilities", () => ({
+  useCapabilities: () => ({
+    data: {
+      schema_version: 1,
+      model_types: [
+        { key: "auto", label: "Auto (infer from y)", group: "auto" },
+        { key: "ols", label: "OLS (linear)", group: "Linear" },
+        { key: "logit", label: "Logit", group: "Binary" },
+        { key: "poisson", label: "Poisson", group: "Count" },
+        { key: "negative_binomial", label: "Negative Binomial", group: "Count" },
+      ],
+      imputation_methods: [],
+    },
+    loading: false,
+    error: null,
+    refetch: () => {},
+  }),
+}));
+
 import App from "./App";
 import type { RunSummary } from "./api";
 import * as XLSX from "xlsx";
@@ -1102,7 +1122,7 @@ test("running run progress includes statistical tests step", async () => {
 
 // --- V1.2.5 model type selector tests ---
 
-test("model type selector renders with auto, ols, logit, poisson options", () => {
+test("model type selector renders options from capabilities", () => {
   renderAt("/");
 
   const selector = screen.getByLabelText("model type");
@@ -1110,7 +1130,16 @@ test("model type selector renders with auto, ols, logit, poisson options", () =>
 
   const options = within(selector).getAllByRole("option");
   const optionValues = options.map((opt) => (opt as HTMLOptionElement).value);
-  expect(optionValues).toEqual(["auto", "ols", "logit", "poisson"]);
+  expect(optionValues).toEqual([
+    "auto",
+    "ols",
+    "logit",
+    "poisson",
+    "negative_binomial",
+  ]);
+  expect(
+    within(selector).getByRole("option", { name: "OLS (linear)" }),
+  ).toHaveValue("ols");
 });
 
 test("model type defaults to Auto and can be changed to logit", async () => {
@@ -1388,4 +1417,3 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
 });
-

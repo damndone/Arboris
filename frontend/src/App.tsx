@@ -22,6 +22,8 @@ import {
 import { RunHistoryPanel } from "./runHistory";
 import { RunDetailRoute } from "./runDetail";
 import { RunResultView } from "./runResult";
+import { useCapabilities } from "./capabilities/useCapabilities";
+import { ModelTypeSelect } from "./runForm/ModelTypeSelect";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import "./styles.css";
 
@@ -54,6 +56,7 @@ function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
   const navigate = useNavigate();
+  const { data: capabilities } = useCapabilities();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
@@ -377,16 +380,11 @@ function SubmitRoute() {
           </label>
           <label>
             Model type
-            <select
-              aria-label="model type"
+            <ModelTypeSelect
+              capabilities={capabilities}
               value={modelType}
-              onChange={(event) => setModelType(event.target.value)}
-            >
-              <option value="auto">Auto (infer from y)</option>
-              <option value="ols">OLS (linear regression)</option>
-              <option value="logit">Logit (binary outcome)</option>
-              <option value="poisson">Poisson (count outcome)</option>
-            </select>
+              onChange={setModelType}
+            />
           </label>
           {preview && preview.sheetNames.length > 1 && (
             <label>
