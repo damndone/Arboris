@@ -330,6 +330,7 @@ export async function runWorkflow(
   modelType: string = "auto",
   sheetName?: string,
   transpose?: boolean,
+  imputation?: string,
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append("project_root", projectRoot);
@@ -339,6 +340,7 @@ export async function runWorkflow(
   form.append("x", x);
   if (sheetName) form.append("sheet_name", sheetName);
   if (transpose) form.append("transpose", "true");
+  if (imputation) form.append("imputation", imputation);
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });
   return readResponse<RunResponse>(response);
