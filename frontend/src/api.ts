@@ -247,7 +247,7 @@ export class ApiError extends Error {
 
 const API_PREFIX = "/api";
 
-function apiUrl(path: string): string {
+export function apiUrl(path: string): string {
   return `${API_PREFIX}${path}`;
 }
 
@@ -285,7 +285,7 @@ function isEnvelope(body: unknown): body is { error: ApiErrorEnvelope } {
   return "code" in error && "message" in error;
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
+export async function readResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>;
   }
