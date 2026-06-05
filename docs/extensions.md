@@ -336,3 +336,22 @@ contributions. Packs are trusted code that runs in the same Python process
 as the kernel — review them with the same care you'd review a direct edit
 of `engine/`. Dynamic / discovery / sandbox concerns are explicitly out of
 scope for V1.5.4 and reserved for later work.
+
+## 9. How new model and imputation options appear in the UI
+
+V1.5.4.1 exposes a capability manifest at `GET /capabilities`. The backend
+builds that payload from `MODEL_REGISTRY` and `IMPUTATION_REGISTRY`; the
+frontend fetches it once through `useCapabilities()` and renders form controls
+from the returned entries.
+
+To add a new `model_type`, register a `ModelHandler` through an imported
+`AnalysisPack` as shown above. If the handler should be selectable by users,
+make sure `build_capabilities()` exposes the registry key with a label, group,
+description, and any required metadata. `ModelTypeSelect` consumes that payload,
+so the option appears in the model type dropdown without editing `App.tsx`.
+
+To add a new imputation method, register an `ImputationMethod` in
+`IMPUTATION_REGISTRY` with a stable key, label, and description, then teach
+`ImputationStage` how to execute that method. `ImputationControls` renders the
+available methods from the same `/capabilities` payload; with one method it
+shows a checkbox, and with two or more it switches to a select.
