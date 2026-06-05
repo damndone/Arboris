@@ -623,6 +623,15 @@ function SubmitRoute() {
             projectRoot={projectRoot}
             runId={lastRun.run_id}
             onError={setError}
+            onFailureAction={(action) => {
+              // V1.5.4.1: apply a recovery action's form_overrides to the
+              // form. Minimum behavior — set model_type back; the user then
+              // clicks "Run analysis" again to re-submit.
+              const overrides = action.form_overrides;
+              if (overrides && typeof overrides.model_type === "string") {
+                setModelType(overrides.model_type);
+              }
+            }}
           />
         ) : (
           <p className="muted">

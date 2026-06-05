@@ -12,11 +12,19 @@ import {
   type RunDetail,
 } from "./api";
 import { validateDiagnosticPreview } from "./contract/validateDiagnosticPreview";
+import { FailureCard, type RecommendedAction } from "./runResult/FailureCard";
 
 type Props = {
   projectRoot: string;
   runId: string;
   onError: (message: string) => void;
+  // V1.5.4.1: invoked when the user clicks a recovery action on the
+  // FailureCard (e.g. "Re-run with auto"). The parent (App.tsx) owns form
+  // state and applies the action's form_overrides.
+  onFailureAction?: (
+    action: RecommendedAction,
+    evidence: Record<string, unknown>,
+  ) => void;
 };
 
 function statusBadgeClass(status: string): string {
@@ -147,7 +155,7 @@ const PROGRESS_STEPS: StepProgress[] = [
   { step: "export", label: "Export", status: "pending" },
 ];
 
-export function RunResultView({ projectRoot, runId, onError }: Props) {
+export function RunResultView({ projectRoot, runId, onError, onFailureAction }: Props) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifactsState, setArtifactsState] = useState<ArtifactsState>({
     status: "loading",
@@ -267,6 +275,12 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
     ? (detail.errors?.issues ?? [])
     : normalizeIssues(detail);
   const problemIssues = issues.filter((issue) => issue.severity === "BLOCKER");
+  // V1.5.4.1: surface a structured FailureCard for explicit model-fit
+  // failures. Evidence is serialized under `evidence` (GuardrailIssue.to_dict),
+  // NOT `details` — same key the slice-2d invariant test locks.
+  const fitFailure = problemIssues.find((i) => i.code === "MODEL_FIT_FAILED");
+  const failureEvidence = (fitFailure?.evidence ?? {}) as Record<string, unknown>;
+  const hasFailureCard = detail.status === "failed" && fitFailure !== undefined;
   const warningIssues = issues.filter((issue) => issue.severity === "WARNING");
   const cautionIssues = issues.filter((issue) => issue.severity === "CAUTION");
   const infoIssues = issues.filter((issue) => issue.severity === "INFO");
@@ -307,6 +321,12 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           {statusLabel(detail.status)}
         </span>
       </div>
+      {hasFailureCard && (
+        <FailureCard
+          evidence={failureEvidence as never}
+          onAction={(action) => onFailureAction?.(action, failureEvidence)}
+        />
+      )}
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>
