@@ -241,6 +241,11 @@ class EstimationStage:
             failure_evidence["y_type"] = ctx.y_type
             if model_type != "auto":
                 failure_evidence["requested_model_type"] = model_type
+            from ..recommended_actions import actions_for_model_fit_failure
+            failure_evidence["recommended_actions"] = actions_for_model_fit_failure(
+                requested_model_type=model_type,
+                y_type=ctx.y_type,
+            )
 
             issue_dicts.append(GuardrailIssue(
                 Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
@@ -286,17 +291,23 @@ class EstimationStage:
                 )
             except ValueError as ols_exc:
                 # OLS fallback itself failed.
+                fallback_evidence = _model_failure_details(
+                    model_type="ols",
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(ols_exc),
+                    step="estimation",
+                )
+                from ..recommended_actions import actions_for_model_fit_failure
+                fallback_evidence["recommended_actions"] = actions_for_model_fit_failure(
+                    requested_model_type="auto",
+                    y_type=ctx.y_type,
+                )
                 issue_dicts.append(GuardrailIssue(
                     Severity.BLOCKER,
                     "MODEL_FIT_FAILED",
                     f"OLS fallback also failed: {ols_exc}",
-                    _model_failure_details(
-                        model_type="ols",
-                        y=normalized_y,
-                        x=normalized_x,
-                        root_cause=str(ols_exc),
-                        step="estimation",
-                    ),
+                    fallback_evidence,
                 ).to_dict())
                 write_json(run_root / "errors.json", {"issues": issue_dicts})
                 _write_manifest(

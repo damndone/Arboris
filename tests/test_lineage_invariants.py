@@ -129,6 +129,19 @@ def test_invariant_explicit_model_type_failure_returns_failed_no_silent_fallback
     assert not (run_root / "model_results" / "ols_1.json").exists(), \
         "OLS fallback ran when explicit type was requested — 1.5.3.2 contract broken"
 
+    # V1.5.4.1: failure_evidence must carry recommended_actions for the
+    # frontend to render the FailureCard. Serialized key is `evidence`
+    # (GuardrailIssue.to_dict, domain.py), NOT `details`.
+    errors = read_json(run_root / "errors.json")
+    fit_failures = [
+        i for i in errors["issues"]
+        if i.get("code") == "MODEL_FIT_FAILED" and i.get("severity") == "BLOCKER"
+    ]
+    assert fit_failures, "expected a BLOCKER MODEL_FIT_FAILED issue"
+    evidence = fit_failures[0]["evidence"]
+    actions = evidence.get("recommended_actions", [])
+    assert any(a["key"] == "rerun_auto" for a in actions)
+
 
 # -------- Invariant 6: artifact_index `inputs` matches what produced it ----
 def test_invariant_data_provenance_is_present_for_modeling_artifacts(tmp_path):
