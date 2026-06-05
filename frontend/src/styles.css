@@ -778,3 +778,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* V1.5.4.1 ImputationControls — capability-driven imputation input */
 .imputation-controls { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
 .imputation-controls-hint { font-size: 12px; color: #0c4a6e; margin-top: 6px; padding-left: 22px; }
+
+/* V1.5.4.1 ImputationSummary — post-run imputation provenance panel */
+.imputation-summary { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+.imputation-summary-title { font-weight: 600; font-size: 13px; color: #0c4a6e; margin-bottom: 4px; }
+.imputation-summary-list { margin: 0; padding-left: 24px; font-size: 12px; color: #0c4a6e; line-height: 1.6; }
+.imputation-summary code { background: #e0f2fe; padding: 1px 4px; border-radius: 3px; }
+.imputation-summary .hint { color: #94a3b8; }

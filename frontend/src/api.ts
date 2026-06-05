@@ -772,6 +772,17 @@ export function artifactDownloadUrl(
   );
 }
 
+// V1.5.4.1: fetch a single artifact's JSON body (e.g. imputation_summary).
+// The artifact endpoint serves the raw file; readResponse parses it.
+export async function fetchArtifactJson<T = unknown>(
+  projectRoot: string,
+  runId: string,
+  artifactId: string,
+): Promise<T> {
+  const response = await fetch(artifactDownloadUrl(projectRoot, runId, artifactId));
+  return readResponse<T>(response);
+}
+
 export function reportUrl(projectRoot: string, runId: string): string {
   return apiUrl(
     `/runs/${encodeURIComponent(runId)}/report?project_root=${encodeURIComponent(projectRoot)}`,

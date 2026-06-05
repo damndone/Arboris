@@ -24,6 +24,7 @@ import { RunDetailRoute } from "./runDetail";
 import { RunResultView } from "./runResult";
 import { useCapabilities } from "./capabilities/useCapabilities";
 import { ModelTypeSelect } from "./runForm/ModelTypeSelect";
+import { ImputationControls } from "./runForm/ImputationControls";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import "./styles.css";
 
@@ -62,6 +63,9 @@ function SubmitRoute() {
   const [name, setName] = useState("demo");
   const [mode, setMode] = useState("auto");
   const [modelType, setModelType] = useState("auto");
+  // V1.5.4.1: imputation method key (null = not requested). Driven by the
+  // same `capabilities` manifest as ModelTypeSelect.
+  const [imputationMethod, setImputationMethod] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | undefined>(undefined);
   const [transpose, setTranspose] = useState(false);
   const [y, setY] = useState("");
@@ -207,6 +211,11 @@ function SubmitRoute() {
     setError(null);
     setActivity("Running workflow");
     try {
+      // V1.5.4.1: imputation wire format is a JSON string {"method": key}
+      // (docs/api-contracts/runs-post.md); empty -> backend config fallback.
+      const imputationPayload = imputationMethod
+        ? JSON.stringify({ method: imputationMethod })
+        : undefined;
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
@@ -216,6 +225,7 @@ function SubmitRoute() {
         modelType,
         sheetName,
         transpose,
+        imputationPayload,
       );
       setLastRun(result);
       // P0 + race fix: POST /runs returns immediately with
@@ -386,6 +396,11 @@ function SubmitRoute() {
               onChange={setModelType}
             />
           </label>
+          <ImputationControls
+            capabilities={capabilities}
+            value={imputationMethod}
+            onChange={setImputationMethod}
+          />
           {preview && preview.sheetNames.length > 1 && (
             <label>
               Sheet
