@@ -4,6 +4,17 @@ import pandas as pd
 
 from ...imputation import run_mice_imputation
 from ..context import DataHandle, ModelingContext, RunEnv
+from ..imputation_registry import ImputationMethod, register_imputation_method
+
+
+register_imputation_method(ImputationMethod(
+    key="mice",
+    label="MICE (Multiple Imputation)",
+    description=(
+        "Multiple Imputation by Chained Equations. Recommended when more than "
+        "5-10% of rows would otherwise be dropped due to missing values."
+    ),
+))
 
 
 class ImputationStage:

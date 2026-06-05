@@ -23,6 +23,7 @@ from .api_errors import (
 )
 from .artifacts import read_json, write_json
 from .config import load_config
+from .engine.capabilities import build_capabilities
 from .graph_store import GraphDeserializationError, GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
 from .term_parser import parse_term, is_q_quoted_dummy
@@ -47,6 +48,11 @@ BYTES_PER_GB = 1024**3
 class ProjectRequest(BaseModel):
     parent: str
     name: str
+
+
+@app.get("/capabilities")
+def capabilities_endpoint() -> dict:
+    return build_capabilities()
 
 
 @app.post("/projects")
