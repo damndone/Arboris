@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -296,6 +297,19 @@ def run_workflow(
             requested_model_type=model_type,
         )
         raise
+
+
+def parse_imputation_request(raw: str | dict | None) -> dict | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if raw.strip() == "":
+        return None
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("imputation must be a JSON object")
+    return parsed
 
 
 def run_batch_y_workflow(
