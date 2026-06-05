@@ -43,9 +43,11 @@ class ImputationStage:
         normalized_y = ctx.artifacts["_normalized_y"]
         normalized_x = ctx.artifacts["_normalized_x"]
         run_root = env.run_root
+        request = ctx.artifacts.get("_imputation_request")
+        method = request.get("method") if isinstance(request, dict) else config.imputation_method
 
         imputation_summary: dict | None = None
-        if config.imputation_method == "mice":
+        if method == "mice":
             imputation_summary = run_mice_imputation(
                 cleaned,
                 run_root,
