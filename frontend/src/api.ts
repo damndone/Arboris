@@ -247,7 +247,7 @@ export class ApiError extends Error {
 
 const API_PREFIX = "/api";
 
-function apiUrl(path: string): string {
+export function apiUrl(path: string): string {
   return `${API_PREFIX}${path}`;
 }
 
@@ -285,7 +285,7 @@ function isEnvelope(body: unknown): body is { error: ApiErrorEnvelope } {
   return "code" in error && "message" in error;
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
+export async function readResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>;
   }
@@ -330,6 +330,7 @@ export async function runWorkflow(
   modelType: string = "auto",
   sheetName?: string,
   transpose?: boolean,
+  imputation?: string,
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append("project_root", projectRoot);
@@ -339,6 +340,7 @@ export async function runWorkflow(
   form.append("x", x);
   if (sheetName) form.append("sheet_name", sheetName);
   if (transpose) form.append("transpose", "true");
+  if (imputation) form.append("imputation", imputation);
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });
   return readResponse<RunResponse>(response);
@@ -582,30 +584,49 @@ export async function fetchRunDetail(
 }
 
 /**
- * Poll fetchRunDetail until the run reaches a terminal status
- * (anything other than `"running"`). The POST /runs endpoint returns
- * immediately with `status="running"` because the orchestrator
- * executes in a background thread — without this guard the Submit
- * page's auto-navigation lands on the lineage view before
- * graph.json is written, and `/runs/<id>/graph` returns the
- * `legacy=true` empty-graph fallback (false "no lineage" state).
+ * Wait for a run to reach a terminal status (anything other than
+ * `"running"`). Uses SSE when available (real-time, cheap) and falls
+ * back to polling `fetchRunDetail` when EventSource is missing or the
+ * stream errors. Without this guard the Submit page's auto-navigation
+ * lands on the lineage view before graph.json is written.
  *
- * Defaults: 500 ms cadence, 5 min total cap. Test sites override
- * `intervalMs` to avoid timer waits.
+ * - SSE path: subscribe to /runs/<id>/events, fetch detail once on
+ *   the terminal event. Intermediate ticks pass `lastEvent` so UI can
+ *   show "currently running: <step>".
+ * - Polling path: 500 ms cadence, fetches detail every tick.
+ * - Default cap: 30 min (SSE is cheap; the polling fallback inherits
+ *   the remaining time on the same deadline).
+ *
+ * `onTick(detail, lastEvent?)`: `detail` is the freshly fetched
+ * `RunDetail` on the polling path, `null` on the SSE path (we skip
+ * the per-event fetch). `lastEvent` is populated only on the SSE
+ * path. Callers that only care about progress text should read from
+ * `lastEvent`.
  */
-export async function waitForRunTerminal(
+export type WaitForRunTerminalOpts = {
+  intervalMs?: number;
+  maxMs?: number;
+  onTick?: (detail: RunDetail | null, lastEvent?: RunProgressEvent) => void;
+  signal?: AbortSignal;
+};
+
+class _SseUnavailable extends Error {
+  constructor() {
+    super("SSE stream errored; falling back to polling");
+    this.name = "SseUnavailable";
+  }
+}
+
+async function _pollUntilTerminal(
   projectRoot: string,
   runId: string,
   opts: {
-    intervalMs?: number;
-    maxMs?: number;
-    onTick?: (detail: RunDetail) => void;
+    intervalMs: number;
+    deadline: number;
     signal?: AbortSignal;
-  } = {},
+    onTick?: WaitForRunTerminalOpts["onTick"];
+  },
 ): Promise<RunDetail> {
-  const intervalMs = opts.intervalMs ?? 500;
-  const maxMs = opts.maxMs ?? 5 * 60 * 1000;
-  const deadline = Date.now() + maxMs;
   while (true) {
     if (opts.signal?.aborted) {
       throw new DOMException("waitForRunTerminal aborted", "AbortError");
@@ -613,12 +634,120 @@ export async function waitForRunTerminal(
     const detail = await fetchRunDetail(projectRoot, runId);
     if (detail.status !== "running") return detail;
     opts.onTick?.(detail);
-    if (Date.now() >= deadline) {
+    if (Date.now() >= opts.deadline) {
       throw new Error(
-        `Run ${runId} still running after ${maxMs} ms; giving up on poll.`,
+        `Run ${runId} still running after deadline; giving up on poll.`,
       );
     }
-    await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    await new Promise<void>((resolve) => setTimeout(resolve, opts.intervalMs));
+  }
+}
+
+function _subscribeUntilTerminal(
+  projectRoot: string,
+  runId: string,
+  opts: {
+    signal?: AbortSignal;
+    onTick?: WaitForRunTerminalOpts["onTick"];
+  },
+): Promise<RunDetail> {
+  return new Promise<RunDetail>((resolve, reject) => {
+    if (opts.signal?.aborted) {
+      reject(new DOMException("waitForRunTerminal aborted", "AbortError"));
+      return;
+    }
+    let close: (() => void) | null = null;
+    let settled = false;
+    let sequence = 0;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      close?.();
+      reject(new DOMException("waitForRunTerminal aborted", "AbortError"));
+    };
+    opts.signal?.addEventListener("abort", onAbort);
+
+    const cleanup = () => {
+      settled = true;
+      opts.signal?.removeEventListener("abort", onAbort);
+    };
+
+    const emit = (
+      event: RunProgressEvent["event"],
+      step: string | null,
+      message: string,
+      status: string | null,
+    ) => {
+      sequence += 1;
+      const lastEvent: RunProgressEvent = {
+        event,
+        run_id: runId,
+        sequence,
+        timestamp: new Date().toISOString(),
+        step,
+        message,
+        status,
+      };
+      opts.onTick?.(null, lastEvent);
+    };
+
+    close = connectRunEvents(projectRoot, runId, {
+      onStepStart: (step, msg) => emit("step_start", step, msg, null),
+      onStepComplete: (step, msg) => emit("step_complete", step, msg, null),
+      onStepBlocked: (step, msg) => emit("step_blocked", step, msg, null),
+      onTerminal: (status, msg) => {
+        if (settled) return;
+        // connectRunEvents closes the EventSource for us before
+        // returning from its terminal handler; fetch the final detail
+        // (graph.json + manifest are flushed by now) and resolve.
+        emit("workflow_completed", null, msg, status);
+        cleanup();
+        fetchRunDetail(projectRoot, runId).then(resolve, reject);
+      },
+      onError: () => {
+        if (settled) return;
+        cleanup();
+        close?.();
+        reject(new _SseUnavailable());
+      },
+    });
+  });
+}
+
+export async function waitForRunTerminal(
+  projectRoot: string,
+  runId: string,
+  opts: WaitForRunTerminalOpts = {},
+): Promise<RunDetail> {
+  const intervalMs = opts.intervalMs ?? 500;
+  const maxMs = opts.maxMs ?? 30 * 60 * 1000;
+  const deadline = Date.now() + maxMs;
+  const pollArgs = {
+    intervalMs,
+    deadline,
+    signal: opts.signal,
+    onTick: opts.onTick,
+  };
+
+  // Older browsers / jsdom don't ship EventSource. Skip straight to
+  // polling so dev/test still work without the SSE path.
+  if (typeof EventSource === "undefined") {
+    return _pollUntilTerminal(projectRoot, runId, pollArgs);
+  }
+
+  try {
+    return await _subscribeUntilTerminal(projectRoot, runId, {
+      signal: opts.signal,
+      onTick: opts.onTick,
+    });
+  } catch (err) {
+    if (err instanceof _SseUnavailable) {
+      // SSE stream broke (network blip, proxy stripping `text/event-stream`,
+      // etc.). Fall through to the polling loop with whatever time is
+      // left on the shared deadline.
+      return _pollUntilTerminal(projectRoot, runId, pollArgs);
+    }
+    throw err;
   }
 }
 
@@ -641,6 +770,17 @@ export function artifactDownloadUrl(
   return apiUrl(
     `/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}?project_root=${encodeURIComponent(projectRoot)}`,
   );
+}
+
+// V1.5.4.1: fetch a single artifact's JSON body (e.g. imputation_summary).
+// The artifact endpoint serves the raw file; readResponse parses it.
+export async function fetchArtifactJson<T = unknown>(
+  projectRoot: string,
+  runId: string,
+  artifactId: string,
+): Promise<T> {
+  const response = await fetch(artifactDownloadUrl(projectRoot, runId, artifactId));
+  return readResponse<T>(response);
 }
 
 export function reportUrl(projectRoot: string, runId: string): string {

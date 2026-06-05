@@ -57,8 +57,8 @@ def create_figures(
 
     model_result = _first_model_result(model_results or [])
     if model_result is not None:
-        residuals = _numeric_list(model_result.get("residuals"))
-        fitted = _numeric_list(model_result.get("fitted_values"))
+        residuals = _model_numeric_list(model_result, "residuals_preview", "residuals")
+        fitted = _model_numeric_list(model_result, "fitted_values_preview", "fitted_values")
         if residuals and fitted and len(residuals) == len(fitted):
             path = figures_dir / "residuals_fitted.png"
             fig, ax = plt.subplots()
@@ -129,6 +129,14 @@ def _numeric_list(values: object) -> list[float]:
             return []
         numeric.append(parsed)
     return numeric
+
+
+def _model_numeric_list(model_result: dict, *keys: str) -> list[float]:
+    for key in keys:
+        values = _numeric_list(model_result.get(key))
+        if values:
+            return values
+    return []
 
 
 def _coefficient_rows(model_result: dict) -> list[tuple[str, float, float]]:

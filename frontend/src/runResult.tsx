@@ -3,6 +3,7 @@ import {
   ApiError,
   artifactDownloadUrl,
   connectRunEvents,
+  fetchArtifactJson,
   fetchRunArtifacts,
   fetchRunDetail,
   reportUrl,
@@ -12,11 +13,23 @@ import {
   type RunDetail,
 } from "./api";
 import { validateDiagnosticPreview } from "./contract/validateDiagnosticPreview";
+import { FailureCard, type RecommendedAction } from "./runResult/FailureCard";
+import {
+  ImputationSummary,
+  type ImputationSummaryData,
+} from "./runResult/ImputationSummary";
 
 type Props = {
   projectRoot: string;
   runId: string;
   onError: (message: string) => void;
+  // V1.5.4.1: invoked when the user clicks a recovery action on the
+  // FailureCard (e.g. "Re-run with auto"). The parent (App.tsx) owns form
+  // state and applies the action's form_overrides.
+  onFailureAction?: (
+    action: RecommendedAction,
+    evidence: Record<string, unknown>,
+  ) => void;
 };
 
 function statusBadgeClass(status: string): string {
@@ -147,7 +160,7 @@ const PROGRESS_STEPS: StepProgress[] = [
   { step: "export", label: "Export", status: "pending" },
 ];
 
-export function RunResultView({ projectRoot, runId, onError }: Props) {
+export function RunResultView({ projectRoot, runId, onError, onFailureAction }: Props) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifactsState, setArtifactsState] = useState<ArtifactsState>({
     status: "loading",
@@ -156,6 +169,9 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
   const [progressSteps, setProgressSteps] =
     useState<StepProgress[]>(PROGRESS_STEPS);
   const [isLive, setIsLive] = useState(false);
+  const [imputationData, setImputationData] = useState<
+    ImputationSummaryData | undefined
+  >();
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -177,6 +193,31 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
         setArtifactsState({ status: "error", message });
       });
   }, [projectRoot, runId]);
+
+  // V1.5.4.1: when the run produced an imputation_summary artifact, fetch
+  // its JSON to render the ImputationSummary panel. Presence is detected
+  // from the already-loaded artifacts list (RunDetail has no artifacts field).
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const present = artifactsState.groups.some((g) =>
+      g.items.some((it) => it.artifact_id === "imputation_summary"),
+    );
+    if (!present) {
+      setImputationData(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<ImputationSummaryData>(projectRoot, runId, "imputation_summary")
+      .then((data) => {
+        if (!cancelled) setImputationData(data);
+      })
+      .catch(() => {
+        if (!cancelled) setImputationData(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,6 +308,12 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
     ? (detail.errors?.issues ?? [])
     : normalizeIssues(detail);
   const problemIssues = issues.filter((issue) => issue.severity === "BLOCKER");
+  // V1.5.4.1: surface a structured FailureCard for explicit model-fit
+  // failures. Evidence is serialized under `evidence` (GuardrailIssue.to_dict),
+  // NOT `details` — same key the slice-2d invariant test locks.
+  const fitFailure = problemIssues.find((i) => i.code === "MODEL_FIT_FAILED");
+  const failureEvidence = (fitFailure?.evidence ?? {}) as Record<string, unknown>;
+  const hasFailureCard = detail.status === "failed" && fitFailure !== undefined;
   const warningIssues = issues.filter((issue) => issue.severity === "WARNING");
   const cautionIssues = issues.filter((issue) => issue.severity === "CAUTION");
   const infoIssues = issues.filter((issue) => issue.severity === "INFO");
@@ -307,6 +354,13 @@ export function RunResultView({ projectRoot, runId, onError }: Props) {
           {statusLabel(detail.status)}
         </span>
       </div>
+      {hasFailureCard && (
+        <FailureCard
+          evidence={failureEvidence as never}
+          onAction={(action) => onFailureAction?.(action, failureEvidence)}
+        />
+      )}
+      <ImputationSummary summary={imputationData} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>

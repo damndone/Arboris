@@ -106,7 +106,12 @@ describe("NodeActionMenu", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 
-  it("exposes exactly 4 menu items in spec §10.2 order", () => {
+  // V1.5.2 P6: menu is now registry-driven (actionRegistry filtered
+  // by surface="drawer-header-menu") plus the drawer-local "View Raw
+  // JSON" item. Items appear in registry order; disabled placeholders
+  // (Ask AI / Rerun / Mark needs review) render greyed-out with a
+  // reason tooltip rather than being hidden.
+  it("exposes View Raw JSON plus the drawer-header registry actions", () => {
     renderMenu(makeNode());
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
     const items = screen.getAllByRole("menuitem");
@@ -114,27 +119,39 @@ describe("NodeActionMenu", () => {
       (el) => el.textContent?.trim().replace(/⌘.*$/, "").trim(),
     );
     expect(labels).toEqual([
+      "View Raw JSON",
+      "Pin as tab",
       "Copy node ID",
       "Copy as JSON",
-      "View Raw JSON",
       "Copy lineage path",
+      "Ask AI about this node",
+      "Rerun from here",
+      "Mark needs review",
     ]);
   });
 
   it.each([
-    ["Ask AI"],
-    ["Rerun from this node"],
-    ["Mark as bad decision"],
-    ["Pin to compare"],
-    ["Coming soon"],
+    ["Ask AI about this node"],
+    ["Rerun from here"],
+    ["Mark needs review"],
   ] as const)(
-    'reserved label "%s" is NOT in the DOM (spec §10.3)',
+    'disabled placeholder "%s" renders greyed-out with a reason tooltip (plan §11)',
     (label) => {
       renderMenu(makeNode());
       fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
-      expect(screen.queryByText(new RegExp(label, "i"))).toBeNull();
+      const item = screen.getByText(label).closest("button");
+      expect(item).not.toBeNull();
+      expect(item).toBeDisabled();
+      expect(item?.getAttribute("title")).toMatch(/V1\.5\.3/i);
     },
   );
+
+  it("V1.5.0-era reserved labels are no longer present (Pin to compare / Coming soon)", () => {
+    renderMenu(makeNode());
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    expect(screen.queryByText(/pin to compare/i)).toBeNull();
+    expect(screen.queryByText(/coming soon/i)).toBeNull();
+  });
 
   it("Copy node ID writes node.nodeKey (not node.id) — spec §10.2 V2 forward-compat", () => {
     const n = makeNode({ id: "uuid-1", nodeKey: "model:ols_1" });

@@ -46,6 +46,23 @@ def _json_safe_sequence(values: Any) -> list[float | None]:
     return [_json_safe_float(value) for value in iterable]
 
 
+def _json_safe_sequence_preview(values: Any, limit: int = 500) -> list[float | None]:
+    if limit <= 0:
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    preview: list[float | None] = []
+    for _ in range(limit):
+        try:
+            value = next(iterator)
+        except StopIteration:
+            break
+        preview.append(_json_safe_float(value))
+    return preview
+
+
 def _labelled_values(fitted: Any, name: str) -> dict[str, Any]:
     values = getattr(fitted, name)
     if hasattr(values, "items"):
@@ -167,13 +184,26 @@ def _is_poisson_model_id(model_id: str) -> bool:
     return model_id is not None and "poisson" in model_id.lower()
 
 
+def _is_count_model(fitted: Any, model_id: str) -> bool:
+    model = getattr(fitted, "model", None)
+    family = getattr(model, "family", None)
+    names = {
+        type(model).__name__.lower(),
+        type(family).__name__.lower(),
+    }
+    return _is_poisson_model_id(model_id) or any(
+        name in {"poisson", "negativebinomial", "negativebinomialp"}
+        for name in names
+    )
+
+
 def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
     params = _labelled_values(fitted, "params")
     bse = _labelled_values(fitted, "bse")
     pvalues = _labelled_values(fitted, "pvalues")
     ci_lower, ci_upper = _confidence_intervals(fitted)
     has_pr2 = getattr(fitted, "prsquared", None) is not None
-    is_poisson = _is_poisson_model_id(model_id)
+    is_count_model = _is_count_model(fitted, model_id)
 
     coefficients: dict[str, dict[str, Any]] = {}
     for term, estimate in params.items():
@@ -195,6 +225,7 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         coefficients[term] = coef_entry
 
     result: dict[str, Any] = {
+        "schema_version": 1,
         "model_id": model_id,
         "nobs": int(fitted.nobs),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
@@ -202,17 +233,19 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "llf": _json_safe_float(getattr(fitted, "llf", None)),
         "aic": _json_safe_float(getattr(fitted, "aic", None)),
         "bic": _json_safe_float(getattr(fitted, "bic", None)),
-        "fitted_values": _json_safe_sequence(getattr(fitted, "fittedvalues", [])),
-        "residuals": _json_safe_sequence(getattr(fitted, "resid", [])),
+        "fitted_values_preview": _json_safe_sequence_preview(
+            getattr(fitted, "fittedvalues", [])
+        ),
+        "residuals_preview": _json_safe_sequence_preview(getattr(fitted, "resid", [])),
         "coefficients": coefficients,
     }
 
-    if has_pr2 or is_poisson:
-        if is_poisson:
-            poisson_irr = _incidence_rate_ratios(fitted, params, ci_lower, ci_upper, pvalues=pvalues)
-            if poisson_irr:
-                result["irr"] = poisson_irr
-                for term, irr_data in poisson_irr.items():
+    if has_pr2 or is_count_model:
+        if is_count_model:
+            count_irr = _incidence_rate_ratios(fitted, params, ci_lower, ci_upper, pvalues=pvalues)
+            if count_irr:
+                result["irr"] = count_irr
+                for term, irr_data in count_irr.items():
                     if term in coefficients:
                         coefficients[term]["irr"] = irr_data.get("irr")
                         coefficients[term]["irr_ci_lower"] = irr_data.get("irr_ci_lower")

@@ -1,7 +1,27 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+
+vi.mock("./capabilities/useCapabilities", () => ({
+  useCapabilities: () => ({
+    data: {
+      schema_version: 1,
+      model_types: [
+        { key: "auto", label: "Auto (infer from y)", group: "auto" },
+        { key: "ols", label: "OLS (linear)", group: "Linear" },
+        { key: "logit", label: "Logit", group: "Binary" },
+        { key: "poisson", label: "Poisson", group: "Count" },
+        { key: "negative_binomial", label: "Negative Binomial", group: "Count" },
+      ],
+      imputation_methods: [],
+    },
+    loading: false,
+    error: null,
+    refetch: () => {},
+  }),
+}));
+
 import App from "./App";
 import type { RunSummary } from "./api";
 import * as XLSX from "xlsx";
@@ -294,6 +314,102 @@ test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () =>
       screen.getByRole("tab", { name: "Lineage" }),
     ).toHaveAttribute("aria-selected", "true");
   });
+});
+
+test("V1.5.1 T1.3 — Submit shows live step progress from SSE step_start", async () => {
+  // SSE happy path: POST /runs returns running so waitForRunTerminal
+  // takes the SSE subscribe path. A stubbed EventSource lets us fire
+  // a step_start event mid-run; the Submit page should render the
+  // step text in the └─ progress chip.
+  class MockEventSource {
+    static instances: MockEventSource[] = [];
+    url: string;
+    listeners = new Map<string, ((e: MessageEvent) => void)[]>();
+    onerror: ((e: Event) => void) | null = null;
+    close = vi.fn();
+    constructor(url: string) {
+      this.url = url;
+      MockEventSource.instances.push(this);
+    }
+    addEventListener(type: string, fn: (e: MessageEvent) => void) {
+      const list = this.listeners.get(type) ?? [];
+      list.push(fn);
+      this.listeners.set(type, list);
+    }
+    fire(type: string, data: unknown) {
+      for (const fn of this.listeners.get(type) ?? []) {
+        fn({ data: JSON.stringify(data) } as MessageEvent);
+      }
+    }
+  }
+  MockEventSource.instances = [];
+  vi.stubGlobal("EventSource", MockEventSource);
+
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  installFetchRouter(fetchMock, (url) => {
+    if (url.includes("/projects"))
+      return jsonResponse({ project_root: "/tmp/demo" });
+    if (/\/runs\/run-sse\/artifacts(\?|$)/.test(url)) {
+      return jsonResponse({ groups: [] });
+    }
+    if (/\/runs\/run-sse(\?|$)/.test(url)) {
+      return jsonResponse(fullRunDetail("run-sse", "completed"));
+    }
+    if (/\/runs(\?|$)/.test(url)) {
+      return jsonResponse({ run_id: "run-sse", status: "running" });
+    }
+    return jsonResponse({});
+  });
+
+  renderAt("/");
+  await fillProject();
+  fillRunForm();
+  fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
+
+  // EventSource is opened inside the SSE subscribe path; wait for it
+  // before firing simulated server events.
+  await waitFor(() => {
+    expect(MockEventSource.instances.length).toBeGreaterThan(0);
+  });
+  const source = MockEventSource.instances.at(-1)!;
+  act(() => {
+    source.fire("step_start", {
+      event: "step_start",
+      run_id: "run-sse",
+      sequence: 1,
+      timestamp: "2026-05-01T00:00:01+00:00",
+      step: "regress",
+      message: "Running OLS",
+      status: null,
+    });
+  });
+
+  await waitFor(() => {
+    expect(screen.getByTestId("run-progress-line")).toHaveTextContent(
+      /regress: Running OLS/,
+    );
+  });
+
+  // Fire terminal so waitForRunTerminal resolves and the test doesn't
+  // dangle on a pending promise.
+  act(() => {
+    source.fire("workflow_completed", {
+      event: "workflow_completed",
+      run_id: "run-sse",
+      sequence: 2,
+      timestamp: "2026-05-01T00:00:05+00:00",
+      step: null,
+      message: "Done",
+      status: "completed",
+    });
+  });
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: /Open Lineage/ }),
+    ).toBeInTheDocument();
+  });
+  // Progress chip clears once the run terminates.
+  expect(screen.queryByTestId("run-progress-line")).not.toBeInTheDocument();
 });
 
 test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {
@@ -1006,7 +1122,7 @@ test("running run progress includes statistical tests step", async () => {
 
 // --- V1.2.5 model type selector tests ---
 
-test("model type selector renders with auto, ols, logit, poisson options", () => {
+test("model type selector renders options from capabilities", () => {
   renderAt("/");
 
   const selector = screen.getByLabelText("model type");
@@ -1014,7 +1130,16 @@ test("model type selector renders with auto, ols, logit, poisson options", () =>
 
   const options = within(selector).getAllByRole("option");
   const optionValues = options.map((opt) => (opt as HTMLOptionElement).value);
-  expect(optionValues).toEqual(["auto", "ols", "logit", "poisson"]);
+  expect(optionValues).toEqual([
+    "auto",
+    "ols",
+    "logit",
+    "poisson",
+    "negative_binomial",
+  ]);
+  expect(
+    within(selector).getByRole("option", { name: "OLS (linear)" }),
+  ).toHaveValue("ols");
 });
 
 test("model type defaults to Auto and can be changed to logit", async () => {
@@ -1292,4 +1417,3 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
 });
-

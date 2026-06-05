@@ -22,6 +22,10 @@ import {
 import { RunHistoryPanel } from "./runHistory";
 import { RunDetailRoute } from "./runDetail";
 import { RunResultView } from "./runResult";
+import { useCapabilities } from "./capabilities/useCapabilities";
+import { ModelTypeSelect } from "./runForm/ModelTypeSelect";
+import { ImputationControls } from "./runForm/ImputationControls";
+import { ThemeProvider, ThemeToggle } from "./theme";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
@@ -53,11 +57,15 @@ function SubmitRoute() {
   const { projectRoot, setProjectRoot, setError, setActivity, activity } =
     useAppContext();
   const navigate = useNavigate();
+  const { data: capabilities } = useCapabilities();
 
   const [parent, setParent] = useState("");
   const [name, setName] = useState("demo");
   const [mode, setMode] = useState("auto");
   const [modelType, setModelType] = useState("auto");
+  // V1.5.4.1: imputation method key (null = not requested). Driven by the
+  // same `capabilities` manifest as ModelTypeSelect.
+  const [imputationMethod, setImputationMethod] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | undefined>(undefined);
   const [transpose, setTranspose] = useState(false);
   const [y, setY] = useState("");
@@ -70,6 +78,10 @@ function SubmitRoute() {
   >("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [requestState, setRequestState] = useState<RequestState>("idle");
+  // V1.5.1 T1.3: live progress line under the Run button. Populated
+  // from SSE step events (or a 3 s "connecting…" placeholder if no
+  // event arrives — usually means we fell back to polling).
+  const [progressLine, setProgressLine] = useState<string | null>(null);
   // V1.5.0.1 HF4: persist lastRun in sessionStorage so the "Open
   // Lineage" affordance and inline RunResultView survive when the
   // user navigates away (e.g. to History or to /runs/:id and back)
@@ -199,6 +211,11 @@ function SubmitRoute() {
     setError(null);
     setActivity("Running workflow");
     try {
+      // V1.5.4.1: imputation wire format is a JSON string {"method": key}
+      // (docs/api-contracts/runs-post.md); empty -> backend config fallback.
+      const imputationPayload = imputationMethod
+        ? JSON.stringify({ method: imputationMethod })
+        : undefined;
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
@@ -208,6 +225,7 @@ function SubmitRoute() {
         modelType,
         sheetName,
         transpose,
+        imputationPayload,
       );
       setLastRun(result);
       // P0 + race fix: POST /runs returns immediately with
@@ -228,10 +246,26 @@ function SubmitRoute() {
       let finalStatus = result.status;
       if (result.run_id && result.status === "running") {
         setActivity("Running workflow — waiting for completion");
+        setProgressLine(null);
+        let sawEvent = false;
+        const connectingTimer = window.setTimeout(() => {
+          if (!sawEvent) setProgressLine("Connecting to event stream…");
+        }, 3000);
         try {
           const terminal = await waitForRunTerminal(
             projectRoot.trim(),
             result.run_id,
+            {
+              onTick: (_detail, lastEvent) => {
+                if (!lastEvent) return;
+                sawEvent = true;
+                window.clearTimeout(connectingTimer);
+                const step = lastEvent.step?.trim() ?? "";
+                setProgressLine(
+                  step ? `${step}: ${lastEvent.message}` : lastEvent.message,
+                );
+              },
+            },
           );
           finalStatus = terminal.status;
         } catch (waitError) {
@@ -240,6 +274,9 @@ function SubmitRoute() {
               ? waitError.message
               : "Polling failed";
           setError(msg);
+        } finally {
+          window.clearTimeout(connectingTimer);
+          setProgressLine(null);
         }
       }
       setActivity(
@@ -353,17 +390,17 @@ function SubmitRoute() {
           </label>
           <label>
             Model type
-            <select
-              aria-label="model type"
+            <ModelTypeSelect
+              capabilities={capabilities}
               value={modelType}
-              onChange={(event) => setModelType(event.target.value)}
-            >
-              <option value="auto">Auto (infer from y)</option>
-              <option value="ols">OLS (linear regression)</option>
-              <option value="logit">Logit (binary outcome)</option>
-              <option value="poisson">Poisson (count outcome)</option>
-            </select>
+              onChange={setModelType}
+            />
           </label>
+          <ImputationControls
+            capabilities={capabilities}
+            value={imputationMethod}
+            onChange={setImputationMethod}
+          />
           {preview && preview.sheetNames.length > 1 && (
             <label>
               Sheet
@@ -481,6 +518,15 @@ function SubmitRoute() {
               : "Run workflow"}
           </button>
         </div>
+        {progressLine && (
+          <p
+            className="run-progress-line"
+            aria-live="polite"
+            data-testid="run-progress-line"
+          >
+            └─ {progressLine}
+          </p>
+        )}
         {runErrors.projectRoot && (
           <p className="field-error inline-error">{runErrors.projectRoot}</p>
         )}
@@ -590,6 +636,15 @@ function SubmitRoute() {
             projectRoot={projectRoot}
             runId={lastRun.run_id}
             onError={setError}
+            onFailureAction={(action) => {
+              // V1.5.4.1: apply a recovery action's form_overrides to the
+              // form. Minimum behavior — set model_type back; the user then
+              // clicks "Run analysis" again to re-submit.
+              const overrides = action.form_overrides;
+              if (overrides && typeof overrides.model_type === "string") {
+                setModelType(overrides.model_type);
+              }
+            }}
           />
         ) : (
           <p className="muted">
@@ -740,9 +795,12 @@ function AppShell() {
     >
       <header className="workbench-header">
         <h1>Local Econometrics Workbench</h1>
-        <span className="activity" aria-live="polite">
-          {activity}
-        </span>
+        <div className="workbench-header__right">
+          <span className="activity" aria-live="polite">
+            {activity}
+          </span>
+          <ThemeToggle />
+        </div>
       </header>
 
       {errorMessage && (
@@ -783,13 +841,18 @@ function AppShell() {
 // --- App (router root) ---
 
 export default function App() {
+  // V1.5.1 T6 — ThemeProvider lives here (not main.tsx) so App.test.tsx
+  // and any other consumer that renders <App /> directly gets the theme
+  // context for free. main.tsx no longer wraps to avoid a double-listener.
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<SubmitRoute />} />
-        <Route path="runs" element={<RunHistoryRoute />} />
-        <Route path="runs/:runId" element={<RunDetailRoute />} />
-      </Route>
-    </Routes>
+    <ThemeProvider>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<SubmitRoute />} />
+          <Route path="runs" element={<RunHistoryRoute />} />
+          <Route path="runs/:runId" element={<RunDetailRoute />} />
+        </Route>
+      </Routes>
+    </ThemeProvider>
   );
 }

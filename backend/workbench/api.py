@@ -23,6 +23,7 @@ from .api_errors import (
 )
 from .artifacts import read_json, write_json
 from .config import load_config
+from .engine.capabilities import build_capabilities
 from .graph_store import GraphDeserializationError, GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
 from .term_parser import parse_term, is_q_quoted_dummy
@@ -32,6 +33,7 @@ from .orchestrator import (
     _lineage,
     _run_workflow,
     _write_manifest,
+    parse_imputation_request,
     run_batch_y_workflow,
     run_workflow,
 )
@@ -47,6 +49,11 @@ BYTES_PER_GB = 1024**3
 class ProjectRequest(BaseModel):
     parent: str
     name: str
+
+
+@app.get("/capabilities")
+def capabilities_endpoint() -> dict:
+    return build_capabilities()
 
 
 @app.post("/projects")
@@ -65,11 +72,16 @@ async def run_endpoint(
     file: UploadFile = File(...),
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
+    imputation: str = Form(""),
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
     x_columns = [part.strip() for part in x.split(",") if part.strip()]
+    try:
+        imputation_request = parse_imputation_request(imputation)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -101,7 +113,7 @@ async def run_endpoint(
         events.executor.submit(
             _bg_run, run.root, run.run_id, saved_path,
             mode, y, x_columns, started_at, model_type,
-            sheet_name or None, transpose == "true",
+            sheet_name or None, transpose == "true", imputation_request,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -213,6 +225,7 @@ def _bg_run(
     model_type: str = "auto",
     sheet_name: str | None = None,
     transpose: bool = False,
+    imputation: dict | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -239,6 +252,7 @@ def _bg_run(
             model_type=model_type,
             sheet_name=sheet_name,
             transpose=transpose,
+            imputation=imputation,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

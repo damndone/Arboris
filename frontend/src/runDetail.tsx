@@ -5,7 +5,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { RunResultView } from "./runResult";
-import { LineageRouteContainer } from "./lineage/LineageRouteContainer";
+import { WorkbenchRouteContainer } from "./workbench/WorkbenchRouteContainer";
 
 type AppContextValue = {
   projectRoot: string;
@@ -91,7 +91,7 @@ export function RunDetailRoute() {
         </TabLink>
       </div>
       {tab === "lineage" ? (
-        <LineageRouteContainer projectRoot={projectRoot} runId={runId} />
+        <WorkbenchRouteContainer projectRoot={projectRoot} runId={runId} />
       ) : (
         <RunResultView
           projectRoot={projectRoot}

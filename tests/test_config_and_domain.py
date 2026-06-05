@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -26,14 +27,35 @@ def test_default_config_matches_v1_boundaries():
     assert config.max_panel_missing_cells == 0.5
     assert config.min_variable_role_confidence == 0.65
     assert config.random_seed == 20260429
+    assert config.imputation_method == ""
+    assert config.imputation_m == 5
+    assert config.imputation_max_iter == 10
+    assert config.prediction_enabled is False
+    assert config.prediction_model_type == ""
+    assert config.prediction_cv_folds == 5
+    assert config.prediction_sampling_method == ""
 
 
 def test_load_config_allows_project_override(tmp_path: Path):
     path = tmp_path / "config.yml"
-    path.write_text("max_rows: 100\nmin_join_overlap: 0.8\n", encoding="utf-8")
+    path.write_text(
+        "max_rows: 100\n"
+        "min_join_overlap: 0.8\n"
+        "imputation_method: mice\n"
+        "prediction_enabled: true\n"
+        "prediction_model_type: prediction_ridge\n"
+        "prediction_cv_folds: 3\n"
+        "prediction_sampling_method: oversample\n",
+        encoding="utf-8",
+    )
     config = load_config(path)
     assert config.max_rows == 100
     assert config.min_join_overlap == 0.8
+    assert config.imputation_method == "mice"
+    assert config.prediction_enabled is True
+    assert config.prediction_model_type == "prediction_ridge"
+    assert config.prediction_cv_folds == 3
+    assert config.prediction_sampling_method == "oversample"
     assert config.max_upload_files == 20
 
 
@@ -215,8 +237,20 @@ def test_cli_module_exports_app():
     assert app is not None
 
 
-def test_cli_lineage_url_default_origin(tmp_path):
+def _isolate_origin_state(monkeypatch, tmp_path, probe_open=True):
+    """Redirect the cache file to a tmp dir and stub the TCP probe so
+    `_resolve_ui_origin` is deterministic regardless of whether a real
+    dev server is running on the host."""
+    from workbench import cli as cli_module
+
+    monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
+    monkeypatch.setattr(cli_module, "_CACHE_PATH", tmp_path / "ui_origin_cache.json")
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: probe_open)
+
+
+def test_cli_lineage_url_default_origin(tmp_path, monkeypatch):
     """Built URL points at the FE dev origin and lands on the lineage tab."""
+    _isolate_origin_state(monkeypatch, tmp_path, probe_open=True)
     from workbench.cli import _lineage_url
 
     project = tmp_path / "proj"
@@ -245,9 +279,10 @@ def test_cli_lineage_url_env_override(tmp_path, monkeypatch):
     assert url.startswith("https://my-remote-tunnel.dev/runs/r1?")
 
 
-def test_cli_lineage_url_quotes_special_runid(tmp_path):
+def test_cli_lineage_url_quotes_special_runid(tmp_path, monkeypatch):
     """A run_id containing slashes/spaces must be percent-encoded so
     the URL stays parseable."""
+    _isolate_origin_state(monkeypatch, tmp_path, probe_open=True)
     from workbench.cli import _lineage_url
 
     project = tmp_path / "proj"
@@ -256,6 +291,53 @@ def test_cli_lineage_url_quotes_special_runid(tmp_path):
     # Spaces → %20, slash → %2F. The single legitimate "/runs/" prefix
     # remains intact.
     assert "/runs/weird%20run%2Fid?" in url
+
+
+def test_resolve_ui_origin_env_var_skips_probe(tmp_path, monkeypatch):
+    """T5.3: explicit env var short-circuits the probe and the cache."""
+    from workbench import cli as cli_module
+
+    monkeypatch.setenv("WORKBENCH_UI_ORIGIN", "https://tunnel.example/")
+    monkeypatch.setattr(cli_module, "_CACHE_PATH", tmp_path / "cache.json")
+
+    def _boom():
+        raise AssertionError("probe must not run when env var is set")
+
+    monkeypatch.setattr(cli_module, "_probe_dev_server", _boom)
+    assert cli_module._resolve_ui_origin() == "https://tunnel.example"
+
+
+def test_resolve_ui_origin_probe_open_returns_dev_server(tmp_path, monkeypatch):
+    """T5.3: when :5173 accepts a connection, use it and cache the choice."""
+    from workbench import cli as cli_module
+
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
+    monkeypatch.setattr(cli_module, "_CACHE_PATH", cache_path)
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: True)
+
+    assert cli_module._resolve_ui_origin() == "http://localhost:5173"
+    # Probe result is persisted so subsequent CLI invocations skip the probe.
+    assert cache_path.exists()
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached["origin"] == "http://localhost:5173"
+
+
+def test_resolve_ui_origin_probe_closed_falls_back_to_backend(
+    tmp_path, monkeypatch
+):
+    """T5.3: when :5173 is unreachable, fall back to the backend origin
+    so the printed URL still resolves to something a user can open."""
+    from workbench import cli as cli_module
+
+    cache_path = tmp_path / "cache.json"
+    monkeypatch.delenv("WORKBENCH_UI_ORIGIN", raising=False)
+    monkeypatch.setattr(cli_module, "_CACHE_PATH", cache_path)
+    monkeypatch.setattr(cli_module, "_probe_dev_server", lambda: False)
+
+    assert cli_module._resolve_ui_origin() == "http://localhost:8000"
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached["origin"] == "http://localhost:8000"
 
 
 def test_cli_run_stdout_is_run_id_only_stderr_carries_url(

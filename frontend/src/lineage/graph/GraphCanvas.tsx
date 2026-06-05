@@ -60,11 +60,20 @@ export function waitingReviewsCount(model: GraphViewModel): number {
   return n;
 }
 
+// V1.5.1 T4' — layout mode. "free" is the default (user-arranged after
+// initial seed). "LR" / "TB" run dagre with that rankdir on demand and
+// snap nodes to the result. Switching back to "free" preserves the most
+// recent positions (via useNodesState ownership; see HF5 comment below).
+export type LayoutMode = "free" | "LR" | "TB";
+export const DEFAULT_LAYOUT: LayoutMode = "free";
+
 interface CanvasToolbarProps {
   containerRef: React.RefObject<HTMLDivElement>;
+  layout: LayoutMode;
+  onLayout: (mode: LayoutMode) => void;
 }
 
-function CanvasToolbar({ containerRef }: CanvasToolbarProps) {
+function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
   const { fitView } = useReactFlow();
   const onFit = () => fitView({ padding: 0.2, duration: 200 });
   const onFullscreen = async () => {
@@ -73,11 +82,6 @@ function CanvasToolbar({ containerRef }: CanvasToolbarProps) {
     // Fullscreen API may be unsupported (older browsers, embedded
     // contexts) or rejected (user gesture missing, security policy).
     // Both branches degrade gracefully — no banner, no throw.
-    //
-    // Target is the lineage-root container. If a future host layout
-    // ever wraps GraphCanvas with siblings the user expects to keep
-    // visible (e.g. a header bar) we'd hoist the ref upward; for
-    // V1.5.0 the lineage view IS the page content so this is fine.
     if (!document.fullscreenEnabled) return;
     try {
       if (document.fullscreenElement) {
@@ -89,22 +93,33 @@ function CanvasToolbar({ containerRef }: CanvasToolbarProps) {
       /* user rejected or feature blocked — silent no-op */
     }
   };
+  const layoutBtn = (mode: LayoutMode, label: string, title: string) => (
+    <button
+      type="button"
+      onClick={() => onLayout(mode)}
+      data-testid={`toolbar-layout-${mode.toLowerCase()}`}
+      data-active={layout === mode ? "true" : undefined}
+      aria-pressed={layout === mode}
+      title={title}
+    >
+      {label}
+    </button>
+  );
   return (
     <Panel position="top-left">
-      <div className="ln-canvas-toolbar" data-testid="canvas-toolbar">
-        {/* "Auto layout" is currently the only layout mode (dagre runs
-         * unconditionally). Render as a disabled pressed indicator
-         * rather than a clickable no-op so the affordance honestly
-         * reflects current capability. */}
-        <button
-          type="button"
-          disabled
-          aria-pressed="true"
-          data-testid="toolbar-auto-layout"
-          title="Auto layout (always on)"
-        >
-          Auto
-        </button>
+      <div
+        className="ln-canvas-toolbar"
+        data-testid="canvas-toolbar"
+        role="group"
+        aria-label="Canvas layout"
+      >
+        {/* V1.5.1 T4' — Free is the default (per user 2026-05-25).
+         * Horizontal/Vertical click forces a fresh dagre re-layout with
+         * that rankdir; clicking Free again stops forced re-layouts
+         * (positions are preserved by useNodesState below). */}
+        {layoutBtn("free", "Free", "Free layout — drag nodes anywhere")}
+        {layoutBtn("LR", "Horizontal", "Horizontal flow (left → right)")}
+        {layoutBtn("TB", "Vertical", "Vertical flow (top → bottom)")}
         <button
           type="button"
           onClick={onFit}
@@ -183,11 +198,44 @@ interface GraphCanvasProps {
   expandedGroups: Set<string>;
   onSelect: (nodeId: string) => void;
   onExpandGroup: (groupId: string) => void;
+  /** V1.5.1 T4' — controlled layout. Defaults to "free" when omitted. */
+  layout?: LayoutMode;
+  onLayoutChange?: (mode: LayoutMode) => void;
+  /** V1.5.2 P4 — right-click on a node. Receives the node id + the
+   *  viewport-coordinate event so a portal context menu can position
+   *  itself. Omit to disable right-click in tests / legacy consumers. */
+  onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
+  /** V1.5.2 P6 — focus anchor (plan §8 priority #2). When set AND
+   *  different from `selectedNodeId`, the node renders with a distinct
+   *  focus ring. */
+  focusNodeKey?: string | null;
+  /** V1.5.2 P6 — caller-computed upstream set of `focusNodeKey`.
+   *  GraphCanvas doesn't walk the graph itself; GraphView passes a
+   *  ReadonlySet built from RunSnapshotAdapter.upstreamOf so walk
+   *  semantics match Drawer chips + AI scope. */
+  focusUpstreamKeys?: ReadonlySet<string>;
+  /** V1.5.2 P6 — search-hit overlay set (Tier 3). Layered on top of
+   *  the state class, never displaces selected/focus. Empty when no
+   *  search is active. */
+  searchHitKeys?: ReadonlySet<string>;
+  /** V1.5.3 F5 — the single "current cursor" search hit (the row the
+   *  user is on in the ⌘K palette). Rendered one tier stronger than
+   *  the other searchHits so ↑/↓ navigation is visible on the canvas.
+   *  null when the palette is closed or has no results. */
+  searchCursorKey?: string | null;
 }
 
-function layoutDagre<T extends RFNode>(nodes: T[], edges: RFEdge[]): T[] {
+function layoutDagre<T extends RFNode>(
+  nodes: T[],
+  edges: RFEdge[],
+  rankdir: "TB" | "LR" = "LR",
+): T[] {
+  // V1.5.1 T4' — default rankdir flipped to LR. The graph reads as a
+  // pipeline (source → eda → … → report); horizontal flow matches the
+  // editorial prototype's visual rhythm better than vertical for wide
+  // screens. Vertical is still selectable via the layout toolbar.
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 60 });
+  g.setGraph({ rankdir, nodesep: 40, ranksep: 60 });
   g.setDefaultEdgeLabel(() => ({}));
   nodes.forEach((n) => g.setNode(n.id, { width: 240, height: 80 }));
   edges.forEach((e) => g.setEdge(e.source, e.target));
@@ -257,7 +305,31 @@ export function GraphCanvas({
   expandedGroups,
   onSelect,
   onExpandGroup,
+  layout: layoutProp,
+  onLayoutChange,
+  onNodeContextMenu,
+  focusNodeKey = null,
+  focusUpstreamKeys,
+  searchHitKeys,
+  searchCursorKey = null,
 }: GraphCanvasProps) {
+  // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
+  // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
+  // `layoutVersion` increments on every user click so the seedNodes
+  // useMemo re-runs even when nothing else changed — that's how a
+  // "Horizontal" or "Vertical" click forces a fresh dagre snap.
+  const [layoutLocal, setLayoutLocal] = useState<LayoutMode>(DEFAULT_LAYOUT);
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  const layout = layoutProp ?? layoutLocal;
+  const handleLayout = useCallback(
+    (mode: LayoutMode) => {
+      if (onLayoutChange) onLayoutChange(mode);
+      else setLayoutLocal(mode);
+      setLayoutVersion((v) => v + 1);
+    },
+    [onLayoutChange],
+  );
+
   // Hoisted out of the main useMemo so a selection-only re-render (which
   // bumps selectedNodeId but not model) doesn't pay an O(n) Map rebuild.
   // [REV-3 #6 — Step 5 adversarial review]
@@ -354,31 +426,49 @@ export function GraphCanvas({
       return true;
     });
 
+    // V1.5.1 T4' — rankdir derives from layout mode. "free" still seeds
+    // with LR dagre so first paint is sensible; once seeded, HF5's
+    // useNodesState ownership lets the user drag freely without snap-back.
+    // Clicking Horizontal/Vertical bumps layoutVersion, which re-runs this
+    // useMemo and produces a fresh dagre snap.
+    const rankdir: "TB" | "LR" = layout === "TB" ? "TB" : "LR";
     const layouted = layoutDagre(
       [...realNodes, ...groupNodes, ...markerNodes],
       uniqEdges,
+      rankdir,
     );
     return { seedNodes: layouted, rfEdges: uniqEdges, memberToGroup };
-  }, [model, expandedGroups, nodeById]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, expandedGroups, nodeById, layout, layoutVersion]);
 
   // V1.5.0.1 HF5: useNodesState lets React Flow own the live position
   // state, so node drag mutations stick. We re-seed from layoutDagre
   // ONLY when the graph identity changes (i.e., the set of node ids
   // changes). Selection changes do NOT re-seed.
+  //
+  // V1.5.1 T4': also re-seed when the user clicks a Layout button
+  // (Free/Horizontal/Vertical). layoutVersion ticks on every click; we
+  // fold it into the seed key so a re-layout actually replaces
+  // positions even though node ids are stable.
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(seedNodes);
   const lastSeedKey = useRef<string>("");
   useEffect(() => {
-    const key = seedNodes.map((n) => n.id).join("|");
+    const key = `v${layoutVersion}:${layout}:${seedNodes.map((n) => n.id).join("|")}`;
     if (key !== lastSeedKey.current) {
       setRfNodes(seedNodes);
       lastSeedKey.current = key;
     }
-  }, [seedNodes, setRfNodes]);
+  }, [seedNodes, setRfNodes, layout, layoutVersion]);
 
   // T8.5: tri-state highlight + selected flag overlaid on top of the
   // RF-owned node state. Re-runs cheaply on selection change without
   // touching positions.
+  // V1.5.1 T4': handleAxis flips edge anchor sides so LR layout edges
+  // come out the right side (not bottom) — kills the S-curve look the
+  // user flagged 2026-05-25.
+  const handleAxis = layout === "TB" ? "vertical" : "horizontal";
   const decoratedNodes = useMemo(() => {
+    // Selected's immediate neighbours (V1.5.0 behaviour, unchanged).
     const related = new Set<string>();
     if (selectedNodeId !== null) {
       related.add(selectedNodeId);
@@ -389,18 +479,45 @@ export function GraphCanvas({
         if (src === selectedNodeId) related.add(tgt);
       }
     }
-    const stateFor = (id: string): "selected" | "related" | "dim" => {
-      if (selectedNodeId === null) return "related";
+    // V1.5.2 P6 — 5-level state per plan §8.
+    const stateFor = (
+      id: string,
+    ): "selected" | "focus" | "focus-upstream" | "related" | "dim" => {
       if (id === selectedNodeId) return "selected";
+      // focus only wins when it's distinct from selected (so a node
+      // that is both stays "selected" — the stronger ring wins).
+      if (focusNodeKey !== null && id === focusNodeKey) return "focus";
+      if (focusUpstreamKeys?.has(id)) return "focus-upstream";
+      // Fallback: when nothing is selected AND nothing is focused,
+      // every node is "related" (no dimming) — same V1.5.0 default
+      // so empty-state graphs look unchanged.
+      if (selectedNodeId === null && focusNodeKey === null) return "related";
       if (related.has(id)) return "related";
       return "dim";
     };
     return rfNodes.map((n) => ({
       ...n,
       selected: n.id === selectedNodeId,
-      data: { ...n.data, state: stateFor(n.id) },
+      data: {
+        ...n.data,
+        state: stateFor(n.id),
+        handleAxis,
+        isSearchHit: searchHitKeys?.has(n.id) ?? false,
+        // F5: exactly one node (the palette cursor) gets this flag.
+        isSearchCursor: searchCursorKey !== null && n.id === searchCursorKey,
+      },
     }));
-  }, [rfNodes, selectedNodeId, model.edges, memberToGroup]);
+  }, [
+    rfNodes,
+    selectedNodeId,
+    focusNodeKey,
+    focusUpstreamKeys,
+    searchHitKeys,
+    searchCursorKey,
+    model.edges,
+    memberToGroup,
+    handleAxis,
+  ]);
 
   // ── T8.4 hover tooltip ──────────────────────────────────────────
   // Tracks the candidate node under the cursor + screen-space coords.
@@ -474,6 +591,7 @@ export function GraphCanvas({
     <div
       ref={rootRef}
       className="lineage-root"
+      data-graph="true"
       style={{ width: "100%", height: "100%", minHeight: 480 }}
     >
       <ReactFlow
@@ -496,6 +614,15 @@ export function GraphCanvas({
           if (n.id.startsWith("group:")) onExpandGroup(n.id);
           else onSelect(n.id);
         }}
+        onNodeContextMenu={(e, n) => {
+          // V1.5.2 P4 — open the workbench context menu. Suppress the
+          // browser default so the registry menu is the only one shown.
+          // Group nodes don't have actions so we ignore them.
+          if (n.id.startsWith("group:")) return;
+          if (!onNodeContextMenu) return;
+          e.preventDefault();
+          onNodeContextMenu(n.id, e.clientX, e.clientY);
+        }}
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseMove={onNodeMouseMove}
         onNodeMouseLeave={onNodeMouseLeave}
@@ -503,7 +630,11 @@ export function GraphCanvas({
       >
         <Background gap={20} />
         <Controls showInteractive={false} />
-        <CanvasToolbar containerRef={rootRef} />
+        <CanvasToolbar
+          containerRef={rootRef}
+          layout={layout}
+          onLayout={handleLayout}
+        />
         <CanvasStatus model={model} />
         <CanvasLegend />
       </ReactFlow>

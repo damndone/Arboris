@@ -1,0 +1,65 @@
+{
+  "artifacts": {
+    "analysis_router": [
+      "data_profile"
+    ],
+    "cleaned_dataset": [
+      "raw_data.csv"
+    ],
+    "cleaning_actions": [
+      "raw_data.csv"
+    ],
+    "coef_plot": [],
+    "correlation_heatmap": [],
+    "data_profile": [
+      "cleaned_dataset"
+    ],
+    "diagnostic_summary": [],
+    "diagnostics_logit_1": [
+      "cleaned_dataset"
+    ],
+    "logit_1": [
+      "cleaned_dataset"
+    ],
+    "raw_data.csv": [],
+    "report_html": [],
+    "report_pdf": [],
+    "statistical_tests_anova": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_chi_square": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_fisher_exact": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_nonparametric": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_rank_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_t_tests": [
+      "cleaned_dataset"
+    ],
+    "tables_xlsx": []
+  },
+  "error_codes": [],
+  "models": {
+    "logit_1": {
+      "coef_keys": [
+        "Intercept",
+        "x"
+      ],
+      "coef_rounded": {
+        "Intercept": -0.117732,
+        "x": 0.009611
+      },
+      "model_type": "logit"
+    }
+  },
+  "status": "completed"
+}

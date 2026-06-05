@@ -4,6 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Local Econometrics Workbench</title>
+    <script>
+      // V1.5.1 T6 — flash-of-wrong-theme prevention.
+      // Runs before stylesheet evaluation so the first paint uses the
+      // resolved theme. Mirrors the logic in src/theme/ThemeProvider.tsx
+      // (STORAGE_KEY, valid choices, system → matchMedia). The Provider
+      // re-evaluates on mount and remains the source of truth at runtime.
+      (function () {
+        try {
+          var stored = localStorage.getItem("workbench:theme");
+          var valid = stored === "dark" || stored === "light" || stored === "system";
+          var choice = valid ? stored : "system";
+          var effective = choice;
+          if (choice === "system") {
+            effective =
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          }
+          document.documentElement.setAttribute("data-theme", effective);
+        } catch (_e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,34 +1,44 @@
 // frontend/src/lineage/graph/NodeActionMenu.tsx
 //
-// V1.5.0 NodeActionMenu (Step 6, T6.9). Renamed and relocated from
-// V1.4.1's MoreMenu. Now exposes 4 actionable items per spec §10.2;
-// reserved-future items (Ask AI, Rerun, Mark bad decision, Pin to
-// compare) are documented in spec §10.3 and intentionally NOT rendered
-// — no placeholders, no disabled rows, no "Coming soon" tooltips.
+// V1.5.2 P6 — refactored to consume actionRegistry (plan §11).
 //
-// Closes on outside click + Escape + scroll (V1.4.1 MoreMenu pattern
-// hardened).
+// Renders the actions registered for the `drawer-header-menu` surface.
+// V1.5.0 hardcoded 4 items inline; that's replaced with a registry
+// loop so new actions (or disabled placeholders for AI / rerun /
+// mark-review) appear automatically.
+//
+// When mounted outside WorkbenchStateProvider (legacy test harness),
+// the menu degrades to V1.5.0's read-only invokes — copyNodeId,
+// copyAsJson, copyLineagePath, plus the "View Raw JSON" item that
+// is NOT in the registry (it's drawer-internal — owned by the
+// drawer, not a node-scoped action). This keeps the existing
+// RawJsonModal flow intact.
 //
 // Popup is rendered via createPortal into document.body and positioned
 // against the trigger's getBoundingClientRect() with `position: fixed`.
-// This survives ancestor stacking contexts and overflow:hidden — needed
-// for Step 8, when the menu mounts on a React Flow node's ⋯ affordance.
-// REV-3 F1+F2.
+// Closes on outside-click + Escape + scroll (V1.4.1 MoreMenu pattern
+// hardened in V1.5.0 REV-3 F1+F2).
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { buildBranchPath } from "../pathBuilder";
 import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
+import {
+  actionsForSurface,
+  type ActionContext,
+} from "../../workbench/registry/actionRegistry";
+import { useWorkbenchOptional } from "../../workbench/WorkbenchStateProvider";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
   node: GraphViewNode;
   /** Needed by "Copy lineage path"; pass the same model the workbench owns. */
   model: GraphViewModel;
-  /** Caller wires this to open the RawJsonModal. */
+  /** Caller wires this to open the RawJsonModal. View Raw JSON stays
+   *  drawer-local (not a registry action) because it controls a
+   *  drawer-owned modal, not a node-scoped imperative. */
   onShowJson: () => void;
 }
 
@@ -39,15 +49,17 @@ interface PopupCoords {
 
 const GAP_PX = 6;
 
-export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps) {
+export function NodeActionMenu({
+  node,
+  model,
+  onShowJson,
+}: NodeActionMenuProps) {
+  const wb = useWorkbenchOptional();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<PopupCoords | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
 
-  // Compute popup coords from the trigger's viewport rect. Runs on open
-  // and on resize so the popup tracks layout changes without itself
-  // being a layout container.
   useLayoutEffect(() => {
     if (!open) {
       setCoords(null);
@@ -67,10 +79,6 @@ export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps)
     return () => window.removeEventListener("resize", compute);
   }, [open]);
 
-  // Outside-click + Escape + scroll close.
-  // Portal-aware: clicks inside the popup (which lives in document.body,
-  // outside our wrapper) must NOT close. We check both refs explicitly
-  // instead of the wrapper.contains(target) shortcut used pre-portal.
   useEffect(() => {
     if (!open) return undefined;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -82,8 +90,6 @@ export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps)
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    // Native <select> closes on scroll; users find a stuck popup that no
-    // longer aligns with its trigger more disorienting than auto-close.
     const onScroll = () => setOpen(false);
     document.addEventListener("mousedown", onDocMouseDown, true);
     document.addEventListener("keydown", onKey, true);
@@ -95,32 +101,30 @@ export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps)
     };
   }, [open]);
 
-  const run = (fn: () => void) => () => {
+  // Build the action context. When the provider is absent the
+  // registry's dispatch-dependent actions (openDetail, pinTab,
+  // pinUpstream, focusUpstream) gracefully no-op via the stub
+  // dispatch below — V1.5.0/1.5.1 test harnesses keep working.
+  const ctx: ActionContext = {
+    node,
+    model,
+    selectedKey: wb?.state.selectedKey ?? null,
+    focusKey: wb?.state.focusKey ?? null,
+    pinned: wb?.state.pinned ?? false,
+    dispatch: {
+      openDetail: wb?.dispatch.selectByCanvasClick ?? (() => {}),
+      pinTab: wb?.dispatch.selectByCanvasClick ?? (() => {}),
+      pinUpstream: wb?.dispatch.pinFocus ?? (() => {}),
+      // F1: focus-only (see ContextMenu) — don't move selection.
+      focusUpstream: wb?.dispatch.setFocusOnly ?? (() => {}),
+    },
+  };
+  const registryActions = actionsForSurface("drawer-header-menu", ctx);
+
+  const closeAfter = (fn: () => void) => () => {
     fn();
     setOpen(false);
   };
-
-  const items: Array<{ label: string; onClick: () => void; shortcut?: string }> = [
-    {
-      label: "Copy node ID",
-      onClick: () => navigator.clipboard.writeText(node.nodeKey),
-    },
-    {
-      label: "Copy as JSON",
-      onClick: () =>
-        navigator.clipboard.writeText(JSON.stringify(node.raw, null, 2)),
-    },
-    {
-      label: "View Raw JSON",
-      onClick: onShowJson,
-      shortcut: "⌘J",
-    },
-    {
-      label: "Copy lineage path",
-      onClick: () =>
-        navigator.clipboard.writeText(buildBranchPath(model, node.id)),
-    },
-  ];
 
   const popup =
     open && coords !== null ? (
@@ -141,42 +145,26 @@ export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps)
           zIndex: 1000,
         }}
       >
-        {items.map((it) => (
-          <button
-            key={it.label}
-            type="button"
-            role="menuitem"
-            onClick={run(it.onClick)}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "9px 12px",
-              borderRadius: 8,
-              background: "transparent",
-              border: 0,
-              color: "var(--label)",
-              cursor: "pointer",
-              textAlign: "left",
-              font: "inherit",
-              fontSize: 13.5,
-              width: "100%",
-            }}
-          >
-            <span>{it.label}</span>
-            {it.shortcut && (
-              <span
-                style={{
-                  color: "var(--label-tertiary)",
-                  fontSize: 12,
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
-                {it.shortcut}
-              </span>
-            )}
-          </button>
-        ))}
+        {/* View Raw JSON is drawer-owned (not registry) — stays at top. */}
+        <MenuItem
+          label="View Raw JSON"
+          shortcut="⌘J"
+          onClick={closeAfter(onShowJson)}
+          testId="drawer-menu-item-view-raw-json"
+        />
+        {registryActions.map((action) => {
+          const disabled = action.disabled?.(ctx);
+          return (
+            <MenuItem
+              key={action.id}
+              label={action.label}
+              shortcut={action.shortcut}
+              disabled={disabled ? disabled.reason : undefined}
+              onClick={closeAfter(() => action.invoke(ctx))}
+              testId={`drawer-menu-item-${action.id}`}
+            />
+          );
+        })}
       </div>
     ) : null;
 
@@ -198,5 +186,63 @@ export function NodeActionMenu({ node, model, onShowJson }: NodeActionMenuProps)
       </button>
       {popup !== null && createPortal(popup, document.body)}
     </div>
+  );
+}
+
+function MenuItem({
+  label,
+  shortcut,
+  onClick,
+  disabled,
+  testId,
+}: {
+  label: string;
+  shortcut?: string;
+  onClick: () => void;
+  disabled?: string;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      data-testid={testId}
+      data-disabled={disabled ? "true" : undefined}
+      title={disabled}
+      disabled={!!disabled}
+      onClick={() => {
+        if (disabled) return;
+        onClick();
+      }}
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "9px 12px",
+        borderRadius: 8,
+        background: "transparent",
+        border: 0,
+        color: disabled ? "var(--label-tertiary)" : "var(--label)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        textAlign: "left",
+        font: "inherit",
+        fontSize: 13.5,
+        width: "100%",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <span>{label}</span>
+      {shortcut && (
+        <span
+          style={{
+            color: "var(--label-tertiary)",
+            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {shortcut}
+        </span>
+      )}
+    </button>
   );
 }

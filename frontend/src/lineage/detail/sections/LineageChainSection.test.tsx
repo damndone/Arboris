@@ -99,13 +99,30 @@ describe("LineageChainSection", () => {
     );
 
     renderSection(m, model);
-    const path = screen.getByTestId("lineage-chain-path").textContent ?? "";
-    // pathBuilder joins with arrows; assert each node appears in order.
-    expect(path).toContain("Raw");
-    expect(path).toContain("Cleaned");
-    expect(path).toContain("OLS · n=10");
-    expect(path.indexOf("Raw")).toBeLessThan(path.indexOf("Cleaned"));
-    expect(path.indexOf("Cleaned")).toBeLessThan(path.indexOf("OLS"));
+    // V1.5.2 P6: lineage chain is now a clickable chip strip per
+    // plan §9 Layer 2. Each ancestor renders as its own chip with
+    // data-testid="lineage-chip-<nodeKey>". Order in the DOM matches
+    // ancestry order; the target chip carries data-active="true".
+    const chips = screen.getByTestId("lineage-chain-chips");
+    const rawChip = screen.getByTestId("lineage-chip-stage:raw");
+    const cleanedChip = screen.getByTestId("lineage-chip-stage:cleaned");
+    const targetChip = screen.getByTestId("lineage-chip-model:ols_1");
+    expect(chips).toContainElement(rawChip);
+    expect(chips).toContainElement(cleanedChip);
+    expect(chips).toContainElement(targetChip);
+    expect(targetChip.getAttribute("data-active")).toBe("true");
+    // Chip labels show the node title.
+    expect(rawChip.textContent).toBe("Raw");
+    expect(cleanedChip.textContent).toBe("Cleaned");
+    // DOM order encodes ancestry: raw first, target last.
+    const ids = Array.from(chips.querySelectorAll("[data-testid^='lineage-chip-']")).map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(ids).toEqual([
+      "lineage-chip-stage:raw",
+      "lineage-chip-stage:cleaned",
+      "lineage-chip-model:ols_1",
+    ]);
   });
 
   it("isolated node (no incoming edges) shows the empty-path placeholder", () => {
@@ -113,6 +130,65 @@ describe("LineageChainSection", () => {
     const m = makeModel([node]);
     renderSection(m, node);
     expect(screen.getByText("(no upstream nodes)")).toBeInTheDocument();
+  });
+
+  // V1.5.2 P6 — chip is interactive per plan §9 Layer 2.
+  it("chip click calls useLineage().select with the chip's nodeKey", () => {
+    const raw = makeNode("stage:raw", {
+      kind: "dataset_stage",
+      summary: "Raw",
+    });
+    const target = makeNode("model:ols_1", {
+      kind: "model",
+      summary: "OLS",
+    });
+    const m = makeModel(
+      [raw, target],
+      [{ id: "e1", source: "stage:raw", target: "model:ols_1" }],
+    );
+    const select = vi.fn();
+    const ctx: LineageContextValue = {
+      model: m,
+      selectedKey: "model:ols_1",
+      select,
+    };
+    render(
+      <LineageContext.Provider value={ctx}>
+        <LineageChainSection node={target} />
+      </LineageContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByTestId("lineage-chip-stage:raw"));
+    expect(select).toHaveBeenCalledWith("stage:raw");
+  });
+
+  it("clicking the active (target) chip does NOT call select", () => {
+    const raw = makeNode("stage:raw", {
+      kind: "dataset_stage",
+      summary: "Raw",
+    });
+    const target = makeNode("model:ols_1", {
+      kind: "model",
+      summary: "OLS",
+    });
+    const m = makeModel(
+      [raw, target],
+      [{ id: "e1", source: "stage:raw", target: "model:ols_1" }],
+    );
+    const select = vi.fn();
+    const ctx: LineageContextValue = {
+      model: m,
+      selectedKey: "model:ols_1",
+      select,
+    };
+    render(
+      <LineageContext.Provider value={ctx}>
+        <LineageChainSection node={target} />
+      </LineageContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByTestId("lineage-chip-model:ols_1"));
+    expect(select).not.toHaveBeenCalled();
   });
 
   it("copy button writes buildBranchPath result to navigator.clipboard", async () => {

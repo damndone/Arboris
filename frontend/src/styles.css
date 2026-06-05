@@ -1,11 +1,29 @@
+/* frontend/src/styles.css — V1.5.1 T6 token-driven rewrite.
+ *
+ * Every colour in this file resolves to a CSS custom property defined in
+ * `src/lineage/tokens/lineage.css` (`:root` and `:root[data-theme="light"]`).
+ * The HTML root element carries `data-theme="dark|light"` written by
+ * `theme/ThemeProvider.tsx` (with a pre-paint hint inline in `index.html`),
+ * so swapping theme is a single attribute flip — no per-route shell
+ * modifiers, no <body> class.
+ *
+ * V1.5.0 P1 used a `workbench-shell--lineage` class to redeclare OKLCH
+ * tokens inside the lineage route only. That entire block is gone in V1.5.1:
+ * the same tokens now live at `:root` and cascade everywhere, which is
+ * exactly what the user-requested global theme requires.
+ *
+ * Trust-status palette (`.trust-*`, `.risk-*`, `.count-*`, `.badge-*`)
+ * was previously expressed as ~30 distinct hex codes. We now express
+ * the same families as `color-mix(in oklch, var(--green|--orange|--red),
+ * var(--panel-bg))` — same hue, different lightness in dark vs light.
+ */
+
 :root {
-  color: #17202a;
-  background: #f4f6fa;
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color: var(--label);
+  background: var(--bg-canvas);
 }
 
 * {
@@ -16,7 +34,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f4f6fa;
+  background: var(--bg-canvas);
+  color: var(--label);
 }
 
 button,
@@ -27,10 +46,10 @@ select {
 
 button {
   min-height: 36px;
-  border: 1px solid #1f6feb;
+  border: 1px solid var(--tint);
   border-radius: 5px;
-  background: #1f6feb;
-  color: #ffffff;
+  background: var(--tint);
+  color: oklch(1 0 0);
   cursor: pointer;
   font-weight: 600;
   padding: 6px 14px;
@@ -49,12 +68,55 @@ button:disabled {
 
 .workbench-header {
   align-items: center;
-  border-bottom: 1px solid #d9e0eb;
+  border-bottom: 1px solid var(--border-strong);
   display: flex;
   gap: 16px;
   justify-content: space-between;
   margin-bottom: 14px;
   padding-bottom: 10px;
+}
+
+.workbench-header__right {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+/* V1.5.1 T6 — segmented theme toggle. Token-only colours so it adapts
+ * automatically when the user flips between dark and light. */
+.theme-toggle {
+  display: inline-flex;
+  background: var(--bg-card-2);
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 0;
+}
+.theme-toggle__btn {
+  background: transparent;
+  border: 0;
+  color: var(--label-tertiary);
+  cursor: pointer;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1;
+  min-height: 26px;
+  padding: 3px 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-toggle__btn:hover {
+  color: var(--label);
+}
+.theme-toggle__btn[data-active="true"] {
+  background: var(--panel-bg);
+  color: var(--label);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.theme-toggle__btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 h1,
@@ -65,7 +127,7 @@ h3 {
 }
 
 h1 {
-  color: #111827;
+  color: var(--label);
   font-size: 1.15rem;
   font-weight: 700;
 }
@@ -76,7 +138,7 @@ h2 {
 }
 
 h3.subhead {
-  color: #39465c;
+  color: var(--label-secondary);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -85,24 +147,32 @@ h3.subhead {
 }
 
 .activity {
-  color: #5f6f89;
+  color: var(--label-tertiary);
   font-size: 0.85rem;
 }
 
 .activity-working {
-  color: #704800;
+  color: var(--hint-warn-fg);
+}
+
+.run-progress-line {
+  margin: 6px 0 0;
+  padding-left: 4px;
+  color: var(--label-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
 }
 
 .panel {
-  background: #ffffff;
-  border: 1px solid #d9e0eb;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   margin-top: 12px;
   padding: 14px 16px;
 }
 
 .result-panel {
-  border-top: 1px solid #e2e6ee;
+  border-top: 1px solid var(--border);
   margin-top: 12px;
   padding-top: 12px;
 }
@@ -116,14 +186,14 @@ h3.subhead {
 }
 
 .panel-heading span {
-  color: #6b7891;
+  color: var(--label-tertiary);
   font-size: 0.82rem;
 }
 
 .panel-error {
-  background: #fff4f4;
-  border-color: #f3b9bf;
-  color: #8a1d27;
+  background: var(--panel-error-bg);
+  border-color: color-mix(in oklch, var(--red) 38%, transparent);
+  color: var(--panel-error-fg);
 }
 
 .panel-error strong {
@@ -151,7 +221,7 @@ h3.subhead {
 }
 
 label {
-  color: #39465c;
+  color: var(--label-secondary);
   display: grid;
   font-size: 0.82rem;
   font-weight: 600;
@@ -160,10 +230,10 @@ label {
 
 input,
 select {
-  background: #ffffff;
-  border: 1px solid #bdc7d6;
+  background: var(--field-bg);
+  border: 1px solid var(--border-strong);
   border-radius: 5px;
-  color: #17202a;
+  color: var(--label);
   min-height: 36px;
   padding: 6px 9px;
   width: 100%;
@@ -171,25 +241,25 @@ select {
 
 input[aria-invalid="true"],
 select[aria-invalid="true"] {
-  background: #fff8f8;
-  border-color: #cf222e;
+  background: var(--field-invalid-bg);
+  border-color: var(--red);
 }
 
 input:focus,
 select:focus,
 button:focus-visible {
-  outline: 2px solid #9dc2ff;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .field-error {
-  color: #a40e26;
+  color: var(--field-error-fg);
   font-size: 0.74rem;
   font-weight: 600;
 }
 
 .field-hint {
-  color: #6b7891;
+  color: var(--field-hint-fg);
   font-size: 0.74rem;
   font-weight: 500;
 }
@@ -222,7 +292,7 @@ button:focus-visible {
 }
 
 .summary-list div {
-  border-top: 1px solid #eef1f6;
+  border-top: 1px solid var(--table-row-border);
   display: grid;
   gap: 6px;
   grid-template-columns: 130px 1fr;
@@ -234,7 +304,7 @@ button:focus-visible {
 }
 
 dt {
-  color: #5f6f89;
+  color: var(--label-tertiary);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -248,21 +318,19 @@ dd {
 }
 
 .mono {
-  font-family:
-    ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Monaco, Consolas,
-    monospace;
+  font-family: var(--font-mono);
   font-size: 0.82rem;
 }
 
 .muted {
-  color: #6b7891;
+  color: var(--label-tertiary);
   font-size: 0.85rem;
   margin: 0;
 }
 
 .path-list {
-  background: #f7f8fc;
-  border: 1px solid #e2e6ee;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
   border-radius: 5px;
   display: grid;
   gap: 4px;
@@ -283,31 +351,31 @@ dd {
 }
 
 .badge-ok {
-  background: #e7f6ec;
-  border-color: #2da44e;
-  color: #13693a;
+  background: var(--badge-ok-bg);
+  border-color: var(--badge-ok-border);
+  color: var(--badge-ok-fg);
 }
 
 .badge-warn {
-  background: #fff4dc;
-  border-color: #bf8700;
-  color: #6f4900;
+  background: var(--badge-warn-bg);
+  border-color: var(--badge-warn-border);
+  color: var(--badge-warn-fg);
 }
 
 .badge-neutral {
-  background: #eef1f6;
-  border-color: #c4ccda;
-  color: #495567;
+  background: var(--badge-neutral-bg);
+  border-color: var(--badge-neutral-border);
+  color: var(--badge-neutral-fg);
 }
 
 .status-hint {
-  color: #6f4900;
+  color: var(--hint-warn-fg);
   font-size: 0.78rem;
   margin-left: 8px;
 }
 
 .preview-panel {
-  border-top: 1px solid #e2e6ee;
+  border-top: 1px solid var(--border);
   margin-top: 14px;
   padding-top: 12px;
 }
@@ -317,17 +385,17 @@ dd {
 }
 
 .transpose-warning {
-  background: #fff4dc;
-  border: 1px solid #bf8700;
+  background: var(--hint-warn-bg);
+  border: 1px solid color-mix(in oklch, var(--orange) 40%, transparent);
   border-radius: 5px;
-  color: #6f4900;
+  color: var(--hint-warn-fg);
   font-size: 0.82rem;
   margin-top: 8px;
   padding: 8px 12px;
 }
 
 .preview-table-wrap {
-  border: 1px solid #e2e6ee;
+  border: 1px solid var(--border);
   border-radius: 5px;
   overflow-x: auto;
 }
@@ -342,7 +410,7 @@ dd {
 .preview-table td,
 .coefficients-table th,
 .coefficients-table td {
-  border-bottom: 1px solid #eef1f6;
+  border-bottom: 1px solid var(--table-row-border);
   font-size: 0.78rem;
   padding: 6px 8px;
   text-align: left;
@@ -351,13 +419,13 @@ dd {
 
 .preview-table th,
 .coefficients-table th {
-  background: #f7f8fc;
-  color: #39465c;
+  background: var(--table-header-bg);
+  color: var(--label-secondary);
   font-weight: 700;
 }
 
 .coefficients-table-wrap {
-  border: 1px solid #e2e6ee;
+  border: 1px solid var(--border);
   border-radius: 5px;
   margin-top: 8px;
   overflow-x: auto;
@@ -371,7 +439,7 @@ dd {
 
 .column-option {
   align-items: center;
-  border: 1px solid #e2e6ee;
+  border: 1px solid var(--border);
   border-radius: 5px;
   display: grid;
   gap: 8px;
@@ -380,7 +448,7 @@ dd {
 }
 
 .column-meta {
-  color: #6b7891;
+  color: var(--label-tertiary);
   display: block;
   font-size: 0.74rem;
   font-weight: 500;
@@ -389,7 +457,7 @@ dd {
 
 .inline-choice {
   align-items: center;
-  color: #39465c;
+  color: var(--label-secondary);
   display: inline-flex;
   font-size: 0.78rem;
   gap: 4px;
@@ -433,20 +501,20 @@ dd {
   border: none;
   border-bottom: 2px solid transparent;
   border-radius: 0;
-  color: #5f6f89;
+  color: var(--label-tertiary);
   cursor: pointer;
   font-size: 0.9rem;
   padding: 0.4rem 0.6rem;
 }
 
 .tabs button[role="tab"]:hover {
-  color: #17202a;
+  color: var(--label);
 }
 
 .tabs button[aria-selected="true"] {
-  color: #17202a;
+  color: var(--label);
   font-weight: 600;
-  border-bottom-color: currentColor;
+  border-bottom-color: var(--ink);
 }
 
 .tabs button[role="tab"]:disabled {
@@ -454,77 +522,24 @@ dd {
   cursor: not-allowed;
 }
 
-/* ─── V1.5.0 P1: Lineage route dark chrome ──────────────────────────
- * Applied when AppShell detects pathname `/runs/<id>`. Goal: kill the
- * "light V1-form page over dark canvas" visual break that the smoke
- * surfaced. We DO NOT introduce a left rail, bottom terminal, top
- * workspace breadcrumb, or any other V1.5.1+ deferred chrome — only
- * re-skin what already exists (header + outer tabs + inner tablist).
- *
- * The OKLCH tokens here are redeclared from lineage/tokens/lineage.css
- * so they cascade into RunDetailRoute's inline `var(--tint)` styles
- * without the components needing to know whether they're under a
- * `.lineage-root`. The lineage canvas itself still owns its own
- * `.lineage-root` scope inside <LineageRouteContainer>; nesting is
- * intentional and harmless (variables resolve at use site).
- */
-html:has(.workbench-shell--lineage),
-body:has(.workbench-shell--lineage) {
-  background: oklch(0.165 0.006 70);
-}
+/* V1.5.1 T6 — the `workbench-shell--lineage` class is kept for
+ * backward-compat with App.tsx scope detection (planned removal in
+ * V1.5.2 once the layout-switching + LeftRail land). All visual
+ * declarations from V1.5.0 P1 are deleted: tokens now cascade from
+ * `:root` so the lineage route already paints with --bg-canvas /
+ * --label etc. The modifier class is a no-op selector; we keep the
+ * full-width + top-padding declarations that aren't theme-related. */
 .workbench-shell--lineage {
-  /* Make the shell carry its own background instead of letting the
-   * page peek through the centered max-width column. */
-  background: oklch(0.165 0.006 70);
-  color: oklch(0.94 0.008 75);
   min-height: 100vh;
   width: 100%;
   max-width: none;
   padding: 16px 24px 0;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
-    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-
-  /* Cascade tokens to children — including RunDetailRoute's inner
-   * TabLink whose inline styles read var(--tint, #0a84ff). */
-  --label:            oklch(0.94 0.008 75);
-  --label-secondary:  oklch(0.72 0.008 75);
-  --label-tertiary:   oklch(0.50 0.008 75);
-  --separator:        rgba(255, 250, 240, 0.08);
-  --tint:             oklch(0.72 0.08 240);
-  --ink:              oklch(0.72 0.08 240);
 }
 .workbench-shell--lineage .workbench-header {
   border-bottom: 1px solid var(--separator);
   padding-bottom: 12px;
   margin-bottom: 10px;
 }
-.workbench-shell--lineage h1 {
-  color: var(--label);
-  font-weight: 600;
-}
-.workbench-shell--lineage .activity {
-  color: var(--label-secondary);
-}
-
-/* Outer Submit/History tabs — re-skin without restructuring. */
-.workbench-shell--lineage .tabs button[role="tab"] {
-  color: var(--label-secondary);
-}
-.workbench-shell--lineage .tabs button[role="tab"]:hover:not(:disabled) {
-  color: var(--label);
-}
-.workbench-shell--lineage .tabs button[aria-selected="true"] {
-  color: var(--label);
-  border-bottom-color: var(--ink);
-}
-.workbench-shell--lineage .tabs button[role="tab"]:disabled {
-  opacity: 0.35;
-}
-
-/* The inner Overview/Lineage tablist in RunDetailRoute uses inline
- * `var(--tint, …)` and `var(--separator, …)` — both cascade from the
- * shell tokens above. No additional rule needed. */
 
 .runs-table {
   width: 100%;
@@ -535,7 +550,7 @@ body:has(.workbench-shell--lineage) {
 .runs-table td {
   text-align: left;
   padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--table-row-border);
 }
 
 .runs-row {
@@ -543,14 +558,14 @@ body:has(.workbench-shell--lineage) {
 }
 
 .runs-row:hover {
-  background: #f3f4f6;
+  background: var(--bg-card-2);
 }
 
 .report-frame {
   width: 100%;
   height: 600px;
   margin-top: 0.75rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-strong);
 }
 
 .report-link {
@@ -581,14 +596,14 @@ body:has(.workbench-shell--lineage) {
 }
 
 .pagination-info {
-  color: #5f6f89;
+  color: var(--label-tertiary);
   font-size: 0.82rem;
   font-weight: 600;
 }
 
 .progress-panel {
-  background: #f0f7ff;
-  border: 1px solid #b3d4ff;
+  background: color-mix(in oklch, var(--tint) 14%, var(--panel-bg));
+  border: 1px solid color-mix(in oklch, var(--tint) 32%, transparent);
   border-radius: 6px;
   padding: 12px 16px;
   margin-bottom: 12px;
@@ -616,10 +631,10 @@ body:has(.workbench-shell--lineage) {
   font-size: 0.78rem;
 }
 
-.progress-step.pending  { color: #8c9aaa; }
-.progress-step.running  { color: #1f6feb; font-weight: 600; }
-.progress-step.completed { color: #13693a; }
-.progress-step.blocked  { color: #cf222e; }
+.progress-step.pending  { color: var(--label-tertiary); }
+.progress-step.running  { color: var(--tint); font-weight: 600; }
+.progress-step.completed { color: var(--green); }
+.progress-step.blocked  { color: var(--red); }
 
 .progress-dot {
   width: 7px;
@@ -628,17 +643,17 @@ body:has(.workbench-shell--lineage) {
   flex-shrink: 0;
 }
 
-.progress-dot.pending  { background: #d1d9e6; }
-.progress-dot.running  { background: #1f6feb; animation: pulse 1s infinite; }
-.progress-dot.completed { background: #2da44e; }
-.progress-dot.blocked  { background: #cf222e; }
+.progress-dot.pending  { background: var(--border-strong); }
+.progress-dot.running  { background: var(--tint); animation: pulse 1s infinite; }
+.progress-dot.completed { background: var(--green); }
+.progress-dot.blocked  { background: var(--red); }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
 
-/* V1.3.1 Trust Status Bar */
+/* V1.3.1 Trust Status Bar — token-driven from --green/--orange/--red. */
 .trust-summary {
   margin-bottom: 16px;
   border-radius: 6px;
@@ -647,54 +662,126 @@ body:has(.workbench-shell--lineage) {
 .trust-bar {
   padding: 10px 14px;
   font-size: 0.95rem;
-  border-left: 4px solid #999;
+  border-left: 4px solid var(--label-tertiary);
 }
 .trust-ready_to_interpret {
-  background: #e8f5e9; border-left-color: #2e7d32;
+  background: color-mix(in oklch, var(--green) 16%, var(--panel-bg));
+  border-left-color: var(--green);
 }
 .trust-interpret_with_caution {
-  background: #fff8e1; border-left-color: #f57f17;
+  background: color-mix(in oklch, var(--orange) 16%, var(--panel-bg));
+  border-left-color: var(--orange);
 }
 .trust-not_ready_to_interpret {
-  background: #fce4ec; border-left-color: #c62828;
+  background: color-mix(in oklch, var(--red) 16%, var(--panel-bg));
+  border-left-color: var(--red);
 }
 .trust-run_failed {
-  background: #ffebee; border-left-color: #b71c1c;
+  background: color-mix(in oklch, var(--red) 22%, var(--panel-bg));
+  border-left-color: var(--red);
 }
 .trust-analysis_running {
-  background: #e3f2fd; border-left-color: #1565c0;
+  background: color-mix(in oklch, var(--tint) 14%, var(--panel-bg));
+  border-left-color: var(--tint);
 }
 .trust-counts { margin-left: 12px; font-size: 0.85rem; }
-.count-blocker { color: #c62828; margin-right: 8px; }
-.count-warning { color: #e65100; margin-right: 8px; }
-.count-caution { color: #f9a825; margin-right: 8px; }
-.count-info { color: #666; }
-.trust-reasons { padding: 8px 14px; background: #fafafa; border-top: 1px solid #eee; }
+.count-blocker { color: var(--red); margin-right: 8px; }
+.count-warning { color: var(--orange); margin-right: 8px; }
+.count-caution { color: var(--review); margin-right: 8px; }
+.count-info { color: var(--label-tertiary); }
+.trust-reasons {
+  padding: 8px 14px;
+  background: var(--bg-card-2);
+  border-top: 1px solid var(--separator-faint);
+}
 .trust-reasons .reason { margin: 3px 0; font-size: 0.9rem; }
-.trust-model-id { padding: 6px 14px; font-size: 0.82rem; color: #666; background: #f5f5f5; }
+.trust-model-id {
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  color: var(--label-tertiary);
+  background: var(--bg-card-2);
+}
 
 /* V1.3.1 Coefficient Risk */
 .coefficient-risk { margin-bottom: 16px; }
-.risk-group { padding: 10px; margin: 8px 0; border-left: 4px solid #ccc; background: #fafafa; border-radius: 4px; }
-.risk-group.risk-blocker { border-left-color: #c62828; background: #fff5f5; }
-.risk-group.risk-warning { border-left-color: #e65100; background: #fff8f0; }
-.risk-group.risk-caution { border-left-color: #f9a825; background: #fffff0; }
+.risk-group {
+  padding: 10px;
+  margin: 8px 0;
+  border-left: 4px solid var(--label-tertiary);
+  background: var(--bg-card-2);
+  border-radius: 4px;
+}
+.risk-group.risk-blocker {
+  border-left-color: var(--red);
+  background: color-mix(in oklch, var(--red) 12%, var(--panel-bg));
+}
+.risk-group.risk-warning {
+  border-left-color: var(--orange);
+  background: color-mix(in oklch, var(--orange) 12%, var(--panel-bg));
+}
+.risk-group.risk-caution {
+  border-left-color: var(--review);
+  background: color-mix(in oklch, var(--review) 12%, var(--panel-bg));
+}
 .risk-group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.risk-badge { padding: 1px 6px; border-radius: 3px; font-size: 0.75rem; background: #eee; }
-.risk-badge.badge-blocker { background: #ffcdd2; color: #b71c1c; }
-.risk-badge.badge-warning { background: #ffe0b2; color: #e65100; }
-.risk-badge.badge-caution { background: #fff9c4; color: #f57f17; }
-.risk-level { font-size: 0.8rem; color: #666; text-transform: uppercase; }
-.risk-summary { font-size: 0.85rem; color: #555; margin: 2px 0; }
+.risk-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  background: var(--badge-neutral-bg);
+}
+.risk-badge.badge-blocker {
+  background: color-mix(in oklch, var(--red) 26%, var(--panel-bg));
+  color: var(--field-error-fg);
+}
+.risk-badge.badge-warning {
+  background: color-mix(in oklch, var(--orange) 26%, var(--panel-bg));
+  color: var(--hint-warn-fg);
+}
+.risk-badge.badge-caution {
+  background: color-mix(in oklch, var(--review) 26%, var(--panel-bg));
+  color: var(--badge-warn-fg);
+}
+.risk-level { font-size: 0.8rem; color: var(--label-tertiary); text-transform: uppercase; }
+.risk-summary { font-size: 0.85rem; color: var(--label-secondary); margin: 2px 0; }
 .risk-terms-table { width: 100%; margin-top: 6px; font-size: 0.85rem; }
-.risk-terms-table th, .risk-terms-table td { padding: 3px 6px; border: 1px solid #eee; }
+.risk-terms-table th, .risk-terms-table td {
+  padding: 3px 6px;
+  border: 1px solid var(--table-row-border);
+}
 
 /* V1.3.1 Interpretation Guidance */
 .interpretation-guidance { margin-bottom: 16px; }
 .restriction, .action { padding: 6px 10px; margin: 3px 0; border-radius: 3px; font-size: 0.88rem; }
-.restriction { border-left: 3px solid #e57373; background: #fff5f5; }
-.action { border-left: 3px solid #81c784; background: #f1f8e9; }
+.restriction {
+  border-left: 3px solid var(--red);
+  background: color-mix(in oklch, var(--red) 10%, var(--panel-bg));
+}
+.action {
+  border-left: 3px solid var(--green);
+  background: color-mix(in oklch, var(--green) 10%, var(--panel-bg));
+}
 
 /* V1.3.1 Report gating */
-.report-warning { color: #c62828; font-size: 0.85rem; margin: 4px 0; }
+.report-warning { color: var(--red); font-size: 0.85rem; margin: 4px 0; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* V1.5.4.1 FailureCard — structured model-fit failure + recovery actions */
+.failure-card { border: 1px solid #fca5a5; background: #fef2f2; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+.failure-card-title { font-weight: 600; color: #991b1b; font-size: 14px; margin-bottom: 4px; }
+.failure-card-cause { font-family: monospace; font-size: 12px; color: #7f1d1d; background: #fee2e2; padding: 6px 8px; border-radius: 4px; margin: 4px 0 10px; white-space: pre-wrap; }
+.failure-card-actions { display: flex; gap: 8px; margin-top: 8px; }
+.failure-action { padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.failure-action-primary { background: #dc2626; color: white; border: 0; font-weight: 500; }
+.failure-action-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+
+/* V1.5.4.1 ImputationControls — capability-driven imputation input */
+.imputation-controls { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; padding: 10px 12px; margin: 10px 0; }
+.imputation-controls-hint { font-size: 12px; color: #0c4a6e; margin-top: 6px; padding-left: 22px; }
+
+/* V1.5.4.1 ImputationSummary — post-run imputation provenance panel */
+.imputation-summary { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+.imputation-summary-title { font-weight: 600; font-size: 13px; color: #0c4a6e; margin-bottom: 4px; }
+.imputation-summary-list { margin: 0; padding-left: 24px; font-size: 12px; color: #0c4a6e; line-height: 1.6; }
+.imputation-summary code { background: #e0f2fe; padding: 1px 4px; border-radius: 3px; }
+.imputation-summary .hint { color: #94a3b8; }
