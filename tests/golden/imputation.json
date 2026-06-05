@@ -21,6 +21,9 @@
     "imputed_dataset": [
       "cleaned_dataset"
     ],
+    "imputation_summary": [
+      "cleaned_dataset"
+    ],
     "mice_decisions": [
       "cleaned_dataset"
     ],

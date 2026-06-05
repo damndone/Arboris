@@ -128,8 +128,9 @@ def run(
     ),
     mode: str = typer.Option("auto", "--mode"),
     model_type: str = typer.Option("auto", "--model-type"),
+    imputation: str = typer.Option("", "--imputation"),
 ) -> None:
-    from .orchestrator import run_workflow
+    from .orchestrator import parse_imputation_request, run_workflow
 
     result = run_workflow(
         project_root,
@@ -138,6 +139,7 @@ def run(
         y=y,
         x=x,
         model_type=model_type,
+        imputation=parse_imputation_request(imputation),
     )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing

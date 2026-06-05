@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -183,6 +184,7 @@ def run_workflow(
     y: str,
     x: list[str],
     model_type: str = "auto",
+    imputation: dict | None = None,
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -211,6 +213,7 @@ def run_workflow(
             config,
             started_at,
             model_type=model_type,
+            imputation=imputation,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -294,6 +297,19 @@ def run_workflow(
             requested_model_type=model_type,
         )
         raise
+
+
+def parse_imputation_request(raw: str | dict | None) -> dict | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        return raw
+    if raw.strip() == "":
+        return None
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("imputation must be a JSON object")
+    return parsed
 
 
 def run_batch_y_workflow(
@@ -404,6 +420,7 @@ def _run_workflow(
     model_type: str = "auto",
     sheet_name: str | None = None,
     transpose: bool = False,
+    imputation: dict | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -435,6 +452,7 @@ def _run_workflow(
     ctx.artifacts["_x"] = x
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
+    ctx.artifacts["_imputation_request"] = imputation
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)
