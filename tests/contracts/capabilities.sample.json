@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "model_types": [
     {"key": "auto",              "label": "Auto (infer from y)",         "group": "auto",   "description": "Pick the best model automatically based on y type."},
     {"key": "ols",               "label": "OLS (linear)",                 "group": "Linear", "description": "Ordinary Least Squares with HC1 robust SE."},
@@ -14,5 +14,20 @@
   ],
   "imputation_methods": [
     {"key": "mice", "label": "MICE (Multiple Imputation)", "description": "Multiple Imputation by Chained Equations. Recommended when more than 5–10% of rows would otherwise be dropped due to missing values."}
+  ],
+  "prediction_models": [
+    {"key": "prediction_lasso",         "label": "Lasso",         "description": "L1-regularized linear prediction."},
+    {"key": "prediction_ridge",         "label": "Ridge",         "description": "L2-regularized linear prediction."},
+    {"key": "prediction_random_forest", "label": "Random Forest", "description": "Tree-ensemble prediction."}
+  ],
+  "sampling_methods": [
+    {"key": "smote",       "label": "SMOTE"},
+    {"key": "oversample",  "label": "Oversample"},
+    {"key": "undersample", "label": "Undersample"}
+  ],
+  "covariance_options": [
+    {"key": "robust",     "label": "Robust (default)"},
+    {"key": "clustered",  "label": "Clustered"},
+    {"key": "unadjusted", "label": "Unadjusted"}
   ]
 }

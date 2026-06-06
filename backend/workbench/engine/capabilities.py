@@ -65,6 +65,27 @@ MODEL_UI_ORDER = [
     "glm:negative_binomial",
 ]
 
+# DESIGN NOTE: these UI lists are hardcoded rather than derived from registries
+# to keep this task small and avoid coupling to prediction/imputation registry
+# internals. Deliberate scope choice — not a registry-derivation.
+PREDICTION_UI = [
+    {"key": "prediction_lasso", "label": "Lasso", "description": "L1-regularized linear prediction."},
+    {"key": "prediction_ridge", "label": "Ridge", "description": "L2-regularized linear prediction."},
+    {"key": "prediction_random_forest", "label": "Random Forest", "description": "Tree-ensemble prediction."},
+]
+
+SAMPLING_UI = [
+    {"key": "smote", "label": "SMOTE"},
+    {"key": "oversample", "label": "Oversample"},
+    {"key": "undersample", "label": "Undersample"},
+]
+
+COVARIANCE_UI = [
+    {"key": "robust", "label": "Robust (default)"},
+    {"key": "clustered", "label": "Clustered"},
+    {"key": "unadjusted", "label": "Unadjusted"},
+]
+
 
 def build_capabilities() -> dict:
     """Build the UI capability manifest from registered backend handlers."""
@@ -97,7 +118,10 @@ def build_capabilities() -> dict:
     ]
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "model_types": model_types,
         "imputation_methods": imputation_methods,
+        "prediction_models": list(PREDICTION_UI),
+        "sampling_methods": list(SAMPLING_UI),
+        "covariance_options": list(COVARIANCE_UI),
     }
