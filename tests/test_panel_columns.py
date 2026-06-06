@@ -64,6 +64,50 @@ def test_user_entity_time_drives_panel_fit(tmp_path):
     assert (run_root / "model_results" / "panel_ols_1.json").exists()
 
 
+def _panel_frame_unnormalized_entity() -> pd.DataFrame:
+    # Same shape as _panel_frame but the entity header is non-normalized AND
+    # contains no auto-detect ID token ("Company Unit" -> "company_unit").
+    # Auto-detection (metadata.ID_TOKENS) therefore MISSES this column, so the
+    # only way the panel fit can use it is through the normalized user override.
+    # This proves normalization happens before matching; the old un-normalized
+    # code would compare raw "Company Unit" against cleaned "company_unit",
+    # no-op, and fall back to a non-panel fit.
+    import numpy as np
+
+    rng = np.random.default_rng(1234)
+    firms = {f"F{i}": (i + 1) * 10 for i in range(8)}
+    years = (2018, 2019, 2020, 2021, 2022)
+    rows = []
+    for firm, base in firms.items():
+        for year in years:
+            rnd = base / 2 + (year - 2018) + float(rng.normal(0, 3.0))
+            rows.append({
+                "Company Unit": firm,
+                "yr": year,
+                "rnd": rnd,
+                "profit": base + (year - 2018) * 2.0 + 1.5 * rnd
+                + float(rng.normal(0, 1.0)),
+            })
+    return pd.DataFrame(rows)
+
+
+def test_nonnormalized_entity_header_is_normalized_before_override(tmp_path):
+    run_root, result = _run(
+        tmp_path,
+        _panel_frame_unnormalized_entity(),
+        mode="auto",
+        y="profit",
+        x=["rnd"],
+        model_type="panel_ols",
+        entity_col="Company Unit",
+        time_col="yr",
+    )
+    assert result["status"] == "completed"
+    router = read_json(run_root / "staged" / "analysis_router.json")
+    assert router["kind"] == "panel"
+    assert (run_root / "model_results" / "panel_ols_1.json").exists()
+
+
 def test_omitting_entity_time_is_backward_compatible(tmp_path):
     run_root, result = _run(
         tmp_path, _panel_frame(), mode="auto", y="profit", x=["rnd"],
