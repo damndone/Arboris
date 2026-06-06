@@ -49,3 +49,30 @@ def test_default_covariance_runs(tmp_path):
         model_type="panel_ols", entity_col="firm", time_col="yr",
     )
     assert result["status"] == "completed"
+
+
+def test_panel_ols_forwards_requested_covariance(tmp_path, monkeypatch):
+    import workbench.orchestrator as orch
+    captured = {}
+    real = orch.run_panel_ols
+    def spy(*a, **kw):
+        captured["covariance"] = kw.get("covariance")
+        return real(*a, **kw)
+    monkeypatch.setattr(orch, "run_panel_ols", spy)
+    _run(tmp_path, mode="auto", y="profit", x=["rnd"],
+         model_type="panel_ols", entity_col="firm", time_col="yr",
+         covariance="clustered")
+    assert captured["covariance"] == "clustered"
+
+
+def test_panel_ols_defaults_covariance_to_robust(tmp_path, monkeypatch):
+    import workbench.orchestrator as orch
+    captured = {}
+    real = orch.run_panel_ols
+    def spy(*a, **kw):
+        captured["covariance"] = kw.get("covariance")
+        return real(*a, **kw)
+    monkeypatch.setattr(orch, "run_panel_ols", spy)
+    _run(tmp_path, mode="auto", y="profit", x=["rnd"],
+         model_type="panel_ols", entity_col="firm", time_col="yr")
+    assert captured["covariance"] == "robust"
