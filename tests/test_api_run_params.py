@@ -1,11 +1,11 @@
 import io
+import time
 import pandas as pd
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from workbench.api import app
-from workbench.events import get_event_manager
 
 
 def _csv() -> bytes:
@@ -15,19 +15,16 @@ def _csv() -> bytes:
 
 def test_run_endpoint_forwards_new_params(tmp_path):
     client = TestClient(app)
-    proj = client.post("/projects", json={"parent": str(tmp_path), "name": "demo"})
-    root = proj.json()["project_root"]
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
 
-    captured = {}
-
-    def _fake_bg(*args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        # _bg_run normally releases the run slot in its finally block; mirror that
-        # so we don't leak the slot to subsequent tests in this process.
-        get_event_manager().release_slot(args[1])
-
-    with patch("workbench.api._bg_run", _fake_bg):
+    # Patch _run_workflow (the symbol _bg_run actually calls). Names bind there,
+    # so a positional swap in executor.submit(_bg_run, ...) is caught.
+    with patch(
+        "workbench.api._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
         resp = client.post("/runs", data={
             "project_root": root, "mode": "auto", "model_type": "panel_ols",
             "y": "y", "x": "x",
@@ -35,9 +32,17 @@ def test_run_endpoint_forwards_new_params(tmp_path):
             "prediction_model_type": "prediction_ridge", "prediction_cv_folds": "3",
             "prediction_sampling_method": "smote",
         }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
+        # _bg_run runs on the executor thread — poll until _run_workflow is called.
+        for _ in range(100):
+            if m.call_args is not None:
+                break
+            time.sleep(0.05)
 
     assert resp.status_code == 200
-    flat = list(captured.get("args", ())) + list(captured.get("kwargs", {}).values())
-    assert "firm" in flat and "yr" in flat
-    assert "prediction_ridge" in flat and "smote" in flat
-    assert 3 in flat  # prediction_cv_folds parsed to int
+    kw = m.call_args.kwargs
+    assert kw["entity_col"] == "firm"
+    assert kw["time_col"] == "yr"
+    assert kw["covariance"] == "robust"
+    assert kw["prediction_model_type"] == "prediction_ridge"
+    assert kw["prediction_cv_folds"] == 3  # parsed to int
+    assert kw["prediction_sampling_method"] == "smote"
