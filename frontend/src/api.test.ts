@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import {
   ApiError,
   connectRunEvents,
@@ -7,6 +7,7 @@ import {
   fetchRunArtifacts,
   getRunGraph,
   runBatchWorkflow,
+  runWorkflow,
   previewFile,
   reportUrl,
   artifactDownloadUrl,
@@ -583,4 +584,29 @@ test("getRunGraph throws ApiError on 404", async () => {
     jsonResponse({ detail: "Run not found" }, 404),
   );
   await expect(getRunGraph("/proj", "missing")).rejects.toBeInstanceOf(ApiError);
+});
+
+describe("runWorkflow panel+prediction params", () => {
+  it("appends entity/time/covariance/prediction params to FormData", async () => {
+    let sent: FormData | null = null;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      sent = init.body as FormData;
+      return new Response(JSON.stringify({ run_id: "r1", status: "running" }),
+        { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["y,x\n1,2"], "d.csv", { type: "text/csv" });
+    await runWorkflow("/proj", "auto", "y", "x", file, "panel_ols", undefined, false, undefined, {
+      entityCol: "firm", timeCol: "yr", covariance: "robust",
+      predictionModelType: "prediction_ridge", predictionCvFolds: 3,
+      predictionSamplingMethod: "smote",
+    });
+    expect(sent!.get("entity_col")).toBe("firm");
+    expect(sent!.get("time_col")).toBe("yr");
+    expect(sent!.get("covariance")).toBe("robust");
+    expect(sent!.get("prediction_model_type")).toBe("prediction_ridge");
+    expect(sent!.get("prediction_cv_folds")).toBe("3");
+    expect(sent!.get("prediction_sampling_method")).toBe("smote");
+    vi.unstubAllGlobals();
+  });
 });

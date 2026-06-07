@@ -321,6 +321,15 @@ export async function createProject(
   return readResponse<ProjectResponse>(response);
 }
 
+export interface RunExtraParams {
+  entityCol?: string;
+  timeCol?: string;
+  covariance?: string;
+  predictionModelType?: string;
+  predictionCvFolds?: number;
+  predictionSamplingMethod?: string;
+}
+
 export async function runWorkflow(
   projectRoot: string,
   mode: string,
@@ -331,6 +340,7 @@ export async function runWorkflow(
   sheetName?: string,
   transpose?: boolean,
   imputation?: string,
+  extra?: RunExtraParams,
 ): Promise<RunResponse> {
   const form = new FormData();
   form.append("project_root", projectRoot);
@@ -341,6 +351,12 @@ export async function runWorkflow(
   if (sheetName) form.append("sheet_name", sheetName);
   if (transpose) form.append("transpose", "true");
   if (imputation) form.append("imputation", imputation);
+  if (extra?.entityCol) form.append("entity_col", extra.entityCol);
+  if (extra?.timeCol) form.append("time_col", extra.timeCol);
+  if (extra?.covariance) form.append("covariance", extra.covariance);
+  if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
+  if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
+  if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });
   return readResponse<RunResponse>(response);
