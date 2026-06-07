@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, test, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 vi.mock("./capabilities/useCapabilities", () => ({
@@ -1416,4 +1416,39 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
   const shell = document.querySelector("main.workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
+});
+
+import { validatePanelPrediction } from "./App";
+
+describe("validatePanelPrediction", () => {
+  it("flags entity == time", () => {
+    expect(validatePanelPrediction({
+      modelType: "panel_ols", entity: "firm", time: "firm",
+      isPanelData: true, predictionEnabled: false, predictionModelType: "",
+    })).toMatch(/相同|同一列|entity.*time/i);
+  });
+  it("flags prediction enabled without algorithm", () => {
+    expect(validatePanelPrediction({
+      modelType: "auto", entity: "", time: "",
+      isPanelData: false, predictionEnabled: true, predictionModelType: "",
+    })).toMatch(/算法|algorithm/i);
+  });
+  it("flags panel selected, no columns, non-panel data", () => {
+    expect(validatePanelPrediction({
+      modelType: "panel_ols", entity: "", time: "",
+      isPanelData: false, predictionEnabled: false, predictionModelType: "",
+    })).toMatch(/面板|panel/i);
+  });
+  it("passes a valid panel config", () => {
+    expect(validatePanelPrediction({
+      modelType: "panel_ols", entity: "firm", time: "yr",
+      isPanelData: true, predictionEnabled: false, predictionModelType: "",
+    })).toBeNull();
+  });
+  it("passes a non-panel non-prediction config", () => {
+    expect(validatePanelPrediction({
+      modelType: "auto", entity: "", time: "",
+      isPanelData: false, predictionEnabled: false, predictionModelType: "",
+    })).toBeNull();
+  });
 });
