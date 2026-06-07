@@ -18,6 +18,10 @@ import {
   ImputationSummary,
   type ImputationSummaryData,
 } from "./runResult/ImputationSummary";
+import {
+  PredictionResultCard,
+  type PredictionResultData,
+} from "./runResult/PredictionResultCard";
 
 type Props = {
   projectRoot: string;
@@ -172,6 +176,9 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
   const [imputationData, setImputationData] = useState<
     ImputationSummaryData | undefined
   >();
+  const [predictionResult, setPredictionResult] = useState<
+    PredictionResultData | undefined
+  >(undefined);
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -213,6 +220,32 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       })
       .catch(() => {
         if (!cancelled) setImputationData(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
+
+  // V1.5.4.2: when the run produced a prediction_result artifact (model_id like
+  // `prediction_ridge_1`), fetch its JSON to render the PredictionResultCard.
+  // Mirrors the imputation_summary wiring above.
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const predId = artifactsState.groups
+      .flatMap((g) => g.items)
+      .map((it) => it.artifact_id)
+      .find((id) => /^prediction_.*_1$/.test(id));
+    if (!predId) {
+      setPredictionResult(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<PredictionResultData>(projectRoot, runId, predId)
+      .then((data) => {
+        if (!cancelled) setPredictionResult(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPredictionResult(undefined);
       });
     return () => {
       cancelled = true;
@@ -361,6 +394,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
         />
       )}
       <ImputationSummary summary={imputationData} />
+      <PredictionResultCard result={predictionResult} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>
