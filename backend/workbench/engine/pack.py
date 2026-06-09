@@ -12,7 +12,44 @@ from .registry import ModelHandler, register_model, set_default
 DiagnosticRule = Any
 
 
+class PackContractError(ValueError):
+    """Raised when a pack declares a contribution the engine does not yet wire."""
+
+
+# Fields declared on AnalysisPack but NOT yet consumed by the engine.
+# Maps field -> planned wiring version (kept in code so the roadmap is
+# self-documenting). register_pack refuses to register a pack that
+# populates any of these — silent no-ops become loud errors.
+_UNWIRED_FIELDS: dict[str, str] = {
+    "diagnostics": "V1.5.6",
+    "report_blocks": "V1.5.6",
+    "recommended_actions": "when a pack needs it",
+    "interpretation_restrictions": "V1.5.6",
+}
+
+
 REGISTERED_PACKS: list["AnalysisPack"] = []
+
+
+@dataclass
+class RerunAction:
+    """A pack-declared one-click re-run option. param_overrides maps run-form
+    fields to override values (mapped to the FailureCard form_overrides schema)."""
+    key: str
+    label: str
+    param_overrides: dict = field(default_factory=dict)
+
+
+RERUN_ACTION_REGISTRY: list[RerunAction] = []
+
+
+@dataclass
+class StageInsertion:
+    """Declares a pipeline stage contribution and where it goes.
+    `after` (or `before`) names an existing PIPELINE stage by `.name`."""
+    stage: Any
+    after: str | None = None
+    before: str | None = None
 
 
 @dataclass
@@ -27,21 +64,34 @@ class AnalysisPack:
     model_handlers: list[ModelHandler] = field(default_factory=list)
     defaults_by_y_type: dict[str, str] = field(default_factory=dict)
     stages: list[Any] = field(default_factory=list)
-    diagnostics: list[DiagnosticRule] = field(default_factory=list)
+    diagnostics: list[DiagnosticRule] = field(default_factory=list)  # NOT wired -> V1.5.6
 
     # ---- declared, NOT implemented in V1.5.4 (-> V1.5.6+ / agent) ----
-    report_blocks: list[Any] = field(default_factory=list)
-    recommended_actions: list[Any] = field(default_factory=list)
-    interpretation_restrictions: list[Any] = field(default_factory=list)
+    report_blocks: list[Any] = field(default_factory=list)  # NOT wired -> V1.5.6
+    recommended_actions: list[Any] = field(default_factory=list)  # NOT wired -> when a pack needs it
+    interpretation_restrictions: list[Any] = field(default_factory=list)  # NOT wired -> V1.5.6
     rerun_actions: list[Any] = field(default_factory=list)
 
 
 def register_pack(pack: AnalysisPack) -> None:
-    """Register a pack's contributions. V1.5.4 wires model_handlers and
-    defaults_by_y_type; stage appending to PIPELINE is the importing
-    module's responsibility (so insertion order stays explicit)."""
+    """Register a pack's contributions. Wired: model_handlers, defaults_by_y_type,
+    stages (explicit insertion, Task 2), rerun_actions (Task 3). Declaring a
+    not-yet-wired field raises PackContractError (no silent no-ops)."""
+    for field_name, planned in _UNWIRED_FIELDS.items():
+        if getattr(pack, field_name):
+            raise PackContractError(
+                f"AnalysisPack.{field_name} is declared but not wired "
+                f"(planned: {planned}). Remove it or wire it before registering "
+                f"pack {pack.pack_id!r}."
+            )
     for handler in pack.model_handlers:
         register_model(handler)
     for y_type, model_type in pack.defaults_by_y_type.items():
         set_default(y_type, model_type)
+    if pack.stages:
+        from .stages import splice_stage
+        for insertion in pack.stages:
+            splice_stage(insertion)
+    for rerun in pack.rerun_actions:
+        RERUN_ACTION_REGISTRY.append(rerun)
     REGISTERED_PACKS.append(pack)

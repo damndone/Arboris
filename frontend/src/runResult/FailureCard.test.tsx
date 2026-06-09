@@ -1,9 +1,12 @@
 import { expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { FailureCard } from "./FailureCard";
-import sampleActions from "../../../tests/contracts/recommended_actions.model_fit_failure.sample.json";
+import type { FailureEvidence, RecommendedAction } from "./FailureCard";
+import sampleActionsJson from "../../../tests/contracts/recommended_actions.model_fit_failure.sample.json";
 
-const sampleEvidence = {
+const sampleActions = sampleActionsJson as RecommendedAction[];
+
+const sampleEvidence: FailureEvidence = {
   error_code: "MODEL_FIT_FAILED",
   requested_model_type: "logit",
   root_cause: "ValueError: y must be binary (got 40 unique continuous values)",

@@ -475,7 +475,7 @@ test("T1.2.a — waitForRunTerminal SSE happy path resolves on terminal event", 
 
   // Constructor runs synchronously inside the async function, so the
   // mock instance exists before we hand control back to the awaiter.
-  const source = MockEventSource.instances.at(-1)!;
+  const source = MockEventSource.instances[MockEventSource.instances.length - 1]!;
   expect(source).toBeDefined();
   expect(source.url).toContain("/runs/sse-1/events");
 
@@ -532,7 +532,7 @@ test("T1.2.b — waitForRunTerminal falls back to polling on SSE error", async (
   );
 
   const promise = waitForRunTerminal("/tmp/p", "sse-2", { intervalMs: 0 });
-  const source = MockEventSource.instances.at(-1)!;
+  const source = MockEventSource.instances[MockEventSource.instances.length - 1]!;
   source.fireError();
 
   const result = await promise;
@@ -549,7 +549,7 @@ test("T1.2.c — waitForRunTerminal abort closes EventSource and rejects", async
 
   const ctrl = new AbortController();
   const promise = waitForRunTerminal("/tmp/p", "sse-3", { signal: ctrl.signal });
-  const source = MockEventSource.instances.at(-1)!;
+  const source = MockEventSource.instances[MockEventSource.instances.length - 1]!;
   expect(source.closed).toBe(false);
 
   ctrl.abort();

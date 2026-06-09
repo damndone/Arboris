@@ -42,3 +42,19 @@ PIPELINE: list[Stage] = [
     ReliabilityStage(),
     ReportStage(),
 ]
+
+
+def splice_stage(insertion) -> None:
+    """Insert insertion.stage into PIPELINE relative to a named anchor.
+    Raises PackContractError if the anchor is not present."""
+    from ..pack import PackContractError
+    names = [s.name for s in PIPELINE]
+    anchor = insertion.after or insertion.before
+    if anchor is None or anchor not in names:
+        raise PackContractError(
+            f"StageInsertion anchor {anchor!r} is not a PIPELINE stage. "
+            f"Known stages: {names}"
+        )
+    idx = names.index(anchor)
+    pos = idx + 1 if insertion.after else idx
+    PIPELINE.insert(pos, insertion.stage)

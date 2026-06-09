@@ -35,6 +35,15 @@ _CHECK_DATA: dict = {
 }
 
 
+def _rerun_action_to_dict(ra) -> dict:
+    return {
+        "key": ra.key,
+        "label": ra.label,
+        "severity": "secondary",
+        "form_overrides": dict(ra.param_overrides),
+    }
+
+
 def actions_for_model_fit_failure(
     *, requested_model_type: str, y_type: str | None,
 ) -> list[dict]:
@@ -58,6 +67,8 @@ def actions_for_model_fit_failure(
                 f"Your y is binary; {requested_model_type} is built for continuous y."
             )
         actions.append(check_y)
+        from .pack import RERUN_ACTION_REGISTRY
+        actions.extend(_rerun_action_to_dict(ra) for ra in RERUN_ACTION_REGISTRY)
         return actions
     return [dict(_CHECK_DATA), dict(_CHANGE_MODEL)]
 

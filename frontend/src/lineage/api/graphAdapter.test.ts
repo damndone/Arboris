@@ -38,7 +38,7 @@ function makeDP(overrides: Partial<DecisionPoint> = {}): DecisionPoint {
 
 function makeNode(
   id: string,
-  overrides: Partial<LineageNode> & { stage?: string | null } = {},
+  overrides: Omit<Partial<LineageNode>, "stage"> & { stage?: string | null | undefined } = {},
 ): LineageNode {
   return {
     id,
@@ -236,7 +236,7 @@ describe("graphAdapter", () => {
   ] as const)(
     "v3 stage=%p → coerced to %p without throwing",
     (rawStage, expected) => {
-      const node = makeNode("n", { stage: rawStage as string | null });
+      const node = makeNode("n", { stage: rawStage as string | null | undefined });
       const m = adaptRunGraph(makeV3Graph([node]));
       expect(m.nodes[0].stage).toBe(expected);
     },

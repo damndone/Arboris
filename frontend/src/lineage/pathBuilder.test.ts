@@ -17,6 +17,7 @@ function makeNode(
     nodeKey: id,
     raw: null,
     stage: "unknown",
+    parentStageId: null,
     kind: "dataset_stage",
     title: id,
     summary: summary ?? undefined,

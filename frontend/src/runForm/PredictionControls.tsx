@@ -1,7 +1,7 @@
 import type { Capabilities } from "../capabilities/types";
 
 export function PredictionControls(props: {
-  capabilities: Capabilities | undefined;
+  capabilities: Capabilities | null | undefined;
   enabled: boolean;
   modelType: string;
   cvFolds: number;
