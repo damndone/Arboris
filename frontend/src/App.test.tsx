@@ -371,7 +371,7 @@ test("V1.5.1 T1.3 — Submit shows live step progress from SSE step_start", asyn
   await waitFor(() => {
     expect(MockEventSource.instances.length).toBeGreaterThan(0);
   });
-  const source = MockEventSource.instances.at(-1)!;
+  const source = MockEventSource.instances[MockEventSource.instances.length - 1]!;
   act(() => {
     source.fire("step_start", {
       event: "step_start",

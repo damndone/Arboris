@@ -1,7 +1,7 @@
 import type { Capabilities } from "../capabilities/types";
 
 export function PanelControls(props: {
-  capabilities: Capabilities | undefined;
+  capabilities: Capabilities | null | undefined;
   columns: string[];
   entity: string;
   time: string;

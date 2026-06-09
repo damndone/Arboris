@@ -1,7 +1,7 @@
 import type { Capabilities } from "../capabilities/types";
 
 export function ImputationControls(props: {
-  capabilities: Capabilities | undefined;
+  capabilities: Capabilities | null | undefined;
   value: string | null; // method key or null (not requested)
   onChange: (key: string | null) => void;
 }) {

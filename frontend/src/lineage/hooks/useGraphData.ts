@@ -25,7 +25,7 @@ export type GraphError =
   | { kind: "not_found"; detail?: string }
   | { kind: "corrupt"; detail?: string }
   | { kind: "network"; detail?: string }
-  | { kind: "unsupported_schema"; schemaVersion: number };
+  | { kind: "unsupported_schema"; schemaVersion: number; detail?: string };
 
 export interface UseGraphDataResult {
   model: GraphViewModel | null;

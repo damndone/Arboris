@@ -237,6 +237,7 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
               isSearchHit: true,
               isSearchCursor: true,
             }}
+            selected={false}
           />
         </ReactFlowProvider>,
       );
@@ -252,6 +253,7 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
         <ReactFlowProvider>
           <GraphNode
             data={{ node: vn(), state: "related", isSearchHit: true }}
+            selected={false}
           />
         </ReactFlowProvider>,
       );
