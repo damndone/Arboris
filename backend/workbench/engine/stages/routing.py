@@ -18,6 +18,7 @@ class RoutingStage:
     def run(self, ctx: ModelingContext, env: RunEnv) -> ModelingContext:
         # Lazy import to avoid a module-load cycle: orchestrator imports this
         # stage at the top of its module, and _normalized_existing lives there.
+        from ...cleaning import normalize_column_name
         from ...orchestrator import _normalized_existing
 
         cleaned = ctx.data.frame
@@ -27,6 +28,16 @@ class RoutingStage:
         env.step("routing", "start", "Classifying dataset...")
         time_candidates = _normalized_existing(schema.time_candidates, cleaned)
         id_candidates = _normalized_existing(schema.id_candidates, cleaned)
+        # V1.5.4.2: user-supplied panel columns override auto-detection.
+        # Normalize raw user input to match the cleaned (normalized) column
+        # names, consistent with ytype.py. normalize_column_name("") == "" so
+        # the empty short-circuit below still holds.
+        entity_col = normalize_column_name(ctx.artifacts.get("_entity_col") or "")
+        time_col = normalize_column_name(ctx.artifacts.get("_time_col") or "")
+        if entity_col and entity_col in cleaned.columns:
+            id_candidates = [entity_col]
+        if time_col and time_col in cleaned.columns:
+            time_candidates = [time_col]
         routing = classify_dataset(cleaned, id_candidates, time_candidates)
         env.step("routing", "complete", f"Classified as {routing['kind']}")
         routing_path = run_root / "staged" / "analysis_router.json"

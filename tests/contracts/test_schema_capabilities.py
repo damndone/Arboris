@@ -49,6 +49,47 @@ SCHEMA: dict = {
                 "additionalProperties": False,
             },
         },
+        # V1.5.4.2 (schema_version 2): additive UI groups for
+        # prediction/sampling/covariance controls.
+        "prediction_models": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["key", "label"],
+                "properties": {
+                    "key": {"type": "string", "minLength": 1},
+                    "label": {"type": "string", "minLength": 1},
+                    "description": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "sampling_methods": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["key", "label"],
+                "properties": {
+                    "key": {"type": "string", "minLength": 1},
+                    "label": {"type": "string", "minLength": 1},
+                    "description": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "covariance_options": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["key", "label"],
+                "properties": {
+                    "key": {"type": "string", "minLength": 1},
+                    "label": {"type": "string", "minLength": 1},
+                    "description": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
     },
     "additionalProperties": False,
 }

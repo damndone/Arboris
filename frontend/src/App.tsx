@@ -25,6 +25,8 @@ import { RunResultView } from "./runResult";
 import { useCapabilities } from "./capabilities/useCapabilities";
 import { ModelTypeSelect } from "./runForm/ModelTypeSelect";
 import { ImputationControls } from "./runForm/ImputationControls";
+import { PanelControls } from "./runForm/PanelControls";
+import { PredictionControls } from "./runForm/PredictionControls";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import "./styles.css";
 
@@ -35,6 +37,28 @@ function parseColumns(value: string): string[] {
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part !== "");
+}
+
+export function validatePanelPrediction(s: {
+  modelType: string;
+  entity: string;
+  time: string;
+  isPanelData: boolean;
+  predictionEnabled: boolean;
+  predictionModelType: string;
+}): string | null {
+  if (s.modelType === "panel_ols") {
+    if (s.entity && s.time && s.entity === s.time) {
+      return "个体列与时间列不能是同一列 (entity == time)。";
+    }
+    if (!s.entity && !s.time && !s.isPanelData) {
+      return "选择 Panel OLS 时请指定个体或时间列；该数据未被识别为面板数据。";
+    }
+  }
+  if (s.predictionEnabled && !s.predictionModelType) {
+    return "已开启预测，请选择算法 (algorithm)。";
+  }
+  return null;
 }
 
 // --- Context ---
@@ -66,6 +90,15 @@ function SubmitRoute() {
   // V1.5.4.1: imputation method key (null = not requested). Driven by the
   // same `capabilities` manifest as ModelTypeSelect.
   const [imputationMethod, setImputationMethod] = useState<string | null>(null);
+  // V1.5.4.2: panel entity/time/covariance overrides + optional prediction.
+  const [entityCol, setEntityCol] = useState("");
+  const [timeCol, setTimeCol] = useState("");
+  const [covariance, setCovariance] = useState("");
+  const [predictionEnabled, setPredictionEnabled] = useState(false);
+  const [predictionModelType, setPredictionModelType] = useState("");
+  const [predictionCvFolds, setPredictionCvFolds] = useState(5);
+  const [predictionSampling, setPredictionSampling] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [sheetName, setSheetName] = useState<string | undefined>(undefined);
   const [transpose, setTranspose] = useState(false);
   const [y, setY] = useState("");
@@ -115,6 +148,10 @@ function SubmitRoute() {
   }, [setError]);
 
   const xColumns = useMemo(() => parseColumns(x), [x]);
+  const columnNames = useMemo(
+    () => preview?.columns?.map((c) => c.name) ?? [],
+    [preview],
+  );
 
   const projectErrors: Record<string, string> = {};
   if (parent.trim() === "") projectErrors.parent = "Required";
@@ -207,6 +244,16 @@ function SubmitRoute() {
 
   async function onRun() {
     if (!file) return;
+    const err = validatePanelPrediction({
+      modelType,
+      entity: entityCol,
+      time: timeCol,
+      isPanelData: false, // no reliable client-side panel detection pre-run
+      predictionEnabled,
+      predictionModelType,
+    });
+    setValidationError(err);
+    if (err) return;
     setRequestState("working");
     setError(null);
     setActivity("Running workflow");
@@ -226,6 +273,14 @@ function SubmitRoute() {
         sheetName,
         transpose,
         imputationPayload,
+        {
+          entityCol,
+          timeCol,
+          covariance,
+          predictionModelType: predictionEnabled ? predictionModelType : "",
+          predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
+          predictionSamplingMethod: predictionEnabled ? predictionSampling : "",
+        },
       );
       setLastRun(result);
       // P0 + race fix: POST /runs returns immediately with
@@ -401,6 +456,32 @@ function SubmitRoute() {
             value={imputationMethod}
             onChange={setImputationMethod}
           />
+          {modelType === "panel_ols" && (
+            <PanelControls
+              capabilities={capabilities}
+              columns={columnNames}
+              entity={entityCol}
+              time={timeCol}
+              covariance={covariance}
+              onEntity={setEntityCol}
+              onTime={setTimeCol}
+              onCovariance={setCovariance}
+            />
+          )}
+          <PredictionControls
+            capabilities={capabilities}
+            enabled={predictionEnabled}
+            modelType={predictionModelType}
+            cvFolds={predictionCvFolds}
+            sampling={predictionSampling}
+            onEnabled={setPredictionEnabled}
+            onModelType={setPredictionModelType}
+            onCvFolds={setPredictionCvFolds}
+            onSampling={setPredictionSampling}
+          />
+          {validationError && (
+            <div className="ios-warning" role="alert">{validationError}</div>
+          )}
           {preview && preview.sheetNames.length > 1 && (
             <label>
               Sheet

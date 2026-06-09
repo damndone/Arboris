@@ -57,6 +57,9 @@ class DiagnosticsStage:
         model_input_ids = ctx.artifacts["_model_input_ids"]
         model_type = ctx.artifacts["_model_type"]
         config = ctx.artifacts["_config"]
+        req_pred_type = ctx.artifacts.get("_prediction_model_type") or ""
+        req_pred_folds = ctx.artifacts.get("_prediction_cv_folds") or 0
+        req_pred_sampling = ctx.artifacts.get("_prediction_sampling_method") or ""
         routing = ctx.artifacts["_routing"]
         time_candidates = ctx.artifacts["_time_candidates"]
 
@@ -102,10 +105,13 @@ class DiagnosticsStage:
         prediction_model_type = (
             model_type
             if model_type in _PREDICTION_MODEL_TYPES
-            else config.prediction_model_type if config.prediction_enabled else ""
+            else req_pred_type
+            or (config.prediction_model_type if config.prediction_enabled else "")
         )
         if prediction_model_type:
             prediction_model_id = f"{prediction_model_type}_1"
+            cv_folds = req_pred_folds or config.prediction_cv_folds
+            sampling_method = req_pred_sampling or config.prediction_sampling_method
             try:
                 run_prediction_model(
                     modeling_frame,
@@ -114,10 +120,10 @@ class DiagnosticsStage:
                     x=normalized_x,
                     model_type=prediction_model_type,
                     model_id=prediction_model_id,
-                    cv_folds=config.prediction_cv_folds,
+                    cv_folds=cv_folds,
                     random_seed=config.random_seed,
                     inputs=model_input_ids,
-                    sampling_method=config.prediction_sampling_method,
+                    sampling_method=sampling_method,
                 )
             except OptionalDependencyNotInstalled as dep_exc:
                 # Prediction is supplementary; missing optional deps should

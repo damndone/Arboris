@@ -46,6 +46,13 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 BYTES_PER_GB = 1024**3
 
 
+def _safe_int(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 class ProjectRequest(BaseModel):
     parent: str
     name: str
@@ -73,6 +80,12 @@ async def run_endpoint(
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
     imputation: str = Form(""),
+    entity_col: str = Form(""),
+    time_col: str = Form(""),
+    covariance: str = Form(""),
+    prediction_model_type: str = Form(""),
+    prediction_cv_folds: str = Form("0"),
+    prediction_sampling_method: str = Form(""),
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -114,6 +127,9 @@ async def run_endpoint(
             _bg_run, run.root, run.run_id, saved_path,
             mode, y, x_columns, started_at, model_type,
             sheet_name or None, transpose == "true", imputation_request,
+            entity_col, time_col, covariance,
+            prediction_model_type, _safe_int(prediction_cv_folds),
+            prediction_sampling_method,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -226,6 +242,12 @@ def _bg_run(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    entity_col: str = "",
+    time_col: str = "",
+    covariance: str = "",
+    prediction_model_type: str = "",
+    prediction_cv_folds: int = 0,
+    prediction_sampling_method: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -253,6 +275,12 @@ def _bg_run(
             sheet_name=sheet_name,
             transpose=transpose,
             imputation=imputation,
+            entity_col=entity_col,
+            time_col=time_col,
+            covariance=covariance,
+            prediction_model_type=prediction_model_type,
+            prediction_cv_folds=prediction_cv_folds,
+            prediction_sampling_method=prediction_sampling_method,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

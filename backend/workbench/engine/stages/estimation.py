@@ -24,6 +24,7 @@ def _orch():
 def _fit_panel_ols(ctx, env):
     id_cands = ctx.artifacts.get("_id_candidates") or []
     t_cands = ctx.artifacts.get("_time_candidates") or []
+    covariance = ctx.artifacts.get("_covariance") or "robust"
     primary, fitted = _orch().run_panel_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
@@ -31,6 +32,7 @@ def _fit_panel_ols(ctx, env):
         entity=id_cands[0] if id_cands else None,
         time=t_cands[0] if t_cands else None,
         model_id="panel_ols_1",
+        covariance=covariance,
     )
     # NB: today's code does NOT store panel_ols fitted; preserve that.
     return "panel_ols_1", primary, None

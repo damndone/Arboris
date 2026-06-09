@@ -331,7 +331,7 @@ def test_run_workflow_panel_ols_requires_panel_fields(tmp_path):
 def test_run_workflow_panel_ols_skips_statsmodels_diagnostics(monkeypatch, tmp_path):
     import workbench.orchestrator as orchestrator
 
-    def fake_panel_ols(frame, y, x, entity, time, model_id):
+    def fake_panel_ols(frame, y, x, entity, time, model_id, covariance="robust"):
         assert entity == "firm_id"
         assert time == "year"
         return (

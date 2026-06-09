@@ -185,6 +185,12 @@ def run_workflow(
     x: list[str],
     model_type: str = "auto",
     imputation: dict | None = None,
+    entity_col: str = "",
+    time_col: str = "",
+    covariance: str = "",
+    prediction_model_type: str = "",
+    prediction_cv_folds: int = 0,
+    prediction_sampling_method: str = "",
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -214,6 +220,12 @@ def run_workflow(
             started_at,
             model_type=model_type,
             imputation=imputation,
+            entity_col=entity_col,
+            time_col=time_col,
+            covariance=covariance,
+            prediction_model_type=prediction_model_type,
+            prediction_cv_folds=prediction_cv_folds,
+            prediction_sampling_method=prediction_sampling_method,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -421,6 +433,12 @@ def _run_workflow(
     sheet_name: str | None = None,
     transpose: bool = False,
     imputation: dict | None = None,
+    entity_col: str = "",
+    time_col: str = "",
+    covariance: str = "",
+    prediction_model_type: str = "",
+    prediction_cv_folds: int = 0,
+    prediction_sampling_method: str = "",
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -453,6 +471,12 @@ def _run_workflow(
     ctx.artifacts["_model_type"] = model_type
     ctx.artifacts["_started_at"] = started_at
     ctx.artifacts["_imputation_request"] = imputation
+    ctx.artifacts["_entity_col"] = entity_col
+    ctx.artifacts["_time_col"] = time_col
+    ctx.artifacts["_covariance"] = covariance
+    ctx.artifacts["_prediction_model_type"] = prediction_model_type
+    ctx.artifacts["_prediction_cv_folds"] = prediction_cv_folds
+    ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)

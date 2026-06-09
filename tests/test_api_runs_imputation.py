@@ -50,4 +50,4 @@ def test_post_runs_parses_imputation_json_and_passes_to_background_worker(
 
     assert response.status_code == 200
     assert response.json()["status"] == "running"
-    assert captured["args"][-1] == {"method": "mice"}
+    assert {"method": "mice"} in captured["args"]
