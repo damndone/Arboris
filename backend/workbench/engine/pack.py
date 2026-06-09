@@ -32,6 +32,15 @@ REGISTERED_PACKS: list["AnalysisPack"] = []
 
 
 @dataclass
+class StageInsertion:
+    """Declares a pipeline stage contribution and where it goes.
+    `after` (or `before`) names an existing PIPELINE stage by `.name`."""
+    stage: Any
+    after: str | None = None
+    before: str | None = None
+
+
+@dataclass
 class AnalysisPack:
     """Container that future feature packs (Panel / DID / RDD / TimeSeries /
     ML) and the kernel itself use to declare contributions. V1.5.4 fully wires
@@ -67,4 +76,8 @@ def register_pack(pack: AnalysisPack) -> None:
         register_model(handler)
     for y_type, model_type in pack.defaults_by_y_type.items():
         set_default(y_type, model_type)
+    if pack.stages:
+        from .stages import splice_stage
+        for insertion in pack.stages:
+            splice_stage(insertion)
     REGISTERED_PACKS.append(pack)
