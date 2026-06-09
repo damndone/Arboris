@@ -32,6 +32,18 @@ REGISTERED_PACKS: list["AnalysisPack"] = []
 
 
 @dataclass
+class RerunAction:
+    """A pack-declared one-click re-run option. param_overrides maps run-form
+    fields to override values (mapped to the FailureCard form_overrides schema)."""
+    key: str
+    label: str
+    param_overrides: dict = field(default_factory=dict)
+
+
+RERUN_ACTION_REGISTRY: list[RerunAction] = []
+
+
+@dataclass
 class StageInsertion:
     """Declares a pipeline stage contribution and where it goes.
     `after` (or `before`) names an existing PIPELINE stage by `.name`."""
@@ -80,4 +92,6 @@ def register_pack(pack: AnalysisPack) -> None:
         from .stages import splice_stage
         for insertion in pack.stages:
             splice_stage(insertion)
+    for rerun in pack.rerun_actions:
+        RERUN_ACTION_REGISTRY.append(rerun)
     REGISTERED_PACKS.append(pack)
