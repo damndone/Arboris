@@ -58,7 +58,7 @@ export function IVControls(props: {
           </select>
         </label>
       ))}
-      <div className="ios-hint" aria-label="iv-identification">{badge}</div>
+      <div className="ios-hint" aria-label="iv-identification" aria-live="polite">{badge}</div>
     </div>
   );
 }

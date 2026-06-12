@@ -30,4 +30,16 @@ describe("IVControls", () => {
     rerender(<IVControls columns={cols} value={{ endog: ["educ"], instruments: ["dist", "momeduc"] }} onChange={() => {}} />);
     expect(screen.getByText(/over-identified|过度识别/i)).toBeInTheDocument();
   });
+
+  it("reassigning a column back to exog removes it from both buckets", () => {
+    const onChange = vi.fn();
+    render(<IVControls columns={cols} value={{ endog: ["educ"], instruments: ["dist"] }} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("role-educ"), { target: { value: "exog" } });
+    expect(onChange).toHaveBeenLastCalledWith({ endog: [], instruments: ["dist"] });
+  });
+
+  it("shows the neutral hint when no endogenous variable is assigned", () => {
+    render(<IVControls columns={cols} value={{ endog: [], instruments: [] }} onChange={() => {}} />);
+    expect(screen.getByText(/请指派至少一个内生变量/)).toBeInTheDocument();
+  });
 });
