@@ -135,3 +135,30 @@ def test_golden_explicit_model_type_logit(tmp_path):
     frame = pd.DataFrame({"y": [0, 1] * 25, "x": [i * 0.5 for i in range(50)], "firm_id": list(range(200, 250))})
     run_root, _ = _run(tmp_path, frame, y="y", x=["x"], model_type="logit")
     _assert_or_write_golden("explicit_logit", _capture(run_root))
+
+
+def test_golden_iv_2sls(tmp_path):
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    n = 400
+    z = rng.normal(size=n)
+    u = rng.normal(size=n)
+    educ = 0.8 * z + u + rng.normal(size=n) * 0.3
+    age = rng.normal(size=n)
+    wage = 1.0 + 0.5 * educ + 0.2 * age + u + rng.normal(size=n) * 0.5
+    frame = pd.DataFrame({"wage": wage, "educ": educ, "age": age, "dist": z})
+
+    source = tmp_path / "data.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(
+        project.root, [source], mode="auto", y="wage", x=["age"],
+        model_type="iv_2sls", iv_endog=["educ"], iv_instruments=["dist"],
+    )
+    run_root = project.root / "runs" / result["run_id"]
+
+    snap = _capture(run_root)
+    # Guard: an IV regression from Task 2 must complete; a failure here is a regression.
+    assert snap["status"] == "completed"
+    _assert_or_write_golden("iv_2sls", snap)
