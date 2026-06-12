@@ -36,6 +36,11 @@ def validate_iv_spec(
                     f"and cannot also be in {role}."
                 )
             if col in seen:
+                if seen[col] == role:
+                    raise IVSpecError(
+                        f"IV_INVALID_PARTITION: '{col}' is listed more than "
+                        f"once in {role}."
+                    )
                 raise IVSpecError(
                     f"IV_INVALID_PARTITION: '{col}' appears in both "
                     f"{seen[col]} and {role}; each column has exactly one role."

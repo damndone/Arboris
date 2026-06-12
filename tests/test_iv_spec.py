@@ -39,3 +39,16 @@ def test_y_in_a_bucket_raises():
     with pytest.raises(IVSpecError):
         validate_iv_spec(y="wage", exog=["wage"], endog=["educ"],
                          instruments=["dist"])
+
+
+def test_duplicate_instrument_within_bucket_raises():
+    with pytest.raises(IVSpecError) as exc:
+        validate_iv_spec(y="wage", exog=[], endog=["educ"],
+                         instruments=["dist", "dist"])
+    assert "dist" in str(exc.value)
+
+
+def test_duplicate_endog_within_bucket_raises():
+    with pytest.raises(IVSpecError):
+        validate_iv_spec(y="wage", exog=[], endog=["educ", "educ"],
+                         instruments=["z1", "z2"])
