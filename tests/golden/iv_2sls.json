@@ -21,6 +21,9 @@
     "iv_2sls_1": [
       "cleaned_dataset"
     ],
+    "iv_diagnostics": [
+      "cleaned_dataset"
+    ],
     "raw_data.csv": [],
     "report_html": [],
     "report_pdf": [],

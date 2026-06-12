@@ -59,3 +59,41 @@ def test_iv_run_calls_estimator_with_buckets(monkeypatch, iv_frame, tmp_path):
 def test_iv_2sls_is_explicit_only():
     # explicit-only invariant: registered but NEVER an auto default
     assert "iv_2sls" not in DEFAULT_BY_Y_TYPE
+
+
+def test_iv_run_writes_iv_diagnostics_artifact(iv_frame, tmp_path):
+    run_root, result = _run_iv(
+        tmp_path, iv_frame, endog=["educ"], instruments=["dist"], x=["age"]
+    )
+    manifest = read_json(run_root / "run_manifest.json")
+    assert manifest["status"] == "completed"
+
+    diag_path = run_root / "iv_diagnostics.json"
+    assert diag_path.exists(), "iv_diagnostics.json must be written for an IV run"
+    diag = read_json(diag_path)
+    for key in ("identification", "weak_instruments", "endogeneity", "overidentification"):
+        assert key in diag, f"missing key {key!r} in iv_diagnostics"
+
+    idx = read_json(run_root / "artifacts_index.json")
+    ids = {a["artifact_id"] for a in idx["artifacts"]}
+    assert "iv_diagnostics" in ids
+
+
+def test_non_iv_run_has_no_iv_diagnostics(tmp_path):
+    rng = np.random.default_rng(1)
+    n = 200
+    x = rng.normal(size=n)
+    y = 1.0 + 0.5 * x + rng.normal(size=n)
+    frame = pd.DataFrame({"y": y, "x": x})
+    source = tmp_path / "data.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(
+        project.root, [source], mode="auto", y="y", x=["x"], model_type="auto"
+    )
+    run_root = project.root / "runs" / result["run_id"]
+
+    assert not (run_root / "iv_diagnostics.json").exists()
+    idx = read_json(run_root / "artifacts_index.json")
+    ids = {a["artifact_id"] for a in idx["artifacts"]}
+    assert "iv_diagnostics" not in ids

@@ -102,6 +102,24 @@ class DiagnosticsStage:
                 write_json(run_root / "errors.json", {"issues": issue_dicts})
         env.step("diagnostics", "complete", f"Diagnostics computed for {len(fitted_models)} model(s)")
 
+        if model_type == "iv_2sls":
+            from ..iv_diagnostics import build_iv_diagnostics
+            iv_fitted = fitted_models.get("iv_2sls_1")
+            if iv_fitted is not None:
+                n_endog = len(ctx.artifacts.get("_iv_endog") or [])
+                n_instr = len(ctx.artifacts.get("_iv_instruments") or [])
+                iv_diag = build_iv_diagnostics(iv_fitted, n_endog, n_instr)
+                iv_diag_path = run_root / "iv_diagnostics.json"
+                write_json(iv_diag_path, iv_diag)
+                register_artifact(
+                    run_root,
+                    "iv_diagnostics",
+                    iv_diag_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+
         prediction_model_type = (
             model_type
             if model_type in _PREDICTION_MODEL_TYPES
