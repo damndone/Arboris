@@ -53,6 +53,18 @@ def _safe_int(value: str) -> int:
         return 0
 
 
+def _parse_json_str_array(raw: str, label: str) -> list[str]:
+    if not raw.strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid {label} JSON: {exc}")
+    if not isinstance(parsed, list) or not all(isinstance(c, str) for c in parsed):
+        raise HTTPException(status_code=422, detail=f"{label} must be a JSON array of column-name strings.")
+    return parsed
+
+
 class ProjectRequest(BaseModel):
     parent: str
     name: str
@@ -97,11 +109,8 @@ async def run_endpoint(
         imputation_request = parse_imputation_request(imputation)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    try:
-        iv_endog_list = json.loads(iv_endog) if iv_endog.strip() else []
-        iv_instruments_list = json.loads(iv_instruments) if iv_instruments.strip() else []
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid IV spec JSON: {exc}") from exc
+    iv_endog_list = _parse_json_str_array(iv_endog, "iv_endog")
+    iv_instruments_list = _parse_json_str_array(iv_instruments, "iv_instruments")
 
     events = get_event_manager()
     if not events.try_acquire_slot():

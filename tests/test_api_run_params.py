@@ -1,11 +1,13 @@
 import io
 import time
 import pandas as pd
+import pytest
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from workbench.api import app
+from workbench.api import app, _parse_json_str_array
 
 
 def _csv() -> bytes:
@@ -46,3 +48,73 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["prediction_model_type"] == "prediction_ridge"
     assert kw["prediction_cv_folds"] == 3  # parsed to int
     assert kw["prediction_sampling_method"] == "smote"
+
+
+def test_parse_json_str_array_valid():
+    assert _parse_json_str_array('["educ"]', "iv_endog") == ["educ"]
+
+
+def test_parse_json_str_array_empty():
+    assert _parse_json_str_array("", "iv_endog") == []
+    assert _parse_json_str_array("   ", "iv_endog") == []
+
+
+def test_parse_json_str_array_non_array_raises_422():
+    # valid JSON but not a string-array -> clean 422, not a downstream 500
+    with pytest.raises(HTTPException) as exc:
+        _parse_json_str_array("5", "iv_endog")
+    assert exc.value.status_code == 422
+
+    with pytest.raises(HTTPException) as exc:
+        _parse_json_str_array('{"a": 1}', "iv_endog")
+    assert exc.value.status_code == 422
+
+    with pytest.raises(HTTPException) as exc:
+        _parse_json_str_array("[1, 2]", "iv_endog")  # array but not strings
+    assert exc.value.status_code == 422
+
+
+def test_parse_json_str_array_malformed_json_raises_422():
+    with pytest.raises(HTTPException) as exc:
+        _parse_json_str_array("[not json", "iv_endog")
+    assert exc.value.status_code == 422
+
+
+def test_run_endpoint_rejects_non_array_iv_endog(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+
+    resp = client.post("/runs", data={
+        "project_root": root, "mode": "auto", "model_type": "iv_2sls",
+        "y": "y", "x": "x",
+        "iv_endog": "5",  # valid JSON, wrong shape
+    }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
+    assert resp.status_code == 422
+
+
+def test_run_endpoint_accepts_valid_iv_endog(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+
+    with patch(
+        "workbench.api._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
+        resp = client.post("/runs", data={
+            "project_root": root, "mode": "auto", "model_type": "iv_2sls",
+            "y": "y", "x": "x",
+            "iv_endog": '["educ"]', "iv_instruments": '["dist"]',
+        }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
+        for _ in range(100):
+            if m.call_args is not None:
+                break
+            time.sleep(0.05)
+
+    assert resp.status_code == 200
+    kw = m.call_args.kwargs
+    assert kw["iv_endog"] == ["educ"]
+    assert kw["iv_instruments"] == ["dist"]
