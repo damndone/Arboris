@@ -328,6 +328,8 @@ export interface RunExtraParams {
   predictionModelType?: string;
   predictionCvFolds?: number;
   predictionSamplingMethod?: string;
+  ivEndog?: string[];
+  ivInstruments?: string[];
 }
 
 export async function runWorkflow(
@@ -354,6 +356,8 @@ export async function runWorkflow(
   if (extra?.entityCol) form.append("entity_col", extra.entityCol);
   if (extra?.timeCol) form.append("time_col", extra.timeCol);
   if (extra?.covariance) form.append("covariance", extra.covariance);
+  if (extra?.ivEndog?.length) form.append("iv_endog", JSON.stringify(extra.ivEndog));
+  if (extra?.ivInstruments?.length) form.append("iv_instruments", JSON.stringify(extra.ivInstruments));
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
