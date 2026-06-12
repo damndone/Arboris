@@ -46,6 +46,24 @@ def test_panel_fields_missing_offers_rerun_auto():
     assert primary["form_overrides"].get("model_type") == "auto"
 
 
+def test_iv_switch_to_ols_does_not_leak_to_non_iv_failures():
+    # iv_switch_to_ols is registered on CORE_PACK with applies_to=["iv_2sls"];
+    # a non-IV explicit failure must NOT receive it. Import the estimation
+    # stage so CORE_PACK is registered even when this file runs in isolation.
+    import workbench.engine.stages.estimation  # noqa: F401
+    actions = actions_for_model_fit_failure(
+        requested_model_type="logit", y_type="binary",
+    )
+    _validate_all(actions)
+    assert "iv_switch_to_ols" not in {a["key"] for a in actions}
+    # and confirm the positive case: an IV failure DOES get it
+    iv_actions = actions_for_model_fit_failure(
+        requested_model_type="iv_2sls", y_type="continuous",
+    )
+    _validate_all(iv_actions)
+    assert "iv_switch_to_ols" in {a["key"] for a in iv_actions}
+
+
 def test_at_most_one_primary_action_per_recovery():
     """The story has one starring button. Other actions are secondary."""
     for actions in [
