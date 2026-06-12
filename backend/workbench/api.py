@@ -86,6 +86,8 @@ async def run_endpoint(
     prediction_model_type: str = Form(""),
     prediction_cv_folds: str = Form("0"),
     prediction_sampling_method: str = Form(""),
+    iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
+    iv_instruments: str = Form(""),    # JSON array of column names
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -95,6 +97,11 @@ async def run_endpoint(
         imputation_request = parse_imputation_request(imputation)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        iv_endog_list = json.loads(iv_endog) if iv_endog.strip() else []
+        iv_instruments_list = json.loads(iv_instruments) if iv_instruments.strip() else []
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid IV spec JSON: {exc}") from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -130,6 +137,7 @@ async def run_endpoint(
             entity_col, time_col, covariance,
             prediction_model_type, _safe_int(prediction_cv_folds),
             prediction_sampling_method,
+            iv_endog_list, iv_instruments_list,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -248,6 +256,8 @@ def _bg_run(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    iv_endog: list[str] | None = None,
+    iv_instruments: list[str] | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -281,6 +291,8 @@ def _bg_run(
             prediction_model_type=prediction_model_type,
             prediction_cv_folds=prediction_cv_folds,
             prediction_sampling_method=prediction_sampling_method,
+            iv_endog=iv_endog,
+            iv_instruments=iv_instruments,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

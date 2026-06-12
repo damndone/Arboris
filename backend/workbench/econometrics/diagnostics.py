@@ -39,7 +39,7 @@ def compute_diagnostics(
     if resid is None:
         resid = getattr(fitted, "resid_response", None)
     if resid is None:
-        resid = fitted.fittedvalues  # fallback: won't work for diagnostics but prevents crash
+        resid = getattr(fitted, "fittedvalues", None)  # fallback: won't work for diagnostics but prevents crash
     n = int(fitted.nobs)
 
     diag: dict[str, Any] = {"model_id": model_id, "nobs": n}
