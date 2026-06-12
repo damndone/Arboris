@@ -4,6 +4,14 @@ from workbench.engine.pack import AnalysisPack, StageInsertion, PackContractErro
 from workbench.engine.stages import PIPELINE
 
 
+@pytest.fixture(autouse=True)
+def restore_registered_packs():
+    from workbench.engine.pack import REGISTERED_PACKS
+    snap = list(REGISTERED_PACKS)
+    yield
+    REGISTERED_PACKS[:] = snap
+
+
 class _NoopStage:
     name = "noop_test"
     def run(self, ctx, env):

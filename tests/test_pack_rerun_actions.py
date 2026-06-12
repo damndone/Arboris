@@ -6,6 +6,14 @@ from workbench.engine.pack import (
 from workbench.engine.recommended_actions import actions_for_model_fit_failure
 
 
+@pytest.fixture(autouse=True)
+def restore_registered_packs():
+    from workbench.engine.pack import REGISTERED_PACKS
+    snap = list(REGISTERED_PACKS)
+    yield
+    REGISTERED_PACKS[:] = snap
+
+
 @pytest.fixture
 def restore_rerun_registry():
     snapshot = list(RERUN_ACTION_REGISTRY)

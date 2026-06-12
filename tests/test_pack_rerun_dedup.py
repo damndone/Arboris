@@ -4,6 +4,14 @@ from workbench.engine.pack import (
 )
 
 
+@pytest.fixture(autouse=True)
+def restore_registered_packs():
+    from workbench.engine.pack import REGISTERED_PACKS
+    snap = list(REGISTERED_PACKS)
+    yield
+    REGISTERED_PACKS[:] = snap
+
+
 @pytest.fixture
 def restore_rerun_registry():
     snap = list(RERUN_ACTION_REGISTRY)
