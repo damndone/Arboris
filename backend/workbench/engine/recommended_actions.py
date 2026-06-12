@@ -68,7 +68,10 @@ def actions_for_model_fit_failure(
             )
         actions.append(check_y)
         from .pack import RERUN_ACTION_REGISTRY
-        actions.extend(_rerun_action_to_dict(ra) for ra in RERUN_ACTION_REGISTRY)
+        actions.extend(
+            _rerun_action_to_dict(ra) for ra in RERUN_ACTION_REGISTRY
+            if ra.applies_to is None or requested_model_type in ra.applies_to
+        )
         return actions
     return [dict(_CHECK_DATA), dict(_CHANGE_MODEL)]
 

@@ -79,6 +79,25 @@ def test_iv_run_writes_iv_diagnostics_artifact(iv_frame, tmp_path):
     assert "iv_diagnostics" in ids
 
 
+def test_iv_failure_offers_switch_to_ols(iv_frame, tmp_path):
+    # IV run with EMPTY instruments -> IV_SPEC_INCOMPLETE -> failed manifest.
+    run_root, result = _run_iv(
+        tmp_path, iv_frame, endog=["educ"], instruments=[], x=["age"]
+    )
+    manifest = read_json(run_root / "run_manifest.json")
+    assert manifest["status"] == "failed"
+
+    errors = read_json(run_root / "errors.json")
+    fit_issues = [i for i in errors["issues"] if i["code"] == "MODEL_FIT_FAILED"]
+    assert fit_issues, "expected a MODEL_FIT_FAILED issue"
+    actions = fit_issues[0]["evidence"]["recommended_actions"]
+    switch = next(
+        (a for a in actions if a["key"] == "iv_switch_to_ols"), None
+    )
+    assert switch is not None, f"iv_switch_to_ols not in {[a['key'] for a in actions]}"
+    assert switch["form_overrides"] == {"model_type": "ols"}
+
+
 def test_non_iv_run_has_no_iv_diagnostics(tmp_path):
     rng = np.random.default_rng(1)
     n = 200

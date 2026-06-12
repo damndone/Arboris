@@ -38,6 +38,7 @@ class RerunAction:
     key: str
     label: str
     param_overrides: dict = field(default_factory=dict)
+    applies_to: list[str] | None = None   # model_types this action is relevant for; None = all
 
 
 RERUN_ACTION_REGISTRY: list[RerunAction] = []
@@ -92,6 +93,13 @@ def register_pack(pack: AnalysisPack) -> None:
         from .stages import splice_stage
         for insertion in pack.stages:
             splice_stage(insertion)
+    existing_keys = {ra.key for ra in RERUN_ACTION_REGISTRY}
     for rerun in pack.rerun_actions:
+        if rerun.key in existing_keys:
+            raise PackContractError(
+                f"Duplicate RerunAction key {rerun.key!r} "
+                f"(pack {pack.pack_id!r}); rerun keys must be unique."
+            )
+        existing_keys.add(rerun.key)
         RERUN_ACTION_REGISTRY.append(rerun)
     REGISTERED_PACKS.append(pack)

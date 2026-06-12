@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
-from ..pack import AnalysisPack, register_pack
+from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
     ModelHandler,
     resolve,
@@ -152,6 +152,14 @@ CORE_PACK = AnalysisPack(
         "binary": "logit",
         "count": "poisson_rate",
     },
+    rerun_actions=[
+        RerunAction(
+            key="iv_switch_to_ols",
+            label="Switch to OLS",
+            param_overrides={"model_type": "ols"},
+            applies_to=["iv_2sls"],
+        ),
+    ],
 )
 register_pack(CORE_PACK)
 
