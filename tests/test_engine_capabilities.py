@@ -49,8 +49,15 @@ def test_panel_ols_declares_entity_or_time_requirement():
     assert "entity_or_time" in panel.get("requires", [])
 
 
+def test_iv_2sls_declares_endog_instruments_requirement():
+    payload = build_capabilities()
+    iv = next(entry for entry in payload["model_types"] if entry["key"] == "iv_2sls")
+    assert iv.get("requires") == ["endog", "instruments"]
+    assert iv["group"] == "IV"
+
+
 def test_groups_match_known_vocabulary():
     payload = build_capabilities()
 
     groups = {entry["group"] for entry in payload["model_types"]}
-    assert groups.issubset({"auto", "Linear", "Binary", "Count", "Panel", "GLM"})
+    assert groups.issubset({"auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV"})

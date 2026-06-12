@@ -8,6 +8,7 @@
     {"key": "poisson",           "label": "Poisson",                      "group": "Count",  "description": "Poisson regression for count outcomes."},
     {"key": "negative_binomial", "label": "Negative Binomial",            "group": "Count",  "description": "For overdispersed count outcomes."},
     {"key": "panel_ols",         "label": "Panel OLS",                    "group": "Panel",  "description": "Fixed/random effects panel OLS.", "requires": ["entity_or_time"]},
+    {"key": "iv_2sls",           "label": "IV / 2SLS",                    "group": "IV",     "description": "Two-stage least squares with instrumental variables for endogenous regressors.", "requires": ["endog", "instruments"]},
     {"key": "glm:binomial",      "label": "GLM · binomial",         "group": "GLM",    "description": "Generalized linear model with binomial family."},
     {"key": "glm:poisson",       "label": "GLM · poisson",          "group": "GLM",    "description": "Generalized linear model with Poisson family."},
     {"key": "glm:negative_binomial", "label": "GLM · negative binomial", "group": "GLM", "description": "Generalized linear model with negative binomial family."}

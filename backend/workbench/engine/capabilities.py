@@ -36,6 +36,12 @@ MODEL_UI_META: dict[str, dict[str, object]] = {
         "description": "Fixed/random effects panel OLS.",
         "requires": ["entity_or_time"],
     },
+    "iv_2sls": {
+        "label": "IV / 2SLS",
+        "group": "IV",
+        "description": "Two-stage least squares with instrumental variables for endogenous regressors.",
+        "requires": ["endog", "instruments"],
+    },
     "glm:binomial": {
         "label": "GLM - binomial",
         "group": "GLM",
@@ -60,6 +66,7 @@ MODEL_UI_ORDER = [
     "poisson",
     "negative_binomial",
     "panel_ols",
+    "iv_2sls",
     "glm:binomial",
     "glm:poisson",
     "glm:negative_binomial",
