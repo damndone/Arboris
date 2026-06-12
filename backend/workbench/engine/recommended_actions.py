@@ -35,6 +35,19 @@ _CHECK_DATA: dict = {
 }
 
 
+# Action keys this module emits directly. A pack-declared RerunAction.key must
+# not collide with any of these (guarded in pack.register_pack — the frontend
+# treats "key" as unique, so a clash renders duplicate/colliding buttons).
+# "verify_panel_columns" is emitted inline by actions_for_panel_fields_missing.
+BUILTIN_ACTION_KEYS: frozenset[str] = frozenset({
+    _RERUN_AUTO["key"],
+    _CHANGE_MODEL["key"],
+    _CHECK_Y["key"],
+    _CHECK_DATA["key"],
+    "verify_panel_columns",
+})
+
+
 def _rerun_action_to_dict(ra) -> dict:
     return {
         "key": ra.key,
