@@ -38,6 +38,7 @@ class RerunAction:
     key: str
     label: str
     param_overrides: dict = field(default_factory=dict)
+    applies_to: list[str] | None = None   # model_types this action is relevant for; None = all
 
 
 RERUN_ACTION_REGISTRY: list[RerunAction] = []
@@ -92,6 +93,32 @@ def register_pack(pack: AnalysisPack) -> None:
         from .stages import splice_stage
         for insertion in pack.stages:
             splice_stage(insertion)
-    for rerun in pack.rerun_actions:
-        RERUN_ACTION_REGISTRY.append(rerun)
+    if pack.rerun_actions:
+        from .recommended_actions import BUILTIN_ACTION_KEYS
+        existing_keys = {ra.key for ra in RERUN_ACTION_REGISTRY}
+        seen_in_pack: set[str] = set()
+        # Two-pass: validate ALL keys before appending any, so a collision
+        # rejects the whole pack atomically (no partial registration).
+        for rerun in pack.rerun_actions:
+            if rerun.key in BUILTIN_ACTION_KEYS:
+                raise PackContractError(
+                    f"RerunAction key {rerun.key!r} (pack {pack.pack_id!r}) clashes "
+                    f"with a built-in action key. The frontend treats 'key' as "
+                    f"unique; rename it. Built-in keys: "
+                    f"{sorted(BUILTIN_ACTION_KEYS)}."
+                )
+            if rerun.key in existing_keys:
+                raise PackContractError(
+                    f"RerunAction key {rerun.key!r} (pack {pack.pack_id!r}) is "
+                    f"already registered by another pack. The frontend treats "
+                    f"'key' as unique; keys must be globally unique."
+                )
+            if rerun.key in seen_in_pack:
+                raise PackContractError(
+                    f"RerunAction key {rerun.key!r} is declared twice within pack "
+                    f"{pack.pack_id!r}. The frontend treats 'key' as unique."
+                )
+            seen_in_pack.add(rerun.key)
+        for rerun in pack.rerun_actions:
+            RERUN_ACTION_REGISTRY.append(rerun)
     REGISTERED_PACKS.append(pack)

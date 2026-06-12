@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
-from ..pack import AnalysisPack, register_pack
+from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
     ModelHandler,
     resolve,
@@ -98,6 +98,25 @@ def _fit_poisson(ctx, env):
     return "poisson_1", primary, fitted
 
 
+def _fit_iv_2sls(ctx, env):
+    from ..iv_spec import validate_iv_spec
+    endog = ctx.artifacts.get("_iv_endog") or []
+    instruments = ctx.artifacts.get("_iv_instruments") or []
+    exog = ctx.artifacts["_normalized_x"]
+    y = ctx.artifacts["_normalized_y"]
+    validate_iv_spec(y=y, exog=exog, endog=endog, instruments=instruments)
+    primary, fitted = _orch().run_iv_2sls(
+        ctx.data.frame,
+        y=y,
+        exog=exog,
+        endog=endog,
+        instruments=instruments,
+        model_id="iv_2sls_1",
+        covariance=ctx.artifacts.get("_covariance") or "robust",
+    )
+    return "iv_2sls_1", primary, fitted   # MUST return fitted (diagnostics needs it)
+
+
 def _fit_ols(ctx, env):
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
@@ -126,12 +145,21 @@ CORE_PACK = AnalysisPack(
         ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson),
         ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
         ModelHandler("ols", "ols_1", ("continuous",), _fit_ols),
+        ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
     ],
     defaults_by_y_type={
         "continuous": "ols",
         "binary": "logit",
         "count": "poisson_rate",
     },
+    rerun_actions=[
+        RerunAction(
+            key="iv_switch_to_ols",
+            label="Switch to OLS",
+            param_overrides={"model_type": "ols"},
+            applies_to=["iv_2sls"],
+        ),
+    ],
 )
 register_pack(CORE_PACK)
 

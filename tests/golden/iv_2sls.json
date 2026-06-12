@@ -1,0 +1,70 @@
+{
+  "artifacts": {
+    "analysis_router": [
+      "data_profile"
+    ],
+    "cleaned_dataset": [
+      "raw_data.csv"
+    ],
+    "cleaning_actions": [
+      "raw_data.csv"
+    ],
+    "coef_plot": [],
+    "correlation_heatmap": [],
+    "data_profile": [
+      "cleaned_dataset"
+    ],
+    "diagnostic_summary": [],
+    "diagnostics_iv_2sls_1": [
+      "cleaned_dataset"
+    ],
+    "iv_2sls_1": [
+      "cleaned_dataset"
+    ],
+    "iv_diagnostics": [
+      "cleaned_dataset"
+    ],
+    "raw_data.csv": [],
+    "report_html": [],
+    "report_pdf": [],
+    "statistical_tests_anova": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_chi_square": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_fisher_exact": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_nonparametric": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_rank_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_t_tests": [
+      "cleaned_dataset"
+    ],
+    "tables_xlsx": []
+  },
+  "error_codes": [],
+  "models": {
+    "iv_2sls_1": {
+      "coef_keys": [
+        "Intercept",
+        "age",
+        "educ"
+      ],
+      "coef_rounded": {
+        "Intercept": 0.93362,
+        "age": 0.257776,
+        "educ": 0.594248
+      },
+      "model_type": "iv_2sls"
+    }
+  },
+  "status": "completed"
+}

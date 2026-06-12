@@ -37,6 +37,7 @@ from .econometrics.optional_deps import OptionalDependencyNotInstalled
 from .econometrics.diagnostics import compute_diagnostics
 from .econometrics.runner import (
     run_glm,
+    run_iv_2sls,
     run_logit,
     run_negative_binomial,
     run_ols,
@@ -191,6 +192,8 @@ def run_workflow(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    iv_endog: list[str] | None = None,
+    iv_instruments: list[str] | None = None,
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -226,6 +229,8 @@ def run_workflow(
             prediction_model_type=prediction_model_type,
             prediction_cv_folds=prediction_cv_folds,
             prediction_sampling_method=prediction_sampling_method,
+            iv_endog=iv_endog,
+            iv_instruments=iv_instruments,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -439,6 +444,8 @@ def _run_workflow(
     prediction_model_type: str = "",
     prediction_cv_folds: int = 0,
     prediction_sampling_method: str = "",
+    iv_endog: list[str] | None = None,
+    iv_instruments: list[str] | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -477,6 +484,8 @@ def _run_workflow(
     ctx.artifacts["_prediction_model_type"] = prediction_model_type
     ctx.artifacts["_prediction_cv_folds"] = prediction_cv_folds
     ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
+    ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
+    ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)
@@ -663,6 +672,7 @@ _MODEL_TYPE_MAP = {
     "poisson": "count",
     "negative_binomial": "count",
     "panel_ols": "continuous",
+    "iv_2sls": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 _PREDICTION_MODEL_TYPES = {

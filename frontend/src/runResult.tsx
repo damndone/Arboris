@@ -15,6 +15,10 @@ import {
 import { validateDiagnosticPreview } from "./contract/validateDiagnosticPreview";
 import { FailureCard, type RecommendedAction } from "./runResult/FailureCard";
 import {
+  IVDiagnosticsCard,
+  type IVDiagnostics,
+} from "./runResult/IVDiagnosticsCard";
+import {
   ImputationSummary,
   type ImputationSummaryData,
 } from "./runResult/ImputationSummary";
@@ -179,6 +183,9 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
   const [predictionResult, setPredictionResult] = useState<
     PredictionResultData | undefined
   >(undefined);
+  const [ivDiagnostics, setIvDiagnostics] = useState<IVDiagnostics | undefined>(
+    undefined,
+  );
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -246,6 +253,30 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       })
       .catch(() => {
         if (!cancelled) setPredictionResult(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
+
+  // V1.5.4.4: when the run produced an iv_diagnostics artifact (IV/2SLS runs),
+  // fetch its JSON to render the IVDiagnosticsCard. Mirrors the wiring above.
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const present = artifactsState.groups.some((g) =>
+      g.items.some((it) => it.artifact_id === "iv_diagnostics"),
+    );
+    if (!present) {
+      setIvDiagnostics(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<IVDiagnostics>(projectRoot, runId, "iv_diagnostics")
+      .then((data) => {
+        if (!cancelled) setIvDiagnostics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setIvDiagnostics(undefined);
       });
     return () => {
       cancelled = true;
@@ -395,6 +426,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       )}
       <ImputationSummary summary={imputationData} />
       <PredictionResultCard result={predictionResult} />
+      <IVDiagnosticsCard diagnostics={ivDiagnostics} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>

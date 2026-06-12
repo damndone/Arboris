@@ -15,6 +15,7 @@ import { ModelTypeSelect } from "./ModelTypeSelect";
 import { ImputationControls } from "./ImputationControls";
 import { PanelControls } from "./PanelControls";
 import { PredictionControls } from "./PredictionControls";
+import { IVControls, type IVRoleValue } from "./IVControls";
 
 type RequestState = "idle" | "working";
 
@@ -57,6 +58,11 @@ export function RunForm(props: RunFormProps) {
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  // V1.5.4.4: IV role assignment (endog / instruments) over the X selection.
+  const [ivRole, setIvRole] = useState<IVRoleValue>({
+    endog: [],
+    instruments: [],
+  });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
   const [predictionCvFolds, setPredictionCvFolds] = useState(5);
@@ -182,11 +188,21 @@ export function RunForm(props: RunFormProps) {
       const imputationPayload = imputationMethod
         ? JSON.stringify({ method: imputationMethod })
         : undefined;
+      // V1.5.4.4: for IV, the posted x is the exogenous remainder only
+      // (X − endog − instruments); endog/instruments go as separate fields.
+      // validate_iv_spec on the backend rejects overlap, so we must exclude.
+      const isIV = modelType === "iv_2sls";
+      const exogColumns = isIV
+        ? xColumns.filter(
+            (c) =>
+              !ivRole.endog.includes(c) && !ivRole.instruments.includes(c),
+          )
+        : xColumns;
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
         y.trim(),
-        xColumns.join(","),
+        exogColumns.join(","),
         file,
         modelType,
         sheetName,
@@ -199,6 +215,8 @@ export function RunForm(props: RunFormProps) {
           predictionModelType: predictionEnabled ? predictionModelType : "",
           predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
           predictionSamplingMethod: predictionEnabled ? predictionSampling : "",
+          ivEndog: isIV ? ivRole.endog : undefined,
+          ivInstruments: isIV ? ivRole.instruments : undefined,
         },
       );
       setLastRun(result);
@@ -318,6 +336,34 @@ export function RunForm(props: RunFormProps) {
               onTime={setTimeCol}
               onCovariance={setCovariance}
             />
+          )}
+          {modelType === "iv_2sls" && (
+            <div className="ios-group" aria-label="IV controls">
+              <p className="ios-hint">
+                把控制变量、内生变量、工具变量都加入 X，再在下方为每个变量指派角色
+              </p>
+              <IVControls
+                columns={xColumns}
+                value={ivRole}
+                onChange={setIvRole}
+              />
+              {(capabilities?.covariance_options ?? []).length > 0 && (
+                <label className="ios-field">
+                  <span>标准误 covariance</span>
+                  <select
+                    aria-label="covariance"
+                    value={covariance}
+                    onChange={(e) => setCovariance(e.target.value)}
+                  >
+                    {(capabilities?.covariance_options ?? []).map((c) => (
+                      <option key={c.key} value={c.key}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
           )}
           <PredictionControls
             capabilities={capabilities}

@@ -3,6 +3,14 @@ import pytest
 from workbench.engine.pack import AnalysisPack, PackContractError, register_pack
 
 
+@pytest.fixture(autouse=True)
+def restore_registered_packs():
+    from workbench.engine.pack import REGISTERED_PACKS
+    snap = list(REGISTERED_PACKS)
+    yield
+    REGISTERED_PACKS[:] = snap
+
+
 def test_unwired_field_raises_with_planned_version():
     pack = AnalysisPack(pack_id="t_diag", diagnostics=["anything"])
     with pytest.raises(PackContractError) as exc:

@@ -1,4 +1,4 @@
-export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM";
+export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV";
 
 export interface ModelTypeEntry {
   key: string;
