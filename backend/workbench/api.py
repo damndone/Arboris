@@ -100,6 +100,11 @@ async def run_endpoint(
     prediction_sampling_method: str = Form(""),
     iv_endog: str = Form(""),          # JSON array of column names, e.g. ["educ"]
     iv_instruments: str = Form(""),    # JSON array of column names
+    did_mode: str = Form(""),
+    did_cohort_col: str = Form(""),
+    did_treat_col: str = Form(""),
+    did_post_col: str = Form(""),
+    did_status_col: str = Form(""),
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -147,6 +152,7 @@ async def run_endpoint(
             prediction_model_type, _safe_int(prediction_cv_folds),
             prediction_sampling_method,
             iv_endog_list, iv_instruments_list,
+            did_mode, did_cohort_col, did_treat_col, did_post_col, did_status_col,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -267,6 +273,11 @@ def _bg_run(
     prediction_sampling_method: str = "",
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
+    did_mode: str = "",
+    did_cohort_col: str = "",
+    did_treat_col: str = "",
+    did_post_col: str = "",
+    did_status_col: str = "",
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -302,6 +313,11 @@ def _bg_run(
             prediction_sampling_method=prediction_sampling_method,
             iv_endog=iv_endog,
             iv_instruments=iv_instruments,
+            did_mode=did_mode,
+            did_cohort_col=did_cohort_col,
+            did_treat_col=did_treat_col,
+            did_post_col=did_post_col,
+            did_status_col=did_status_col,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

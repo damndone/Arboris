@@ -40,7 +40,7 @@ def _coerce_cohort_value(v):
 def _check_partition(y, time, entity, role_cols: dict):
     seen = {entity: "entity", time: "time"}
     for role, col in role_cols.items():
-        if col is None:
+        if not col:
             continue
         if col == y:
             raise DIDSpecError(
@@ -62,6 +62,20 @@ def validate_did_spec(
 ) -> None:
     if mode not in {"cohort", "two_by_two", "status"}:
         raise DIDSpecError(f"DID_BAD_MODE: unknown mode '{mode}'.")
+    for label, col in (("entity", entity), ("time", time)):
+        if not col:
+            raise DIDSpecError(f"DID_FIELDS_MISSING: a {label} column is required.")
+        if col not in frame.columns:
+            raise DIDSpecError(f"DID_COLUMN_NOT_FOUND: {label} column '{col}' not in data.")
+    required = {"cohort": ["cohort"], "two_by_two": ["treat", "post"],
+                "status": ["status"]}[mode]
+    role_vals = {"cohort": cohort, "treat": treat, "post": post, "status": status}
+    for r in required:
+        col = role_vals[r]
+        if not col:
+            raise DIDSpecError(f"DID_FIELDS_MISSING: mode '{mode}' requires a {r} column.")
+        if col not in frame.columns:
+            raise DIDSpecError(f"DID_COLUMN_NOT_FOUND: {r} column '{col}' not in data.")
     _check_partition(y, time, entity,
                      {"cohort": cohort, "treat": treat, "post": post, "status": status})
     if frame[time].nunique(dropna=True) < 2:

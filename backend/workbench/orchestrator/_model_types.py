@@ -87,6 +87,7 @@ _MODEL_TYPE_MAP = {
     "negative_binomial": "count",
     "panel_ols": "continuous",
     "iv_2sls": "continuous",
+    "did": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 _PREDICTION_MODEL_TYPES = {

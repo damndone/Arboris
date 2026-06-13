@@ -256,6 +256,13 @@ class EstimationStage:
                 },
             )
 
+        if model_type == "did" and (not id_cands or not t_cands):
+            raise WorkflowValidationError(
+                "DID_FIELDS_MISSING",
+                "did requires both an entity and a time column.",
+                {"model_type": "did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
+            )
+
         env.step("estimation", "start", f"Fitting {ctx.y_type} model (y type: {ctx.y_type})...")
 
         model_results: list[tuple[str, dict[str, Any]]] = []
