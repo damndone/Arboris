@@ -84,3 +84,32 @@ def test_did_missing_entity_time_fails_clearly(tmp_path):
     errors = read_json(run_root / "errors.json")
     codes = [i.get("code") for i in errors.get("issues", [])]
     assert "DID_FIELDS_MISSING" in codes
+
+
+def test_did_end_to_end_writes_diagnostics_and_calls_run_did(tmp_path, monkeypatch):
+    from workbench import orchestrator as orch
+    src = _staggered_csv(tmp_path)
+    project = create_project(tmp_path, "demo")
+    captured = {}
+    real = orch.run_did
+
+    def spy(frame, **kwargs):
+        captured.update(kwargs)
+        captured["has_did_D"] = "_did_D" in frame.columns
+        return real(frame, **kwargs)
+
+    monkeypatch.setattr(orch, "run_did", spy)
+    result = _rw(project.root, [src], mode="auto", y="y", x=[], model_type="did",
+                 entity_col="id", time_col="year", did_mode="cohort",
+                 did_cohort_col="first_treat")
+    # the spy proves the wiring actually called run_did with real args
+    assert captured["entity"] == "id" and captured["time"] == "year"
+    assert captured["has_did_D"] is True  # normalized cohort frame was passed
+    run_root = project.root / "runs" / result["run_id"]
+    from workbench.artifacts import read_json
+    assert (run_root / "did_diagnostics.json").exists()
+    diag = read_json(run_root / "did_diagnostics.json")
+    assert set(diag) >= {"att", "event_study", "parallel_trends", "goodman_bacon", "spec"}
+    # artifact registered in the index
+    idx = read_json(run_root / "artifacts_index.json")
+    assert any(a["artifact_id"] == "did_diagnostics" for a in idx["artifacts"])
