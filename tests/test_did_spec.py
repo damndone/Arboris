@@ -1,0 +1,119 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from workbench.engine.did_spec import (
+    DIDSpecError,
+    NormalizedDID,
+    normalize_did_input,
+    validate_did_spec,
+)
+
+
+def _panel():
+    # entities A,B treated in 2020; C never treated; years 2018-2021.
+    rows = []
+    for ent, cohort in [("A", 2020), ("B", 2020), ("C", 0)]:
+        for year in range(2018, 2022):
+            rows.append({"id": ent, "year": year, "y": 1.0, "first_treat": cohort})
+    return pd.DataFrame(rows)
+
+
+def test_cohort_mode_derives_D_and_event_time():
+    norm = normalize_did_input(
+        _panel(), mode="cohort", entity="id", time="year", y="y", cohort="first_treat"
+    )
+    assert isinstance(norm, NormalizedDID)
+    f = norm.frame
+    # A in 2020 is treated (year >= cohort), in 2019 not.
+    a2020 = f[(f["id"] == "A") & (f["year"] == 2020)].iloc[0]
+    a2019 = f[(f["id"] == "A") & (f["year"] == 2019)].iloc[0]
+    assert a2020["_did_D"] == 1 and a2020["_did_event_time"] == 0
+    assert a2019["_did_D"] == 0 and a2019["_did_event_time"] == -1
+    # never-treated C: D always 0, event_time NaN, cohort NaN.
+    c = f[f["id"] == "C"]
+    assert (c["_did_D"] == 0).all()
+    assert c["_did_event_time"].isna().all()
+    assert norm.summary["n_treated_units"] == 2
+    assert norm.summary["n_never_treated"] == 1
+    assert norm.summary["staggered"] is False
+
+
+def test_two_by_two_mode_maps_to_cohort():
+    rows = []
+    for ent, treat in [("A", 1), ("B", 0)]:
+        for year, post in [(2018, 0), (2021, 1)]:
+            rows.append({"id": ent, "year": year, "y": 1.0, "treat": treat, "post": post})
+    norm = normalize_did_input(
+        pd.DataFrame(rows), mode="two_by_two", entity="id", time="year", y="y",
+        treat="treat", post="post",
+    )
+    # treated A gets cohort = earliest year where post==1 (2021); control B never.
+    a = norm.frame[norm.frame["id"] == "A"]
+    assert a[a["year"] == 2021].iloc[0]["_did_D"] == 1
+    assert norm.summary["n_never_treated"] == 1
+
+
+def test_status_mode_requires_absorbing_treatment():
+    rows = [
+        {"id": "A", "year": 2019, "y": 1.0, "D": 0},
+        {"id": "A", "year": 2020, "y": 1.0, "D": 1},
+        {"id": "A", "year": 2021, "y": 1.0, "D": 0},  # turns OFF -> non-absorbing
+    ]
+    with pytest.raises(DIDSpecError, match="DID_NON_ABSORBING"):
+        normalize_did_input(
+            pd.DataFrame(rows), mode="status", entity="id", time="year", y="y", status="D"
+        )
+
+
+def test_validate_requires_two_periods_and_comparison_group():
+    one_period = pd.DataFrame([{"id": "A", "year": 2020, "y": 1.0, "first_treat": 2020}])
+    with pytest.raises(DIDSpecError, match="DID_TOO_FEW_PERIODS"):
+        validate_did_spec(one_period, mode="cohort", entity="id", time="year", y="y",
+                          cohort="first_treat")
+    # all units treated at the same time, no never/not-yet group at the boundary
+    all_treated = pd.DataFrame(
+        [{"id": e, "year": yr, "y": 1.0, "first_treat": 2018}
+         for e in ("A", "B") for yr in (2018, 2019)]
+    )
+    with pytest.raises(DIDSpecError, match="DID_NO_COMPARISON_GROUP"):
+        validate_did_spec(all_treated, mode="cohort", entity="id", time="year", y="y",
+                          cohort="first_treat")
+
+
+def test_role_column_overlap_with_y_rejected():
+    with pytest.raises(DIDSpecError, match="DID_INVALID_PARTITION"):
+        validate_did_spec(_panel(), mode="cohort", entity="id", time="year", y="y",
+                          cohort="y")  # cohort == y
+
+
+def test_staggered_flag_true_for_multiple_cohorts():
+    rows = []
+    for ent, cohort in [("A", 2019), ("B", 2021), ("C", 0)]:
+        for year in range(2018, 2022):
+            rows.append({"id": ent, "year": year, "y": 1.0, "first_treat": cohort})
+    norm = normalize_did_input(pd.DataFrame(rows), mode="cohort", entity="id",
+                               time="year", y="y", cohort="first_treat")
+    assert norm.summary["staggered"] is True
+
+
+from workbench.engine.did_spec import _coerce_cohort_value
+
+
+@pytest.mark.parametrize("value,expected_nan,expected_val", [
+    (0, True, None),
+    ("0", True, None),
+    ("", True, None),
+    ("never", True, None),
+    ("NA", True, None),
+    (float("inf"), True, None),
+    ("2020", False, 2020.0),
+    (2019, False, 2019.0),
+    ("garbage", True, None),
+])
+def test_coerce_cohort_value(value, expected_nan, expected_val):
+    result = _coerce_cohort_value(value)
+    if expected_nan:
+        assert np.isnan(result)
+    else:
+        assert result == expected_val

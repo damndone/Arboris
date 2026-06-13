@@ -9,11 +9,12 @@ from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
 
-def _run(tmp_path, frame, *, y, x, mode="auto", model_type="auto"):
+def _run(tmp_path, frame, *, y, x, mode="auto", model_type="auto", **extra):
     source = tmp_path / "data.csv"
     frame.to_csv(source, index=False)
     project = create_project(tmp_path, "demo")
-    result = run_workflow(project.root, [source], mode=mode, y=y, x=x, model_type=model_type)
+    result = run_workflow(project.root, [source], mode=mode, y=y, x=x,
+                          model_type=model_type, **extra)
     return project.root / "runs" / result["run_id"], result
 
 
@@ -162,3 +163,48 @@ def test_golden_iv_2sls(tmp_path):
     # Guard: an IV regression from Task 2 must complete; a failure here is a regression.
     assert snap["status"] == "completed"
     _assert_or_write_golden("iv_2sls", snap)
+
+
+def test_golden_did_staggered(tmp_path):
+    import numpy as np
+    rng = np.random.default_rng(7)
+    rows = []
+    for ent, cohort in [("A", 2019), ("B", 2019), ("C", 2021), ("D", 2021),
+                        ("E", 0), ("F", 0)]:
+        fe = rng.normal()
+        for year in range(2017, 2023):
+            d = 1 if (cohort and year >= cohort) else 0
+            rows.append({"id": ent, "year": year,
+                         "y": round(fe + 0.1 * (year - 2017) + 2.0 * d, 6),
+                         "first_treat": cohort})
+    run_root, _ = _run(tmp_path, pd.DataFrame(rows), y="y", x=[], model_type="did",
+                       entity_col="id", time_col="year", did_mode="cohort",
+                       did_cohort_col="first_treat")
+    snap = _capture(run_root)
+    assert snap["status"] == "completed"
+    assert "did_diagnostics" in snap["artifacts"]
+    _assert_or_write_golden("did_staggered", snap)
+
+
+def test_golden_did_two_by_two(tmp_path):
+    # 20 entities (10 treated, 10 control) x 4 periods = 80 rows, above the
+    # min_model_n=30 guardrail. Per-entity fixed effect; clean ATT of 2.0.
+    import numpy as np
+    rng = np.random.default_rng(8)
+    rows = []
+    # Consecutive years so the event_time=-1 reference period (2019) is present
+    # and the event study is identified; never-treated controls (treat=0).
+    for i in range(20):
+        ent = f"u{i:02d}"
+        treat = 1 if i < 10 else 0
+        fe = round(float(rng.normal()), 6)
+        for year, post in [(2018, 0), (2019, 0), (2020, 1), (2021, 1)]:
+            rows.append({"id": ent, "year": year, "treat": treat, "post": post,
+                         "y": round(fe + 2.0 * (treat * post), 6)})
+    run_root, _ = _run(tmp_path, pd.DataFrame(rows), y="y", x=[], model_type="did",
+                       entity_col="id", time_col="year", did_mode="two_by_two",
+                       did_treat_col="treat", did_post_col="post")
+    snap = _capture(run_root)
+    assert snap["status"] == "completed"
+    assert "did_diagnostics" in snap["artifacts"]
+    _assert_or_write_golden("did_two_by_two", _capture(run_root))

@@ -401,6 +401,97 @@ def run_iv_2sls(
     return _normalize_linearmodels_result(fitted, model_id, "iv_2sls"), fitted
 
 
+def run_did(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    entity: str,
+    time: str,
+    model_id: str,
+    covariance: str = "robust",
+) -> tuple[dict[str, Any], Any]:
+    """TWFE DID: y ~ 1 + _did_D + x... + EntityEffects + TimeEffects. The
+    coefficient on _did_D is the ATT. Expects the canonical cohort frame from
+    normalize_did_input (must contain _did_D)."""
+    panel_module = require_optional_dependency(
+        "linearmodels.panel", extra="panel", engine="linearmodels", model_type="did",
+    )
+    data = _ensure_numeric_y(frame.copy(), y)
+    data = _ensure_numeric_x(data, x)
+    data = data.set_index([entity, time])
+
+    terms = ["1", "_did_D", *[_linearmodels_term(c) for c in x],
+             "EntityEffects", "TimeEffects"]
+    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
+    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
+    return _normalize_linearmodels_result(fitted, model_id, "did"), fitted
+
+
+def run_event_study(
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    entity: str,
+    time: str,
+    event_time_col: str,
+    ref_period: int = -1,
+    covariance: str = "robust",
+) -> dict[str, Any]:
+    """Dynamic DID: regress y on event-time dummies (reference period omitted)
+    under two-way FE. Returns the coefficient path keyed by event_time. Never-
+    treated rows (NaN event_time) contribute to the FE baseline only."""
+    panel_module = require_optional_dependency(
+        "linearmodels.panel", extra="panel", engine="linearmodels", model_type="did",
+    )
+    data = _ensure_numeric_y(frame.copy(), y)
+    data = _ensure_numeric_x(data, x)
+    evt = data[event_time_col]
+    event_values = sorted(int(v) for v in evt.dropna().unique() if int(v) != ref_period)
+
+    dummy_terms = []
+    for k in event_values:
+        col = f"_evt_{'m' if k < 0 else 'p'}{abs(k)}"
+        data[col] = (evt == k).astype(float)
+        dummy_terms.append(col)
+
+    data = data.set_index([entity, time])
+    terms = ["1", *dummy_terms, *[_linearmodels_term(c) for c in x],
+             "EntityEffects", "TimeEffects"]
+    formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
+    try:
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
+            cov_type=covariance
+        )
+    except Exception as exc:
+        # A single treatment cohort (no timing variation) makes the event-time
+        # indicators collinear with the time fixed effects, so PanelOLS reports
+        # the event dummies as absorbed. Surface this as a structured, catchable
+        # DID_ error so callers can skip the (unidentified) event study while
+        # still reporting the ATT — rather than crashing the whole run.
+        if "absorb" in str(exc).lower() or type(exc).__name__ == "AbsorbingEffectError":
+            raise ValueError(
+                "DID_EVENT_STUDY_UNIDENTIFIED: event-time indicators are collinear "
+                "with the time fixed effects (e.g. a single treatment cohort, or the "
+                "reference period is absent from the data); the dynamic event study "
+                "is not identified."
+            ) from exc
+        raise
+
+    coef, se, ci_lo, ci_hi = [], [], [], []
+    conf = fitted.conf_int()
+    for k in event_values:
+        col = f"_evt_{'m' if k < 0 else 'p'}{abs(k)}"
+        coef.append(_json_safe_float(fitted.params.get(col)))
+        se.append(_json_safe_float(fitted.std_errors.get(col)))
+        ci_lo.append(_json_safe_float(conf.loc[col, "lower"]))
+        ci_hi.append(_json_safe_float(conf.loc[col, "upper"]))
+    return {
+        "event_time": event_values,
+        "coef": coef, "se": se, "ci_lower": ci_lo, "ci_upper": ci_hi,
+        "ref_period": ref_period,
+    }
+
+
 def run_time_series_diagnostics(
     frame: pd.DataFrame, y: str, time: str
 ) -> dict[str, float | None]:

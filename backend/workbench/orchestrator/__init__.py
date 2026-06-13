@@ -53,6 +53,8 @@ from .. import graph_decision_factory as dpf
 from ..econometrics.optional_deps import OptionalDependencyNotInstalled
 from ..econometrics.diagnostics import compute_diagnostics
 from ..econometrics.runner import (
+    run_did,
+    run_event_study,
     run_glm,
     run_iv_2sls,
     run_logit,
@@ -171,6 +173,11 @@ def run_workflow(
     prediction_sampling_method: str = "",
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
+    did_mode: str = "",
+    did_cohort_col: str = "",
+    did_treat_col: str = "",
+    did_post_col: str = "",
+    did_status_col: str = "",
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -208,6 +215,11 @@ def run_workflow(
             prediction_sampling_method=prediction_sampling_method,
             iv_endog=iv_endog,
             iv_instruments=iv_instruments,
+            did_mode=did_mode,
+            did_cohort_col=did_cohort_col,
+            did_treat_col=did_treat_col,
+            did_post_col=did_post_col,
+            did_status_col=did_status_col,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -355,6 +367,11 @@ def _run_workflow(
     prediction_sampling_method: str = "",
     iv_endog: list[str] | None = None,
     iv_instruments: list[str] | None = None,
+    did_mode: str = "",
+    did_cohort_col: str = "",
+    did_treat_col: str = "",
+    did_post_col: str = "",
+    did_status_col: str = "",
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -395,6 +412,11 @@ def _run_workflow(
     ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
     ctx.artifacts["_iv_endog"] = [normalize_column_name(c) for c in (iv_endog or [])]
     ctx.artifacts["_iv_instruments"] = [normalize_column_name(c) for c in (iv_instruments or [])]
+    ctx.artifacts["_did_mode"] = did_mode
+    ctx.artifacts["_did_cohort_col"] = normalize_column_name(did_cohort_col) if did_cohort_col else ""
+    ctx.artifacts["_did_treat_col"] = normalize_column_name(did_treat_col) if did_treat_col else ""
+    ctx.artifacts["_did_post_col"] = normalize_column_name(did_post_col) if did_post_col else ""
+    ctx.artifacts["_did_status_col"] = normalize_column_name(did_status_col) if did_status_col else ""
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)

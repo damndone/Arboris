@@ -120,6 +120,26 @@ class DiagnosticsStage:
                     model_input_ids,
                 )
 
+        if model_type == "did":
+            from ..did_diagnostics import build_did_diagnostics
+            did_fitted = fitted_models.get("did_1")
+            norm = ctx.artifacts.get("_did_normalized")
+            if did_fitted is not None and norm is not None:
+                did_diag = build_did_diagnostics(
+                    did_fitted, norm, norm.frame,
+                    covariance=ctx.artifacts.get("_covariance") or "robust",
+                )
+                did_diag_path = run_root / "did_diagnostics.json"
+                write_json(did_diag_path, did_diag)
+                register_artifact(
+                    run_root,
+                    "did_diagnostics",
+                    did_diag_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+
         prediction_model_type = (
             model_type
             if model_type in _PREDICTION_MODEL_TYPES

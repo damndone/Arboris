@@ -117,6 +117,34 @@ def _fit_iv_2sls(ctx, env):
     return "iv_2sls_1", primary, fitted   # MUST return fitted (diagnostics needs it)
 
 
+def _fit_did(ctx, env):
+    from ..did_spec import normalize_did_input
+    id_cands = ctx.artifacts.get("_id_candidates") or []
+    t_cands = ctx.artifacts.get("_time_candidates") or []
+    norm = normalize_did_input(
+        ctx.data.frame,
+        mode=ctx.artifacts.get("_did_mode") or "cohort",
+        entity=id_cands[0] if id_cands else None,
+        time=t_cands[0] if t_cands else None,
+        y=ctx.artifacts["_normalized_y"],
+        cohort=ctx.artifacts.get("_did_cohort_col"),
+        treat=ctx.artifacts.get("_did_treat_col"),
+        post=ctx.artifacts.get("_did_post_col"),
+        status=ctx.artifacts.get("_did_status_col"),
+    )
+    ctx.artifacts["_did_normalized"] = norm
+    primary, fitted = _orch().run_did(
+        norm.frame,
+        y=norm.y,
+        x=ctx.artifacts["_normalized_x"],
+        entity=norm.entity,
+        time=norm.time,
+        model_id="did_1",
+        covariance=ctx.artifacts.get("_covariance") or "robust",
+    )
+    return "did_1", primary, fitted   # MUST return fitted (diagnostics needs it)
+
+
 def _fit_ols(ctx, env):
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
@@ -146,6 +174,7 @@ CORE_PACK = AnalysisPack(
         ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
         ModelHandler("ols", "ols_1", ("continuous",), _fit_ols),
         ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
+        ModelHandler("did", "did_1", ("continuous",), _fit_did),
     ],
     defaults_by_y_type={
         "continuous": "ols",
@@ -158,6 +187,12 @@ CORE_PACK = AnalysisPack(
             label="Switch to OLS",
             param_overrides={"model_type": "ols"},
             applies_to=["iv_2sls"],
+        ),
+        RerunAction(
+            key="did_switch_to_panel_ols",
+            label="Switch to plain Panel FE",
+            param_overrides={"model_type": "panel_ols"},
+            applies_to=["did"],
         ),
     ],
 )
@@ -219,6 +254,13 @@ class EstimationStage:
                     "has_entity": bool(id_cands),
                     "has_time": bool(t_cands),
                 },
+            )
+
+        if model_type == "did" and (not id_cands or not t_cands):
+            raise WorkflowValidationError(
+                "DID_FIELDS_MISSING",
+                "did requires both an entity and a time column.",
+                {"model_type": "did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
             )
 
         env.step("estimation", "start", f"Fitting {ctx.y_type} model (y type: {ctx.y_type})...")

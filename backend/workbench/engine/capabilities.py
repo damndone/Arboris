@@ -42,6 +42,12 @@ MODEL_UI_META: dict[str, dict[str, object]] = {
         "description": "Two-stage least squares with instrumental variables for endogenous regressors.",
         "requires": ["endog", "instruments"],
     },
+    "did": {
+        "label": "DID (Difference-in-Differences)",
+        "group": "DID",
+        "description": "Two-way fixed-effects DID with event study, parallel-trends test, and Goodman-Bacon decomposition.",
+        "requires": ["entity", "time", "treatment_timing"],
+    },
     "glm:binomial": {
         "label": "GLM - binomial",
         "group": "GLM",
@@ -67,6 +73,7 @@ MODEL_UI_ORDER = [
     "negative_binomial",
     "panel_ols",
     "iv_2sls",
+    "did",
     "glm:binomial",
     "glm:poisson",
     "glm:negative_binomial",
