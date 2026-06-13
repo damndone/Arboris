@@ -64,12 +64,25 @@ from ..statistical_tests import (
 from ..validation import has_blockers, validate_profile
 from ..variable_roles import infer_variable_roles
 from ..visualization import create_figures
+from ._errors import WorkflowValidationError
 from ._manifest import (
     _build_model_routing_summary,
     _lineage,
     _primary_model_summary,
     _safe_flush_recorder,
     _write_manifest,
+)
+from ._model_types import (
+    _MODEL_METADATA,
+    _MODEL_TYPE_MAP,
+    _PREDICTION_MODEL_TYPES,
+    _ROOT_CAUSE_MAX_LENGTH,
+    _SUPPORTED_GLM_FAMILIES,
+    _engine_for_type,
+    _map_model_type,
+    _model_failure_details,
+    _model_id_for_type,
+    _validate_requested_model_type,
 )
 
 # ============================================================
@@ -87,42 +100,6 @@ from ._manifest import (
 # ============================================================
 
 
-class WorkflowValidationError(ValueError):
-    """Structured validation error with error code and evidence context.
-
-    Raised when a workflow cannot proceed due to a known, diagnosable
-    configuration or input issue (unsupported model, bad GLM family,
-    etc.).  The error code and evidence are used to write a structured
-    ``errors.json`` entry so the failure is machine-readable, not a
-    generic ``WORKFLOW_FAILED``.
-    """
-
-    def __init__(
-        self,
-        error_code: str,
-        message: str,
-        evidence: dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.error_code = error_code
-        self.evidence = evidence or {}
-
-
-# ---------------------------------------------------------------------------
-# Per-model-type metadata used to build structured failure details.
-# ---------------------------------------------------------------------------
-_MODEL_METADATA: dict[str, dict[str, str]] = {
-    "ols":               {"model_id": "ols_1",               "engine": "statsmodels"},
-    "logit":             {"model_id": "logit_1",             "engine": "statsmodels"},
-    "probit":            {"model_id": "probit_1",            "engine": "statsmodels"},
-    "poisson":           {"model_id": "poisson_1",           "engine": "statsmodels"},
-    "negative_binomial": {"model_id": "negative_binomial_1", "engine": "statsmodels"},
-    "panel_ols":         {"model_id": "panel_ols_1",         "engine": "linearmodels"},
-    "prediction_lasso":          {"model_id": "prediction_lasso_1",          "engine": "scikit-learn"},
-    "prediction_ridge":          {"model_id": "prediction_ridge_1",          "engine": "scikit-learn"},
-    "prediction_random_forest":  {"model_id": "prediction_random_forest_1",  "engine": "scikit-learn"},
-}
-
 # Map auto-detected y_type back to the model type actually attempted,
 # so that failure evidence names the correct model (e.g. "logit",
 # not "binary").
@@ -131,57 +108,6 @@ _Y_TYPE_TO_ATTEMPTED_MODEL: dict[str, str] = {
     "count": "poisson",
     "continuous": "ols",
 }
-
-# Maximum length of root_cause string in failure evidence to avoid
-# leaking verbose stack traces into errors.json.
-_ROOT_CAUSE_MAX_LENGTH = 300
-
-
-def _model_id_for_type(model_type: str) -> str:
-    """Return the canonical model_id for a given model_type string."""
-    meta = _MODEL_METADATA.get(model_type)
-    if meta is not None:
-        return meta["model_id"]
-    if model_type.startswith("glm:"):
-        return "glm_1"
-    return f"{model_type}_1"
-
-
-def _engine_for_type(model_type: str) -> str:
-    """Return the engine string for a given model_type."""
-    meta = _MODEL_METADATA.get(model_type)
-    if meta is not None:
-        return meta["engine"]
-    if model_type.startswith("glm:"):
-        return "statsmodels"
-    return "unknown"
-
-
-def _model_failure_details(
-    *,
-    model_type: str,
-    y: str,
-    x: list[str],
-    root_cause: str,
-    step: str = "estimation",
-) -> dict[str, Any]:
-    """Build a consistent evidence dict for model-failure issues.
-
-    Every ``MODEL_FIT_FAILED``, ``UNSUPPORTED_MODEL_TYPE``, etc. issue
-    must include at least ``model_type``, ``model_id``, ``engine``,
-    ``step``, ``y``, ``x``, and ``root_cause`` so that downstream
-    consumers (diagnostic summary, report view-model) can render the
-    failure without guessing context.
-    """
-    return {
-        "model_type": model_type,
-        "model_id": _model_id_for_type(model_type),
-        "engine": _engine_for_type(model_type),
-        "step": step,
-        "y": y,
-        "x": list(x),
-        "root_cause": root_cause[:_ROOT_CAUSE_MAX_LENGTH],
-    }
 
 
 def run_workflow(
@@ -571,55 +497,6 @@ def _model_column_issue(
 _BINARY_CORRELATION_WARN = 0.7  # |r| > 0.7 > Severity.WARNING
 _BINARY_CORRELATION_INFO = 0.5  # 0.5 < |r| <= 0.7 > Severity.INFO
 _TREATMENT_PROXY_CORRELATION_WARN = 0.7
-_MODEL_TYPE_MAP = {
-    "ols": "continuous",
-    "logit": "binary",
-    "probit": "binary",
-    "poisson": "count",
-    "negative_binomial": "count",
-    "panel_ols": "continuous",
-    "iv_2sls": "continuous",
-}
-_SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
-_PREDICTION_MODEL_TYPES = {
-    "prediction_lasso",
-    "prediction_ridge",
-    "prediction_random_forest",
-}
-
-
-def _map_model_type(model_type: str) -> str | None:
-    return _MODEL_TYPE_MAP.get(model_type)
-
-
-def _validate_requested_model_type(model_type: str) -> str | None:
-    if model_type == "auto" or model_type in _MODEL_TYPE_MAP or model_type in _PREDICTION_MODEL_TYPES:
-        return None
-    if not model_type.startswith("glm:"):
-        raise WorkflowValidationError(
-            "UNSUPPORTED_MODEL_TYPE",
-            f"Unsupported model type: {model_type}",
-            {
-                "model_type": model_type,
-                "supported_types": sorted(
-                    list(_MODEL_TYPE_MAP.keys())
-                    + list(_PREDICTION_MODEL_TYPES)
-                    + ["glm:<family>"]
-                ),
-            },
-        )
-    family_name = model_type.split(":", 1)[1]
-    if family_name not in _SUPPORTED_GLM_FAMILIES:
-        raise WorkflowValidationError(
-            "UNSUPPORTED_GLM_FAMILY",
-            f"Unsupported GLM family: {family_name}",
-            {
-                "model_type": model_type,
-                "glm_family": family_name,
-                "supported_families": sorted(_SUPPORTED_GLM_FAMILIES),
-            },
-        )
-    return family_name
 
 
 def _diagnostic_family(model_result: dict[str, Any]) -> str:
