@@ -53,6 +53,8 @@ from .. import graph_decision_factory as dpf
 from ..econometrics.optional_deps import OptionalDependencyNotInstalled
 from ..econometrics.diagnostics import compute_diagnostics
 from ..econometrics.runner import (
+    run_did,
+    run_event_study,
     run_glm,
     run_iv_2sls,
     run_logit,
