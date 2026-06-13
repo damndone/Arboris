@@ -7,35 +7,35 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from .artifacts import read_json, register_artifact, write_json
-from .cleaning import clean_frame, normalize_column_name
-from .config import load_config
-from .diagnostic_summary import build_diagnostic_summary
-from .domain import GuardrailIssue, Severity
-from .engine.context import DataHandle, ModelingContext, RunEnv
-from .engine.stages.cleaning import CleaningStage
-from .engine.stages.profile import ProfileStage
-from .engine.stages.routing import RoutingStage
-from .engine.stages.source import SourceStage
-from .engine.stages.validation import ValidationStage
-from .engine.stages.ytype import YTypeStage
-from .engine.stages.pre_estimation_checks import PreEstimationChecksStage
-from .engine.stages.roles import RoleInferenceStage
-from .engine.stages.exposure import ExposureDetectionStage
-from .engine.stages.statistical_tests import StatisticalTestsStage
-from .engine.stages.imputation import ImputationStage
-from .engine.stages.estimation import EstimationStage
-from .engine.stages.recording import RecordingStage
-from .engine.stages.diagnostics import DiagnosticsStage
-from .engine.stages.reliability import ReliabilityStage
-from .engine.stages.report import ReportStage
-from .graph_recorder import GraphRecorder
-from .graph_model import Stage
-from .graph_store import GraphStore
-from . import graph_decision_factory as dpf
-from .econometrics.optional_deps import OptionalDependencyNotInstalled
-from .econometrics.diagnostics import compute_diagnostics
-from .econometrics.runner import (
+from ..artifacts import read_json, register_artifact, write_json
+from ..cleaning import clean_frame, normalize_column_name
+from ..config import load_config
+from ..diagnostic_summary import build_diagnostic_summary
+from ..domain import GuardrailIssue, Severity
+from ..engine.context import DataHandle, ModelingContext, RunEnv
+from ..engine.stages.cleaning import CleaningStage
+from ..engine.stages.profile import ProfileStage
+from ..engine.stages.routing import RoutingStage
+from ..engine.stages.source import SourceStage
+from ..engine.stages.validation import ValidationStage
+from ..engine.stages.ytype import YTypeStage
+from ..engine.stages.pre_estimation_checks import PreEstimationChecksStage
+from ..engine.stages.roles import RoleInferenceStage
+from ..engine.stages.exposure import ExposureDetectionStage
+from ..engine.stages.statistical_tests import StatisticalTestsStage
+from ..engine.stages.imputation import ImputationStage
+from ..engine.stages.estimation import EstimationStage
+from ..engine.stages.recording import RecordingStage
+from ..engine.stages.diagnostics import DiagnosticsStage
+from ..engine.stages.reliability import ReliabilityStage
+from ..engine.stages.report import ReportStage
+from ..graph_recorder import GraphRecorder
+from ..graph_model import Stage
+from ..graph_store import GraphStore
+from .. import graph_decision_factory as dpf
+from ..econometrics.optional_deps import OptionalDependencyNotInstalled
+from ..econometrics.diagnostics import compute_diagnostics
+from ..econometrics.runner import (
     run_glm,
     run_iv_2sls,
     run_logit,
@@ -46,24 +46,24 @@ from .econometrics.runner import (
     run_probit,
     run_time_series_diagnostics,
 )
-from .exports import export_pdf, export_xlsx
-from .ingestion import ingest_files
-from .imputation import run_mice_imputation
-from .metadata import infer_schema
-from .narrative import build_claims
-from .profiling import profile_frame
-from .prediction import run_prediction_model
-from .projects import create_run
-from .reporting import render_html_report
-from .router import classify_dataset, detect_y_kind
-from .statistical_tests import (
+from ..exports import export_pdf, export_xlsx
+from ..ingestion import ingest_files
+from ..imputation import run_mice_imputation
+from ..metadata import infer_schema
+from ..narrative import build_claims
+from ..profiling import profile_frame
+from ..prediction import run_prediction_model
+from ..projects import create_run
+from ..reporting import render_html_report
+from ..router import classify_dataset, detect_y_kind
+from ..statistical_tests import (
     run_statistical_tests,
     summarize_statistical_tests,
     write_statistical_test_artifacts,
 )
-from .validation import has_blockers, validate_profile
-from .variable_roles import infer_variable_roles
-from .visualization import create_figures
+from ..validation import has_blockers, validate_profile
+from ..variable_roles import infer_variable_roles
+from ..visualization import create_figures
 
 # ============================================================
 # AUTO-DETECTION (computed from data, dataset-agnostic):
@@ -452,7 +452,7 @@ def _run_workflow(
     — this function only assembles inputs, drives the loop, and returns the
     final status.
     """
-    from .engine.stages import PIPELINE
+    from ..engine.stages import PIPELINE
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
