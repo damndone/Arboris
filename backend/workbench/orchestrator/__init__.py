@@ -1,3 +1,20 @@
+"""Workflow orchestration package.
+
+V1.5.4.5: orchestrator.py（1354 行）拆成包，行为冻结。本 __init__ 是薄驱动核心
+（run_workflow / _run_workflow / run_batch_y_workflow / parse_imputation_request /
+PIPELINE 装配 + run_* 再导出）+ 对外命名空间再导出枢纽。
+
+维护者须知：
+- helper 按消费者分簇在子模块：_manifest（清单/血缘）、_model_types（模型类型映射）、
+  _errors（WorkflowValidationError）、_column_checks（列检查）、
+  _reliability_checks（可靠性/相关性）、_report_build（报告构建）。
+  新 helper 按用途放对应子模块；找不到归属再考虑新建子模块。
+- 子模块**不得**反向 import 本包（`from . import ...`）—— 初始化期循环。
+  子模块要用同级 helper，写 `from ._sibling import name`。
+- 凡 stage / api / 测试以 `workbench.orchestrator.X` 形式引用的名字，必须在本文件 re-export；
+  tests/test_orchestrator_namespace.py 钉死这份集合，漏导出即变红。
+- run_* 再导出是测试 monkeypatch 的命名空间面，永远留在本文件。
+"""
 from __future__ import annotations
 
 import json
