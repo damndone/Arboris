@@ -11,6 +11,7 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "auto", label: "Auto (infer from y)", group: "auto" },
         { key: "ols", label: "OLS (linear)", group: "Linear" },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
+        { key: "did", label: "DID", group: "Causal" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -113,6 +114,19 @@ describe("RunForm IV wiring", () => {
     expect(extra?.ivInstruments).toEqual(["dist"]);
   });
 
+  it("does not send did fields for a non-DID model", async () => {
+    const spy = vi
+      .spyOn(api, "runWorkflow")
+      .mockResolvedValue(RUN_RESPONSE);
+    renderForm();
+    fillForm();
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const extra = spy.mock.calls[0][9];
+    expect(extra?.didMode).toBeUndefined();
+  });
+
   it("does not send iv fields for a non-IV model", async () => {
     const spy = vi
       .spyOn(api, "runWorkflow")
@@ -127,5 +141,78 @@ describe("RunForm IV wiring", () => {
     const extra = call[9];
     expect(extra?.ivEndog).toBeUndefined();
     expect(extra?.ivInstruments).toBeUndefined();
+  });
+});
+
+const PREVIEW: api.FilePreview = {
+  fileName: "data.csv",
+  sheetNames: ["Sheet1"],
+  selectedSheet: "Sheet1",
+  rowCount: 10,
+  columnCount: 4,
+  columns: [
+    { name: "y", dtype: "numeric", missingRate: 0, uniqueCount: 10, suggestedRole: "y" },
+    { name: "x1", dtype: "numeric", missingRate: 0, uniqueCount: 10, suggestedRole: "x" },
+    { name: "id", dtype: "numeric", missingRate: 0, uniqueCount: 4, suggestedRole: "id" },
+    { name: "year", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "time" },
+    { name: "cohort", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "x" },
+  ],
+  previewRows: [],
+  suggestedY: "y",
+  suggestedX: ["x1"],
+  excludedColumns: [],
+};
+
+describe("RunForm DID wiring", () => {
+  async function setupDID() {
+    vi.spyOn(api, "previewFile").mockResolvedValue(PREVIEW);
+    renderForm();
+    const file = new File(["a\n1\n"], "data.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+    // wait for the preview panel (and its column list) to render
+    await screen.findByLabelText("column selector");
+    fireEvent.change(screen.getByLabelText("dependent variable"), {
+      target: { value: "y" },
+    });
+    fireEvent.change(screen.getByLabelText("independent variables"), {
+      target: { value: "x1, cohort" },
+    });
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "did" },
+    });
+  }
+
+  it("renders DID controls when model is did", async () => {
+    await setupDID();
+    expect(screen.getByLabelText("did-mode")).toBeInTheDocument();
+    expect(screen.getByLabelText("did-entity")).toBeInTheDocument();
+    expect(screen.getByLabelText("did-cohort")).toBeInTheDocument();
+  });
+
+  it("posts did_mode and excludes the DID role columns from x", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    await setupDID();
+    fireEvent.change(screen.getByLabelText("did-entity"), {
+      target: { value: "id" },
+    });
+    fireEvent.change(screen.getByLabelText("did-time"), {
+      target: { value: "year" },
+    });
+    fireEvent.change(screen.getByLabelText("did-cohort"), {
+      target: { value: "cohort" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const call = spy.mock.calls[0];
+    // x (index 3) must drop the cohort role column, keeping only x1.
+    expect(call[3]).toBe("x1");
+    const extra = call[9];
+    expect(extra?.didMode).toBe("cohort");
+    expect(extra?.didCohortCol).toBe("cohort");
+    expect(extra?.entityCol).toBe("id");
+    expect(extra?.timeCol).toBe("year");
   });
 });

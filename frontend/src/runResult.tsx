@@ -19,6 +19,10 @@ import {
   type IVDiagnostics,
 } from "./runResult/IVDiagnosticsCard";
 import {
+  DIDDiagnosticsCard,
+  type DIDDiagnostics,
+} from "./runResult/DIDDiagnosticsCard";
+import {
   ImputationSummary,
   type ImputationSummaryData,
 } from "./runResult/ImputationSummary";
@@ -186,6 +190,9 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
   const [ivDiagnostics, setIvDiagnostics] = useState<IVDiagnostics | undefined>(
     undefined,
   );
+  const [didDiagnostics, setDidDiagnostics] = useState<
+    DIDDiagnostics | undefined
+  >(undefined);
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -277,6 +284,30 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       })
       .catch(() => {
         if (!cancelled) setIvDiagnostics(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
+
+  // V1.5.5: when the run produced a did_diagnostics artifact (DID runs),
+  // fetch its JSON to render the DIDDiagnosticsCard. Mirrors the IV wiring.
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const present = artifactsState.groups.some((g) =>
+      g.items.some((it) => it.artifact_id === "did_diagnostics"),
+    );
+    if (!present) {
+      setDidDiagnostics(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<DIDDiagnostics>(projectRoot, runId, "did_diagnostics")
+      .then((data) => {
+        if (!cancelled) setDidDiagnostics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDidDiagnostics(undefined);
       });
     return () => {
       cancelled = true;
@@ -427,6 +458,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <ImputationSummary summary={imputationData} />
       <PredictionResultCard result={predictionResult} />
       <IVDiagnosticsCard diagnostics={ivDiagnostics} />
+      <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>

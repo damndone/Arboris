@@ -330,6 +330,11 @@ export interface RunExtraParams {
   predictionSamplingMethod?: string;
   ivEndog?: string[];
   ivInstruments?: string[];
+  didMode?: string;
+  didCohortCol?: string;
+  didTreatCol?: string;
+  didPostCol?: string;
+  didStatusCol?: string;
 }
 
 export async function runWorkflow(
@@ -358,6 +363,11 @@ export async function runWorkflow(
   if (extra?.covariance) form.append("covariance", extra.covariance);
   if (extra?.ivEndog?.length) form.append("iv_endog", JSON.stringify(extra.ivEndog));
   if (extra?.ivInstruments?.length) form.append("iv_instruments", JSON.stringify(extra.ivInstruments));
+  if (extra?.didMode) form.append("did_mode", extra.didMode);
+  if (extra?.didCohortCol) form.append("did_cohort_col", extra.didCohortCol);
+  if (extra?.didTreatCol) form.append("did_treat_col", extra.didTreatCol);
+  if (extra?.didPostCol) form.append("did_post_col", extra.didPostCol);
+  if (extra?.didStatusCol) form.append("did_status_col", extra.didStatusCol);
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);

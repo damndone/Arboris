@@ -16,6 +16,7 @@ import { ImputationControls } from "./ImputationControls";
 import { PanelControls } from "./PanelControls";
 import { PredictionControls } from "./PredictionControls";
 import { IVControls, type IVRoleValue } from "./IVControls";
+import { DIDControls, type DIDRoleValue } from "./DIDControls";
 
 type RequestState = "idle" | "working";
 
@@ -62,6 +63,16 @@ export function RunForm(props: RunFormProps) {
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
     instruments: [],
+  });
+  // V1.5.5: DID role assignment (mode + entity/time/cohort/treat/post/status).
+  const [didRole, setDidRole] = useState<DIDRoleValue>({
+    mode: "cohort",
+    entity: "",
+    time: "",
+    cohort: "",
+    treat: "",
+    post: "",
+    status: "",
   });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
@@ -192,12 +203,28 @@ export function RunForm(props: RunFormProps) {
       // (X − endog − instruments); endog/instruments go as separate fields.
       // validate_iv_spec on the backend rejects overlap, so we must exclude.
       const isIV = modelType === "iv_2sls";
+      // V1.5.5: for DID, the role columns (entity/time/cohort/treat/post/status,
+      // whichever are set) carry the design and must NOT appear in x. Mirrors
+      // the IV exog-remainder exclusion above.
+      const isDID = modelType === "did";
+      const didRoleCols = isDID
+        ? [
+            didRole.entity,
+            didRole.time,
+            didRole.cohort,
+            didRole.treat,
+            didRole.post,
+            didRole.status,
+          ].filter((c) => c !== "")
+        : [];
       const exogColumns = isIV
         ? xColumns.filter(
             (c) =>
               !ivRole.endog.includes(c) && !ivRole.instruments.includes(c),
           )
-        : xColumns;
+        : isDID
+          ? xColumns.filter((c) => !didRoleCols.includes(c))
+          : xColumns;
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
@@ -209,14 +236,19 @@ export function RunForm(props: RunFormProps) {
         transpose,
         imputationPayload,
         {
-          entityCol,
-          timeCol,
+          entityCol: isDID ? didRole.entity : entityCol,
+          timeCol: isDID ? didRole.time : timeCol,
           covariance,
           predictionModelType: predictionEnabled ? predictionModelType : "",
           predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
           predictionSamplingMethod: predictionEnabled ? predictionSampling : "",
           ivEndog: isIV ? ivRole.endog : undefined,
           ivInstruments: isIV ? ivRole.instruments : undefined,
+          didMode: isDID ? didRole.mode : undefined,
+          didCohortCol: isDID ? didRole.cohort : undefined,
+          didTreatCol: isDID ? didRole.treat : undefined,
+          didPostCol: isDID ? didRole.post : undefined,
+          didStatusCol: isDID ? didRole.status : undefined,
         },
       );
       setLastRun(result);
@@ -364,6 +396,14 @@ export function RunForm(props: RunFormProps) {
                 </label>
               )}
             </div>
+          )}
+          {/* DID role cols (entity/time/cohort) are panel identifiers chosen from ALL columns, not the x subset */}
+          {modelType === "did" && (
+            <DIDControls
+              columns={columnNames}
+              value={didRole}
+              onChange={setDidRole}
+            />
           )}
           <PredictionControls
             capabilities={capabilities}
