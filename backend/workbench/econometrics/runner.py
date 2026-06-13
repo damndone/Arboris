@@ -458,7 +458,24 @@ def run_event_study(
     terms = ["1", *dummy_terms, *[_linearmodels_term(c) for c in x],
              "EntityEffects", "TimeEffects"]
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
-    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(cov_type=covariance)
+    try:
+        fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
+            cov_type=covariance
+        )
+    except Exception as exc:
+        # A single treatment cohort (no timing variation) makes the event-time
+        # indicators collinear with the time fixed effects, so PanelOLS reports
+        # the event dummies as absorbed. Surface this as a structured, catchable
+        # DID_ error so callers can skip the (unidentified) event study while
+        # still reporting the ATT — rather than crashing the whole run.
+        if "absorb" in str(exc).lower() or type(exc).__name__ == "AbsorbingEffectError":
+            raise ValueError(
+                "DID_EVENT_STUDY_UNIDENTIFIED: event-time indicators are collinear "
+                "with the time fixed effects (e.g. a single treatment cohort, or the "
+                "reference period is absent from the data); the dynamic event study "
+                "is not identified."
+            ) from exc
+        raise
 
     coef, se, ci_lo, ci_hi = [], [], [], []
     conf = fitted.conf_int()

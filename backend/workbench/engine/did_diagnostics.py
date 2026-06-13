@@ -44,9 +44,20 @@ def _parallel_trends(event_study: dict) -> dict:
 
 def build_did_diagnostics(fitted: Any, norm: NormalizedDID, frame, *,
                           covariance: str = "robust") -> dict:
-    es = run_event_study(frame, y=norm.y, x=[], entity=norm.entity, time=norm.time,
-                         event_time_col="_did_event_time", ref_period=-1,
-                         covariance=covariance)
+    # The event study is unidentified for a single treatment cohort (event-time
+    # indicators collinear with the time fixed effects). Skip it gracefully — the
+    # ATT is still valid — exactly as Bacon is skipped on an unbalanced panel.
+    try:
+        es = run_event_study(frame, y=norm.y, x=[], entity=norm.entity,
+                             time=norm.time, event_time_col="_did_event_time",
+                             ref_period=-1, covariance=covariance)
+        es["applicable"] = True
+    except ValueError as exc:
+        if not str(exc).startswith("DID_EVENT_STUDY_UNIDENTIFIED"):
+            raise
+        es = {"applicable": False, "message": str(exc), "event_time": [],
+              "coef": [], "se": [], "ci_lower": [], "ci_upper": [], "ref_period": -1}
+
     att = _att_from_fitted(fitted)
     att["covariance"] = covariance
     pt = _parallel_trends(es)

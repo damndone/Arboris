@@ -77,3 +77,23 @@ def test_parallel_trends_not_rejected_when_leads_flat():
           "se": [0.2, 0.2, 0.2, 0.2], "ci_lower": [], "ci_upper": [], "ref_period": -1}
     pt = _parallel_trends(es)
     assert pt["verdict"] == "not_rejected"
+
+
+def test_unidentified_event_study_skipped_but_keeps_att():
+    # Reference period event_time=-1 (year 2020) absent (gappy years) + single
+    # cohort => event study unidentified, skipped gracefully; ATT still reported,
+    # run does not crash.
+    rows = []
+    for ent, cohort in [("A", 2021), ("B", 2021), ("C", 2021), ("D", 0), ("E", 0), ("F", 0)]:
+        for year in [2018, 2019, 2021, 2022]:  # 2020 (the -1 reference) is missing
+            d = 1 if (cohort and year >= cohort) else 0
+            rows.append({"id": ent, "year": year, "y": 1.0 + 2.0 * d, "first_treat": cohort})
+    norm = normalize_did_input(pd.DataFrame(rows), mode="cohort", entity="id",
+                               time="year", y="y", cohort="first_treat")
+    _, fitted = run_did(norm.frame, y="y", x=[], entity="id", time="year", model_id="did_1")
+    diag = build_did_diagnostics(fitted, norm, norm.frame, covariance="robust")
+    assert diag["event_study"]["applicable"] is False
+    assert "DID_EVENT_STUDY_UNIDENTIFIED" in diag["event_study"]["message"]
+    assert isinstance(diag["att"]["estimate"], float)
+    import json
+    json.dumps(diag)

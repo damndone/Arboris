@@ -66,3 +66,19 @@ def test_run_did_accepts_covariates():
                               model_id="did_1")
     assert "_did_D" in primary["coefficients"]
     assert "ctrl" in primary["coefficients"]
+
+
+def test_run_event_study_raises_when_unidentified():
+    # The reference period event_time=-1 (year 2020) is ABSENT (gappy years) and
+    # there is a single cohort 2021 => event-time dummies are collinear with the
+    # time fixed effects; the event study is not identified.
+    rows = []
+    for ent, cohort in [("A", 2021), ("B", 2021), ("C", 2021), ("D", 0), ("E", 0), ("F", 0)]:
+        for year in [2018, 2019, 2021, 2022]:  # 2020 (the -1 reference) is missing
+            d = 1 if (cohort and year >= cohort) else 0
+            rows.append({"id": ent, "year": year, "y": 1.0 + 2.0 * d, "first_treat": cohort})
+    norm = normalize_did_input(pd.DataFrame(rows), mode="cohort", entity="id",
+                               time="year", y="y", cohort="first_treat")
+    with pytest.raises(ValueError, match="DID_EVENT_STUDY_UNIDENTIFIED"):
+        run_event_study(norm.frame, y="y", x=[], entity="id", time="year",
+                        event_time_col="_did_event_time", ref_period=-1)
