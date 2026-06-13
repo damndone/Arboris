@@ -58,11 +58,11 @@
 From the repo root (`/Users/jiayuanren/项目规划`):
 
 ```bash
-git worktree add .worktrees/workbench-v1.5.5-did -b workbench-v1.5.5-did 75a8d23
-cd .worktrees/workbench-v1.5.5-did
+git worktree add .worktrees/workbench-v1.5.5 -b workbench-v1.5.5 75a8d23
+cd .worktrees/workbench-v1.5.5
 ```
 
-(Version-isolation rule: every new version gets its own branch AND worktree. Base = current `main` head `75a8d23`. Rename the branch/folder if the maintainer assigns a different version number.)
+(Version-isolation rule: every new version gets its own branch AND worktree. Base = current `main` head `75a8d23`. Version number V1.5.5 confirmed 2026-06-13 — DID Layer 1 takes the V1.5.5 slot; the previously-planned "multi-project tabs" defers to V1.5.6+.)
 
 - [ ] **Step 2: Build the venv with full extras**
 
