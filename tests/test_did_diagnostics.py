@@ -79,6 +79,25 @@ def test_parallel_trends_not_rejected_when_leads_flat():
     assert pt["verdict"] == "not_rejected"
 
 
+def test_parallel_trends_tolerates_none_coef_or_se():
+    # Fix 1: a None coef/se (absorbed lead) must be skipped, not crash.
+    es = {"event_time": [-2, -1, 0, 1], "coef": [None, 0.0, 2.0, 2.1],
+          "se": [None, 0.2, 0.2, 0.2], "ci_lower": [], "ci_upper": [], "ref_period": -1}
+    pt = _parallel_trends(es)  # must not raise
+    assert pt["verdict"] in {"not_rejected", "rejected"}
+
+
+def test_att_from_fitted_absorbed_raises_value_error():
+    # Fix 1: missing/absorbed _did_D => catchable ValueError, not bare KeyError.
+    from workbench.engine.did_diagnostics import _att_from_fitted
+
+    class _Fitted:
+        params = {}  # _did_D absent
+
+    with pytest.raises(ValueError, match="DID_ATT_ABSORBED"):
+        _att_from_fitted(_Fitted())
+
+
 def test_unidentified_event_study_skipped_but_keeps_att():
     # Reference period event_time=-1 (year 2020) absent (gappy years) + single
     # cohort => event study unidentified, skipped gracefully; ATT still reported,

@@ -110,6 +110,8 @@ from workbench.engine.did_spec import _coerce_cohort_value
     ("2020", False, 2020.0),
     (2019, False, 2019.0),
     ("garbage", True, None),
+    (-5, True, None),       # Fix 5: non-positive cohort => never-treated
+    (-2020.0, True, None),
 ])
 def test_coerce_cohort_value(value, expected_nan, expected_val):
     result = _coerce_cohort_value(value)
@@ -117,3 +119,65 @@ def test_coerce_cohort_value(value, expected_nan, expected_val):
         assert np.isnan(result)
     else:
         assert result == expected_val
+
+
+# --- Fix 2: string-typed time column -----------------------------------------
+
+def test_non_numeric_time_raises_structured_error():
+    rows = []
+    for ent, cohort in [("A", 2020), ("B", 2020), ("C", 0)]:
+        for yr in ("alpha", "beta", "gamma", "delta"):
+            rows.append({"id": ent, "year": yr, "y": 1.0, "first_treat": cohort})
+    with pytest.raises(DIDSpecError, match="DID_TIME_NOT_NUMERIC"):
+        validate_did_spec(pd.DataFrame(rows), mode="cohort", entity="id",
+                          time="year", y="y", cohort="first_treat")
+
+
+def test_numeric_coercible_string_time_still_works():
+    rows = []
+    for ent, cohort in [("A", "2020"), ("B", "2020"), ("C", "0")]:
+        for yr in ("2018", "2019", "2020", "2021"):
+            rows.append({"id": ent, "year": yr, "y": 1.0, "first_treat": cohort})
+    # must not raise; coercible string years are valid periods
+    validate_did_spec(pd.DataFrame(rows), mode="cohort", entity="id",
+                      time="year", y="y", cohort="first_treat")
+
+
+# --- Fix 4: duplicate (entity, time) rows ------------------------------------
+
+def test_duplicate_entity_time_rows_rejected():
+    rows = []
+    for ent, cohort in [("A", 2020), ("B", 2020), ("C", 0)]:
+        for yr in (2018, 2019, 2020, 2021):
+            rows.append({"id": ent, "year": yr, "y": 1.0, "first_treat": cohort})
+    df = pd.concat([pd.DataFrame(rows), pd.DataFrame(rows[:1])], ignore_index=True)
+    with pytest.raises(DIDSpecError, match="DID_DUPLICATE_OBS"):
+        validate_did_spec(df, mode="cohort", entity="id", time="year", y="y",
+                          cohort="first_treat")
+
+
+# --- Fix 5: negative cohort never-treated + inconsistent cohort ---------------
+
+def test_negative_cohort_is_never_treated():
+    rows = []
+    for ent, cohort in [("A", 2020), ("B", 2020), ("C", -1)]:
+        for yr in range(2018, 2022):
+            rows.append({"id": ent, "year": yr, "y": 1.0, "first_treat": cohort})
+    norm = normalize_did_input(pd.DataFrame(rows), mode="cohort", entity="id",
+                               time="year", y="y", cohort="first_treat")
+    c = norm.frame[norm.frame["id"] == "C"]
+    assert (c["_did_D"] == 0).all()
+    assert c["_did_event_time"].isna().all()
+    assert norm.summary["n_never_treated"] == 1
+
+
+def test_inconsistent_cohort_per_entity_rejected():
+    rows = [
+        {"id": "A", "year": 2018, "y": 1.0, "first_treat": 2020},
+        {"id": "A", "year": 2019, "y": 1.0, "first_treat": 2021},  # different cohort
+        {"id": "B", "year": 2018, "y": 1.0, "first_treat": 0},
+        {"id": "B", "year": 2019, "y": 1.0, "first_treat": 0},
+    ]
+    with pytest.raises(DIDSpecError, match="DID_INCONSISTENT_COHORT"):
+        validate_did_spec(pd.DataFrame(rows), mode="cohort", entity="id",
+                          time="year", y="y", cohort="first_treat")

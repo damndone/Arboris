@@ -11,6 +11,11 @@ from .did_spec import NormalizedDID
 
 
 def _att_from_fitted(fitted) -> dict:
+    if fitted.params.get("_did_D") is None:
+        raise ValueError(
+            "DID_ATT_ABSORBED: the treatment indicator _did_D was absorbed/dropped; "
+            "ATT not identified"
+        )
     est = float(fitted.params["_did_D"])
     se = float(fitted.std_errors["_did_D"])
     p = float(fitted.pvalues["_did_D"])
@@ -28,7 +33,7 @@ def _parallel_trends(event_study: dict) -> dict:
         return {"test": "joint_pre_leads_f", "statistic": None, "pvalue": None,
                 "n_pre_leads": 0, "verdict": "not_rejected",
                 "message": "No pre-period leads available to test."}
-    z2 = [(c / s) ** 2 for c, s in leads if s and s > 0]
+    z2 = [(c / s) ** 2 for c, s in leads if c is not None and s is not None and s > 0]
     f_stat = float(np.mean(z2)) if z2 else 0.0
     df1 = len(z2)
     pvalue = float(stats.f.sf(f_stat, df1, 10_000)) if df1 else 1.0
@@ -53,7 +58,9 @@ def build_did_diagnostics(fitted: Any, norm: NormalizedDID, frame, *,
                              ref_period=-1, covariance=covariance)
         es["applicable"] = True
     except ValueError as exc:
-        if not str(exc).startswith("DID_EVENT_STUDY_UNIDENTIFIED"):
+        if not str(exc).startswith(
+            ("DID_EVENT_STUDY_UNIDENTIFIED", "DID_EVENT_TIME_NONINTEGER")
+        ):
             raise
         es = {"applicable": False, "message": str(exc), "event_time": [],
               "coef": [], "se": [], "ci_lower": [], "ci_upper": [], "ref_period": -1}

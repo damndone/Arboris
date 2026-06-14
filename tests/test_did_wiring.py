@@ -86,6 +86,35 @@ def test_did_missing_entity_time_fails_clearly(tmp_path):
     assert "DID_FIELDS_MISSING" in codes
 
 
+def test_did_diagnostics_failure_does_not_kill_successful_run(tmp_path, monkeypatch):
+    # Fix 1: if build_did_diagnostics raises, the already-fit did_1 result must
+    # survive; the run completes and a degraded did_diagnostics artifact is written.
+    import workbench.engine.stages.diagnostics as diag_stage
+    src = _staggered_csv(tmp_path)
+    project = create_project(tmp_path, "demo")
+
+    def boom(*a, **k):
+        raise RuntimeError("kaboom in diagnostics")
+
+    monkeypatch.setattr(
+        "workbench.engine.did_diagnostics.build_did_diagnostics", boom
+    )
+    result = _rw(project.root, [src], mode="auto", y="y", x=[], model_type="did",
+                 entity_col="id", time_col="year", did_mode="cohort",
+                 did_cohort_col="first_treat")
+    run_root = project.root / "runs" / result["run_id"]
+    from workbench.artifacts import read_json
+    manifest = read_json(run_root / "run_manifest.json")
+    assert manifest["status"] == "completed"
+    # the model result survived
+    model_results = read_json(run_root / "model_results" / "did_1.json")
+    assert model_results is not None
+    # degraded diagnostics artifact written
+    diag = read_json(run_root / "did_diagnostics.json")
+    assert diag["available"] is False
+    assert "error" in diag
+
+
 def test_did_end_to_end_writes_diagnostics_and_calls_run_did(tmp_path, monkeypatch):
     from workbench import orchestrator as orch
     src = _staggered_csv(tmp_path)

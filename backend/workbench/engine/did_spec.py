@@ -27,14 +27,20 @@ class NormalizedDID:
 
 
 def _coerce_cohort_value(v):
-    """Map a user cohort cell to a float period or NaN (never-treated)."""
+    """Map a user cohort cell to a float period or NaN (never-treated).
+
+    Non-positive cohorts (<= 0) are treated as never-treated to match the
+    Goodman-Bacon sentinel convention (goodman_bacon.py: ``cohort <= 0`` => U).
+    """
     if pd.isna(v) or v in _NEVER_SENTINELS:
         return np.nan
     try:
         f = float(v)
     except (TypeError, ValueError):
         return np.nan
-    return np.nan if np.isinf(f) else f
+    if np.isinf(f) or f <= 0:
+        return np.nan
+    return f
 
 
 def _check_partition(y, time, entity, role_cols: dict):
@@ -78,9 +84,23 @@ def validate_did_spec(
             raise DIDSpecError(f"DID_COLUMN_NOT_FOUND: {r} column '{col}' not in data.")
     _check_partition(y, time, entity,
                      {"cohort": cohort, "treat": treat, "post": post, "status": status})
-    if frame[time].nunique(dropna=True) < 2:
+    # Coerce the time column to numeric ONCE; downstream comparisons (.min(),
+    # not-yet-treated) must use a numeric series so a string time column raises a
+    # structured DID_ error instead of a raw TypeError.
+    t_numeric = pd.to_numeric(frame[time], errors="coerce")
+    if t_numeric.notna().sum() == 0:
+        raise DIDSpecError(
+            "DID_TIME_NOT_NUMERIC: the time column could not be interpreted as "
+            "numeric periods."
+        )
+    if t_numeric.nunique(dropna=True) < 2:
         raise DIDSpecError(
             "DID_TOO_FEW_PERIODS: DID requires at least 2 distinct time periods."
+        )
+    if frame.duplicated(subset=[entity, time]).any():
+        raise DIDSpecError(
+            "DID_DUPLICATE_OBS: duplicate (entity, time) observations found; the "
+            "panel must have one row per unit-period."
         )
     # Build the cohort series for the comparison-group check (cheap; reused logic).
     cohort_by_entity = _cohort_series(frame, mode=mode, entity=entity, time=time,
@@ -89,8 +109,9 @@ def validate_did_spec(
     if not treated:
         raise DIDSpecError("DID_NO_TREATED_UNITS: no treated unit found.")
     never = {e for e, c in cohort_by_entity.items() if pd.isna(c)}
+    t_min = t_numeric.min()
     not_yet = {e for e, c in cohort_by_entity.items()
-               if not pd.isna(c) and c > frame[time].min()}
+               if not pd.isna(c) and c > t_min}
     if not never and not not_yet:
         raise DIDSpecError(
             "DID_NO_COMPARISON_GROUP: need at least one never-treated or "
@@ -102,25 +123,34 @@ def _cohort_series(frame, *, mode, entity, time, cohort, treat, post, status) ->
     """Return {entity_value: cohort_period or NaN}. Pure helper shared by
     validate + normalize."""
     out: dict = {}
+    # Numeric view of the time column; modes that compare/aggregate on time must
+    # use this so a string time column never raises a raw TypeError.
+    t_numeric = pd.to_numeric(frame[time], errors="coerce")
     if mode == "cohort":
         for ent, grp in frame.groupby(entity):
+            if grp[cohort].nunique(dropna=False) > 1:
+                raise DIDSpecError(
+                    f"DID_INCONSISTENT_COHORT: entity '{ent}' has more than one "
+                    f"first-treatment value."
+                )
             out[ent] = _coerce_cohort_value(grp[cohort].iloc[0])
     elif mode == "two_by_two":
-        treated_periods = frame.loc[frame[post].astype(float) == 1, time]
-        first_post = treated_periods.min() if len(treated_periods) else np.nan
+        treated_periods = t_numeric[frame[post].astype(float) == 1]
+        first_post = treated_periods.min() if treated_periods.notna().any() else np.nan
         for ent, grp in frame.groupby(entity):
             is_treated = (grp[treat].astype(float) == 1).any()
             out[ent] = float(first_post) if is_treated else np.nan
     elif mode == "status":
         for ent, grp in frame.groupby(entity):
-            g = grp.sort_values(time)
+            order = pd.to_numeric(grp[time], errors="coerce").sort_values().index
+            g = grp.loc[order]
             d = g[status].astype(float).to_numpy()
             if np.any(np.diff(d) < 0):
                 raise DIDSpecError(
                     f"DID_NON_ABSORBING: treatment for unit '{ent}' turns off after "
                     f"turning on; status mode requires absorbing treatment."
                 )
-            on = g.loc[g[status].astype(float) == 1, time]
+            on = t_numeric.loc[g.index[g[status].astype(float) == 1]]
             out[ent] = float(on.min()) if len(on) else np.nan
     return out
 
