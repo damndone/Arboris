@@ -44,4 +44,21 @@ describe("DIDDiagnosticsCard", () => {
     fireEvent.click(screen.getByText(/展开完整数据/));
     expect(screen.queryByLabelText("did-event-study-table")).toBeNull();
   });
+
+  it("does not crash when event-study values contain nulls", () => {
+    const withNull: DIDDiagnostics = { ...diag, event_study: {
+      applicable: true, event_time: [-2, 0, 1],
+      coef: [0.0, null as unknown as number, 2.4],
+      se: [0.3, null as unknown as number, 0.5],
+      ci_lower: [-0.6, null as unknown as number, 1.4],
+      ci_upper: [0.6, 2.6, 3.4], ref_period: -1 } };
+    expect(() => render(<DIDDiagnosticsCard diagnostics={withNull} />)).not.toThrow();
+    fireEvent.click(screen.getByText(/展开完整数据/));
+    const table = screen.getByLabelText("did-event-study-table");
+    expect(table).toBeInTheDocument();
+    // the null cell renders an em-dash placeholder
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    // a non-null row still renders its value
+    expect(screen.getByText("2.400")).toBeInTheDocument();
+  });
 });

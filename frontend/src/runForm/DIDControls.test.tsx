@@ -27,6 +27,9 @@ describe("DIDControls", () => {
       value={{ ...base, mode: "two_by_two" }} onChange={() => {}} />);
     expect(screen.getByLabelText("did-treat")).toBeInTheDocument();
     expect(screen.getByLabelText("did-post")).toBeInTheDocument();
+    // entity/time are still needed by the backend panel index in two_by_two mode
+    expect(screen.getByLabelText("did-entity")).toBeInTheDocument();
+    expect(screen.getByLabelText("did-time")).toBeInTheDocument();
   });
 
   it("shows status selector when mode is status", () => {
