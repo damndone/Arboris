@@ -446,7 +446,13 @@ def run_event_study(
     data = _ensure_numeric_y(frame.copy(), y)
     data = _ensure_numeric_x(data, x)
     evt = data[event_time_col]
-    event_values = sorted(int(v) for v in evt.dropna().unique() if int(v) != ref_period)
+    distinct = evt.dropna().unique()
+    if any(not float(v).is_integer() for v in distinct):
+        raise ValueError(
+            "DID_EVENT_TIME_NONINTEGER: event times must be whole periods; got "
+            "fractional values"
+        )
+    event_values = sorted(int(v) for v in distinct if int(v) != ref_period)
 
     dummy_terms = []
     for k in event_values:

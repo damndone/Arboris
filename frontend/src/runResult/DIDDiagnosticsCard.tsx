@@ -4,8 +4,8 @@ export interface DIDDiagnostics {
   att: { estimate: number; std_error: number; pvalue: number; ci: [number, number];
     spec: string; covariance: string };
   event_study: { applicable: boolean; message?: string; event_time: number[];
-    coef: number[]; se: number[]; ci_lower: number[]; ci_upper: number[];
-    ref_period: number };
+    coef: (number | null)[]; se: (number | null)[]; ci_lower: (number | null)[];
+    ci_upper: (number | null)[]; ref_period: number };
   parallel_trends: { test: string; statistic: number | null; pvalue: number | null;
     n_pre_leads: number; verdict: "not_rejected" | "rejected"; message: string };
   goodman_bacon: { applicable: boolean; message?: string;
@@ -20,25 +20,33 @@ function EventStudyChart({ es }: { es: DIDDiagnostics["event_study"] }) {
   const W = 260, H = 90, pad = 8;
   const xs = es.event_time;
   if (!xs.length) return null;
-  const all = [...es.coef, ...es.ci_lower, ...es.ci_upper];
+  // Only keep indices where coef + both CI bounds are non-null.
+  const pts0 = xs
+    .map((_, i) => ({ i, coef: es.coef[i], lo: es.ci_lower[i], hi: es.ci_upper[i] }))
+    .filter((p): p is { i: number; coef: number; lo: number; hi: number } =>
+      p.coef != null && p.lo != null && p.hi != null);
+  if (!pts0.length) return null;
+  const all = pts0.flatMap((p) => [p.coef, p.lo, p.hi]);
   const lo = Math.min(...all), hi = Math.max(...all);
   const sx = (i: number) => pad + (i / Math.max(xs.length - 1, 1)) * (W - 2 * pad);
   const sy = (v: number) => H - pad - ((v - lo) / Math.max(hi - lo, 1e-9)) * (H - 2 * pad);
   const zeroIdx = xs.findIndex((k) => k >= 0);
-  const pts = es.coef.map((c, i) => `${sx(i)},${sy(c)}`).join(" ");
+  const pts = pts0.map((p) => `${sx(p.i)},${sy(p.coef)}`).join(" ");
   return (
     <svg width={W} height={H} aria-label="did-event-study-chart">
       <line x1={pad} y1={sy(0)} x2={W - pad} y2={sy(0)} stroke="#ccc" />
       {zeroIdx >= 0 && <line x1={sx(zeroIdx)} y1={0} x2={sx(zeroIdx)} y2={H}
         stroke="#f55" strokeDasharray="4 3" />}
-      {es.coef.map((c, i) => (
-        <line key={i} x1={sx(i)} y1={sy(es.ci_lower[i])} x2={sx(i)} y2={sy(es.ci_upper[i])}
+      {pts0.map((p) => (
+        <line key={p.i} x1={sx(p.i)} y1={sy(p.lo)} x2={sx(p.i)} y2={sy(p.hi)}
           stroke="#4a6cf7" opacity={0.5} />
       ))}
       <polyline points={pts} fill="none" stroke="#4a6cf7" strokeWidth={2} />
     </svg>
   );
 }
+
+const f = (v: number | null, d = 3) => (v == null ? "—" : v.toFixed(d));
 
 export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostics | undefined }) {
   const [open, setOpen] = useState(false);
@@ -86,9 +94,9 @@ export function DIDDiagnosticsCard({ diagnostics }: { diagnostics: DIDDiagnostic
               <tbody>
                 {d.event_study.event_time.map((k, i) => (
                   <tr key={k}>
-                    <td>{k}</td><td>{d.event_study.coef[i].toFixed(3)}</td>
-                    <td>{d.event_study.se[i].toFixed(3)}</td>
-                    <td>[{d.event_study.ci_lower[i].toFixed(2)}, {d.event_study.ci_upper[i].toFixed(2)}]</td>
+                    <td>{k}</td><td>{f(d.event_study.coef[i])}</td>
+                    <td>{f(d.event_study.se[i])}</td>
+                    <td>[{f(d.event_study.ci_lower[i], 2)}, {f(d.event_study.ci_upper[i], 2)}]</td>
                   </tr>
                 ))}
               </tbody>

@@ -47,14 +47,10 @@ export function DIDControls(props: {
         </select>
       </label>
 
-      {value.mode !== "two_by_two" && (
-        <>
-          <ColumnSelect label="个体 (entity)" aria="did-entity" columns={columns}
-            value={value.entity} onChange={(v) => set({ entity: v })} />
-          <ColumnSelect label="时间 (time)" aria="did-time" columns={columns}
-            value={value.time} onChange={(v) => set({ time: v })} />
-        </>
-      )}
+      <ColumnSelect label="个体 (entity)" aria="did-entity" columns={columns}
+        value={value.entity} onChange={(v) => set({ entity: v })} />
+      <ColumnSelect label="时间 (time)" aria="did-time" columns={columns}
+        value={value.time} onChange={(v) => set({ time: v })} />
       {value.mode === "cohort" && (
         <ColumnSelect label="首次处理时点 (cohort)" aria="did-cohort" columns={columns}
           value={value.cohort} onChange={(v) => set({ cohort: v })} />

@@ -68,6 +68,21 @@ def test_run_did_accepts_covariates():
     assert "ctrl" in primary["coefficients"]
 
 
+def test_event_study_rejects_fractional_event_times():
+    # Build a frame whose _did_event_time has a fractional value; run_event_study
+    # must refuse rather than silently truncate periods together.
+    norm = normalize_did_input(_panel(), mode="cohort", entity="id", time="year",
+                               y="y", cohort="first_treat")
+    frame = norm.frame.copy()
+    # corrupt one event-time to a non-integer period
+    mask = frame["_did_event_time"].notna()
+    first_idx = frame.index[mask][0]
+    frame.loc[first_idx, "_did_event_time"] = 1.5
+    with pytest.raises(ValueError, match="DID_EVENT_TIME_NONINTEGER"):
+        run_event_study(frame, y="y", x=[], entity="id", time="year",
+                        event_time_col="_did_event_time", ref_period=-1)
+
+
 def test_run_event_study_raises_when_unidentified():
     # The reference period event_time=-1 (year 2020) is ABSENT (gappy years) and
     # there is a single cohort 2021 => event-time dummies are collinear with the

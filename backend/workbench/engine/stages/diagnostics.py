@@ -125,10 +125,16 @@ class DiagnosticsStage:
             did_fitted = fitted_models.get("did_1")
             norm = ctx.artifacts.get("_did_normalized")
             if did_fitted is not None and norm is not None:
-                did_diag = build_did_diagnostics(
-                    did_fitted, norm, norm.frame,
-                    covariance=ctx.artifacts.get("_covariance") or "robust",
-                )
+                # Diagnostics are supplementary: did_1 is already fit + written.
+                # A failure here must NOT fail the run — degrade to an
+                # "unavailable" artifact and continue.
+                try:
+                    did_diag = build_did_diagnostics(
+                        did_fitted, norm, norm.frame,
+                        covariance=ctx.artifacts.get("_covariance") or "robust",
+                    )
+                except Exception as exc:  # noqa: BLE001 - any failure degrades
+                    did_diag = {"available": False, "error": str(exc)}
                 did_diag_path = run_root / "did_diagnostics.json"
                 write_json(did_diag_path, did_diag)
                 register_artifact(
