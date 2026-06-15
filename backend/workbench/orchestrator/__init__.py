@@ -53,6 +53,7 @@ from .. import graph_decision_factory as dpf
 from ..econometrics.optional_deps import OptionalDependencyNotInstalled
 from ..econometrics.diagnostics import compute_diagnostics
 from ..econometrics.runner import (
+    run_cs_did,
     run_did,
     run_event_study,
     run_glm,
@@ -178,6 +179,11 @@ def run_workflow(
     did_treat_col: str = "",
     did_post_col: str = "",
     did_status_col: str = "",
+    cs_control_group: str = "",
+    cs_est_method: str = "",
+    cs_base_period: str = "",
+    cs_anticipation: int = 0,
+    cs_cluster_var: str = "",
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -220,6 +226,11 @@ def run_workflow(
             did_treat_col=did_treat_col,
             did_post_col=did_post_col,
             did_status_col=did_status_col,
+            cs_control_group=cs_control_group,
+            cs_est_method=cs_est_method,
+            cs_base_period=cs_base_period,
+            cs_anticipation=cs_anticipation,
+            cs_cluster_var=cs_cluster_var,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -372,6 +383,11 @@ def _run_workflow(
     did_treat_col: str = "",
     did_post_col: str = "",
     did_status_col: str = "",
+    cs_control_group: str = "",
+    cs_est_method: str = "",
+    cs_base_period: str = "",
+    cs_anticipation: int = 0,
+    cs_cluster_var: str = "",
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -417,6 +433,11 @@ def _run_workflow(
     ctx.artifacts["_did_treat_col"] = normalize_column_name(did_treat_col) if did_treat_col else ""
     ctx.artifacts["_did_post_col"] = normalize_column_name(did_post_col) if did_post_col else ""
     ctx.artifacts["_did_status_col"] = normalize_column_name(did_status_col) if did_status_col else ""
+    ctx.artifacts["_cs_control_group"] = cs_control_group
+    ctx.artifacts["_cs_est_method"] = cs_est_method
+    ctx.artifacts["_cs_base_period"] = cs_base_period
+    ctx.artifacts["_cs_anticipation"] = cs_anticipation
+    ctx.artifacts["_cs_cluster_var"] = normalize_column_name(cs_cluster_var) if cs_cluster_var else ""
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)
