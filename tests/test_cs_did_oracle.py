@@ -37,3 +37,32 @@ def test_cell_influence_function_matches_DRDID(method):
     ours = np.array([inf[pos[u]] for u in ref["unit"]])
     assert np.allclose(ours, ref[method]["inf_func"], atol=1e-8), \
         f"{method} max dev {np.max(np.abs(ours - np.array(ref[method]['inf_func'])))}"
+
+
+def _bundle_dr_never():
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    from workbench.engine.did_spec import normalize_did_input
+    from workbench.engine.cs_attgt import estimate_att_gt
+    norm = normalize_did_input(d, mode="cohort", entity="unit", time="period",
+        y="y", cohort="first_treat")
+    return estimate_att_gt(norm, control_group="never", est_method="dr",
+        base_period="varying", anticipation=0, covariates=["x1"], cluster_var=None)
+
+def test_aggregations_match_R_aggte_pointwise():
+    from workbench.engine.cs_aggregate import aggregate
+    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))
+    b = _bundle_dr_never()
+    # overall for every aggregation type
+    for kind in ("simple", "dynamic", "group", "calendar"):
+        out = aggregate(b, kind)
+        if ref[kind]["overall"] is not None:
+            assert abs(out["overall"] - ref[kind]["overall"]) < 1e-6, \
+                f"{kind} overall ours={out['overall']} R={ref[kind]['overall']}"
+    # per-label estimates for dynamic / group / calendar
+    for kind in ("dynamic", "group", "calendar"):
+        out = aggregate(b, kind)
+        labels = list(map(float, ref[kind]["egt"]))
+        for lab, att in zip(labels, ref[kind]["att_egt"]):
+            i = [round(x, 9) for x in out["label"]].index(round(lab, 9))
+            assert abs(out["estimate"][i] - att) < 1e-6, \
+                f"{kind} label={lab} ours={out['estimate'][i]} R={att}"
