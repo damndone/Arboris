@@ -277,3 +277,88 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     return {"att": att, "n_treated": int(D.sum()), "n_control": int((1 - D).sum()),
             "valid": True, "warning": None, "_units": units, "_D": D, "_dY": dY,
             "_X": X, "_ps": ps, "_mhat": mhat, "_trim": trim}
+
+
+CS_MAX_GK = 50_000_000   # G*K guard threshold
+
+
+def estimate_att_gt(norm, *, control_group, est_method, base_period,
+                    anticipation, covariates, cluster_var) -> EffectEstimateBundle:
+    """Assemble per-(g,t) ATT + influence functions into an EffectEstimateBundle.
+    Enumerates every (g,t) cell, scatters each cell's observation-level IF into a
+    full (G x K) cluster-row matrix (zero outside the cell sub-sample), records
+    self-describing cell_metadata + the applied sample_spec."""
+    frame, entity, time, y = norm.frame, norm.entity, norm.time, norm.y
+    cohort = frame.groupby(entity)["_did_cohort"].first()
+    units_all = np.sort(cohort.index.to_numpy())                 # stable row order
+    cohorts = sorted({c for c in cohort.to_numpy() if np.isfinite(c)})
+    periods = sorted(pd.to_numeric(frame[time]).unique())
+
+    # enumerate cells (g,t): all treated cohorts x all periods with a valid base != t
+    cells = []
+    for g in cohorts:
+        for t in periods:
+            base_t = base_period_for(g=g, t=t, base_period=base_period, anticipation=anticipation)
+            if base_t == t or base_t not in periods or t not in periods:
+                continue
+            cells.append((g, float(t), float(base_t)))
+    K = len(cells)
+    G = len(units_all)
+    if G * max(K, 1) > CS_MAX_GK:
+        raise CSSpecError(f"CS_PROBLEM_TOO_LARGE: G*K={G*K} exceeds {CS_MAX_GK}; "
+                          "out-of-core IF is deferred (see spec).")
+
+    pos = {u: i for i, u in enumerate(units_all)}
+    estimates = np.full(K, np.nan)
+    obs_if = np.zeros((G, K))                 # observation/unit-level IF (cluster=entity default)
+    meta = []
+    ps_mins, ps_maxs, omitted = [], [], []
+    for k, (g, t, base_t) in enumerate(cells):
+        cell = att_gt_cell(frame=frame, entity=entity, time=time, y=y, g=g, t=t,
+                           base_t=base_t, control_group=control_group,
+                           anticipation=anticipation, covariates=covariates,
+                           est_method=est_method)
+        rec = {"g": g, "t": t, "event_time": t - g, "estimand_type": "att_gt",
+               "control_group_rule": control_group,
+               "reference_period": reference_period(g=g, anticipation=anticipation),
+               "n_treated": cell["n_treated"], "n_control": cell["n_control"],
+               "valid": cell["valid"], "warning": cell.get("warning")}
+        if cell["valid"]:
+            estimates[k] = cell["att"]
+            inf = cell_influence_function(cell, est_method=est_method)
+            for u, val in zip(cell["_units"], inf):
+                obs_if[pos[u], k] = val
+            ps_mins.append(float(np.min(cell["_ps"]))); ps_maxs.append(float(np.max(cell["_ps"])))
+        else:
+            omitted.append({"g": g, "t": t, "warning": cell.get("warning")})
+        meta.append(rec)
+
+    if not any(m["valid"] for m in meta):
+        raise CSSpecError("CS_NO_VALID_CELLS: no (g,t) cell had both a treated and a "
+                          "clean comparison group; cannot estimate.")
+
+    # cluster aggregation (default cluster = entity => identity)
+    if cluster_var:
+        cl = frame.drop_duplicates(entity).set_index(entity).loc[units_all, cluster_var].to_numpy()
+        cluster_ids = np.unique(cl)
+        cif = np.zeros((len(cluster_ids), K))
+        for j, c in enumerate(cluster_ids):
+            cif[j] = obs_if[cl == c].sum(axis=0)
+    else:
+        cluster_ids, cif = units_all, obs_if
+
+    n_by_g = {g: int((cohort == g).sum()) for g in cohorts}
+    total_treated = sum(n_by_g.values())
+    weights = {"n_g": n_by_g,
+               "p_g": {g: n_by_g[g] / total_treated for g in cohorts} if total_treated else {}}
+    sample_spec = {"control_group": control_group, "est_method": est_method,
+                   "base_period": base_period, "anticipation": anticipation,
+                   "covariates": list(covariates), "cluster_var": cluster_var}
+    vcov_config = {"cluster_var": cluster_var or entity, "cluster_level": "entity" if not cluster_var else cluster_var,
+                   "confidence_level": 0.95, "band_type": None}   # band_type set by inference
+    diagnostics = {"overlap": {"ps_min": min(ps_mins) if ps_mins else None,
+                               "ps_max": max(ps_maxs) if ps_maxs else None},
+                   "omitted_cells": omitted, "sample_spec": sample_spec}
+    return EffectEstimateBundle(estimates=estimates, influence_func=cif,
+        cluster_ids=cluster_ids, cell_metadata=meta, weights=weights,
+        vcov_config=vcov_config, diagnostics=diagnostics)
