@@ -328,7 +328,8 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
             inf = cell_influence_function(cell, est_method=est_method)
             for u, val in zip(cell["_units"], inf):
                 obs_if[pos[u], k] = val
-            ps_mins.append(float(np.min(cell["_ps"]))); ps_maxs.append(float(np.max(cell["_ps"])))
+            ps_mins.append(float(np.min(cell["_ps"])))
+            ps_maxs.append(float(np.max(cell["_ps"])))
         else:
             omitted.append({"g": g, "t": t, "warning": cell.get("warning")})
         meta.append(rec)
@@ -345,7 +346,8 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
         for j, c in enumerate(cluster_ids):
             cif[j] = obs_if[cl == c].sum(axis=0)
     else:
-        cluster_ids, cif = units_all, obs_if
+        cluster_ids = units_all
+        cif = obs_if
 
     n_by_g = {g: int((cohort == g).sum()) for g in cohorts}
     total_treated = sum(n_by_g.values())
@@ -354,6 +356,10 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     sample_spec = {"control_group": control_group, "est_method": est_method,
                    "base_period": base_period, "anticipation": anticipation,
                    "covariates": list(covariates), "cluster_var": cluster_var}
+    # cluster_level is a DESCRIPTIVE tag, not a column name: the literal "entity"
+    # when unclustered, or the cluster column name when clustered. So cluster_var and
+    # cluster_level may hold the same string (the column) under clustering — Task 9
+    # (inference) should key off cluster_var for the actual grouping.
     vcov_config = {"cluster_var": cluster_var or entity, "cluster_level": "entity" if not cluster_var else cluster_var,
                    "confidence_level": 0.95, "band_type": None}   # band_type set by inference
     diagnostics = {"overlap": {"ps_min": min(ps_mins) if ps_mins else None,

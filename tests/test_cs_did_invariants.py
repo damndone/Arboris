@@ -19,10 +19,18 @@ def test_bundle_shape_and_cluster_rows():
     assert len(b.cell_metadata) == b.estimates.shape[0]
 
 def test_invalid_cell_marked_not_zero():
-    b = _bundle()
-    for i, m in enumerate(b.cell_metadata):
-        if not m["valid"]:
-            assert np.isnan(b.estimates[i])      # invalid => nan, NOT 0.0
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    d2 = d[~((d.first_treat == 0) & (d.period == 6))]
+    b = estimate_att_gt(normalize_did_input(d2, mode="cohort", entity="unit",
+            time="period", y="y", cohort="first_treat"),
+        control_group="never", est_method="dr", base_period="varying",
+        anticipation=0, covariates=["x1"], cluster_var=None)
+    invalid = [i for i, m in enumerate(b.cell_metadata) if not m["valid"]]
+    assert invalid                                       # cells actually dropped
+    for i in invalid:
+        assert np.isnan(b.estimates[i])                  # NaN, not 0.0
+        assert np.allclose(b.influence_func[:, i], 0.0)  # IF column zeroed
+    assert b.diagnostics["omitted_cells"]                # diagnostic populated
 
 def test_metadata_fields_present():
     b = _bundle()
