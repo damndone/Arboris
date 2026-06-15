@@ -42,14 +42,19 @@ def comparison_mask(cohort: pd.Series, *, g: float, t: float, base_t: float,
 
 
 def effective_treatment_start(*, g: float, anticipation: int) -> float:
+    """First period where cohort `g` is treated, shifted earlier by `anticipation`."""
     return g - anticipation
 
 
 def reference_period(*, g: float, anticipation: int) -> float:
+    """The last clean pre-period for cohort `g` (one period before effective start)."""
     return g - 1 - anticipation
 
 
 def base_period_for(*, g: float, t: float, base_period: str, anticipation: int) -> float:
+    """Base period to difference cell (g,t) against. Post periods (t ≥ effective start)
+    always use the reference period; pre periods use t−1 under "varying" or the fixed
+    reference period under "universal"."""
     ref = reference_period(g=g, anticipation=anticipation)
     if t >= effective_treatment_start(g=g, anticipation=anticipation):
         return ref

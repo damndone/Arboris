@@ -39,3 +39,11 @@ def test_varying_pre_period_is_sequential():
 
 def test_universal_pre_period_is_fixed_reference():
     assert base_period_for(g=4, t=2, base_period="universal", anticipation=0) == 3
+
+def test_boundary_at_effective_start_is_post():
+    # t == effective_treatment_start(g=4, δ=0) == 4 must be POST → base = reference = 3,
+    # NOT the varying pre rule (t-1 = 3 here coincidentally, so use δ=1 to disambiguate):
+    assert base_period_for(g=4, t=4, base_period="varying", anticipation=0) == 3
+    # δ=1: effective start = 3, reference = 2; t=3 is post → base = 2 (not t-1=2 — pick t=4)
+    assert base_period_for(g=5, t=4, base_period="varying", anticipation=1) == 3  # post: ref=5-1-1=3
+    assert base_period_for(g=5, t=2, base_period="varying", anticipation=1) == 1  # pre: t-1
