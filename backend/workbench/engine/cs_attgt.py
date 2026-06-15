@@ -11,6 +11,13 @@ class CSSpecError(ValueError):
     """CS_*-prefixed failure → structured MODEL_FIT_FAILED (v1.5.5.1 convention)."""
 
 
+# DRDID's control-side propensity-score trim threshold (`trim.level` default in
+# DRDID 1.3.0): a comparison unit with ps >= this gets ZERO weight in BOTH the
+# point estimate and the influence function. Treated units use a 1.01 cutoff
+# (i.e. never trimmed). Keep this as the single trim threshold for the whole cell.
+CS_PS_TRIM = 0.995
+
+
 @dataclass
 class EffectEstimateBundle:
     estimates: np.ndarray                 # (K,)
@@ -85,9 +92,11 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
     n = D.shape[0]
     iw = np.ones(n)  # i.weights, already mean-normalized to 1
 
-    # DRDID trimming: ps.fit < 1.01 for treated (always True); controls ps < 0.995.
-    trim_ps = ps < 1.01
-    trim_ps = np.where(D == 0, ps < 0.995, trim_ps).astype(float)
+    # DRDID `trim.ps` 0/1 weight — consume the SINGLE SOURCE OF TRUTH computed and
+    # applied by att_gt_cell (`_trim`), so the IF and the point estimate share one
+    # effective sample. Fall back to recomputing only for older cells lacking it.
+    trim_ps = np.asarray(cell.get("_trim"), dtype=float) if cell.get("_trim") is not None \
+        else np.where(D == 0, ps < CS_PS_TRIM, ps < 1.01).astype(float)
 
     if est_method == "reg":
         # reg_did_panel: no trimming, w.treat = w.cont = i.weights * D
@@ -219,14 +228,24 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     else:
         ps = sm.Logit(D, X).fit(disp=0).predict(X)
     ps = np.clip(ps, 1e-6, 1 - 1e-6)
+    # DRDID `trim.ps` (0/1 weight, NOT row deletion): treated kept iff ps < 1.01
+    # (always), controls kept iff ps < CS_PS_TRIM (0.995). SINGLE SOURCE OF TRUTH —
+    # computed once here, stored as `_trim`, and consumed verbatim by
+    # `cell_influence_function`, so the point estimate and the influence function
+    # (hence SE/bands) can never describe different effective samples.
+    trim = np.where(D == 0, ps < CS_PS_TRIM, ps < 1.01).astype(float)
     # outcome regression on the comparison units (constant if no covariates)
     if X.shape[1] == 1:
         mhat = np.full(len(units), dY[D == 0].mean())
     else:
         ols = sm.OLS(dY[D == 0], X[D == 0]).fit()
         mhat = X @ ols.params
-    w1 = D / D.mean()
-    raw0 = ps * (1 - D) / (1 - ps)
+    # Trim is applied as a 0/1 weight on BOTH the treated and control weights, then
+    # each side is renormalized by its own (trimmed) mean — matching DRDID's
+    # eta.treat = mean(w.treat*·)/mean(w.treat), eta.cont = mean(w.cont*·)/mean(w.cont).
+    raw1 = trim * D
+    w1 = raw1 / raw1.mean()
+    raw0 = trim * ps * (1 - D) / (1 - ps)
     w0 = raw0 / raw0.mean()
     if est_method == "dr":
         att = float(np.mean((w1 - w0) * (dY - mhat)))
@@ -237,7 +256,8 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     else:
         raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
     # Success return: the `_*` arrays are row-aligned on `_units` (see docstring
-    # contract). `_X` carries the leading intercept; `_ps` is already clipped.
+    # contract). `_X` carries the leading intercept; `_ps` is already clipped;
+    # `_trim` is the DRDID 0/1 trim weight (the trim source of truth).
     return {"att": att, "n_treated": int(D.sum()), "n_control": int((1 - D).sum()),
             "valid": True, "warning": None, "_units": units, "_D": D, "_dY": dY,
-            "_X": X, "_ps": ps, "_mhat": mhat}
+            "_X": X, "_ps": ps, "_mhat": mhat, "_trim": trim}

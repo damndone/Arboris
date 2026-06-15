@@ -82,3 +82,72 @@ def test_cluster_influence_identity_and_sum():
     ids2, summed2 = cluster_influence(obs, np.array([10, 10, 30, 40]))
     assert np.array_equal(ids2, np.array([10, 30, 40]))
     assert np.allclose(summed2, np.array([3.0, 3.0, 4.0]))
+
+
+def _high_ps_panel():
+    """Panel with ONE control whose fitted propensity exceeds DRDID's 0.995 trim
+    threshold. A long, well-separated treated tail keeps the logit slope steep and
+    converged; the lone over-threshold control carries a WILD outcome jump so that
+    trimming vs not changes the ATT by a large, unmistakable margin. Deterministic
+    (no RNG) so the pinned trimmed-ATT values below are stable."""
+    xt = np.linspace(5, 40, 30)          # treated, wide high range -> steep slope
+    xc = np.linspace(-40, -5, 30)        # clean controls, far negative
+    rogue = 30.0                          # control that the logit reads as ~certainly treated
+    rows = []
+    def add(u, cohort, x1, k):
+        y3 = 0.1 * k - 0.3
+        eff = 2.0 if cohort == 4 else 0.0
+        y4 = y3 + 0.5 + eff
+        rows.append(dict(unit=u, period=3, first_treat=cohort, x1=x1, y=y3))
+        rows.append(dict(unit=u, period=4, first_treat=cohort, x1=x1, y=y4))
+    u = k = 0
+    for x in xt:
+        add(u, 4, x, k); u += 1; k += 1
+    for x in xc:
+        add(u, 0, x, k); u += 1; k += 1
+    rogue_id = u
+    add(rogue_id, 0, rogue, k)
+    for r in rows:                        # poison only the rogue control's t=4 outcome
+        if r["unit"] == rogue_id and r["period"] == 4:
+            r["y"] += 50.0
+    d = _attach_cohort(pd.DataFrame(rows))
+    return d, rogue_id
+
+
+def test_trim_ps_applied_consistently_in_att_and_influence_function():
+    """Regression: att_gt_cell must apply DRDID's trim.ps (control kept iff
+    ps < CS_PS_TRIM = 0.995) to the POINT ESTIMATE, the same trim the influence
+    function uses — so both describe one effective sample. Pre-fix, att_gt_cell did
+    not trim, so the rogue control (ps>=0.995, wild outcome) blew up the ATT while
+    the IF silently dropped it. This test fails if the trim is removed from
+    att_gt_cell (the att collapses back to the untrimmed value)."""
+    from workbench.engine.cs_attgt import att_gt_cell, cell_influence_function, CS_PS_TRIM
+    assert CS_PS_TRIM == 0.995  # DRDID 1.3.0 control-side trim.level default
+    d, rogue_id = _high_ps_panel()
+    # Pinned trimmed (= IF-consistent) ATTs for this deterministic panel; the
+    # untrimmed ATTs are far away (dr ~ -44.65, ipw ~ much larger in magnitude).
+    expected = {"dr": -11.6389713117, "ipw": 2.0}
+    for method, exp_att in expected.items():
+        cell = att_gt_cell(frame=d, entity="unit", time="period", y="y", g=4.0, t=4.0,
+            base_t=3.0, control_group="never", anticipation=0, covariates=["x1"],
+            est_method=method)
+        pos = {u: i for i, u in enumerate(cell["_units"])}
+        ir = pos[rogue_id]
+        # (a) the rogue control is over threshold and gets ZERO direct weight in BOTH
+        #     the att (via _trim) and the influence function (which consumes _trim).
+        assert cell["_ps"][ir] >= CS_PS_TRIM, f"{method}: rogue ps {cell['_ps'][ir]} not over threshold"
+        assert cell["_trim"][ir] == 0.0, f"{method}: rogue not trimmed"
+        # (b) the returned ATT equals the trimmed, IF-consistent value — NOT the
+        #     untrimmed estimate that the rogue would otherwise dominate.
+        assert abs(cell["att"] - exp_att) < 1e-6, \
+            f"{method}: att {cell['att']} != trimmed {exp_att}"
+        # reconstruct the att from the SAME trimmed weights the IF uses -> identical.
+        D, dY, ps, mhat, tr = (cell["_D"], cell["_dY"], cell["_ps"], cell["_mhat"], cell["_trim"])
+        r1 = tr * D; w1 = r1 / r1.mean()
+        r0 = tr * ps * (1 - D) / (1 - ps); w0 = r0 / r0.mean()
+        recon = float(np.mean((w1 - w0) * (dY - mhat))) if method == "dr" \
+            else float(np.mean((w1 - w0) * dY))
+        assert abs(cell["att"] - recon) < 1e-12, f"{method}: att not IF-consistent"
+        # and the IF is finite / mean-zero with the rogue trimmed out of the weights.
+        inf = cell_influence_function(cell, est_method=method)
+        assert np.all(np.isfinite(inf)) and abs(inf.mean()) < 1e-8
