@@ -66,3 +66,20 @@ def test_aggregations_match_R_aggte_pointwise():
             i = [round(x, 9) for x in out["label"]].index(round(lab, 9))
             assert abs(out["estimate"][i] - att) < 1e-6, \
                 f"{kind} label={lab} ours={out['estimate'][i]} R={att}"
+
+def test_aggregation_se_matches_R_aggte():
+    from workbench.engine.cs_aggregate import aggregate
+    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))
+    b = _bundle_dr_never()
+    for kind in ("simple", "dynamic", "group", "calendar"):
+        out = aggregate(b, kind)
+        if ref[kind]["overall_se"] is not None:
+            assert abs(out["overall_se"] - ref[kind]["overall_se"]) < 1e-6, \
+                f"{kind} overall_se ours={out['overall_se']} R={ref[kind]['overall_se']}"
+    for kind in ("dynamic", "group", "calendar"):
+        out = aggregate(b, kind)
+        labels = list(map(float, ref[kind]["egt"]))
+        for lab, se in zip(labels, ref[kind]["se_egt"]):
+            i = [round(x, 9) for x in out["label"]].index(round(lab, 9))
+            assert abs(out["se"][i] - se) < 1e-6, \
+                f"{kind} label={lab} ours={out['se'][i]} R={se}"

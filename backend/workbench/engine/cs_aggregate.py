@@ -21,6 +21,76 @@ import numpy as np
 VALID_KINDS = ("simple", "dynamic", "group", "calendar")
 
 
+# ---------------------------------------------------------------------------
+# Aggregation influence functions (port of did:::wif / get_agg_inf_func / getSE)
+#
+# R works entirely at the INDIVIDUAL (entity) level: inffunc1 has one row per
+# sampling unit, `wif` builds an (N, |keepers|) weight-influence matrix from each
+# entity's cohort membership, and getSE clusters via rowsum() only at the very end.
+# We mirror that: build the per-label IF at the entity-row level of
+# bundle.influence_func, then (when clustered) sum within clusters before the SE.
+#
+# pg (cohort share) = mean(weights.ind * (gvar == g)) over ALL N entities = n_g/N
+# (N includes never-treated). This is NOT bundle.weights["p_g"], which divides by
+# the treated total — so we recompute pg here as n_g / n_total.
+# ---------------------------------------------------------------------------
+
+
+def _pg_map(bundle):
+    """Cohort shares pg[g] = n_g / N (R's mean(weights.ind*(gvar==g)))."""
+    n_total = float(bundle.aux["n_total"])
+    if n_total == 0.0:
+        raise CSAggregateError("CS_AGG_DEGENERATE: zero total sampling units.")
+    return {float(g): float(n) / n_total for g, n in bundle.weights["n_g"].items()}
+
+
+def _wif(keeper_groups, pg_map, row_cohort):
+    """Port of did:::wif. Returns the (N, len(keepers)) weight-influence matrix.
+
+      Spg      = sum_k pg[g_k]
+      centered[:,j] = 1{row_cohort == g_j} - pg[g_j]          (weights.ind == 1)
+      if1      = centered / Spg
+      if2      = rowSums(centered) outer (pg[keepers] / Spg^2)
+      wif      = if1 - if2
+    """
+    pg_keep = np.array([pg_map[g] for g in keeper_groups], dtype=float)
+    Spg = float(pg_keep.sum())
+    # centered: (N, J)
+    centered = (row_cohort[:, None] == np.array(keeper_groups)[None, :]).astype(float)
+    centered -= pg_keep[None, :]
+    if1 = centered / Spg
+    if2 = centered.sum(axis=1)[:, None] * (pg_keep / (Spg ** 2))[None, :]
+    return if1 - if2
+
+
+def _agg_inf_func(influence_func, whichones, w_agg, att, wif):
+    """Port of did:::get_agg_inf_func.
+
+      thisinffunc = inffunc1[, whichones] %*% w_agg  + wif %*% att[whichones]
+    Operates at the entity-row level; clustering/SE happen downstream.
+    """
+    comp = influence_func[:, whichones] @ np.asarray(w_agg, dtype=float)
+    if wif is not None:
+        comp = comp + wif @ np.asarray([att[k] for k in whichones], dtype=float)
+    return comp
+
+
+def _se(entity_if, row_cluster, n_total):
+    """Port of did:::getSE (analytical, bstrap=FALSE).
+
+    Unclustered: sqrt(mean(if^2)/n) = sqrt(sum(if^2)) / n.
+    Extra cluster: S = rowsum(if, cv); sqrt(sum(S^2)) / n.  Here n is the number of
+    INDIVIDUALS (entity rows), matching R (getSE's n = length(thisinffunc)).
+    """
+    n = float(n_total)
+    uniq = np.unique(row_cluster)
+    if len(uniq) == len(row_cluster):
+        clustered = entity_if            # identity (cluster == entity)
+    else:
+        clustered = np.array([entity_if[row_cluster == c].sum() for c in uniq])
+    return float(np.sqrt(np.sum(clustered ** 2)) / n)
+
+
 class CSAggregateError(ValueError):
     """CS_AGG_* failure (bad kind / degenerate aggregation)."""
 
@@ -88,14 +158,104 @@ def aggregate(bundle, kind: str) -> dict:
             "bundle.weights['n_g']; cannot weight aggregation.")
 
     if kind == "simple":
-        return _simple(cells, n_g)
-    if kind == "group":
-        return _group(cells, n_g)
-    if kind == "dynamic":
-        return _dynamic(cells, n_g)
-    if kind == "calendar":
-        return _calendar(cells, n_g)
-    raise CSAggregateError(f"CS_AGG_BAD_KIND: '{kind}'")  # unreachable
+        out = _simple(cells, n_g)
+    elif kind == "group":
+        out = _group(cells, n_g)
+    elif kind == "dynamic":
+        out = _dynamic(cells, n_g)
+    elif kind == "calendar":
+        out = _calendar(cells, n_g)
+    else:
+        raise CSAggregateError(f"CS_AGG_BAD_KIND: '{kind}'")  # unreachable
+    _attach_influence(bundle, out)
+    return out
+
+
+def _attach_influence(bundle, out) -> None:
+    """Augment a point-estimate result with analytical influence functions + SE.
+
+    Adds (always present):
+      "component_if": (N, n_labels) entity-row IF of the per-label estimates
+                      (empty (N,0) for `simple`, which has no labels).
+      "overall_if":   (N,) entity-row IF of the overall estimate (None if overall None).
+      "se":           per-label analytical SE (aligned with out["label"]).
+      "overall_se":   scalar overall SE (None if overall None).
+    Task 9 (multiplier bootstrap) draws on component_if / overall_if directly.
+    """
+    kind = out["kind"]
+    IF = bundle.influence_func                       # (N, K) entity rows
+    att = bundle.estimates
+    N = int(bundle.aux["n_total"])
+    row_cohort = bundle.aux["row_cohort"]
+    row_cluster = bundle.aux["row_cluster"]
+    pg = _pg_map(bundle)
+    cell_g = [float(m["g"]) for m in bundle.cell_metadata]
+
+    def cohorts_of(ks):
+        return [cell_g[k] for k in ks]
+
+    # ----- per-label component IFs --------------------------------------------
+    comp_cols, se_list = [], []
+    if kind == "simple":
+        out["component_if"] = np.zeros((N, 0))
+        out["se"] = []
+    else:
+        for lab in out["label"]:
+            wu = out["weights_used"][lab]
+            ks, w = wu["cells"], np.array(wu["att_weights"], dtype=float)
+            if kind == "group":
+                # within-group: uniform weights, NO weight-estimation correction
+                # (R passes wif=NULL for selective.se.inner) — the group share is
+                # not re-estimated inside a single group's event-time mean.
+                wif = None
+            else:
+                # dynamic / calendar: weights are pg-shares over the keeper cohorts;
+                # those shares are estimated -> include R's wif term.
+                wif = _wif(cohorts_of(ks), pg, row_cohort)
+            comp = _agg_inf_func(IF, ks, w, att, wif)
+            comp_cols.append(comp)
+            se_list.append(_se(comp, row_cluster, N))
+        out["component_if"] = (np.column_stack(comp_cols) if comp_cols
+                               else np.zeros((N, 0)))
+        out["se"] = se_list
+
+    # ----- overall IF ----------------------------------------------------------
+    if out["overall"] is None:
+        out["overall_if"] = None
+        out["overall_se"] = None
+        return
+    ow = out["overall_weights"]
+    if kind == "simple":
+        ks = ow["cells"]
+        w = np.array(ow["att_weights"], dtype=float)
+        wif = _wif(cohorts_of(ks), pg, row_cohort)
+        overall_if = _agg_inf_func(IF, ks, w, att, wif)
+    elif kind == "group":
+        # two-stage: overall = sum_g group_weight[g] * within-group-mean(g).
+        # R forms this directly over the GROUP-level estimates with a group-level
+        # wif (keepers = the groups, pg = group shares pgg).  Equivalent to
+        # composing the within-group (uniform, wif=NULL) IFs by the group weights,
+        # then adding the group-level weight-correction term.
+        groups = ow["groups"]
+        gw = np.array(ow["group_weights"], dtype=float)
+        # within-group component IFs (already wif=NULL), indexed by label order
+        lab_idx = {lab: i for i, lab in enumerate(out["label"])}
+        comp_by_group = out["component_if"]
+        first_stage = sum(gw[j] * comp_by_group[:, lab_idx[g]]
+                          for j, g in enumerate(groups))
+        # group-level wif: keepers are the groups themselves; cohorts = the groups;
+        # att = within-group means (the group label estimates).
+        grp_att = np.array([out["estimate"][lab_idx[g]] for g in groups], dtype=float)
+        wif = _wif([float(g) for g in groups], pg, row_cohort)
+        overall_if = first_stage + wif @ grp_att
+    else:  # dynamic / calendar: uniform mean of per-label estimates, wif=NULL
+        labs = ow["labels"]
+        lw = np.array(ow["label_weights"], dtype=float)
+        lab_idx = {lab: i for i, lab in enumerate(out["label"])}
+        overall_if = sum(lw[j] * out["component_if"][:, lab_idx[lab]]
+                         for j, lab in enumerate(labs))
+    out["overall_if"] = overall_if
+    out["overall_se"] = _se(overall_if, row_cluster, N)
 
 
 def _simple(cells, n_g) -> dict:

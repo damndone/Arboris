@@ -27,6 +27,19 @@ class EffectEstimateBundle:
     weights: dict                         # cohort sizes n_g, shares p̂_g
     vcov_config: dict
     diagnostics: dict = field(default_factory=dict)
+    # aux carries data the aggregation influence functions (Task 8) need but that is
+    # not part of the per-cell estimate contract:
+    #   "n_total":   N = number of independent sampling units = inffunc row count
+    #                (entities; equals len(cluster_ids) when unclustered). R's aggte
+    #                cohort share pg = mean(weights.ind*(gvar==g)) divides n_g by THIS.
+    #   "row_cohort": (N,) entity-level cohort of each IF row (0 = never-treated),
+    #                aligned to the pre-cluster entity order; used to build R's `wif`
+    #                centered weight-indicator matrix.
+    #   "row_cluster": (N,) cluster id of each entity row (== entity id when
+    #                unclustered) so the aggregated, individual-level IF can be summed
+    #                within clusters before the SE (R does wif/get_agg_inf_func at the
+    #                individual level, then getSE clusters via rowsum).
+    aux: dict = field(default_factory=dict)
 
 
 def comparison_mask(cohort: pd.Series, *, g: float, t: float, base_t: float,
@@ -326,8 +339,16 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
         if cell["valid"]:
             estimates[k] = cell["att"]
             inf = cell_influence_function(cell, est_method=est_method)
+            # DRDID's cell influence function is defined over the cell SUBSAMPLE of
+            # n_cell units (its SE = sqrt(sum(psi^2))/n_cell). did::att_gt embeds it
+            # into the full N-unit sample as a full-sample influence function, scaled
+            # by N/n_cell, so that sqrt(sum(inf_N^2))/N reproduces the same cell SE
+            # and the columns compose correctly under aggregation (matches R's
+            # m$inffunc to ~1e-8). Scaling preserves the mean-zero property.
+            n_cell = cell["n_treated"] + cell["n_control"]
+            scale = G / n_cell
             for u, val in zip(cell["_units"], inf):
-                obs_if[pos[u], k] = val
+                obs_if[pos[u], k] = val * scale
             ps_mins.append(float(np.min(cell["_ps"])))
             ps_maxs.append(float(np.max(cell["_ps"])))
         else:
@@ -365,6 +386,15 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     diagnostics = {"overlap": {"ps_min": min(ps_mins) if ps_mins else None,
                                "ps_max": max(ps_maxs) if ps_maxs else None},
                    "omitted_cells": omitted, "sample_spec": sample_spec}
-    return EffectEstimateBundle(estimates=estimates, influence_func=cif,
+    # Entity-aligned cohort vector (0 = never-treated) for the aggregation `wif`,
+    # plus the cluster assignment of each entity row and the sampling-unit count N.
+    row_cohort = np.array([float(cohort.loc[u]) if np.isfinite(cohort.loc[u]) else 0.0
+                           for u in units_all], dtype=float)
+    if cluster_var:
+        row_cluster = np.asarray(cl)
+    else:
+        row_cluster = np.asarray(units_all)
+    aux = {"n_total": int(G), "row_cohort": row_cohort, "row_cluster": row_cluster}
+    return EffectEstimateBundle(estimates=estimates, influence_func=cif, aux=aux,
         cluster_ids=cluster_ids, cell_metadata=meta, weights=weights,
         vcov_config=vcov_config, diagnostics=diagnostics)

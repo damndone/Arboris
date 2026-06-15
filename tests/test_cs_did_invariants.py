@@ -55,3 +55,19 @@ def test_influence_columns_mean_zero_per_valid_cell():
     for i, m in enumerate(b.cell_metadata):
         if m["valid"]:
             assert abs(b.influence_func[:, i].mean()) < 1e-7
+
+def test_single_cohort_aggregated_if_equals_cell_if():
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    d = d[d.first_treat.isin([0, 4])]             # one treated cohort + never
+    from workbench.engine.cs_aggregate import aggregate
+    b = estimate_att_gt(normalize_did_input(d, mode="cohort", entity="unit",
+        time="period", y="y", cohort="first_treat"), control_group="never",
+        est_method="dr", base_period="varying", anticipation=0,
+        covariates=["x1"], cluster_var=None)
+    out = aggregate(b, "dynamic")
+    # each dynamic label maps to exactly one cell (single cohort); its component IF
+    # must equal that cell's bundle IF column (weight term is zero with one cohort).
+    for lab, comp in zip(out["label"], out["component_if"].T):
+        k = out["weights_used"][lab]["cells"][0]
+        assert len(out["weights_used"][lab]["cells"]) == 1
+        assert np.allclose(comp, b.influence_func[:, k], atol=1e-10)
