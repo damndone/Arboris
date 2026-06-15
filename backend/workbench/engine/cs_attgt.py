@@ -39,3 +39,22 @@ def comparison_mask(cohort: pd.Series, *, g: float, t: float, base_t: float,
     if control_group == "not_yet":
         return never | (cohort > safe_until + anticipation)
     raise CSSpecError(f"CS_BAD_CONTROL_GROUP: '{control_group}'")
+
+
+def effective_treatment_start(*, g: float, anticipation: int) -> float:
+    return g - anticipation
+
+
+def reference_period(*, g: float, anticipation: int) -> float:
+    return g - 1 - anticipation
+
+
+def base_period_for(*, g: float, t: float, base_period: str, anticipation: int) -> float:
+    ref = reference_period(g=g, anticipation=anticipation)
+    if t >= effective_treatment_start(g=g, anticipation=anticipation):
+        return ref
+    if base_period == "universal":
+        return ref
+    if base_period == "varying":
+        return t - 1
+    raise CSSpecError(f"CS_BAD_BASE_PERIOD: '{base_period}'")
