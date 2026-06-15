@@ -70,7 +70,21 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
                 anticipation, covariates, est_method):
     """Sant'Anna-Zhao panel ATT for one (g,t) cell on sub-sample S(g,t).
     frame must carry the canonical `_did_cohort` column (float, NaN/inf = never-treated).
-    Returns att + cell counts + the intermediates Task 5's influence function needs."""
+    Returns att + cell counts + the intermediates the influence-function task needs.
+
+    Intermediate contract (present only on the success return; see that return):
+      - All six arrays (`_units`, `_D`, `_dY`, `_X`, `_ps`, `_mhat`) are ROW-ALIGNED
+        on `_units` order — index i refers to the same unit across every array.
+      - `_units` (n,): entity ids of the cell complete-case sub-sample S(g,t).
+      - `_D` (n,): cohort-g treatment indicator, float 1.0 (treated) / 0.0 (comparison).
+      - `_dY` (n,): the long difference Y_t − Y_base_t.
+      - `_X` (n, 1+len(covariates)): design matrix WITH a leading intercept column
+        (shape (n, 1) when covariates is empty).
+      - `_ps` (n,): propensity score, ALREADY clipped to [1e-6, 1-1e-6].
+      - `_mhat` (n,): fitted outcome-regression prediction of `_dY`.
+      - Callers MUST check `valid` is True before touching any `_*` intermediate: the
+        empty-cell early return sets valid=False and OMITS all six arrays.
+    """
     cohort = frame.groupby(entity)["_did_cohort"].first()
     treated = set(cohort.index[cohort == g])
     comp = set(cohort.index[comparison_mask(cohort, g=g, t=t, base_t=base_t,
@@ -114,6 +128,8 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
         att = float(np.mean(w1 * (dY - mhat)))
     else:
         raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
+    # Success return: the `_*` arrays are row-aligned on `_units` (see docstring
+    # contract). `_X` carries the leading intercept; `_ps` is already clipped.
     return {"att": att, "n_treated": int(D.sum()), "n_control": int((1 - D).sum()),
             "valid": True, "warning": None, "_units": units, "_D": D, "_dY": dY,
             "_X": X, "_ps": ps, "_mhat": mhat}
