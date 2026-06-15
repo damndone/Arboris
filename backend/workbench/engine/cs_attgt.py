@@ -94,9 +94,11 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
 
     # DRDID `trim.ps` 0/1 weight — consume the SINGLE SOURCE OF TRUTH computed and
     # applied by att_gt_cell (`_trim`), so the IF and the point estimate share one
-    # effective sample. Fall back to recomputing only for older cells lacking it.
-    trim_ps = np.asarray(cell.get("_trim"), dtype=float) if cell.get("_trim") is not None \
-        else np.where(D == 0, ps < CS_PS_TRIM, ps < 1.01).astype(float)
+    # effective sample. There is exactly one trim computation (in att_gt_cell); we do
+    # NOT recompute it here — that would be a second copy of the rule.
+    if cell.get("_trim") is None:
+        raise CSSpecError("CS_MISSING_TRIM: intermediates predate the trim contract")
+    trim_ps = np.asarray(cell["_trim"], dtype=float)
 
     if est_method == "reg":
         # reg_did_panel: no trimming, w.treat = w.cont = i.weights * D
@@ -190,8 +192,8 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     Returns att + cell counts + the intermediates the influence-function task needs.
 
     Intermediate contract (present only on the success return; see that return):
-      - All six arrays (`_units`, `_D`, `_dY`, `_X`, `_ps`, `_mhat`) are ROW-ALIGNED
-        on `_units` order — index i refers to the same unit across every array.
+      - All seven arrays (`_units`, `_D`, `_dY`, `_X`, `_ps`, `_mhat`, `_trim`) are
+        ROW-ALIGNED on `_units` order — index i refers to the same unit across every array.
       - `_units` (n,): entity ids of the cell complete-case sub-sample S(g,t).
       - `_D` (n,): cohort-g treatment indicator, float 1.0 (treated) / 0.0 (comparison).
       - `_dY` (n,): the long difference Y_t − Y_base_t.
@@ -199,8 +201,12 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
         (shape (n, 1) when covariates is empty).
       - `_ps` (n,): propensity score, ALREADY clipped to [1e-6, 1-1e-6].
       - `_mhat` (n,): fitted outcome-regression prediction of `_dY`.
+      - `_trim` (n,): DRDID `trim.ps` 0/1 weight (the single trim source of truth) —
+        control kept iff ps < CS_PS_TRIM, treated always kept. cell_influence_function
+        consumes this verbatim so att and IF share one effective sample.
       - Callers MUST check `valid` is True before touching any `_*` intermediate: the
-        empty-cell early return sets valid=False and OMITS all six arrays.
+        invalid early returns (empty cell, fully-trimmed side) set valid=False and
+        OMIT all seven arrays.
     """
     cohort = frame.groupby(entity)["_did_cohort"].first()
     treated = set(cohort.index[cohort == g])
@@ -234,6 +240,16 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     # `cell_influence_function`, so the point estimate and the influence function
     # (hence SE/bands) can never describe different effective samples.
     trim = np.where(D == 0, ps < CS_PS_TRIM, ps < 1.01).astype(float)
+    # Degrade (do NOT raise) if trimming empties either side: with no surviving
+    # controls (or treated) the renormalizers raw0.mean()/raw1.mean() are 0, which
+    # would silently yield att=nan with valid:True. Return the invalid-cell shape so
+    # estimate_att_gt drops just this pathological cell (invariant #5 / v1.5.5.1
+    # degrade convention). The empty-cell guard above does NOT catch this case
+    # (controls/treated rows exist, they are merely all trimmed).
+    if (trim * (1.0 - D)).sum() == 0 or (trim * D).sum() == 0:
+        return {"att": float("nan"), "n_treated": int(D.sum()),
+                "n_control": int((1 - D).sum()), "valid": False,
+                "warning": "CS_FULLY_TRIMMED_CONTROL"}
     # outcome regression on the comparison units (constant if no covariates)
     if X.shape[1] == 1:
         mhat = np.full(len(units), dY[D == 0].mean())

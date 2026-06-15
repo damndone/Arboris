@@ -151,3 +151,37 @@ def test_trim_ps_applied_consistently_in_att_and_influence_function():
         # and the IF is finite / mean-zero with the rogue trimmed out of the weights.
         inf = cell_influence_function(cell, est_method=method)
         assert np.all(np.isfinite(inf)) and abs(inf.mean()) < 1e-8
+
+
+def test_fully_trimmed_control_side_degrades_to_invalid_no_nan_leak():
+    """A cell whose ENTIRE comparison side is trimmed must DEGRADE to an invalid
+    cell (valid=False, warning='CS_FULLY_TRIMMED_CONTROL'), never return valid=True
+    with att=nan. The empty-cell guard does not catch this — controls exist, they
+    are merely all trimmed. Deterministic trigger: with no covariates the propensity
+    is the constant treated share; 200 treated + 1 control => ps = 200/201 =
+    0.9950249 >= CS_PS_TRIM, so the lone control is trimmed and the control side
+    empties, zeroing the raw0 renormalizer (the silent-nan path pre-fix)."""
+    from workbench.engine.cs_attgt import att_gt_cell, CS_PS_TRIM
+    n_treated = 200
+    rows = []
+    def add(u, cohort, k):
+        y3 = 0.1 * (k % 7) - 0.3
+        y4 = y3 + 0.5 + (2.0 if cohort == 4 else 0.0)
+        rows.append(dict(unit=u, period=3, first_treat=cohort, y=y3))
+        rows.append(dict(unit=u, period=4, first_treat=cohort, y=y4))
+    u = k = 0
+    for _ in range(n_treated):
+        add(u, 4, k); u += 1; k += 1
+    add(u, 0, k)  # single comparison unit
+    d = _attach_cohort(pd.DataFrame(rows))
+    assert n_treated / (n_treated + 1) >= CS_PS_TRIM  # constant ps over the threshold
+    for method in ("dr", "ipw", "reg"):
+        cell = att_gt_cell(frame=d, entity="unit", time="period", y="y", g=4.0, t=4.0,
+            base_t=3.0, control_group="never", anticipation=0, covariates=[], est_method=method)
+        assert cell["valid"] is False, f"{method}: fully-trimmed cell should be invalid"
+        assert cell["warning"] == "CS_FULLY_TRIMMED_CONTROL", f"{method}: wrong warning {cell['warning']}"
+        # no nan must ever leak out with valid==True
+        assert not (cell["valid"] and np.isnan(cell["att"])), f"{method}: silent nan with valid=True"
+        # invalid cells omit every intermediate (the seven-array contract)
+        for arr in ("_units", "_D", "_dY", "_X", "_ps", "_mhat", "_trim"):
+            assert arr not in cell, f"{method}: invalid cell leaked {arr}"
