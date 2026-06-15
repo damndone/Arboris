@@ -48,6 +48,12 @@ MODEL_UI_META: dict[str, dict[str, object]] = {
         "description": "Two-way fixed-effects DID with event study, parallel-trends test, and Goodman-Bacon decomposition.",
         "requires": ["entity", "time", "treatment_timing"],
     },
+    "cs_did": {
+        "label": "Callaway-Sant'Anna DID",
+        "group": "DID",
+        "description": "Heterogeneity-robust group-time ATT(g,t) with event-study, group, and calendar aggregations and simultaneous confidence bands. Eliminates the staggered-adoption bias of TWFE DID.",
+        "requires": ["entity", "time", "treatment_timing"],
+    },
     "glm:binomial": {
         "label": "GLM - binomial",
         "group": "GLM",
@@ -74,6 +80,7 @@ MODEL_UI_ORDER = [
     "panel_ols",
     "iv_2sls",
     "did",
+    "cs_did",
     "glm:binomial",
     "glm:poisson",
     "glm:negative_binomial",

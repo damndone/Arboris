@@ -73,3 +73,79 @@ def test_cs_did_missing_entity_time_fails_clearly(tmp_path):
     errors = read_json(run_root / "errors.json")
     codes = [i.get("code") for i in errors.get("issues", [])]
     assert "CS_DID_FIELDS_MISSING" in codes
+
+
+# ---------------------------------------------------------------------------
+# Task 12: degraded-safe cs_did result artifact + capabilities sync
+# ---------------------------------------------------------------------------
+
+import json as _json
+from pathlib import Path as _Path
+
+_FIXTURE_PANEL = _Path(__file__).parent / "fixtures" / "cs_did" / "panel.csv"
+
+
+def _run_cs_did_on_fixture(tmp_path):
+    project = create_project(tmp_path, "demo")
+    result = _rw(project.root, [_FIXTURE_PANEL], mode="auto", y="y", x=[],
+                 model_type="cs_did", entity_col="unit", time_col="period",
+                 did_mode="cohort", did_cohort_col="first_treat")
+    run_root = project.root / "runs" / result["run_id"]
+    return run_root
+
+
+def test_cs_did_artifact_present_and_valid(tmp_path):
+    """End-to-end: a cs_did artifact is written, valid JSON, has the 4
+    aggregations + metadata. Goes RED if the diagnostics block is removed."""
+    run_root = _run_cs_did_on_fixture(tmp_path)
+    from workbench.artifacts import read_json
+    manifest = read_json(run_root / "run_manifest.json")
+    assert manifest["status"] == "completed"
+
+    cs_path = run_root / "cs_did.json"
+    assert cs_path.exists(), "cs_did artifact missing (diagnostics block removed?)"
+    artifact = _json.loads(cs_path.read_text())
+    assert artifact.get("available") is True
+    assert set(artifact["aggregations"]) >= {"simple", "dynamic", "group", "calendar"}
+    assert "metadata" in artifact
+
+    # registered in the artifact index
+    index = read_json(run_root / "artifacts_index.json")
+    ids = {a["artifact_id"] for a in index["artifacts"]}
+    assert "cs_did" in ids
+
+
+def test_cs_did_artifact_degrades_when_serialization_fails(tmp_path, monkeypatch):
+    """If _json_safe raises, the artifact degrades to {available: False, error}
+    and the run still completes (status != failed)."""
+    from workbench.engine.stages import diagnostics as diag_mod
+
+    def _boom(obj):
+        raise RuntimeError("boom-serialize")
+
+    monkeypatch.setattr(diag_mod, "_json_safe", _boom)
+    run_root = _run_cs_did_on_fixture(tmp_path)
+
+    from workbench.artifacts import read_json
+    manifest = read_json(run_root / "run_manifest.json")
+    assert manifest["status"] == "completed"  # degrade, not WORKFLOW_FAILED
+
+    artifact = _json.loads((run_root / "cs_did.json").read_text())
+    assert artifact.get("available") is False
+    assert "boom-serialize" in artifact.get("error", "")
+
+
+def test_cs_did_capabilities_sync():
+    from workbench.engine.capabilities import MODEL_UI_META, MODEL_UI_ORDER
+    assert MODEL_UI_META["cs_did"]["group"] == "DID"
+    assert "cs_did" in MODEL_UI_ORDER
+
+
+def test_json_safe_coerces_numpy():
+    from workbench.engine.stages.diagnostics import _json_safe
+    obj = {"a": np.int64(3), "b": np.array([1.0, 2.0]),
+           "c": [np.float64(1.5)], "d": None, "e": "x"}
+    out = _json_safe(obj)
+    assert out == {"a": 3, "b": [1.0, 2.0], "c": [1.5], "d": None, "e": "x"}
+    assert isinstance(out, dict)  # so .setdefault works downstream
+    _json.dumps(out)  # must be JSON-serializable

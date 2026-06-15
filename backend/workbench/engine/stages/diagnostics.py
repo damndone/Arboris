@@ -2,9 +2,29 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from ..context import ModelingContext, RunEnv
+
+
+def _json_safe(obj: Any) -> Any:
+    """Recursively coerce an object into JSON-serializable primitives.
+
+    numpy scalars -> ``.item()``; numpy arrays -> nested lists; dicts recurse
+    with str keys; list/tuple recurse; python primitives/None pass through.
+    Unlike ``graph_store._to_jsonable`` (which RAISES on numpy), this degrades
+    numpy types so the supplementary cs_did artifact can be serialized safely.
+    """
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return [_json_safe(x) for x in obj.tolist()]
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(x) for x in obj]
+    return obj
 
 
 class DiagnosticsStage:
@@ -141,6 +161,27 @@ class DiagnosticsStage:
                     run_root,
                     "did_diagnostics",
                     did_diag_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+
+        if model_type == "cs_did":
+            cs_result = ctx.artifacts.get("_cs_did_result")
+            if cs_result is not None:
+                # Supplementary artifact: the cs_did estimate already ran in
+                # estimation. Serialization must not fail the run — degrade.
+                try:
+                    cs_artifact = _json_safe(cs_result)
+                    cs_artifact.setdefault("available", True)
+                except Exception as exc:  # noqa: BLE001 - any failure degrades
+                    cs_artifact = {"available": False, "error": str(exc)}
+                cs_path = run_root / "cs_did.json"
+                write_json(cs_path, cs_artifact)
+                register_artifact(
+                    run_root,
+                    "cs_did",
+                    cs_path,
                     "model_diagnostic",
                     "econometrics",
                     model_input_ids,
