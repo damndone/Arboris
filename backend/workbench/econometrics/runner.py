@@ -527,8 +527,10 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
 
     # --- four aggregations, each with bootstrap bands ---
     aggregations = {}
+    agg_by_kind = {}
     for kind in ("simple", "dynamic", "group", "calendar"):
         agg = aggregate(bundle, kind)
+        agg_by_kind[kind] = agg
         out = {"overall": agg["overall"], "overall_se": agg["overall_se"]}
         # overall band (single component)
         if agg["overall"] is not None and agg["overall_if"] is not None:
@@ -559,7 +561,7 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     for oc in bundle.diagnostics.get("omitted_cells", []):
         warnings.append(f"Cell (g={oc['g']}, t={oc['t']}) omitted: {oc.get('warning')}")
     # single-cohort event times in the dynamic aggregation (thin support)
-    dyn = aggregate(bundle, "dynamic")
+    dyn = agg_by_kind["dynamic"]
     for lab in dyn["label"]:
         cells = dyn["weights_used"][lab]["cells"]
         if len(cells) == 1:
