@@ -65,3 +65,20 @@ def test_empty_x_collapse_to_2x2():
     reg = att_gt_cell(est_method="reg", **kw)["att"]
     # with no covariates all three collapse to the clean 2x2 mean-difference
     assert abs(dr - ipw) < 1e-10 and abs(dr - reg) < 1e-10
+
+def test_influence_columns_mean_zero():
+    from workbench.engine.cs_attgt import cell_influence_function, att_gt_cell
+    d = _attach_cohort(pd.read_csv("tests/fixtures/cs_did/panel.csv"))
+    cell = att_gt_cell(frame=d, entity="unit", time="period", y="y", g=4.0, t=4.0,
+        base_t=3.0, control_group="never", anticipation=0, covariates=["x1"], est_method="dr")
+    assert abs(cell_influence_function(cell, est_method="dr").mean()) < 1e-8
+
+def test_cluster_influence_identity_and_sum():
+    from workbench.engine.cs_attgt import cluster_influence
+    obs = np.array([1.0, 2.0, 3.0, 4.0])
+    ids, summed = cluster_influence(obs, np.array([10, 20, 30, 40]))
+    assert np.array_equal(ids, np.array([10, 20, 30, 40]))
+    assert np.allclose(summed, obs)
+    ids2, summed2 = cluster_influence(obs, np.array([10, 10, 30, 40]))
+    assert np.array_equal(ids2, np.array([10, 30, 40]))
+    assert np.allclose(summed2, np.array([3.0, 3.0, 4.0]))

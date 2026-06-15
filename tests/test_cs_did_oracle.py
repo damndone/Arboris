@@ -21,3 +21,19 @@ def test_attgt_matches_R_did(method, control):
             g=float(g), t=float(t), base_t=float(base), control_group=control,
             anticipation=0, covariates=["x1"], est_method=method)["att"]
         assert abs(ours - att) < 1e-6, f"(g={g},t={t}) ours={ours} R={att}"
+
+from workbench.engine.cs_attgt import cell_influence_function
+
+@pytest.mark.parametrize("method", ["dr", "ipw", "reg"])
+def test_cell_influence_function_matches_DRDID(method):
+    ref = json.load(open("tests/fixtures/cs_did/drdid_inffunc.json"))
+    panel = _panel()   # helper already defined in this file (attaches _did_cohort)
+    cell = att_gt_cell(frame=panel, entity="unit", time="period", y="y",
+        g=4.0, t=4.0, base_t=3.0, control_group="never", anticipation=0,
+        covariates=["x1"], est_method=method)
+    inf = cell_influence_function(cell, est_method=method)
+    # align ours (cell["_units"]) to the R unit order
+    pos = {u: i for i, u in enumerate(cell["_units"])}
+    ours = np.array([inf[pos[u]] for u in ref["unit"]])
+    assert np.allclose(ours, ref[method]["inf_func"], atol=1e-8), \
+        f"{method} max dev {np.max(np.abs(ours - np.array(ref[method]['inf_func'])))}"

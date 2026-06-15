@@ -66,6 +66,114 @@ def base_period_for(*, g: float, t: float, base_period: str, anticipation: int) 
     raise CSSpecError(f"CS_BAD_BASE_PERIOD: '{base_period}'")
 
 
+def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
+    """Observation-level influence function for one (g,t) cell, row-aligned on
+    `cell["_units"]`. Faithful port of DRDID 1.3.0 panel estimators:
+      dr  → DRDID:::drdid_panel        (PS-correction + WLS/OR-correction)
+      ipw → DRDID:::std_ipw_did_panel  (PS-correction only)
+      reg → DRDID:::reg_did_panel      (OLS/OR-correction only)
+    DRDID normalizes i.weights by their mean (here all 1 → no-op) and applies
+    trimming `trim.ps`: control units kept iff ps < 0.995. Returns att.inf.func
+    (the same array DRDID would, with se = sqrt(mean(inf^2)/n))."""
+    if not cell.get("valid", False):
+        raise CSSpecError("CS_INVALID_CELL_NO_IF: cannot compute influence function for an invalid cell")
+    D = np.asarray(cell["_D"], dtype=float)
+    dY = np.asarray(cell["_dY"], dtype=float)
+    X = np.asarray(cell["_X"], dtype=float)
+    ps = np.asarray(cell["_ps"], dtype=float)
+    out_delta = np.asarray(cell["_mhat"], dtype=float)
+    n = D.shape[0]
+    iw = np.ones(n)  # i.weights, already mean-normalized to 1
+
+    # DRDID trimming: ps.fit < 1.01 for treated (always True); controls ps < 0.995.
+    trim_ps = ps < 1.01
+    trim_ps = np.where(D == 0, ps < 0.995, trim_ps).astype(float)
+
+    if est_method == "reg":
+        # reg_did_panel: no trimming, w.treat = w.cont = i.weights * D
+        w_treat = iw * D
+        w_cont = iw * D
+        reg_att_treat = w_treat * dY
+        reg_att_cont = w_cont * out_delta
+        eta_treat = np.mean(reg_att_treat) / np.mean(w_treat)
+        eta_cont = np.mean(reg_att_cont) / np.mean(w_cont)
+
+        weights_ols = iw * (1.0 - D)
+        wols_x = (weights_ols[:, None]) * X
+        wols_eX = (weights_ols * (dY - out_delta))[:, None] * X
+        XpX = wols_x.T @ X / n
+        XpX_inv = np.linalg.solve(XpX, np.eye(XpX.shape[0]))
+        asy_lin_rep_ols = wols_eX @ XpX_inv
+
+        inf_treat = (reg_att_treat - w_treat * eta_treat) / np.mean(w_treat)
+        inf_cont_1 = reg_att_cont - w_cont * eta_cont
+        M1 = (w_cont[None, :] @ X).ravel() / n
+        inf_cont_2 = asy_lin_rep_ols @ M1
+        inf_control = (inf_cont_1 + inf_cont_2) / np.mean(w_cont)
+        return inf_treat - inf_control
+
+    # Shared PS-correction machinery for ipw and dr.
+    W = ps * (1.0 - ps) * iw
+    w_treat = trim_ps * iw * D
+    w_cont = trim_ps * iw * ps * (1.0 - D) / (1.0 - ps)
+    mw_treat = np.mean(w_treat)
+    mw_cont = np.mean(w_cont)
+
+    score_ps = (iw * (D - ps))[:, None] * X
+    XtWX_ps = X.T @ (W[:, None] * X)
+    Hessian_ps = np.linalg.solve(XtWX_ps, np.eye(XtWX_ps.shape[0])) * n
+    asy_lin_rep_ps = score_ps @ Hessian_ps
+
+    if est_method == "ipw":
+        att_treat = w_treat * dY
+        att_cont = w_cont * dY
+        eta_treat = np.mean(att_treat) / mw_treat
+        eta_cont = np.mean(att_cont) / mw_cont
+
+        inf_treat = (att_treat - w_treat * eta_treat) / mw_treat
+        inf_cont_1 = att_cont - w_cont * eta_cont
+        M2 = ((w_cont * (dY - eta_cont))[None, :] @ X).ravel() / n
+        inf_cont_2 = asy_lin_rep_ps @ M2
+        inf_control = (inf_cont_1 + inf_cont_2) / mw_cont
+        return inf_treat - inf_control
+
+    if est_method == "dr":
+        dr_att_treat = w_treat * (dY - out_delta)
+        dr_att_cont = w_cont * (dY - out_delta)
+        eta_treat = np.mean(dr_att_treat) / mw_treat
+        eta_cont = np.mean(dr_att_cont) / mw_cont
+
+        weights_ols = iw * (1.0 - D)
+        wols_x = (weights_ols[:, None]) * X
+        wols_eX = (weights_ols * (dY - out_delta))[:, None] * X
+        XpX = wols_x.T @ X / n
+        XpX_inv = np.linalg.solve(XpX, np.eye(XpX.shape[0]))
+        asy_lin_rep_wols = wols_eX @ XpX_inv
+
+        inf_treat_1 = dr_att_treat - w_treat * eta_treat
+        M1 = (w_treat[None, :] @ X).ravel() / n
+        inf_treat_2 = asy_lin_rep_wols @ M1
+        inf_cont_1 = dr_att_cont - w_cont * eta_cont
+        M2 = ((w_cont * (dY - out_delta - eta_cont))[None, :] @ X).ravel() / n
+        inf_cont_2 = asy_lin_rep_ps @ M2
+        M3 = (w_cont[None, :] @ X).ravel() / n
+        inf_cont_3 = asy_lin_rep_wols @ M3
+
+        inf_treat = (inf_treat_1 - inf_treat_2) / mw_treat
+        inf_control = (inf_cont_1 + inf_cont_2 - inf_cont_3) / mw_cont
+        return inf_treat - inf_control
+
+    raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
+
+
+def cluster_influence(obs_if: np.ndarray, cluster_of_obs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Sum observation-level IF within clusters. Returns (cluster_ids_sorted, summed_if).
+    Default cluster = entity → each obs is its own cluster → identity."""
+    ids = np.unique(cluster_of_obs)
+    summed = np.array([obs_if[cluster_of_obs == c].sum() for c in ids])
+    return ids, summed
+
+
 def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
                 anticipation, covariates, est_method):
     """Sant'Anna-Zhao panel ATT for one (g,t) cell on sub-sample S(g,t).
