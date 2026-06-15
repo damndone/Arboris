@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 
 
 class CSSpecError(ValueError):
@@ -63,3 +64,56 @@ def base_period_for(*, g: float, t: float, base_period: str, anticipation: int) 
     if base_period == "varying":
         return t - 1
     raise CSSpecError(f"CS_BAD_BASE_PERIOD: '{base_period}'")
+
+
+def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
+                anticipation, covariates, est_method):
+    """Sant'Anna-Zhao panel ATT for one (g,t) cell on sub-sample S(g,t).
+    frame must carry the canonical `_did_cohort` column (float, NaN/inf = never-treated).
+    Returns att + cell counts + the intermediates Task 5's influence function needs."""
+    cohort = frame.groupby(entity)["_did_cohort"].first()
+    treated = set(cohort.index[cohort == g])
+    comp = set(cohort.index[comparison_mask(cohort, g=g, t=t, base_t=base_t,
+                                            control_group=control_group, anticipation=anticipation)])
+    keep = treated | comp
+    sub = frame[frame[entity].isin(keep) & frame[time].isin([t, base_t])]
+    wide = sub.pivot_table(index=entity, columns=time, values=y)
+    ok = wide[[t, base_t]].notna().all(axis=1)        # cell-level complete-case
+    units = wide.index[ok].to_numpy()
+    dY = (wide.loc[units, t] - wide.loc[units, base_t]).to_numpy()
+    D = np.array([u in treated for u in units], dtype=float)
+    if D.sum() == 0 or (1.0 - D).sum() == 0:
+        return {"att": float("nan"), "n_treated": int(D.sum()),
+                "n_control": int((1 - D).sum()), "valid": False, "warning": "CS_EMPTY_CELL"}
+    # covariates at the base period (pre-treatment, time-invariant in this design)
+    X = np.ones((len(units), 1))
+    if covariates:
+        base_rows = (frame[frame[time] == base_t].drop_duplicates(entity)
+                     .set_index(entity).loc[units, covariates].to_numpy(float))
+        X = np.column_stack([np.ones(len(units)), base_rows])
+    # propensity score: constant => p = treated share (=> weights collapse to 2x2)
+    if X.shape[1] == 1:
+        ps = np.full(len(units), D.mean())
+    else:
+        ps = sm.Logit(D, X).fit(disp=0).predict(X)
+    ps = np.clip(ps, 1e-6, 1 - 1e-6)
+    # outcome regression on the comparison units (constant if no covariates)
+    if X.shape[1] == 1:
+        mhat = np.full(len(units), dY[D == 0].mean())
+    else:
+        ols = sm.OLS(dY[D == 0], X[D == 0]).fit()
+        mhat = X @ ols.params
+    w1 = D / D.mean()
+    raw0 = ps * (1 - D) / (1 - ps)
+    w0 = raw0 / raw0.mean()
+    if est_method == "dr":
+        att = float(np.mean((w1 - w0) * (dY - mhat)))
+    elif est_method == "ipw":
+        att = float(np.mean((w1 - w0) * dY))
+    elif est_method == "reg":
+        att = float(np.mean(w1 * (dY - mhat)))
+    else:
+        raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
+    return {"att": att, "n_treated": int(D.sum()), "n_control": int((1 - D).sum()),
+            "valid": True, "warning": None, "_units": units, "_D": D, "_dY": dY,
+            "_X": X, "_ps": ps, "_mhat": mhat}

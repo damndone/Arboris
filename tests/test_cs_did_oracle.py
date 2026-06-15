@@ -1,0 +1,23 @@
+import json, numpy as np, pandas as pd, pytest
+from workbench.engine.cs_attgt import att_gt_cell, base_period_for
+
+ORACLE = json.load(open("tests/fixtures/cs_did/att_gt.json"))
+
+def _panel():
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    cohort = d.groupby("unit")["first_treat"].first().replace(0, np.inf)
+    d = d.copy(); d["_did_cohort"] = d["unit"].map(cohort)
+    return d
+
+@pytest.mark.parametrize("method,control", [("dr","never"),("ipw","never"),
+    ("reg","never"),("dr","not_yet")])
+def test_attgt_matches_R_did(method, control):
+    key = {"never":"nevertreated","not_yet":"notyettreated"}[control]
+    ref = ORACLE[f"{method}_{key}"]
+    panel = _panel()
+    for g, t, att in zip(ref["group"], ref["t"], ref["att"]):
+        base = base_period_for(g=float(g), t=float(t), base_period="varying", anticipation=0)
+        ours = att_gt_cell(frame=panel, entity="unit", time="period", y="y",
+            g=float(g), t=float(t), base_t=float(base), control_group=control,
+            anticipation=0, covariates=["x1"], est_method=method)["att"]
+        assert abs(ours - att) < 1e-6, f"(g={g},t={t}) ours={ours} R={att}"

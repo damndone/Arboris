@@ -47,3 +47,21 @@ def test_boundary_at_effective_start_is_post():
     # δ=1: effective start = 3, reference = 2; t=3 is post → base = 2 (not t-1=2 — pick t=4)
     assert base_period_for(g=5, t=4, base_period="varying", anticipation=1) == 3  # post: ref=5-1-1=3
     assert base_period_for(g=5, t=2, base_period="varying", anticipation=1) == 1  # pre: t-1
+
+
+def _attach_cohort(d):
+    d = d.copy()
+    cohort = d.groupby("unit")["first_treat"].first().replace(0, np.inf)
+    d["_did_cohort"] = d["unit"].map(cohort)
+    return d
+
+def test_empty_x_collapse_to_2x2():
+    from workbench.engine.cs_attgt import att_gt_cell
+    d = _attach_cohort(pd.read_csv("tests/fixtures/cs_did/panel.csv"))
+    kw = dict(frame=d, entity="unit", time="period", y="y", g=4.0, t=4.0, base_t=3.0,
+              control_group="never", anticipation=0, covariates=[])
+    dr  = att_gt_cell(est_method="dr",  **kw)["att"]
+    ipw = att_gt_cell(est_method="ipw", **kw)["att"]
+    reg = att_gt_cell(est_method="reg", **kw)["att"]
+    # with no covariates all three collapse to the clean 2x2 mean-difference
+    assert abs(dr - ipw) < 1e-10 and abs(dr - reg) < 1e-10
