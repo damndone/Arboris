@@ -45,3 +45,16 @@ def test_pointwise_and_uniform_band_shapes():
     # uniform band is wider than (or equal to) pointwise
     assert np.all(r["uniform_band"][:, 1] - r["uniform_band"][:, 0] >=
                   r["pointwise_ci"][:, 1] - r["pointwise_ci"][:, 0] - 1e-9)
+
+
+def test_degenerate_zero_column_does_not_nan_the_band():
+    psi = _if().copy()
+    psi[:, 2] = 0.0                      # one fully-degenerate column
+    est = np.arange(psi.shape[1], dtype=float)
+    r = multiplier_bootstrap(psi, B=1000, alpha=0.05, seed=11, estimates=est)
+    assert np.isfinite(r["uniform_crit"])                 # not NaN
+    assert np.all(np.isfinite(r["uniform_band"]))         # whole band finite
+    # the degenerate column has zero-width band; others are non-degenerate
+    assert r["uniform_band"][2, 1] - r["uniform_band"][2, 0] == 0.0
+    assert np.all(r["uniform_band"][[0, 1, 3, 4], 1] -
+                  r["uniform_band"][[0, 1, 3, 4], 0] > 0)

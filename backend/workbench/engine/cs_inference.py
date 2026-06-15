@@ -36,9 +36,15 @@ def multiplier_bootstrap(if_matrix, *, B=1000, alpha=0.05, seed=20260615,
     # pointwise z critical value
     z = stats.norm.ppf(1 - alpha / 2)
     pointwise_ci = np.column_stack([estimates - z * se, estimates + z * se])
-    # simultaneous sup-t critical value
-    tstat = np.max(np.abs(R) / sigma, axis=1)            # (B,)
-    uniform_crit = float(np.quantile(tstat, 1 - alpha))
+    # simultaneous sup-t critical value. Exclude degenerate (sigma==0, i.e.
+    # all-zero IF) columns from the max so one dead column can't NaN-out the
+    # whole simultaneous band; divide only over good columns (no RuntimeWarning).
+    good = sigma > 0
+    if good.any():
+        tstat = np.max(np.abs(R[:, good]) / sigma[good], axis=1)   # (B,)
+        uniform_crit = float(np.quantile(tstat, 1 - alpha))
+    else:
+        uniform_crit = float(z)
     uniform_band = np.column_stack([estimates - uniform_crit * se,
                                     estimates + uniform_crit * se])
     return {"se": se, "pointwise_ci": pointwise_ci, "uniform_band": uniform_band,
