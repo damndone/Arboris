@@ -19,7 +19,9 @@ for (m in c("dr", "ipw", "reg")) for (cg in c("nevertreated", "notyettreated"))
   att_gt_out[[paste(m, cg, sep = "_")]] <- emit_attgt(m, cg)
 write_json(att_gt_out, "tests/fixtures/cs_did/att_gt.json", digits = 12, auto_unbox = TRUE)
 
-# ---- Per-cell DRDID influence function: cell (g=4, base=3, t=4), never-treated, dr ----
+# ---- Per-cell DRDID influence functions: cell (g=4, base=3, t=4), never-treated ----
+# dr -> drdid_panel ; ipw -> std_ipw_did_panel ; reg -> reg_did_panel
+# (these are exactly what did::att_gt calls for each est_method on a 2-period panel cell).
 cell <- subset(d, first_treat %in% c(0, 4) & period %in% c(3, 4))
 c0 <- cell[cell$period == 3, c("unit", "y", "x1", "first_treat")]   # base period
 c1 <- cell[cell$period == 4, c("unit", "y")]                        # outcome period
@@ -27,10 +29,15 @@ m  <- merge(c0, c1, by = "unit", suffixes = c("_0", "_1"))
 m  <- m[order(m$unit), ]
 D  <- as.integer(m$first_treat == 4)
 X  <- model.matrix(~x1, data = m)
-dr <- drdid_panel(y1 = m$y_1, y0 = m$y_0, D = D, covariates = X, inffunc = TRUE)
-write_json(list(att = dr$ATT, se = dr$se,
-                inf_func = as.numeric(dr$att.inf.func), unit = m$unit),
-           "tests/fixtures/cs_did/drdid_inffunc.json", digits = 12, auto_unbox = TRUE)
+emit_if <- function(fit) list(att = fit$ATT, se = fit$se,
+                              inf_func = as.numeric(fit$att.inf.func))
+inf_out <- list(
+  unit = m$unit,
+  dr  = emit_if(drdid_panel(y1 = m$y_1, y0 = m$y_0, D = D, covariates = X, inffunc = TRUE)),
+  ipw = emit_if(std_ipw_did_panel(y1 = m$y_1, y0 = m$y_0, D = D, covariates = X, inffunc = TRUE)),
+  reg = emit_if(reg_did_panel(y1 = m$y_1, y0 = m$y_0, D = D, covariates = X, inffunc = TRUE))
+)
+write_json(inf_out, "tests/fixtures/cs_did/drdid_inffunc.json", digits = 12, auto_unbox = TRUE)
 
 # ---- Aggregations (dr, never-treated): simple / dynamic / group / calendar ----
 r <- att_gt(yname = "y", tname = "period", idname = "unit", gname = "first_treat",
