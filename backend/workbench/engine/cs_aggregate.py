@@ -35,25 +35,57 @@ def _valid_cells(bundle):
     return out
 
 
+def _normalize(raw: np.ndarray, *, ctx: str) -> np.ndarray:
+    """Divide weights by their sum, raising CS_AGG_DEGENERATE on a zero denominator
+    (rather than producing silent nan/inf)."""
+    total = float(raw.sum())
+    if total == 0.0:
+        raise CSAggregateError(
+            f"CS_AGG_DEGENERATE: zero cohort-weight denominator while aggregating {ctx}.")
+    return raw / total
+
+
 def aggregate(bundle, kind: str) -> dict:
     """Aggregate ATT(g,t) per did::aggte. Returns point estimates only (no SE).
 
     Returns dict:
-      {"kind", "overall": float|None,
-       "label": [...], "estimate": [...],
-       "weights_used": {label: {"cells": [k...], "att_weights": [w...]}},
-       "overall_weights": {"cells": [k...], "label_weights": [...]}}
+      {"kind", "overall": float|None, "label": [...], "estimate": [...],
+       "weights_used": {...}, "overall_weights": {...}}
 
-    `weights_used` / `overall_weights` express each aggregate (per-label and the
-    overall) as an explicit linear combination of CELL ATTs (keyed by cell index
-    k into bundle.estimates / bundle.influence_func columns). Task 8 reconstructs
-    each aggregate's influence function from these weights (plus its own estimand-
-    weight / wif correction term)."""
+    `weights_used` and `overall_weights` express each aggregate as an explicit
+    linear combination of CELL ATTs so Task 8 can rebuild each aggregate's
+    influence function (plus its own estimand-weight / wif correction term).
+
+    `weights_used` (per-label decomposition) has the SAME shape for every kind:
+        {label: {"cells": [k...], "att_weights": [w...]}}
+    where each `k` indexes a column of `bundle.influence_func` (and an entry of
+    `bundle.estimates`); the per-label estimate is `sum_j w_j * estimates[cells_j]`,
+    and the weights sum to 1 within each label. For `simple` it is empty (no labels).
+
+    `overall_weights` describes how `overall` is formed and has THREE kind-specific
+    shapes (all intentional — key off `kind`):
+      - simple:            {"cells": [k...],  "att_weights": [w...]}
+            overall is a direct n_g-weighted combination of cell ATTs (no labels).
+      - dynamic, calendar: {"labels": [...],  "label_weights": [w...]}
+            overall is a (uniform) weighted mean of the per-label estimates; combine
+            with `weights_used[label]` to expand back to cells.
+      - group:             {"groups": [g...], "group_weights": [w...]}
+            overall is TWO-STAGE: sum_g group_weights[g] * (the within-group mean
+            given by weights_used[g]["att_weights"] over weights_used[g]["cells"]).
+    """
     if kind not in VALID_KINDS:
         raise CSAggregateError(f"CS_AGG_BAD_KIND: '{kind}' not in {VALID_KINDS}")
 
     n_g = {float(g): float(n) for g, n in bundle.weights["n_g"].items()}
     cells = _valid_cells(bundle)
+    # Upstream invariant: every valid cell's cohort appears in weights["n_g"].
+    # Guard it explicitly so a future divergence raises a structured CS_AGG_* error
+    # instead of a bare KeyError mid-aggregation.
+    missing = sorted({g for (_, g, _, _, _) in cells if g not in n_g})
+    if missing:
+        raise CSAggregateError(
+            f"CS_AGG_DEGENERATE: valid cell cohort(s) {missing} absent from "
+            "bundle.weights['n_g']; cannot weight aggregation.")
 
     if kind == "simple":
         return _simple(cells, n_g)
@@ -73,7 +105,7 @@ def _simple(cells, n_g) -> dict:
                 "weights_used": {}, "overall_weights": {"cells": [], "att_weights": []}}
     ks = [k for (k, g, att) in keepers]
     raw = np.array([n_g[g] for (k, g, att) in keepers], dtype=float)
-    w = raw / raw.sum()
+    w = _normalize(raw, ctx="simple overall")
     atts = np.array([att for (k, g, att) in keepers], dtype=float)
     overall = float(np.dot(w, atts))
     return {"kind": "simple", "overall": overall, "label": [], "estimate": [],
@@ -104,6 +136,10 @@ def _group(cells, n_g) -> dict:
         overall_weights = {"groups": [], "group_weights": []}
     else:
         tot = sum(group_n.values())
+        if tot == 0.0:
+            raise CSAggregateError(
+                "CS_AGG_DEGENERATE: zero cohort-weight denominator while aggregating "
+                "group overall.")
         gw = {g: group_n[g] / tot for g in labels}
         overall = float(sum(gw[g] * group_theta[g] for g in labels))
         overall_weights = {"groups": list(labels),
@@ -121,7 +157,7 @@ def _dynamic(cells, n_g) -> dict:
         sel = [(k, g, att) for (k, g, t, ee, att) in cells if ee == e]
         ks = [k for (k, g, att) in sel]
         raw = np.array([n_g[g] for (k, g, att) in sel], dtype=float)
-        w = raw / raw.sum()
+        w = _normalize(raw, ctx=f"dynamic event-time {e}")
         atts = np.array([att for (k, g, att) in sel], dtype=float)
         theta = float(np.dot(w, atts))
         labels.append(e)
@@ -152,7 +188,7 @@ def _calendar(cells, n_g) -> dict:
             continue
         ks = [k for (k, g, att) in sel]
         raw = np.array([n_g[g] for (k, g, att) in sel], dtype=float)
-        w = raw / raw.sum()
+        w = _normalize(raw, ctx=f"calendar period {t}")
         atts = np.array([att for (k, g, att) in sel], dtype=float)
         theta = float(np.dot(w, atts))
         labels.append(t)
