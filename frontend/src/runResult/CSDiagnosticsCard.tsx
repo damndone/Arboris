@@ -67,6 +67,8 @@ export interface CSDiagnostics {
     anticipation: number;
     covariates: string[];
     cluster_var: string | null;
+    cluster_level?: string;
+    n_clusters?: number;
     n_units: number;
     n_cohorts: number;
     n_valid_cells: number;
@@ -288,6 +290,15 @@ export function CSDiagnosticsCard({
             {m.n_valid_cells}/{m.n_cells} · 省略格 {omittedCount} · 置信度
             {(m.confidence_level * 100).toFixed(0)}% · 带类型 {m.band_type}
           </div>
+          {m.cluster_level && (
+            <div aria-label="cs-cluster-level">
+              聚类层级:{" "}
+              {m.cluster_level === "entity"
+                ? "实体 (entity)"
+                : `${m.cluster_level} · ${m.n_clusters ?? "?"} 簇`}
+              （cluster-robust SE）
+            </div>
+          )}
         </div>
       )}
     </section>

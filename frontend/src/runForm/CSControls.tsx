@@ -3,13 +3,15 @@ export interface CSValue {
   estMethod: "dr" | "ipw" | "reg";
   basePeriod: "varying" | "universal";
   anticipation: number;
+  clusterVar: string; // "" = cluster by entity
 }
 
 export function CSControls(props: {
   value: CSValue;
+  columns: string[];
   onChange: (v: CSValue) => void;
 }) {
-  const { value, onChange } = props;
+  const { value, columns, onChange } = props;
   const set = (patch: Partial<CSValue>) => onChange({ ...value, ...patch });
 
   return (
@@ -74,6 +76,20 @@ export function CSControls(props: {
             set({ anticipation: Number.isFinite(n) && n >= 0 ? n : 0 });
           }}
         />
+      </label>
+
+      <label className="ios-field">
+        <span>聚类变量 (cluster, 选填)</span>
+        <select
+          aria-label="cs-cluster-var"
+          value={value.clusterVar}
+          onChange={(e) => set({ clusterVar: e.target.value })}
+        >
+          <option value="">按实体 (entity, 默认)</option>
+          {columns.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
       </label>
     </div>
   );
