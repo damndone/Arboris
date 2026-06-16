@@ -17,6 +17,7 @@ import { PanelControls } from "./PanelControls";
 import { PredictionControls } from "./PredictionControls";
 import { IVControls, type IVRoleValue } from "./IVControls";
 import { DIDControls, type DIDRoleValue } from "./DIDControls";
+import { CSControls, type CSValue } from "./CSControls";
 
 type RequestState = "idle" | "working";
 
@@ -73,6 +74,14 @@ export function RunForm(props: RunFormProps) {
     treat: "",
     post: "",
     status: "",
+  });
+  // V1.5.6: Callaway-Sant'Anna (cs_did) specific params. Entity/time/cohort
+  // roles are shared with DID via `didRole`; these are the CS-only knobs.
+  const [csValue, setCsValue] = useState<CSValue>({
+    controlGroup: "never",
+    estMethod: "dr",
+    basePeriod: "varying",
+    anticipation: 0,
   });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
@@ -207,7 +216,11 @@ export function RunForm(props: RunFormProps) {
       // whichever are set) carry the design and must NOT appear in x. Mirrors
       // the IV exog-remainder exclusion above.
       const isDID = modelType === "did";
-      const didRoleCols = isDID
+      // V1.5.6: cs_did reuses the exact same entity/time/cohort role wiring as
+      // classic DID (same capabilities group). The CS-only knobs go separately.
+      const isCsDid = modelType === "cs_did";
+      const usesDidRoles = isDID || isCsDid;
+      const didRoleCols = usesDidRoles
         ? [
             didRole.entity,
             didRole.time,
@@ -222,7 +235,7 @@ export function RunForm(props: RunFormProps) {
             (c) =>
               !ivRole.endog.includes(c) && !ivRole.instruments.includes(c),
           )
-        : isDID
+        : usesDidRoles
           ? xColumns.filter((c) => !didRoleCols.includes(c))
           : xColumns;
       const result = await runWorkflow(
@@ -236,19 +249,23 @@ export function RunForm(props: RunFormProps) {
         transpose,
         imputationPayload,
         {
-          entityCol: isDID ? didRole.entity : entityCol,
-          timeCol: isDID ? didRole.time : timeCol,
+          entityCol: usesDidRoles ? didRole.entity : entityCol,
+          timeCol: usesDidRoles ? didRole.time : timeCol,
           covariance,
           predictionModelType: predictionEnabled ? predictionModelType : "",
           predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
           predictionSamplingMethod: predictionEnabled ? predictionSampling : "",
           ivEndog: isIV ? ivRole.endog : undefined,
           ivInstruments: isIV ? ivRole.instruments : undefined,
-          didMode: isDID ? didRole.mode : undefined,
-          didCohortCol: isDID ? didRole.cohort : undefined,
-          didTreatCol: isDID ? didRole.treat : undefined,
-          didPostCol: isDID ? didRole.post : undefined,
-          didStatusCol: isDID ? didRole.status : undefined,
+          didMode: usesDidRoles ? didRole.mode : undefined,
+          didCohortCol: usesDidRoles ? didRole.cohort : undefined,
+          didTreatCol: usesDidRoles ? didRole.treat : undefined,
+          didPostCol: usesDidRoles ? didRole.post : undefined,
+          didStatusCol: usesDidRoles ? didRole.status : undefined,
+          csControlGroup: isCsDid ? csValue.controlGroup : undefined,
+          csEstMethod: isCsDid ? csValue.estMethod : undefined,
+          csBasePeriod: isCsDid ? csValue.basePeriod : undefined,
+          csAnticipation: isCsDid ? csValue.anticipation : undefined,
         },
       );
       setLastRun(result);
@@ -398,11 +415,17 @@ export function RunForm(props: RunFormProps) {
             </div>
           )}
           {/* DID role cols (entity/time/cohort) are panel identifiers chosen from ALL columns, not the x subset */}
-          {modelType === "did" && (
+          {(modelType === "did" || modelType === "cs_did") && (
             <DIDControls
               columns={columnNames}
               value={didRole}
               onChange={setDidRole}
+            />
+          )}
+          {modelType === "cs_did" && (
+            <CSControls
+              value={csValue}
+              onChange={setCsValue}
             />
           )}
           <PredictionControls

@@ -335,6 +335,10 @@ export interface RunExtraParams {
   didTreatCol?: string;
   didPostCol?: string;
   didStatusCol?: string;
+  csControlGroup?: string;
+  csEstMethod?: string;
+  csBasePeriod?: string;
+  csAnticipation?: number;
 }
 
 export async function runWorkflow(
@@ -368,6 +372,10 @@ export async function runWorkflow(
   if (extra?.didTreatCol) form.append("did_treat_col", extra.didTreatCol);
   if (extra?.didPostCol) form.append("did_post_col", extra.didPostCol);
   if (extra?.didStatusCol) form.append("did_status_col", extra.didStatusCol);
+  if (extra?.csControlGroup) form.append("cs_control_group", extra.csControlGroup);
+  if (extra?.csEstMethod) form.append("cs_est_method", extra.csEstMethod);
+  if (extra?.csBasePeriod) form.append("cs_base_period", extra.csBasePeriod);
+  if (extra?.csAnticipation) form.append("cs_anticipation", String(extra.csAnticipation));
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);

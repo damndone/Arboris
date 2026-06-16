@@ -23,6 +23,10 @@ import {
   type DIDDiagnostics,
 } from "./runResult/DIDDiagnosticsCard";
 import {
+  CSDiagnosticsCard,
+  type CSDiagnosticsData,
+} from "./runResult/CSDiagnosticsCard";
+import {
   ImputationSummary,
   type ImputationSummaryData,
 } from "./runResult/ImputationSummary";
@@ -193,6 +197,9 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
   const [didDiagnostics, setDidDiagnostics] = useState<
     DIDDiagnostics | undefined
   >(undefined);
+  const [csDiagnostics, setCsDiagnostics] = useState<
+    CSDiagnosticsData | undefined
+  >(undefined);
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -308,6 +315,30 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       })
       .catch(() => {
         if (!cancelled) setDidDiagnostics(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
+
+  // V1.5.6: when the run produced a cs_did artifact (Callaway-Sant'Anna runs),
+  // fetch its JSON to render the CSDiagnosticsCard. Mirrors the DID wiring.
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const present = artifactsState.groups.some((g) =>
+      g.items.some((it) => it.artifact_id === "cs_did"),
+    );
+    if (!present) {
+      setCsDiagnostics(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<CSDiagnosticsData>(projectRoot, runId, "cs_did")
+      .then((data) => {
+        if (!cancelled) setCsDiagnostics(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCsDiagnostics(undefined);
       });
     return () => {
       cancelled = true;
@@ -459,6 +490,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <PredictionResultCard result={predictionResult} />
       <IVDiagnosticsCard diagnostics={ivDiagnostics} />
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
+      <CSDiagnosticsCard diagnostics={csDiagnostics} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>

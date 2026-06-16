@@ -498,6 +498,95 @@ def run_event_study(
     }
 
 
+def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
+               anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05):
+    """Callaway-Sant'Anna group-time ATT end to end. Returns a structured dict:
+    att_gt cell table, four aggregations (each with point estimates + analytical SE +
+    multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
+    Pure (no I/O). Seed-deterministic."""
+    from ..engine.cs_attgt import estimate_att_gt
+    from ..engine.cs_aggregate import aggregate
+    from ..engine.cs_inference import multiplier_bootstrap
+    import numpy as np
+
+    # v1.5.6 hardening — Fix #2: coerce/validate the outcome to numeric, mirroring
+    # the other runners' `_ensure_numeric_y`. A string/object y otherwise reaches
+    # a bare `dtype 'str' does not support operation 'mean'` TypeError that escapes
+    # to WORKFLOW_FAILED; this raises the structured numeric-y ValueError instead
+    # (caught by the estimation stage → MODEL_FIT_FAILED).
+    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
+
+    bundle = estimate_att_gt(norm, control_group=control_group, est_method=est_method,
+        base_period=base_period, anticipation=anticipation,
+        covariates=list(covariates), cluster_var=cluster_var)
+    G = bundle.influence_func.shape[0]
+
+    # --- per-cell att_gt table (se from the cell's IF column for valid cells) ---
+    att_gt = []
+    for k, m in enumerate(bundle.cell_metadata):
+        col = bundle.influence_func[:, k]
+        se = float(np.sqrt((col**2).sum()) / G) if m["valid"] else None
+        att_gt.append({"g": float(m["g"]), "t": float(m["t"]),
+            "event_time": float(m["event_time"]), "att": (float(bundle.estimates[k])
+            if m["valid"] else None), "se": se, "n_treated": m["n_treated"],
+            "n_control": m["n_control"], "valid": bool(m["valid"]),
+            "warning": m.get("warning")})
+
+    # --- four aggregations, each with bootstrap bands ---
+    aggregations = {}
+    agg_by_kind = {}
+    for kind in ("simple", "dynamic", "group", "calendar"):
+        agg = aggregate(bundle, kind)
+        agg_by_kind[kind] = agg
+        out = {"overall": agg["overall"], "overall_se": agg["overall_se"]}
+        # overall band (single component)
+        if agg["overall"] is not None and agg["overall_if"] is not None:
+            ob = multiplier_bootstrap(np.asarray(agg["overall_if"]).reshape(G, 1),
+                B=B, alpha=alpha, seed=seed, estimates=np.array([agg["overall"]]))
+            out["overall_pointwise_ci"] = ob["pointwise_ci"][0].tolist()
+            out["overall_uniform_band"] = ob["uniform_band"][0].tolist()
+        # per-label estimates + simultaneous band over the labels
+        labels = [float(x) for x in agg["label"]]
+        if labels:
+            lb = multiplier_bootstrap(agg["component_if"], B=B, alpha=alpha, seed=seed,
+                estimates=np.asarray(agg["estimate"], dtype=float))
+            out.update({
+                "label_kind": {"simple": "none", "dynamic": "event_time",
+                    "group": "cohort", "calendar": "period"}[kind],
+                ("event_time" if kind == "dynamic" else "label"): labels,
+                "estimate": [float(x) for x in agg["estimate"]],
+                "se": [float(x) for x in agg["se"]],
+                "pointwise_ci": lb["pointwise_ci"].tolist(),
+                "uniform_band": lb["uniform_band"].tolist(),
+                "uniform_crit": lb["uniform_crit"]})
+        else:
+            out.update({"label_kind": "none", "label": [], "estimate": [], "se": []})
+        aggregations[kind] = out
+
+    # --- warnings ---
+    warnings = []
+    for oc in bundle.diagnostics.get("omitted_cells", []):
+        warnings.append(f"Cell (g={oc['g']}, t={oc['t']}) omitted: {oc.get('warning')}")
+    # single-cohort event times in the dynamic aggregation (thin support)
+    dyn = agg_by_kind["dynamic"]
+    for lab in dyn["label"]:
+        cells = dyn["weights_used"][lab]["cells"]
+        if len(cells) == 1:
+            warnings.append(f"Event time {lab} is supported by a single cohort.")
+
+    cohorts = sorted({m["g"] for m in bundle.cell_metadata})
+    metadata = {"control_group": control_group, "est_method": est_method,
+        "base_period": base_period, "anticipation": anticipation,
+        "covariates": list(covariates), "cluster_var": cluster_var,
+        "n_units": int(G), "n_cohorts": len(cohorts),
+        "n_valid_cells": int(sum(1 for m in bundle.cell_metadata if m["valid"])),
+        "n_cells": len(bundle.cell_metadata), "B": B, "alpha": alpha, "seed": seed,
+        "confidence_level": 1 - alpha, "band_type": "simultaneous"}
+
+    return {"att_gt": att_gt, "aggregations": aggregations,
+        "diagnostics": bundle.diagnostics, "warnings": warnings, "metadata": metadata}
+
+
 def run_time_series_diagnostics(
     frame: pd.DataFrame, y: str, time: str
 ) -> dict[str, float | None]:

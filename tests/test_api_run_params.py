@@ -50,6 +50,42 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["prediction_sampling_method"] == "smote"
 
 
+def test_run_endpoint_forwards_cs_params(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+
+    # Patch _run_workflow (the symbol _bg_run actually calls). Names bind there,
+    # so a positional swap in executor.submit(_bg_run, ...) is caught.
+    with patch(
+        "workbench.api._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
+        resp = client.post("/runs", data={
+            "project_root": root, "mode": "auto", "model_type": "cs_did",
+            "y": "y", "x": "x",
+            "entity_col": "firm", "time_col": "yr",
+            "did_mode": "cohort", "did_cohort_col": "first_treat",
+            "cs_control_group": "never", "cs_est_method": "dr",
+            "cs_base_period": "varying", "cs_cluster_var": "firm",
+            "cs_anticipation": "1",
+        }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
+        # _bg_run runs on the executor thread — poll until _run_workflow is called.
+        for _ in range(100):
+            if m.call_args is not None:
+                break
+            time.sleep(0.05)
+
+    assert resp.status_code == 200
+    kw = m.call_args.kwargs
+    assert kw["cs_control_group"] == "never"
+    assert kw["cs_est_method"] == "dr"
+    assert kw["cs_base_period"] == "varying"
+    assert kw["cs_cluster_var"] == "firm"
+    assert kw["cs_anticipation"] == 1  # Form(int) parsed to int
+
+
 def test_parse_json_str_array_valid():
     assert _parse_json_str_array('["educ"]', "iv_endog") == ["educ"]
 

@@ -145,6 +145,46 @@ def _fit_did(ctx, env):
     return "did_1", primary, fitted   # MUST return fitted (diagnostics needs it)
 
 
+def _fit_cs_did(ctx, env):
+    from ..did_spec import normalize_did_input
+    id_cands = ctx.artifacts.get("_id_candidates") or []
+    t_cands = ctx.artifacts.get("_time_candidates") or []
+    norm = normalize_did_input(
+        ctx.data.frame,
+        mode=ctx.artifacts.get("_did_mode") or "cohort",
+        entity=id_cands[0] if id_cands else None,
+        time=t_cands[0] if t_cands else None,
+        y=ctx.artifacts["_normalized_y"],
+        cohort=ctx.artifacts.get("_did_cohort_col"),
+        treat=ctx.artifacts.get("_did_treat_col"),
+        post=ctx.artifacts.get("_did_post_col"),
+        status=ctx.artifacts.get("_did_status_col"),
+    )
+    ctx.artifacts["_did_normalized"] = norm
+    result = _orch().run_cs_did(
+        norm,
+        covariates=ctx.artifacts["_normalized_x"],
+        control_group=ctx.artifacts.get("_cs_control_group") or "never",
+        est_method=ctx.artifacts.get("_cs_est_method") or "dr",
+        base_period=ctx.artifacts.get("_cs_base_period") or "varying",
+        anticipation=int(ctx.artifacts.get("_cs_anticipation") or 0),
+        cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,
+    )
+    ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
+    simple = result["aggregations"]["simple"]
+    primary = {
+        "schema_version": 1, "model_id": "cs_did_1", "model_type": "cs_did",
+        "engine": "workbench", "nobs": int(result["metadata"]["n_units"]),
+        "r_squared": None,
+        "coefficients": {"ATT": {
+            "estimate": simple["overall"], "std_error": simple["overall_se"],
+            "p_value": None,
+            "source_id": "model_results.cs_did_1.coefficients.ATT"}},
+        "warnings": result["warnings"],
+    }
+    return "cs_did_1", primary, None     # no fitted object; diagnostics reads _cs_did_result
+
+
 def _fit_ols(ctx, env):
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
@@ -175,6 +215,7 @@ CORE_PACK = AnalysisPack(
         ModelHandler("ols", "ols_1", ("continuous",), _fit_ols),
         ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
         ModelHandler("did", "did_1", ("continuous",), _fit_did),
+        ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),
     ],
     defaults_by_y_type={
         "continuous": "ols",
@@ -193,6 +234,12 @@ CORE_PACK = AnalysisPack(
             label="Switch to plain Panel FE",
             param_overrides={"model_type": "panel_ols"},
             applies_to=["did"],
+        ),
+        RerunAction(
+            key="cs_did_switch_to_did",
+            label="Switch to classic DID",
+            param_overrides={"model_type": "did"},
+            applies_to=["cs_did"],
         ),
     ],
 )
@@ -261,6 +308,13 @@ class EstimationStage:
                 "DID_FIELDS_MISSING",
                 "did requires both an entity and a time column.",
                 {"model_type": "did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
+            )
+
+        if model_type == "cs_did" and (not id_cands or not t_cands):
+            raise WorkflowValidationError(
+                "CS_DID_FIELDS_MISSING",
+                "cs_did requires both an entity and a time column.",
+                {"model_type": "cs_did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
             )
 
         env.step("estimation", "start", f"Fitting {ctx.y_type} model (y type: {ctx.y_type})...")
