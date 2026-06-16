@@ -5,32 +5,41 @@ from scipy import stats
 
 
 def multiplier_bootstrap(if_matrix, *, B=1000, alpha=0.05, seed=20260615,
-                         estimates=None):
-    """Callaway-Sant'Anna multiplier (wild) bootstrap on a cluster-row influence
-    matrix Psi of shape (G, K). Returns analytical SE, pointwise CIs, and a
-    simultaneous (sup-t) uniform band. Seed-deterministic (golden 0-drift).
+                         estimates=None, clusters=None):
+    """Callaway-Sant'Anna multiplier (wild) bootstrap.
 
-    if_matrix : (G, K) ndarray, mean-zero columns (cluster-row IF).
-    estimates : optional (K,) point estimates; CIs are centered on them
-        (default zeros).
+    if_matrix : (N, K) ENTITY-row IF, mean-zero columns.
+    clusters  : optional (N,) cluster id per entity row. When given, the IF is
+        summed within clusters (R's rowsum) before drawing one Mammen multiplier
+        per CLUSTER; the analytical/robust scale divisor stays N (entities), so
+        the unclustered case (each entity its own cluster) is the exact identity.
+    estimates : optional (K,) point estimates; CIs are centered on them.
     """
     if B < 1:
         raise ValueError("CS_BAD_BOOTSTRAP_B: B must be >= 1")
-    Psi = np.asarray(if_matrix, dtype=float)
-    G, K = Psi.shape
+    Psi_entity = np.asarray(if_matrix, dtype=float)
+    N, K = Psi_entity.shape
+    if clusters is None:
+        Psi = Psi_entity
+    else:
+        clusters = np.asarray(clusters)
+        if clusters.shape[0] != N:
+            raise ValueError("CS_CLUSTER_LEN_MISMATCH: clusters length != IF rows")
+        uniq, inv = np.unique(clusters, return_inverse=True)
+        Psi = np.zeros((len(uniq), K))
+        np.add.at(Psi, inv, Psi_entity)            # rowsum within cluster
+    G = Psi.shape[0]                               # rows to draw multipliers over
     if estimates is None:
         estimates = np.zeros(K)
     estimates = np.asarray(estimates, dtype=float)
-    # analytical SE (R getSE convention on cluster-row IF)
-    se = np.sqrt((Psi ** 2).sum(axis=0)) / G
-    # Mammen two-point multipliers (mean 0, var 1), one per sampling unit (row)
+    # analytical/robust SE uses the ENTITY count N (cluster-robust CRVE convention)
+    se = np.sqrt((Psi ** 2).sum(axis=0)) / N
     rng = np.random.default_rng(seed)
     k1 = (1 - np.sqrt(5)) / 2
     k2 = (1 + np.sqrt(5)) / 2
     p = (np.sqrt(5) + 1) / (2 * np.sqrt(5))
-    V = np.where(rng.random((B, G)) < p, k1, k2)        # (B, G)
-    # bootstrap draws of the estimator perturbation: R_b = (1/G) sum_c V_bc Psi_ck
-    R = (V @ Psi) / G                                    # (B, K)
+    V = np.where(rng.random((B, G)) < p, k1, k2)        # (B, G) one per cluster
+    R = (V @ Psi) / N                                   # (B, K)  divisor N
     # robust scale (CS IQR estimator), fall back to analytical se if degenerate
     q75, q25 = np.quantile(R, 0.75, axis=0), np.quantile(R, 0.25, axis=0)
     sigma = (q75 - q25) / (stats.norm.ppf(0.75) - stats.norm.ppf(0.25))

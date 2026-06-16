@@ -65,3 +65,32 @@ def test_degenerate_zero_column_does_not_nan_the_band():
     assert r["uniform_band"][2, 1] - r["uniform_band"][2, 0] == 0.0
     assert np.all(r["uniform_band"][[0, 1, 3, 4], 1] -
                   r["uniform_band"][[0, 1, 3, 4], 0] > 0)
+
+
+def test_clusters_none_is_unchanged():
+    psi = _if()
+    a = multiplier_bootstrap(psi, B=500, alpha=0.05, seed=3)
+    b = multiplier_bootstrap(psi, B=500, alpha=0.05, seed=3, clusters=None)
+    assert np.array_equal(a["se"], b["se"])
+    assert a["uniform_crit"] == b["uniform_crit"]
+
+
+def test_distinct_clusters_equal_entity_identity():
+    # each row its own cluster => identical to unclustered (rowsum is identity)
+    psi = _if()                                   # (80, 5)
+    distinct = np.arange(psi.shape[0])
+    a = multiplier_bootstrap(psi, B=500, alpha=0.05, seed=9)
+    b = multiplier_bootstrap(psi, B=500, alpha=0.05, seed=9, clusters=distinct)
+    assert np.allclose(a["se"], b["se"])
+    assert np.allclose(a["uniform_band"], b["uniform_band"])
+
+
+def test_clustered_se_matches_rowsum_crve():
+    # se under clustering = sqrt(sum_c S_c^2)/N  (N = #rows, not #clusters)
+    psi = _if()                                   # (80, 5)
+    clusters = np.arange(psi.shape[0]) % 16       # 16 clusters of 5
+    r = multiplier_bootstrap(psi, B=200, alpha=0.05, seed=4, clusters=clusters)
+    import pandas as pd
+    S = pd.DataFrame(psi).groupby(clusters).sum().to_numpy()   # (16, 5)
+    expected = np.sqrt((S ** 2).sum(axis=0)) / psi.shape[0]
+    assert np.allclose(r["se"], expected, atol=1e-12)
