@@ -65,6 +65,20 @@ describe("CSDiagnosticsCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("renders a 结果不完整 fallback for a truthy-but-incomplete artifact", () => {
+    // available is not false (so it passes the degraded check) but a required
+    // aggregation key is missing — must NOT throw on d.aggregations.dynamic.*.
+    const partial = {
+      ...diag,
+      aggregations: { simple: diag.aggregations.simple },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any as CSDiagnostics;
+    expect(() =>
+      render(<CSDiagnosticsCard diagnostics={partial} />),
+    ).not.toThrow();
+    expect(screen.getByText(/结果不完整/)).toBeInTheDocument();
+  });
+
   it("renders an unavailable note when dynamic event_time is empty", () => {
     const noEs: CSDiagnostics = { ...diag,
       aggregations: { ...diag.aggregations,

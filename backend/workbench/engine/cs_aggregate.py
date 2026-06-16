@@ -87,6 +87,7 @@ def _se(entity_if, row_cluster, n_total):
     if len(uniq) == len(row_cluster):
         clustered = entity_if            # identity (cluster == entity)
     else:
+        # UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); needs a clustered R oracle before re-enabling
         clustered = np.array([entity_if[row_cluster == c].sum() for c in uniq])
     return float(np.sqrt(np.sum(clustered ** 2)) / n)
 
@@ -187,6 +188,7 @@ def _attach_influence(bundle, out) -> None:
     att = bundle.estimates
     N = int(bundle.aux["n_total"])
     row_cohort = bundle.aux["row_cohort"]
+    # UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); row_cluster == entity in practice — needs a clustered R oracle before re-enabling
     row_cluster = bundle.aux["row_cluster"]
     pg = _pg_map(bundle)
     cell_g = [float(m["g"]) for m in bundle.cell_metadata]

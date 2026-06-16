@@ -1,5 +1,12 @@
 import numpy as np
+import pytest
 from workbench.engine.cs_inference import multiplier_bootstrap
+
+
+def test_bootstrap_B_below_one_raises():
+    # B=0 used to reach an empty-quantile IndexError; guard it structurally.
+    with pytest.raises(ValueError, match="CS_BAD_BOOTSTRAP_B"):
+        multiplier_bootstrap(_if(), B=0, alpha=0.05, seed=1)
 
 
 def _if():

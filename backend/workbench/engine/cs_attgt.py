@@ -190,6 +190,7 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
     raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
 
 
+# UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); needs a clustered R oracle before re-enabling
 def cluster_influence(obs_if: np.ndarray, cluster_of_obs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Sum observation-level IF within clusters. Returns (cluster_ids_sorted, summed_if).
     Default cluster = entity → each obs is its own cluster → identity."""
@@ -248,6 +249,24 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     if covariates:
         base_rows = (frame[frame[time] == base_t].drop_duplicates(entity)
                      .set_index(entity).loc[units, covariates].to_numpy(float))
+        # v1.5.6 hardening round 2 — Fix #1: the cell complete-case must require the
+        # base-period COVARIATE values be observed too (spec §3.9). A non-finite
+        # covariate row otherwise reaches `sm.Logit(D, X)` and raises a statsmodels
+        # MissingDataError (NOT a ValueError) that escapes to WORKFLOW_FAILED. Drop
+        # such units and re-filter units/D/dY consistently; if the surviving set has
+        # no treated or no control, return the invalid-cell shape so the cell is
+        # omitted (→ CS_NO_VALID_CELLS if every cell goes invalid). NO-OP when all
+        # covariate rows are finite (the panel.csv oracle).
+        cov_ok = np.isfinite(base_rows).all(axis=1)
+        if not cov_ok.all():
+            units = units[cov_ok]
+            dY = dY[cov_ok]
+            D = D[cov_ok]
+            base_rows = base_rows[cov_ok]
+            if D.sum() == 0 or (1.0 - D).sum() == 0:
+                return {"att": float("nan"), "n_treated": int(D.sum()),
+                        "n_control": int((1 - D).sum()), "valid": False,
+                        "warning": "CS_EMPTY_CELL"}
         X = np.column_stack([np.ones(len(units)), base_rows])
     # propensity score: constant => p = treated share (=> weights collapse to 2x2)
     if X.shape[1] == 1:
@@ -380,6 +399,7 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
                           "clean comparison group; cannot estimate.")
 
     # cluster aggregation (default cluster = entity => identity)
+    # UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); needs a clustered R oracle before re-enabling (unreachable — guarded above)
     if cluster_var:
         cl = frame.drop_duplicates(entity).set_index(entity).loc[units_all, cluster_var].to_numpy()
         cluster_ids = np.unique(cl)

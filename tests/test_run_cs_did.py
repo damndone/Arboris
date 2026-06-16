@@ -36,7 +36,8 @@ def test_run_cs_did_deterministic():
 
 def test_run_cs_did_overall_matches_aggte_point():
     import json
-    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))
+    # aggte.json restructured to {dr,ipw,reg} (hardening round 2 Fix #2); this run is dr.
+    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))["dr"]
     res = run_cs_did(_norm(), covariates=["x1"], control_group="never", est_method="dr",
         base_period="varying", anticipation=0, cluster_var=None, seed=1)
     assert abs(res["aggregations"]["simple"]["overall"] - ref["simple"]["overall"]) < 1e-6

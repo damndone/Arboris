@@ -206,6 +206,17 @@ export function CSDiagnosticsCard({
 
   const d = diagnostics as CSDiagnostics;
   const agg = d.aggregations;
+  // Defensive: a truthy-but-incomplete artifact (e.g. a degraded write that kept
+  // `available` unset but dropped aggregation keys) would otherwise throw when we
+  // dereference agg.dynamic.event_time below. Render a small fallback instead.
+  if (!agg || !agg.simple || !agg.dynamic || !agg.group || !agg.calendar) {
+    return (
+      <section className="ios-card cs-diagnostics" aria-label="cs-diagnostics">
+        <div className="ios-card-title">Callaway-Sant'Anna DID</div>
+        <div className="ios-warning">结果不完整</div>
+      </section>
+    );
+  }
   const dyn = agg.dynamic;
   const esOk = dyn.event_time.length > 0;
   const band = agg.simple.overall_uniform_band;

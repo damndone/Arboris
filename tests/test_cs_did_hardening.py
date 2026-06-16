@@ -71,3 +71,36 @@ def test_all_nan_y_no_valid_cells():
     with pytest.raises((CSSpecError, ValueError), match="CS_NO_VALID_CELLS"):
         estimate_att_gt(norm, control_group="never", est_method="dr",
             base_period="varying", anticipation=0, covariates=[], cluster_var=None)
+
+
+# --- Round 2 Fix #1: all-NaN COVARIATE → CS_NO_VALID_CELLS, not MissingDataError
+def _frame_with_cov(cov_values):
+    """_frame() plus an extra covariate column `x` set to `cov_values`
+    (scalar broadcast)."""
+    frame = _frame()
+    frame["x"] = cov_values
+    return frame
+
+
+def _norm_cov(frame):
+    return normalize_did_input(frame, mode="cohort", entity="unit", time="period",
+        y="y", cohort="first_treat")
+
+
+def test_all_nan_covariate_no_valid_cells():
+    """An all-NaN covariate must make every cell invalid (its base-period covariate
+    row is non-finite) → structured CS_NO_VALID_CELLS, NOT a statsmodels
+    MissingDataError escaping `except ValueError` → WORKFLOW_FAILED."""
+    norm = _norm_cov(_frame_with_cov(np.nan))
+    with pytest.raises((CSSpecError, ValueError), match="CS_NO_VALID_CELLS"):
+        estimate_att_gt(norm, control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, covariates=["x"], cluster_var=None)
+
+
+def test_all_nan_covariate_run_cs_did_structured():
+    """End-to-end: an all-NaN covariate surfaces a ValueError (caught → MODEL_FIT_FAILED),
+    never a bare MissingDataError that escapes to WORKFLOW_FAILED."""
+    norm = _norm_cov(_frame_with_cov(np.nan))
+    with pytest.raises(ValueError, match="CS_NO_VALID_CELLS"):
+        run_cs_did(norm, covariates=["x"], control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, cluster_var=None)

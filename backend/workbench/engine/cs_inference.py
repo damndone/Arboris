@@ -14,6 +14,8 @@ def multiplier_bootstrap(if_matrix, *, B=1000, alpha=0.05, seed=20260615,
     estimates : optional (K,) point estimates; CIs are centered on them
         (default zeros).
     """
+    if B < 1:
+        raise ValueError("CS_BAD_BOOTSTRAP_B: B must be >= 1")
     Psi = np.asarray(if_matrix, dtype=float)
     G, K = Psi.shape
     if estimates is None:

@@ -39,17 +39,25 @@ inf_out <- list(
 )
 write_json(inf_out, "tests/fixtures/cs_did/drdid_inffunc.json", digits = 12, auto_unbox = TRUE)
 
-# ---- Aggregations (dr, never-treated): simple / dynamic / group / calendar ----
-r <- att_gt(yname = "y", tname = "period", idname = "unit", gname = "first_treat",
-            xformla = ~x1, data = d, est_method = "dr", control_group = "nevertreated",
-            base_period = "varying", anticipation = 0, bstrap = FALSE, cband = FALSE)
-agg <- function(type) {
-  a <- aggte(r, type = type, bstrap = FALSE)
-  list(overall = a$overall.att, overall_se = a$overall.se,
-       egt = a$egt, att_egt = a$att.egt, se_egt = a$se.egt)
+# ---- Aggregations: simple / dynamic / group / calendar, per est_method ----
+# never-treated, varying base, anticipation 0. Structured under method keys so the
+# shared aggregation-SE machinery (wif/get_agg_inf_func/getSE) is regression-frozen
+# for ipw and reg too, not only the dr oracle (v1.5.6 hardening round 2, Fix #2).
+emit_aggte <- function(method) {
+  r <- att_gt(yname = "y", tname = "period", idname = "unit", gname = "first_treat",
+              xformla = ~x1, data = d, est_method = method,
+              control_group = "nevertreated", base_period = "varying",
+              anticipation = 0, bstrap = FALSE, cband = FALSE)
+  agg <- function(type) {
+    a <- aggte(r, type = type, bstrap = FALSE)
+    list(overall = a$overall.att, overall_se = a$overall.se,
+         egt = a$egt, att_egt = a$att.egt, se_egt = a$se.egt)
+  }
+  list(simple = agg("simple"), dynamic = agg("dynamic"),
+       group = agg("group"), calendar = agg("calendar"))
 }
-write_json(list(simple = agg("simple"), dynamic = agg("dynamic"),
-                group = agg("group"), calendar = agg("calendar")),
-           "tests/fixtures/cs_did/aggte.json", digits = 12, auto_unbox = TRUE)
+aggte_out <- list()
+for (m in c("dr", "ipw", "reg")) aggte_out[[m]] <- emit_aggte(m)
+write_json(aggte_out, "tests/fixtures/cs_did/aggte.json", digits = 12, auto_unbox = TRUE)
 
 cat("Fixtures written: att_gt.json, drdid_inffunc.json, aggte.json\n")

@@ -39,19 +39,21 @@ def test_cell_influence_function_matches_DRDID(method):
         f"{method} max dev {np.max(np.abs(ours - np.array(ref[method]['inf_func'])))}"
 
 
-def _bundle_dr_never():
+# aggte.json is structured by est_method: {"dr": {...}, "ipw": {...}, "reg": {...}}
+# (v1.5.6 hardening round 2, Fix #2 — ipw/reg SE machinery frozen vs R too).
+def _bundle_never(est_method):
     d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
     from workbench.engine.did_spec import normalize_did_input
     from workbench.engine.cs_attgt import estimate_att_gt
     norm = normalize_did_input(d, mode="cohort", entity="unit", time="period",
         y="y", cohort="first_treat")
-    return estimate_att_gt(norm, control_group="never", est_method="dr",
+    return estimate_att_gt(norm, control_group="never", est_method=est_method,
         base_period="varying", anticipation=0, covariates=["x1"], cluster_var=None)
 
 def test_aggregations_match_R_aggte_pointwise():
     from workbench.engine.cs_aggregate import aggregate
-    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))
-    b = _bundle_dr_never()
+    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))["dr"]
+    b = _bundle_never("dr")
     # overall for every aggregation type
     for kind in ("simple", "dynamic", "group", "calendar"):
         out = aggregate(b, kind)
@@ -67,19 +69,23 @@ def test_aggregations_match_R_aggte_pointwise():
             assert abs(out["estimate"][i] - att) < 1e-6, \
                 f"{kind} label={lab} ours={out['estimate'][i]} R={att}"
 
-def test_aggregation_se_matches_R_aggte():
+@pytest.mark.parametrize("est_method", ["dr", "ipw", "reg"])
+def test_aggregation_se_matches_R_aggte(est_method):
+    """Freeze the shared wif/_agg_inf_func/_se aggregation-SE machinery against R for
+    ALL three est_methods. The dr aggte was already oracle'd; ipw/reg close the
+    regression-protection hole (a future _wif/_se refactor can't silently break them)."""
     from workbench.engine.cs_aggregate import aggregate
-    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))
-    b = _bundle_dr_never()
+    ref = json.load(open("tests/fixtures/cs_did/aggte.json"))[est_method]
+    b = _bundle_never(est_method)
     for kind in ("simple", "dynamic", "group", "calendar"):
         out = aggregate(b, kind)
         if ref[kind]["overall_se"] is not None:
             assert abs(out["overall_se"] - ref[kind]["overall_se"]) < 1e-6, \
-                f"{kind} overall_se ours={out['overall_se']} R={ref[kind]['overall_se']}"
+                f"{est_method} {kind} overall_se ours={out['overall_se']} R={ref[kind]['overall_se']}"
     for kind in ("dynamic", "group", "calendar"):
         out = aggregate(b, kind)
         labels = list(map(float, ref[kind]["egt"]))
         for lab, se in zip(labels, ref[kind]["se_egt"]):
             i = [round(x, 9) for x in out["label"]].index(round(lab, 9))
             assert abs(out["se"][i] - se) < 1e-6, \
-                f"{kind} label={lab} ours={out['se'][i]} R={se}"
+                f"{est_method} {kind} label={lab} ours={out['se'][i]} R={se}"
