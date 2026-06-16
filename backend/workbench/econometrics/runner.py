@@ -520,6 +520,8 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
         base_period=base_period, anticipation=anticipation,
         covariates=list(covariates), cluster_var=cluster_var)
     G = bundle.influence_func.shape[0]
+    row_cluster = bundle.aux["row_cluster"]
+    n_clusters = int(np.unique(row_cluster).size)
 
     # --- per-cell att_gt table (se from the cell's IF column for valid cells) ---
     att_gt = []
@@ -542,14 +544,15 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
         # overall band (single component)
         if agg["overall"] is not None and agg["overall_if"] is not None:
             ob = multiplier_bootstrap(np.asarray(agg["overall_if"]).reshape(G, 1),
-                B=B, alpha=alpha, seed=seed, estimates=np.array([agg["overall"]]))
+                B=B, alpha=alpha, seed=seed, estimates=np.array([agg["overall"]]),
+                clusters=row_cluster)
             out["overall_pointwise_ci"] = ob["pointwise_ci"][0].tolist()
             out["overall_uniform_band"] = ob["uniform_band"][0].tolist()
         # per-label estimates + simultaneous band over the labels
         labels = [float(x) for x in agg["label"]]
         if labels:
             lb = multiplier_bootstrap(agg["component_if"], B=B, alpha=alpha, seed=seed,
-                estimates=np.asarray(agg["estimate"], dtype=float))
+                estimates=np.asarray(agg["estimate"], dtype=float), clusters=row_cluster)
             out.update({
                 "label_kind": {"simple": "none", "dynamic": "event_time",
                     "group": "cohort", "calendar": "period"}[kind],
@@ -578,7 +581,9 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     metadata = {"control_group": control_group, "est_method": est_method,
         "base_period": base_period, "anticipation": anticipation,
         "covariates": list(covariates), "cluster_var": cluster_var,
-        "n_units": int(G), "n_cohorts": len(cohorts),
+        "n_units": int(G), "n_clusters": n_clusters,
+        "cluster_level": bundle.vcov_config.get("cluster_level", "entity"),
+        "n_cohorts": len(cohorts),
         "n_valid_cells": int(sum(1 for m in bundle.cell_metadata if m["valid"])),
         "n_cells": len(bundle.cell_metadata), "B": B, "alpha": alpha, "seed": seed,
         "confidence_level": 1 - alpha, "band_type": "simultaneous"}
