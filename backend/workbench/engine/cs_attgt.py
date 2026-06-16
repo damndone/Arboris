@@ -21,8 +21,8 @@ CS_PS_TRIM = 0.995
 @dataclass
 class EffectEstimateBundle:
     estimates: np.ndarray                 # (K,)
-    influence_func: np.ndarray            # (G, K) cluster rows, mean-zero columns
-    cluster_ids: np.ndarray               # (G,)
+    influence_func: np.ndarray            # (N, K) ENTITY rows, mean-zero columns
+    cluster_ids: np.ndarray               # (n_clusters,) descriptive only
     cell_metadata: list[dict]             # K records
     weights: dict                         # cohort sizes n_g, shares p̂_g
     vcov_config: dict
@@ -190,15 +190,6 @@ def cell_influence_function(cell: dict, *, est_method: str) -> np.ndarray:
     raise CSSpecError(f"CS_BAD_EST_METHOD: '{est_method}'")
 
 
-# UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); needs a clustered R oracle before re-enabling
-def cluster_influence(obs_if: np.ndarray, cluster_of_obs: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Sum observation-level IF within clusters. Returns (cluster_ids_sorted, summed_if).
-    Default cluster = entity → each obs is its own cluster → identity."""
-    ids = np.unique(cluster_of_obs)
-    summed = np.array([obs_if[cluster_of_obs == c].sum() for c in ids])
-    return ids, summed
-
-
 def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
                 anticipation, covariates, est_method):
     """Sant'Anna-Zhao panel ATT for one (g,t) cell on sub-sample S(g,t).
@@ -328,21 +319,26 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     Enumerates every (g,t) cell, scatters each cell's observation-level IF into a
     full (G x K) cluster-row matrix (zero outside the cell sub-sample), records
     self-describing cell_metadata + the applied sample_spec."""
-    # v1.5.6 hardening — Fix #1: variable-clustering is DEFERRED. One-way
-    # clustering by a non-entity variable needs the entity-level IF clustered in
-    # BOTH the analytical SE and the multiplier bootstrap, plus a clustered R
-    # oracle to validate; that is out of scope here. The DEFAULT (cluster_var
-    # falsy → cluster by entity) is validated and stays. Raising before the
-    # cluster-collapse block also subsumes the bad-cluster-name case: any
-    # cluster_var is rejected structurally before it can hit a `.loc` KeyError.
-    if cluster_var:
-        raise CSSpecError(
-            "CS_CLUSTERING_DEFERRED: clustering by a variable other than the "
-            "entity is not yet supported; leave the cluster variable empty to "
-            "cluster by entity (the default).")
     frame, entity, time, y = norm.frame, norm.entity, norm.time, norm.y
     cohort = frame.groupby(entity)["_did_cohort"].first()
     units_all = np.sort(cohort.index.to_numpy())                 # stable row order
+
+    # Resolve per-entity cluster id (entity-default when cluster_var is falsy).
+    # Single row convention: clustering lives ONLY here (aux["row_cluster"]); the
+    # influence function stays entity-level everywhere downstream.
+    if cluster_var:
+        if cluster_var not in frame.columns:
+            raise CSSpecError(f"CS_CLUSTER_COL_MISSING: '{cluster_var}' is not a column.")
+        cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
+        cl = cl_by_unit.loc[units_all]
+        if cl.isna().any():
+            raise CSSpecError("CS_CLUSTER_COL_NAN: cluster column has missing values.")
+        cl = cl.to_numpy()
+        if len(np.unique(cl)) < 2:
+            raise CSSpecError("CS_CLUSTER_SINGLE: need >= 2 clusters for cluster-robust SE.")
+        row_cluster = np.asarray(cl)
+    else:
+        row_cluster = np.asarray(units_all)
     cohorts = sorted({c for c in cohort.to_numpy() if np.isfinite(c)})
     periods = sorted(pd.to_numeric(frame[time]).unique())
 
@@ -398,17 +394,11 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
         raise CSSpecError("CS_NO_VALID_CELLS: no (g,t) cell had both a treated and a "
                           "clean comparison group; cannot estimate.")
 
-    # cluster aggregation (default cluster = entity => identity)
-    # UNVALIDATED: variable-clustering deferred (CS_CLUSTERING_DEFERRED); needs a clustered R oracle before re-enabling (unreachable — guarded above)
-    if cluster_var:
-        cl = frame.drop_duplicates(entity).set_index(entity).loc[units_all, cluster_var].to_numpy()
-        cluster_ids = np.unique(cl)
-        cif = np.zeros((len(cluster_ids), K))
-        for j, c in enumerate(cluster_ids):
-            cif[j] = obs_if[cl == c].sum(axis=0)
-    else:
-        cluster_ids = units_all
-        cif = obs_if
+    # Single row convention: influence_func stays ENTITY-level (N, K). Clustering
+    # is applied only at the variance steps (cs_aggregate._se, cs_inference) via
+    # aux["row_cluster"]. cluster_ids is descriptive only.
+    cif = obs_if
+    cluster_ids = np.unique(row_cluster)
 
     n_by_g = {g: int((cohort == g).sum()) for g in cohorts}
     total_treated = sum(n_by_g.values())
@@ -430,10 +420,6 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     # plus the cluster assignment of each entity row and the sampling-unit count N.
     row_cohort = np.array([float(cohort.loc[u]) if np.isfinite(cohort.loc[u]) else 0.0
                            for u in units_all], dtype=float)
-    if cluster_var:
-        row_cluster = np.asarray(cl)
-    else:
-        row_cluster = np.asarray(units_all)
     aux = {"n_total": int(G), "row_cohort": row_cohort, "row_cluster": row_cluster}
     return EffectEstimateBundle(estimates=estimates, influence_func=cif, aux=aux,
         cluster_ids=cluster_ids, cell_metadata=meta, weights=weights,

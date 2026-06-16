@@ -2,7 +2,9 @@
 (→ structured MODEL_FIT_FAILED), never a bare KeyError/TypeError (→ WORKFLOW_FAILED).
 
 Each test exercises a previously-escaping path:
-  1. cluster_var set  → CS_CLUSTERING_DEFERRED (variable-clustering deferred)
+  1. cluster_var set  → variable-clustering is SUPPORTED (v1.5.6.1 Task 3): a valid
+     cluster column estimates; a bad/degenerate cluster column raises a structured
+     CS_CLUSTER_* ValueError (never a bare KeyError → WORKFLOW_FAILED).
   2. non-numeric y    → structured numeric-y ValueError (mirrors run_did)
   3. all-NaN y        → CS_NO_VALID_CELLS (empty complete-case pivot, was bare KeyError)
 """
@@ -35,22 +37,35 @@ def _norm(frame=None):
         mode="cohort", entity="unit", time="period", y="y", cohort="first_treat")
 
 
-# --- Fix #1: variable-clustering deferred with a structured guard ----------
-def test_cluster_var_raises_clustering_deferred():
+# --- Fix #1 (v1.5.6.1 Task 3): variable-clustering is now supported; a bad
+#     cluster column must still raise a STRUCTURED CS_CLUSTER_* error, never a
+#     bare KeyError that would escape to WORKFLOW_FAILED. -------------------
+def test_missing_cluster_var_structured():
     norm = _norm()
-    with pytest.raises(CSSpecError, match="CS_CLUSTERING_DEFERRED"):
+    with pytest.raises(CSSpecError, match="CS_CLUSTER_COL_MISSING"):
         estimate_att_gt(norm, control_group="never", est_method="dr",
             base_period="varying", anticipation=0, covariates=[],
-            cluster_var="first_treat")
+            cluster_var="not_a_column")
 
 
-def test_cluster_var_run_cs_did_structured():
-    """End-to-end via run_cs_did: must surface a ValueError (caught → MODEL_FIT_FAILED),
-    not a bare KeyError/TypeError that would escape to WORKFLOW_FAILED."""
+def test_valid_cluster_var_estimates():
+    """A valid cluster column (>=2 clusters) now estimates: entity-level IF, with
+    cluster ids carried only in aux['row_cluster']."""
+    norm = _norm()  # first_treat has 3 distinct values across 6 entities
+    b = estimate_att_gt(norm, control_group="never", est_method="dr",
+        base_period="varying", anticipation=0, covariates=[],
+        cluster_var="first_treat")
+    assert b.influence_func.shape[0] == 6          # ENTITY-level rows, not clusters
+    assert b.aux["row_cluster"].shape[0] == 6
+
+
+def test_bad_cluster_var_run_cs_did_structured():
+    """End-to-end via run_cs_did: a missing cluster column must surface a ValueError
+    (caught → MODEL_FIT_FAILED), not a bare KeyError/TypeError → WORKFLOW_FAILED."""
     norm = _norm()
-    with pytest.raises(ValueError, match="CS_CLUSTERING_DEFERRED"):
+    with pytest.raises(ValueError, match="CS_CLUSTER_COL_MISSING"):
         run_cs_did(norm, covariates=[], control_group="never", est_method="dr",
-            base_period="varying", anticipation=0, cluster_var="first_treat")
+            base_period="varying", anticipation=0, cluster_var="not_a_column")
 
 
 # --- Fix #2: non-numeric outcome → structured failure ---------------------
