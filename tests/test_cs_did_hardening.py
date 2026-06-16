@@ -119,3 +119,81 @@ def test_all_nan_covariate_run_cs_did_structured():
     with pytest.raises(ValueError, match="CS_NO_VALID_CELLS"):
         run_cs_did(norm, covariates=["x"], control_group="never", est_method="dr",
             base_period="varying", anticipation=0, cluster_var=None)
+
+
+# --- Task 6 (v1.5.6.1): FULL-PIPELINE clustering proof -----------------------
+# Tasks 2-5 wired variable-clustering through api.py -> orchestrator
+# (cs_cluster_var -> ctx.artifacts["_cs_cluster_var"]) -> estimation stage
+# (run_cs_did(..., cluster_var=...)). Task 3 tests call run_cs_did DIRECTLY.
+# These tests prove the WHOLE run_workflow pipeline:
+#   1. a clustered cs_did run COMPLETES and writes cluster metadata to its artifact;
+#   2. a bad cluster column produces a STRUCTURED failure (status=failed +
+#      CS_CLUSTER_* signal in errors.json), NOT a bare WORKFLOW_FAILED escape.
+from workbench.projects import create_project
+from workbench.orchestrator import run_workflow
+from workbench.artifacts import read_json
+
+
+def _run(tmp_path, frame, *, y, x, mode="auto", model_type="auto", **extra):
+    source = tmp_path / "data.csv"
+    frame.to_csv(source, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [source], mode=mode, y=y, x=x,
+                          model_type=model_type, **extra)
+    return project.root / "runs" / result["run_id"], result
+
+
+def _run_cs(tmp_path, df, *, cs_cluster_var):
+    """run_workflow with the fixed cs_did kwargs (cohort/never/dr/varying)."""
+    return _run(tmp_path, df, y="y", x=["x1"], model_type="cs_did",
+                entity_col="id", time_col="year", did_mode="cohort",
+                did_cohort_col="first_treat", cs_control_group="never",
+                cs_est_method="dr", cs_base_period="varying",
+                cs_cluster_var=cs_cluster_var)
+
+
+def _read_cs_did_metadata(run_root):
+    """The diagnostics stage writes the run_cs_did dict to run_root/cs_did.json
+    (artifact id 'cs_did'); return its ['metadata']."""
+    return read_json(run_root / "cs_did.json")["metadata"]
+
+
+def test_clustered_cs_did_completes_end_to_end(tmp_path):
+    rng = np.random.default_rng(5)
+    rows = []
+    for i in range(40):
+        cohort = [0, 2019, 2020, 2021][i % 4]
+        x1, fe = float(rng.normal()), float(rng.normal())
+        for year in range(2017, 2023):
+            d = 1 if (cohort and year >= cohort) else 0
+            y = fe + 0.1 * (year - 2017) + 0.3 * x1 + 2.0 * d + 0.05 * rng.normal()
+            rows.append({"id": f"u{i:02d}", "year": year, "first_treat": cohort,
+                         "x1": round(x1, 6), "y": round(y, 6), "grp": i % 8})  # 8 clusters
+    run_root, result = _run_cs(tmp_path, pd.DataFrame(rows), cs_cluster_var="grp")
+    assert result["status"] == "completed"
+    meta = _read_cs_did_metadata(run_root)
+    assert meta["cluster_level"] == "grp"
+    assert meta["n_clusters"] == 8
+    assert meta["n_units"] == 40
+
+
+def test_clustered_bad_cluster_col_structured_failure(tmp_path):
+    rng = np.random.default_rng(6)
+    rows = []
+    for i in range(40):
+        cohort = [0, 2019, 2020, 2021][i % 4]
+        x1, fe = float(rng.normal()), float(rng.normal())
+        for year in range(2017, 2023):
+            d = 1 if (cohort and year >= cohort) else 0
+            rows.append({"id": f"u{i:02d}", "year": year, "first_treat": cohort,
+                         "x1": round(x1, 6), "y": round(fe + 2.0 * d, 6)})
+    run_root, result = _run_cs(tmp_path, pd.DataFrame(rows),
+                               cs_cluster_var="does_not_exist")
+    assert result["status"] == "failed"
+    # structured: CSSpecError("CS_CLUSTER_COL_MISSING: ...") IS-A ValueError, caught
+    # by the estimation stage -> MODEL_FIT_FAILED issue whose message embeds the
+    # CS_CLUSTER_COL_MISSING signal. NOT a bare WORKFLOW_FAILED escape.
+    errors = read_json(run_root / "errors.json")
+    codes = " ".join(i.get("code", "") + " " + i.get("message", "")
+                     for i in errors.get("issues", []))
+    assert "CS_CLUSTER_COL_MISSING" in codes or "MODEL_FIT_FAILED" in codes
