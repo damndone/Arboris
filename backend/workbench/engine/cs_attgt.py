@@ -317,7 +317,7 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
                     anticipation, covariates, cluster_var) -> EffectEstimateBundle:
     """Assemble per-(g,t) ATT + influence functions into an EffectEstimateBundle.
     Enumerates every (g,t) cell, scatters each cell's observation-level IF into a
-    full (G x K) cluster-row matrix (zero outside the cell sub-sample), records
+    full (G x K) entity-row matrix (zero outside the cell sub-sample), records
     self-describing cell_metadata + the applied sample_spec."""
     frame, entity, time, y = norm.frame, norm.entity, norm.time, norm.y
     cohort = frame.groupby(entity)["_did_cohort"].first()
