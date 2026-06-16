@@ -509,6 +509,13 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     from ..engine.cs_inference import multiplier_bootstrap
     import numpy as np
 
+    # v1.5.6 hardening — Fix #2: coerce/validate the outcome to numeric, mirroring
+    # the other runners' `_ensure_numeric_y`. A string/object y otherwise reaches
+    # a bare `dtype 'str' does not support operation 'mean'` TypeError that escapes
+    # to WORKFLOW_FAILED; this raises the structured numeric-y ValueError instead
+    # (caught by the estimation stage → MODEL_FIT_FAILED).
+    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
+
     bundle = estimate_att_gt(norm, control_group=control_group, est_method=est_method,
         base_period=base_period, anticipation=anticipation,
         covariates=list(covariates), cluster_var=cluster_var)

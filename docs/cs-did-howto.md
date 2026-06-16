@@ -47,8 +47,8 @@ CS-specific settings (the defaults match R's `did` package):
 - **Anticipation** — number of pre-treatment periods (integer, default `0`) during
   which units may already respond; those periods are excluded from the clean
   baseline.
-- **Cluster variable** — optional column for clustered inference; defaults to
-  clustering by entity.
+- **Clustering** — inference clusters by **entity** (the panel unit). Clustering by
+  a different variable is a planned follow-up and not yet supported.
 
 Defaults `never + dr + varying + anticipation 0` reproduce R `did`'s out-of-the-box
 behaviour.
@@ -61,13 +61,15 @@ behaviour.
 2. Pick the **DID mode** and use the role controls to assign **entity**, **time**,
    **outcome**, and the mode-specific column(s) (cohort, or treat + post, or status).
 3. Put any conditioning covariates in **X** (these activate `dr`/`ipw`/`reg`).
-4. Set the CS knobs (control group, method, base period, anticipation, cluster).
+4. Set the CS knobs (control group, method, base period, anticipation). Inference
+   clusters by entity.
 
 ### API (`POST /runs`, multipart form)
 
 Set `model_type=cs_did`, `entity_col`, `time_col`, `y`, the mode fields (e.g.
 `did_mode=cohort`, `did_cohort_col=...`), and the CS params: `cs_control_group`,
-`cs_est_method`, `cs_base_period`, `cs_anticipation`, `cs_cluster_var`.
+`cs_est_method`, `cs_base_period`, `cs_anticipation`. (Inference clusters by
+entity; a `cs_cluster_var` parameter is a planned follow-up.)
 
 ### CLI
 

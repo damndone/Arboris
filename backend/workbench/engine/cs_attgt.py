@@ -228,6 +228,14 @@ def att_gt_cell(*, frame, entity, time, y, g, t, base_t, control_group,
     keep = treated | comp
     sub = frame[frame[entity].isin(keep) & frame[time].isin([t, base_t])]
     wide = sub.pivot_table(index=entity, columns=time, values=y)
+    # v1.5.6 hardening — Fix #3: if neither required period survived the
+    # complete-case pivot (e.g. an all-NaN outcome empties the cell), the
+    # `wide[[t, base_t]]` index below raises a bare KeyError that would escape to
+    # WORKFLOW_FAILED. Return the invalid-cell shape so estimate_att_gt omits the
+    # cell (and raises the structured CS_NO_VALID_CELLS if EVERY cell is invalid).
+    if t not in wide.columns or base_t not in wide.columns:
+        return {"att": float("nan"), "n_treated": 0, "n_control": 0,
+                "valid": False, "warning": "CS_EMPTY_CELL"}
     ok = wide[[t, base_t]].notna().all(axis=1)        # cell-level complete-case
     units = wide.index[ok].to_numpy()
     dY = (wide.loc[units, t] - wide.loc[units, base_t]).to_numpy()
@@ -301,6 +309,18 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     Enumerates every (g,t) cell, scatters each cell's observation-level IF into a
     full (G x K) cluster-row matrix (zero outside the cell sub-sample), records
     self-describing cell_metadata + the applied sample_spec."""
+    # v1.5.6 hardening — Fix #1: variable-clustering is DEFERRED. One-way
+    # clustering by a non-entity variable needs the entity-level IF clustered in
+    # BOTH the analytical SE and the multiplier bootstrap, plus a clustered R
+    # oracle to validate; that is out of scope here. The DEFAULT (cluster_var
+    # falsy → cluster by entity) is validated and stays. Raising before the
+    # cluster-collapse block also subsumes the bad-cluster-name case: any
+    # cluster_var is rejected structurally before it can hit a `.loc` KeyError.
+    if cluster_var:
+        raise CSSpecError(
+            "CS_CLUSTERING_DEFERRED: clustering by a variable other than the "
+            "entity is not yet supported; leave the cluster variable empty to "
+            "cluster by entity (the default).")
     frame, entity, time, y = norm.frame, norm.entity, norm.time, norm.y
     cohort = frame.groupby(entity)["_did_cohort"].first()
     units_all = np.sort(cohort.index.to_numpy())                 # stable row order

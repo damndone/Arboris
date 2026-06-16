@@ -82,7 +82,6 @@ export function RunForm(props: RunFormProps) {
     estMethod: "dr",
     basePeriod: "varying",
     anticipation: 0,
-    clusterVar: "",
   });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
@@ -267,7 +266,6 @@ export function RunForm(props: RunFormProps) {
           csEstMethod: isCsDid ? csValue.estMethod : undefined,
           csBasePeriod: isCsDid ? csValue.basePeriod : undefined,
           csAnticipation: isCsDid ? csValue.anticipation : undefined,
-          csClusterVar: isCsDid ? csValue.clusterVar : undefined,
         },
       );
       setLastRun(result);
@@ -426,7 +424,6 @@ export function RunForm(props: RunFormProps) {
           )}
           {modelType === "cs_did" && (
             <CSControls
-              columns={columnNames}
               value={csValue}
               onChange={setCsValue}
             />
