@@ -61,3 +61,53 @@ def test_arm_constraints_match_R():
         assert A.shape == A_R.shape, (c["s"], c["max_positive"], A.shape, A_R.shape)
         # exact row-order match (port reproduces R's ordering)
         assert np.allclose(A, A_R, atol=1e-9), (c["s"], c["max_positive"])
+
+
+CT = json.load(open(os.path.join(_FIX, "conditional_test.json")))
+
+
+def test_arp_conditional_test_matches_R():
+    """Option A: full reconstruction from raw betahat/sigma + intermediate checks."""
+    from workbench.engine.honest_did import arp_conditional_test
+
+    out = arp_conditional_test(
+        betahat=np.array(HRM["betahat"], dtype=float),
+        sigma=np.array(HRM["sigma"], dtype=float),
+        num_pre=CT["numPre"],
+        num_post=CT["numPost"],
+        l_vec=np.array(CT["l_vec"], dtype=float),
+        mbar=float(CT["Mbar"]),
+        s=CT["s"],
+        max_positive=CT["max_positive"],
+        theta=CT["theta"],
+        alpha=CT["alpha"],
+    )
+
+    # intermediate construction validated against the fixture (atol 1e-8)
+    assert np.allclose(out["AGammaInv_one"], CT["AGammaInv_one"], atol=1e-8)
+    assert np.allclose(out["AGammaInv_minusOne"], CT["AGammaInv_minusOne"], atol=1e-8)
+    assert np.allclose(out["Y"], CT["Y"], atol=1e-8)
+    assert np.allclose(out["sigmaY"], CT["sigmaY"], atol=1e-8)
+    assert np.allclose(out["y_T"], CT["y_T"], atol=1e-8)
+    # rowsForARP reported 1-based to match R fixture, exact
+    assert out["rowsForARP_1based"] == CT["rowsForARP"]
+
+    # deterministic output
+    assert int(out["reject"]) == int(CT["reject"])
+    assert abs(out["eta"] - CT["eta"]) < 1e-6
+
+
+def test_lp_conditional_test_low_level_matches_R():
+    """Option B: low-level test directly on fixture y_T / X_T / sigmaY / rows."""
+    from workbench.engine.honest_did import _lp_conditional_test
+
+    y_T = np.array(CT["y_T"], dtype=float)
+    X_T = np.array(CT["AGammaInv_minusOne"], dtype=float)
+    sigma_Y = np.array(CT["sigmaY"], dtype=float)
+    rows0 = [r - 1 for r in CT["rowsForARP"]]  # 1-based R -> 0-based
+
+    out = _lp_conditional_test(
+        y_T=y_T, X_T=X_T, sigma=sigma_Y, alpha=CT["alpha"], rows_for_arp=rows0
+    )
+    assert int(out["reject"]) == int(CT["reject"])
+    assert abs(out["eta"] - CT["eta"]) < 1e-6
