@@ -130,9 +130,13 @@ emit_clustered <- function(method) {
          overall_se = if (is.null(overall_if)) NULL else crve(overall_if),
          egt = a$egt, se_egt = se_egt)
   }
+  # per-cell clustered CRVE SE: crve() of each att_gt influence-function column
+  # (r$inffunc is N x K, columns aligned to r$group / r$t).
+  att_gt_se <- apply(r$inffunc, 2, crve)
   list(n = N, n_clusters = length(unique(cl)),
        simple = agg("simple"), dynamic = agg("dynamic"),
-       group = agg("group"), calendar = agg("calendar"))
+       group = agg("group"), calendar = agg("calendar"),
+       att_gt = list(group = r$group, t = r$t, se = att_gt_se))
 }
 clustered_out <- list()
 for (m in c("dr", "ipw", "reg")) clustered_out[[m]] <- emit_clustered(m)

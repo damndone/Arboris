@@ -505,7 +505,7 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
     Pure (no I/O). Seed-deterministic."""
     from ..engine.cs_attgt import estimate_att_gt
-    from ..engine.cs_aggregate import aggregate
+    from ..engine.cs_aggregate import aggregate, _se
     from ..engine.cs_inference import multiplier_bootstrap
     import numpy as np
 
@@ -527,7 +527,7 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     att_gt = []
     for k, m in enumerate(bundle.cell_metadata):
         col = bundle.influence_func[:, k]
-        se = float(np.sqrt((col**2).sum()) / G) if m["valid"] else None
+        se = float(_se(col, row_cluster, G)) if m["valid"] else None
         att_gt.append({"g": float(m["g"]), "t": float(m["t"]),
             "event_time": float(m["event_time"]), "att": (float(bundle.estimates[k])
             if m["valid"] else None), "se": se, "n_treated": m["n_treated"],

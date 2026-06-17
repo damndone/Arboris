@@ -29,6 +29,24 @@ describe("CSControls", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ clusterVar: "region" }));
   });
 
+  // Characterization: clearing a selected cluster var back to the default entity
+  // option must emit clusterVar:"" (the entity / no-op sentinel). Guards the
+  // unclustered no-op contract at the UI boundary.
+  it("clearing the cluster-var back to entity emits clusterVar:''", () => {
+    const onChange = vi.fn();
+    render(
+      <CSControls
+        value={{ ...baseValue, clusterVar: "region" }}
+        columns={["unit", "region", "x1"]}
+        onChange={onChange}
+      />,
+    );
+    const sel = screen.getByLabelText("cs-cluster-var") as HTMLSelectElement;
+    expect(sel.value).toBe("region"); // reflects current selection
+    fireEvent.change(sel, { target: { value: "" } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ clusterVar: "" }));
+  });
+
   it("reflects the current value in each control", () => {
     render(
       <CSControls
