@@ -22,7 +22,7 @@ def test_sigma_is_cluster_robust_crve():
     N = int(b.aux["n_total"])
     rc = b.aux["row_cluster"]
     out = honest_did_from_cs_dynamic(agg, row_cluster=rc, n_total=N,
-                                     mbar_grid=[0, 1], alpha=0.05)
+                                     mbar_grid=[0, 1], alpha=0.05, grid_points=150)
     CIF = np.asarray(agg["component_if"], float)
     S = pd.DataFrame(CIF).groupby(np.asarray(rc)).sum().to_numpy()
     Sigma_full = S.T @ S / (N ** 2)
@@ -36,7 +36,7 @@ def test_pre_post_mapping():
     agg, b = _dyn()
     out = honest_did_from_cs_dynamic(agg, row_cluster=b.aux["row_cluster"],
                                      n_total=int(b.aux["n_total"]),
-                                     mbar_grid=[0, 1], alpha=0.05)
+                                     mbar_grid=[0, 1], alpha=0.05, grid_points=150)
     et = out["_debug_event_times"]
     assert all(abs(e + 1.0) > 1e-9 for e in et)          # reference e=-1 excluded
     assert out["num_pre"] == sum(1 for e in et if e < 0)
