@@ -7,6 +7,8 @@ for the ported DeltaRM engine in later tasks (T2-T5).
 import json
 import os
 
+import numpy as np
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIX = os.path.join(_HERE, "fixtures", "honest_did")
 
@@ -40,3 +42,21 @@ def test_conditional_test_instance_shape():
     n = len(ct["A_RM"])
     assert len(ct["y_T"]) == n
     assert len(ct["sigmaY"]) == n and all(len(r) == n for r in ct["sigmaY"])
+
+
+def test_arm_constraints_match_R():
+    from workbench.engine.honest_did import create_arm_constraints
+
+    ref = json.load(open(os.path.join(_FIX, "arm_constraints.json")))
+    for c in ref["constraints"]:
+        A = create_arm_constraints(
+            num_pre=ref["numPre"],
+            num_post=ref["numPost"],
+            mbar=ref["Mbar"],
+            s=c["s"],
+            max_positive=c["max_positive"],
+        )
+        A_R = np.array(c["A"], dtype=float)
+        assert A.shape == A_R.shape, (c["s"], c["max_positive"], A.shape, A_R.shape)
+        # exact row-order match (port reproduces R's ordering)
+        assert np.allclose(A, A_R, atol=1e-9), (c["s"], c["max_positive"])
