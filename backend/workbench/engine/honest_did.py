@@ -556,6 +556,7 @@ def honest_rm(
     l_vec: np.ndarray,
     mbar_grid,
     alpha: float = 0.05,
+    grid_points: int = 1000,
 ) -> dict:
     """Robust ΔRM confidence sets across the Mbar grid + the breakdown Mbar.
 
@@ -602,6 +603,7 @@ def honest_rm(
             l_vec=l_vec,
             mbar=float(M),
             alpha=alpha,
+            grid_points=grid_points,
         )
         results.append({"Mbar": float(M), "lb": float(lb), "ub": float(ub)})
 

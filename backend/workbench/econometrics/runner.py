@@ -8,6 +8,11 @@ import statsmodels.formula.api as smf
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
+# honest-DID (Rambachan-Roth ΔRM) production config. Module-level so tests can
+# monkeypatch to a small grid for speed; run_cs_did reads them as globals.
+HONEST_MBAR_GRID = [0.0, 0.5, 1.0, 1.5, 2.0]
+HONEST_GRID_POINTS = 1000
+
 
 def _formula_term(column: str, categorical: bool = False) -> str:
     quoted = f"Q({column!r})"
@@ -499,7 +504,8 @@ def run_event_study(
 
 
 def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
-               anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05):
+               anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05,
+               honest_did=False):
     """Callaway-Sant'Anna group-time ATT end to end. Returns a structured dict:
     att_gt cell table, four aggregations (each with point estimates + analytical SE +
     multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
@@ -588,8 +594,22 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
         "n_cells": len(bundle.cell_metadata), "B": B, "alpha": alpha, "seed": seed,
         "confidence_level": 1 - alpha, "band_type": "simultaneous"}
 
+    # --- honest-DID (Rambachan-Roth ΔRM) sensitivity: opt-in, degrade-not-fail ---
+    result_honest = None
+    if honest_did:
+        from ..engine.honest_did_adapter import honest_did_from_cs_dynamic
+        try:
+            hd = honest_did_from_cs_dynamic(
+                agg_by_kind["dynamic"], row_cluster=row_cluster, n_total=G,
+                mbar_grid=HONEST_MBAR_GRID, alpha=alpha, grid_points=HONEST_GRID_POINTS)
+        except Exception as exc:            # honest-DID must NEVER fail the run
+            hd = {"skipped": True, "reason": f"HONEST_INTERNAL_ERROR: {exc}"}
+        # strip the _debug_* keys from the shipped artifact (test-only in engine layer)
+        result_honest = {k: v for k, v in hd.items() if not k.startswith("_debug_")}
+
     return {"att_gt": att_gt, "aggregations": aggregations,
-        "diagnostics": bundle.diagnostics, "warnings": warnings, "metadata": metadata}
+        "diagnostics": bundle.diagnostics, "warnings": warnings, "metadata": metadata,
+        **({"honest_did": result_honest} if result_honest is not None else {})}
 
 
 def run_time_series_diagnostics(

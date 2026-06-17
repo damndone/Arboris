@@ -17,7 +17,7 @@ from .honest_did import honest_rm, HonestDiDError
 
 
 def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total,
-                               mbar_grid, alpha=0.05) -> dict:
+                               mbar_grid, alpha=0.05, grid_points=1000) -> dict:
     """Run ΔRM honest-DID from a CS dynamic aggregation.
 
     Returns a JSON-safe block; on any ``HonestDiDError`` returns
@@ -59,14 +59,14 @@ def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total,
         l_avg = np.full(num_post, 1.0 / num_post)
         avg = honest_rm(betahat=betahat, sigma=sigma, num_pre=num_pre,
                         num_post=num_post, l_vec=l_avg, mbar_grid=mbar_grid,
-                        alpha=alpha)
+                        alpha=alpha, grid_points=grid_points)
         per_event = []
         for j in range(num_post):
             lv = np.zeros(num_post)
             lv[j] = 1.0
             r = honest_rm(betahat=betahat, sigma=sigma, num_pre=num_pre,
                           num_post=num_post, l_vec=lv, mbar_grid=mbar_grid,
-                          alpha=alpha)
+                          alpha=alpha, grid_points=grid_points)
             per_event.append({"event_time": et[num_pre + j], **r})
         return {
             "skipped": False,
