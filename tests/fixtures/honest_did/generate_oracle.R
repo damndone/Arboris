@@ -83,7 +83,7 @@ set.seed(0)
 rm_avg_tbl <- createSensitivityResults_relativeMagnitudes(
   betahat = betahat, sigma = sigma,
   numPrePeriods = numPre, numPostPeriods = numPost,
-  method = "C-LF", Mbarvec = mbar_grid,
+  method = "Conditional", Mbarvec = mbar_grid,
   l_vec = l_avg, alpha = alpha, gridPoints = 1e3, seed = 0
 )
 rm_avg <- lapply(seq_len(nrow(rm_avg_tbl)), function(i) {
@@ -99,7 +99,7 @@ rm_event <- lapply(seq_len(numPost), function(j) {
   tbl <- createSensitivityResults_relativeMagnitudes(
     betahat = betahat, sigma = sigma,
     numPrePeriods = numPre, numPostPeriods = numPost,
-    method = "C-LF", Mbarvec = c(1),
+    method = "Conditional", Mbarvec = c(1),
     l_vec = l_j, alpha = alpha, gridPoints = 1e3, seed = 0
   )
   list(event_index = j - 1L,                 # 0-based post event time
@@ -111,7 +111,7 @@ honest_rm <- list(
   numPre    = numPre,
   numPost   = numPost,
   alpha     = alpha,
-  method    = "C-LF",
+  method    = "Conditional",
   seed      = 0L,
   gridPoints= 1000L,
   betahat   = as.numeric(betahat),
@@ -162,16 +162,24 @@ write_json(arm_constraints, file.path(OUTDIR, "arm_constraints.json"),
 
 # ===========================================================================
 # 3. conditional_test.json  -- INTERMEDIATE for Task 3
-#    A single-(theta, Mbar) ARP C-LF single-point test instance, with the
-#    fully-reconstructed inputs to .lp_conditional_test_fn AND its scalar
-#    output {reject, eta, lf_cv}. Representative (s, max_positive) = (0, TRUE),
-#    Mbar = 1, l_vec = l_avg, theta = 0.05.
+#    A single-(theta, Mbar) PURE ARP CONDITIONAL single-point test instance,
+#    with the fully-reconstructed inputs to .lp_conditional_test_fn AND its
+#    deterministic scalar output {reject, eta}. Representative
+#    (s, max_positive) = (0, TRUE), Mbar = 1, l_vec = l_avg, theta = 0.05.
+#
+#    Design switch (v1.5.7): hybrid_flag = "ARP" (NOT "LF"). Under ARP the
+#    least-favorable first stage is skipped (mod_size = alpha) and hybrid_list
+#    is never read for an lf_cv, so the whole path is simulation-free and
+#    exactly reproducible in numpy (LP + truncated-normal inverse). Verified
+#    against the .lp_conditional_test_fn body: the "ARP" branch only sets
+#    mod_size = alpha and does not touch hybrid_list$lf_cv. There is therefore
+#    NO lf_cv field in this fixture.
 #
 #    Task 3 consumes this by: building A_RM, d_RM, Gamma, AGammaInv, Y, sigmaY,
-#    rowsForARP, lf_cv exactly as documented above (all exported here as a
-#    cross-check), then calling its ported single-point ARP/LF test at the
-#    given theta and asserting reject == reject_expected (and eta ~ eta_star,
-#    lf_cv ~ lf_cv_expected to tolerance). lf_cv is simulated under seed=0.
+#    rowsForARP exactly as documented above (all exported here as a
+#    cross-check), then calling its ported single-point ARP conditional test at
+#    the given theta and asserting reject == reject_expected (and eta ~ eta_star
+#    to tolerance).
 # ===========================================================================
 s_ct  <- 0L
 mp_ct <- TRUE
@@ -193,17 +201,12 @@ AGammaInv_minusOne <- AGammaInv[, -1]
 Y      <- c(A_RM %*% betahat - d_RM)
 sigmaY <- A_RM %*% sigma %*% t(A_RM)
 
-set.seed(0)
-lf_cv <- HonestDiD:::.compute_least_favorable_cv(
-  X_T = AGammaInv_minusOne, sigma = sigmaY,
-  hybrid_kappa = hybrid_kappa, rowsForARP = rowsForARP, seed = 0
-)
-
+# Pure ARP conditional: no least-favorable first stage, empty hybrid_list.
 y_T <- Y - AGammaInv_one * theta_ct
 res <- HonestDiD:::.lp_conditional_test_fn(
   theta = theta_ct, y_T = y_T, X_T = AGammaInv_minusOne,
-  sigma = sigmaY, alpha = alpha, hybrid_flag = "LF",
-  hybrid_list = list(hybrid_kappa = hybrid_kappa, lf_cv = lf_cv),
+  sigma = sigmaY, alpha = alpha, hybrid_flag = "ARP",
+  hybrid_list = list(),
   rowsForARP = rowsForARP
 )
 
@@ -217,8 +220,7 @@ conditional_test <- list(
   Mbar     = Mbar_ct,
   theta    = theta_ct,
   alpha    = alpha,
-  hybrid_flag  = "LF",
-  hybrid_kappa = hybrid_kappa,
+  hybrid_flag  = "ARP",
   l_vec    = as.numeric(l_avg),
   # --- reconstructed inputs (so Task 3 can build/check each piece) ---
   A_RM        = mat_to_nested(A_RM),
@@ -230,8 +232,7 @@ conditional_test <- list(
   Y           = as.numeric(Y),
   y_T         = as.numeric(y_T),              # Y - AGammaInv_one * theta
   sigmaY      = mat_to_nested(sigmaY),
-  lf_cv       = as.numeric(lf_cv),            # simulated, seed=0
-  # --- expected scalar output ---
+  # --- expected deterministic scalar output (pure ARP conditional) ---
   reject      = as.integer(res$reject),
   eta         = as.numeric(res$eta)
 )
@@ -244,8 +245,8 @@ cat("rm_avg widths (M=0..2):\n")
 for (r in rm_avg) cat(sprintf("  Mbar=%.1f  [%.5f, %.5f]  width=%.5f\n",
                               r$Mbar, r$lb, r$ub, r$ub - r$lb))
 cat("rm_event count =", length(rm_event), "\n")
-cat("conditional_test: theta=", theta_ct, " reject=", res$reject,
-    " eta=", res$eta, " lf_cv=", lf_cv, "\n")
+cat("conditional_test (ARP): theta=", theta_ct, " reject=", res$reject,
+    " eta=", res$eta, "\n")
 cat("arm_constraints: n(s,sign) combos =", length(A_list),
     " (expect", length(s_indices) * 2, ")\n")
 cat("DONE\n")

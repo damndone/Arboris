@@ -35,9 +35,10 @@ def test_arm_constraints_cover_all_s_sign():
 
 def test_conditional_test_instance_shape():
     ct = json.load(open(os.path.join(_FIX, "conditional_test.json")))
-    assert ct["hybrid_flag"] == "LF"
+    # pure ARP conditional (simulation-free) -> no least-favorable cv field
+    assert ct["hybrid_flag"] == "ARP"
+    assert "lf_cv" not in ct
     assert ct["reject"] in (0, 1)
-    assert isinstance(ct["lf_cv"], float)
     # y_T row count matches A_RM row count; sigmaY is square of same size
     n = len(ct["A_RM"])
     assert len(ct["y_T"]) == n
