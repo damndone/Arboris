@@ -79,6 +79,107 @@ describe("CSDiagnosticsCard", () => {
     expect(screen.getByText(/结果不完整/)).toBeInTheDocument();
   });
 
+  it("renders the honest-DID sensitivity panel with a breakdown value", () => {
+    const withHonest: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        skipped: false,
+        num_pre: 2,
+        num_post: 2,
+        mbar_grid: [0.5, 1.0, 1.5],
+        post_average: {
+          results: [
+            { Mbar: 0.5, lb: 0.8, ub: 3.2 },
+            { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+            { Mbar: 1.5, lb: -0.1, ub: 4.1 },
+          ],
+          breakdown: 1.0,
+        },
+        per_event_time: [
+          {
+            event_time: 0,
+            results: [
+              { Mbar: 0.5, lb: 0.9, ub: 2.7 },
+              { Mbar: 1.0, lb: 0.5, ub: 3.1 },
+            ],
+            breakdown: null,
+          },
+        ],
+      },
+    };
+    render(<CSDiagnosticsCard diagnostics={withHonest} />);
+    expect(screen.getByLabelText("cs-honest-did-panel")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("cs-honest-did-post-average"),
+    ).toBeInTheDocument();
+    // post-average breakdown M̄ (1.00) surfaces in its own div
+    const postBreakdown = screen
+      .getByLabelText("cs-honest-did-post-average")
+      .parentElement!.querySelector("div");
+    expect(postBreakdown?.textContent).toContain("突破 M̄: 1.00");
+    // null breakdown microcopy for the per-event-time row
+    expect(screen.getByText(/无突破/)).toBeInTheDocument();
+  });
+
+  it("renders a null (nan-sanitized) honest-DID CI row as — without crashing", () => {
+    // The backend coerces a degenerate (nan, nan) CI to JSON null (lb/ub = null).
+    // The card MUST render those as the em-dash "—" via the `f` helper, never
+    // "null"/"NaN", and must not throw.
+    const withNullCI: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        skipped: false,
+        num_pre: 2,
+        num_post: 2,
+        mbar_grid: [0.0, 1.0],
+        post_average: {
+          results: [
+            { Mbar: 0.0, lb: null, ub: null },
+            { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+          ],
+          breakdown: null,
+        },
+        per_event_time: [
+          {
+            event_time: 0,
+            results: [{ Mbar: 0.0, lb: null, ub: null }],
+            breakdown: null,
+          },
+        ],
+      },
+    };
+    expect(() =>
+      render(<CSDiagnosticsCard diagnostics={withNullCI} />),
+    ).not.toThrow();
+    const panel = screen.getByLabelText("cs-honest-did-post-average");
+    expect(panel.textContent).toContain("—");
+    expect(panel.textContent).not.toContain("null");
+    expect(panel.textContent).not.toContain("NaN");
+  });
+
+  it("renders the skipped note when honest_did is degraded", () => {
+    const skipped: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        skipped: true,
+        reason: "需要至少 1 个 pre 期",
+        num_pre: 0,
+        num_post: 2,
+      },
+    };
+    render(<CSDiagnosticsCard diagnostics={skipped} />);
+    expect(
+      screen.getByLabelText("cs-honest-did-skipped"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/需要至少 1 个 pre 期/)).toBeInTheDocument();
+  });
+
+  it("renders no honest-DID panel when honest_did is absent (degraded-safe)", () => {
+    render(<CSDiagnosticsCard diagnostics={diag} />);
+    expect(screen.queryByLabelText("cs-honest-did-panel")).toBeNull();
+    expect(screen.queryByLabelText("cs-honest-did-skipped")).toBeNull();
+  });
+
   it("renders an unavailable note when dynamic event_time is empty", () => {
     const noEs: CSDiagnostics = { ...diag,
       aggregations: { ...diag.aggregations,

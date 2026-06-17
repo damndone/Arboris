@@ -4,6 +4,7 @@ export interface CSValue {
   basePeriod: "varying" | "universal";
   anticipation: number;
   clusterVar: string; // "" = cluster by entity
+  honestDid: boolean;
 }
 
 export function CSControls(props: {
@@ -90,6 +91,16 @@ export function CSControls(props: {
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+      </label>
+
+      <label className="ios-row">
+        <span>honest-DID 敏感性 (Rambachan-Roth)</span>
+        <input
+          type="checkbox"
+          aria-label="cs-honest-did"
+          checked={value.honestDid}
+          onChange={(e) => set({ honestDid: e.target.checked })}
+        />
       </label>
     </div>
   );

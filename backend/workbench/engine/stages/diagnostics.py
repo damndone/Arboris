@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -13,11 +14,18 @@ def _json_safe(obj: Any) -> Any:
 
     numpy scalars -> ``.item()``; numpy arrays -> nested lists; dicts recurse
     with str keys; list/tuple recurse; python primitives/None pass through.
+    Non-finite floats (NaN/Inf) -> ``None``: ``json.dumps`` defaults to
+    ``allow_nan=True`` and would emit the bare token ``NaN``/``Infinity``, which
+    is invalid JSON and makes the browser's strict ``Response.json()`` throw
+    (silently dropping the whole cs_did card). A degenerate honest-DID CI can be
+    ``(nan, nan)``; ``None`` renders cleanly as "—" in the frontend.
     Unlike ``graph_store._to_jsonable`` (which RAISES on numpy), this degrades
     numpy types so the supplementary cs_did artifact can be serialized safely.
     """
     if isinstance(obj, np.generic):
-        return obj.item()
+        obj = obj.item()
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
     if isinstance(obj, np.ndarray):
         return [_json_safe(x) for x in obj.tolist()]
     if isinstance(obj, dict):

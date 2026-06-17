@@ -86,3 +86,23 @@ def test_run_cs_did_clustered_bands_differ_from_unclustered():
     assert abs(dc["overall_se"] - du["overall_se"]) > 1e-4
     assert dc["overall_uniform_band"] is not None
     assert len(dc["uniform_band"]) == len(dc["estimate"])
+
+
+def test_run_cs_did_honest_did_block_present(monkeypatch):
+    import workbench.econometrics.runner as runner
+    monkeypatch.setattr(runner, "HONEST_MBAR_GRID", [0.0, 1.0])
+    monkeypatch.setattr(runner, "HONEST_GRID_POINTS", 150)
+    res = runner.run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0, cluster_var="cluster",
+        seed=20260615, honest_did=True)
+    h = res["honest_did"]
+    assert h["skipped"] is False
+    assert "post_average" in h and "results" in h["post_average"]
+    assert len(h["per_event_time"]) == h["num_post"]
+    assert not any(k.startswith("_debug_") for k in h)        # debug keys stripped
+
+
+def test_run_cs_did_honest_did_absent_by_default():
+    res = run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0, cluster_var=None, seed=20260615)
+    assert "honest_did" not in res

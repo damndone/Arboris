@@ -169,6 +169,7 @@ def _fit_cs_did(ctx, env):
         base_period=ctx.artifacts.get("_cs_base_period") or "varying",
         anticipation=int(ctx.artifacts.get("_cs_anticipation") or 0),
         cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,
+        honest_did=ctx.artifacts.get("_honest_did", False),
     )
     ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
     simple = result["aggregations"]["simple"]

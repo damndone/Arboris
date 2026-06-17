@@ -83,6 +83,7 @@ export function RunForm(props: RunFormProps) {
     basePeriod: "varying",
     anticipation: 0,
     clusterVar: "",
+    honestDid: false,
   });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
@@ -268,6 +269,7 @@ export function RunForm(props: RunFormProps) {
           csBasePeriod: isCsDid ? csValue.basePeriod : undefined,
           csAnticipation: isCsDid ? csValue.anticipation : undefined,
           csClusterVar: isCsDid ? csValue.clusterVar : undefined,
+          honestDid: isCsDid ? csValue.honestDid : undefined,
         },
       );
       setLastRun(result);

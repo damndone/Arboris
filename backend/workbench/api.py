@@ -110,6 +110,7 @@ async def run_endpoint(
     cs_base_period: str = Form(""),
     cs_cluster_var: str = Form(""),
     cs_anticipation: int = Form(0),
+    honest_did: bool = Form(False),
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -160,6 +161,7 @@ async def run_endpoint(
             did_mode, did_cohort_col, did_treat_col, did_post_col, did_status_col,
             cs_control_group, cs_est_method, cs_base_period, cs_cluster_var,
             cs_anticipation,
+            honest_did,
         )
 
         return {"run_id": run.run_id, "status": "running"}
@@ -290,6 +292,7 @@ def _bg_run(
     cs_base_period: str = "",
     cs_cluster_var: str = "",
     cs_anticipation: int = 0,
+    honest_did: bool = False,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -335,6 +338,7 @@ def _bg_run(
             cs_base_period=cs_base_period,
             cs_cluster_var=cs_cluster_var,
             cs_anticipation=cs_anticipation,
+            honest_did=honest_did,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")

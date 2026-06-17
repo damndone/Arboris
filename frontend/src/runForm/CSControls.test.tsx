@@ -8,6 +8,7 @@ const base: CSValue = {
   basePeriod: "varying",
   anticipation: 0,
   clusterVar: "",
+  honestDid: false,
 };
 const baseValue = base;
 
@@ -32,6 +33,17 @@ describe("CSControls", () => {
   // Characterization: clearing a selected cluster var back to the default entity
   // option must emit clusterVar:"" (the entity / no-op sentinel). Guards the
   // unclustered no-op contract at the UI boundary.
+  it("renders the honest-DID checkbox and reports toggling it", () => {
+    const onChange = vi.fn();
+    render(<CSControls value={baseValue} columns={[]} onChange={onChange} />);
+    const cb = screen.getByLabelText("cs-honest-did") as HTMLInputElement;
+    expect(cb).toBeInTheDocument();
+    fireEvent.click(cb);
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ honestDid: true }),
+    );
+  });
+
   it("clearing the cluster-var back to entity emits clusterVar:''", () => {
     const onChange = vi.fn();
     render(
@@ -56,6 +68,7 @@ describe("CSControls", () => {
           basePeriod: "universal",
           anticipation: 2,
           clusterVar: "",
+          honestDid: false,
         }}
         columns={[]}
         onChange={() => {}}
