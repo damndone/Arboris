@@ -184,6 +184,7 @@ def run_workflow(
     cs_base_period: str = "",
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
+    honest_did: bool = False,
 ) -> dict[str, str]:
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
@@ -231,6 +232,7 @@ def run_workflow(
             cs_base_period=cs_base_period,
             cs_anticipation=cs_anticipation,
             cs_cluster_var=cs_cluster_var,
+            honest_did=honest_did,
         )
     except OptionalDependencyNotInstalled as exc:
         details = exc.to_issue_details()
@@ -388,6 +390,7 @@ def _run_workflow(
     cs_base_period: str = "",
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
+    honest_did: bool = False,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
     terminal_status. All per-stage work lives in ``backend/workbench/engine/stages/``
@@ -438,6 +441,7 @@ def _run_workflow(
     ctx.artifacts["_cs_base_period"] = cs_base_period
     ctx.artifacts["_cs_anticipation"] = cs_anticipation
     ctx.artifacts["_cs_cluster_var"] = normalize_column_name(cs_cluster_var) if cs_cluster_var else ""
+    ctx.artifacts["_honest_did"] = bool(honest_did)
 
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)
