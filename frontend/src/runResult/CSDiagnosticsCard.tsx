@@ -34,6 +34,34 @@ interface CSLabelAgg extends CSAggCommon {
   uniform_crit: number;
 }
 
+interface HonestDidResult {
+  Mbar: number;
+  lb: number;
+  ub: number;
+}
+
+interface HonestDidActive {
+  skipped: false;
+  num_pre: number;
+  num_post: number;
+  mbar_grid: number[];
+  post_average: { results: HonestDidResult[]; breakdown: number | null };
+  per_event_time: {
+    event_time: number;
+    results: HonestDidResult[];
+    breakdown: number | null;
+  }[];
+}
+
+interface HonestDidSkipped {
+  skipped: true;
+  reason: string;
+  num_pre: number;
+  num_post: number;
+}
+
+type HonestDidBlock = HonestDidActive | HonestDidSkipped;
+
 export interface CSDiagnostics {
   att_gt: {
     g: number;
@@ -59,6 +87,7 @@ export interface CSDiagnostics {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     sample_spec: Record<string, any>;
   };
+  honest_did?: HonestDidBlock;
   warnings: string[];
   metadata: {
     control_group: string;
@@ -189,6 +218,80 @@ function LabelTable({
   );
 }
 
+function HonestDidSensitivityTable({
+  caption,
+  ariaLabel,
+  results,
+  breakdown,
+}: {
+  caption: string;
+  ariaLabel: string;
+  results: HonestDidResult[];
+  breakdown: number | null;
+}) {
+  return (
+    <div>
+      <table aria-label={ariaLabel}>
+        <caption>{caption}</caption>
+        <thead>
+          <tr>
+            <th>M̄</th>
+            <th>下界</th>
+            <th>上界</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((r) => (
+            <tr key={r.Mbar}>
+              <td>{f(r.Mbar, 2)}</td>
+              <td>{f(r.lb, 2)}</td>
+              <td>{f(r.ub, 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div>
+        突破 M̄:{" "}
+        {breakdown == null ? "无突破 (始终含 0)" : f(breakdown, 2)}
+      </div>
+    </div>
+  );
+}
+
+function HonestDidPanel({ honest }: { honest: HonestDidBlock }) {
+  if (honest.skipped) {
+    return (
+      <div aria-label="cs-honest-did-skipped" className="ios-warning">
+        honest-DID 敏感性已跳过：{honest.reason}
+      </div>
+    );
+  }
+  return (
+    <section aria-label="cs-honest-did-panel">
+      <div className="ios-card-title">honest-DID 敏感性 (Rambachan-Roth ΔRM)</div>
+      <div>
+        点估计不变；M̄ 越大表示平行趋势假设越弱。突破 M̄ =
+        效应仍显著（CI 不含 0）的最大相对幅度界。
+      </div>
+      <HonestDidSensitivityTable
+        caption="后处理期平均 (post-average)"
+        ariaLabel="cs-honest-did-post-average"
+        results={honest.post_average.results}
+        breakdown={honest.post_average.breakdown}
+      />
+      {honest.per_event_time.map((pet) => (
+        <HonestDidSensitivityTable
+          key={pet.event_time}
+          caption={`事件期 ${pet.event_time}`}
+          ariaLabel={`cs-honest-did-event-${pet.event_time}`}
+          results={pet.results}
+          breakdown={pet.breakdown}
+        />
+      ))}
+    </section>
+  );
+}
+
 export function CSDiagnosticsCard({
   diagnostics,
 }: {
@@ -301,6 +404,8 @@ export function CSDiagnosticsCard({
           )}
         </div>
       )}
+
+      {d.honest_did && <HonestDidPanel honest={d.honest_did} />}
     </section>
   );
 }

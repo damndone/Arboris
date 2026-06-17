@@ -340,6 +340,7 @@ export interface RunExtraParams {
   csBasePeriod?: string;
   csAnticipation?: number;
   csClusterVar?: string;
+  honestDid?: boolean;
 }
 
 export async function runWorkflow(
@@ -378,6 +379,7 @@ export async function runWorkflow(
   if (extra?.csBasePeriod) form.append("cs_base_period", extra.csBasePeriod);
   if (extra?.csAnticipation) form.append("cs_anticipation", String(extra.csAnticipation));
   if (extra?.csClusterVar) form.append("cs_cluster_var", extra.csClusterVar);
+  if (extra?.honestDid) form.append("honest_did", "true");
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
