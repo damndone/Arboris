@@ -326,18 +326,26 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     # Resolve per-entity cluster id (entity-default when cluster_var is falsy).
     # Single row convention: clustering lives ONLY here (aux["row_cluster"]); the
     # influence function stays entity-level everywhere downstream.
-    if cluster_var:
+    if cluster_var and cluster_var != entity:
         if cluster_var not in frame.columns:
             raise CSSpecError(f"CS_CLUSTER_COL_MISSING: '{cluster_var}' is not a column.")
-        cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
-        cl = cl_by_unit.loc[units_all]
+        try:
+            cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
+            cl = cl_by_unit.loc[units_all]
+        except (KeyError, TypeError) as exc:
+            raise CSSpecError(f"CS_CLUSTER_COL_BAD: could not resolve cluster column "
+                              f"'{cluster_var}': {exc}") from exc
         if cl.isna().any():
             raise CSSpecError("CS_CLUSTER_COL_NAN: cluster column has missing values.")
-        cl = cl.to_numpy()
+        # Coerce to string ids so mixed/object dtype can't raise a bare TypeError in the
+        # downstream np.unique/sort (escapes the stage's ValueError handler otherwise).
+        # The cluster PARTITION is unchanged; only the id labels become strings.
+        cl = cl.to_numpy().astype(str)
         if len(np.unique(cl)) < 2:
             raise CSSpecError("CS_CLUSTER_SINGLE: need >= 2 clusters for cluster-robust SE.")
         row_cluster = np.asarray(cl)
     else:
+        # cluster_var falsy OR cluster_var == entity -> default entity clustering (identity)
         row_cluster = np.asarray(units_all)
     cohorts = sorted({c for c in cohort.to_numpy() if np.isfinite(c)})
     periods = sorted(pd.to_numeric(frame[time]).unique())
@@ -411,7 +419,11 @@ def estimate_att_gt(norm, *, control_group, est_method, base_period,
     # when unclustered, or the cluster column name when clustered. So cluster_var and
     # cluster_level may hold the same string (the column) under clustering — Task 9
     # (inference) should key off cluster_var for the actual grouping.
-    vcov_config = {"cluster_var": cluster_var or entity, "cluster_level": "entity" if not cluster_var else cluster_var,
+    # Effective clustering: cluster_var == entity is the entity-identity (default),
+    # NOT a real cluster column, so it must report cluster_level="entity".
+    clustered = bool(cluster_var and cluster_var != entity)
+    vcov_config = {"cluster_var": cluster_var if clustered else entity,
+                   "cluster_level": cluster_var if clustered else "entity",
                    "confidence_level": 0.95, "band_type": None}   # band_type set by inference
     diagnostics = {"overlap": {"ps_min": min(ps_mins) if ps_mins else None,
                                "ps_max": max(ps_maxs) if ps_maxs else None},

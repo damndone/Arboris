@@ -197,3 +197,59 @@ def test_clustered_bad_cluster_col_structured_failure(tmp_path):
     codes = " ".join(i.get("code", "") + " " + i.get("message", "")
                      for i in errors.get("issues", []))
     assert "CS_CLUSTER_COL_MISSING" in codes or "MODEL_FIT_FAILED" in codes
+
+
+# --- Fix C1/I2 (v1.5.6.1 final adversarial review): two unstructured escapes.
+#     C1: cluster_var == entity column -> set_index consumes the column -> bare
+#         KeyError escapes the stage ValueError handler. Now treated as the
+#         default entity-identity clustering (cluster_level="entity").
+#     I2: object/mixed-dtype cluster column -> np.unique raises bare TypeError.
+#         Now str-coerced so a mixed column is a valid partition (or structured). --
+def test_cluster_var_equals_entity_is_identity():
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    norm = normalize_did_input(d, mode="cohort", entity="unit", time="period",
+        y="y", cohort="first_treat")
+    b = estimate_att_gt(norm, control_group="never", est_method="dr",
+        base_period="varying", anticipation=0, covariates=["x1"],
+        cluster_var="unit")  # picks the ENTITY column as cluster -> identity
+    # entity-as-cluster == default entity clustering: identity, no crash
+    assert len(set(map(str, b.aux["row_cluster"]))) == 60
+    assert b.vcov_config["cluster_level"] == "entity"
+
+
+def test_object_dtype_cluster_column_structured():
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    # object dtype, mixed str/int. With str-coercion this is a valid 2-cluster
+    # partition -> must ESTIMATE (no bare TypeError escape); structured CSSpecError
+    # is also acceptable.
+    units = sorted(d["unit"].unique())
+    cmap = {u: ("A" if i % 2 else 1) for i, u in enumerate(units)}
+    d["badcl"] = d["unit"].map(cmap)
+    norm = normalize_did_input(d, mode="cohort", entity="unit", time="period",
+        y="y", cohort="first_treat")
+    try:
+        b = estimate_att_gt(norm, control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, covariates=["x1"],
+            cluster_var="badcl")
+        assert b.influence_func.shape[0] == 60   # estimated fine after str-coercion
+    except CSSpecError:
+        pass  # structured failure is also acceptable
+
+
+def test_cluster_var_equals_entity_completes_end_to_end(tmp_path):
+    rng = np.random.default_rng(7)
+    rows = []
+    for i in range(40):
+        cohort = [0, 2019, 2020, 2021][i % 4]
+        x1, fe = float(rng.normal()), float(rng.normal())
+        for year in range(2017, 2023):
+            d = 1 if (cohort and year >= cohort) else 0
+            rows.append({"id": f"u{i:02d}", "year": year, "first_treat": cohort,
+                         "x1": round(x1, 6),
+                         "y": round(fe + 0.1 * (year - 2017) + 2.0 * d, 6)})
+    # cs_cluster_var = the entity column "id" -> identity, must COMPLETE
+    run_root, result = _run_cs(tmp_path, pd.DataFrame(rows), cs_cluster_var="id")
+    assert result["status"] == "completed"
+    meta = _read_cs_did_metadata(run_root)
+    assert meta["cluster_level"] == "entity"
+    assert meta["n_clusters"] == 40
