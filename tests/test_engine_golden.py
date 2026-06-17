@@ -234,6 +234,34 @@ def test_golden_cs_did_staggered(tmp_path):
     _assert_or_write_golden("cs_did_staggered", snap)
 
 
+def test_golden_cs_did_honest(tmp_path, monkeypatch):
+    import numpy as np
+    import workbench.econometrics.runner as runner
+    monkeypatch.setattr(runner, "HONEST_MBAR_GRID", [0.0, 1.0])
+    monkeypatch.setattr(runner, "HONEST_GRID_POINTS", 150)
+    rng = np.random.default_rng(11)
+    rows = []
+    for i in range(40):
+        ent = f"u{i:02d}"; cohort = [0, 2019, 2020, 2021][i % 4]
+        x1 = round(float(rng.normal()), 6); fe = round(float(rng.normal()), 6)
+        for year in range(2017, 2023):
+            d = 1 if (cohort and year >= cohort) else 0
+            y = round(fe + 0.1*(year-2017) + 0.3*x1 + 2.0*d + 0.05*rng.normal(), 6)
+            rows.append({"id": ent, "year": year, "first_treat": cohort, "x1": x1, "y": y})
+    run_root, _ = _run(tmp_path, pd.DataFrame(rows), y="y", x=["x1"], model_type="cs_did",
+                       entity_col="id", time_col="year", did_mode="cohort",
+                       did_cohort_col="first_treat", cs_control_group="never",
+                       cs_est_method="dr", cs_base_period="varying", honest_did=True)
+    snap = _capture(run_root)
+    assert snap["status"] == "completed"
+    assert "cs_did" in snap["artifacts"]
+    # guard the honest_did block directly (NOT via _capture, which doesn't freeze it)
+    art = read_json(run_root / "cs_did.json")
+    assert "honest_did" in art and art["honest_did"]["skipped"] is False
+    assert "post_average" in art["honest_did"] and "results" in art["honest_did"]["post_average"]
+    _assert_or_write_golden("cs_did_honest", snap)
+
+
 def test_golden_cs_did_clustered(tmp_path):
     import numpy as np
     rng = np.random.default_rng(11)
