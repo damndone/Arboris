@@ -150,3 +150,84 @@ def test_grid_accept_elementwise_matches_R():
     )
     mism = int(np.sum(np.asarray(acc, int) != np.asarray(GA["accept"], int)))
     assert mism <= 3, f"{mism} accept mismatches (dual-path port likely wrong if clustered)"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: honest_rm top-level entry (Mbar grid + breakdown + guards + determinism).
+# ---------------------------------------------------------------------------
+
+
+def test_honest_rm_avg_matches_R():
+    from workbench.engine.honest_did import honest_rm
+
+    out = honest_rm(
+        betahat=np.array(HRM["betahat"]),
+        sigma=np.array(HRM["sigma"]),
+        num_pre=HRM["numPre"],
+        num_post=HRM["numPost"],
+        l_vec=np.array(HRM["l_avg"]),
+        mbar_grid=HRM["mbar_grid"],
+        alpha=0.05,
+    )
+    assert len(out["results"]) == len(HRM["rm_avg"])
+    for r_ours, r_ref in zip(out["results"], HRM["rm_avg"]):
+        assert abs(r_ours["Mbar"] - r_ref["Mbar"]) < 1e-12
+        assert abs(r_ours["lb"] - r_ref["lb"]) < 1e-3
+        assert abs(r_ours["ub"] - r_ref["ub"]) < 1e-3
+
+
+def test_honest_rm_event_matches_R():
+    from workbench.engine.honest_did import honest_rm
+
+    numPost = HRM["numPost"]
+    for ev in HRM["rm_event"]:
+        j = ev["event_index"]
+        lv = np.zeros(numPost)
+        lv[j] = 1.0
+        out = honest_rm(
+            betahat=np.array(HRM["betahat"]),
+            sigma=np.array(HRM["sigma"]),
+            num_pre=HRM["numPre"],
+            num_post=numPost,
+            l_vec=lv,
+            mbar_grid=[1.0],
+            alpha=0.05,
+        )
+        r = out["results"][0]
+        assert abs(r["lb"] - ev["lb"]) < 1e-3 and abs(r["ub"] - ev["ub"]) < 1e-3
+
+
+def test_honest_rm_deterministic():
+    from workbench.engine.honest_did import honest_rm
+
+    kw = dict(
+        betahat=np.array(HRM["betahat"]),
+        sigma=np.array(HRM["sigma"]),
+        num_pre=HRM["numPre"],
+        num_post=HRM["numPost"],
+        l_vec=np.array(HRM["l_avg"]),
+        mbar_grid=HRM["mbar_grid"],
+        alpha=0.05,
+    )
+    a, b = honest_rm(**kw), honest_rm(**kw)
+    assert [r["lb"] for r in a["results"]] == [r["lb"] for r in b["results"]]
+    assert [r["ub"] for r in a["results"]] == [r["ub"] for r in b["results"]]
+    assert a["breakdown"] == b["breakdown"]
+
+
+def test_honest_rm_guards():
+    import pytest
+
+    from workbench.engine.honest_did import honest_rm, HonestDiDError
+
+    sig = np.eye(4)
+    with pytest.raises(HonestDiDError, match="HONEST_NO_PRE_PERIODS"):
+        honest_rm(betahat=np.zeros(4), sigma=sig, num_pre=0, num_post=4,
+                  l_vec=np.ones(4) / 4, mbar_grid=[1.0])
+    with pytest.raises(HonestDiDError, match="HONEST_NO_POST_PERIODS"):
+        honest_rm(betahat=np.zeros(4), sigma=sig, num_pre=4, num_post=0,
+                  l_vec=np.array([]), mbar_grid=[1.0])
+    bad = np.ones((4, 4))
+    with pytest.raises(HonestDiDError, match="HONEST_DEGENERATE_SIGMA"):
+        honest_rm(betahat=np.zeros(4), sigma=bad, num_pre=2, num_post=2,
+                  l_vec=np.ones(2) / 2, mbar_grid=[1.0])

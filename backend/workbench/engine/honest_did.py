@@ -547,6 +547,75 @@ def arp_confidence_interval(
     return (float(accepted.min()), float(accepted.max()))
 
 
+def honest_rm(
+    *,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    mbar_grid,
+    alpha: float = 0.05,
+) -> dict:
+    """Robust ΔRM confidence sets across the Mbar grid + the breakdown Mbar.
+
+    Pure, deterministic (golden 0-drift). Loops ``arp_confidence_interval`` over
+    ``mbar_grid``.
+
+    Raises ``HonestDiDError`` on degenerate inputs (these DEGRADE the honest_did
+    block, never fail the run — caught upstream by the adapter/runner):
+
+      HONEST_NO_PRE_PERIODS   if num_pre  < 1  (ΔRM needs a pre-period to bound against)
+      HONEST_NO_POST_PERIODS  if num_post < 1  (no post-period to test)
+      HONEST_DEGENERATE_SIGMA if sigma is not positive-definite.
+
+    Returns ``{"results": [{"Mbar", "lb", "ub"}...], "breakdown": float|None}``
+    where ``breakdown`` is the LARGEST Mbar whose CI still EXCLUDES 0
+    (``lb > 0`` or ``ub < 0``); ``None`` if no Mbar excludes 0.
+    """
+    if num_pre < 1:
+        raise HonestDiDError(
+            "HONEST_NO_PRE_PERIODS: ΔRM requires at least one pre-period."
+        )
+    if num_post < 1:
+        raise HonestDiDError(
+            "HONEST_NO_POST_PERIODS: ΔRM requires at least one post-period."
+        )
+
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    sigma_sym = 0.5 * (sigma + sigma.T)
+    if float(np.linalg.eigvalsh(sigma_sym).min()) <= 0.0:
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: sigma is not positive-definite."
+        )
+
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+
+    results = []
+    for M in mbar_grid:
+        lb, ub = arp_confidence_interval(
+            betahat=betahat,
+            sigma=sigma,
+            num_pre=num_pre,
+            num_post=num_post,
+            l_vec=l_vec,
+            mbar=float(M),
+            alpha=alpha,
+        )
+        results.append({"Mbar": float(M), "lb": float(lb), "ub": float(ub)})
+
+    excludes0 = [
+        r["Mbar"]
+        for r in results
+        if (r["lb"] == r["lb"] and r["ub"] == r["ub"])  # not NaN
+        and (r["lb"] > 0.0 or r["ub"] < 0.0)
+    ]
+    breakdown = max(excludes0) if excludes0 else None
+
+    return {"results": results, "breakdown": breakdown}
+
+
 def arp_conditional_test(
     *,
     betahat: np.ndarray,
