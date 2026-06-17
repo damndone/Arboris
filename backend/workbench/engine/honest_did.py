@@ -240,22 +240,311 @@ def _lp_conditional_test(
     return {"reject": reject, "eta": eta, "delta": soln["delta_star"]}
 
 
-def _lp_conditional_test_dual(*, y, X, sig, eta, lam, mod_size, soln) -> dict:
-    """Degenerate / non-full-rank ARP path (R ``.lp_dual_fn`` + ``.vlo_vup_dual_fn``).
+_EPS = np.finfo(float).eps  # .Machine$double.eps
+_ROUNDEPS_TOL = _EPS ** (3.0 / 4.0)  # ~1.8e-12
 
-    DEFERRED to Task 4. R's dual path resolves the conditioning event ``[vlo, vup]``
-    via a bisection root-finder (``.check_if_solution_helper``), a scheme that is
-    materially different from the closed-form non-degenerate path and is NOT
-    exercised by the Task-3 fixture (whose binding set has exactly ``k+1`` rows ->
-    non-degenerate). Rather than ship an unvalidated approximation that could
-    silently return a wrong reject, this raises so callers cannot mistake an
-    unported branch for a correct answer. Task 4 will port ``.vlo_vup_dual_fn``
-    faithfully and validate it against the full-grid oracle.
+
+def _roundeps(x: float) -> float:
+    """Port of R ``HonestDiD:::.roundeps``: snap near-zero magnitudes to 0."""
+    return 0.0 if abs(x) < _ROUNDEPS_TOL else x
+
+
+def _max_program(*, s_T, gamma_tilde, sigma, W_T, c):
+    """Port of R ``HonestDiD:::.max_program``.
+
+    f = s_T + (gamma' sigma gamma)^{-1} (sigma gamma) c.
+    maximize f' x s.t. (W_T') x == [1, 0, ...], x >= 0.
+    R solves min(-f' x) via Rglpk; scipy linprog(c=-f) minimizes -f' x too, so
+    ``optimum = res.fun = min(-f' x) = -max(f' x)``, matching R's ``$optimum``.
+    Returns dict(solution, optimum, success).
     """
-    raise HonestDiDError(
-        "HONEST_DUAL_PATH_UNPORTED: degenerate/non-full-rank ARP branch is "
-        "deferred to Task 4 (R .vlo_vup_dual_fn bisection not yet ported)."
+    gsg = float(gamma_tilde @ sigma @ gamma_tilde)
+    f = s_T + (1.0 / gsg) * (sigma @ gamma_tilde) * c
+    f = np.asarray(f, dtype=float).reshape(-1)
+    Aeq = W_T.T  # rows = ncol(W_T), cols = len(x)
+    beq = np.zeros(Aeq.shape[0])
+    beq[0] = 1.0
+    res = linprog(
+        c=-f, A_eq=Aeq, b_eq=beq, bounds=(0, None), method="highs"
     )
+    if not res.success or res.x is None:
+        return {"solution": None, "optimum": np.inf, "success": False}
+    return {"solution": np.asarray(res.x, dtype=float), "optimum": float(res.fun), "success": True}
+
+
+def _check_solution(*, c, tol, s_T, gamma_tilde, sigma, W_T):
+    """Port of R ``HonestDiD:::.check_if_solution_helper``.
+
+    honestsolution = (|c - (-optimum)| <= tol). Returns the LP dict augmented
+    with ``honestsolution`` (NA -> None when the LP failed).
+    """
+    lp = _max_program(s_T=s_T, gamma_tilde=gamma_tilde, sigma=sigma, W_T=W_T, c=c)
+    if not lp["success"]:
+        lp["honestsolution"] = None
+        return lp
+    lp["honestsolution"] = bool(abs(c - (-lp["optimum"])) <= tol)
+    return lp
+
+
+def _vlo_vup_dual(*, eta, s_T, gamma_tilde, sigma, W_T):
+    """Port of R ``HonestDiD:::.vlo_vup_dual_fn`` (bisection root-finder).
+
+    Resolves the conditioning event [vlo, vup] for the degenerate dual path.
+    The ``solution``/``b`` used in the secant-like ``mid`` update come from the
+    MOST RECENT ``_check_solution`` call, mirroring R's reassignment of
+    ``linprog`` inside the while condition.
+    """
+    tol_c = 1e-6
+    tol_equality = 1e-6
+    gsg = float(gamma_tilde @ sigma @ gamma_tilde)
+    sigma_B = np.sqrt(gsg)
+    low_initial = min(-100.0, eta - 20.0 * sigma_B)
+    high_initial = max(100.0, eta + 20.0 * sigma_B)
+    maxiters = 10000
+    switchiters = 10
+    b = (1.0 / gsg) * (sigma @ gamma_tilde)
+    b = np.asarray(b, dtype=float).reshape(-1)
+    s_T = np.asarray(s_T, dtype=float).reshape(-1)
+
+    def check(cval):
+        return _check_solution(
+            c=cval, tol=tol_equality, s_T=s_T, gamma_tilde=gamma_tilde,
+            sigma=sigma, W_T=W_T,
+        )
+
+    checksol = check(eta)["honestsolution"]
+    if checksol is None or not checksol:
+        return {"vlo": eta, "vup": np.inf}
+
+    # ---- vup ----
+    linprog_hi = check(high_initial)
+    if linprog_hi["honestsolution"]:
+        vup = np.inf
+    else:
+        dif = 0.0
+        iters = 1
+        linprog = linprog_hi  # most-recent check result feeding the mid update
+        sol = linprog["solution"]
+        mid = _roundeps(float(sol @ s_T)) / (1.0 - float(sol @ b))
+        linprog = check(mid)
+        while (not linprog["honestsolution"]) and iters < maxiters:
+            iters += 1
+            if iters >= switchiters:
+                dif = tol_c + 1.0
+                break
+            sol = linprog["solution"]
+            mid = _roundeps(float(sol @ s_T)) / (1.0 - float(sol @ b))
+            linprog = check(mid)
+        low = eta
+        high = mid
+        while dif > tol_c and iters < maxiters:
+            iters += 1
+            mid = (high + low) / 2.0
+            if check(mid)["honestsolution"]:
+                low = mid
+            else:
+                high = mid
+            dif = high - low
+        vup = mid
+
+    # ---- vlo (mirrored) ----
+    linprog_lo = check(low_initial)
+    if linprog_lo["honestsolution"]:
+        vlo = -np.inf
+    else:
+        dif = 0.0
+        iters = 1
+        linprog = linprog_lo
+        sol = linprog["solution"]
+        mid = _roundeps(float(sol @ s_T)) / (1.0 - float(sol @ b))
+        linprog = check(mid)
+        while (not linprog["honestsolution"]) and iters < maxiters:
+            iters += 1
+            if iters >= switchiters:
+                dif = tol_c + 1.0
+                break
+            sol = linprog["solution"]
+            mid = _roundeps(float(sol @ s_T)) / (1.0 - float(sol @ b))
+            linprog = check(mid)
+        low = mid
+        high = eta
+        while dif > tol_c and iters < maxiters:
+            mid = (low + high) / 2.0
+            iters += 1
+            if check(mid)["honestsolution"]:
+                high = mid
+            else:
+                low = mid
+            dif = high - low
+        vlo = mid
+
+    return {"vlo": vlo, "vup": vup}
+
+
+def _lp_dual(*, y_T, X_T, eta, gamma_tilde, sigma):
+    """Port of R ``HonestDiD:::.lp_dual_fn``."""
+    y_T = np.asarray(y_T, dtype=float).reshape(-1)
+    X_T = np.atleast_2d(np.asarray(X_T, dtype=float))
+    sd_vec = np.sqrt(np.diag(sigma))
+    W_T = np.hstack([sd_vec.reshape(-1, 1), X_T])
+    gsg = float(gamma_tilde @ sigma @ gamma_tilde)
+    n = y_T.shape[0]
+    s_T = (np.eye(n) - (1.0 / gsg) * (sigma @ np.outer(gamma_tilde, gamma_tilde))) @ y_T
+    v = _vlo_vup_dual(eta=eta, s_T=s_T, gamma_tilde=gamma_tilde, sigma=sigma, W_T=W_T)
+    return {"vlo": v["vlo"], "vup": v["vup"], "eta": eta, "gamma_tilde": gamma_tilde}
+
+
+def _lp_conditional_test_dual(*, y, X, sig, eta, lam, mod_size, soln) -> dict:
+    """Degenerate / non-full-rank ARP path. Port of the dual branch of R
+    ``.lp_conditional_test_fn`` (uses ``.lp_dual_fn`` -> ``.vlo_vup_dual_fn``)."""
+    lp_dual = _lp_dual(y_T=y, X_T=X, eta=eta, gamma_tilde=lam, sigma=sig)
+    sigma_B_dual2 = float(lam @ sig @ lam)
+    if abs(sigma_B_dual2) < _EPS:
+        return {"reject": int(eta > 0), "eta": eta, "delta": soln["delta_star"]}
+    if sigma_B_dual2 < 0:
+        raise HonestDiDError(
+            "HONEST_DUAL_NEG_VAR: .vlo_vup_dual_fn returned a negative variance."
+        )
+    sigma_B_dual = np.sqrt(sigma_B_dual2)
+    maxstat = lp_dual["eta"] / sigma_B_dual
+    zlo_dual = lp_dual["vlo"] / sigma_B_dual
+    zup_dual = lp_dual["vup"] / sigma_B_dual
+    if not (zlo_dual <= maxstat <= zup_dual):
+        return {"reject": 0, "eta": eta, "delta": soln["delta_star"]}
+    cval = max(0.0, _norminvp_generalized(1.0 - mod_size, zlo_dual, zup_dual))
+    reject = int(maxstat > cval)
+    return {"reject": reject, "eta": eta, "delta": soln["delta_star"]}
+
+
+def _build_polyhedron(
+    *, betahat, sigma, num_pre, num_post, l_vec, mbar, s, max_positive
+) -> dict:
+    """Build the per-``(s, sign)`` ARP constants ONCE (cached across the theta grid).
+
+    Port of the construction inside R ``.ARP_computeCI`` (everything outside the
+    ``testTheta`` closure). Returns the pieces the per-theta LP reuses.
+    """
+    A = create_arm_constraints(
+        num_pre=num_pre,
+        num_post=num_post,
+        mbar=mbar,
+        s=s,
+        max_positive=max_positive,
+        drop_zero=True,
+    )
+    d = np.zeros(A.shape[0])  # ΔRM: d is zeros
+    Gamma = _construct_gamma(l_vec)
+    Gamma_inv = np.linalg.inv(Gamma)
+    A_post = A[:, num_pre:num_pre + num_post]
+    AGammaInv = A_post @ Gamma_inv
+    AGammaInv_one = AGammaInv[:, 0]
+    AGammaInv_minusOne = AGammaInv[:, 1:]
+    Y = A @ betahat - d
+    sigmaY = A @ sigma @ A.T
+    post_cols = np.arange(num_pre, A.shape[1])
+    rows0 = np.nonzero(np.any(A[:, post_cols] != 0, axis=1))[0]
+    return {
+        "A": A,
+        "AGammaInv_one": AGammaInv_one,
+        "AGammaInv_minusOne": AGammaInv_minusOne,
+        "Y": Y,
+        "sigmaY": sigmaY,
+        "rows0": list(rows0),
+    }
+
+
+def _arp_accept_grid(
+    *,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    mbar: float,
+    alpha: float,
+    grid: np.ndarray,
+) -> np.ndarray:
+    """Union accept vector over (s, max_positive) for each theta in ``grid``.
+
+    Port of R ``computeConditionalCS_DeltaRM``'s ``pmax`` over s in
+    ``-(num_pre-1)..0`` and ``max_positive in {True, False}``, with each
+    fixed-S CI from the ARP branch of ``.ARP_computeCI``. The per-(s,sign)
+    constants are cached once and reused across the grid (the R ``testTheta``
+    closure pattern).
+    """
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+    grid = np.asarray(grid, dtype=float).reshape(-1)
+
+    s_indices = range(-(num_pre - 1), 1)
+    accept_union = np.zeros(grid.shape[0], dtype=int)
+
+    for s in s_indices:
+        for max_positive in (True, False):
+            poly = _build_polyhedron(
+                betahat=betahat, sigma=sigma, num_pre=num_pre,
+                num_post=num_post, l_vec=l_vec, mbar=mbar, s=s,
+                max_positive=max_positive,
+            )
+            Y = poly["Y"]
+            AGI_one = poly["AGammaInv_one"]
+            AGI_minus = poly["AGammaInv_minusOne"]
+            sigmaY = poly["sigmaY"]
+            rows0 = poly["rows0"]
+            for i, theta in enumerate(grid):
+                if accept_union[i] == 1:
+                    continue  # already in the union; max over (s,sign) stays 1
+                y_T = Y - AGI_one * theta
+                out = _lp_conditional_test(
+                    y_T=y_T, X_T=AGI_minus, sigma=sigmaY,
+                    alpha=alpha, rows_for_arp=rows0,
+                )
+                if out["reject"] == 0:
+                    accept_union[i] = 1
+    return accept_union
+
+
+def arp_confidence_interval(
+    *,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    mbar: float,
+    alpha: float = 0.05,
+    grid_points: int = 1000,
+    grid_lb: float | None = None,
+    grid_hi: float | None = None,
+) -> tuple[float, float]:
+    """Test-inversion CI for ΔRM(mbar): theta NOT rejected, union over (s, sign).
+
+    Faithful port of R ``computeConditionalCS_DeltaRM`` + endpoint extraction
+    (``lb = min(grid[accept==1])``, ``ub = max(...)``). ``grid = seq(grid_lb,
+    grid_hi, length.out=grid_points)`` with default ``±20*sdTheta`` where
+    ``sdTheta = sqrt(l' Sigma_post l)``.
+    """
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+
+    sigma_post = sigma[num_pre:num_pre + num_post, num_pre:num_pre + num_post]
+    sd_theta = float(np.sqrt(l_vec @ sigma_post @ l_vec))
+    if grid_hi is None:
+        grid_hi = 20.0 * sd_theta
+    if grid_lb is None:
+        grid_lb = -20.0 * sd_theta
+    grid = np.linspace(grid_lb, grid_hi, grid_points)
+
+    accept = _arp_accept_grid(
+        betahat=betahat, sigma=sigma, num_pre=num_pre, num_post=num_post,
+        l_vec=l_vec, mbar=mbar, alpha=alpha, grid=grid,
+    )
+    accepted = grid[accept == 1]
+    if accepted.size == 0:
+        return (np.nan, np.nan)
+    return (float(accepted.min()), float(accepted.max()))
 
 
 def arp_conditional_test(
@@ -283,30 +572,15 @@ def arp_conditional_test(
     sigma = np.asarray(sigma, dtype=float)
     l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
 
-    A = create_arm_constraints(
-        num_pre=num_pre,
-        num_post=num_post,
-        mbar=mbar,
-        s=s,
-        max_positive=max_positive,
-        drop_zero=True,
+    poly = _build_polyhedron(
+        betahat=betahat, sigma=sigma, num_pre=num_pre, num_post=num_post,
+        l_vec=l_vec, mbar=mbar, s=s, max_positive=max_positive,
     )
-    d = np.zeros(A.shape[0])  # ΔRM: d is zeros
-
-    Gamma = _construct_gamma(l_vec)
-    Gamma_inv = np.linalg.inv(Gamma)
-    # A restricted to POST columns: 0-based cols num_pre .. num_pre+num_post-1
-    A_post = A[:, num_pre:num_pre + num_post]
-    AGammaInv = A_post @ Gamma_inv
-    AGammaInv_one = AGammaInv[:, 0]
-    AGammaInv_minusOne = AGammaInv[:, 1:]
-
-    Y = A @ betahat - d
-    sigmaY = A @ sigma @ A.T
-
-    # rowsForARP: post-period-moment rows (numPost>1). 0-based.
-    post_cols = np.arange(num_pre, A.shape[1])
-    rows0 = np.nonzero(np.any(A[:, post_cols] != 0, axis=1))[0]
+    AGammaInv_one = poly["AGammaInv_one"]
+    AGammaInv_minusOne = poly["AGammaInv_minusOne"]
+    Y = poly["Y"]
+    sigmaY = poly["sigmaY"]
+    rows0 = poly["rows0"]
 
     y_T = Y - AGammaInv_one * theta
 

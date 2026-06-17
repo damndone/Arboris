@@ -111,3 +111,42 @@ def test_lp_conditional_test_low_level_matches_R():
     )
     assert int(out["reject"]) == int(CT["reject"])
     assert abs(out["eta"] - CT["eta"]) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Task 4: test-inversion CI for one Mbar (grid + union) + degenerate dual path.
+# ---------------------------------------------------------------------------
+
+
+def test_ci_for_one_mbar_matches_R():
+    from workbench.engine.honest_did import arp_confidence_interval
+
+    ref = next(r for r in HRM["rm_avg"] if abs(r["Mbar"] - 1.0) < 1e-9)
+    lb, ub = arp_confidence_interval(
+        betahat=np.array(HRM["betahat"]),
+        sigma=np.array(HRM["sigma"]),
+        num_pre=HRM["numPre"],
+        num_post=HRM["numPost"],
+        l_vec=np.array(HRM["l_avg"]),
+        mbar=1.0,
+        alpha=0.05,
+    )
+    assert abs(lb - ref["lb"]) < 1e-3 and abs(ub - ref["ub"]) < 1e-3
+
+
+def test_grid_accept_elementwise_matches_R():
+    from workbench.engine.honest_did import _arp_accept_grid
+
+    GA = json.load(open(os.path.join(_FIX, "grid_accept.json")))
+    acc = _arp_accept_grid(
+        betahat=np.array(HRM["betahat"]),
+        sigma=np.array(HRM["sigma"]),
+        num_pre=HRM["numPre"],
+        num_post=HRM["numPost"],
+        l_vec=np.array(HRM["l_avg"]),
+        mbar=1.0,
+        alpha=0.05,
+        grid=np.array(GA["grid"]),
+    )
+    mism = int(np.sum(np.asarray(acc, int) != np.asarray(GA["accept"], int)))
+    assert mism <= 3, f"{mism} accept mismatches (dual-path port likely wrong if clustered)"

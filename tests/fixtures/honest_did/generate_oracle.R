@@ -249,4 +249,33 @@ cat("conditional_test (ARP): theta=", theta_ct, " reject=", res$reject,
     " eta=", res$eta, "\n")
 cat("arm_constraints: n(s,sign) combos =", length(A_list),
     " (expect", length(s_indices) * 2, ")\n")
+
+# ===========================================================================
+# 4. grid_accept.json  -- ELEMENT-WISE ORACLE for Task 4
+#    The FULL union accept vector (over s and max_positive) produced by
+#    HonestDiD:::computeConditionalCS_DeltaRM for Mbar=1, l_vec=l_avg, ARP.
+#    Returns tibble(grid, accept); accept is pmax over (s,sign) per the R
+#    source. Used to validate the degenerate dual-path port element-wise
+#    (CI-endpoint alone under-validates interior degenerate theta).
+#
+#    Gated by env WB_GRID_ONLY: when set, ONLY this fixture is (re)written so
+#    the other committed fixtures stay byte-identical (git must not list them).
+# ===========================================================================
+ga_tbl <- HonestDiD:::computeConditionalCS_DeltaRM(
+  betahat = betahat, sigma = sigma,
+  numPrePeriods = numPre, numPostPeriods = numPost,
+  l_vec = l_avg, Mbar = 1, alpha = 0.05,
+  hybrid_flag = "ARP", gridPoints = 1000L, seed = 0
+)
+grid_accept <- list(
+  Mbar   = 1,
+  l      = "avg",
+  grid   = as.numeric(ga_tbl$grid),
+  accept = as.integer(ga_tbl$accept)
+)
+write_json(grid_accept, file.path(OUTDIR, "grid_accept.json"),
+           digits = 10, auto_unbox = TRUE, pretty = TRUE)
+cat("grid_accept: n accept==1 =", sum(ga_tbl$accept),
+    " CI = [", min(ga_tbl$grid[ga_tbl$accept == 1]), ",",
+    max(ga_tbl$grid[ga_tbl$accept == 1]), "]\n")
 cat("DONE\n")
