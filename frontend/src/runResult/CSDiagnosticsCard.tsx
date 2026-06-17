@@ -36,8 +36,10 @@ interface CSLabelAgg extends CSAggCommon {
 
 interface HonestDidResult {
   Mbar: number;
-  lb: number;
-  ub: number;
+  // A degenerate (nan, nan) CI is sanitized to JSON null by the backend
+  // (_json_safe). The `f` helper renders null/undefined as "—".
+  lb: number | null;
+  ub: number | null;
 }
 
 interface HonestDidActive {

@@ -121,6 +121,42 @@ describe("CSDiagnosticsCard", () => {
     expect(screen.getByText(/无突破/)).toBeInTheDocument();
   });
 
+  it("renders a null (nan-sanitized) honest-DID CI row as — without crashing", () => {
+    // The backend coerces a degenerate (nan, nan) CI to JSON null (lb/ub = null).
+    // The card MUST render those as the em-dash "—" via the `f` helper, never
+    // "null"/"NaN", and must not throw.
+    const withNullCI: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        skipped: false,
+        num_pre: 2,
+        num_post: 2,
+        mbar_grid: [0.0, 1.0],
+        post_average: {
+          results: [
+            { Mbar: 0.0, lb: null, ub: null },
+            { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+          ],
+          breakdown: null,
+        },
+        per_event_time: [
+          {
+            event_time: 0,
+            results: [{ Mbar: 0.0, lb: null, ub: null }],
+            breakdown: null,
+          },
+        ],
+      },
+    };
+    expect(() =>
+      render(<CSDiagnosticsCard diagnostics={withNullCI} />),
+    ).not.toThrow();
+    const panel = screen.getByLabelText("cs-honest-did-post-average");
+    expect(panel.textContent).toContain("—");
+    expect(panel.textContent).not.toContain("null");
+    expect(panel.textContent).not.toContain("NaN");
+  });
+
   it("renders the skipped note when honest_did is degraded", () => {
     const skipped: CSDiagnostics = {
       ...diag,
