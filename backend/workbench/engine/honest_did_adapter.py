@@ -29,6 +29,13 @@ def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total,
     N = int(n_total)
     rc = np.asarray(row_cluster)
 
+    # Honor the "NEVER throws" contract: a row_cluster/component_if mismatch (or
+    # empty IF) would otherwise raise from np.add.at BEFORE the try below.
+    if CIF.ndim != 2 or rc.shape[0] != CIF.shape[0] or CIF.shape[1] == 0:
+        return {"skipped": True,
+                "reason": "HONEST_BAD_INPUT: row_cluster/component_if shape mismatch.",
+                "num_pre": 0, "num_post": 0}
+
     # Cluster-robust Σ_full (v1.5.6.1 single-row convention, N = entity count).
     uniq, inv = np.unique(rc, return_inverse=True)
     S = np.zeros((len(uniq), CIF.shape[1]))

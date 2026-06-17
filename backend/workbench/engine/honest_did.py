@@ -585,6 +585,12 @@ def honest_rm(
 
     betahat = np.asarray(betahat, dtype=float).reshape(-1)
     sigma = np.asarray(sigma, dtype=float)
+    if not (np.isfinite(sigma).all() and np.isfinite(betahat).all()):
+        # eigvalsh on a non-finite sigma raises LinAlgError/ValueError (a generic
+        # HONEST_INTERNAL_ERROR upstream); report the degeneracy cleanly instead.
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: non-finite values in sigma or betahat."
+        )
     sigma_sym = 0.5 * (sigma + sigma.T)
     if float(np.linalg.eigvalsh(sigma_sym).min()) <= 0.0:
         raise HonestDiDError(
