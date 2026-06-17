@@ -1,0 +1,42 @@
+"""honest-DID (Rambachan-Roth DeltaRM) engine tests.
+
+Task 1: oracle-shape sanity only (no Python engine yet). The R HonestDiD 0.2.8
+fixtures under tests/fixtures/honest_did/ are the element-wise validation target
+for the ported DeltaRM engine in later tasks (T2-T5).
+"""
+import json
+import os
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_FIX = os.path.join(_HERE, "fixtures", "honest_did")
+
+HRM = json.load(open(os.path.join(_FIX, "honest_rm.json")))
+
+
+def test_oracle_present_and_widens():
+    assert HRM["numPre"] == 3 and HRM["numPost"] == 4
+    widths = [r["ub"] - r["lb"] for r in HRM["rm_avg"]]
+    assert widths == sorted(widths)   # CI width non-decreasing in Mbar
+    assert len(HRM["rm_event"]) == 4
+
+
+def test_arm_constraints_cover_all_s_sign():
+    ac = json.load(open(os.path.join(_FIX, "arm_constraints.json")))
+    # s loops -(numPre-1):0 -> numPre values, times {TRUE,FALSE}
+    assert len(ac["constraints"]) == ac["numPre"] * 2
+    assert ac["s_indices"] == [-2, -1, 0]
+    assert ac["primary"] == {"s": 0, "max_positive": True}
+    for c in ac["constraints"]:
+        assert len(c["A"]) == c["nrow"]
+        assert all(len(row) == c["ncol"] for row in c["A"])
+
+
+def test_conditional_test_instance_shape():
+    ct = json.load(open(os.path.join(_FIX, "conditional_test.json")))
+    assert ct["hybrid_flag"] == "LF"
+    assert ct["reject"] in (0, 1)
+    assert isinstance(ct["lf_cv"], float)
+    # y_T row count matches A_RM row count; sigmaY is square of same size
+    n = len(ct["A_RM"])
+    assert len(ct["y_T"]) == n
+    assert len(ct["sigmaY"]) == n and all(len(r) == n for r in ct["sigmaY"])
