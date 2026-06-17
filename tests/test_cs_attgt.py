@@ -73,17 +73,6 @@ def test_influence_columns_mean_zero():
         base_t=3.0, control_group="never", anticipation=0, covariates=["x1"], est_method="dr")
     assert abs(cell_influence_function(cell, est_method="dr").mean()) < 1e-8
 
-def test_cluster_influence_identity_and_sum():
-    from workbench.engine.cs_attgt import cluster_influence
-    obs = np.array([1.0, 2.0, 3.0, 4.0])
-    ids, summed = cluster_influence(obs, np.array([10, 20, 30, 40]))
-    assert np.array_equal(ids, np.array([10, 20, 30, 40]))
-    assert np.allclose(summed, obs)
-    ids2, summed2 = cluster_influence(obs, np.array([10, 10, 30, 40]))
-    assert np.array_equal(ids2, np.array([10, 30, 40]))
-    assert np.allclose(summed2, np.array([3.0, 3.0, 4.0]))
-
-
 def _high_ps_panel():
     """Panel with ONE control whose fitted propensity exceeds DRDID's 0.995 trim
     threshold. A long, well-separated treated tail keeps the logit slope steep and
@@ -185,3 +174,52 @@ def test_fully_trimmed_control_side_degrades_to_invalid_no_nan_leak():
         # invalid cells omit every intermediate (the seven-array contract)
         for arr in ("_units", "_D", "_dY", "_X", "_ps", "_mhat", "_trim"):
             assert arr not in cell, f"{method}: invalid cell leaked {arr}"
+
+
+# --- v1.5.6.1 Task 3: entity-level IF + cluster validation (single row convention) ---
+from workbench.engine.did_spec import normalize_did_input
+from workbench.engine.cs_attgt import estimate_att_gt
+
+
+def _norm(extra=None):
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    if extra:
+        d = extra(d)
+    return normalize_did_input(d, mode="cohort", entity="unit", time="period",
+                               y="y", cohort="first_treat")
+
+
+def test_clustered_if_is_entity_level():
+    b = estimate_att_gt(_norm(), control_group="never", est_method="dr",
+        base_period="varying", anticipation=0, covariates=["x1"], cluster_var="cluster")
+    # IF rows = entities (60), NOT clusters (20)
+    assert b.influence_func.shape[0] == 60
+    assert b.aux["row_cluster"].shape[0] == 60
+    assert len(np.unique(b.aux["row_cluster"])) == 20
+
+
+def test_unclustered_row_cluster_is_entity():
+    b = estimate_att_gt(_norm(), control_group="never", est_method="dr",
+        base_period="varying", anticipation=0, covariates=["x1"], cluster_var=None)
+    assert b.influence_func.shape[0] == 60
+    assert len(np.unique(b.aux["row_cluster"])) == 60
+
+
+def test_missing_cluster_col_raises():
+    with pytest.raises(CSSpecError, match="CS_CLUSTER_COL_MISSING"):
+        estimate_att_gt(_norm(), control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, covariates=["x1"], cluster_var="nope")
+
+
+def test_single_cluster_raises():
+    setone = lambda d: d.assign(cluster=0)
+    with pytest.raises(CSSpecError, match="CS_CLUSTER_SINGLE"):
+        estimate_att_gt(_norm(setone), control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, covariates=["x1"], cluster_var="cluster")
+
+
+def test_nan_cluster_raises():
+    setnan = lambda d: d.assign(cluster=d["cluster"].where(d["unit"] != d["unit"].iloc[0]))
+    with pytest.raises(CSSpecError, match="CS_CLUSTER_COL_NAN"):
+        estimate_att_gt(_norm(setnan), control_group="never", est_method="dr",
+            base_period="varying", anticipation=0, covariates=["x1"], cluster_var="cluster")

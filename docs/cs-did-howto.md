@@ -47,8 +47,9 @@ CS-specific settings (the defaults match R's `did` package):
 - **Anticipation** — number of pre-treatment periods (integer, default `0`) during
   which units may already respond; those periods are excluded from the clean
   baseline.
-- **Clustering** — inference clusters by **entity** (the panel unit). Clustering by
-  a different variable is a planned follow-up and not yet supported.
+- **Clustering** — by default inference clusters by **entity** (the panel unit). You
+  can also pick a column for **one-way variable clustering** (`cs_cluster_var`); see
+  the Clustering section below.
 
 Defaults `never + dr + varying + anticipation 0` reproduce R `did`'s out-of-the-box
 behaviour.
@@ -61,15 +62,17 @@ behaviour.
 2. Pick the **DID mode** and use the role controls to assign **entity**, **time**,
    **outcome**, and the mode-specific column(s) (cohort, or treat + post, or status).
 3. Put any conditioning covariates in **X** (these activate `dr`/`ipw`/`reg`).
-4. Set the CS knobs (control group, method, base period, anticipation). Inference
-   clusters by entity.
+4. Set the CS knobs (control group, method, base period, anticipation). Leave the
+   **cluster** field empty to cluster by entity (default), or pick a column for
+   one-way variable clustering.
 
 ### API (`POST /runs`, multipart form)
 
 Set `model_type=cs_did`, `entity_col`, `time_col`, `y`, the mode fields (e.g.
 `did_mode=cohort`, `did_cohort_col=...`), and the CS params: `cs_control_group`,
-`cs_est_method`, `cs_base_period`, `cs_anticipation`. (Inference clusters by
-entity; a `cs_cluster_var` parameter is a planned follow-up.)
+`cs_est_method`, `cs_base_period`, `cs_anticipation`, `cs_cluster_var`. Leave
+`cs_cluster_var` empty to cluster by entity (default), or set it to a column name
+for one-way variable clustering.
 
 ### CLI
 
@@ -121,3 +124,34 @@ The CS estimator is **self-implemented** (no new dependencies) and validated
 **element-wise against R `did` / `DRDID`**: group-time ATTs, the doubly-robust
 influence function, the aggregations, and the multiplier-bootstrap bands are all
 checked against the R reference fixtures.
+
+## Clustering / 聚类
+
+By default CS DID clusters inference at the **entity** level (the panel unit) — the
+standard choice, matching R `did`. Leave the **cluster** field (GUI) /
+`cs_cluster_var` (API) **empty** to keep this default.
+
+要按其他变量聚类（one-way variable clustering），在 GUI 的 cluster 选择器里选一列，
+或在 API 里把 `cs_cluster_var` 设为该列名（例如 `cl`、`state`、`industry`）。典型场景
+是把同一州/行业内的多个实体归为一个聚类，承认 cluster 内部的相关结构。
+
+What clustering changes — and what it does **not**:
+
+- **Point estimates are unchanged.** Group-time ATT(g,t) and all four aggregations
+  are identical whether you cluster by entity or by another variable — clustering
+  only affects **inference**. 点估计完全不变。
+- **Standard errors and the simultaneous (uniform) bands become cluster-robust.**
+  The entity-level influence functions are summed within each cluster at the two
+  variance steps (the analytical CRVE standard error and the multiplier bootstrap),
+  so the reported SEs and bands reflect within-cluster correlation.
+- The result metadata reports the honest counts: `n_units`, `n_clusters`, and
+  `cluster_level` (the column you chose, or `entity` for the default).
+
+Limitations / 限制:
+
+- **Two-way clustering is not yet supported** — only one clustering dimension at a
+  time. 暂不支持双向聚类。
+- A **bad cluster column** — missing, not present in the data, or collapsing to a
+  **single distinct value** (one cluster) — yields a **structured
+  `MODEL_FIT_FAILED`** rather than a silent or misleading result. 选择无效的聚类列
+  会返回结构化的 `MODEL_FIT_FAILED` 失败，而不是悄悄给出错误的标准误。

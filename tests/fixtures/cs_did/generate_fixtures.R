@@ -60,4 +60,87 @@ aggte_out <- list()
 for (m in c("dr", "ipw", "reg")) aggte_out[[m]] <- emit_aggte(m)
 write_json(aggte_out, "tests/fixtures/cs_did/aggte.json", digits = 12, auto_unbox = TRUE)
 
-cat("Fixtures written: att_gt.json, drdid_inffunc.json, aggte.json\n")
+# ---- Clustered CRVE oracle (deterministic, built from inf functions) ----
+# did forces bstrap=TRUE with clustervars, so there is no native analytical
+# clustered SE. We build a deterministic cluster-robust SE from the SAME
+# influence functions did exposes (already 1e-8-validated unclustered):
+#   S_c = sum_{i in c} psi_i ;  se = sqrt(sum_c S_c^2) / N   (N = #entities).
+# Unclustered identity: each entity its own cluster => reduces to did's getSE.
+# (Verified: with cl = 1..N this reproduces did's native overall.se / se.egt
+#  to machine precision for dr dynamic, confirming both the formula and the
+#  inf-func row order used below.)
+#
+# IMPORTANT deviations from the original plan snippet, made after empirically
+# probing did 2.5.0 internals (the unmodified snippet would error):
+#  (1) Accessor names. did 2.5.0 does NOT expose $overall.inf.func /
+#      $egt.inf.func. Per aggregation type the names differ:
+#        simple   -> simple.att            (overall only, no per-egt)
+#        dynamic  -> dynamic.inf.func      + dynamic.inf.func.e   (N x n_egt)
+#        group    -> selective.inf.func    + selective.inf.func.g (N x n_egt)
+#        calendar -> calendar.inf.func     + calendar.inf.func.t  (N x n_egt)
+#      We therefore pick them GENERICALLY: the overall IF is the element that
+#      is a length-N vector (1 column); the per-egt IF is the element whose
+#      column count equals length(a$egt) (NULL when absent, e.g. simple).
+#  (2) Row order. att_gt/aggte sort entities into cohort blocks, so the IF
+#      rows are in unique(r$DIDparams$data$unit) order (== time_invariant_data
+#      $unit), NOT sort(unique(unit)). We align the cluster id vector to THAT
+#      order. Verified length(cl) == N == length(overall IF) before emitting.
+cluster_of_unit <- unique(d[, c("unit", "cluster")])
+cluster_of_unit <- cluster_of_unit[order(cluster_of_unit$unit), ]
+emit_clustered <- function(method) {
+  r <- att_gt(yname = "y", tname = "period", idname = "unit", gname = "first_treat",
+              xformla = ~x1, data = d, est_method = method,
+              control_group = "nevertreated", base_period = "varying",
+              anticipation = 0, bstrap = FALSE, cband = FALSE)
+  # Entity row order of the influence functions (verified == IF row order).
+  ids <- unique(r$DIDparams$data$unit)
+  N   <- length(ids)
+  cl  <- cluster_of_unit$cluster[match(ids, cluster_of_unit$unit)]
+  stopifnot(length(cl) == N, !any(is.na(cl)))
+  crve <- function(inf) {                       # inf: length-N entity IF
+    inf <- as.numeric(inf)
+    stopifnot(length(inf) == N)                 # row alignment guard
+    S <- rowsum(inf, cl)                         # (n_clusters,)
+    sqrt(sum(S^2)) / N
+  }
+  # Generic IF picker: overall = the length-N vector element; per-egt = the
+  # element with ncol == length(egt) (NULL when none, e.g. type="simple").
+  pick_overall <- function(iflist) {
+    for (nm in names(iflist)) {
+      m <- as.matrix(iflist[[nm]])
+      if (ncol(m) == 1L && nrow(m) == N) return(as.numeric(m))
+    }
+    NULL
+  }
+  pick_egt <- function(iflist, n_egt) {
+    if (is.null(n_egt) || n_egt < 1L) return(NULL)
+    for (nm in names(iflist)) {
+      m <- as.matrix(iflist[[nm]])
+      if (nrow(m) == N && ncol(m) == n_egt) return(m)
+    }
+    NULL
+  }
+  agg <- function(type) {
+    a <- aggte(r, type = type, bstrap = FALSE)
+    overall_if <- pick_overall(a$inf.function)
+    n_egt <- if (is.null(a$egt)) 0L else length(a$egt)
+    egt_if <- pick_egt(a$inf.function, n_egt)    # matrix (N x n_egt) or NULL
+    se_egt <- if (is.null(egt_if)) NULL else apply(egt_if, 2, crve)
+    list(overall = a$overall.att,
+         overall_se = if (is.null(overall_if)) NULL else crve(overall_if),
+         egt = a$egt, se_egt = se_egt)
+  }
+  # per-cell clustered CRVE SE: crve() of each att_gt influence-function column
+  # (r$inffunc is N x K, columns aligned to r$group / r$t).
+  att_gt_se <- apply(r$inffunc, 2, crve)
+  list(n = N, n_clusters = length(unique(cl)),
+       simple = agg("simple"), dynamic = agg("dynamic"),
+       group = agg("group"), calendar = agg("calendar"),
+       att_gt = list(group = r$group, t = r$t, se = att_gt_se))
+}
+clustered_out <- list()
+for (m in c("dr", "ipw", "reg")) clustered_out[[m]] <- emit_clustered(m)
+write_json(clustered_out, "tests/fixtures/cs_did/aggte_clustered.json",
+           digits = 12, auto_unbox = TRUE, null = "null")
+
+cat("Fixtures written: att_gt.json, drdid_inffunc.json, aggte.json, aggte_clustered.json\n")

@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "analysis_router": [
+      "data_profile"
+    ],
+    "cleaned_dataset": [
+      "raw_data.csv"
+    ],
+    "cleaning_actions": [
+      "raw_data.csv"
+    ],
+    "coef_plot": [],
+    "correlation_heatmap": [],
+    "cs_did": [
+      "cleaned_dataset"
+    ],
+    "cs_did_1": [
+      "cleaned_dataset"
+    ],
+    "data_profile": [
+      "cleaned_dataset"
+    ],
+    "diagnostic_summary": [],
+    "raw_data.csv": [],
+    "report_html": [],
+    "report_pdf": [],
+    "statistical_tests_anova": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_chi_square": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_fisher_exact": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_nonparametric": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_rank_correlations": [
+      "cleaned_dataset"
+    ],
+    "statistical_tests_t_tests": [
+      "cleaned_dataset"
+    ],
+    "tables_xlsx": [],
+    "time_trend": []
+  },
+  "error_codes": [
+    "PANEL_POOLED_MODEL",
+    "VARIABLE_DROPPED"
+  ],
+  "models": {
+    "cs_did_1": {
+      "coef_keys": [
+        "ATT"
+      ],
+      "coef_rounded": {
+        "ATT": 1.988953
+      },
+      "model_type": "cs_did"
+    }
+  },
+  "status": "completed"
+}

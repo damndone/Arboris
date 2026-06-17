@@ -42,3 +42,47 @@ def test_run_cs_did_overall_matches_aggte_point():
         base_period="varying", anticipation=0, cluster_var=None, seed=1)
     assert abs(res["aggregations"]["simple"]["overall"] - ref["simple"]["overall"]) < 1e-6
     assert abs(res["aggregations"]["group"]["overall_se"] - ref["group"]["overall_se"]) < 1e-6
+
+
+def _norm_cluster():
+    import pandas as pd
+    from workbench.engine.did_spec import normalize_did_input
+    d = pd.read_csv("tests/fixtures/cs_did/panel.csv")
+    return normalize_did_input(d, mode="cohort", entity="unit", time="period",
+        y="y", cohort="first_treat")
+
+
+def test_run_cs_did_clustered_metadata():
+    res = run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0,
+        cluster_var="cluster", seed=20260615)
+    m = res["metadata"]
+    assert m["n_units"] == 60          # entities, never overwritten
+    assert m["n_clusters"] == 20
+    assert m["cluster_level"] == "cluster"
+
+
+def test_run_cs_did_entity_metadata():
+    res = run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0,
+        cluster_var=None, seed=20260615)
+    m = res["metadata"]
+    assert m["n_units"] == 60 and m["n_clusters"] == 60
+    assert m["cluster_level"] == "entity"
+
+
+def test_run_cs_did_clustered_bands_differ_from_unclustered():
+    # passing clusters must actually change the bands (cluster-robust != entity)
+    rc = run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0,
+        cluster_var="cluster", seed=1)
+    ru = run_cs_did(_norm_cluster(), covariates=["x1"], control_group="never",
+        est_method="dr", base_period="varying", anticipation=0,
+        cluster_var=None, seed=1)
+    dc = rc["aggregations"]["dynamic"]
+    du = ru["aggregations"]["dynamic"]
+    # point estimates identical, SE/bands different
+    assert abs(dc["overall"] - du["overall"]) < 1e-12
+    assert abs(dc["overall_se"] - du["overall_se"]) > 1e-4
+    assert dc["overall_uniform_band"] is not None
+    assert len(dc["uniform_band"]) == len(dc["estimate"])
