@@ -52,6 +52,12 @@ def _run_track(fn, *, betahat, sigma, num_pre, num_post, et, extra, **kw) -> dic
     on ``HonestDiDError``. Both ``num_pre``/``num_post`` are always echoed.
     """
     try:
+        # Let the engine raise its clean HONEST_NO_PRE/POST_PERIODS guard BEFORE we
+        # build the averaging weights (1/num_post would ZeroDivisionError on an
+        # empty-post snapshot, escaping the narrow `except HonestDiDError`).
+        if num_post < 1 or num_pre < 1:
+            fn(betahat=betahat, sigma=sigma, num_pre=num_pre,
+               num_post=num_post, l_vec=np.zeros(max(num_post, 0)), **kw)
         l_avg = np.full(num_post, 1.0 / num_post)
         avg = fn(betahat=betahat, sigma=sigma, num_pre=num_pre,
                  num_post=num_post, l_vec=l_avg, **kw)

@@ -32,7 +32,7 @@ def test_nan_honest_did_block_serializes_to_strict_valid_json():
     # A honest_did block carrying a (nan, nan) CI must serialize to JSON that the
     # browser's strict parser accepts (no bare NaN token). json.loads with
     # parse_constant rejecting NaN/Infinity emulates the browser's strictness.
-    block = {"skipped": False, "num_pre": 1, "num_post": 2,
+    block = {"status": "ok", "num_pre": 1, "num_post": 2,
              "post_average": {"results": [{"Mbar": 0.0, "lb": float("nan"),
                                            "ub": float("nan")}],
                               "breakdown": None}}
@@ -61,5 +61,7 @@ def test_adapter_row_mismatch_skips_not_throws():
            "component_if": np.zeros((5, 3))}
     out = honest_did_from_cs_dynamic(agg, row_cluster=np.array([0, 1, 2, 3]),
                                      n_total=4, mbar_grid=[0, 1], grid_points=50)
-    assert out["skipped"] is True
-    assert "HONEST_BAD_INPUT" in out["reason"]
+    assert out["rm"]["status"] == "not_available"
+    assert "HONEST_BAD_INPUT" in out["rm"]["reason"]
+    assert out["sd"]["status"] == "not_available"
+    assert "HONEST_BAD_INPUT" in out["sd"]["reason"]

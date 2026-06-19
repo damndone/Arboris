@@ -91,9 +91,10 @@ def test_real_run_with_nan_ci_writes_strict_valid_json(tmp_path, monkeypatch):
 
     # this DGP is meant to exercise the (nan,nan) path; if the design ever stops
     # producing one we want a loud signal rather than a silently weakened test.
-    assert not hd["skipped"], "expected honest-DID to RUN (not skip) for this DGP"
-    flat = [r for r in hd["post_average"]["results"]]
-    for pe in hd["per_event_time"]:
+    rm = hd["rm"]
+    assert rm["status"] == "ok", "expected honest-DID ΔRM to RUN (not skip) for this DGP"
+    flat = [r for r in rm["post_average"]["results"]]
+    for pe in rm["per_event_time"]:
         flat += pe["results"]
     null_rows = [r for r in flat if r["lb"] is None or r["ub"] is None]
     assert null_rows, "expected at least one (nan->null) CI row from the coarse grid"
@@ -111,8 +112,8 @@ def test_adapter_real_nan_ci_sanitizes_to_strict_json():
            "component_if": rng.normal(0, 1e-3, size=(N, 3))}  # tiny Σ
     out = honest_did_from_cs_dynamic(agg, row_cluster=np.arange(N), n_total=N,
                                      mbar_grid=[0.0, 1.0], grid_points=5)
-    assert out["skipped"] is False
-    raw = out["post_average"]["results"]
+    assert out["rm"]["status"] == "ok"
+    raw = out["rm"]["post_average"]["results"]
     assert any(r["lb"] != r["lb"] for r in raw), "expected a real NaN lb pre-sanitize"
 
     shipped = {k: v for k, v in out.items() if not k.startswith("_debug_")}
@@ -120,7 +121,7 @@ def test_adapter_real_nan_ci_sanitizes_to_strict_json():
     text = json.dumps(safe)
     assert "NaN" not in text and "Infinity" not in text
     parsed = json.loads(text, parse_constant=_reject_constant)
-    assert parsed["post_average"]["results"][0]["lb"] is None
+    assert parsed["rm"]["post_average"]["results"][0]["lb"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -166,10 +167,16 @@ def test_adapter_one_pre_one_post_runs():
            "component_if": rng.normal(0, 0.05, (N, 3))}
     o = honest_did_from_cs_dynamic(agg, row_cluster=np.arange(N), n_total=N,
                                    mbar_grid=[0, 1], grid_points=80)
-    assert o["skipped"] is False
-    assert o["num_pre"] == 1 and o["num_post"] == 1
-    assert len(o["per_event_time"]) == 1
-    assert o["per_event_time"][0]["event_time"] == 0.0
+    rm = o["rm"]
+    assert rm["status"] == "ok"
+    assert rm["num_pre"] == 1 and rm["num_post"] == 1
+    assert len(rm["per_event_time"]) == 1
+    assert rm["per_event_time"][0]["event_time"] == 0.0
+    # ΔSD/FLCI also runs on the minimal-pre snapshot (one pre, one post)
+    sd = o["sd"]
+    assert sd["status"] in ("ok", "not_available")
+    if sd["status"] == "ok":
+        assert sd["method"] == "FLCI" and sd["num_pre"] == 1 and sd["num_post"] == 1
 
 
 def test_adapter_no_post_periods_skips_clean():
@@ -180,9 +187,12 @@ def test_adapter_no_post_periods_skips_clean():
            "component_if": rng.normal(0, 0.05, (N, 2))}
     o = honest_did_from_cs_dynamic(agg, row_cluster=np.arange(N), n_total=N,
                                    mbar_grid=[0, 1], grid_points=80)
-    assert o["skipped"] is True
-    assert "HONEST_NO_POST_PERIODS" in o["reason"]
-    assert o["num_pre"] == 1 and o["num_post"] == 0
+    rm = o["rm"]
+    assert rm["status"] == "not_available"
+    assert "HONEST_NO_POST_PERIODS" in rm["reason"]
+    assert rm["num_pre"] == 1 and rm["num_post"] == 0
+    assert o["sd"]["status"] == "not_available"
+    assert "HONEST_NO_POST_PERIODS" in o["sd"]["reason"]
 
 
 def test_adapter_no_pre_no_post_only_reference_skips_clean():
@@ -194,9 +204,12 @@ def test_adapter_no_pre_no_post_only_reference_skips_clean():
            "component_if": rng.normal(0, 0.05, (N, 1))}
     o = honest_did_from_cs_dynamic(agg, row_cluster=np.arange(N), n_total=N,
                                    mbar_grid=[0, 1], grid_points=80)
-    assert o["skipped"] is True
-    assert "HONEST_NO_PRE_PERIODS" in o["reason"]
-    assert o["num_pre"] == 0 and o["num_post"] == 0
+    rm = o["rm"]
+    assert rm["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in rm["reason"]
+    assert rm["num_pre"] == 0 and rm["num_post"] == 0
+    assert o["sd"]["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in o["sd"]["reason"]
 
 
 # ---------------------------------------------------------------------------

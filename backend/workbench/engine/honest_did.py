@@ -952,6 +952,11 @@ def _flci_derivative_bisection(*, h_min, h0, m, sigma, num_pre, num_post, l_vec,
 
     eps = _EPS
     dif = min((b - a) / num_points, abs(b) * eps ** (1.0 / 3.0))
+    # Degenerate search interval (h_min >= h0, e.g. num_pre == 1 leaves no
+    # bias/variance slope to optimize): the finite-difference step collapses to 0.
+    # Bail to NaN so the caller's grid fallback handles the single-point case.
+    if not (dif > 0.0):
+        return float("nan")
     failtol = eps ** 0.5
     fa = f(a)
     fb = f(b)
