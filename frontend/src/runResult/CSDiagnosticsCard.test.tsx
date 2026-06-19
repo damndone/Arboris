@@ -238,6 +238,80 @@ describe("CSDiagnosticsCard", () => {
     expect(screen.queryByLabelText("cs-honest-did-sd-panel")).toBeNull();
   });
 
+  it("type-checks + renders a not_available sd track carrying the FULL backend-echoed extra (method/m_grid/scale, no post_average)", () => {
+    // The adapter echoes `extra` (method/m_grid/scale) on the HonestDiDError
+    // (not_available) path too — so the on-disk degraded sd track is RICHER than
+    // {status, reason}. This must still type-check against HonestTrack (those
+    // fields optional) and render the unavailable note without crashing.
+    const sdRichDegraded: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        rm: {
+          status: "not_available",
+          reason: "HONEST_NO_PRE_PERIODS: ΔRM requires at least one pre-period.",
+          num_pre: 0,
+          num_post: 2,
+          mbar_grid: [0.0, 1.0],
+        },
+        sd: {
+          status: "not_available",
+          reason: "HONEST_NO_PRE_PERIODS: ΔSD requires at least one pre-period.",
+          num_pre: 0,
+          num_post: 2,
+          method: "FLCI",
+          m_grid: [0.0, 0.5, 1.0, 1.5, 2.0],
+          scale: 0.42,
+          // intentionally NO post_average / per_event_time (degraded path)
+        },
+      },
+    };
+    render(<CSDiagnosticsCard diagnostics={sdRichDegraded} />);
+    const sdU = screen.getByLabelText("cs-honest-did-sd-unavailable");
+    expect(sdU.textContent).toContain("HONEST_NO_PRE_PERIODS");
+    const rmU = screen.getByLabelText("cs-honest-did-rm-unavailable");
+    expect(rmU.textContent).toContain("HONEST_NO_PRE_PERIODS");
+    // neither ok panel renders
+    expect(screen.queryByLabelText("cs-honest-did-sd-panel")).toBeNull();
+    expect(screen.queryByLabelText("cs-honest-did-rm-panel")).toBeNull();
+  });
+
+  it("type-checks an ok sd track whose rows carry null (nan-sanitized) M lb/ub", () => {
+    // Backend sanitizes a degenerate FLCI CI to JSON null; the sd row's lb/ub
+    // must be assignable from `number | null` and render as — without crashing.
+    const sdNull: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        rm: { status: "not_available", reason: "skip" },
+        sd: {
+          status: "ok",
+          reason: null,
+          num_pre: 2,
+          num_post: 1,
+          method: "FLCI",
+          m_grid: [0.0, 0.5, 1.0],
+          scale: 0.1,
+          post_average: {
+            results: [
+              { M: 0.0, lb: 0.5, ub: 1.5 },
+              { M: 0.5, lb: null, ub: null },
+            ],
+            breakdown: null,
+          },
+          per_event_time: [
+            {
+              event_time: 0,
+              results: [{ M: 0.0, lb: null, ub: null }],
+              breakdown: null,
+            },
+          ],
+        },
+      },
+    };
+    render(<CSDiagnosticsCard diagnostics={sdNull} />);
+    const panel = screen.getByLabelText("cs-honest-did-sd-post-average");
+    expect(panel.textContent).toContain("—");
+  });
+
   it("renders the degraded note (with reason) for a degraded track", () => {
     const degraded: CSDiagnostics = {
       ...diag,
