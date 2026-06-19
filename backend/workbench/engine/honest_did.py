@@ -6,8 +6,8 @@ Faithful Python port of R ``HonestDiD 0.2.8``. The committed R oracles under
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import linprog
-from scipy.stats import truncnorm
+from scipy.optimize import brentq, linprog
+from scipy.stats import norm, truncnorm
 
 
 class HonestDiDError(ValueError):
@@ -48,6 +48,32 @@ def _create_a_sd(*, num_pre: int, num_post: int) -> np.ndarray:
         atilde[r, r : r + 3] = [1.0, -2.0, 1.0]
     atilde = np.delete(atilde, num_pre, axis=1)  # drop reference-period column
     return np.vstack([atilde, -atilde])
+
+
+def _folded_normal_quantile(t: float, *, alpha: float = 0.05) -> float:
+    """(1-alpha) quantile of the folded normal |N(t,1)|.
+
+    Root of g(c) = Φ(c-t) - Φ(-c-t) - (1-alpha), strictly increasing in c.
+    Deterministic (Brent root-find; no Monte Carlo). Used by FLCI: the
+    half-length is sqrt(var) * c_alpha(bias/sqrt(var)).
+    """
+    t = abs(float(t))
+    target = 1.0 - alpha
+
+    def g(c):
+        return (norm.cdf(c - t) - norm.cdf(-c - t)) - target
+
+    lo = norm.ppf(1.0 - alpha / 2.0)   # value at t=0; lower bound for any t>=0
+    hi = lo + t + 10.0                 # generous upper bracket; g(hi) > 0
+    return float(brentq(g, lo, hi, xtol=1e-12, rtol=1e-14))
+
+
+def _folded_normal_quantile_monotone(ts, *, alpha: float = 0.05) -> np.ndarray:
+    """c_alpha over a sequence of t values, forced non-decreasing to remove
+    sub-ULP solver noise that could perturb a downstream argmin. c_alpha(t) is
+    theoretically strictly increasing in t; this only corrects numerical noise."""
+    out = np.array([_folded_normal_quantile(t, alpha=alpha) for t in ts], dtype=float)
+    return np.maximum.accumulate(out)
 
 
 def create_arm_constraints(

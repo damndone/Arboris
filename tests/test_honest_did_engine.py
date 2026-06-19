@@ -258,3 +258,35 @@ def test_create_a_sd_insufficient_periods_raises():
     from workbench.engine.honest_did import _create_a_sd, HonestDiDError
     with pytest.raises(HonestDiDError, match="HONEST_SD_INSUFFICIENT_PERIODS"):
         _create_a_sd(num_pre=0, num_post=1)    # total 1 -> no second-diff row
+
+
+def test_folded_normal_quantile_t0_is_standard_normal():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    from scipy.stats import norm
+    # |N(0,1)| (1-alpha) quantile == two-sided z_{1-alpha/2}
+    assert abs(_folded_normal_quantile(0.0, alpha=0.05) - norm.ppf(0.975)) < 1e-8
+
+
+def test_folded_normal_quantile_strictly_increasing_in_t():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    ts = [0.0, 0.5, 1.0, 2.0, 5.0]
+    vals = [_folded_normal_quantile(t, alpha=0.05) for t in ts]
+    assert all(b > a for a, b in zip(vals, vals[1:]))
+
+
+def test_folded_normal_quantile_satisfies_cdf_equation():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    from scipy.stats import norm
+    t = 1.3
+    c = _folded_normal_quantile(t, alpha=0.05)
+    assert abs((norm.cdf(c - t) - norm.cdf(-c - t)) - 0.95) < 1e-8
+
+
+def test_folded_normal_quantile_monotone_is_nondecreasing():
+    from workbench.engine.honest_did import _folded_normal_quantile_monotone
+    # even if input t is non-monotone, output is forced nondecreasing
+    ts = [0.0, 1.0, 0.9, 2.0]
+    out = _folded_normal_quantile_monotone(ts, alpha=0.05)
+    assert np.all(np.diff(out) >= 0)
+    # the first three "true" values are increasing then the 0.9 would dip; clamp holds it
+    assert out[2] >= out[1]
