@@ -373,3 +373,51 @@ def test_flci_m_zero_is_min_sd_ci():
         l_vec=l, m=0.0, alpha=0.05,
     )
     assert abs(r["half_length"] - norm.ppf(0.975) * hMin) < 1e-8
+
+
+# ---------------------------------------------------------------------------
+# Task 5: honest_sd top-level entry (M grid + breakdown + guards).
+# Orchestration over the already-validated flci(); no new R oracle needed.
+# ---------------------------------------------------------------------------
+def test_honest_sd_matches_flci_per_m_and_shape():
+    from workbench.engine.honest_did import honest_sd, flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    s = float(np.sqrt(np.diag(sigma)).max())
+    m_grid = [0.0, 0.5*s, 1.0*s, 1.5*s, 2.0*s]
+    out = honest_sd(betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+                    l_vec=l, m_grid=m_grid, alpha=0.05)
+    assert [r["M"] for r in out["results"]] == [float(m) for m in m_grid]
+    # each row equals a direct flci() call (orchestration consistency)
+    for m, row in zip(m_grid, out["results"]):
+        r = flci(betahat=beta, sigma=sigma, num_pre=npre, num_post=npost, l_vec=l, m=float(m), alpha=0.05)
+        assert abs(row["lb"] - r["lb"]) < 1e-12 and abs(row["ub"] - r["ub"]) < 1e-12
+    assert "breakdown" in out
+
+
+def test_honest_sd_breakdown_excludes_zero():
+    # construct a case where the smallest M CI excludes 0 (shift betahat far from 0)
+    from workbench.engine.honest_did import honest_sd
+    beta, sigma, npre, npost, l = _flci_inputs()
+    beta2 = np.array(beta, dtype=float); beta2[npre:] += 50.0  # huge post effect
+    out = honest_sd(betahat=beta2, sigma=sigma, num_pre=npre, num_post=npost,
+                    l_vec=l, m_grid=[0.0, 0.1, 0.2], alpha=0.05)
+    assert out["breakdown"] is not None   # some M still excludes 0
+
+
+def test_honest_sd_no_pre_periods_raises():
+    from workbench.engine.honest_did import honest_sd, HonestDiDError
+    import pytest
+    beta, sigma, npre, npost, l = _flci_inputs()
+    with pytest.raises(HonestDiDError, match="HONEST_NO_PRE_PERIODS"):
+        honest_sd(betahat=beta[npre:], sigma=sigma[npre:, npre:], num_pre=0,
+                  num_post=npost, l_vec=l, m_grid=[0.0, 1.0], alpha=0.05)
+
+
+def test_honest_sd_degenerate_sigma_raises():
+    from workbench.engine.honest_did import honest_sd, HonestDiDError
+    import pytest
+    beta, sigma, npre, npost, l = _flci_inputs()
+    bad = np.array(sigma, dtype=float); bad[0,0] = -1.0  # not PD
+    with pytest.raises(HonestDiDError, match="HONEST_DEGENERATE_SIGMA"):
+        honest_sd(betahat=beta, sigma=bad, num_pre=npre, num_post=npost,
+                  l_vec=l, m_grid=[0.0], alpha=0.05)

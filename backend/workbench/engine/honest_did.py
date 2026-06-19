@@ -1051,3 +1051,82 @@ def flci(
         "lb": center - half_length,
         "ub": center + half_length,
     }
+
+
+def honest_sd(
+    *,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    m_grid,
+    alpha: float = 0.05,
+    num_points: int = 100,
+) -> dict:
+    """Robust ΔSD confidence sets across the M grid + the breakdown M.
+
+    Mirrors :func:`honest_rm` in shape and guard style, but uses the validated
+    ΔSD Fixed-Length CI :func:`flci` (second-difference / smoothness restriction)
+    instead of the ΔRM ARP test, and reports the smoothness bound under the
+    ``"M"`` key. Pure, deterministic (golden 0-drift); loops ``flci`` over
+    ``m_grid``.
+
+    Raises ``HonestDiDError`` on degenerate inputs (these DEGRADE the honest_did
+    block, never fail the run — caught upstream by the adapter/runner):
+
+      HONEST_NO_PRE_PERIODS   if num_pre  < 1  (R's findOptimalFLCI imposes one
+                                                sum-weights equality; needs >=1 pre)
+      HONEST_NO_POST_PERIODS  if num_post < 1  (no post-period to test)
+      HONEST_DEGENERATE_SIGMA if sigma is not positive-definite.
+
+    Returns ``{"results": [{"M", "lb", "ub"}...], "breakdown": float|None}``
+    where ``breakdown`` is the LARGEST M whose CI still EXCLUDES 0
+    (``lb > 0`` or ``ub < 0``); ``None`` if no M excludes 0.
+    """
+    if num_pre < 1:
+        raise HonestDiDError(
+            "HONEST_NO_PRE_PERIODS: ΔSD requires at least one pre-period."
+        )
+    if num_post < 1:
+        raise HonestDiDError(
+            "HONEST_NO_POST_PERIODS: ΔSD requires at least one post-period."
+        )
+
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    if not (np.isfinite(sigma).all() and np.isfinite(betahat).all()):
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: non-finite values in sigma or betahat."
+        )
+    sigma_sym = 0.5 * (sigma + sigma.T)
+    if float(np.linalg.eigvalsh(sigma_sym).min()) <= 0.0:
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: sigma is not positive-definite."
+        )
+
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+
+    results = []
+    for M in m_grid:
+        r = flci(
+            betahat=betahat,
+            sigma=sigma,
+            num_pre=num_pre,
+            num_post=num_post,
+            l_vec=l_vec,
+            m=float(M),
+            alpha=alpha,
+            num_points=num_points,
+        )
+        results.append({"M": float(M), "lb": float(r["lb"]), "ub": float(r["ub"])})
+
+    excludes0 = [
+        r["M"]
+        for r in results
+        if (r["lb"] == r["lb"] and r["ub"] == r["ub"])  # not NaN
+        and (r["lb"] > 0.0 or r["ub"] < 0.0)
+    ]
+    breakdown = max(excludes0) if excludes0 else None
+
+    return {"results": results, "breakdown": breakdown}
