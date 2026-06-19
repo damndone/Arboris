@@ -48,6 +48,21 @@ suppressWarnings(suppressMessages({
   library(jsonlite)
 }))
 
+# ---------------------------------------------------------------------------
+# v1.5.7.1: replace HonestDiD's Monte-Carlo .qfoldednormal with an ANALYTIC
+# folded-normal quantile so the whole FLCI path is deterministic and the
+# committed oracle is matchable element-wise by the numpy port (Task 3/4).
+# Root of  Phi((c-mu)/sd) - Phi((-c-mu)/sd) - p = 0  in c (strictly increasing).
+# ---------------------------------------------------------------------------
+qfold_analytic <- function(p, mu = 0, sd = 1, ...) {
+  vapply(mu, function(m) {
+    lo <- qnorm((1 + p) / 2) * sd
+    uniroot(function(c) pnorm((c - m) / sd) - pnorm((-c - m) / sd) - p,
+            lower = lo, upper = lo + abs(m) + 20 * sd, tol = 1e-12)$root
+  }, numeric(1))
+}
+assignInNamespace(".qfoldednormal", qfold_analytic, ns = "HonestDiD")
+
 set.seed(0)
 
 OUTDIR <- "tests/fixtures/honest_did"
@@ -324,17 +339,26 @@ write_json(a_sd, file.path(OUTDIR, "a_sd.json"),
 #     c(0,0.5,1,1.5,2) * max(sqrt(diag(sigma)))
 M_scale <- max(sqrt(diag(sigma)))
 Mvec    <- c(0, 0.5, 1.0, 1.5, 2.0) * M_scale
+
+# intermediates: hMin (.findLowestH) and h0 (.findHForMinimumBias) are M-free
+hMin_int <- as.numeric(HonestDiD:::.findLowestH(
+  sigma = sigma, numPrePeriods = numPre, numPostPeriods = numPost, l_vec = l_avg))
+h0_int   <- as.numeric(HonestDiD:::.findHForMinimumBias(
+  sigma = sigma, numPrePeriods = numPre, numPostPeriods = numPost, l_vec = l_avg))
+
 flci_rows <- lapply(Mvec, function(M) {
   r <- HonestDiD::findOptimalFLCI(
     betahat = betahat, sigma = sigma,
     numPrePeriods = numPre, numPostPeriods = numPost,
     l_vec = l_avg, M = M, alpha = alpha, numPoints = 100, seed = 0
   )
-  list(M                = as.numeric(M),
+  list(M                 = as.numeric(M),
        optimalHalfLength = as.numeric(r$optimalHalfLength),
-       lb               = as.numeric(r$FLCI[1]),
-       ub               = as.numeric(r$FLCI[2]),
-       status           = as.character(r$status))
+       lb                = as.numeric(r$FLCI[1]),
+       ub                = as.numeric(r$FLCI[2]),
+       optimalVec        = as.numeric(r$optimalVec),
+       optimalPrePeriodVec = as.numeric(r$optimalVec[seq_len(numPre)]),
+       status            = as.character(r$status))
 })
 flci_sd <- list(
   numPre   = numPre,
@@ -347,6 +371,22 @@ flci_sd <- list(
   results  = flci_rows
 )
 write_json(flci_sd, file.path(OUTDIR, "flci_sd.json"),
+           digits = 10, auto_unbox = TRUE, pretty = TRUE)
+
+# intermediates fixture (Phase 1 validation): hMin, h0, per-M optimalPrePeriodVec
+flci_intermediates <- list(
+  numPre  = numPre,
+  numPost = numPost,
+  alpha   = alpha,
+  l_vec   = as.numeric(l_avg),
+  hMin    = hMin_int,
+  h0      = h0_int,
+  Mvec    = as.numeric(Mvec),
+  perM    = lapply(flci_rows, function(rr) list(
+              M = rr$M,
+              optimalPrePeriodVec = rr$optimalPrePeriodVec))
+)
+write_json(flci_intermediates, file.path(OUTDIR, "flci_intermediates.json"),
            digits = 10, auto_unbox = TRUE, pretty = TRUE)
 
 cat("a_sd: dim =", nrow(A_sd), "x", ncol(A_sd), "\n")
