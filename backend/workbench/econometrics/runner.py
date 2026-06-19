@@ -12,6 +12,8 @@ from .optional_deps import require_optional_dependency
 # monkeypatch to a small grid for speed; run_cs_did reads them as globals.
 HONEST_MBAR_GRID = [0.0, 0.5, 1.0, 1.5, 2.0]
 HONEST_GRID_POINTS = 1000
+HONEST_SD_M_MULT = [0.0, 0.5, 1.0, 1.5, 2.0]
+HONEST_SD_SCALE_FLOOR = 1e-8
 
 
 def _formula_term(column: str, categorical: bool = False) -> str:
@@ -601,9 +603,13 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
         try:
             hd = honest_did_from_cs_dynamic(
                 agg_by_kind["dynamic"], row_cluster=row_cluster, n_total=G,
-                mbar_grid=HONEST_MBAR_GRID, alpha=alpha, grid_points=HONEST_GRID_POINTS)
+                mbar_grid=HONEST_MBAR_GRID, alpha=alpha,
+                grid_points=HONEST_GRID_POINTS,
+                m_mult=HONEST_SD_M_MULT, scale_floor=HONEST_SD_SCALE_FLOOR)
         except Exception as exc:            # honest-DID must NEVER fail the run
-            hd = {"skipped": True, "reason": f"HONEST_INTERNAL_ERROR: {exc}"}
+            reason = f"HONEST_INTERNAL_ERROR: {exc}"
+            hd = {"rm": {"status": "degraded", "reason": reason},
+                  "sd": {"status": "degraded", "reason": reason}}
         # strip the _debug_* keys from the shipped artifact (test-only in engine layer)
         result_honest = {k: v for k, v in hd.items() if not k.startswith("_debug_")}
 

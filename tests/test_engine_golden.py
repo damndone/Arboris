@@ -257,8 +257,11 @@ def test_golden_cs_did_honest(tmp_path, monkeypatch):
     assert "cs_did" in snap["artifacts"]
     # guard the honest_did block directly (NOT via _capture, which doesn't freeze it)
     art = read_json(run_root / "cs_did.json")
-    assert "honest_did" in art and art["honest_did"]["skipped"] is False
-    assert "post_average" in art["honest_did"] and "results" in art["honest_did"]["post_average"]
+    hd = art["honest_did"]
+    assert hd["rm"]["status"] == "ok" and "results" in hd["rm"]["post_average"]
+    assert hd["sd"]["status"] == "ok" and hd["sd"]["method"] == "FLCI"
+    assert "results" in hd["sd"]["post_average"]
+    assert not any(k.startswith("_debug_") for k in hd)
     _assert_or_write_golden("cs_did_honest", snap)
 
 

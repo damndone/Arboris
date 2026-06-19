@@ -96,10 +96,20 @@ def test_run_cs_did_honest_did_block_present(monkeypatch):
         est_method="dr", base_period="varying", anticipation=0, cluster_var="cluster",
         seed=20260615, honest_did=True)
     h = res["honest_did"]
-    assert h["skipped"] is False
-    assert "post_average" in h and "results" in h["post_average"]
-    assert len(h["per_event_time"]) == h["num_post"]
-    assert not any(k.startswith("_debug_") for k in h)        # debug keys stripped
+    rm = h["rm"]
+    assert rm["status"] == "ok"
+    assert "post_average" in rm and "results" in rm["post_average"]
+    assert len(rm["per_event_time"]) == rm["num_post"]
+    # sd (ΔSD/FLCI) track runs on the same snapshot
+    sd = h["sd"]
+    assert sd["status"] in ("ok", "not_available")
+    if sd["status"] == "ok":
+        assert sd["method"] == "FLCI"
+        assert "results" in sd["post_average"]
+        assert sd["post_average"]["results"][0].get("M") is not None
+    assert not any(k.startswith("_debug_") for k in h)        # debug keys stripped (top level)
+    assert not any(k.startswith("_debug_") for k in rm)       # and not in tracks
+    assert not any(k.startswith("_debug_") for k in sd)
 
 
 def test_run_cs_did_honest_did_absent_by_default():

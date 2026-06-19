@@ -231,3 +231,193 @@ def test_honest_rm_guards():
     with pytest.raises(HonestDiDError, match="HONEST_DEGENERATE_SIGMA"):
         honest_rm(betahat=np.zeros(4), sigma=bad, num_pre=2, num_post=2,
                   l_vec=np.ones(2) / 2, mbar_grid=[1.0])
+
+
+# --- Task 2: ΔSD second-difference operator (R .create_A_SD port) ---
+
+def test_create_a_sd_matches_r_oracle():
+    import json as _json
+    from pathlib import Path
+    from workbench.engine.honest_did import _create_a_sd
+    o = _json.loads((Path(_FIX) / "a_sd.json").read_text())
+    A = _create_a_sd(num_pre=o["numPre"], num_post=o["numPost"])
+    expected = np.asarray(o["A_sd"], dtype=float)
+    assert A.shape == expected.shape          # 12x7 for the fixture
+    assert np.allclose(A, expected, atol=1e-9)
+
+
+def test_create_a_sd_two_sided_structure():
+    from workbench.engine.honest_did import _create_a_sd
+    A = _create_a_sd(num_pre=3, num_post=4)
+    k = A.shape[0] // 2
+    assert np.allclose(A[k:], -A[:k])          # rbind(Atilde, -Atilde)
+
+
+def test_create_a_sd_insufficient_periods_raises():
+    import pytest
+    from workbench.engine.honest_did import _create_a_sd, HonestDiDError
+    with pytest.raises(HonestDiDError, match="HONEST_SD_INSUFFICIENT_PERIODS"):
+        _create_a_sd(num_pre=0, num_post=1)    # total 1 -> no second-diff row
+
+
+def test_folded_normal_quantile_t0_is_standard_normal():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    from scipy.stats import norm
+    # |N(0,1)| (1-alpha) quantile == two-sided z_{1-alpha/2}
+    assert abs(_folded_normal_quantile(0.0, alpha=0.05) - norm.ppf(0.975)) < 1e-8
+
+
+def test_folded_normal_quantile_strictly_increasing_in_t():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    ts = [0.0, 0.5, 1.0, 2.0, 5.0]
+    vals = [_folded_normal_quantile(t, alpha=0.05) for t in ts]
+    assert all(b > a for a, b in zip(vals, vals[1:]))
+
+
+def test_folded_normal_quantile_satisfies_cdf_equation():
+    from workbench.engine.honest_did import _folded_normal_quantile
+    from scipy.stats import norm
+    t = 1.3
+    c = _folded_normal_quantile(t, alpha=0.05)
+    assert abs((norm.cdf(c - t) - norm.cdf(-c - t)) - 0.95) < 1e-8
+
+
+def test_folded_normal_quantile_monotone_is_nondecreasing():
+    from workbench.engine.honest_did import _folded_normal_quantile_monotone
+    # even if input t is non-monotone, output is forced nondecreasing
+    ts = [0.0, 1.0, 0.9, 2.0]
+    out = _folded_normal_quantile_monotone(ts, alpha=0.05)
+    assert np.all(np.diff(out) >= 0)
+    # the first three "true" values are increasing then the 0.9 would dip; clamp holds it
+    assert out[2] >= out[1]
+
+
+# ---------------------------------------------------------------------------
+# Task 4: FLCI (DeltaSD) convex sub-problems + public flci(). Oracle =
+# flci_sd.json (regenerated with an analytic qfoldednormal) + intermediates.
+# ---------------------------------------------------------------------------
+
+FLCI_INT = json.load(open(os.path.join(_FIX, "flci_intermediates.json")))
+FLCI_SD = json.load(open(os.path.join(_FIX, "flci_sd.json")))
+
+
+def _flci_inputs():
+    beta = np.array(HRM["betahat"], dtype=float)
+    sigma = np.array(HRM["sigma"], dtype=float)
+    return beta, sigma, HRM["numPre"], HRM["numPost"], np.array(FLCI_SD["l_vec"], dtype=float)
+
+
+def test_flci_hmin_matches_r():
+    from workbench.engine.honest_did import _flci_min_sd
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    assert abs(hMin - FLCI_INT["hMin"]) < 1e-6
+
+
+def test_flci_h0_matches_r():
+    from workbench.engine.honest_did import _flci_h_for_min_bias
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    h0 = _flci_h_for_min_bias(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    assert abs(h0 - FLCI_INT["h0"]) < 1e-6
+
+
+def test_flci_worst_case_bias_finite_and_lopt_matches_r():
+    # At h = hMin the worst-case bias optimizer's L_opt should match R's
+    # optimalPrePeriodVec for the M=0 anchor (whose chosen h is hMin).
+    from workbench.engine.honest_did import (
+        _flci_min_sd,
+        _flci_worst_case_bias_given_h,
+    )
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    wb = _flci_worst_case_bias_given_h(
+        h=hMin, sigma=sigma, num_pre=npre, num_post=npost, l_vec=l
+    )
+    assert wb["status"] == "optimal"
+    assert np.isfinite(wb["value"])
+    L_r = np.array(FLCI_INT["perM"][0]["optimalPrePeriodVec"], dtype=float)
+    assert np.max(np.abs(wb["L_opt"] - L_r)) < 1e-4
+
+
+def test_flci_matches_r_oracle_over_m_grid():
+    from workbench.engine.honest_did import flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    alpha = FLCI_SD["alpha"]
+    for row in FLCI_SD["results"]:
+        r = flci(
+            betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+            l_vec=l, m=row["M"], alpha=alpha,
+        )
+        # half-length (the FLCI width) is the load-bearing quantity: 1e-6.
+        assert abs(r["half_length"] - row["optimalHalfLength"]) < 1e-6, row["M"]
+        if row["M"] == 0:
+            # M=0 center sits on a FLAT bias manifold: R's CVXR/ECOS leaves
+            # ~2e-10 slack in hMin which the degenerate worst-case-bias direction
+            # amplifies ~1e4x into the L_opt -> center. The CI WIDTH is exact
+            # (above); only the center wobbles at solver-noise scale. The M=0
+            # anchor below pins the half-length analytically.
+            assert abs(r["lb"] - row["lb"]) < 5e-6, row["M"]
+            assert abs(r["ub"] - row["ub"]) < 5e-6, row["M"]
+        else:
+            assert abs(r["lb"] - row["lb"]) < 1e-6, row["M"]
+            assert abs(r["ub"] - row["ub"]) < 1e-6, row["M"]
+
+
+def test_flci_m_zero_is_min_sd_ci():
+    from scipy.stats import norm
+    from workbench.engine.honest_did import _flci_min_sd, flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    r = flci(
+        betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+        l_vec=l, m=0.0, alpha=0.05,
+    )
+    assert abs(r["half_length"] - norm.ppf(0.975) * hMin) < 1e-8
+
+
+# ---------------------------------------------------------------------------
+# Task 5: honest_sd top-level entry (M grid + breakdown + guards).
+# Orchestration over the already-validated flci(); no new R oracle needed.
+# ---------------------------------------------------------------------------
+def test_honest_sd_matches_flci_per_m_and_shape():
+    from workbench.engine.honest_did import honest_sd, flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    s = float(np.sqrt(np.diag(sigma)).max())
+    m_grid = [0.0, 0.5*s, 1.0*s, 1.5*s, 2.0*s]
+    out = honest_sd(betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+                    l_vec=l, m_grid=m_grid, alpha=0.05)
+    assert [r["M"] for r in out["results"]] == [float(m) for m in m_grid]
+    # each row equals a direct flci() call (orchestration consistency)
+    for m, row in zip(m_grid, out["results"]):
+        r = flci(betahat=beta, sigma=sigma, num_pre=npre, num_post=npost, l_vec=l, m=float(m), alpha=0.05)
+        assert abs(row["lb"] - r["lb"]) < 1e-12 and abs(row["ub"] - r["ub"]) < 1e-12
+    assert "breakdown" in out
+
+
+def test_honest_sd_breakdown_excludes_zero():
+    # construct a case where the smallest M CI excludes 0 (shift betahat far from 0)
+    from workbench.engine.honest_did import honest_sd
+    beta, sigma, npre, npost, l = _flci_inputs()
+    beta2 = np.array(beta, dtype=float); beta2[npre:] += 50.0  # huge post effect
+    out = honest_sd(betahat=beta2, sigma=sigma, num_pre=npre, num_post=npost,
+                    l_vec=l, m_grid=[0.0, 0.1, 0.2], alpha=0.05)
+    assert out["breakdown"] is not None   # some M still excludes 0
+
+
+def test_honest_sd_no_pre_periods_raises():
+    from workbench.engine.honest_did import honest_sd, HonestDiDError
+    import pytest
+    beta, sigma, npre, npost, l = _flci_inputs()
+    with pytest.raises(HonestDiDError, match="HONEST_NO_PRE_PERIODS"):
+        honest_sd(betahat=beta[npre:], sigma=sigma[npre:, npre:], num_pre=0,
+                  num_post=npost, l_vec=l, m_grid=[0.0, 1.0], alpha=0.05)
+
+
+def test_honest_sd_degenerate_sigma_raises():
+    from workbench.engine.honest_did import honest_sd, HonestDiDError
+    import pytest
+    beta, sigma, npre, npost, l = _flci_inputs()
+    bad = np.array(sigma, dtype=float); bad[0,0] = -1.0  # not PD
+    with pytest.raises(HonestDiDError, match="HONEST_DEGENERATE_SIGMA"):
+        honest_sd(betahat=beta, sigma=bad, num_pre=npre, num_post=npost,
+                  l_vec=l, m_grid=[0.0], alpha=0.05)

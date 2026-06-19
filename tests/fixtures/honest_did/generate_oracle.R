@@ -48,6 +48,21 @@ suppressWarnings(suppressMessages({
   library(jsonlite)
 }))
 
+# ---------------------------------------------------------------------------
+# v1.5.7.1: replace HonestDiD's Monte-Carlo .qfoldednormal with an ANALYTIC
+# folded-normal quantile so the whole FLCI path is deterministic and the
+# committed oracle is matchable element-wise by the numpy port (Task 3/4).
+# Root of  Phi((c-mu)/sd) - Phi((-c-mu)/sd) - p = 0  in c (strictly increasing).
+# ---------------------------------------------------------------------------
+qfold_analytic <- function(p, mu = 0, sd = 1, ...) {
+  vapply(mu, function(m) {
+    lo <- qnorm((1 + p) / 2) * sd
+    uniroot(function(c) pnorm((c - m) / sd) - pnorm((-c - m) / sd) - p,
+            lower = lo, upper = lo + abs(m) + 20 * sd, tol = 1e-12)$root
+  }, numeric(1))
+}
+assignInNamespace(".qfoldednormal", qfold_analytic, ns = "HonestDiD")
+
 set.seed(0)
 
 OUTDIR <- "tests/fixtures/honest_did"
@@ -278,4 +293,104 @@ write_json(grid_accept, file.path(OUTDIR, "grid_accept.json"),
 cat("grid_accept: n accept==1 =", sum(ga_tbl$accept),
     " CI = [", min(ga_tbl$grid[ga_tbl$accept == 1]), ",",
     max(ga_tbl$grid[ga_tbl$accept == 1]), "]\n")
+
+# ===========================================================================
+# 5. a_sd.json + flci_sd.json  -- DeltaSD / FLCI oracle (v1.5.7.1)
+#
+#    Reuses the SAME betahat/sigma/numPre/numPost as the DeltaRM fixtures so
+#    all engine tests share one covariance.
+#
+#    Verified API facts (HonestDiD 0.2.8 source):
+#     * .create_A_SD(numPrePeriods, numPostPeriods, postPeriodMomentsOnly=FALSE)
+#         Builds Atilde (numPre+numPost-1) x (numPre+numPost+1) where each row r
+#         is the 2nd difference [1,-2,1] at columns r:(r+2), THEN drops column
+#         (numPre+1) -- i.e. the reference period is the augmented grid's
+#         period 0; the 2nd-difference is taken over the FULL augmented grid
+#         (length numPre+numPost+1) and the reference column is removed
+#         afterwards. Final A = rbind(Atilde, -Atilde) so it encodes
+#         |2nd diff| <= M as two-sided linear constraints. Does NOT take l_vec
+#         or M. Result dim = 2*(numPre+numPost-1) x (numPre+numPost).
+#     * findOptimalFLCI(betahat, sigma, M=0, numPrePeriods, numPostPeriods,
+#         l_vec=basis1, numPoints=100, alpha=0.05, seed=0)
+#         -> list(FLCI=c(lb,ub), optimalVec, optimalHalfLength, M, status).
+#         CI endpoints are FLCI[1] (lb) / FLCI[2] (ub); half-length is
+#         $optimalHalfLength. l_vec and M are named args (M positional default 0).
+#         M=0 runs fine (no error) and returns the minimum-variance (classical-
+#         like) CI; recorded as the engine's M=0 anchor.
+#     * h-grid inside .findOptimalFLCI_helper: bisection over [hMin, h0] where
+#         hMin = .findLowestH (CVXR min-SD), h0 = .findHForMinimumBias
+#         (min-bias SD); fallback grid = seq(hMin, h0, length.out=numPoints),
+#         numPoints default = 100.
+# ===========================================================================
+
+# (a) .create_A_SD operator matrix
+A_sd <- HonestDiD:::.create_A_SD(numPrePeriods = numPre, numPostPeriods = numPost)
+a_sd <- list(
+  numPre  = numPre,
+  numPost = numPost,
+  nrow    = as.integer(nrow(A_sd)),
+  ncol    = as.integer(ncol(A_sd)),
+  A_sd    = lapply(seq_len(nrow(A_sd)), function(i) as.numeric(A_sd[i, ]))
+)
+write_json(a_sd, file.path(OUTDIR, "a_sd.json"),
+           digits = 10, auto_unbox = TRUE, pretty = TRUE)
+
+# (b) findOptimalFLCI over the M-grid; M scaled to match the engine:
+#     c(0,0.5,1,1.5,2) * max(sqrt(diag(sigma)))
+M_scale <- max(sqrt(diag(sigma)))
+Mvec    <- c(0, 0.5, 1.0, 1.5, 2.0) * M_scale
+
+# intermediates: hMin (.findLowestH) and h0 (.findHForMinimumBias) are M-free
+hMin_int <- as.numeric(HonestDiD:::.findLowestH(
+  sigma = sigma, numPrePeriods = numPre, numPostPeriods = numPost, l_vec = l_avg))
+h0_int   <- as.numeric(HonestDiD:::.findHForMinimumBias(
+  sigma = sigma, numPrePeriods = numPre, numPostPeriods = numPost, l_vec = l_avg))
+
+flci_rows <- lapply(Mvec, function(M) {
+  r <- HonestDiD::findOptimalFLCI(
+    betahat = betahat, sigma = sigma,
+    numPrePeriods = numPre, numPostPeriods = numPost,
+    l_vec = l_avg, M = M, alpha = alpha, numPoints = 100, seed = 0
+  )
+  list(M                 = as.numeric(M),
+       optimalHalfLength = as.numeric(r$optimalHalfLength),
+       lb                = as.numeric(r$FLCI[1]),
+       ub                = as.numeric(r$FLCI[2]),
+       optimalVec        = as.numeric(r$optimalVec),
+       optimalPrePeriodVec = as.numeric(r$optimalVec[seq_len(numPre)]),
+       status            = as.character(r$status))
+})
+flci_sd <- list(
+  numPre   = numPre,
+  numPost  = numPost,
+  alpha    = alpha,
+  l_vec    = as.numeric(l_avg),
+  numPoints= 100L,
+  M_scale  = as.numeric(M_scale),
+  Mvec     = as.numeric(Mvec),
+  results  = flci_rows
+)
+write_json(flci_sd, file.path(OUTDIR, "flci_sd.json"),
+           digits = 10, auto_unbox = TRUE, pretty = TRUE)
+
+# intermediates fixture (Phase 1 validation): hMin, h0, per-M optimalPrePeriodVec
+flci_intermediates <- list(
+  numPre  = numPre,
+  numPost = numPost,
+  alpha   = alpha,
+  l_vec   = as.numeric(l_avg),
+  hMin    = hMin_int,
+  h0      = h0_int,
+  Mvec    = as.numeric(Mvec),
+  perM    = lapply(flci_rows, function(rr) list(
+              M = rr$M,
+              optimalPrePeriodVec = rr$optimalPrePeriodVec))
+)
+write_json(flci_intermediates, file.path(OUTDIR, "flci_intermediates.json"),
+           digits = 10, auto_unbox = TRUE, pretty = TRUE)
+
+cat("a_sd: dim =", nrow(A_sd), "x", ncol(A_sd), "\n")
+cat("flci_sd (M scaled by", M_scale, "):\n")
+for (rr in flci_rows) cat(sprintf("  M=%.6f  hl=%.6f  [%.6f, %.6f]  %s\n",
+                                  rr$M, rr$optimalHalfLength, rr$lb, rr$ub, rr$status))
 cat("DONE\n")

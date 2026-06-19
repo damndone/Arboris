@@ -148,14 +148,20 @@ def test_adapter_all_pre_skips():
     out = honest_did_from_cs_dynamic(_agg([-3.0, -2.0, -1.0], [0.1, 0.2, 0.0]),
                                      row_cluster=np.arange(40), n_total=40,
                                      mbar_grid=[0.0], grid_points=30)
-    assert out["skipped"] is True and "HONEST_NO_POST_PERIODS" in out["reason"]
+    assert out["rm"]["status"] == "not_available"
+    assert "HONEST_NO_POST_PERIODS" in out["rm"]["reason"]
+    assert out["sd"]["status"] == "not_available"
+    assert "HONEST_NO_POST_PERIODS" in out["sd"]["reason"]
 
 
 def test_adapter_all_post_skips():
     out = honest_did_from_cs_dynamic(_agg([-1.0, 0.0, 1.0, 2.0], [0.0, 0.3, 0.4, 0.5]),
                                      row_cluster=np.arange(40), n_total=40,
                                      mbar_grid=[0.0], grid_points=30)
-    assert out["skipped"] is True and "HONEST_NO_PRE_PERIODS" in out["reason"]
+    assert out["rm"]["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in out["rm"]["reason"]
+    assert out["sd"]["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in out["sd"]["reason"]
 
 
 # --------------------------------------------------------------------------
@@ -247,6 +253,10 @@ def test_generic_exception_in_honest_degrades_not_fails(tmp_path, monkeypatch):
     # run STILL completes despite the generic blowup
     assert read_json(run_root / "run_manifest.json")["status"] == "completed"
     art = read_json(run_root / "cs_did.json")
-    assert art["honest_did"]["skipped"] is True
-    assert "HONEST_INTERNAL_ERROR" in art["honest_did"]["reason"]
-    assert not any(k.startswith("_debug_") for k in art["honest_did"])
+    hd = art["honest_did"]
+    # the runner's `except Exception` degrades BOTH tracks with the same reason
+    assert hd["rm"]["status"] == "degraded"
+    assert "HONEST_INTERNAL_ERROR" in hd["rm"]["reason"]
+    assert hd["sd"]["status"] == "degraded"
+    assert "HONEST_INTERNAL_ERROR" in hd["sd"]["reason"]
+    assert not any(k.startswith("_debug_") for k in hd)

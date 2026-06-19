@@ -32,7 +32,7 @@ def test_nan_honest_did_block_serializes_to_strict_valid_json():
     # A honest_did block carrying a (nan, nan) CI must serialize to JSON that the
     # browser's strict parser accepts (no bare NaN token). json.loads with
     # parse_constant rejecting NaN/Infinity emulates the browser's strictness.
-    block = {"skipped": False, "num_pre": 1, "num_post": 2,
+    block = {"status": "ok", "num_pre": 1, "num_post": 2,
              "post_average": {"results": [{"Mbar": 0.0, "lb": float("nan"),
                                            "ub": float("nan")}],
                               "breakdown": None}}
@@ -44,6 +44,32 @@ def test_nan_honest_did_block_serializes_to_strict_valid_json():
         raise ValueError("invalid JSON constant")
     parsed = json.loads(text, parse_constant=_reject)
     assert parsed["post_average"]["results"][0]["lb"] is None
+
+
+def test_nan_sd_flci_block_serializes_to_strict_valid_json():
+    # The ΔSD/FLCI track uses the "M" key; a non-finite FLCI CI must serialize to
+    # JSON null the same way the ΔRM track does, so the strict browser parser
+    # never sees a bare NaN token (which would blank the whole CS card).
+    block = {"status": "ok", "method": "FLCI", "num_pre": 2, "num_post": 2,
+             "m_grid": [0.0, 0.5], "scale": 0.25,
+             "post_average": {"results": [{"M": 0.5, "lb": float("nan"),
+                                           "ub": float("inf")}],
+                              "breakdown": None},
+             "per_event_time": [{"event_time": 0.0,
+                                 "results": [{"M": 0.5, "lb": float("-inf"),
+                                              "ub": 1.0}],
+                                 "breakdown": None}]}
+    safe = _json_safe(block)
+    text = json.dumps(safe)
+    assert "NaN" not in text and "Infinity" not in text
+
+    def _reject(_):
+        raise ValueError("invalid JSON constant")
+    parsed = json.loads(text, parse_constant=_reject)
+    assert parsed["post_average"]["results"][0]["lb"] is None
+    assert parsed["post_average"]["results"][0]["ub"] is None
+    assert parsed["per_event_time"][0]["results"][0]["lb"] is None
+    assert parsed["per_event_time"][0]["results"][0]["ub"] == 1.0
 
 
 def test_honest_rm_non_finite_sigma_clean_degenerate():
@@ -61,5 +87,7 @@ def test_adapter_row_mismatch_skips_not_throws():
            "component_if": np.zeros((5, 3))}
     out = honest_did_from_cs_dynamic(agg, row_cluster=np.array([0, 1, 2, 3]),
                                      n_total=4, mbar_grid=[0, 1], grid_points=50)
-    assert out["skipped"] is True
-    assert "HONEST_BAD_INPUT" in out["reason"]
+    assert out["rm"]["status"] == "not_available"
+    assert "HONEST_BAD_INPUT" in out["rm"]["reason"]
+    assert out["sd"]["status"] == "not_available"
+    assert "HONEST_BAD_INPUT" in out["sd"]["reason"]

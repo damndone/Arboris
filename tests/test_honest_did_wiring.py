@@ -38,11 +38,24 @@ def test_honest_did_completes_end_to_end(tmp_path, monkeypatch):
     assert read_json(run_root / "run_manifest.json")["status"] == "completed"
     art = read_json(run_root / "cs_did.json")
     assert "honest_did" in art
-    # may be skipped if this design yields no pre-periods; if not skipped,
+    hd = art["honest_did"]
+    rm, sd = hd["rm"], hd["sd"]
+    # may be not_available if this design yields no pre-periods; if ok,
     # post_average present
-    if not art["honest_did"]["skipped"]:
-        assert "post_average" in art["honest_did"] and "results" in art["honest_did"]["post_average"]
-    assert not any(k.startswith("_debug_") for k in art["honest_did"])    # debug stripped
+    if rm["status"] == "ok":
+        assert "post_average" in rm and "results" in rm["post_average"]
+    # ΔSD/FLCI track runs on the same snapshot: ok (with M-grid) or a sensible
+    # not_available reason.
+    assert sd["status"] in ("ok", "not_available")
+    if sd["status"] == "ok":
+        assert sd["method"] == "FLCI"
+        assert "results" in sd["post_average"]
+        assert sd["post_average"]["results"][0].get("M") is not None
+    else:
+        assert sd["reason"]
+    assert not any(k.startswith("_debug_") for k in hd)     # debug stripped (top level)
+    assert not any(k.startswith("_debug_") for k in rm)     # and not in tracks
+    assert not any(k.startswith("_debug_") for k in sd)
 
 
 def test_honest_did_absent_without_flag(tmp_path):
@@ -84,5 +97,10 @@ def test_honest_did_no_pre_periods_skips_not_fails(tmp_path, monkeypatch):
     run_root = project.root / "runs" / result["run_id"]
     assert read_json(run_root / "run_manifest.json")["status"] == "completed"   # run STILL completes
     art = read_json(run_root / "cs_did.json")
-    assert art["honest_did"]["skipped"] is True
-    assert "HONEST_NO_PRE_PERIODS" in art["honest_did"]["reason"]
+    hd = art["honest_did"]
+    # With no usable pre-period, BOTH tracks are not_available with the same
+    # HONEST_NO_PRE_PERIODS reason.
+    assert hd["rm"]["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in hd["rm"]["reason"]
+    assert hd["sd"]["status"] == "not_available"
+    assert "HONEST_NO_PRE_PERIODS" in hd["sd"]["reason"]

@@ -6,12 +6,74 @@ Faithful Python port of R ``HonestDiD 0.2.8``. The committed R oracles under
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import linprog
-from scipy.stats import truncnorm
+from scipy.optimize import brentq, linprog, minimize
+from scipy.stats import norm, truncnorm
 
 
 class HonestDiDError(ValueError):
     """HONEST_*-prefixed failure; degrades the honest_did block, never fails the run."""
+
+
+def _create_a_sd(*, num_pre: int, num_post: int) -> np.ndarray:
+    """Build the ΔSD (smoothness) second-difference constraint operator.
+
+    Faithful port of R ``HonestDiD:::.create_A_SD(numPrePeriods, numPostPeriods)``
+    (HonestDiD 0.2.8), validated element-wise against the committed oracle
+    ``tests/fixtures/honest_did/a_sd.json`` (12×7 for num_pre=3, num_post=4).
+
+    Construction:
+      1. Place the second-difference stencil ``[1, -2, 1]`` at columns r:(r+2)
+         in row r of ``Atilde`` over the AUGMENTED grid of length
+         ``num_pre + num_post + 1`` (which includes the reference period).
+         ``Atilde`` has shape ``(num_pre + num_post - 1) × (num_pre + num_post + 1)``.
+      2. Drop the reference-period column (0-based index ``num_pre``); a stencil
+         straddling it loses that entry. Shape → ``(...) × (num_pre + num_post)``.
+      3. Return ``A = vstack([Atilde, -Atilde])`` — the two-sided form encoding
+         ``|second diff| ≤ M``, i.e. ``Δ^SD(M) = {δ : A δ ≤ M·1}``.
+
+    The only guard here: there must be at least one constructible second-difference
+    row (augmented grid length ≥ 3), i.e. ``num_pre + num_post >= 2``. The
+    ``num_pre >= 2`` identifiability guard belongs to the later ``honest_sd`` entry.
+    """
+    if num_pre + num_post < 2:
+        raise HonestDiDError(
+            "HONEST_SD_INSUFFICIENT_PERIODS: need num_pre + num_post >= 2 to "
+            f"construct any ΔSD second-difference row (got num_pre={num_pre}, "
+            f"num_post={num_post})."
+        )
+    n_rows = num_pre + num_post - 1
+    n_aug = num_pre + num_post + 1
+    atilde = np.zeros((n_rows, n_aug), dtype=float)
+    for r in range(n_rows):
+        atilde[r, r : r + 3] = [1.0, -2.0, 1.0]
+    atilde = np.delete(atilde, num_pre, axis=1)  # drop reference-period column
+    return np.vstack([atilde, -atilde])
+
+
+def _folded_normal_quantile(t: float, *, alpha: float = 0.05) -> float:
+    """(1-alpha) quantile of the folded normal |N(t,1)|.
+
+    Root of g(c) = Φ(c-t) - Φ(-c-t) - (1-alpha), strictly increasing in c.
+    Deterministic (Brent root-find; no Monte Carlo). Used by FLCI: the
+    half-length is sqrt(var) * c_alpha(bias/sqrt(var)).
+    """
+    t = abs(float(t))
+    target = 1.0 - alpha
+
+    def g(c):
+        return (norm.cdf(c - t) - norm.cdf(-c - t)) - target
+
+    lo = norm.ppf(1.0 - alpha / 2.0)   # value at t=0; lower bound for any t>=0
+    hi = lo + t + 10.0                 # generous upper bracket; g(hi) > 0
+    return float(brentq(g, lo, hi, xtol=1e-12, rtol=1e-14))
+
+
+def _folded_normal_quantile_monotone(ts, *, alpha: float = 0.05) -> np.ndarray:
+    """c_alpha over a sequence of t values, forced non-decreasing to remove
+    sub-ULP solver noise that could perturb a downstream argmin. c_alpha(t) is
+    theoretically strictly increasing in t; this only corrects numerical noise."""
+    out = np.array([_folded_normal_quantile(t, alpha=alpha) for t in ts], dtype=float)
+    return np.maximum.accumulate(out)
 
 
 def create_arm_constraints(
@@ -675,3 +737,401 @@ def arp_conditional_test(
     out["y_T"] = y_T
     out["rowsForARP_1based"] = [int(r) + 1 for r in rows0]
     return out
+
+
+# ===========================================================================
+# Task 4: ΔSD Fixed-Length Confidence Interval (FLCI).
+# Faithful port of R HonestDiD 0.2.8 findOptimalFLCI / .findOptimalFLCI_helper.
+# Deterministic: convex sub-problems via SLSQP + analytic folded-normal CV.
+# Oracle: tests/fixtures/honest_did/flci_sd.json (regenerated with an analytic
+# .qfoldednormal so the whole path is deterministic) + flci_intermediates.json.
+# ===========================================================================
+
+
+def _flci_wtol_premat(num_pre: int) -> np.ndarray:
+    """``WtoLPreMat`` (p×p): identity with the sub-diagonal set to −1, so
+    ``(WtoLPreMat @ W)_1 = W_1`` and ``(·)_i = W_i − W_{i-1}``. For p==1: [[1]]."""
+    mat = np.eye(num_pre)
+    for col in range(num_pre - 1):
+        mat[col + 1, col] = -1.0
+    return mat
+
+
+def _flci_var_pieces(*, sigma, num_pre, num_post, l_vec) -> dict:
+    """Constants for ``var(W)`` and ``bias(W)`` (R ``.createMatricesForVarianceFromW``
+    + ``.createObjectiveObjectForBias`` constant). ``W`` and ``l_vec`` live in R^p, R^q.
+
+    var(W) = L @ SigmaPre @ L + 2 * L @ (SigmaPrePost @ l_vec) + SigmaPostScalar,
+    where L = WtoLPreMat @ W.
+    bias(W) per unit M = bias_const + sum_i |cumsum(W)_i|.
+    """
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+    p, q = num_pre, num_post
+    sigma_pre = sigma[:p, :p]
+    sigma_pre_post = sigma[:p, p:]
+    sigma_post_scalar = float(l_vec @ sigma[p:, p:] @ l_vec)
+    wtol = _flci_wtol_premat(p)
+    lin = sigma_pre_post @ l_vec  # (p,)
+    c_sum = float(np.arange(1, q + 1) @ l_vec)  # sum_{s} s * l_vec[s-1]
+    # bias_const = sum_{s=1..q} | (1..s) . last-s-of-l_vec | - C_sum
+    bias_const = 0.0
+    for s in range(1, q + 1):
+        seg = l_vec[q - s:]  # last s entries
+        bias_const += abs(float(np.arange(1, s + 1) @ seg))
+    bias_const -= c_sum
+    return {
+        "sigma_pre": sigma_pre,
+        "lin": lin,
+        "sigma_post_scalar": sigma_post_scalar,
+        "wtol": wtol,
+        "c_sum": c_sum,
+        "bias_const": bias_const,
+    }
+
+
+def _flci_var_of_w(W, pieces) -> float:
+    L = pieces["wtol"] @ W
+    return float(L @ pieces["sigma_pre"] @ L + 2.0 * (L @ pieces["lin"]) + pieces["sigma_post_scalar"])
+
+
+def _flci_min_sd(*, sigma, num_pre, num_post, l_vec) -> float:
+    """``hMin = sqrt( min_W var(W) s.t. sum(W) = C_sum )``  (R ``.findLowestH``).
+
+    Equality-constrained convex QP — closed form via Lagrange/KKT on the dense
+    quadratic in W.  var(W) = W'Q W + 2 g'W + const with Q = WtoL' SigmaPre WtoL,
+    g = WtoL' lin.  Minimize s.t. a'W = C_sum, a = ones(p).
+    """
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    wtol = pieces["wtol"]
+    Q = wtol.T @ pieces["sigma_pre"] @ wtol
+    g = wtol.T @ pieces["lin"]
+    p = num_pre
+    a = np.ones(p)
+    c_sum = pieces["c_sum"]
+    # KKT: [2Q  a; a' 0] [W; lam] = [-2g; C_sum]
+    KKT = np.zeros((p + 1, p + 1))
+    KKT[:p, :p] = 2.0 * Q
+    KKT[:p, p] = a
+    KKT[p, :p] = a
+    rhs = np.concatenate([-2.0 * g, [c_sum]])
+    sol = np.linalg.solve(KKT, rhs)
+    W = sol[:p]
+    return float(np.sqrt(_flci_var_of_w(W, pieces)))
+
+
+def _flci_h_for_min_bias(*, sigma, num_pre, num_post, l_vec) -> float:
+    """``h0`` (R ``.findHForMinimumBias``): w0 = [0,...,0, C_sum]; h0 = sqrt(var(w0))."""
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    w0 = np.zeros(num_pre)
+    w0[-1] = pieces["c_sum"]
+    return float(np.sqrt(_flci_var_of_w(w0, pieces)))
+
+
+def _flci_worst_case_bias_given_h(*, h, sigma, num_pre, num_post, l_vec) -> dict:
+    """``min_W bias(W) s.t. var(W) <= h**2 and sum(W) = C_sum``  (R
+    ``.findWorstCaseBiasGivenH``, per unit M).
+
+    Smoothed via auxiliaries U∈R^p with U_i >= cumsum(W)_i, U_i >= -cumsum(W)_i;
+    minimize bias_const + sum(U). Variables x = [U (p), W (p)] (dim 2p).
+    Returns {"value": bias_per_unit_M, "L_opt": WtoLPreMat@W, "status"}.
+    """
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    p = num_pre
+    wtol = pieces["wtol"]
+    Q = wtol.T @ pieces["sigma_pre"] @ wtol
+    g = wtol.T @ pieces["lin"]
+    const_var = pieces["sigma_post_scalar"]
+    c_sum = pieces["c_sum"]
+    bias_const = pieces["bias_const"]
+    # cumsum operator (lower-triangular ones)
+    cum = np.tril(np.ones((p, p)))
+
+    def split(x):
+        return x[:p], x[p:]
+
+    def obj(x):
+        U, _W = split(x)
+        return bias_const + float(U.sum())
+
+    def obj_grad(x):
+        gr = np.zeros(2 * p)
+        gr[:p] = 1.0
+        return gr
+
+    # Equality: sum(W) = C_sum
+    def eq(x):
+        _U, W = split(x)
+        return float(W.sum() - c_sum)
+
+    def eq_jac(x):
+        j = np.zeros(2 * p)
+        j[p:] = 1.0
+        return j
+
+    # Inequalities (>= 0 in scipy): U - cumsum(W) >= 0 ; U + cumsum(W) >= 0 ;
+    # h**2 - var(W) >= 0.
+    def ineq(x):
+        U, W = split(x)
+        cw = cum @ W
+        var = float(W @ Q @ W + 2.0 * (g @ W) + const_var)
+        return np.concatenate([U - cw, U + cw, [h * h - var]])
+
+    def ineq_jac(x):
+        _U, W = split(x)
+        rows = []
+        for i in range(p):  # U_i - cumsum(W)_i
+            r = np.zeros(2 * p)
+            r[i] = 1.0
+            r[p:] = -cum[i]
+            rows.append(r)
+        for i in range(p):  # U_i + cumsum(W)_i
+            r = np.zeros(2 * p)
+            r[i] = 1.0
+            r[p:] = cum[i]
+            rows.append(r)
+        rv = np.zeros(2 * p)  # h^2 - var(W): d/dW = -(2 Q W + 2 g)
+        rv[p:] = -(2.0 * (Q @ W) + 2.0 * g)
+        rows.append(rv)
+        return np.array(rows)
+
+    # Feasible warm start: W with sum=C_sum at min-SD; U = |cumsum(W)|.
+    a = np.ones(p)
+    KKT = np.zeros((p + 1, p + 1))
+    KKT[:p, :p] = 2.0 * Q
+    KKT[:p, p] = a
+    KKT[p, :p] = a
+    rhs = np.concatenate([-2.0 * g, [c_sum]])
+    W0 = np.linalg.solve(KKT, rhs)[:p]
+    U0 = np.abs(cum @ W0)
+    x0 = np.concatenate([U0, W0])
+
+    res = minimize(
+        obj, x0, jac=obj_grad, method="SLSQP",
+        constraints=[
+            {"type": "eq", "fun": eq, "jac": eq_jac},
+            {"type": "ineq", "fun": ineq, "jac": ineq_jac},
+        ],
+        options={"ftol": 1e-12, "maxiter": 1000},
+    )
+    _U, W = split(res.x)
+    status = "optimal" if res.success else "failed"
+    return {
+        "value": float(obj(res.x)),
+        "L_opt": wtol @ W,
+        "status": status,
+    }
+
+
+def _flci_ci_halflength(*, h, m, sigma, num_pre, num_post, l_vec, alpha, wc=None) -> float:
+    """``CI_halflength(h, M) = c_alpha(M*bias(h)/h) * h`` (analytic folded-normal
+    CV). Returns NaN if the worst-case bias is non-finite. ``wc`` may be a
+    precomputed ``_flci_worst_case_bias_given_h`` result for ``h``."""
+    if wc is None:
+        wc = _flci_worst_case_bias_given_h(
+            h=h, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+        )
+    bias = wc["value"]
+    if not np.isfinite(bias):
+        return float("nan")
+    max_bias = m * bias
+    return float(_folded_normal_quantile(max_bias / h, alpha=alpha) * h)
+
+
+def _flci_derivative_bisection(*, h_min, h0, m, sigma, num_pre, num_post, l_vec, alpha, num_points):
+    """Port of R ``.findOptimalCIDerivativeBisection``: bisect on the finite-
+    difference derivative of ``CI_halflength`` over ``[h_min, h0]``. Returns the
+    optimal ``h`` or NaN (caller falls back to a grid search)."""
+    a, b = h_min, h0
+
+    def f(h):
+        return _flci_ci_halflength(
+            h=h, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+            l_vec=l_vec, alpha=alpha,
+        )
+
+    eps = _EPS
+    dif = min((b - a) / num_points, abs(b) * eps ** (1.0 / 3.0))
+    # Degenerate search interval (h_min >= h0, e.g. num_pre == 1 leaves no
+    # bias/variance slope to optimize): the finite-difference step collapses to 0.
+    # Bail to NaN so the caller's grid fallback handles the single-point case.
+    if not (dif > 0.0):
+        return float("nan")
+    failtol = eps ** 0.5
+    fa = f(a)
+    fb = f(b)
+    fpa = (f(a + dif) - fa) / dif
+    fpb = (f(b - dif) - fb) / (-dif)
+    iters = 1
+    maxiter = 10 * int(np.ceil(np.log(abs(b - a) / dif) / np.log(2.0)))
+    failed = False
+    hstar = float("nan")
+
+    if (fpa > fpb) or np.isnan(fa) or np.isnan(fb):
+        failed = True
+    elif fpb < 0:
+        hstar = b
+    elif fpa > 0:
+        hstar = a
+    else:
+        while (not failed) and abs(b - a) > dif:
+            iters += 1
+            x = (a + b) / 2.0
+            fpx = (f(x + dif) - f(x - dif)) / (2.0 * dif)
+            failed = (fpx > fpb + failtol) or (fpx + failtol < fpa) or iters > maxiter
+            if fpx > 0:
+                b = x
+            else:
+                a = x
+        hstar = (a + b) / 2.0
+
+    return float("nan") if failed else hstar
+
+
+def flci(
+    *,
+    betahat,
+    sigma,
+    num_pre: int,
+    num_post: int,
+    l_vec,
+    m: float,
+    alpha: float = 0.05,
+    num_points: int = 100,
+) -> dict:
+    """ΔSD Fixed-Length Confidence Interval. Faithful port of R
+    ``HonestDiD::findOptimalFLCI`` (0.2.8) with an ANALYTIC folded-normal CV, so
+    the whole path is deterministic. Validated element-wise vs ``flci_sd.json``.
+
+    Returns ``{"half_length", "lb", "ub"}``.
+    """
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+    m = float(m)
+
+    h0 = _flci_h_for_min_bias(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    h_min = _flci_min_sd(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+
+    hstar = _flci_derivative_bisection(
+        h_min=h_min, h0=h0, m=m, sigma=sigma, num_pre=num_pre,
+        num_post=num_post, l_vec=l_vec, alpha=alpha, num_points=num_points,
+    )
+
+    if np.isnan(hstar):
+        # Fallback grid: keep only solver-optimal points, take argmin half-length.
+        h_grid = np.linspace(h_min, h0, num_points)
+        best = None
+        for h in h_grid:
+            wc = _flci_worst_case_bias_given_h(
+                h=h, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+            )
+            if wc["status"] not in ("optimal", "optimal_inaccurate"):
+                continue
+            if not np.isfinite(wc["value"]):
+                continue
+            hl = _flci_ci_halflength(
+                h=h, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+                l_vec=l_vec, alpha=alpha, wc=wc,
+            )
+            if best is None or hl < best[0]:
+                best = (hl, h, wc)
+        if best is None:
+            return {"half_length": float("nan"), "lb": float("nan"), "ub": float("nan")}
+        half_length, h_used, wc = best
+    else:
+        h_used = hstar
+        wc = _flci_worst_case_bias_given_h(
+            h=h_used, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+        )
+        half_length = _flci_ci_halflength(
+            h=h_used, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+            l_vec=l_vec, alpha=alpha, wc=wc,
+        )
+
+    optimal_vec = np.concatenate([wc["L_opt"], l_vec])
+    center = float(optimal_vec @ betahat)
+    return {
+        "half_length": float(half_length),
+        "lb": center - half_length,
+        "ub": center + half_length,
+    }
+
+
+def honest_sd(
+    *,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    m_grid,
+    alpha: float = 0.05,
+    num_points: int = 100,
+) -> dict:
+    """Robust ΔSD confidence sets across the M grid + the breakdown M.
+
+    Mirrors :func:`honest_rm` in shape and guard style, but uses the validated
+    ΔSD Fixed-Length CI :func:`flci` (second-difference / smoothness restriction)
+    instead of the ΔRM ARP test, and reports the smoothness bound under the
+    ``"M"`` key. Pure, deterministic (golden 0-drift); loops ``flci`` over
+    ``m_grid``.
+
+    Raises ``HonestDiDError`` on degenerate inputs (these DEGRADE the honest_did
+    block, never fail the run — caught upstream by the adapter/runner):
+
+      HONEST_NO_PRE_PERIODS   if num_pre  < 1  (R's findOptimalFLCI imposes one
+                                                sum-weights equality; needs >=1 pre)
+      HONEST_NO_POST_PERIODS  if num_post < 1  (no post-period to test)
+      HONEST_DEGENERATE_SIGMA if sigma is not positive-definite.
+
+    Returns ``{"results": [{"M", "lb", "ub"}...], "breakdown": float|None}``
+    where ``breakdown`` is the LARGEST M whose CI still EXCLUDES 0
+    (``lb > 0`` or ``ub < 0``); ``None`` if no M excludes 0.
+    """
+    if num_pre < 1:
+        raise HonestDiDError(
+            "HONEST_NO_PRE_PERIODS: ΔSD requires at least one pre-period."
+        )
+    if num_post < 1:
+        raise HonestDiDError(
+            "HONEST_NO_POST_PERIODS: ΔSD requires at least one post-period."
+        )
+
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    if not (np.isfinite(sigma).all() and np.isfinite(betahat).all()):
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: non-finite values in sigma or betahat."
+        )
+    sigma_sym = 0.5 * (sigma + sigma.T)
+    if float(np.linalg.eigvalsh(sigma_sym).min()) <= 0.0:
+        raise HonestDiDError(
+            "HONEST_DEGENERATE_SIGMA: sigma is not positive-definite."
+        )
+
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+
+    results = []
+    for M in m_grid:
+        r = flci(
+            betahat=betahat,
+            sigma=sigma,
+            num_pre=num_pre,
+            num_post=num_post,
+            l_vec=l_vec,
+            m=float(M),
+            alpha=alpha,
+            num_points=num_points,
+        )
+        results.append({"M": float(M), "lb": float(r["lb"]), "ub": float(r["ub"])})
+
+    excludes0 = [
+        r["M"]
+        for r in results
+        if (r["lb"] == r["lb"] and r["ub"] == r["ub"])  # not NaN
+        and (r["lb"] > 0.0 or r["ub"] < 0.0)
+    ]
+    breakdown = max(excludes0) if excludes0 else None
+
+    return {"results": results, "breakdown": breakdown}
