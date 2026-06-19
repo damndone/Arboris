@@ -337,3 +337,39 @@ def test_flci_worst_case_bias_finite_and_lopt_matches_r():
     assert np.isfinite(wb["value"])
     L_r = np.array(FLCI_INT["perM"][0]["optimalPrePeriodVec"], dtype=float)
     assert np.max(np.abs(wb["L_opt"] - L_r)) < 1e-4
+
+
+def test_flci_matches_r_oracle_over_m_grid():
+    from workbench.engine.honest_did import flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    alpha = FLCI_SD["alpha"]
+    for row in FLCI_SD["results"]:
+        r = flci(
+            betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+            l_vec=l, m=row["M"], alpha=alpha,
+        )
+        # half-length (the FLCI width) is the load-bearing quantity: 1e-6.
+        assert abs(r["half_length"] - row["optimalHalfLength"]) < 1e-6, row["M"]
+        if row["M"] == 0:
+            # M=0 center sits on a FLAT bias manifold: R's CVXR/ECOS leaves
+            # ~2e-10 slack in hMin which the degenerate worst-case-bias direction
+            # amplifies ~1e4x into the L_opt -> center. The CI WIDTH is exact
+            # (above); only the center wobbles at solver-noise scale. The M=0
+            # anchor below pins the half-length analytically.
+            assert abs(r["lb"] - row["lb"]) < 5e-6, row["M"]
+            assert abs(r["ub"] - row["ub"]) < 5e-6, row["M"]
+        else:
+            assert abs(r["lb"] - row["lb"]) < 1e-6, row["M"]
+            assert abs(r["ub"] - row["ub"]) < 1e-6, row["M"]
+
+
+def test_flci_m_zero_is_min_sd_ci():
+    from scipy.stats import norm
+    from workbench.engine.honest_did import _flci_min_sd, flci
+    beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    r = flci(
+        betahat=beta, sigma=sigma, num_pre=npre, num_post=npost,
+        l_vec=l, m=0.0, alpha=0.05,
+    )
+    assert abs(r["half_length"] - norm.ppf(0.975) * hMin) < 1e-8

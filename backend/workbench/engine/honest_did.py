@@ -921,3 +921,133 @@ def _flci_worst_case_bias_given_h(*, h, sigma, num_pre, num_post, l_vec) -> dict
         "L_opt": wtol @ W,
         "status": status,
     }
+
+
+def _flci_ci_halflength(*, h, m, sigma, num_pre, num_post, l_vec, alpha, wc=None) -> float:
+    """``CI_halflength(h, M) = c_alpha(M*bias(h)/h) * h`` (analytic folded-normal
+    CV). Returns NaN if the worst-case bias is non-finite. ``wc`` may be a
+    precomputed ``_flci_worst_case_bias_given_h`` result for ``h``."""
+    if wc is None:
+        wc = _flci_worst_case_bias_given_h(
+            h=h, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+        )
+    bias = wc["value"]
+    if not np.isfinite(bias):
+        return float("nan")
+    max_bias = m * bias
+    return float(_folded_normal_quantile(max_bias / h, alpha=alpha) * h)
+
+
+def _flci_derivative_bisection(*, h_min, h0, m, sigma, num_pre, num_post, l_vec, alpha, num_points):
+    """Port of R ``.findOptimalCIDerivativeBisection``: bisect on the finite-
+    difference derivative of ``CI_halflength`` over ``[h_min, h0]``. Returns the
+    optimal ``h`` or NaN (caller falls back to a grid search)."""
+    a, b = h_min, h0
+
+    def f(h):
+        return _flci_ci_halflength(
+            h=h, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+            l_vec=l_vec, alpha=alpha,
+        )
+
+    eps = _EPS
+    dif = min((b - a) / num_points, abs(b) * eps ** (1.0 / 3.0))
+    failtol = eps ** 0.5
+    fa = f(a)
+    fb = f(b)
+    fpa = (f(a + dif) - fa) / dif
+    fpb = (f(b - dif) - fb) / (-dif)
+    iters = 1
+    maxiter = 10 * int(np.ceil(np.log(abs(b - a) / dif) / np.log(2.0)))
+    failed = False
+    hstar = float("nan")
+
+    if (fpa > fpb) or np.isnan(fa) or np.isnan(fb):
+        failed = True
+    elif fpb < 0:
+        hstar = b
+    elif fpa > 0:
+        hstar = a
+    else:
+        while (not failed) and abs(b - a) > dif:
+            iters += 1
+            x = (a + b) / 2.0
+            fpx = (f(x + dif) - f(x - dif)) / (2.0 * dif)
+            failed = (fpx > fpb + failtol) or (fpx + failtol < fpa) or iters > maxiter
+            if fpx > 0:
+                b = x
+            else:
+                a = x
+        hstar = (a + b) / 2.0
+
+    return float("nan") if failed else hstar
+
+
+def flci(
+    *,
+    betahat,
+    sigma,
+    num_pre: int,
+    num_post: int,
+    l_vec,
+    m: float,
+    alpha: float = 0.05,
+    num_points: int = 100,
+) -> dict:
+    """ΔSD Fixed-Length Confidence Interval. Faithful port of R
+    ``HonestDiD::findOptimalFLCI`` (0.2.8) with an ANALYTIC folded-normal CV, so
+    the whole path is deterministic. Validated element-wise vs ``flci_sd.json``.
+
+    Returns ``{"half_length", "lb", "ub"}``.
+    """
+    betahat = np.asarray(betahat, dtype=float).reshape(-1)
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+    m = float(m)
+
+    h0 = _flci_h_for_min_bias(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    h_min = _flci_min_sd(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+
+    hstar = _flci_derivative_bisection(
+        h_min=h_min, h0=h0, m=m, sigma=sigma, num_pre=num_pre,
+        num_post=num_post, l_vec=l_vec, alpha=alpha, num_points=num_points,
+    )
+
+    if np.isnan(hstar):
+        # Fallback grid: keep only solver-optimal points, take argmin half-length.
+        h_grid = np.linspace(h_min, h0, num_points)
+        best = None
+        for h in h_grid:
+            wc = _flci_worst_case_bias_given_h(
+                h=h, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+            )
+            if wc["status"] not in ("optimal", "optimal_inaccurate"):
+                continue
+            if not np.isfinite(wc["value"]):
+                continue
+            hl = _flci_ci_halflength(
+                h=h, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+                l_vec=l_vec, alpha=alpha, wc=wc,
+            )
+            if best is None or hl < best[0]:
+                best = (hl, h, wc)
+        if best is None:
+            return {"half_length": float("nan"), "lb": float("nan"), "ub": float("nan")}
+        half_length, h_used, wc = best
+    else:
+        h_used = hstar
+        wc = _flci_worst_case_bias_given_h(
+            h=h_used, sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec
+        )
+        half_length = _flci_ci_halflength(
+            h=h_used, m=m, sigma=sigma, num_pre=num_pre, num_post=num_post,
+            l_vec=l_vec, alpha=alpha, wc=wc,
+        )
+
+    optimal_vec = np.concatenate([wc["L_opt"], l_vec])
+    center = float(optimal_vec @ betahat)
+    return {
+        "half_length": float(half_length),
+        "lb": center - half_length,
+        "ub": center + half_length,
+    }
