@@ -6,7 +6,7 @@ Faithful Python port of R ``HonestDiD 0.2.8``. The committed R oracles under
 from __future__ import annotations
 
 import numpy as np
-from scipy.optimize import brentq, linprog
+from scipy.optimize import brentq, linprog, minimize
 from scipy.stats import norm, truncnorm
 
 
@@ -737,3 +737,187 @@ def arp_conditional_test(
     out["y_T"] = y_T
     out["rowsForARP_1based"] = [int(r) + 1 for r in rows0]
     return out
+
+
+# ===========================================================================
+# Task 4: ΔSD Fixed-Length Confidence Interval (FLCI).
+# Faithful port of R HonestDiD 0.2.8 findOptimalFLCI / .findOptimalFLCI_helper.
+# Deterministic: convex sub-problems via SLSQP + analytic folded-normal CV.
+# Oracle: tests/fixtures/honest_did/flci_sd.json (regenerated with an analytic
+# .qfoldednormal so the whole path is deterministic) + flci_intermediates.json.
+# ===========================================================================
+
+
+def _flci_wtol_premat(num_pre: int) -> np.ndarray:
+    """``WtoLPreMat`` (p×p): identity with the sub-diagonal set to −1, so
+    ``(WtoLPreMat @ W)_1 = W_1`` and ``(·)_i = W_i − W_{i-1}``. For p==1: [[1]]."""
+    mat = np.eye(num_pre)
+    for col in range(num_pre - 1):
+        mat[col + 1, col] = -1.0
+    return mat
+
+
+def _flci_var_pieces(*, sigma, num_pre, num_post, l_vec) -> dict:
+    """Constants for ``var(W)`` and ``bias(W)`` (R ``.createMatricesForVarianceFromW``
+    + ``.createObjectiveObjectForBias`` constant). ``W`` and ``l_vec`` live in R^p, R^q.
+
+    var(W) = L @ SigmaPre @ L + 2 * L @ (SigmaPrePost @ l_vec) + SigmaPostScalar,
+    where L = WtoLPreMat @ W.
+    bias(W) per unit M = bias_const + sum_i |cumsum(W)_i|.
+    """
+    sigma = np.asarray(sigma, dtype=float)
+    l_vec = np.asarray(l_vec, dtype=float).reshape(-1)
+    p, q = num_pre, num_post
+    sigma_pre = sigma[:p, :p]
+    sigma_pre_post = sigma[:p, p:]
+    sigma_post_scalar = float(l_vec @ sigma[p:, p:] @ l_vec)
+    wtol = _flci_wtol_premat(p)
+    lin = sigma_pre_post @ l_vec  # (p,)
+    c_sum = float(np.arange(1, q + 1) @ l_vec)  # sum_{s} s * l_vec[s-1]
+    # bias_const = sum_{s=1..q} | (1..s) . last-s-of-l_vec | - C_sum
+    bias_const = 0.0
+    for s in range(1, q + 1):
+        seg = l_vec[q - s:]  # last s entries
+        bias_const += abs(float(np.arange(1, s + 1) @ seg))
+    bias_const -= c_sum
+    return {
+        "sigma_pre": sigma_pre,
+        "lin": lin,
+        "sigma_post_scalar": sigma_post_scalar,
+        "wtol": wtol,
+        "c_sum": c_sum,
+        "bias_const": bias_const,
+    }
+
+
+def _flci_var_of_w(W, pieces) -> float:
+    L = pieces["wtol"] @ W
+    return float(L @ pieces["sigma_pre"] @ L + 2.0 * (L @ pieces["lin"]) + pieces["sigma_post_scalar"])
+
+
+def _flci_min_sd(*, sigma, num_pre, num_post, l_vec) -> float:
+    """``hMin = sqrt( min_W var(W) s.t. sum(W) = C_sum )``  (R ``.findLowestH``).
+
+    Equality-constrained convex QP — closed form via Lagrange/KKT on the dense
+    quadratic in W.  var(W) = W'Q W + 2 g'W + const with Q = WtoL' SigmaPre WtoL,
+    g = WtoL' lin.  Minimize s.t. a'W = C_sum, a = ones(p).
+    """
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    wtol = pieces["wtol"]
+    Q = wtol.T @ pieces["sigma_pre"] @ wtol
+    g = wtol.T @ pieces["lin"]
+    p = num_pre
+    a = np.ones(p)
+    c_sum = pieces["c_sum"]
+    # KKT: [2Q  a; a' 0] [W; lam] = [-2g; C_sum]
+    KKT = np.zeros((p + 1, p + 1))
+    KKT[:p, :p] = 2.0 * Q
+    KKT[:p, p] = a
+    KKT[p, :p] = a
+    rhs = np.concatenate([-2.0 * g, [c_sum]])
+    sol = np.linalg.solve(KKT, rhs)
+    W = sol[:p]
+    return float(np.sqrt(_flci_var_of_w(W, pieces)))
+
+
+def _flci_h_for_min_bias(*, sigma, num_pre, num_post, l_vec) -> float:
+    """``h0`` (R ``.findHForMinimumBias``): w0 = [0,...,0, C_sum]; h0 = sqrt(var(w0))."""
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    w0 = np.zeros(num_pre)
+    w0[-1] = pieces["c_sum"]
+    return float(np.sqrt(_flci_var_of_w(w0, pieces)))
+
+
+def _flci_worst_case_bias_given_h(*, h, sigma, num_pre, num_post, l_vec) -> dict:
+    """``min_W bias(W) s.t. var(W) <= h**2 and sum(W) = C_sum``  (R
+    ``.findWorstCaseBiasGivenH``, per unit M).
+
+    Smoothed via auxiliaries U∈R^p with U_i >= cumsum(W)_i, U_i >= -cumsum(W)_i;
+    minimize bias_const + sum(U). Variables x = [U (p), W (p)] (dim 2p).
+    Returns {"value": bias_per_unit_M, "L_opt": WtoLPreMat@W, "status"}.
+    """
+    pieces = _flci_var_pieces(sigma=sigma, num_pre=num_pre, num_post=num_post, l_vec=l_vec)
+    p = num_pre
+    wtol = pieces["wtol"]
+    Q = wtol.T @ pieces["sigma_pre"] @ wtol
+    g = wtol.T @ pieces["lin"]
+    const_var = pieces["sigma_post_scalar"]
+    c_sum = pieces["c_sum"]
+    bias_const = pieces["bias_const"]
+    # cumsum operator (lower-triangular ones)
+    cum = np.tril(np.ones((p, p)))
+
+    def split(x):
+        return x[:p], x[p:]
+
+    def obj(x):
+        U, _W = split(x)
+        return bias_const + float(U.sum())
+
+    def obj_grad(x):
+        gr = np.zeros(2 * p)
+        gr[:p] = 1.0
+        return gr
+
+    # Equality: sum(W) = C_sum
+    def eq(x):
+        _U, W = split(x)
+        return float(W.sum() - c_sum)
+
+    def eq_jac(x):
+        j = np.zeros(2 * p)
+        j[p:] = 1.0
+        return j
+
+    # Inequalities (>= 0 in scipy): U - cumsum(W) >= 0 ; U + cumsum(W) >= 0 ;
+    # h**2 - var(W) >= 0.
+    def ineq(x):
+        U, W = split(x)
+        cw = cum @ W
+        var = float(W @ Q @ W + 2.0 * (g @ W) + const_var)
+        return np.concatenate([U - cw, U + cw, [h * h - var]])
+
+    def ineq_jac(x):
+        _U, W = split(x)
+        rows = []
+        for i in range(p):  # U_i - cumsum(W)_i
+            r = np.zeros(2 * p)
+            r[i] = 1.0
+            r[p:] = -cum[i]
+            rows.append(r)
+        for i in range(p):  # U_i + cumsum(W)_i
+            r = np.zeros(2 * p)
+            r[i] = 1.0
+            r[p:] = cum[i]
+            rows.append(r)
+        rv = np.zeros(2 * p)  # h^2 - var(W): d/dW = -(2 Q W + 2 g)
+        rv[p:] = -(2.0 * (Q @ W) + 2.0 * g)
+        rows.append(rv)
+        return np.array(rows)
+
+    # Feasible warm start: W with sum=C_sum at min-SD; U = |cumsum(W)|.
+    a = np.ones(p)
+    KKT = np.zeros((p + 1, p + 1))
+    KKT[:p, :p] = 2.0 * Q
+    KKT[:p, p] = a
+    KKT[p, :p] = a
+    rhs = np.concatenate([-2.0 * g, [c_sum]])
+    W0 = np.linalg.solve(KKT, rhs)[:p]
+    U0 = np.abs(cum @ W0)
+    x0 = np.concatenate([U0, W0])
+
+    res = minimize(
+        obj, x0, jac=obj_grad, method="SLSQP",
+        constraints=[
+            {"type": "eq", "fun": eq, "jac": eq_jac},
+            {"type": "ineq", "fun": ineq, "jac": ineq_jac},
+        ],
+        options={"ftol": 1e-12, "maxiter": 1000},
+    )
+    _U, W = split(res.x)
+    status = "optimal" if res.success else "failed"
+    return {
+        "value": float(obj(res.x)),
+        "L_opt": wtol @ W,
+        "status": status,
+    }

@@ -290,3 +290,50 @@ def test_folded_normal_quantile_monotone_is_nondecreasing():
     assert np.all(np.diff(out) >= 0)
     # the first three "true" values are increasing then the 0.9 would dip; clamp holds it
     assert out[2] >= out[1]
+
+
+# ---------------------------------------------------------------------------
+# Task 4: FLCI (DeltaSD) convex sub-problems + public flci(). Oracle =
+# flci_sd.json (regenerated with an analytic qfoldednormal) + intermediates.
+# ---------------------------------------------------------------------------
+
+FLCI_INT = json.load(open(os.path.join(_FIX, "flci_intermediates.json")))
+FLCI_SD = json.load(open(os.path.join(_FIX, "flci_sd.json")))
+
+
+def _flci_inputs():
+    beta = np.array(HRM["betahat"], dtype=float)
+    sigma = np.array(HRM["sigma"], dtype=float)
+    return beta, sigma, HRM["numPre"], HRM["numPost"], np.array(FLCI_SD["l_vec"], dtype=float)
+
+
+def test_flci_hmin_matches_r():
+    from workbench.engine.honest_did import _flci_min_sd
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    assert abs(hMin - FLCI_INT["hMin"]) < 1e-6
+
+
+def test_flci_h0_matches_r():
+    from workbench.engine.honest_did import _flci_h_for_min_bias
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    h0 = _flci_h_for_min_bias(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    assert abs(h0 - FLCI_INT["h0"]) < 1e-6
+
+
+def test_flci_worst_case_bias_finite_and_lopt_matches_r():
+    # At h = hMin the worst-case bias optimizer's L_opt should match R's
+    # optimalPrePeriodVec for the M=0 anchor (whose chosen h is hMin).
+    from workbench.engine.honest_did import (
+        _flci_min_sd,
+        _flci_worst_case_bias_given_h,
+    )
+    _beta, sigma, npre, npost, l = _flci_inputs()
+    hMin = _flci_min_sd(sigma=sigma, num_pre=npre, num_post=npost, l_vec=l)
+    wb = _flci_worst_case_bias_given_h(
+        h=hMin, sigma=sigma, num_pre=npre, num_post=npost, l_vec=l
+    )
+    assert wb["status"] == "optimal"
+    assert np.isfinite(wb["value"])
+    L_r = np.array(FLCI_INT["perM"][0]["optimalPrePeriodVec"], dtype=float)
+    assert np.max(np.abs(wb["L_opt"] - L_r)) < 1e-4
