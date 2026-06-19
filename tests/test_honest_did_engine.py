@@ -231,3 +231,30 @@ def test_honest_rm_guards():
     with pytest.raises(HonestDiDError, match="HONEST_DEGENERATE_SIGMA"):
         honest_rm(betahat=np.zeros(4), sigma=bad, num_pre=2, num_post=2,
                   l_vec=np.ones(2) / 2, mbar_grid=[1.0])
+
+
+# --- Task 2: ΔSD second-difference operator (R .create_A_SD port) ---
+
+def test_create_a_sd_matches_r_oracle():
+    import json as _json
+    from pathlib import Path
+    from workbench.engine.honest_did import _create_a_sd
+    o = _json.loads((Path(_FIX) / "a_sd.json").read_text())
+    A = _create_a_sd(num_pre=o["numPre"], num_post=o["numPost"])
+    expected = np.asarray(o["A_sd"], dtype=float)
+    assert A.shape == expected.shape          # 12x7 for the fixture
+    assert np.allclose(A, expected, atol=1e-9)
+
+
+def test_create_a_sd_two_sided_structure():
+    from workbench.engine.honest_did import _create_a_sd
+    A = _create_a_sd(num_pre=3, num_post=4)
+    k = A.shape[0] // 2
+    assert np.allclose(A[k:], -A[:k])          # rbind(Atilde, -Atilde)
+
+
+def test_create_a_sd_insufficient_periods_raises():
+    import pytest
+    from workbench.engine.honest_did import _create_a_sd, HonestDiDError
+    with pytest.raises(HonestDiDError, match="HONEST_SD_INSUFFICIENT_PERIODS"):
+        _create_a_sd(num_pre=0, num_post=1)    # total 1 -> no second-diff row

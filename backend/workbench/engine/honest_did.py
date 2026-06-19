@@ -14,6 +14,42 @@ class HonestDiDError(ValueError):
     """HONEST_*-prefixed failure; degrades the honest_did block, never fails the run."""
 
 
+def _create_a_sd(*, num_pre: int, num_post: int) -> np.ndarray:
+    """Build the ΔSD (smoothness) second-difference constraint operator.
+
+    Faithful port of R ``HonestDiD:::.create_A_SD(numPrePeriods, numPostPeriods)``
+    (HonestDiD 0.2.8), validated element-wise against the committed oracle
+    ``tests/fixtures/honest_did/a_sd.json`` (12×7 for num_pre=3, num_post=4).
+
+    Construction:
+      1. Place the second-difference stencil ``[1, -2, 1]`` at columns r:(r+2)
+         in row r of ``Atilde`` over the AUGMENTED grid of length
+         ``num_pre + num_post + 1`` (which includes the reference period).
+         ``Atilde`` has shape ``(num_pre + num_post - 1) × (num_pre + num_post + 1)``.
+      2. Drop the reference-period column (0-based index ``num_pre``); a stencil
+         straddling it loses that entry. Shape → ``(...) × (num_pre + num_post)``.
+      3. Return ``A = vstack([Atilde, -Atilde])`` — the two-sided form encoding
+         ``|second diff| ≤ M``, i.e. ``Δ^SD(M) = {δ : A δ ≤ M·1}``.
+
+    The only guard here: there must be at least one constructible second-difference
+    row (augmented grid length ≥ 3), i.e. ``num_pre + num_post >= 2``. The
+    ``num_pre >= 2`` identifiability guard belongs to the later ``honest_sd`` entry.
+    """
+    if num_pre + num_post < 2:
+        raise HonestDiDError(
+            "HONEST_SD_INSUFFICIENT_PERIODS: need num_pre + num_post >= 2 to "
+            f"construct any ΔSD second-difference row (got num_pre={num_pre}, "
+            f"num_post={num_post})."
+        )
+    n_rows = num_pre + num_post - 1
+    n_aug = num_pre + num_post + 1
+    atilde = np.zeros((n_rows, n_aug), dtype=float)
+    for r in range(n_rows):
+        atilde[r, r : r + 3] = [1.0, -2.0, 1.0]
+    atilde = np.delete(atilde, num_pre, axis=1)  # drop reference-period column
+    return np.vstack([atilde, -atilde])
+
+
 def create_arm_constraints(
     *,
     num_pre: int,
