@@ -34,35 +34,36 @@ interface CSLabelAgg extends CSAggCommon {
   uniform_crit: number;
 }
 
-interface HonestDidResult {
-  Mbar: number;
-  // A degenerate (nan, nan) CI is sanitized to JSON null by the backend
-  // (_json_safe). The `f` helper renders null/undefined as "—".
+interface HonestRow {
+  // rm rows use `Mbar`; sd rows use `M`. A degenerate (nan, nan) CI is
+  // sanitized to JSON null by the backend (_json_safe); `f` renders null as "—".
+  Mbar?: number;
+  M?: number;
   lb: number | null;
   ub: number | null;
 }
 
-interface HonestDidActive {
-  skipped: false;
-  num_pre: number;
-  num_post: number;
-  mbar_grid: number[];
-  post_average: { results: HonestDidResult[]; breakdown: number | null };
-  per_event_time: {
+interface HonestTrack {
+  status: "ok" | "degraded" | "not_available";
+  reason: string | null;
+  num_pre?: number;
+  num_post?: number;
+  mbar_grid?: number[];
+  m_grid?: number[];
+  scale?: number;
+  method?: string;
+  post_average?: { results: HonestRow[]; breakdown: number | null };
+  per_event_time?: {
     event_time: number;
-    results: HonestDidResult[];
+    results: HonestRow[];
     breakdown: number | null;
   }[];
 }
 
-interface HonestDidSkipped {
-  skipped: true;
-  reason: string;
-  num_pre: number;
-  num_post: number;
+interface HonestDidBlock {
+  rm: HonestTrack;
+  sd: HonestTrack;
 }
-
-type HonestDidBlock = HonestDidActive | HonestDidSkipped;
 
 export interface CSDiagnostics {
   att_gt: {
@@ -225,11 +226,15 @@ function HonestDidSensitivityTable({
   ariaLabel,
   results,
   breakdown,
+  paramKey,
+  paramLabel,
 }: {
   caption: string;
   ariaLabel: string;
-  results: HonestDidResult[];
+  results: HonestRow[];
   breakdown: number | null;
+  paramKey: "Mbar" | "M";
+  paramLabel: string;
 }) {
   return (
     <div>
@@ -237,15 +242,15 @@ function HonestDidSensitivityTable({
         <caption>{caption}</caption>
         <thead>
           <tr>
-            <th>M̄</th>
+            <th>{paramLabel}</th>
             <th>下界</th>
             <th>上界</th>
           </tr>
         </thead>
         <tbody>
-          {results.map((r) => (
-            <tr key={r.Mbar}>
-              <td>{f(r.Mbar, 2)}</td>
+          {results.map((r, i) => (
+            <tr key={i}>
+              <td>{f(r[paramKey], 2)}</td>
               <td>{f(r.lb, 2)}</td>
               <td>{f(r.ub, 2)}</td>
             </tr>
@@ -253,43 +258,79 @@ function HonestDidSensitivityTable({
         </tbody>
       </table>
       <div>
-        突破 M̄:{" "}
+        突破 {paramLabel}:{" "}
         {breakdown == null ? "无突破 (始终含 0)" : f(breakdown, 2)}
       </div>
     </div>
   );
 }
 
-function HonestDidPanel({ honest }: { honest: HonestDidBlock }) {
-  if (honest.skipped) {
+function HonestTrackPanel({
+  track,
+  kind,
+}: {
+  track: HonestTrack;
+  kind: "rm" | "sd";
+}) {
+  if (track.status === "not_available") {
     return (
-      <div aria-label="cs-honest-did-skipped" className="ios-warning">
-        honest-DID 敏感性已跳过：{honest.reason}
+      <div aria-label={`cs-honest-did-${kind}-unavailable`} className="ios-warning">
+        {track.reason}
       </div>
     );
   }
-  return (
-    <section aria-label="cs-honest-did-panel">
-      <div className="ios-card-title">honest-DID 敏感性 (Rambachan-Roth ΔRM)</div>
-      <div>
-        点估计不变；M̄ 越大表示平行趋势假设越弱。突破 M̄ =
-        效应仍显著（CI 不含 0）的最大相对幅度界。
+  if (track.status === "degraded") {
+    return (
+      <div aria-label={`cs-honest-did-${kind}-degraded`} className="ios-warning">
+        {track.reason}
       </div>
-      <HonestDidSensitivityTable
-        caption="后处理期平均 (post-average)"
-        ariaLabel="cs-honest-did-post-average"
-        results={honest.post_average.results}
-        breakdown={honest.post_average.breakdown}
-      />
-      {honest.per_event_time.map((pet) => (
+    );
+  }
+  const paramKey = kind === "rm" ? "Mbar" : "M";
+  const paramLabel = kind === "rm" ? "M̄" : "M";
+  const heading =
+    kind === "rm"
+      ? "相对幅度限制 (ΔRM, Rambachan-Roth)"
+      : "平滑性限制 (ΔSD) · FLCI 固定长度 CI";
+  const microcopy =
+    kind === "rm"
+      ? "点估计不变；M̄ 越大表示平行趋势假设越弱。突破 M̄ = 效应仍显著（CI 不含 0）的最大相对幅度界。"
+      : "对二阶差分施加平滑性约束 (ΔSD)，以 FLCI（固定长度置信区间）报告。M 越大约束越松。";
+  return (
+    <section aria-label={`cs-honest-did-${kind}-panel`}>
+      <div className="ios-card-title">{heading}</div>
+      <div>{microcopy}</div>
+      {track.post_average && (
+        <HonestDidSensitivityTable
+          caption="后处理期平均 (post-average)"
+          ariaLabel={`cs-honest-did-${kind}-post-average`}
+          results={track.post_average.results}
+          breakdown={track.post_average.breakdown}
+          paramKey={paramKey}
+          paramLabel={paramLabel}
+        />
+      )}
+      {(track.per_event_time ?? []).map((pet) => (
         <HonestDidSensitivityTable
           key={pet.event_time}
           caption={`事件期 ${pet.event_time}`}
-          ariaLabel={`cs-honest-did-event-${pet.event_time}`}
+          ariaLabel={`cs-honest-did-${kind}-event-${pet.event_time}`}
           results={pet.results}
           breakdown={pet.breakdown}
+          paramKey={paramKey}
+          paramLabel={paramLabel}
         />
       ))}
+    </section>
+  );
+}
+
+function HonestDidPanel({ honest }: { honest: HonestDidBlock }) {
+  return (
+    <section aria-label="cs-honest-did-panel">
+      <div className="ios-card-title">honest-DID 敏感性 (Rambachan-Roth)</div>
+      <HonestTrackPanel track={honest.rm} kind="rm" />
+      <HonestTrackPanel track={honest.sd} kind="sd" />
     </section>
   );
 }

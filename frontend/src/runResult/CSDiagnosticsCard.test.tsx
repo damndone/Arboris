@@ -79,46 +79,91 @@ describe("CSDiagnosticsCard", () => {
     expect(screen.getByText(/结果不完整/)).toBeInTheDocument();
   });
 
-  it("renders the honest-DID sensitivity panel with a breakdown value", () => {
+  it("renders both rm and sd panels when both tracks are ok", () => {
     const withHonest: CSDiagnostics = {
       ...diag,
       honest_did: {
-        skipped: false,
-        num_pre: 2,
-        num_post: 2,
-        mbar_grid: [0.5, 1.0, 1.5],
-        post_average: {
-          results: [
-            { Mbar: 0.5, lb: 0.8, ub: 3.2 },
-            { Mbar: 1.0, lb: 0.4, ub: 3.6 },
-            { Mbar: 1.5, lb: -0.1, ub: 4.1 },
-          ],
-          breakdown: 1.0,
-        },
-        per_event_time: [
-          {
-            event_time: 0,
+        rm: {
+          status: "ok",
+          reason: null,
+          num_pre: 2,
+          num_post: 2,
+          mbar_grid: [0.5, 1.0, 1.5],
+          post_average: {
             results: [
-              { Mbar: 0.5, lb: 0.9, ub: 2.7 },
-              { Mbar: 1.0, lb: 0.5, ub: 3.1 },
+              { Mbar: 0.5, lb: 0.8, ub: 3.2 },
+              { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+              { Mbar: 1.5, lb: -0.1, ub: 4.1 },
             ],
-            breakdown: null,
+            breakdown: 1.0,
           },
-        ],
+          per_event_time: [
+            {
+              event_time: 0,
+              results: [
+                { Mbar: 0.5, lb: 0.9, ub: 2.7 },
+                { Mbar: 1.0, lb: 0.5, ub: 3.1 },
+              ],
+              breakdown: null,
+            },
+          ],
+        },
+        sd: {
+          status: "ok",
+          reason: null,
+          method: "FLCI",
+          num_pre: 2,
+          num_post: 2,
+          m_grid: [0.0, 0.01, 0.02],
+          scale: 1.0,
+          post_average: {
+            results: [
+              { M: 0.0, lb: 1.2, ub: 3.0 },
+              { M: 0.01, lb: 0.9, ub: 3.3 },
+              { M: 0.02, lb: 0.5, ub: 3.7 },
+            ],
+            breakdown: 0.02,
+          },
+          per_event_time: [
+            {
+              event_time: 1,
+              results: [
+                { M: 0.0, lb: 1.0, ub: 2.8 },
+                { M: 0.01, lb: 0.7, ub: 3.1 },
+              ],
+              breakdown: null,
+            },
+          ],
+        },
       },
     };
     render(<CSDiagnosticsCard diagnostics={withHonest} />);
     expect(screen.getByLabelText("cs-honest-did-panel")).toBeInTheDocument();
+    expect(screen.getByLabelText("cs-honest-did-rm-panel")).toBeInTheDocument();
+    expect(screen.getByLabelText("cs-honest-did-sd-panel")).toBeInTheDocument();
     expect(
-      screen.getByLabelText("cs-honest-did-post-average"),
+      screen.getByLabelText("cs-honest-did-rm-post-average"),
     ).toBeInTheDocument();
-    // post-average breakdown M̄ (1.00) surfaces in its own div
+    expect(
+      screen.getByLabelText("cs-honest-did-sd-post-average"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("cs-honest-did-rm-event-0"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("cs-honest-did-sd-event-1"),
+    ).toBeInTheDocument();
+    // sd post-average renders an M row (0.0100 -> 0.01 at 2dp)
+    const sdPost = screen.getByLabelText("cs-honest-did-sd-post-average");
+    expect(sdPost.textContent).toContain("0.01");
+    // rm post-average breakdown M̄ (1.00) surfaces in its own div
     const postBreakdown = screen
-      .getByLabelText("cs-honest-did-post-average")
+      .getByLabelText("cs-honest-did-rm-post-average")
       .parentElement!.querySelector("div");
-    expect(postBreakdown?.textContent).toContain("突破 M̄: 1.00");
-    // null breakdown microcopy for the per-event-time row
-    expect(screen.getByText(/无突破/)).toBeInTheDocument();
+    expect(postBreakdown?.textContent).toContain("突破");
+    expect(postBreakdown?.textContent).toContain("1.00");
+    // null breakdown microcopy for the per-event-time rows
+    expect(screen.getAllByText(/无突破/).length).toBeGreaterThan(0);
   });
 
   it("renders a null (nan-sanitized) honest-DID CI row as — without crashing", () => {
@@ -128,56 +173,100 @@ describe("CSDiagnosticsCard", () => {
     const withNullCI: CSDiagnostics = {
       ...diag,
       honest_did: {
-        skipped: false,
-        num_pre: 2,
-        num_post: 2,
-        mbar_grid: [0.0, 1.0],
-        post_average: {
-          results: [
-            { Mbar: 0.0, lb: null, ub: null },
-            { Mbar: 1.0, lb: 0.4, ub: 3.6 },
-          ],
-          breakdown: null,
-        },
-        per_event_time: [
-          {
-            event_time: 0,
-            results: [{ Mbar: 0.0, lb: null, ub: null }],
+        rm: {
+          status: "ok",
+          reason: null,
+          num_pre: 2,
+          num_post: 2,
+          mbar_grid: [0.0, 1.0],
+          post_average: {
+            results: [
+              { Mbar: 0.0, lb: null, ub: null },
+              { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+            ],
             breakdown: null,
           },
-        ],
+          per_event_time: [
+            {
+              event_time: 0,
+              results: [{ Mbar: 0.0, lb: null, ub: null }],
+              breakdown: null,
+            },
+          ],
+        },
+        sd: { status: "not_available", reason: "HONEST_NO_PRE_PERIODS" },
       },
     };
     expect(() =>
       render(<CSDiagnosticsCard diagnostics={withNullCI} />),
     ).not.toThrow();
-    const panel = screen.getByLabelText("cs-honest-did-post-average");
+    const panel = screen.getByLabelText("cs-honest-did-rm-post-average");
     expect(panel.textContent).toContain("—");
     expect(panel.textContent).not.toContain("null");
     expect(panel.textContent).not.toContain("NaN");
   });
 
-  it("renders the skipped note when honest_did is degraded", () => {
-    const skipped: CSDiagnostics = {
+  it("renders the sd-unavailable note (with reason) while rm still renders", () => {
+    const sdUnavail: CSDiagnostics = {
       ...diag,
       honest_did: {
-        skipped: true,
-        reason: "需要至少 1 个 pre 期",
-        num_pre: 0,
-        num_post: 2,
+        rm: {
+          status: "ok",
+          reason: null,
+          num_pre: 2,
+          num_post: 2,
+          mbar_grid: [0.5, 1.0],
+          post_average: {
+            results: [
+              { Mbar: 0.5, lb: 0.8, ub: 3.2 },
+              { Mbar: 1.0, lb: 0.4, ub: 3.6 },
+            ],
+            breakdown: 1.0,
+          },
+          per_event_time: [],
+        },
+        sd: { status: "not_available", reason: "HONEST_NO_PRE_PERIODS" },
       },
     };
-    render(<CSDiagnosticsCard diagnostics={skipped} />);
+    render(<CSDiagnosticsCard diagnostics={sdUnavail} />);
+    const sdU = screen.getByLabelText("cs-honest-did-sd-unavailable");
+    expect(sdU).toBeInTheDocument();
+    expect(sdU.textContent).toContain("HONEST_NO_PRE_PERIODS");
+    // rm panel still renders
+    expect(screen.getByLabelText("cs-honest-did-rm-panel")).toBeInTheDocument();
+    // no sd ok panel
+    expect(screen.queryByLabelText("cs-honest-did-sd-panel")).toBeNull();
+  });
+
+  it("renders the degraded note (with reason) for a degraded track", () => {
+    const degraded: CSDiagnostics = {
+      ...diag,
+      honest_did: {
+        rm: { status: "degraded", reason: "rm solver did not converge" },
+        sd: { status: "degraded", reason: "sd FLCI returned non-finite" },
+      },
+    };
+    render(<CSDiagnosticsCard diagnostics={degraded} />);
     expect(
-      screen.getByLabelText("cs-honest-did-skipped"),
+      screen.getByLabelText("cs-honest-did-rm-degraded"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/需要至少 1 个 pre 期/)).toBeInTheDocument();
+    expect(screen.getByText(/rm solver did not converge/)).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("cs-honest-did-sd-degraded"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/sd FLCI returned non-finite/)).toBeInTheDocument();
+    // panel wrapper still present
+    expect(screen.getByLabelText("cs-honest-did-panel")).toBeInTheDocument();
+    // no ok sub-panels
+    expect(screen.queryByLabelText("cs-honest-did-rm-panel")).toBeNull();
+    expect(screen.queryByLabelText("cs-honest-did-sd-panel")).toBeNull();
   });
 
   it("renders no honest-DID panel when honest_did is absent (degraded-safe)", () => {
     render(<CSDiagnosticsCard diagnostics={diag} />);
     expect(screen.queryByLabelText("cs-honest-did-panel")).toBeNull();
-    expect(screen.queryByLabelText("cs-honest-did-skipped")).toBeNull();
+    expect(screen.queryByLabelText("cs-honest-did-rm-panel")).toBeNull();
+    expect(screen.queryByLabelText("cs-honest-did-sd-panel")).toBeNull();
   });
 
   it("renders an unavailable note when dynamic event_time is empty", () => {
