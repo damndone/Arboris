@@ -46,6 +46,32 @@ def test_nan_honest_did_block_serializes_to_strict_valid_json():
     assert parsed["post_average"]["results"][0]["lb"] is None
 
 
+def test_nan_sd_flci_block_serializes_to_strict_valid_json():
+    # The ΔSD/FLCI track uses the "M" key; a non-finite FLCI CI must serialize to
+    # JSON null the same way the ΔRM track does, so the strict browser parser
+    # never sees a bare NaN token (which would blank the whole CS card).
+    block = {"status": "ok", "method": "FLCI", "num_pre": 2, "num_post": 2,
+             "m_grid": [0.0, 0.5], "scale": 0.25,
+             "post_average": {"results": [{"M": 0.5, "lb": float("nan"),
+                                           "ub": float("inf")}],
+                              "breakdown": None},
+             "per_event_time": [{"event_time": 0.0,
+                                 "results": [{"M": 0.5, "lb": float("-inf"),
+                                              "ub": 1.0}],
+                                 "breakdown": None}]}
+    safe = _json_safe(block)
+    text = json.dumps(safe)
+    assert "NaN" not in text and "Infinity" not in text
+
+    def _reject(_):
+        raise ValueError("invalid JSON constant")
+    parsed = json.loads(text, parse_constant=_reject)
+    assert parsed["post_average"]["results"][0]["lb"] is None
+    assert parsed["post_average"]["results"][0]["ub"] is None
+    assert parsed["per_event_time"][0]["results"][0]["lb"] is None
+    assert parsed["per_event_time"][0]["results"][0]["ub"] == 1.0
+
+
 def test_honest_rm_non_finite_sigma_clean_degenerate():
     sig = np.eye(4)
     sig[0, 0] = float("nan")
