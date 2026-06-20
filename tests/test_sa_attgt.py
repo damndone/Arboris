@@ -79,6 +79,17 @@ def test_has_never_and_ref_cohort():
     assert res["ref_cohort"] is None
 
 
+def test_no_never_treated_uses_last_cohort_ref():
+    # Drop never-treated rows -> last-treated cohort (5) becomes the reference.
+    d, _ = _load("balanced")
+    dn = d[d["cohort"].notna()].copy()
+    res = estimate_sa_saturated(dn, entity="id", time="year", y="y", cohort="cohort")
+    assert res["has_never"] is False
+    assert res["ref_cohort"] == 5.0
+    assert 5.0 not in {float(g) for g in res["g"]}  # reference cohort excluded
+    assert len(res["beta"]) > 0
+
+
 def test_too_few_periods_raises():
     d, _ = _load("balanced")
     d1 = d[d["year"] == 1]

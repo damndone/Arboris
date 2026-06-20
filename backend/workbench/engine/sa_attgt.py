@@ -54,8 +54,11 @@ def _absorb_two_way(M, id_codes, yr_codes, n_id, n_yr):
         yr_cnt = np.bincount(yr_codes, minlength=n_yr).astype(np.float64)
         M = M - (yr_sum / yr_cnt[:, None])[yr_codes]
         if np.max(np.abs(M - prev)) < _ABSORB_TOL:
-            break
-    return M
+            return M
+    raise SASpecError(
+        f"SA_ABSORB_NO_CONVERGE: two-way FE absorption failed to converge in "
+        f"{_ABSORB_MAX_ITER} iterations."
+    )
 
 
 def estimate_sa_saturated(
