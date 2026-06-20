@@ -12,6 +12,8 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "ols", label: "OLS (linear)", group: "Linear" },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "did", label: "DID", group: "Causal" },
+        { key: "cs_did", label: "Callaway-Sant'Anna", group: "Causal" },
+        { key: "sa_did", label: "Sun-Abraham", group: "Causal" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -214,5 +216,65 @@ describe("RunForm DID wiring", () => {
     expect(extra?.didCohortCol).toBe("cohort");
     expect(extra?.entityCol).toBe("id");
     expect(extra?.timeCol).toBe("year");
+  });
+});
+
+describe("RunForm SA (sun-abraham) wiring", () => {
+  async function setupSA() {
+    vi.spyOn(api, "previewFile").mockResolvedValue(PREVIEW);
+    renderForm();
+    const file = new File(["a\n1\n"], "data.csv", { type: "text/csv" });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+    await screen.findByLabelText("column selector");
+    fireEvent.change(screen.getByLabelText("dependent variable"), {
+      target: { value: "y" },
+    });
+    fireEvent.change(screen.getByLabelText("independent variables"), {
+      target: { value: "x1, cohort" },
+    });
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "sa_did" },
+    });
+  }
+
+  it("renders DID + CS controls when model is sa_did", async () => {
+    await setupSA();
+    // DID role selects (entity/time/cohort) reused for SA
+    expect(screen.getByLabelText("did-entity")).toBeInTheDocument();
+    expect(screen.getByLabelText("did-time")).toBeInTheDocument();
+    expect(screen.getByLabelText("did-cohort")).toBeInTheDocument();
+    // CS cohort/cluster/honest-DID knobs reused for SA
+    expect(screen.getByLabelText("cs-cluster-var")).toBeInTheDocument();
+    expect(screen.getByLabelText("cs-honest-did")).toBeInTheDocument();
+  });
+
+  it("posts model_type=sa_did with cohort/entity/time roles excluded from x", async () => {
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    await setupSA();
+    fireEvent.change(screen.getByLabelText("did-entity"), {
+      target: { value: "id" },
+    });
+    fireEvent.change(screen.getByLabelText("did-time"), {
+      target: { value: "year" },
+    });
+    fireEvent.change(screen.getByLabelText("did-cohort"), {
+      target: { value: "cohort" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const call = spy.mock.calls[0];
+    // model_type argument (index 5)
+    expect(call[5]).toBe("sa_did");
+    // x (index 3) drops the cohort role column, keeping only x1.
+    expect(call[3]).toBe("x1");
+    const extra = call[9];
+    expect(extra?.didCohortCol).toBe("cohort");
+    expect(extra?.entityCol).toBe("id");
+    expect(extra?.timeCol).toBe("year");
+    // CS-channel params (honest_did etc.) posted for SA too
+    expect(extra?.honestDid).toBe(false);
   });
 });

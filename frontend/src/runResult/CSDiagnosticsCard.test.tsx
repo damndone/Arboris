@@ -43,6 +43,25 @@ describe("CSDiagnosticsCard", () => {
     expect(screen.getByLabelText("cs-event-study-chart")).toBeInTheDocument();
   });
 
+  it("renders the Callaway-Sant'Anna heading when estimator is absent", () => {
+    // `diag` has no metadata.estimator → must keep the CS heading, never SA.
+    render(<CSDiagnosticsCard diagnostics={diag} />);
+    expect(screen.getByText("Callaway-Sant'Anna DID")).toBeInTheDocument();
+    expect(screen.queryByText(/Sun-Abraham/)).toBeNull();
+  });
+
+  it("renders the Sun-Abraham heading when estimator is sun_abraham", () => {
+    const sa: CSDiagnostics = {
+      ...diag,
+      metadata: { ...diag.metadata, estimator: "sun_abraham" },
+    };
+    render(<CSDiagnosticsCard diagnostics={sa} />);
+    expect(
+      screen.getByText("Sun-Abraham (interaction-weighted) DID"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Callaway-Sant'Anna DID")).toBeNull();
+  });
+
   it("renders a degraded state with the error message", () => {
     render(
       <CSDiagnosticsCard

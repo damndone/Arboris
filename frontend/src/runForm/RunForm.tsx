@@ -221,7 +221,13 @@ export function RunForm(props: RunFormProps) {
       // V1.5.6: cs_did reuses the exact same entity/time/cohort role wiring as
       // classic DID (same capabilities group). The CS-only knobs go separately.
       const isCsDid = modelType === "cs_did";
-      const usesDidRoles = isDID || isCsDid;
+      // V1.5.8: Sun-Abraham (sa_did) reuses the exact same entity/time/cohort
+      // role wiring AND the CS-only knob channel (cluster var, honest_did) as
+      // cs_did. The SA backend ignores the CS-specific control_group/est_method/
+      // base_period/anticipation, so posting the same payload is harmless.
+      const isSaDid = modelType === "sa_did";
+      const usesCsParams = isCsDid || isSaDid;
+      const usesDidRoles = isDID || isCsDid || isSaDid;
       const didRoleCols = usesDidRoles
         ? [
             didRole.entity,
@@ -264,12 +270,12 @@ export function RunForm(props: RunFormProps) {
           didTreatCol: usesDidRoles ? didRole.treat : undefined,
           didPostCol: usesDidRoles ? didRole.post : undefined,
           didStatusCol: usesDidRoles ? didRole.status : undefined,
-          csControlGroup: isCsDid ? csValue.controlGroup : undefined,
-          csEstMethod: isCsDid ? csValue.estMethod : undefined,
-          csBasePeriod: isCsDid ? csValue.basePeriod : undefined,
-          csAnticipation: isCsDid ? csValue.anticipation : undefined,
-          csClusterVar: isCsDid ? csValue.clusterVar : undefined,
-          honestDid: isCsDid ? csValue.honestDid : undefined,
+          csControlGroup: usesCsParams ? csValue.controlGroup : undefined,
+          csEstMethod: usesCsParams ? csValue.estMethod : undefined,
+          csBasePeriod: usesCsParams ? csValue.basePeriod : undefined,
+          csAnticipation: usesCsParams ? csValue.anticipation : undefined,
+          csClusterVar: usesCsParams ? csValue.clusterVar : undefined,
+          honestDid: usesCsParams ? csValue.honestDid : undefined,
         },
       );
       setLastRun(result);
@@ -419,14 +425,16 @@ export function RunForm(props: RunFormProps) {
             </div>
           )}
           {/* DID role cols (entity/time/cohort) are panel identifiers chosen from ALL columns, not the x subset */}
-          {(modelType === "did" || modelType === "cs_did") && (
+          {(modelType === "did" ||
+            modelType === "cs_did" ||
+            modelType === "sa_did") && (
             <DIDControls
               columns={columnNames}
               value={didRole}
               onChange={setDidRole}
             />
           )}
-          {modelType === "cs_did" && (
+          {(modelType === "cs_did" || modelType === "sa_did") && (
             <CSControls
               value={csValue}
               columns={columnNames}

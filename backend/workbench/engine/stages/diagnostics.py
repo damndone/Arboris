@@ -195,6 +195,27 @@ class DiagnosticsStage:
                     model_input_ids,
                 )
 
+        if model_type == "sa_did":
+            sa_result = ctx.artifacts.get("_sa_did_result")
+            if sa_result is not None:
+                # Supplementary artifact: the sa_did estimate already ran in
+                # estimation. Serialization must not fail the run — degrade.
+                try:
+                    sa_artifact = _json_safe(sa_result)
+                    sa_artifact.setdefault("available", True)
+                except Exception as exc:  # noqa: BLE001 - any failure degrades
+                    sa_artifact = {"available": False, "error": str(exc)}
+                sa_path = run_root / "sa_did.json"
+                write_json(sa_path, sa_artifact)
+                register_artifact(
+                    run_root,
+                    "sa_did",
+                    sa_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+
         prediction_model_type = (
             model_type
             if model_type in _PREDICTION_MODEL_TYPES
