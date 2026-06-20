@@ -323,17 +323,21 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
 
   // V1.5.6: when the run produced a cs_did artifact (Callaway-Sant'Anna runs),
   // fetch its JSON to render the CSDiagnosticsCard. Mirrors the DID wiring.
+  // V1.5.8: Sun-Abraham (sa_did) writes the SAME artifact shape (dynamic event
+  // study + nested honest_did {rm,sd}); the only difference is metadata.estimator.
+  // Reuse the same card + state — detect whichever id is present and fetch it.
   useEffect(() => {
     if (artifactsState.status !== "loaded") return;
-    const present = artifactsState.groups.some((g) =>
-      g.items.some((it) => it.artifact_id === "cs_did"),
-    );
-    if (!present) {
+    const artifactId = artifactsState.groups
+      .flatMap((g) => g.items)
+      .map((it) => it.artifact_id)
+      .find((id) => id === "cs_did" || id === "sa_did");
+    if (!artifactId) {
       setCsDiagnostics(undefined);
       return;
     }
     let cancelled = false;
-    fetchArtifactJson<CSDiagnosticsData>(projectRoot, runId, "cs_did")
+    fetchArtifactJson<CSDiagnosticsData>(projectRoot, runId, artifactId)
       .then((data) => {
         if (!cancelled) setCsDiagnostics(data);
       })
