@@ -631,6 +631,17 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
                                 honest_did=honest_did, extra_metadata=md)
 
 
+def run_sa_did(norm, *, cluster_var, seed=20260615, B=1000, alpha=0.05, honest_did=False):
+    """Sun-Abraham interaction-weighted event study end to end. Constructs the SA
+    bundle then defers ENTIRELY to _finalize_did_bundle (estimator-slot validation)."""
+    from ..engine.sa_attgt import estimate_sa
+    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
+    bundle = estimate_sa(norm, cluster_var=cluster_var)
+    md = {"estimator": "sun_abraham", "cluster_var": cluster_var}
+    return _finalize_did_bundle(bundle, seed=seed, B=B, alpha=alpha,
+                                honest_did=honest_did, extra_metadata=md)
+
+
 def run_time_series_diagnostics(
     frame: pd.DataFrame, y: str, time: str
 ) -> dict[str, float | None]:

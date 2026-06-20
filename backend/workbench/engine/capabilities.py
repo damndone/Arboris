@@ -54,6 +54,12 @@ MODEL_UI_META: dict[str, dict[str, object]] = {
         "description": "Heterogeneity-robust group-time ATT(g,t) with event-study, group, and calendar aggregations and simultaneous confidence bands. Eliminates the staggered-adoption bias of TWFE DID.",
         "requires": ["entity", "time", "treatment_timing"],
     },
+    "sa_did": {
+        "label": "Sun-Abraham DID",
+        "group": "DID",
+        "description": "Interaction-weighted event-study estimator (Sun & Abraham 2021). Heterogeneity-robust dynamic ATT using clean-control cohorts, immune to the contamination of TWFE event-study leads/lags under staggered adoption.",
+        "requires": ["entity", "time", "treatment_timing"],
+    },
     "glm:binomial": {
         "label": "GLM - binomial",
         "group": "GLM",
@@ -81,6 +87,7 @@ MODEL_UI_ORDER = [
     "iv_2sls",
     "did",
     "cs_did",
+    "sa_did",
     "glm:binomial",
     "glm:poisson",
     "glm:negative_binomial",

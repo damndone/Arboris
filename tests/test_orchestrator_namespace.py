@@ -48,7 +48,7 @@ BASELINE_NAMES = frozenset({
     'run_cs_did', 'run_did', 'run_event_study',
     'run_glm', 'run_iv_2sls', 'run_logit', 'run_mice_imputation',
     'run_negative_binomial', 'run_ols', 'run_panel_ols', 'run_poisson',
-    'run_prediction_model', 'run_probit', 'run_statistical_tests',
+    'run_prediction_model', 'run_probit', 'run_sa_did', 'run_statistical_tests',
     'run_time_series_diagnostics', 'run_workflow', 'summarize_statistical_tests',
     'timezone', 'validate_profile', 'write_json',
     'write_statistical_test_artifacts',

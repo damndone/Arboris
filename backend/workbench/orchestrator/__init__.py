@@ -64,6 +64,7 @@ from ..econometrics.runner import (
     run_panel_ols,
     run_poisson,
     run_probit,
+    run_sa_did,
     run_time_series_diagnostics,
 )
 from ..exports import export_pdf, export_xlsx

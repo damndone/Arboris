@@ -186,6 +186,37 @@ def _fit_cs_did(ctx, env):
     return "cs_did_1", primary, None     # no fitted object; diagnostics reads _cs_did_result
 
 
+def _fit_sa_did(ctx, env):
+    from ..did_spec import normalize_did_input
+    id_cands = ctx.artifacts.get("_id_candidates") or []
+    t_cands = ctx.artifacts.get("_time_candidates") or []
+    norm = normalize_did_input(
+        ctx.data.frame,
+        mode=ctx.artifacts.get("_did_mode") or "cohort",
+        entity=id_cands[0] if id_cands else None,
+        time=t_cands[0] if t_cands else None,
+        y=ctx.artifacts["_normalized_y"],
+        cohort=ctx.artifacts.get("_did_cohort_col"),
+        treat=ctx.artifacts.get("_did_treat_col"),
+        post=ctx.artifacts.get("_did_post_col"),
+        status=ctx.artifacts.get("_did_status_col"),
+    )
+    ctx.artifacts["_did_normalized"] = norm
+    result = _orch().run_sa_did(
+        norm,
+        cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,   # reuse the CS cluster channel
+        honest_did=ctx.artifacts.get("_honest_did", False),
+    )
+    ctx.artifacts["_sa_did_result"] = result
+    simple = result["aggregations"]["simple"]
+    primary = {"schema_version": 1, "model_id": "sa_did_1", "model_type": "sa_did",
+        "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
+        "coefficients": {"ATT": {"estimate": simple["overall"], "std_error": simple["overall_se"],
+            "p_value": None, "source_id": "model_results.sa_did_1.coefficients.ATT"}},
+        "warnings": result["warnings"]}
+    return "sa_did_1", primary, None
+
+
 def _fit_ols(ctx, env):
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
@@ -217,6 +248,7 @@ CORE_PACK = AnalysisPack(
         ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
         ModelHandler("did", "did_1", ("continuous",), _fit_did),
         ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),
+        ModelHandler("sa_did", "sa_did_1", ("continuous",), _fit_sa_did),
     ],
     defaults_by_y_type={
         "continuous": "ols",
@@ -316,6 +348,13 @@ class EstimationStage:
                 "CS_DID_FIELDS_MISSING",
                 "cs_did requires both an entity and a time column.",
                 {"model_type": "cs_did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
+            )
+
+        if model_type == "sa_did" and (not id_cands or not t_cands):
+            raise WorkflowValidationError(
+                "SA_DID_FIELDS_MISSING",
+                "sa_did requires both an entity and a time column.",
+                {"model_type": "sa_did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
             )
 
         env.step("estimation", "start", f"Fitting {ctx.y_type} model (y type: {ctx.y_type})...")
