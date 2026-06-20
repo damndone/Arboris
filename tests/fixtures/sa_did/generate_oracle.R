@@ -180,19 +180,25 @@ make_balanced <- function() {
 
 # =============================================================================
 # PANEL 2 — UNBALANCED: same DGP as balanced (seed 202), then DROP rows so that
-# observed counts N_{g,e} differ across cohorts at the same event time, while
-# cohort sizes n_g stay equal (30 each). Half of cohort-4 ids lose year>=6;
-# every 3rd cohort-3 id loses year 7. Result: at e=2 cohort-3 has N=30 but
-# cohort-4 has N=15, so sunab's observed-count weighting diverges from n_g
-# weighting by >> 1e-6.
+# observed counts N_{g,e} differ across cohorts AT A MULTI-COHORT EVENT TIME that
+# survives collinearity, while cohort sizes n_g stay equal (30 each). e=0 (the
+# treatment year) is shared by all three cohorts {3,4,5} in the kept set, so it is
+# the place a weighting difference can actually surface. Half of cohort-3's ids
+# lose ONLY their year-3 (e=0) observation: cohort 3 still has 30 ENTITIES (n_g=30)
+# but only N_{3,0}=15 observed at e=0, while N_{4,0}=N_{5,0}=30. Therefore at e=0
+# sunab's observed-count weighting (15,30,20)/65 diverges from cs_aggregate's
+# cohort-size n_g weighting (30,30,20)/80 by >> 1e-6 (verified ~0.09). Dropping a
+# single event-time observation (not whole entities) keeps n_g equal and the (3,0)
+# cell well-supported (15 obs), so the kept-cell set is unchanged vs balanced.
+# (An earlier scheme dropped cohort-4 at year>=6 / cohort-3 at year 7, but those
+# event times collapse to a SINGLE cohort in the kept set, so no weighting
+# divergence ever surfaced — see docs/v1.5.8-IMPL-NOTES.md.)
 # =============================================================================
 make_unbalanced <- function() {
   d <- make_balanced()   # identical DGP/seed, then drop rows
-  c4 <- unique(d$id[!is.na(d$cohort) & d$cohort == 4])
   c3 <- unique(d$id[!is.na(d$cohort) & d$cohort == 3])
-  drop4 <- c4[seq(1, length(c4), 2)]    # half of cohort 4
-  drop3 <- c3[seq(1, length(c3), 3)]    # every 3rd of cohort 3
-  keep <- !((d$id %in% drop4 & d$year >= 6) | (d$id %in% drop3 & d$year == 7))
+  drop3 <- c3[seq(1, length(c3), 2)]    # half of cohort 3
+  keep <- !(d$id %in% drop3 & d$year == 3)   # drop ONLY their e=0 (year 3) row
   d[keep, ]
 }
 
