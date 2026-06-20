@@ -132,7 +132,7 @@ def estimate_sa_saturated(
 
     n_cols = len(candidate_keys)
 
-    # --- Build interaction columns (sparse-friendly: indicator columns). ---
+    # dense indicator columns (one per candidate (g,e); sparse deferred per spec §2.2)
     D = np.zeros((ent_t.size, n_cols), dtype=np.float64)
     for j, mask in enumerate(col_masks):
         D[mask, j] = 1.0
@@ -162,6 +162,8 @@ def estimate_sa_saturated(
             kept_idx.append(j)
 
     kept_keys = [candidate_keys[j] for j in kept_idx]
+    # solve on the original (non-orthonormalized) kept columns so betas are in the
+    # cell basis, not the GS basis
     Dk = D_abs[:, kept_idx] if kept_idx else np.zeros((ent_t.size, 0))
 
     # --- 5. Solve on kept columns. ---
