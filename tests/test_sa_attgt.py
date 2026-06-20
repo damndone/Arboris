@@ -170,3 +170,42 @@ def test_if_mean_zero_and_never_treated_zero():
     pos = {eid: i for i, eid in enumerate(all_ids)}
     for eid in never_ids:
         assert np.all(IF[pos[eid], :] == 0.0), eid
+
+
+# --- Task 5: EffectEstimateBundle assembly + balanced dynamic oracle -----------
+from workbench.engine.cs_attgt import EffectEstimateBundle  # noqa: E402
+from workbench.engine.cs_aggregate import aggregate  # noqa: E402
+from workbench.engine.did_spec import normalize_did_input  # noqa: E402
+from workbench.engine.sa_attgt import estimate_sa  # noqa: E402
+
+
+def _norm(panel):
+    d = pd.read_csv(_FIX / f"panel_{panel}.csv")
+    return normalize_did_input(d, mode="cohort", entity="id", time="year", y="y", cohort="cohort")
+
+
+def test_sa_bundle_is_effectestimatebundle_and_consumable():
+    b = estimate_sa(_norm("balanced"), cluster_var=None)
+    assert isinstance(b, EffectEstimateBundle)
+    assert b.influence_func.shape[0] == b.aux["n_total"]
+    assert b.influence_func.shape[1] == len(b.cell_metadata) == len(b.estimates)
+    assert all(m["valid"] for m in b.cell_metadata)
+    agg = aggregate(b, "dynamic")
+    assert len(agg["label"]) > 0
+
+
+def test_sa_dynamic_matches_fixest_balanced():
+    d, o = _load("balanced")
+    b = estimate_sa(_norm("balanced"), cluster_var=None)
+    agg = aggregate(b, "dynamic")
+    got = {float(e): float(v) for e, v in zip(agg["label"], agg["estimate"])}
+    want = {float(e): float(v) for e, v in zip(o["agg_e"], o["agg_estimate"])}
+    common = set(got) & set(want)
+    assert common
+    for e in common:
+        assert abs(got[e] - want[e]) < 1e-6, (e, got[e], want[e])
+
+
+def test_sa_bundle_diagnostics_balanced_flag():
+    assert estimate_sa(_norm("balanced"), cluster_var=None).diagnostics["balanced"] is True
+    assert estimate_sa(_norm("unbalanced"), cluster_var=None).diagnostics["balanced"] is False

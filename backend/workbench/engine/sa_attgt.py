@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .cs_attgt import EffectEstimateBundle
 from .sa_spec import SASpecError, select_reference_cohort, validate_sa_input
 
 # fixest collin.tol default — relative squared shrinkage below which a column is
@@ -247,3 +248,74 @@ def sa_influence(res) -> np.ndarray:
     key_to_col = {k: c for c, k in enumerate(I["kept_keys"])}
     out_cols = [key_to_col[(float(g), float(e))] for g, e in zip(res["g"], res["e"])]
     return phi_full[:, out_cols]
+
+
+def estimate_sa(norm, *, cluster_var=None) -> EffectEstimateBundle:
+    """Wrap the SA CATT(g,e) estimator + influence function into the shared
+    EffectEstimateBundle contract (the estimator-agnostic seam that Callaway-
+    Sant'Anna also emits), so cs_aggregate / honest-DID consume SA for free.
+
+    Mirrors `estimate_att_gt` (cs_attgt.py) row construction exactly: entity rows
+    in `units_all = np.sort(unique entity ids)` order (== the order sa_influence
+    places IF rows in), per-entity cluster ids (entity-default), an entity-aligned
+    cohort vector (0 = never-treated), cohort sizes, valid-only self-describing
+    cell_metadata, and the applied sample_spec. Only identified (g,e) cells enter;
+    the estimator has already valid-filtered (zero-support -> dropped, collinear
+    -> removed), so every emitted cell is `valid: True`.
+    """
+    frame, entity, time, y = norm.frame, norm.entity, norm.time, norm.y
+    res = estimate_sa_saturated(frame, entity=entity, time=time, y=y,
+                                cohort="_did_cohort", _return_internals=True)
+    IF = sa_influence(res)                                   # (N_all, K), aligned to res g/e
+    estimates = np.asarray(res["beta"], dtype=float)
+
+    cohort = frame.groupby(entity)["_did_cohort"].first()
+    units_all = np.sort(cohort.index.to_numpy())            # IF row order (== np.unique)
+    N = res["_internals"]["N_all"]
+
+    # Per-entity cluster id (entity-default when cluster_var is falsy/== entity).
+    # Single row convention: clustering lives ONLY here (aux["row_cluster"]); the
+    # IF stays entity-level everywhere downstream.
+    clustered = bool(cluster_var and cluster_var != entity)
+    if clustered:
+        if cluster_var not in frame.columns:
+            raise SASpecError(f"SA_CLUSTER_COL_MISSING: '{cluster_var}' is not a column.")
+        cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
+        row_cluster = np.asarray(cl_by_unit.loc[units_all])
+    else:
+        row_cluster = np.asarray(units_all)
+
+    # Entity-aligned cohort vector (0 = never-treated) for the aggregation `wif`.
+    row_cohort = np.array([float(cohort.loc[u]) if np.isfinite(cohort.loc[u]) else 0.0
+                           for u in units_all], dtype=float)
+
+    # Cohort entity counts (treated cohorts only).
+    finite_cohorts = sorted({float(g) for g in cohort.to_numpy() if np.isfinite(g)})
+    n_by_g = {g: int((cohort == g).sum()) for g in finite_cohorts}
+    total_treated = sum(n_by_g.values())
+    weights = {"n_g": n_by_g,
+               "p_g": {g: n_by_g[g] / total_treated for g in finite_cohorts} if total_treated else {}}
+
+    # cell_metadata — only identified cells enter (estimator already valid-filtered).
+    meta = [{"g": float(g), "t": float(g + e), "event_time": float(e), "valid": True,
+             "n_treated": n_by_g.get(float(g), 0), "n_control": None, "warning": None}
+            for g, e in zip(res["g"], res["e"])]
+
+    # Balanced flag (every entity observed at every observed period) — used by Task 8.
+    obs_per_entity = frame.groupby(entity)[time].nunique()
+    n_periods = frame[time].nunique()
+    balanced = bool((obs_per_entity == n_periods).all())
+
+    diagnostics = {"dropped_cells": res["dropped_cells"],
+                   "collinear_cells": res["collinear_cells"],
+                   "support_zero_cells": res["dropped_cells"],
+                   "balanced": balanced,
+                   "sample_spec": {"estimator": "sun_abraham", "cluster_var": cluster_var,
+                                   "ref_cohort": res["ref_cohort"], "has_never": res["has_never"]}}
+    vcov_config = {"cluster_var": cluster_var if clustered else entity,
+                   "cluster_level": cluster_var if clustered else "entity",
+                   "confidence_level": 0.95, "band_type": None}
+    aux = {"n_total": int(N), "row_cohort": row_cohort, "row_cluster": row_cluster}
+    return EffectEstimateBundle(estimates=estimates, influence_func=IF, aux=aux,
+        cluster_ids=np.unique(row_cluster), cell_metadata=meta, weights=weights,
+        vcov_config=vcov_config, diagnostics=diagnostics)
