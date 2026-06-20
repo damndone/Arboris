@@ -65,3 +65,18 @@ def test_run_sa_did_end_to_end(tmp_path):
     index = read_json(run_root / "artifacts_index.json")
     ids = {a["artifact_id"] for a in index["artifacts"]}
     assert "sa_did" in ids
+
+
+def test_sa_unbalanced_run_has_weight_warning_balanced_does_not():
+    import pandas as pd
+    from pathlib import Path
+    from workbench.engine.did_spec import normalize_did_input
+    from workbench.econometrics.runner import run_sa_did
+    FIX = Path(__file__).parent / "fixtures" / "sa_did"
+    def _run(panel):
+        d = pd.read_csv(FIX / f"panel_{panel}.csv")
+        norm = normalize_did_input(d, mode="cohort", entity="id", time="year", y="y", cohort="cohort")
+        return run_sa_did(norm, cluster_var=None)
+    unb = _run("unbalanced"); bal = _run("balanced")
+    assert "interpretation_restrictions" in unb["aggregations"]["dynamic"]
+    assert "interpretation_restrictions" not in bal["aggregations"]["dynamic"]

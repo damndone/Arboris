@@ -209,3 +209,13 @@ def test_sa_dynamic_matches_fixest_balanced():
 def test_sa_bundle_diagnostics_balanced_flag():
     assert estimate_sa(_norm("balanced"), cluster_var=None).diagnostics["balanced"] is True
     assert estimate_sa(_norm("unbalanced"), cluster_var=None).diagnostics["balanced"] is False
+
+
+def test_sa_unbalanced_dynamic_differs_from_fixest():
+    d, o = _load("unbalanced")
+    b = estimate_sa(_norm("unbalanced"), cluster_var=None)
+    agg = aggregate(b, "dynamic")
+    got = {float(e): float(v) for e, v in zip(agg["label"], agg["estimate"])}
+    want = {float(e): float(v) for e, v in zip(o["agg_e"], o["agg_estimate"])}
+    diffs = [abs(got[e] - want[e]) for e in (set(got) & set(want))]
+    assert max(diffs) > 1e-6   # documents the architectural boundary (NOT a bug)

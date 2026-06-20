@@ -563,6 +563,18 @@ def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata):
             out.update({"label_kind": "none", "label": [], "estimate": [], "se": []})
         aggregations[kind] = out
 
+    # --- unbalanced-panel aggregation-weight characterization (qualitative) ---
+    # Estimator-agnostic: keys off diagnostics["balanced"] (set only by SA, and only
+    # to False when some entity is missing some period). CS bundles never set the key
+    # (.get returns None, `is False` → False), so CS stays golden 0-drift; SA balanced
+    # bundles set True. Purely characterizes the boundary — NO quantified difference.
+    if bundle.diagnostics.get("balanced") is False:
+        aggregations["dynamic"]["interpretation_restrictions"] = [
+            "This event-study uses did-style cohort-size (n_g) aggregation weights. "
+            "In unbalanced panels this may differ from fixest::sunab's aggregation "
+            "(which weights by observed counts per relative period)."
+        ]
+
     # --- warnings ---
     warnings = []
     for oc in bundle.diagnostics.get("omitted_cells", []):
