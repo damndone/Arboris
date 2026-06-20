@@ -64,3 +64,24 @@ def test_sa_did_missing_entity_time_fails_clearly(tmp_path):
     errors = read_json(run_root / "errors.json")
     codes = [i.get("code") for i in errors.get("issues", [])]
     assert "SA_DID_FIELDS_MISSING" in codes
+
+
+def test_sa_honest_did_runs_free(tmp_path, monkeypatch):
+    """honest-DID (ΔRM + v1.5.7.1 ΔSD/FLCI) inherited by SA for free.
+
+    The sensitivity post-processor lives in _finalize_did_bundle and is
+    estimator-agnostic; SA's dynamic aggregation feeds it with no new code.
+    """
+    import json
+    from workbench.engine.did_spec import normalize_did_input
+    from workbench.econometrics import runner
+    monkeypatch.setattr(runner, "HONEST_MBAR_GRID", [0.0, 1.0])
+    monkeypatch.setattr(runner, "HONEST_GRID_POINTS", 150)
+    d = pd.read_csv("tests/fixtures/sa_did/panel_balanced.csv")   # has pre periods e<0
+    norm = normalize_did_input(d, mode="cohort", entity="id", time="year", y="y", cohort="cohort")
+    res = runner.run_sa_did(norm, cluster_var=None, honest_did=True)
+    hd = res["honest_did"]
+    assert hd["rm"]["status"] == "ok", hd["rm"]
+    assert hd["sd"]["status"] == "ok", hd["sd"]
+    # strict-JSON serializable (no NaN/inf tokens that would kill the FE card)
+    json.dumps(res, allow_nan=False)
