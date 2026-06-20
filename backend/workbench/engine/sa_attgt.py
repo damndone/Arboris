@@ -201,3 +201,49 @@ def estimate_sa_saturated(
         }
 
     return res
+
+
+def sa_influence(res) -> np.ndarray:
+    """N_all-scaled analytic entity influence function for the SA CATT(g,e).
+
+    Returns an (N_all, K) matrix aligned to res["g"]/res["e"] (sorted-(g,e) order),
+    one row per entity in np.unique(all entities) order, never-treated rows = 0.
+
+    This is the v1.5.8 linchpin: the N_all scale factor makes
+    cs_aggregate._se(IF[:, k], row_cluster, N_all) reproduce fixest's BARE
+    (ssc adj=FALSE,cluster.adj=FALSE) cluster vcov, and (IF_k·IF_l)/N_all^2 the
+    full vcov off-diagonals — so the shared cs_aggregate SE path and the
+    honest-DID adapter work for SA for free.
+
+    Recipe (validated to <=5e-13 vs the committed fixest oracle):
+        phi_i = N_all * (Dk'Dk)^+ @ (sum_t Dk_it * eps_it),  eps = within residuals
+    accumulated over each treated entity's rows; never-treated entities (zero
+    score) stay zero. Columns are reordered from kept_keys (solve order) to the
+    sorted res["g"]/res["e"] return order.
+    """
+    I = res["_internals"]
+    Dk = I["Dk"]
+    beta = np.asarray(I["beta_kept"], dtype=np.float64)
+    ent_codes = I["ent_codes"]
+    N_all = int(I["N_all"])
+
+    resid = I["y_abs"] - Dk @ beta                  # within residuals eps_hat
+    XtX_inv = np.linalg.pinv(Dk.T @ Dk)             # identified-subspace bread (K x K)
+    scored = Dk * resid[:, None]                    # (n_treated_rows, K) per-obs score
+
+    n_tre = len(I["treated_entity_ids"])
+    K = Dk.shape[1]
+    ent_sum = np.zeros((n_tre, K))
+    np.add.at(ent_sum, ent_codes, scored)           # sum_t per treated entity
+    phi_treated = N_all * (ent_sum @ XtX_inv.T)     # (n_treated, K), N_all-scaled
+
+    # scatter into (N_all, K): never-treated rows stay 0
+    pos = {eid: i for i, eid in enumerate(I["all_entity_ids"])}
+    phi_full = np.zeros((N_all, K))
+    for r, eid in enumerate(I["treated_entity_ids"]):
+        phi_full[pos[eid], :] = phi_treated[r, :]
+
+    # reorder columns from kept_keys (solve order) to sorted res["g"]/res["e"]
+    key_to_col = {k: c for c, k in enumerate(I["kept_keys"])}
+    out_cols = [key_to_col[(float(g), float(e))] for g, e in zip(res["g"], res["e"])]
+    return phi_full[:, out_cols]
