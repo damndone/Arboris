@@ -505,28 +505,17 @@ def run_event_study(
     }
 
 
-def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
-               anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05,
-               honest_did=False):
-    """Callaway-Sant'Anna group-time ATT end to end. Returns a structured dict:
-    att_gt cell table, four aggregations (each with point estimates + analytical SE +
-    multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
-    Pure (no I/O). Seed-deterministic."""
-    from ..engine.cs_attgt import estimate_att_gt
+def _finalize_did_bundle(bundle, *, seed, B, alpha, honest_did, extra_metadata):
+    """Estimator-agnostic downstream for a DID EffectEstimateBundle: att_gt cell
+    table, four aggregations + multiplier-bootstrap sup-t bands, warnings,
+    metadata, opt-in honest-DID (ΔRM + ΔSD/FLCI), and the assembled result dict.
+    Shared by run_cs_did and run_sa_did — the bundle is the seam, so this contains
+    NO estimator-specific branch. estimator-specific metadata arrives via
+    `extra_metadata` and is merged into `metadata`."""
     from ..engine.cs_aggregate import aggregate, _se
     from ..engine.cs_inference import multiplier_bootstrap
     import numpy as np
 
-    # v1.5.6 hardening — Fix #2: coerce/validate the outcome to numeric, mirroring
-    # the other runners' `_ensure_numeric_y`. A string/object y otherwise reaches
-    # a bare `dtype 'str' does not support operation 'mean'` TypeError that escapes
-    # to WORKFLOW_FAILED; this raises the structured numeric-y ValueError instead
-    # (caught by the estimation stage → MODEL_FIT_FAILED).
-    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
-
-    bundle = estimate_att_gt(norm, control_group=control_group, est_method=est_method,
-        base_period=base_period, anticipation=anticipation,
-        covariates=list(covariates), cluster_var=cluster_var)
     G = bundle.influence_func.shape[0]
     row_cluster = bundle.aux["row_cluster"]
     n_clusters = int(np.unique(row_cluster).size)
@@ -586,9 +575,7 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
             warnings.append(f"Event time {lab} is supported by a single cohort.")
 
     cohorts = sorted({m["g"] for m in bundle.cell_metadata})
-    metadata = {"control_group": control_group, "est_method": est_method,
-        "base_period": base_period, "anticipation": anticipation,
-        "covariates": list(covariates), "cluster_var": cluster_var,
+    metadata = {**extra_metadata,
         "n_units": int(G), "n_clusters": n_clusters,
         "cluster_level": bundle.vcov_config.get("cluster_level", "entity"),
         "n_cohorts": len(cohorts),
@@ -616,6 +603,32 @@ def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
     return {"att_gt": att_gt, "aggregations": aggregations,
         "diagnostics": bundle.diagnostics, "warnings": warnings, "metadata": metadata,
         **({"honest_did": result_honest} if result_honest is not None else {})}
+
+
+def run_cs_did(norm, *, covariates, control_group, est_method, base_period,
+               anticipation, cluster_var, seed=20260615, B=1000, alpha=0.05,
+               honest_did=False):
+    """Callaway-Sant'Anna group-time ATT end to end. Returns a structured dict:
+    att_gt cell table, four aggregations (each with point estimates + analytical SE +
+    multiplier-bootstrap pointwise/uniform bands), diagnostics, warnings, metadata.
+    Pure (no I/O). Seed-deterministic."""
+    from ..engine.cs_attgt import estimate_att_gt
+
+    # v1.5.6 hardening — Fix #2: coerce/validate the outcome to numeric, mirroring
+    # the other runners' `_ensure_numeric_y`. A string/object y otherwise reaches
+    # a bare `dtype 'str' does not support operation 'mean'` TypeError that escapes
+    # to WORKFLOW_FAILED; this raises the structured numeric-y ValueError instead
+    # (caught by the estimation stage → MODEL_FIT_FAILED).
+    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
+
+    bundle = estimate_att_gt(norm, control_group=control_group, est_method=est_method,
+        base_period=base_period, anticipation=anticipation,
+        covariates=list(covariates), cluster_var=cluster_var)
+    md = {"control_group": control_group, "est_method": est_method,
+          "base_period": base_period, "anticipation": anticipation,
+          "covariates": list(covariates), "cluster_var": cluster_var}
+    return _finalize_did_bundle(bundle, seed=seed, B=B, alpha=alpha,
+                                honest_did=honest_did, extra_metadata=md)
 
 
 def run_time_series_diagnostics(
