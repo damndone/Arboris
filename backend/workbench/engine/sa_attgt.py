@@ -132,6 +132,13 @@ def estimate_sa_saturated(
                 dropped_cells.append({"g": float(g), "e": float(e)})
 
     n_cols = len(candidate_keys)
+    if n_cols == 0:
+        # No interaction columns survive (e.g. a single treated cohort with no
+        # never-treated group -> it is the reference and is excluded). Raise a
+        # structured SA_* instead of letting the empty design hit an opaque numpy
+        # reduction error inside _absorb_two_way.
+        raise SASpecError("SA_NO_IDENTIFIED_CELLS: no identified cohort×event-time "
+                          "cell to estimate (need >=2 cohorts, or a never-treated group).")
 
     # dense indicator columns (one per candidate (g,e); sparse deferred per spec §2.2)
     D = np.zeros((ent_t.size, n_cols), dtype=np.float64)
@@ -280,8 +287,22 @@ def estimate_sa(norm, *, cluster_var=None) -> EffectEstimateBundle:
     if clustered:
         if cluster_var not in frame.columns:
             raise SASpecError(f"SA_CLUSTER_COL_MISSING: '{cluster_var}' is not a column.")
-        cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
-        row_cluster = np.asarray(cl_by_unit.loc[units_all])
+        # Mirror cs_attgt's cluster guards so a degenerate user cluster column never
+        # produces a silently-wrong SE (the worst failure for an econometrics tool).
+        try:
+            cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
+            cl = cl_by_unit.loc[units_all]
+        except (KeyError, TypeError) as exc:
+            raise SASpecError(f"SA_CLUSTER_COL_BAD: could not resolve cluster column "
+                              f"'{cluster_var}': {exc}") from exc
+        if cl.isna().any():
+            raise SASpecError("SA_CLUSTER_COL_NAN: cluster column has missing values.")
+        # Coerce to string ids so mixed/object dtype can't raise a bare TypeError (or
+        # yield garbage) in the downstream np.unique/sort; the PARTITION is unchanged.
+        cl = cl.to_numpy().astype(str)
+        if len(np.unique(cl)) < 2:
+            raise SASpecError("SA_CLUSTER_SINGLE: need >= 2 clusters for cluster-robust SE.")
+        row_cluster = np.asarray(cl)
     else:
         row_cluster = np.asarray(units_all)
 

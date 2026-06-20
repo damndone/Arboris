@@ -219,3 +219,44 @@ def test_sa_unbalanced_dynamic_differs_from_fixest():
     want = {float(e): float(v) for e, v in zip(o["agg_e"], o["agg_estimate"])}
     diffs = [abs(got[e] - want[e]) for e in (set(got) & set(want))]
     assert max(diffs) > 1e-6   # documents the architectural boundary (NOT a bug)
+
+
+# --- v1.5.8.1 hardening: SA cluster-column guards (mirror cs_attgt) + empty design ---
+from workbench.engine.sa_attgt import estimate_sa  # noqa: E402
+from workbench.engine.did_spec import normalize_did_input  # noqa: E402
+
+
+def _norm_frame(d):
+    return normalize_did_input(d, mode="cohort", entity="id", time="year", y="y", cohort="cohort")
+
+
+def test_sa_cluster_col_nan_raises_structured():
+    d = pd.read_csv(_FIX / "panel_balanced.csv")
+    d["clu"] = (d["id"] % 5 + 1).astype(float)   # ensure >=2 levels among the rest
+    d.loc[d["id"] == 1, "clu"] = np.nan           # id 1 exists (ids are 1..120)
+    with pytest.raises(SASpecError, match="SA_CLUSTER_COL_NAN"):
+        estimate_sa(_norm_frame(d), cluster_var="clu")
+
+
+def test_sa_cluster_single_level_raises_structured():
+    d = pd.read_csv(_FIX / "panel_balanced.csv")
+    d["clu"] = 1.0
+    with pytest.raises(SASpecError, match="SA_CLUSTER_SINGLE"):
+        estimate_sa(_norm_frame(d), cluster_var="clu")
+
+
+def test_sa_cluster_object_dtype_coerced_not_garbage():
+    d = pd.read_csv(_FIX / "panel_balanced.csv")
+    d["clu"] = ["c" + str(int(i) % 6) for i in d["id"]]
+    b = estimate_sa(_norm_frame(d), cluster_var="clu")
+    se = _se(b.influence_func[:, 0], b.aux["row_cluster"], b.aux["n_total"])
+    assert np.isfinite(se) and se < 1e6
+
+
+def test_sa_no_identified_cells_raises_structured():
+    rows = []
+    for i in range(20):
+        for yr in range(1, 6):
+            rows.append({"id": i, "year": yr, "cohort": 3.0, "y": float(i + yr)})
+    with pytest.raises(SASpecError, match="SA_NO_IDENTIFIED_CELLS"):
+        estimate_sa(_norm_frame(pd.DataFrame(rows)), cluster_var=None)
