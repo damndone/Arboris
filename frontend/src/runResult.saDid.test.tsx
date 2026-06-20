@@ -61,9 +61,9 @@ const saDiag: CSDiagnostics = {
     cluster_var: null, n_units: 100, n_cohorts: 2, n_valid_cells: 3,
     n_cells: 3, B: 0, alpha: 0.05, seed: 42, confidence_level: 0.95,
     band_type: "uniform",
-    // estimator marker — present on the SA artifact, not load-bearing for reuse.
+    // estimator marker — present on the SA artifact, drives the card heading.
     estimator: "sun_abraham",
-  } as CSDiagnostics["metadata"],
+  },
 };
 
 const detail = {
@@ -128,4 +128,9 @@ test("fetches the sa_did artifact into the CS card (event-study + honest panels 
   // nested honest-DID panel renders (rm ok track)
   expect(screen.getByLabelText("cs-honest-did-panel")).toBeInTheDocument();
   expect(screen.getByLabelText("cs-honest-did-rm-panel")).toBeInTheDocument();
+  // estimator-aware heading: an SA run must NOT be mislabeled Callaway-Sant'Anna
+  expect(
+    screen.getByText("Sun-Abraham (interaction-weighted) DID"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Callaway-Sant'Anna DID")).toBeNull();
 });

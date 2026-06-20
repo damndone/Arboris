@@ -93,6 +93,10 @@ export interface CSDiagnostics {
   honest_did?: HonestDidBlock;
   warnings: string[];
   metadata: {
+    // V1.5.8: present as "sun_abraham" on the Sun-Abraham (sa_did) artifact;
+    // absent (or another value) on the Callaway-Sant'Anna (cs_did) artifact.
+    // Drives the estimator-aware card heading so an SA run is not mislabeled CS.
+    estimator?: string;
     control_group: string;
     est_method: string;
     base_period: string;
@@ -119,6 +123,15 @@ export type CSDiagnosticsData =
 
 const f = (v: number | null | undefined, d = 3) =>
   v == null ? "—" : v.toFixed(d);
+
+// V1.5.8: Sun-Abraham (sa_did) reuses this card but is a DIFFERENT estimator —
+// the heading must say so, not silently read "Callaway-Sant'Anna".
+const isSunAbraham = (estimator: string | undefined): boolean =>
+  estimator === "sun_abraham";
+const cardTitle = (estimator: string | undefined): string =>
+  isSunAbraham(estimator)
+    ? "Sun-Abraham (interaction-weighted) DID"
+    : "Callaway-Sant'Anna DID";
 
 function CSEventStudyChart({ dyn }: { dyn: CSDynamicAgg }) {
   const W = 260,
@@ -360,7 +373,7 @@ export function CSDiagnosticsCard({
   if (!agg || !agg.simple || !agg.dynamic || !agg.group || !agg.calendar) {
     return (
       <section className="ios-card cs-diagnostics" aria-label="cs-diagnostics">
-        <div className="ios-card-title">Callaway-Sant'Anna DID</div>
+        <div className="ios-card-title">{cardTitle(d.metadata?.estimator)}</div>
         <div className="ios-warning">结果不完整</div>
       </section>
     );
@@ -373,7 +386,7 @@ export function CSDiagnosticsCard({
 
   return (
     <section className="ios-card cs-diagnostics" aria-label="cs-diagnostics">
-      <div className="ios-card-title">Callaway-Sant'Anna DID</div>
+      <div className="ios-card-title">{cardTitle(m.estimator)}</div>
 
       <div>
         <span>总体 ATT</span>{" "}
