@@ -80,15 +80,32 @@ def test_has_never_and_ref_cohort():
     assert res["ref_cohort"] is None
 
 
-def test_no_never_treated_uses_last_cohort_ref():
-    # Drop never-treated rows -> last-treated cohort (5) becomes the reference.
+def test_no_never_treated_blocked():
+    # v1.5.8 hardening: a panel with NO never-treated group (every entity eventually
+    # treated) is BLOCKED, not silently estimated. The previously-shipped no-never
+    # (last-cohort-reference) path diverged structurally from fixest::sunab and emitted
+    # UNIDENTIFIED high-event-time coefficients (its Gram-Schmidt collinearity drop never
+    # fired). It now fails loud with SA_NO_NEVER_TREATED. See docs/v1.5.8-IMPL-NOTES.md.
     d, _ = _load("balanced")
     dn = d[d["cohort"].notna()].copy()
-    res = estimate_sa_saturated(dn, entity="id", time="year", y="y", cohort="cohort")
-    assert res["has_never"] is False
-    assert res["ref_cohort"] == 5.0
-    assert 5.0 not in {float(g) for g in res["g"]}  # reference cohort excluded
-    assert len(res["beta"]) > 0
+    with pytest.raises(SASpecError, match="SA_NO_NEVER_TREATED"):
+        estimate_sa_saturated(dn, entity="id", time="year", y="y", cohort="cohort")
+
+
+def test_genuine_collinearity_drop_matches_fixest_balanced():
+    # Hardening: make the implicit explicit. The saturated design has cells that are
+    # genuinely collinear with the two-way (id+year) FEs (NOT zero-support) — the
+    # Gram-Schmidt path (sa_attgt.py) must drop EXACTLY fixest's $collin.var set.
+    # This locks the most fragile branch against silent regressions. The expected set
+    # is fixest 0.14.1 sunab $collin.var on the committed panel_balanced.csv.
+    d, _ = _load("balanced")
+    res = estimate_sa_saturated(d, entity="id", time="year", y="y", cohort="cohort")
+    got = {(float(c["g"]), float(c["e"])) for c in res["collinear_cells"]}
+    want = {(3.0, -2.0), (3.0, 2.0), (5.0, 2.0), (3.0, 3.0), (4.0, 3.0), (3.0, 4.0)}
+    assert got == want, got ^ want
+    # and these collinear cells must be absent from the estimated set
+    kept = {(float(g), float(e)) for g, e in zip(res["g"], res["e"])}
+    assert not (got & kept)
 
 
 def test_too_few_periods_raises():
@@ -254,9 +271,14 @@ def test_sa_cluster_object_dtype_coerced_not_garbage():
 
 
 def test_sa_no_identified_cells_raises_structured():
+    # Empty interaction design WITH a never-treated group present (so the v1.5.8
+    # SA_NO_NEVER_TREATED guard does NOT fire first): the single treated cohort is
+    # observed ONLY at its reference period e=-1, so no identified (g,e) cell survives.
     rows = []
-    for i in range(20):
+    for i in range(10):  # never-treated: full panel, provides the comparison group
         for yr in range(1, 6):
-            rows.append({"id": i, "year": yr, "cohort": 3.0, "y": float(i + yr)})
+            rows.append({"id": i, "year": yr, "cohort": np.nan, "y": float(i + yr)})
+    for i in range(10, 15):  # treated cohort 4, observed ONLY at year 3 == e=-1
+        rows.append({"id": i, "year": 3, "cohort": 4.0, "y": float(i)})
     with pytest.raises(SASpecError, match="SA_NO_IDENTIFIED_CELLS"):
         estimate_sa(_norm_frame(pd.DataFrame(rows)), cluster_var=None)
