@@ -60,6 +60,12 @@ MODEL_UI_META: dict[str, dict[str, object]] = {
         "description": "Interaction-weighted event-study estimator (Sun & Abraham 2021). Heterogeneity-robust dynamic ATT using clean-control cohorts, immune to the contamination of TWFE event-study leads/lags under staggered adoption.",
         "requires": ["entity", "time", "treatment_timing"],
     },
+    "dcdh": {
+        "label": "de Chaisemartin-D'Haultfoeuille DID",
+        "group": "DID",
+        "description": "Dynamic DID for binary NON-ABSORBING (switching) treatment using not-yet-switched controls (de Chaisemartin & D'Haultfoeuille). Handles treatments that turn on and off, which Callaway-Sant'Anna and Sun-Abraham cannot. Event study with native placebo pre-trend tests.",
+        "requires": ["entity", "time", "treatment_path"],
+    },
     "glm:binomial": {
         "label": "GLM - binomial",
         "group": "GLM",
@@ -88,6 +94,7 @@ MODEL_UI_ORDER = [
     "did",
     "cs_did",
     "sa_did",
+    "dcdh",
     "glm:binomial",
     "glm:poisson",
     "glm:negative_binomial",

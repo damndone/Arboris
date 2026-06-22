@@ -43,3 +43,14 @@ def test_dcdh_end_to_end_writes_artifact(tmp_path):
     assert art["event_study"]["label_kind"] == "event_time"
     assert art["honest_did_supported"] is False
     assert art["available"] is True
+
+
+# --- T10: capabilities ----------------------------------------------------
+def test_dcdh_in_capabilities():
+    from workbench.engine.capabilities import MODEL_UI_META, MODEL_UI_ORDER, build_capabilities
+    assert MODEL_UI_META["dcdh"]["group"] == "DID"
+    assert MODEL_UI_META["dcdh"]["requires"] == ["entity", "time", "treatment_path"]
+    assert "dcdh" in MODEL_UI_ORDER
+    caps = build_capabilities()
+    keys = {m["key"] for m in caps["model_types"]}
+    assert "dcdh" in keys   # surfaced because registered in MODEL_REGISTRY
