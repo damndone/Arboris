@@ -10,8 +10,21 @@
 ## One-line definition
 
 **Slice 1 delivers the "editable-op backend contract": every editable node can be
-resolved to a schema, can produce a new immutable run via overrides while preserving
-lineage; execution is still a full re-run, UI and incremental execution are deferred.**
+resolved to an *operation contract*, can produce a new immutable run via overrides while
+preserving lineage; execution is still a full re-run, UI and incremental execution are
+deferred.**
+
+An **Operation Contract** is what the resolver returns for an editable node — `schema` is
+only one part of it:
+
+```text
+OperationContract
+ ├── op_type            # e.g. "iv_2sls", "imputation"
+ ├── schema_id          # "{op_type}@v{major}"  — stable, versioned, label-free
+ ├── editable_schema    # the structural fields (mirrors EditableControl)
+ ├── override_validation# layer-1 structural rules (keys/type/enum/required)
+ └── rerun_semantics    # immutable child, rerun_of, full re-run, lineage invariants
+```
 
 ## North-star framing
 
@@ -116,7 +129,11 @@ manifest and contains zero per-estimator branches.
 Each is its own future version (incremental, golden-safe, never big-bang):
 
 1. **Graph node-edit UI** (next slice) — make `OperationSection` editable + light up
-   `rerunFromNode`, consuming `editable_schema`, calling `/rerun`.
+   `rerunFromNode`, consuming `editable_schema`, calling `/rerun`. **FE architecture
+   constraint (carried forward):** the UI MUST NOT render `editable_schema` directly to
+   JSX. Insert a `control_factory` indirection (`editable_schema → control_factory → UI
+   controls`) so future AI-generated controls, conditional controls, and dynamic
+   visibility are absorbable without rewriting render sites.
 2. **Per-stage op parameterization** — winsorize/log/bin become editable (one version per
    stage; expands each stage's input surface).
 3. **Incremental / hash-skip execution** — `from_node`-downstream + `inputs_hash`
@@ -145,6 +162,18 @@ Each is its own future version (incremental, golden-safe, never big-bang):
 
 These evolve independently: a single op's schema can bump `@v2` without touching the
 capabilities or run-input versions.
+
+**`schema_id` bump policy (normative — MUST):** `schema_id = "{op_type}@v{major}"`.
+
+| Change to an op's `editable_schema` | `schema_id` |
+|---|---|
+| add an **optional** field | unchanged |
+| add a **required** field | `+1` |
+| delete a field | `+1` |
+| change a field's semantics (type/role/enum meaning) | `+1` |
+
+This prevents a future where FE and BE both read `iv_2sls@v1` but disagree on its required
+fields. The bump is part of the same PR that changes the schema.
 
 ### 3.1 A — the op editable-schema manifest
 
@@ -185,10 +214,11 @@ require per-stage backend support (future slices).
 `params`/`schema_id` *in the same place you already declare `label`/`group`/`requires`*.
 The operation layer never changes.
 
-### 3.2 Node → op_type → schema resolution (manifest-driven, label-free)
+### 3.2 Node → operation contract resolution (manifest-driven, label-free)
 
-A small resolver maps a graph node to its op-type/schema, with **zero per-estimator
-branches**, addressing strictly by `node_id`/`stage`/`op_type` — **never label/title**:
+A small resolver maps a graph node to its **OperationContract** (`op_type` + `schema_id` +
+`editable_schema` + validation/rerun semantics), with **zero per-estimator branches**,
+addressing strictly by `node_id`/`stage`/`op_type` — **never label/title**:
 
 - `stage == "model"` → `op_type` = the run's `effective_model_type` (read from
   `run_manifest.model_routing.effective_model_type`) → schema =
@@ -228,7 +258,8 @@ untouched):
   "rerun_of": null,
   "from_node": null,
   "rerun_reason": "initial",
-  "override_hash": null
+  "override_hash": null,
+  "dag_hash": "<hex>"
 }
 ```
 
@@ -242,8 +273,13 @@ untouched):
   `batch_experiment` | `template_apply` | `agent_execution`. Initial runs = `initial`;
   reruns default `manual_override`. Paves the v1.7 agent lane.
 - `override_hash` (SHOULD): on a rerun, `sha256` of the canonicalised `op_overrides`
-  (sorted keys, normalised values). `null` on initial runs. Defines the future hash-skip
-  `cache_key`; **caching not implemented in Slice 1.**
+  (sorted keys, normalised values). `null` on initial runs. **caching not implemented in
+  Slice 1.**
+- `dag_hash` (SHOULD): `sha256(upload_sha256, canonical(form_bag), PIPELINE_VERSION)`,
+  computed and persisted on every run (cheap, deterministic). `PIPELINE_VERSION` is a
+  declared constant bumped whenever the `PIPELINE` stage structure changes. The future
+  hash-skip cache key is `(parent.dag_hash, from_node, override_hash)`; **caching not
+  implemented in Slice 1** — only the field is reserved and populated.
 
 ### 3.4 C — generic node-rerun endpoint
 
@@ -252,33 +288,39 @@ rerun_reason?: str }`:
 
 1. **Validate `from_node`** (Guardrail #6): MUST exist in the parent run's graph node set
    → else `422` (no arbitrary strings).
-2. Read parent `run_inputs.json` → base `form` bag + `upload.sha256`.
-3. Resolve `from_node`'s `op_type` → manifest schema + `schema_id` (§3.2).
-4. **Schema-switching order (Guardrail #4):** if `op_overrides` includes `model_type`,
+2. **Parent terminal-state (Guardrail #8):** the parent run's status MUST be terminal
+   (`completed`/`done`, `failed`, `cancelled`, `interrupted`); a `running`/`queued` parent
+   → `409 Conflict`. Prevents pulling lineage from a parent whose artifacts may still be
+   changing. (Distinct from the single-slot `429`: 409 = parent not terminal, 429 = slot
+   busy.)
+3. Read parent `run_inputs.json` → base `form` bag + `upload.sha256` + parent `dag_hash`.
+4. Resolve `from_node`'s `op_type` → manifest schema + `schema_id` (§3.2).
+5. **Schema-switching order (Guardrail #4):** if `op_overrides` includes `model_type`,
    take the **new** model's schema first; then validate required keys against
    *(parent form bag + overrides)* under the **new** schema. Never block a switch with the
    old schema.
-5. **Layer-1 structural validation (Guardrail #3):** `op_overrides` keys ⊆ schema keys;
+6. **Layer-1 structural validation (Guardrail #3):** `op_overrides` keys ⊆ schema keys;
    type / enum / required checks. **Only manifest structure** — never replicate estimator
    validators here.
-6. Compute `override_hash` = sha256 of canonicalised `op_overrides`.
-7. Shallow-merge `op_overrides` onto the base `form` bag (keys = form-param names).
-8. **Upload reuse (Guardrails #2 + #5):** resolve the parent's `upload.sha256` against the
+7. Compute `override_hash` (canonicalised `op_overrides`) and the child `dag_hash`.
+8. Shallow-merge `op_overrides` onto the base `form` bag (keys = form-param names).
+9. **Upload reuse (Guardrails #2 + #5):** resolve the parent's `upload.sha256` against the
    content-addressable store. The body **cannot** supply a path or sha256 (no field exists
    → cross-run injection is structurally impossible). Re-verify the blob's content hashes
    to its key; mismatch → **fail loud** (`422`), do not silently reuse a corrupted blob.
-9. Acquire the run slot; busy → `429` (concurrency lift deferred).
-10. Create a **new immutable run**: `rerun_of` = parent, `from_node` recorded,
-    `rerun_reason` (default `manual_override`), `override_hash` recorded; write a new
-    `run_inputs.json` referencing the SAME upload sha256 (no copy needed — content-addressed).
-11. Dispatch via the **same `_bg_run` path** as `POST /runs` — extracted into a shared
+10. Acquire the run slot; busy → `429` (concurrency lift deferred).
+11. Create a **new immutable run**: `rerun_of` = parent, `from_node` recorded,
+    `rerun_reason` (default `manual_override`), `override_hash` + `dag_hash` recorded; write
+    a new `run_inputs.json` referencing the SAME upload sha256 (no copy — content-addressed).
+    **Inherits ONLY the upload + run_inputs — never any derived artifact** (§4 invariant 5).
+12. Dispatch via the **same `_bg_run` path** as `POST /runs` — extracted into a shared
     helper `_submit_run(form_bag, upload_sha256, root, *, rerun_of, from_node, rerun_reason,
     override_hash)` so create and rerun share ONE dispatch path (zero duplication, zero
     per-estimator code).
-12. **Full-pipeline re-execution.** `from_node` is recorded only (addressing + lineage +
+13. **Full-pipeline re-execution.** `from_node` is recorded only (addressing + lineage +
     forward-compat for incremental); execution re-runs the whole pipeline. Incremental
     hash-skip is a deferred performance slice.
-13. **Layer-2 semantic validation stays in the pipeline:** column existence, estimability,
+14. **Layer-2 semantic validation stays in the pipeline:** column existence, estimability,
     role conflicts → structured `MODEL_FIT_FAILED` as today.
 
 Response mirrors `POST /runs`: `{ run_id, status }`.
@@ -318,6 +360,10 @@ The run-lineage graph is a **forest of immutable runs** and MUST satisfy:
 4. **Acyclic.** `A → B → A` is forbidden. Structurally guaranteed: a child is created
    *after* its parent and points *backwards* via `rerun_of`, so no run can become its own
    ancestor. `A → B`, `A → C` (siblings) is allowed.
+5. **Child runs never inherit derived artifacts.** A rerun inherits **only** the upload
+   (by sha256) and the (overridden) `run_inputs`. It MUST NOT read or copy the parent's
+   `graph.json`, `report.*`, diagnostics, or any cached artifact — every derived artifact
+   is recomputed from scratch. This is what keeps each run independently reproducible.
 
 These invariants are what make the lineage graph an operating system rather than a
 mutable workflow.
@@ -329,12 +375,13 @@ mutable workflow.
 | # | Guardrail | Where |
 |---|---|---|
 | 1 | `run_inputs.json` redacts secrets (allowlist/reference, never raw) | §3.3 |
-| 2 | rerun re-verifies upload blob content hash; mismatch → fail loud | §3.4.8 |
-| 3 | two-layer validation: manifest structural here, semantic in pipeline | §3.4.5/13 |
-| 4 | `model_type` schema-switching order (new schema first) | §3.4.4 |
-| 5 | no cross-run injection: upload addressed by parent sha256 only, no path/sha256 in body | §3.4.8 |
+| 2 | rerun re-verifies upload blob content hash; mismatch → fail loud | §3.4.9 |
+| 3 | two-layer validation: manifest structural here, semantic in pipeline | §3.4.6/14 |
+| 4 | `model_type` schema-switching order (new schema first) | §3.4.5 |
+| 5 | no cross-run injection: upload addressed by parent sha256 only, no path/sha256 in body | §3.4.9 |
 | 6 | `from_node` must exist in parent run's graph node set, else 422 | §3.4.1 |
 | 7 | serve-layer decorate only; never write `editable_schema` to artifacts | §3.5 |
+| 8 | rerun only on a **terminal** parent run (else 409); distinct from slot-busy 429 | §3.4.2 |
 
 ---
 
@@ -363,10 +410,16 @@ schema+sample; `capabilities_schema_version` 2→3.
 - **schema-switching order**: `model_type` switch validates against the NEW model schema.
 - **upload blob hash mismatch → fail loud (422)**; rerun body cannot carry path/sha256.
 - **`from_node` not in parent graph → 422.**
-- busy slot → 429.
+- **rerun on a non-terminal parent (`running`/`queued`) → 409**; busy slot → 429
+  (the two are distinct and independently tested).
 - semantic failure still surfaces as `MODEL_FIT_FAILED` from the pipeline (boundary proof).
 - **DAG invariants**: rerun does not mutate the parent run's artifacts; child carries
-  exactly one `rerun_of`.
+  exactly one `rerun_of`; **child does NOT inherit parent `graph.json`/report/diagnostics**
+  (derived artifacts recomputed).
+- **`schema_id` bump policy**: a guard test pins each op's `schema_id`; adding a required
+  field without bumping goes red.
+- **`dag_hash`** present + deterministic on create; `override_hash` deterministic under key
+  reordering (canonicalisation).
 
 ---
 
@@ -375,12 +428,13 @@ schema+sample; `capabilities_schema_version` 2→3.
 - `backend/workbench/engine/capabilities.py` — `params`, `editable_stages`, per-op
   `schema_id`, `capabilities_schema_version` 3.
 - `backend/workbench/api.py` — content-addressable upload store on create; write
-  `run_inputs.json`; `POST /runs/{id}/rerun`; `_submit_run` shared helper; serve-layer
-  graph annotation.
-- `backend/workbench/orchestrator/_manifest.py` — `rerun_of` in manifest.
+  `run_inputs.json`; `POST /runs/{id}/rerun` (incl. parent terminal-state 409 check);
+  `_submit_run` shared helper; serve-layer graph annotation.
+- `backend/workbench/orchestrator/_manifest.py` — `rerun_of` in manifest;
+  `PIPELINE_VERSION` constant for `dag_hash`.
 - New module(s): content-addressable upload store (sha256 read/write/resolve);
-  `run_inputs.json` read/write + redaction; node→op resolver; override canonicalisation +
-  hash.
+  `run_inputs.json` read/write + redaction; node→op OperationContract resolver; override
+  canonicalisation + `override_hash`; `dag_hash` computation.
 - `frontend/src/capabilities/types.ts` — `Capabilities` type: `params`, `editable_stages`,
   `schema_id`, `capabilities_schema_version` (type sync only; RunForm unchanged, no new UI
   this slice).
