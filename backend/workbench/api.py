@@ -817,10 +817,25 @@ _TERMINAL_EVENTS = {
 }
 
 
+def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
+    """Guardrail #7: RESPONSE-TIME decoration only — never persisted to graph.json.
+    For each node whose stage is editable and resolves to an OperationContract, attach
+    editable/op_type/schema_id/editable_schema/editable_schema_source."""
+    for node in body.get("nodes", {}).values():
+        contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
+        if contract is None:
+            continue
+        node["editable"] = True
+        node["op_type"] = contract.op_type
+        node["schema_id"] = contract.schema_id
+        node["editable_schema"] = contract.editable_schema
+        node["editable_schema_source"] = "capabilities"
+
+
 @app.get("/runs/{run_id}/graph")
 def get_run_graph(run_id: str, project_root: str):
     runs_root = _resolve_project_runs_dir(project_root)
-    _resolve_run_root(project_root, run_id)  # 404 if run dir missing
+    run_root = _resolve_run_root(project_root, run_id)  # 404 if run dir missing
     store = GraphStore(runs_root=runs_root)
     try:
         graph = store.read(run_id)
@@ -832,6 +847,10 @@ def get_run_graph(run_id: str, project_root: str):
             details={"run_id": run_id},
         ) from exc
     body = graph_to_json(graph)
+    try:
+        _annotate_editable_nodes(body, _read_manifest(run_root))
+    except Exception:
+        pass  # legacy / manifest-less runs stay non-editable (defensive)
     sources = {edge.source_id for edge in graph.edges.values()}
     body["stats"] = {
         "node_count": len(graph.nodes),
