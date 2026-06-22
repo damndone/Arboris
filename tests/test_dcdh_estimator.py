@@ -157,3 +157,20 @@ def test_cluster_var_real_column_runs():
     from workbench.engine.cs_aggregate import _se
     se = _se(b.influence_func[:, -1], b.aux["row_cluster"], b.aux["n_total"])
     assert np.isfinite(se) and se > 0
+
+
+# --- Hardening: validate point estimates + per-ℓ SE on ALL fixtures (not just
+# nonabsorbing), including the unbalanced panel — promotes the controller's manual
+# cross-validation into the committed suite. dCDH matches DYN to ~1e-16 even on gaps.
+@pytest.mark.parametrize("name", ["nonabsorbing", "unbalanced", "baseline1", "placebo"])
+def test_estimates_and_se_match_dyn_all_fixtures(name):
+    o = _oracle(name)
+    res = estimate_dcdh_dynamic(_norm(name))
+    for a, b in zip(res["effect_estimate"], o["effect_estimate"]):
+        assert abs(a - b) < 1e-6, ("effect", name, a, b)
+    for a, b in zip(res["placebo_estimate"], o["placebo_estimate"]):
+        assert abs(a - b) < 1e-6, ("placebo", name, a, b)
+    IF, rc, N = dcdh_influence(res)
+    L = len(o["effect_estimate"])
+    for k in range(L):
+        assert abs(_se(IF[:, -L + k], rc, N) - o["effect_se"][k]) < 1e-6, ("se", name, k)
