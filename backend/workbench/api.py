@@ -39,8 +39,19 @@ from .orchestrator import (
 )
 from .projects import create_project, create_run
 from .lineage.hashing import dag_hash, override_hash
-from .lineage.run_inputs import write_run_inputs
+from .lineage.op_contract import (
+    OpOverrideError,
+    resolve_operation_contract,
+    resolve_overrides_target,
+    validate_overrides,
+)
+from .lineage.run_inputs import read_run_inputs, write_run_inputs
 from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
+
+# A parent run must be in one of these (non-running) states to be rerun-from.
+_TERMINAL_RUN_STATUSES = {
+    "completed", "failed", "cancelled", "interrupted", "partial", "blocked",
+}
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
@@ -829,6 +840,84 @@ def get_run_graph(run_id: str, project_root: str):
         "has_dp_count": sum(1 for node in graph.nodes.values() if node.decision_points),
     }
     return body
+
+
+class RerunRequest(BaseModel):
+    from_node: str
+    op_overrides: dict = {}
+    rerun_reason: str = "manual_override"
+
+
+@app.post("/runs/{run_id}/rerun")
+def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, str]:
+    """Create a new immutable run from a parent run's editable node, applying
+    structurally-validated overrides. Full-pipeline re-execution; lineage preserved."""
+    root = Path(project_root)
+    run_root = _resolve_run_root(project_root, run_id)
+    manifest = _read_manifest(run_root)
+
+    # Guardrail #8: parent must be terminal (else 409). Distinct from slot-busy 429.
+    status = manifest.get("status")
+    if status not in _TERMINAL_RUN_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=f"Parent run not terminal (status={status})."
+        )
+
+    # Guardrail #6: from_node must exist in the parent graph.
+    runs_root = _resolve_project_runs_dir(project_root)
+    graph = GraphStore(runs_root=runs_root).read(run_id)
+    node = graph.nodes.get(body.from_node)
+    if node is None:
+        raise HTTPException(
+            status_code=422, detail=f"from_node not in run graph: {body.from_node}"
+        )
+
+    stage = node.stage.value if node.stage is not None else None
+    contract = resolve_operation_contract(stage=stage, manifest=manifest)
+    if contract is None:
+        raise HTTPException(
+            status_code=422, detail=f"Node {body.from_node} is not editable."
+        )
+
+    # Guardrails #3 + #4: structural validation against the switch-resolved schema.
+    try:
+        target = resolve_overrides_target(contract, body.op_overrides)
+        validate_overrides(target, body.op_overrides)
+    except OpOverrideError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    inputs = read_run_inputs(run_root)
+    parent_sha = inputs["upload"]["sha256"]
+    # Guardrails #2 + #5: reuse parent upload by sha256 only; re-verify content hash.
+    try:
+        upload_bytes = verify_upload(root, parent_sha).read_bytes()
+    except (OSError, ValueError) as exc:  # UploadBlobMissing / UploadHashMismatch
+        raise HTTPException(
+            status_code=422, detail=f"Parent upload unusable: {exc}"
+        ) from exc
+
+    merged_form = {**inputs["form"], **{k: str(v) for k, v in body.op_overrides.items()}}
+
+    events = get_event_manager()
+    if not events.try_acquire_slot():
+        raise HTTPException(status_code=429, detail="A run is already in progress.")
+    child_id: str | None = None
+    try:
+        started_at = datetime.now(timezone.utc).isoformat()
+        result = _submit_run(
+            root, form=merged_form, upload_bytes=upload_bytes,
+            upload_filename=inputs["upload"].get("filename") or "upload.csv",
+            started_at=started_at, rerun_of=run_id, from_node=body.from_node,
+            rerun_reason=body.rerun_reason, op_overrides=body.op_overrides,
+        )
+        child_id = result["run_id"]
+        return result
+    except ValueError as exc:
+        events.release_slot(child_id)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        events.release_slot(child_id)
+        raise
 
 
 @app.get("/runs/{run_id}/events")

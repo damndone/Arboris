@@ -43,6 +43,27 @@ def _contract_for_model_type(op_type: str) -> OperationContract | None:
     )
 
 
+def _model_op_type(manifest: dict) -> str | None:
+    """Map a run's model to a capabilities model_type key (the op_type).
+
+    The manifest's `effective_model_type` is an engine-internal id (e.g. "ols_robust"),
+    NOT a capabilities key. `requested_model_type` IS a capabilities key for explicit
+    runs ("ols"); for "auto" runs we normalize the effective id by longest-prefix match
+    against the known capabilities keys (e.g. "ols_robust" -> "ols")."""
+    routing = manifest.get("model_routing") or {}
+    caps_keys = {e["key"] for e in build_capabilities()["model_types"] if e["key"] != "auto"}
+
+    for candidate in (routing.get("requested_model_type"), routing.get("effective_model_type")):
+        if candidate in caps_keys:
+            return candidate
+
+    effective = routing.get("effective_model_type") or ""
+    for key in sorted(caps_keys, key=len, reverse=True):
+        if effective == key or effective.startswith(f"{key}_"):
+            return key
+    return None
+
+
 def resolve_operation_contract(*, stage: str | None, manifest: dict) -> OperationContract | None:
     """Resolve a graph node's OperationContract from its stage + the run manifest.
     Returns None for non-editable / unresolvable nodes (defensive)."""
@@ -50,7 +71,7 @@ def resolve_operation_contract(*, stage: str | None, manifest: dict) -> Operatio
     if stage not in caps.get("editable_stages", []):
         return None
     if stage == EDITABLE_STAGE_MODEL:
-        op_type = (manifest.get("model_routing") or {}).get("effective_model_type")
+        op_type = _model_op_type(manifest)
         if not op_type:
             return None
         return _contract_for_model_type(op_type)
