@@ -318,6 +318,30 @@ def test_golden_sa_did_honest(tmp_path, monkeypatch):
     _assert_or_write_golden("sa_did_honest", snap)
 
 
+def test_golden_dcdh_nonabsorbing(tmp_path):
+    import numpy as np
+    rng = np.random.default_rng(11)
+    rows = []
+    # Binary NON-ABSORBING panel: baseline d=0; staggered first-up switches at
+    # {3,4,5}; ids %6==0 switch back 1->0 two periods later; i%4==3 never switch.
+    for i in range(40):
+        ent = f"u{i:02d}"
+        fy = [3, 4, 5, 0][i % 4]            # 0 = never switches
+        fe = round(float(rng.normal()), 6)
+        for year in range(1, 9):
+            d = 1 if (fy and year >= fy) else 0
+            if fy and i % 6 == 0 and year >= fy + 2:
+                d = 0                        # switch back
+            y = round(fe + 0.1 * year + 0.8 * d + 0.05 * rng.normal(), 6)
+            rows.append({"id": ent, "year": year, "d": d, "x1": fe, "y": y})
+    run_root, _ = _run(tmp_path, pd.DataFrame(rows), y="y", x=["x1"], model_type="dcdh",
+                       entity_col="id", time_col="year", did_treatment_path="d")
+    snap = _capture(run_root)
+    assert snap["status"] == "completed"
+    assert "dcdh" in snap["artifacts"]
+    _assert_or_write_golden("dcdh_nonabsorbing", snap)
+
+
 def test_golden_cs_did_clustered(tmp_path):
     import numpy as np
     rng = np.random.default_rng(11)

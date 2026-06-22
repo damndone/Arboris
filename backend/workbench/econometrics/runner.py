@@ -654,6 +654,80 @@ def run_sa_did(norm, *, cluster_var, seed=20260615, B=1000, alpha=0.05, honest_d
                                 honest_did=honest_did, extra_metadata=md)
 
 
+def _json_safe_dcdh(obj):
+    """Recursively replace non-finite floats with None so the dCDH result dict is
+    strictly JSON-serializable (json.dumps allow_nan=False)."""
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe_dcdh(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe_dcdh(v) for v in obj]
+    return obj
+
+
+def run_dcdh(norm, *, cluster_var, seed=20260622, B=1000, alpha=0.05):
+    """de Chaisemartin-D'Haultfoeuille dynamic DID (binary non-absorbing, first-up
+    switchers). Emits an EventStudyBundle; reuses multiplier_bootstrap for sup-t
+    bands. Does NOT go through _finalize_did_bundle (that is (g,t)-bundle-specific)."""
+    import numpy as np
+
+    from ..engine.dcdh_estimator import estimate_dcdh
+    from ..engine.cs_inference import multiplier_bootstrap
+    from ..engine.cs_aggregate import _se
+
+    norm.frame = _ensure_numeric_y(norm.frame, norm.y)
+    b = estimate_dcdh(norm, cluster_var=cluster_var)
+    N = int(b.aux["n_total"])
+    row_cluster = b.aux["row_cluster"]
+    est = np.asarray(b.estimates, dtype=float)
+
+    boot = multiplier_bootstrap(b.influence_func, B=B, alpha=alpha, seed=seed,
+                                estimates=est, clusters=row_cluster)
+    se = [float(_se(b.influence_func[:, k], row_cluster, N)) for k in range(est.size)]
+
+    ev = [float(e) for e in b.event_times]
+    event_study = {
+        "label_kind": "event_time",
+        "event_time": ev,
+        "estimate": [float(x) for x in est],
+        "se": se,
+        "pointwise_ci": boot["pointwise_ci"].tolist(),
+        "uniform_band": boot["uniform_band"].tolist(),
+        "uniform_crit": boot["uniform_crit"],
+        "kind": list(b.labels),
+        "n_switchers": [int(x) for x in b.n_switchers],
+    }
+    # overall ATT (secondary / experimental) = switcher-weighted mean of effect cols
+    eff_idx = [k for k, e in enumerate(ev) if e >= 0]
+    if eff_idx:
+        w = np.array([b.n_switchers[k] for k in eff_idx], dtype=float)
+        w = w / w.sum() if w.sum() else np.full(len(eff_idx), 1.0 / len(eff_idx))
+        overall = float(np.dot(w, est[eff_idx]))
+        overall_if = b.influence_func[:, eff_idx] @ w
+        overall_se = float(_se(overall_if, row_cluster, N))
+    else:
+        overall, overall_se = None, None
+
+    result = {
+        "estimator": "dcdh",
+        "event_study": event_study,
+        "overall_att": {"estimate": overall, "se": overall_se, "experimental": True},
+        "diagnostics": b.diagnostics,
+        "honest_did": None,
+        "honest_did_supported": False,
+        "interpretation_restrictions": [
+            "Non-absorbing binary treatment; event origin = first 0->1 switch. "
+            "Units may switch back to 0 after the first up-switch (still included).",
+            "baseline=1 units are excluded from both treatment and control in this version.",
+        ],
+        "warnings": [],
+        "metadata": {"n_units": N, "estimator": "dcdh", "cluster_var": cluster_var},
+    }
+    return _json_safe_dcdh(result)
+
+
 def run_time_series_diagnostics(
     frame: pd.DataFrame, y: str, time: str
 ) -> dict[str, float | None]:

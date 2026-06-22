@@ -24,6 +24,7 @@ _MODEL_METADATA: dict[str, dict[str, str]] = {
     "panel_ols":         {"model_id": "panel_ols_1",         "engine": "linearmodels"},
     "cs_did":            {"model_id": "cs_did_1",            "engine": "workbench"},
     "sa_did":            {"model_id": "sa_did_1",            "engine": "workbench"},
+    "dcdh":              {"model_id": "dcdh_1",              "engine": "workbench"},
     "prediction_lasso":          {"model_id": "prediction_lasso_1",          "engine": "scikit-learn"},
     "prediction_ridge":          {"model_id": "prediction_ridge_1",          "engine": "scikit-learn"},
     "prediction_random_forest":  {"model_id": "prediction_random_forest_1",  "engine": "scikit-learn"},
@@ -92,6 +93,7 @@ _MODEL_TYPE_MAP = {
     "did": "continuous",
     "cs_did": "continuous",
     "sa_did": "continuous",
+    "dcdh": "continuous",
 }
 _SUPPORTED_GLM_FAMILIES = {"binomial", "poisson", "negative_binomial"}
 _PREDICTION_MODEL_TYPES = {
