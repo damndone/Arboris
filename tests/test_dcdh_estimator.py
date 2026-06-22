@@ -118,3 +118,42 @@ def test_if_columns_mean_zero():
     IF, _, _ = dcdh_influence(res)
     sums = IF.sum(axis=0)
     assert np.allclose(sums, 0.0, atol=1e-6)
+
+
+# --- T6: estimate_dcdh -> EventStudyBundle assembly ---------------------------
+from workbench.engine.dcdh_estimator import estimate_dcdh  # noqa: E402
+from workbench.engine.event_study import EventStudyBundle  # noqa: E402
+from workbench.engine.dcdh_spec import DCDHSpecError  # noqa: E402
+
+
+def test_estimate_dcdh_returns_bundle_with_event_axis():
+    o = _oracle("nonabsorbing")
+    b = estimate_dcdh(_norm("nonabsorbing"), cluster_var=None)
+    assert isinstance(b, EventStudyBundle)
+    L = len(o["placebo_estimate"]) + len(o["effect_estimate"])
+    assert b.estimates.shape == (L,)
+    assert b.influence_func.shape == (b.aux["n_total"], L)
+    assert b.event_times.shape == (L,) and b.n_switchers.shape == (L,)
+    # event_times monotone; placebos (negative) precede effects (>=0)
+    assert list(b.event_times) == sorted(b.event_times)
+    assert b.labels.count("placebo") == len(o["placebo_estimate"])
+    # axis-aligned estimates: the >=0 columns equal the oracle effects in order
+    eff = [b.estimates[i] for i, e in enumerate(b.event_times) if e >= 0]
+    for a, want in zip(eff, o["effect_estimate"]):
+        assert abs(a - want) < 1e-6
+
+
+def test_cluster_var_single_level_guard():
+    n = _norm("nonabsorbing")
+    n.frame["clu"] = 1.0
+    with pytest.raises(DCDHSpecError, match="DCDH_CLUSTER_SINGLE"):
+        estimate_dcdh(n, cluster_var="clu")
+
+
+def test_cluster_var_real_column_runs():
+    n = _norm("nonabsorbing")
+    n.frame["clu"] = (n.frame["id"] % 5 + 1).astype(float)
+    b = estimate_dcdh(n, cluster_var="clu")
+    from workbench.engine.cs_aggregate import _se
+    se = _se(b.influence_func[:, -1], b.aux["row_cluster"], b.aux["n_total"])
+    assert np.isfinite(se) and se > 0

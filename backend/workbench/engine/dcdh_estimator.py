@@ -172,6 +172,7 @@ def estimate_dcdh_dynamic(norm) -> dict:
 
     effect_estimate = []
     placebo_estimate = []
+    estimate_axis = []       # estimates aligned to event_time_axis / if_columns order
     if_columns = []          # one per reported event_time, in axis order
     risk_set_by_ell = []
     event_time_axis = []
@@ -189,6 +190,7 @@ def estimate_dcdh_dynamic(norm) -> dict:
     for l, est, IF, ns, nc in sorted(placebo_cells, key=lambda r: -(r[0] + 1)):
         ev = -(l + 1)
         event_time_axis.append(ev)
+        estimate_axis.append(est)
         if_columns.append(IF)
         risk_set_by_ell.append({"ell": int(ev), "n_switchers": int(ns),
                                 "n_controls": int(nc), "dropped_reason": None})
@@ -203,6 +205,7 @@ def estimate_dcdh_dynamic(norm) -> dict:
             continue
         est, IF, ns, nc = agg
         effect_estimate.append(est)
+        estimate_axis.append(est)
         event_time_axis.append(int(ell))
         if_columns.append(IF)
         risk_set_by_ell.append({"ell": int(ell), "n_switchers": int(ns),
@@ -227,6 +230,7 @@ def estimate_dcdh_dynamic(norm) -> dict:
     return {
         "effect_estimate": effect_estimate,
         "placebo_estimate": placebo_estimate,
+        "estimate": list(estimate_axis),     # aligned to event_time / if_columns order
         "event_time": list(event_time_axis),
         "risk_set_by_ell": risk_set_by_ell,
         "_internals": internals,
@@ -257,3 +261,55 @@ def dcdh_influence(res):
     IF = np.array(cols, dtype=float).T * N
     row_cluster = np.arange(N)
     return IF, row_cluster, N
+
+
+def estimate_dcdh(norm, *, cluster_var=None):
+    """Assemble the dCDH event study into the shared EventStudyBundle contract.
+
+    Mirrors the SA cluster convention (engine/sa_attgt.py): entity-default
+    row_cluster, or a per-unit cluster id from `cluster_var` with the same
+    degenerate-column guards so a bad cluster column never yields a silently-wrong
+    SE. The IF stays entity-level; clustering lives only in aux["row_cluster"].
+    """
+    from .event_study import EventStudyBundle
+    from .dcdh_spec import DCDHSpecError
+
+    res = estimate_dcdh_dynamic(norm)
+    IF, _row_cluster, N = dcdh_influence(res)
+    est = np.asarray(res["estimate"], dtype=float)
+    ev = np.asarray(res["event_time"], dtype=float)
+    nsw_by_ell = {int(r["ell"]): int(r["n_switchers"]) for r in res["risk_set_by_ell"]}
+    n_switchers = np.array([nsw_by_ell.get(int(e), 0) for e in ev], dtype=int)
+
+    frame, entity = norm.frame, norm.entity
+    units_all = np.asarray(res["_internals"]["unit_ids"])   # IF row order
+
+    clustered = bool(cluster_var and cluster_var != entity)
+    if clustered:
+        if cluster_var not in frame.columns:
+            raise DCDHSpecError(f"DCDH_CLUSTER_COL_MISSING: '{cluster_var}' is not a column.")
+        try:
+            cl_by_unit = frame.drop_duplicates(entity).set_index(entity)[cluster_var]
+            cl = cl_by_unit.loc[units_all]
+        except (KeyError, TypeError) as exc:
+            raise DCDHSpecError(f"DCDH_CLUSTER_COL_BAD: could not resolve cluster column "
+                                f"'{cluster_var}': {exc}") from exc
+        if cl.isna().any():
+            raise DCDHSpecError("DCDH_CLUSTER_COL_NAN: cluster column has missing values.")
+        cl = cl.to_numpy().astype(str)
+        if len(np.unique(cl)) < 2:
+            raise DCDHSpecError("DCDH_CLUSTER_SINGLE: need >= 2 clusters for cluster-robust SE.")
+        row_cluster = np.asarray(cl)
+    else:
+        row_cluster = np.asarray(units_all)
+
+    diagnostics = {
+        "risk_set_by_ell": res["risk_set_by_ell"],
+        "excluded_units": list(norm.excluded_units),
+        "sample": dict(norm.summary),
+        "cluster_var": cluster_var if clustered else entity,
+    }
+    aux = {"n_total": int(N), "row_cluster": row_cluster}
+    return EventStudyBundle(estimates=est, influence_func=IF, event_times=ev,
+                            cluster_ids=np.unique(row_cluster), n_switchers=n_switchers,
+                            aux=aux, diagnostics=diagnostics)
