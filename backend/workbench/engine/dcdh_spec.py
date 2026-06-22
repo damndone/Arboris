@@ -43,7 +43,12 @@ def normalize_treatment_path(frame, *, entity, time, y, treatment) -> TreatmentP
     if t.dropna().nunique() < 2:
         raise DCDHSpecError("DCDH_TOO_FEW_PERIODS: need >=2 time periods.")
     d = pd.to_numeric(out[treatment], errors="coerce")
-    if not set(pd.unique(d.dropna())) <= {0, 1}:
+    # Missing/non-numeric treatment must fail loud — a NaN here would otherwise
+    # crash `.astype(int)` with an opaque IntCastingNaNError. Do NOT silently drop.
+    if d.isna().any():
+        raise DCDHSpecError("DCDH_TREATMENT_NA: treatment column has missing/"
+                            "non-numeric values; every (unit, period) needs a 0/1 status.")
+    if not set(pd.unique(d)) <= {0, 1}:
         raise DCDHSpecError("DCDH_NON_BINARY_TREATMENT: treatment must be 0/1 "
                             "(continuous intensity is deferred).")
     if out.duplicated(subset=[entity, time]).any():

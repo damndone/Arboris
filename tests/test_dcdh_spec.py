@@ -86,3 +86,11 @@ def test_missing_column_raises():
     rows = [[0, 1, 0, 1.0], [0, 2, 1, 2.0]]
     with pytest.raises(DCDHSpecError, match="DCDH_COLUMN_NOT_FOUND"):
         normalize_treatment_path(_panel(rows), entity="id", time="year", y="y", treatment="nope")
+
+
+def test_treatment_na_raises_structured():
+    # Regression: a missing/NaN treatment cell must give a structured DCDH_TREATMENT_NA,
+    # not a raw IntCastingNaNError from .astype(int).
+    rows = [[0, 1, 0, 1.0], [0, 2, None, 2.0], [1, 1, 0, 1.0], [1, 2, 1, 2.0]]
+    with pytest.raises(DCDHSpecError, match="DCDH_TREATMENT_NA"):
+        normalize_treatment_path(_panel(rows), entity="id", time="year", y="y", treatment="d")
