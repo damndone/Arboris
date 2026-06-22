@@ -102,7 +102,20 @@ make_placebo <- function() {
   d[order(d$id, d$year), ]
 }
 
+# PANEL 4 — UNBALANCED: the non-absorbing DGP, then DROP a chunk of late-period
+# observations for a subset of units (mix of switchers + never-switchers), keeping
+# every switcher's reference period (F-1) and switch period intact. Tests whether
+# the Python engine reproduces DYN on a panel with gaps (validate-or-caveat).
+make_unbalanced <- function() {
+  d <- make_nonabsorbing()
+  # drop years 7-8 for ~1/4 of units (ids divisible by 4) — these are late periods,
+  # never the F-1/F of the {3,4,5} cohorts, so switchers stay valid switchers.
+  drop <- (d$id %% 4 == 0) & (d$year >= 7)
+  d[!drop, ]
+}
+
 write_fixture(make_nonabsorbing(), "nonabsorbing")
 write_fixture(make_baseline1(),    "baseline1")
 write_fixture(make_placebo(),      "placebo")
+write_fixture(make_unbalanced(),   "unbalanced")
 cat("DONE.\n")

@@ -7,7 +7,7 @@ _FIX = Path(__file__).parent / "fixtures" / "dcdh"
 _REQUIRED = {"effects", "placebos", "same_switchers", "cluster", "seed", "package_version"}
 
 
-@pytest.mark.parametrize("name", ["nonabsorbing", "baseline1", "placebo"])
+@pytest.mark.parametrize("name", ["nonabsorbing", "baseline1", "placebo", "unbalanced"])
 def test_oracle_has_locked_kou_jing_metadata(name):
     """Every dCDH oracle JSON must carry the locked DIDmultiplegtDYN 口径 in its
     metadata so a later package upgrade can't silently drift the validation target."""
@@ -20,7 +20,7 @@ def test_oracle_has_locked_kou_jing_metadata(name):
     assert o["metadata"]["placebos"] == 2
 
 
-@pytest.mark.parametrize("name", ["nonabsorbing", "baseline1", "placebo"])
+@pytest.mark.parametrize("name", ["nonabsorbing", "baseline1", "placebo", "unbalanced"])
 def test_oracle_arrays_well_formed(name):
     o = json.loads((_FIX / f"dyn_{name}.json").read_text())
     assert len(o["effect_estimate"]) == len(o["effect_se"]) == len(o["effect_n"]) == 3

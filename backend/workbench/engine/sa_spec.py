@@ -48,6 +48,8 @@ def validate_sa_input(*, cohort, times):
             "SA_NO_NEVER_TREATED: Sun-Abraham in this version requires a never-treated "
             "comparison group, but every entity in this panel is eventually treated. The "
             "no-never-treated (last-cohort-reference) identification is not yet validated "
-            "and is disabled to avoid returning unidentified coefficients."
+            "and is disabled to avoid returning unidentified coefficients. For a fully-"
+            "staggered panel with no never-treated units, use cs_did with "
+            "control_group='not_yet' (Callaway-Sant'Anna handles not-yet-treated controls)."
         )
     return True

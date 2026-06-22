@@ -1,0 +1,19 @@
+{
+  "fixture": "unbalanced",
+  "metadata": {
+    "effects": 3,
+    "placebos": 2,
+    "same_switchers": true,
+    "cluster": "id",
+    "seed": 909,
+    "package_version": "2.3.4"
+  },
+  "effect_estimate": [0.85693492834948459, 0.85842719550692648, 0.68816748940024342],
+  "effect_se": [0.061235923213373018, 0.060747521734484472, 0.065458129228826836],
+  "effect_n": [66, 66, 66],
+  "placebo_estimate": [0.040264223675715402, -0.11421637010785494],
+  "placebo_se": [0.052741625850803102, 0.06960489710174865],
+  "placebo_n": [66, 42],
+  "overall_estimate": 0.84379231103691066,
+  "overall_se": 0.053844321194286136
+}
