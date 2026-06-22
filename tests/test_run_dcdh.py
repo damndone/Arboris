@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import pandas as pd
+import pytest
 from workbench.engine.dcdh_spec import normalize_treatment_path
 from workbench.econometrics import runner
 
@@ -31,9 +32,13 @@ def test_run_dcdh_deterministic():
     assert json.dumps(a["event_study"], sort_keys=True) == json.dumps(b["event_study"], sort_keys=True)
 
 
-def test_run_dcdh_effects_match_oracle():
-    o = json.loads((_FIX / "dyn_nonabsorbing.json").read_text())
-    res = runner.run_dcdh(_norm("nonabsorbing"), cluster_var=None)
+@pytest.mark.parametrize("name", ["nonabsorbing", "unbalanced"])
+def test_run_dcdh_effects_match_oracle(name):
+    # Full run_dcdh path (not just estimate_dcdh_dynamic) matches DYN, on the
+    # balanced AND the unbalanced (gapped) panel, and is strict-JSON serializable.
+    o = json.loads((_FIX / f"dyn_{name}.json").read_text())
+    res = runner.run_dcdh(_norm(name), cluster_var=None)
+    json.dumps(res, allow_nan=False)
     es = res["event_study"]
     eff = [es["estimate"][i] for i, k in enumerate(es["kind"]) if k == "effect"]
     for a, want in zip(eff, o["effect_estimate"]):
