@@ -18,6 +18,7 @@ SCHEMA: dict = {
     "required": ["schema_version", "model_types", "imputation_methods"],
     "properties": {
         "schema_version": {"type": "integer", "minimum": 1},
+        "editable_stages": {"type": "array", "items": {"type": "string"}},
         "model_types": {
             "type": "array",
             "items": {
@@ -31,6 +32,24 @@ SCHEMA: dict = {
                     "requires": {
                         "type": "array",
                         "items": {"type": "string"},
+                    },
+                    "schema_id": {"type": "string"},
+                    "params": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["key", "kind"],
+                            "properties": {
+                                "key": {"type": "string"},
+                                "kind": {"type": "string"},
+                                "label": {"type": "string"},
+                                "role": {"type": "string"},
+                                "required": {"type": "boolean"},
+                                "value": {},
+                                "options": {"type": "array"},
+                            },
+                            "additionalProperties": False,
+                        },
                     },
                 },
                 "additionalProperties": False,

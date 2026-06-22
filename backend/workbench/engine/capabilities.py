@@ -121,6 +121,38 @@ COVARIANCE_UI = [
     {"key": "unadjusted", "label": "Unadjusted"},
 ]
 
+# v1.6.0 — per-op editable schemas (mirror the FE EditableControl). Structural only:
+# key (POST /runs form-param name), kind, options, required, role, value. NO business
+# rules (those stay in the pipeline). Only fields the backend genuinely consumes.
+_COMMON_MODEL_PARAMS = [
+    {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
+    {"key": "covariance", "kind": "select", "label": "Covariance", "required": False,
+     "options": [o["key"] for o in COVARIANCE_UI], "value": "robust"},
+]
+
+_MODEL_PARAMS: dict[str, list[dict]] = {
+    "ols": _COMMON_MODEL_PARAMS,
+    "logit": _COMMON_MODEL_PARAMS,
+    "probit": _COMMON_MODEL_PARAMS,
+    "poisson": _COMMON_MODEL_PARAMS,
+    "negative_binomial": _COMMON_MODEL_PARAMS,
+    "panel_ols": _COMMON_MODEL_PARAMS + [
+        {"key": "entity_col", "kind": "columns", "label": "Entity", "required": False, "role": "entity"},
+        {"key": "time_col", "kind": "columns", "label": "Time", "required": False, "role": "time"},
+    ],
+    "iv_2sls": _COMMON_MODEL_PARAMS + [
+        {"key": "iv_endog", "kind": "columns", "label": "Endogenous", "required": True, "role": "endog"},
+        {"key": "iv_instruments", "kind": "columns", "label": "Instruments", "required": True, "role": "instruments"},
+    ],
+    "did": _COMMON_MODEL_PARAMS,
+    "cs_did": _COMMON_MODEL_PARAMS,
+    "sa_did": _COMMON_MODEL_PARAMS,
+    "dcdh": _COMMON_MODEL_PARAMS,
+    "glm:binomial": _COMMON_MODEL_PARAMS,
+    "glm:poisson": _COMMON_MODEL_PARAMS,
+    "glm:negative_binomial": _COMMON_MODEL_PARAMS,
+}
+
 
 def build_capabilities() -> dict:
     """Build the UI capability manifest from registered backend handlers."""
@@ -141,6 +173,8 @@ def build_capabilities() -> dict:
         if key not in exposed_keys:
             continue
         entry = {"key": key, **MODEL_UI_META[key]}
+        entry["schema_id"] = f"{key}@v1"
+        entry["params"] = _MODEL_PARAMS.get(key, list(_COMMON_MODEL_PARAMS))
         model_types.append(entry)
 
     imputation_methods = [
@@ -153,7 +187,8 @@ def build_capabilities() -> dict:
     ]
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
+        "editable_stages": ["model"],
         "model_types": model_types,
         "imputation_methods": imputation_methods,
         "prediction_models": list(PREDICTION_UI),
