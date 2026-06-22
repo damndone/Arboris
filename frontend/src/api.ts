@@ -341,6 +341,7 @@ export interface RunExtraParams {
   csAnticipation?: number;
   csClusterVar?: string;
   honestDid?: boolean;
+  didTreatmentPath?: string;
 }
 
 export async function runWorkflow(
@@ -380,6 +381,7 @@ export async function runWorkflow(
   if (extra?.csAnticipation) form.append("cs_anticipation", String(extra.csAnticipation));
   if (extra?.csClusterVar) form.append("cs_cluster_var", extra.csClusterVar);
   if (extra?.honestDid) form.append("honest_did", "true");
+  if (extra?.didTreatmentPath) form.append("did_treatment_path", extra.didTreatmentPath);
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);

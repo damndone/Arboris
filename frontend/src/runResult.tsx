@@ -27,6 +27,10 @@ import {
   type CSDiagnosticsData,
 } from "./runResult/CSDiagnosticsCard";
 import {
+  DCDHResultCard,
+  type DCDHResult,
+} from "./runResult/DCDHResultCard";
+import {
   ImputationSummary,
   type ImputationSummaryData,
 } from "./runResult/ImputationSummary";
@@ -200,6 +204,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
   const [csDiagnostics, setCsDiagnostics] = useState<
     CSDiagnosticsData | undefined
   >(undefined);
+  const [dcdhResult, setDcdhResult] = useState<DCDHResult | undefined>(undefined);
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -343,6 +348,30 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       })
       .catch(() => {
         if (!cancelled) setCsDiagnostics(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, runId, artifactsState]);
+
+  // V1.5.9: de Chaisemartin-D'Haultfoeuille (dcdh) writes a dcdh.json artifact
+  // with the EventStudyBundle-shaped result (different contract from cs/sa).
+  useEffect(() => {
+    if (artifactsState.status !== "loaded") return;
+    const present = artifactsState.groups
+      .flatMap((g) => g.items)
+      .some((it) => it.artifact_id === "dcdh");
+    if (!present) {
+      setDcdhResult(undefined);
+      return;
+    }
+    let cancelled = false;
+    fetchArtifactJson<DCDHResult>(projectRoot, runId, "dcdh")
+      .then((data) => {
+        if (!cancelled) setDcdhResult(data);
+      })
+      .catch(() => {
+        if (!cancelled) setDcdhResult(undefined);
       });
     return () => {
       cancelled = true;
@@ -495,6 +524,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <IVDiagnosticsCard diagnostics={ivDiagnostics} />
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       <CSDiagnosticsCard diagnostics={csDiagnostics} />
+      <DCDHResultCard result={dcdhResult} />
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>

@@ -18,6 +18,7 @@ import { PredictionControls } from "./PredictionControls";
 import { IVControls, type IVRoleValue } from "./IVControls";
 import { DIDControls, type DIDRoleValue } from "./DIDControls";
 import { CSControls, type CSValue } from "./CSControls";
+import { DCDHControls, type DCDHValue } from "./DCDHControls";
 
 type RequestState = "idle" | "working";
 
@@ -84,6 +85,14 @@ export function RunForm(props: RunFormProps) {
     anticipation: 0,
     clusterVar: "",
     honestDid: false,
+  });
+  // V1.5.9: de Chaisemartin-D'Haultfoeuille (dcdh) self-contained roles
+  // (entity/time/treatment-path), distinct from cohort-based DID roles.
+  const [dcdhValue, setDcdhValue] = useState<DCDHValue>({
+    entity: "",
+    time: "",
+    treatmentPath: "",
+    clusterVar: "",
   });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
@@ -226,8 +235,14 @@ export function RunForm(props: RunFormProps) {
       // cs_did. The SA backend ignores the CS-specific control_group/est_method/
       // base_period/anticipation, so posting the same payload is harmless.
       const isSaDid = modelType === "sa_did";
+      // V1.5.9: dcdh has its own self-contained roles (entity/time/treatment-path),
+      // NOT the cohort-based DID role wiring.
+      const isDcdh = modelType === "dcdh";
       const usesCsParams = isCsDid || isSaDid;
       const usesDidRoles = isDID || isCsDid || isSaDid;
+      const dcdhRoleCols = isDcdh
+        ? [dcdhValue.entity, dcdhValue.time, dcdhValue.treatmentPath].filter((c) => c !== "")
+        : [];
       const didRoleCols = usesDidRoles
         ? [
             didRole.entity,
@@ -245,7 +260,9 @@ export function RunForm(props: RunFormProps) {
           )
         : usesDidRoles
           ? xColumns.filter((c) => !didRoleCols.includes(c))
-          : xColumns;
+          : isDcdh
+            ? xColumns.filter((c) => !dcdhRoleCols.includes(c))
+            : xColumns;
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
@@ -257,8 +274,8 @@ export function RunForm(props: RunFormProps) {
         transpose,
         imputationPayload,
         {
-          entityCol: usesDidRoles ? didRole.entity : entityCol,
-          timeCol: usesDidRoles ? didRole.time : timeCol,
+          entityCol: usesDidRoles ? didRole.entity : isDcdh ? dcdhValue.entity : entityCol,
+          timeCol: usesDidRoles ? didRole.time : isDcdh ? dcdhValue.time : timeCol,
           covariance,
           predictionModelType: predictionEnabled ? predictionModelType : "",
           predictionCvFolds: predictionEnabled ? predictionCvFolds : undefined,
@@ -274,8 +291,13 @@ export function RunForm(props: RunFormProps) {
           csEstMethod: usesCsParams ? csValue.estMethod : undefined,
           csBasePeriod: usesCsParams ? csValue.basePeriod : undefined,
           csAnticipation: usesCsParams ? csValue.anticipation : undefined,
-          csClusterVar: usesCsParams ? csValue.clusterVar : undefined,
+          csClusterVar: usesCsParams
+            ? csValue.clusterVar
+            : isDcdh
+              ? dcdhValue.clusterVar
+              : undefined,
           honestDid: usesCsParams ? csValue.honestDid : undefined,
+          didTreatmentPath: isDcdh ? dcdhValue.treatmentPath : undefined,
         },
       );
       setLastRun(result);
@@ -439,6 +461,13 @@ export function RunForm(props: RunFormProps) {
               value={csValue}
               columns={columnNames}
               onChange={setCsValue}
+            />
+          )}
+          {modelType === "dcdh" && (
+            <DCDHControls
+              value={dcdhValue}
+              columns={columnNames}
+              onChange={setDcdhValue}
             />
           )}
           <PredictionControls
