@@ -221,8 +221,10 @@ def estimate_dcdh_dynamic(norm) -> dict:
         "if_columns": [col.tolist() for col in if_columns],
         "event_time": list(event_time_axis),
         "n_total": int(N),
-        "unit_ids": [int(i) if np.isscalar(i) and float(i).is_integer()
-                     else i for i in ids],
+        # entity ids as-is (may be strings) — used downstream only for IF row order
+        # and cluster alignment, never JSON-serialized. Do NOT float()-coerce (breaks
+        # string ids like "u00").
+        "unit_ids": list(ids),
         "n_placebo": len(placebo_estimate),
         "n_effect": len(effect_estimate),
     }
