@@ -216,6 +216,27 @@ class DiagnosticsStage:
                     model_input_ids,
                 )
 
+        if model_type == "dcdh":
+            dcdh_result = ctx.artifacts.get("_dcdh_result")
+            if dcdh_result is not None:
+                # Supplementary artifact: the dcdh estimate already ran in
+                # estimation. Serialization must not fail the run — degrade.
+                try:
+                    dcdh_artifact = _json_safe(dcdh_result)
+                    dcdh_artifact.setdefault("available", True)
+                except Exception as exc:  # noqa: BLE001 - any failure degrades
+                    dcdh_artifact = {"available": False, "error": str(exc)}
+                dcdh_path = run_root / "dcdh.json"
+                write_json(dcdh_path, dcdh_artifact)
+                register_artifact(
+                    run_root,
+                    "dcdh",
+                    dcdh_path,
+                    "model_diagnostic",
+                    "econometrics",
+                    model_input_ids,
+                )
+
         prediction_model_type = (
             model_type
             if model_type in _PREDICTION_MODEL_TYPES

@@ -181,6 +181,7 @@ def run_workflow(
     did_treat_col: str = "",
     did_post_col: str = "",
     did_status_col: str = "",
+    did_treatment_path: str = "",
     cs_control_group: str = "",
     cs_est_method: str = "",
     cs_base_period: str = "",
@@ -229,6 +230,7 @@ def run_workflow(
             did_treat_col=did_treat_col,
             did_post_col=did_post_col,
             did_status_col=did_status_col,
+            did_treatment_path=did_treatment_path,
             cs_control_group=cs_control_group,
             cs_est_method=cs_est_method,
             cs_base_period=cs_base_period,
@@ -387,6 +389,7 @@ def _run_workflow(
     did_treat_col: str = "",
     did_post_col: str = "",
     did_status_col: str = "",
+    did_treatment_path: str = "",
     cs_control_group: str = "",
     cs_est_method: str = "",
     cs_base_period: str = "",
@@ -438,6 +441,7 @@ def _run_workflow(
     ctx.artifacts["_did_treat_col"] = normalize_column_name(did_treat_col) if did_treat_col else ""
     ctx.artifacts["_did_post_col"] = normalize_column_name(did_post_col) if did_post_col else ""
     ctx.artifacts["_did_status_col"] = normalize_column_name(did_status_col) if did_status_col else ""
+    ctx.artifacts["_dcdh_treatment_col"] = normalize_column_name(did_treatment_path) if did_treatment_path else ""
     ctx.artifacts["_cs_control_group"] = cs_control_group
     ctx.artifacts["_cs_est_method"] = cs_est_method
     ctx.artifacts["_cs_base_period"] = cs_base_period

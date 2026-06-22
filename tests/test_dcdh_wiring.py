@@ -23,3 +23,23 @@ def test_dcdh_model_type_is_continuous():
 def test_run_dcdh_reexported_from_orchestrator():
     from workbench import orchestrator
     assert hasattr(orchestrator, "run_dcdh")
+
+
+# --- T9: end-to-end run_workflow -> dcdh.json artifact ------------------------
+def test_dcdh_end_to_end_writes_artifact(tmp_path):
+    from workbench.orchestrator import run_workflow
+    from workbench.projects import create_project
+    from workbench.artifacts import read_json
+
+    src = tmp_path / "data.csv"
+    pd.read_csv(_FIX / "panel_nonabsorbing.csv").to_csv(src, index=False)
+    project = create_project(tmp_path, "demo")
+    result = run_workflow(project.root, [src], mode="explicit", model_type="dcdh",
+                          y="y", x=[], entity_col="id", time_col="year",
+                          did_treatment_path="d")
+    run_root = project.root / "runs" / result["run_id"]
+    art = read_json(run_root / "dcdh.json")
+    assert art["estimator"] == "dcdh"
+    assert art["event_study"]["label_kind"] == "event_time"
+    assert art["honest_did_supported"] is False
+    assert art["available"] is True
