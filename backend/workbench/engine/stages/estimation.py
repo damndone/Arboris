@@ -217,6 +217,32 @@ def _fit_sa_did(ctx, env):
     return "sa_did_1", primary, None
 
 
+def _fit_dcdh(ctx, env):
+    from ..dcdh_spec import normalize_treatment_path
+    id_cands = ctx.artifacts.get("_id_candidates") or []
+    t_cands = ctx.artifacts.get("_time_candidates") or []
+    norm = normalize_treatment_path(
+        ctx.data.frame,
+        entity=id_cands[0] if id_cands else None,
+        time=t_cands[0] if t_cands else None,
+        y=ctx.artifacts["_normalized_y"],
+        treatment=ctx.artifacts.get("_dcdh_treatment_col"),
+    )
+    ctx.artifacts["_dcdh_normalized"] = norm
+    result = _orch().run_dcdh(
+        norm,
+        cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,   # reuse cluster channel
+    )
+    ctx.artifacts["_dcdh_result"] = result
+    oa = result["overall_att"]
+    primary = {"schema_version": 1, "model_id": "dcdh_1", "model_type": "dcdh",
+        "engine": "workbench", "nobs": int(result["metadata"]["n_units"]), "r_squared": None,
+        "coefficients": {"ATT": {"estimate": oa["estimate"], "std_error": oa["se"],
+            "p_value": None, "source_id": "model_results.dcdh_1.coefficients.ATT"}},
+        "warnings": result["warnings"]}
+    return "dcdh_1", primary, None
+
+
 def _fit_ols(ctx, env):
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
@@ -249,6 +275,7 @@ CORE_PACK = AnalysisPack(
         ModelHandler("did", "did_1", ("continuous",), _fit_did),
         ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),
         ModelHandler("sa_did", "sa_did_1", ("continuous",), _fit_sa_did),
+        ModelHandler("dcdh", "dcdh_1", ("continuous",), _fit_dcdh),
     ],
     defaults_by_y_type={
         "continuous": "ols",
@@ -355,6 +382,13 @@ class EstimationStage:
                 "SA_DID_FIELDS_MISSING",
                 "sa_did requires both an entity and a time column.",
                 {"model_type": "sa_did", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
+            )
+
+        if model_type == "dcdh" and (not id_cands or not t_cands):
+            raise WorkflowValidationError(
+                "DCDH_FIELDS_MISSING",
+                "dcdh requires both an entity and a time column.",
+                {"model_type": "dcdh", "has_entity": bool(id_cands), "has_time": bool(t_cands)},
             )
 
         env.step("estimation", "start", f"Fitting {ctx.y_type} model (y type: {ctx.y_type})...")

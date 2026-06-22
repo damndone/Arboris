@@ -54,6 +54,7 @@ from ..econometrics.optional_deps import OptionalDependencyNotInstalled
 from ..econometrics.diagnostics import compute_diagnostics
 from ..econometrics.runner import (
     run_cs_did,
+    run_dcdh,
     run_did,
     run_event_study,
     run_glm,
