@@ -89,6 +89,39 @@ def test_rerun_creates_child_with_rerun_of(tmp_path: Path):
     assert inputs["upload"]["sha256"] == parent_inputs["upload"]["sha256"]
 
 
+def test_rerun_missing_run_inputs_422_not_500(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    # Simulate a legacy / pre-v1.6.0 run with no run_inputs.json.
+    (project.root / "runs" / parent / "run_inputs.json").unlink()
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={"from_node": node_id, "op_overrides": {"covariance": "robust"}},
+    )
+    assert resp.status_code == 422
+
+
+def test_rerun_list_override_is_json_encoded(tmp_path: Path):
+    # Switching to IV via rerun with native-array role overrides must dispatch
+    # (the JSON-array gets encoded for the pipeline, not str()-mangled into "['x']").
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={"from_node": node_id, "op_overrides": {
+            "model_type": "iv_2sls", "iv_endog": ["x"], "iv_instruments": ["x"]}},
+    )
+    assert resp.status_code == 200  # dispatches; estimability is the pipeline's call
+    child = resp.json()["run_id"]
+    _wait_terminal(project.root, child)
+    inputs = json.loads((project.root / "runs" / child / "run_inputs.json").read_text())
+    assert inputs["form"]["iv_endog"] == '["x"]'  # JSON-encoded, not "['x']"
+
+
 def test_rerun_on_running_parent_409(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_terminal_run(project.root)

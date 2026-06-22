@@ -347,7 +347,9 @@ Response mirrors `POST /runs`: `{ run_id, status }`.
     "editable": true, "editable_schema": [ ... ],
     "editable_schema_source": "capabilities" }
   ```
-  `editable_schema` values are filled from the run's `run_inputs.json`.
+  `editable_schema` carries the capabilities **default** values in slice 1; filling each
+  control's *current* value from the run's `run_inputs.json` is deferred to the node-edit
+  UI slice (no consumer needs it yet).
 - `editable_schema_source` (SHOULD): provenance marker for debug; future values
   `capabilities` | `agent` | `user-template`.
 - **Guardrail #7 — response-time only:** the decoration is NEVER written back to

@@ -905,8 +905,16 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
     except OpOverrideError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    inputs = read_run_inputs(run_root)
-    parent_sha = inputs["upload"]["sha256"]
+    try:
+        inputs = read_run_inputs(run_root)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Parent run has no run_inputs.json (not rerunnable).",
+        ) from exc
+    parent_sha = (inputs.get("upload") or {}).get("sha256")
+    if not parent_sha:
+        raise HTTPException(status_code=422, detail="Parent run_inputs.json has no upload sha256.")
     # Guardrails #2 + #5: reuse parent upload by sha256 only; re-verify content hash.
     try:
         upload_bytes = verify_upload(root, parent_sha).read_bytes()
@@ -915,7 +923,15 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             status_code=422, detail=f"Parent upload unusable: {exc}"
         ) from exc
 
-    merged_form = {**inputs["form"], **{k: str(v) for k, v in body.op_overrides.items()}}
+    # Form params are strings; JSON-encode list/dict overrides (e.g. iv_endog ["x"])
+    # so the pipeline's JSON-array parsers accept them. override_hash uses raw values.
+    def _encode_override(value: object) -> str:
+        return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
+
+    merged_form = {
+        **inputs["form"],
+        **{k: _encode_override(v) for k, v in body.op_overrides.items()},
+    }
 
     events = get_event_manager()
     if not events.try_acquire_slot():
