@@ -38,6 +38,9 @@ from .orchestrator import (
     run_workflow,
 )
 from .projects import create_project, create_run
+from .lineage.hashing import dag_hash, override_hash
+from .lineage.run_inputs import write_run_inputs
+from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
@@ -81,6 +84,90 @@ def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
     return {"project_root": str(project.root)}
 
 
+async def _read_upload_bytes(file: UploadFile, max_bytes: int) -> bytes:
+    """Read an upload fully into memory, enforcing the project size cap."""
+    buf = bytearray()
+    while chunk := await file.read(UPLOAD_CHUNK_BYTES):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="Uploaded file exceeds project size limit.",
+            )
+    return bytes(buf)
+
+
+def _submit_run(
+    root: Path,
+    *,
+    form: dict[str, str],
+    upload_bytes: bytes,
+    upload_filename: str,
+    started_at: str,
+    rerun_of: str | None = None,
+    from_node: str | None = None,
+    rerun_reason: str = "initial",
+    op_overrides: dict | None = None,
+) -> dict[str, str]:
+    """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
+
+    Stores the upload content-addressably, writes run_inputs.json, materializes the
+    blob into the run dir for the engine (which reads a path), and dispatches the full
+    pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
+    can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
+    raises without leaving a junk run behind."""
+    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
+    imputation_request = parse_imputation_request(form.get("imputation", ""))
+    iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
+    iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
+
+    sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
+    run = create_run(root, mode=form.get("mode", "auto"))
+
+    write_run_inputs(
+        run.root,
+        form=form,
+        upload={"sha256": sha, "filename": upload_filename},
+        rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
+        override_hash=override_hash(op_overrides) if op_overrides else None,
+        dag_hash=dag_hash(sha, form),
+    )
+
+    uploads_dir = run.root / "_uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    saved_path = uploads_dir / Path(upload_filename or "upload.csv").name
+    saved_path.write_bytes(resolve_upload(root, sha).read_bytes())
+
+    _write_manifest(
+        run.root, run.run_id, form.get("mode", "auto"), "running",
+        _lineage([saved_path]), started_at=started_at,
+        y=form.get("y", ""), x=x_columns,
+        requested_model_type=form.get("model_type", "auto"),
+        rerun_of=rerun_of,
+    )
+
+    events = get_event_manager()
+    events.register_run(run.run_id)
+    events.mark_active(run.run_id)
+    events.executor.submit(
+        _bg_run, run.root, run.run_id, saved_path,
+        form.get("mode", "auto"), form.get("y", ""), x_columns, started_at,
+        form.get("model_type", "auto"),
+        (form.get("sheet_name") or None), form.get("transpose") == "true",
+        imputation_request,
+        form.get("entity_col", ""), form.get("time_col", ""), form.get("covariance", ""),
+        form.get("prediction_model_type", ""), _safe_int(form.get("prediction_cv_folds", "0")),
+        form.get("prediction_sampling_method", ""),
+        iv_endog_list, iv_instruments_list,
+        form.get("did_mode", ""), form.get("did_cohort_col", ""), form.get("did_treat_col", ""),
+        form.get("did_post_col", ""), form.get("did_status_col", ""), form.get("did_treatment_path", ""),
+        form.get("cs_control_group", ""), form.get("cs_est_method", ""), form.get("cs_base_period", ""),
+        form.get("cs_cluster_var", ""), _safe_int(str(form.get("cs_anticipation", "0"))),
+        str(form.get("honest_did", "false")).lower() == "true",
+    )
+    return {"run_id": run.run_id, "status": "running"}
+
+
 @app.post("/runs")
 async def run_endpoint(
     project_root: str = Form(...),
@@ -116,13 +203,6 @@ async def run_endpoint(
     root = Path(project_root)
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
-    x_columns = [part.strip() for part in x.split(",") if part.strip()]
-    try:
-        imputation_request = parse_imputation_request(imputation)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    iv_endog_list = _parse_json_str_array(iv_endog, "iv_endog")
-    iv_instruments_list = _parse_json_str_array(iv_instruments, "iv_instruments")
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -133,57 +213,35 @@ async def run_endpoint(
 
     run_id_for_cleanup: str | None = None
     try:
-        run = create_run(root, mode=mode)
-        run_id_for_cleanup = run.run_id
+        data = await _read_upload_bytes(file, max_upload_bytes)
+        form: dict[str, str] = {
+            "mode": mode, "model_type": model_type, "y": y, "x": x,
+            "sheet_name": sheet_name, "transpose": transpose, "imputation": imputation,
+            "entity_col": entity_col, "time_col": time_col, "covariance": covariance,
+            "prediction_model_type": prediction_model_type,
+            "prediction_cv_folds": prediction_cv_folds,
+            "prediction_sampling_method": prediction_sampling_method,
+            "iv_endog": iv_endog, "iv_instruments": iv_instruments,
+            "did_mode": did_mode, "did_cohort_col": did_cohort_col,
+            "did_treat_col": did_treat_col, "did_post_col": did_post_col,
+            "did_status_col": did_status_col, "did_treatment_path": did_treatment_path,
+            "cs_control_group": cs_control_group, "cs_est_method": cs_est_method,
+            "cs_base_period": cs_base_period, "cs_cluster_var": cs_cluster_var,
+            "cs_anticipation": str(cs_anticipation), "honest_did": str(honest_did).lower(),
+        }
         started_at = datetime.now(timezone.utc).isoformat()
-
-        uploads_dir = run.root / "_uploads"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
-        saved_path = uploads_dir / Path(file.filename or "upload.csv").name
-        await _write_upload(file, saved_path, max_upload_bytes)
-
-        _write_manifest(
-            run.root, run.run_id, mode, "running",
-            _lineage([saved_path]),
-            started_at=started_at, y=y, x=x_columns,
-            requested_model_type=model_type,
-        )
-
-        events.register_run(run.run_id)
-        events.mark_active(run.run_id)
-        events.executor.submit(
-            _bg_run, run.root, run.run_id, saved_path,
-            mode, y, x_columns, started_at, model_type,
-            sheet_name or None, transpose == "true", imputation_request,
-            entity_col, time_col, covariance,
-            prediction_model_type, _safe_int(prediction_cv_folds),
-            prediction_sampling_method,
-            iv_endog_list, iv_instruments_list,
-            did_mode, did_cohort_col, did_treat_col, did_post_col, did_status_col,
-            did_treatment_path,
-            cs_control_group, cs_est_method, cs_base_period, cs_cluster_var,
-            cs_anticipation,
-            honest_did,
-        )
-
-        return {"run_id": run.run_id, "status": "running"}
+        try:
+            result = _submit_run(
+                root, form=form, upload_bytes=data,
+                upload_filename=Path(file.filename or "upload.csv").name,
+                started_at=started_at, rerun_reason="initial",
+            )
+        except ValueError as exc:  # bad imputation / iv request — no run created yet
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        run_id_for_cleanup = result["run_id"]
+        return result
     except Exception:
         events.release_slot(run_id_for_cleanup)
-        if run_id_for_cleanup is not None:
-            write_json(
-                run.root / "errors.json",
-                {"issues": [GuardrailIssue(
-                    Severity.BLOCKER, "WORKFLOW_FAILED",
-                    "Workflow submission failed: the background worker could not be started.",
-                    {},
-                ).to_dict()]},
-            )
-            _write_manifest(
-                run.root, run.run_id, mode, "failed",
-                _lineage([saved_path]),
-                started_at=started_at, y=y, x=x_columns,
-                requested_model_type=model_type,
-            )
         raise
     finally:
         await file.close()
