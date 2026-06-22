@@ -77,13 +77,16 @@ def test_sa_did_collinear_dynamic_block_populated(panel):
     json.dumps(res, allow_nan=False)
 
 
-def test_sa_did_no_never_treated_dynamic_block_populated():
+def test_sa_did_no_never_treated_blocked_at_runner():
+    # v1.5.8 hardening: no-never-treated panels are BLOCKED end-to-end (run_sa_did lets
+    # SASpecError propagate -> structured MODEL_FIT_FAILED upstream), rather than silently
+    # producing unidentified CATTs. See docs/v1.5.8-IMPL-NOTES.md.
+    from workbench.engine.sa_spec import SASpecError
+
     d = pd.read_csv(_FIX / "panel_balanced.csv")
-    d = d[d["cohort"].notna()].copy()  # drop never-treated -> last-cohort reference
+    d = d[d["cohort"].notna()].copy()  # drop never-treated -> no never-treated group
     norm = normalize_did_input(
         d, mode="cohort", entity="id", time="year", y="y", cohort="cohort"
     )
-    res = runner.run_sa_did(norm, cluster_var=None)
-    dyn = res["aggregations"]["dynamic"]
-    assert dyn["event_time"] and len(dyn["estimate"]) == len(dyn["event_time"])
-    json.dumps(res, allow_nan=False)
+    with pytest.raises(SASpecError, match="SA_NO_NEVER_TREATED"):
+        runner.run_sa_did(norm, cluster_var=None)
