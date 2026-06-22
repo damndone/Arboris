@@ -152,11 +152,24 @@ Each is its own future version (incremental, golden-safe, never big-bang):
 
 ## 3. Design
 
+> **As-built reconciliation (2026-06-22, grounded in code at `1f1bc8f`):**
+> (1) **`editable_stages = ["model"]` only.** Imputation has no dedicated graph node
+> (graph nodes are `stage:raw`, `stage:cleaned`, `var:*`, `model:{id}`, `report:html`), so
+> there is nothing to attach an editable schema to. Imputation joins when it gets a node.
+> (2) **The capabilities field stays named `schema_version`** (bumped 2→3), NOT renamed to
+> `capabilities_schema_version` — renaming would break the established contract test
+> (`additionalProperties:False`, required `schema_version`) and FE `Capabilities.schema_version`.
+> The three independent version axes still hold: `schema_version` (capabilities),
+> `run_input_schema_version` (run_inputs.json), `schema_id` (per-op).
+> (3) **op_type resolution:** the manifest's `effective_model_type` is an engine id
+> ("ols_robust"), not a capabilities key; the resolver prefers `requested_model_type` and
+> falls back to longest-prefix normalization of the effective id.
+
 ### 3.0 Version axes (three independent, never one number for all)
 
 | Axis | Field | Slice-1 value | Governs |
 |---|---|---|---|
-| Capabilities manifest | `capabilities_schema_version` | `3` | shape of `/capabilities` |
+| Capabilities manifest | `schema_version` | `3` | shape of `/capabilities` |
 | Run-input record | `run_input_schema_version` | `1` | shape of `run_inputs.json` |
 | Per-op schema | `schema_id = "{op_type}@v{n}"` | e.g. `iv_2sls@v1` | a single op's editable schema |
 
@@ -180,8 +193,7 @@ fields. The bump is part of the same PR that changes the schema.
 Extend each `MODEL_UI_META` entry in `backend/workbench/engine/capabilities.py` with a
 `params` list whose items mirror the FE `EditableControl`
 (`key`/`kind`/`label`/`options`/`required`/`role`/`value`), plus a per-op `schema_id`. Add
-a top-level `editable_stages` list. Rename `schema_version` → `capabilities_schema_version`
-and bump to `3`.
+a top-level `editable_stages` list. Keep `schema_version` (bump 2→3; see as-built note).
 
 ```python
 "iv_2sls": {
@@ -196,7 +208,7 @@ and bump to `3`.
 }
 ```
 
-Manifest top-level adds `"editable_stages": ["model", "imputation"]`.
+Manifest top-level adds `"editable_stages": ["model"]` (imputation deferred — see as-built note).
 
 **Field descriptor carries only what STRUCTURAL validation needs:** `key` (the exact
 `POST /runs` form-param name), `kind`/type, `options` (enum), `required`, `role`. **No
