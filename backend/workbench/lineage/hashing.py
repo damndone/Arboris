@@ -29,3 +29,10 @@ def override_hash(op_overrides: dict) -> str:
 
 def dag_hash(upload_sha256: str, form_bag: dict) -> str:
     return _sha(canonicalize([upload_sha256, form_bag, PIPELINE_VERSION]))
+
+
+def node_hash(parent_hashes: list[str], op_spec: dict, pipeline_version: str = PIPELINE_VERSION) -> str:
+    """Merkle hash of a cacheable unit. Parent order-independent (sorted);
+    op_spec is the unit's structural spec (volatile fields like run_id/started_at
+    MUST be excluded by the caller in op_spec extraction, not here)."""
+    return _sha(canonicalize([sorted(parent_hashes), op_spec, pipeline_version]))
