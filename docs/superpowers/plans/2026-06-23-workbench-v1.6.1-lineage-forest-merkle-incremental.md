@@ -265,73 +265,69 @@ Fallback: 关闭 WORKBENCH_INCREMENTAL_CACHE flag
 
 ---
 
-### Loop 2A.5：Upstream bundle rehydrate for model-fork incrementality
+### Loop 2A.5：Materialized imputation cache + identity trace
 
-> **PM 决策（2026-06-23）**：mutate-in-place 管线下，本版执行层复用走 **upstream bundle 边界缓存**（cut = ImputationStage 之后、EstimationStage 之前），非 per-stage 完整 replay（后者 = Slice 3）。per-stage `node_hash` / `incremental_trace` 作身份与观测层保留。
+> **PM 决策 v2（2026-06-23，实测后务实重定义）**：实测证明“estimation 前完整 ctx 可干净序列化”不成立（ctx 含 DatasetSchema/DecisionPoint/WorkbenchConfig 等自定义对象）。继续做 upstream bundle 会把本版拖成 ctx-序列化重构，风险/收益不匹配。**复用拆两层**：(1) **Identity reuse** — 上游 stage-output `node_hash` 相同，森林严格去重、trace/rollback 证明上游没变；(2) **Compute skip** — 本版只对**干净、收益明确的 MICE imputation** 做真跳过；其余上游 stage 可重算，但 `node_hash` 必须一致、图上表现为同一共享前缀。**完整 per-stage ctx rehydrate / 任意 stage skip → Slice 3。**
 
 ```
-Loop 2A.5: Upstream bundle rehydrate for model-fork incrementality
-Input:  dry-run wrapper（2A.4）；node_store（2A.2）；op_spec（2A.3）
-Change: estimation 前切一刀，命中 upstream bundle → rehydrate ctx，只跑 estimation→report
-Verify: model fork 命中 upstream bundle；source→imputation 不执行或只 replay metadata；
-        estimation/report 正常执行；child run run-relative artifacts 完整（G2）；
-        force-full vs bundle-rehydrate 产物逐字节一致（R1/R7/R9）
-Exit:   bundle rehydrate 端到端 + 逐字节一致通过
-Fallback: 退回 dry-run wrapper（不命中、不 rehydrate）
+Loop 2A.5: Materialized imputation cache + identity trace
+Input:  2A.1–2A.4 已有 node_hash、op_spec、dry-run trace
+Change: 不实现 upstream ctx bundle。只缓存 MICE imputation 的 materialized outputs：
+        processed/imputed_dataset.parquet + imputation_summary.json + DataHandle identity metadata。
+        其他 stage 记录 node_hash / status trace，但不跳过执行。
+Verify: no-MICE run: 上游 stage 重算，但 node_hash 与 parent run 相同；
+        MICE run: imputation 命中后不重跑 MICE，直接物化 run-relative artifacts；
+        child run 目录仍完整（G2）；force-full vs imputation-hit run 产物逐字节一致。
+Exit:   MICE 是本版唯一真实上游 compute-skip；其余上游以 node_hash identity 证明共享。
+Fallback: 关闭 imputation cache，保留 node_hash identity trace。
 ```
 
-**Bundle hash（模型层键 NOT 入内——它们是 fork 的变量，estimation 才消费）**
+**trace 状态 taxonomy（替换 hit/miss，避免误导）**
 ```
-upstream_bundle_hash =
-  H(upload_sha256 + cleaned/imputed/model-input identity + selected columns +
-    upstream-relevant config + random_seed + PIPELINE_VERSION)
-```
-
-**Bundle 保存**：modeling_frame/DataHandle（parquet+meta）、normalized_y/normalized_x、categorical_vars、imputation summary/decisions、model_input_ids、stage-output hash trace、必要 ctx.artifacts 子集（上游派生项；输入 `_X` 不缓存、rerun 重注入）、派生字段 y_type/primary_type/exposure_col/roles/diagnostics。**禁 pickle**（仓库 no-pickle gate）：DataFrame→parquet，其余→json。
-
-**执行语义**
-```
-首次(miss): source→…→imputation → 写 bundle → estimation→recording→diagnostics→report
-model fork(hit): 命中 bundle → rehydrate ctx 到 estimation 前
-                 （恢复派生字段+DataHandle+派生 artifacts；输入 _X 用新 form 重注入；
-                  requested_model_type = 新 model_type）→ 只跑 estimation→report
+miss_executed         # 首次执行或 hash 未命中
+hit_reused            # 真实跳过执行，复用 CAS 产物（day-1 主要是 MICE）
+recomputed_same_hash  # 重新执行，但 hash 与既有/parent 节点一致 → 图层身份复用
+recomputed_changed    # op_spec/input 改变，hash 改变
 ```
 
-**三套身份**：per-stage `node_hash`（trace/图层/Slice3）；`incremental_trace.json`（每 stage hit/miss/replayed/skipped）；`upstream_bundle_hash`（本版真正 rehydrate/skip 键）。
+**Files:** 新增 `backend/workbench/lineage/imputation_cache.py`（materialize/restore MICE 产物）· Modify `backend/workbench/lineage/incremental.py`（状态 taxonomy + imputation 命中）· Test `tests/test_imputation_cache.py` · Fixture `tests/fixtures/forest_min_missing.csv`（含缺失，触发 MICE）
 
-**Files:** 新增 `backend/workbench/lineage/bundle.py`（save/restore）· Modify `backend/workbench/lineage/incremental.py` · Test `tests/test_bundle_rehydrate.py`
+- [ ] **Step 1：建缺失 fixture** `forest_min_missing.csv`（在 forest_min 基础上对若干 wage/x 置空，使 imputation 真跑 MICE）。
+- [ ] **Step 2：写失败测试**：① `WORKBENCH_INCREMENTAL_CACHE=1` + imputation 请求，同 project 跑两次：第一次 imputation `miss_executed`、第二次 `hit_reused`（MICE 不重跑）；断言第二次 run 目录仍含 `processed/imputed_dataset.parquet`、`model_results/*.json`、`reports/report.html`（**G2**）。② `WORKBENCH_FORCE_FULL_RECOMPUTE=1` 跑同输入，断言 imputation-hit 产物与 force-full 产物**逐字节一致**。③ no-MICE forest_min：上游 stage trace 标 `recomputed_same_hash`（node_hash 跨两次 run 相同）。
+- [ ] **Step 3：跑确认失败** → FAIL.
+- [ ] **Step 4：实现** `imputation_cache.py`（按 imputation node_hash materialize 帧+summary 到 CAS；命中则 restore + 物化 run-relative）；`incremental.py` 在 ImputationStage 处：命中且非 force-full → 跳过 MICE、注入缓存帧/summary、status `hit_reused`；否则跑、写 CAS、status `miss_executed`。其余 cacheable stage 照跑，status 按 taxonomy（对 parent trace 比对 same/changed）。`add_head_ref` 记账。
+- [ ] **Step 5：跑确认通过**（MICE hit + G2 + 逐字节 + no-MICE identity）→ PASS.
+- [ ] **Step 6：跑全 golden（flag off）** → 0-drift。
+- [ ] **Step 7：Commit** — `git commit -m "feat(2A.5): materialized MICE imputation cache + identity trace taxonomy"`
 
-- [ ] **Step 1：写失败测试**：① `WORKBENCH_INCREMENTAL_CACHE=1` 同 project 跑两次相同 run：第一次 miss、第二次命中 upstream bundle；断言第二次 run 目录仍含 `processed/cleaned_dataset.parquet`、`model_results/*.json`、`reports/report.html`（**G2**）。② `WORKBENCH_FORCE_FULL_RECOMPUTE=1` 跑同输入，断言 bundle-rehydrate 产物与 force-full 产物**逐字节一致**（model_results JSON + report.html）。
-- [ ] **Step 2：跑确认失败** → FAIL.
-- [ ] **Step 3：实现** `bundle.py` + `incremental.py` 命中路径（命中 bundle → skip source..imputation、rehydrate、从 estimation 起跑；副作用 stage 正常重算 → run 目录自然完整）。`add_head_ref` 记账。逐字节 gate 守 bundle 子集完整性（缺字段→扩 bundle）。
-- [ ] **Step 4：跑确认通过**（G2 + 逐字节）→ PASS.
-- [ ] **Step 5：跑全 golden（flag off）** → 0-drift。
-- [ ] **Step 6：Commit** — `git commit -m "feat(2A.5): upstream bundle rehydrate for model-fork incrementality"`
-
-> **Progress note** — Loop: 2A.5 / Changed: bundle.py, incremental.py hit path / Verified: bundle hit + run dir complete (G2) + byte-identical vs force-full / Known risk: bundle ctx-subset 完整性由逐字节 gate 守 / Next: 2A.6
+> **Progress note** — Loop: 2A.5 / Changed: imputation_cache.py, incremental.py (taxonomy + MICE hit), forest_min_missing fixture / Verified: MICE hit_reused + G2 + byte-identical + no-MICE recomputed_same_hash + golden 0-drift / Known risk: full ctx rehydrate deferred to Slice 3 / Next: 2A.6
 
 ---
 
-### Loop 2A.6：引擎级 model override 增量（不走 HTTP）
+### Loop 2A.6：Model override identity incrementality（不走 HTTP）
+
+> **主证据 = node_hash 身份复用**（上游同 hash → 森林共享前缀去重）；compute-skip 证据只要求覆盖 MICE。
 
 ```
-Loop 2A.6: 证明 a→b→c 复用是引擎事实
-Input:  CAS / op_spec / wrapper / rehydrate 完成
+Loop 2A.6: Model override identity incrementality
+Input:  CAS / op_spec / wrapper / imputation-cache 完成
 Change: 引擎内部入口传 model op_spec override（不走 POST /rerun，不依赖 head-set）
-Verify: parent 上游 hash 不变；estimation/model hash 变；diagnostics/report hash 变；增量 vs force-full 逐字节一致；from_node 复用边界 = parents(old_model_node)
-Exit:   a→b→c 引擎事实
+Verify: 上游 stage-output node_hash 与 parent 相同；森林前缀可按 node_hash 去重；
+        estimation/model node_hash 改变；diagnostics/report node_hash 改变；
+        若存在 MICE，imputation 是 hit_reused；force-full vs selective-cache 产物逐字节一致
+Exit:   增量证明主证据 = node_hash 身份复用；compute-skip 覆盖 MICE
 Fallback: engine override 关闭，保留 full rerun
 ```
 
 **Files:** Modify `backend/workbench/orchestrator/__init__.py`（增量入口可接 `op_overrides`）· Test `tests/test_engine_increment_fork.py`
 
-- [ ] **Step 1：写失败测试**：用 forest_min.csv 跑 run A（model=ols）→ 记录各 stage `node_hash`。引擎内部入口以 `op_overrides={"model_type": "iv_2sls"}`（或合法的同形 override，如 covariance）跑 run B → 断言：source/clean/profile/routing/imputation 的 `node_hash` 与 A **完全相同**；estimation 的 `node_hash` **不同**；diagnostics/report `node_hash` **不同**；run B 增量产物与 run B force-full 产物逐字节一致。
+- [ ] **Step 1：写失败测试**：用 forest_min_missing.csv（带 MICE）跑 run A（model=ols）→ 记录各 stage `node_hash`。引擎内部入口以 `op_overrides={"model_type": "iv_2sls"}`（或合法同形 override，如 covariance）跑 run B → 断言：source/clean/profile/routing/imputation 的 `node_hash` 与 A **完全相同**（identity 复用）；imputation 在 B 标 `hit_reused`；estimation 的 `node_hash` **不同**；diagnostics/report `node_hash` **不同**；run B 产物与 run B force-full 产物逐字节一致。
 - [ ] **Step 2：跑确认失败** → FAIL.
-- [ ] **Step 3：实现**：在 `_run_workflow`（或新薄入口 `run_workflow_incremental(..., op_overrides)`）把 override 合并进 estimation 的 form → 只改 estimation 及下游 op_spec → 上游命中复用。**from_node 复用边界 = parents(被替换 stage)**：override 落在哪个 stage，就从该 stage 起 miss，其父 stage-output 命中（spec §3.4）。
+- [ ] **Step 3：实现**：在 `_run_workflow`（或新薄入口 `run_workflow_incremental(..., op_overrides)`）把 override 合并进 estimation 的 form → 只改 estimation 及下游 op_spec → 上游 node_hash 不变（identity 复用）+ MICE 命中跳过。**from_node 复用边界 = parents(被替换 stage)**：override 落在哪个 stage，就从该 stage 起 hash 改变，其父 stage-output node_hash 不变（spec §3.4）。
 - [ ] **Step 4：跑确认通过** → PASS。
-- [ ] **Step 5：Commit** — `git commit -m "feat(2A.6): engine-level model override incrementality (no HTTP)"`
+- [ ] **Step 5：Commit** — `git commit -m "feat(2A.6): model override identity incrementality (no HTTP)"`
 
-> **Progress note** — Loop: 2A.6 / Changed: incremental engine entry / Verified: a→b→c upstream reuse, model+downstream recompute, byte-identical / Known risk: HTTP wiring deferred to 2B.3 / Next: 2A.7
+> **Progress note** — Loop: 2A.6 / Changed: incremental engine entry / Verified: upstream node_hash identity reuse, MICE hit_reused, model+downstream hash changed, byte-identical / Known risk: HTTP wiring deferred to 2B.3 / Next: 2A.7
 
 ---
 

@@ -14,7 +14,7 @@
 
 - **第一性原理**：可缓存计算单元是内容寻址的原子单元，身份 = `H(全部输入身份 ⊕ 自己算子规格 ⊕ PIPELINE_VERSION)`（Merkle）。改一个单元的算子，只有它和后代哈希变；上游不变 = 命中缓存 = **原样复用，绝不重算/复制**。
 - **本版实现粒度（重要边界）**：v1.6.1 实现 **stage-output 级 Merkle CAS**，并以 `node_hash` 作为**图层身份语言**；**真正的 graph-node 级细化（任意图节点独立缓存/重跑）放 Slice 3**。验收据此理解：本版交付的是“切 model 时 a→b→c 整段 stage-output 复用”，不是“任意图节点都能独立缓存”。
-- **本版交付（Slice 2 = 2A+2B+2C）**：节点结果 CAS + stage-output Merkle + 增量重跑（复用上游、只重算分歧前沿）+ head-set 图契约 + FE 森林渲染 + 编辑 model 节点（control_factory）原地 fork 出分支 + 任意节点跨 run 回溯 + 激活祖先 head 回滚。
+- **本版交付（Slice 2 = 2A+2B+2C）**：节点结果 CAS + stage-output Merkle **identity**（上游 node_hash 身份复用、森林共享前缀严格去重）+ **MICE imputation materialized cache（首个干净 compute-skip）** + head-set 图契约 + FE 森林渲染 + 编辑 model 节点（control_factory）原地 fork 出分支 + 任意节点跨 run 回溯 + 激活祖先 head 回滚。**注（v5）**：day-1 仅对 MICE 做真实 compute-skip；完整 per-stage ctx rehydrate / 任意 stage skip → Slice 3。
 - **本版不实现、但契约必须留口**：任意 DAG 拓扑（模型输出再入）、per-stage/code 可编辑节点、时间序列/波动率方法包、节点 AskAI / 报告撰写器、并发解除、CAS 的 GC。通过 **S1–S13 预留功能槽** 在契约层留好，绝不挖坑。
 
 本版被四份真实 Stata 作业（单位根 / ARIMA-ARCH / 随机游走-EMH / LPM-Probit-Logit）反复验证，且其“手动状态管理惨状”反向证明 node-result CAS 方向正确。
@@ -91,7 +91,7 @@ v1.6.0 已把内容寻址用于 upload（sha256）+ 定义了 `canonicalize` / `
 
 缓存 wrapper 语义：拓扑序为每个 cacheable 单元算 `node_hash`（输入 hash + 该单元 op_spec + PIPELINE_VERSION）→ 命中 CAS：跳过执行，以缓存产物重建 `DataHandle`/artifact 引用，**且对有副作用的 stage（diagnostics/report）dual-write 物化 run-relative 产物**（保证下游与历史路径不变）→ 未命中：执行 + 写 CAS + dual-write run 产物。
 
-编辑 model 的 `op_spec` → 其 hash 变 → model 及下游（diagnostics/report）未命中 → **只重算分歧前沿**；source/clean/.../imputation 命中复用。
+编辑 model 的 `op_spec` → 其 hash 变 → model 及下游（diagnostics/report）`node_hash` 改变；source/clean/.../imputation 的 `node_hash` **不变 → identity 复用**（森林共享前缀去重、trace/rollback 证明上游未变）。**v5 边界**：上游 stage 仍**重算**（毫秒级、re-derive → 逐字节一致），其中 **MICE imputation** 命中则**真跳过**（唯一 day-1 compute-skip）。完整 stage skip → Slice 3。
 
 ### 3.3 契约 / 前端层 — head-set 图 + 森林画布（改造）
 
@@ -309,7 +309,8 @@ IO（`tsset` 日/季频、字符串日期、`.dta`/Excel、图/数据集/smcl→
   6. **“跨 pipeline”收紧**：物理共存、默认不复用。
   - §6 拆 **2A/2B/2C** 分段验收；§14 开放问题按 PM 结论定。
 - **v3（2026-06-23，并入 PM 第二轮）**：§6 新增**实施硬护栏 G1/G2/G3**（2A 先证 model fork 最小链路增量复用；CAS 命中须生成完整 run 目录；FE forest 不绑 layout 重构）；2A 验收 + §13 门禁补 run 目录完整性断言。
-- **v4（2026-06-23，执行期 PM 决策 — 2A.5 rehydrate 策略）**：mutate-in-place 管线下，执行层复用走 **upstream bundle 边界缓存**（cut = ImputationStage 后、EstimationStage 前），非 per-stage 完整 replay（→ Slice 3）。`upstream_bundle_hash` 不含模型层键（model_type/covariance 是 fork 变量）。三套身份并存：per-stage `node_hash`（身份/trace/Slice3）、`incremental_trace.json`（hit/miss/replayed/skipped）、`upstream_bundle_hash`（真正 rehydrate/skip 键）。bundle 禁 pickle（no-pickle gate），DataFrame→parquet、其余→json。2A.5 改名 “Upstream bundle rehydrate for model-fork incrementality”，验收 = fork 命中 bundle + 只跑 estimation→report + run 目录完整 + force-full 逐字节一致。详见 plan Loop 2A.5。
+- **v4（2026-06-23，执行期 PM 决策 — 2A.5 rehydrate 策略）**：[已被 v5 取代] 曾定 upstream bundle 边界缓存。
+- **v5（2026-06-23，实测后务实重定义，覆盖 v4）**：dump 实测证明“estimation 前完整 ctx 可干净序列化”**不成立**（ctx 含 DatasetSchema/DecisionPoint/WorkbenchConfig 等自定义对象）。upstream bundle 会把本版拖成 ctx-序列化重构，风险/收益不匹配。**“复用”正式拆两层**：(1) **Identity reuse** — 上游 stage-output `node_hash` 相同，森林严格去重、trace/rollback 证明上游未变；(2) **Compute skip** — day-1 仅对**可稳定物化、收益明确的 MICE imputation** 做真跳过，其余上游 stage 可重算但 `node_hash` 必须一致、图上呈现为同一共享前缀。**完整 per-stage ctx rehydrate / 任意 stage skip → Slice 3。** `incremental_trace` 状态改为 `miss_executed/hit_reused/recomputed_same_hash/recomputed_changed`。v1.6.1 定位 = **跨 run 血缘森林 + stage-output Merkle identity + MICE materialized cache（首个干净 compute-skip）+ model fork/trace/rollback**。a→b→c 口径：图上 a/b/c 是同一批 node_hash（非复制新节点），trace/rollback 证明新 model 分支共享同一上游身份；若上游含 MICE 则真跳过，若是毫秒级 clean/route 则允许重算但 hash 相同、图上仍是同一节点——**不是退回孤立新链**（孤立新链的病是无共享身份、无 head-set forest、无跨 run trace，A 全保住）。2A.5 改名 “Materialized imputation cache + identity trace”，2A.6 改名 “Model override identity incrementality”（主证据 = node_hash 身份复用）。详见 plan Loop 2A.5/2A.6。
 
 ---
 
