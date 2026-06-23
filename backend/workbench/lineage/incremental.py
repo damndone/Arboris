@@ -69,8 +69,28 @@ def run_pipeline_traced(pipeline, ctx, env, *, form: dict, config: dict, force_f
     every other cacheable stage re-executes but reuses identity by hash. Writes
     `incremental_trace.json` to the run root. Returns the final ctx."""
     project_root = env.run_root.parent.parent
+
+    # Precompute the full cacheable Merkle chain UPFRONT — node_hash is a pure
+    # function of (upload_hash, op_specs, PIPELINE_VERSION), independent of
+    # execution. Stashing it in ctx lets RecordingStage stamp graph nodes (2A.7)
+    # with hashes it would otherwise not yet have (report runs after recording).
+    chain: dict[str, dict[str, Any]] = {}
+    _prev = upload_hash
+    for stage in pipeline:
+        name = _STAGE_NAME.get(type(stage).__name__, type(stage).__name__)
+        if name not in CACHEABLE_STAGES:
+            continue
+        spec = op_spec_for_stage(name, form=form, config=config)
+        parents = [_prev] if _prev else []
+        chain[name] = {
+            "node_hash": node_hash(parents, spec),
+            "op_spec_hash": override_hash(spec),
+            "parents": parents,
+        }
+        _prev = chain[name]["node_hash"]
+    ctx.artifacts["_node_hashes"] = {n: c["node_hash"] for n, c in chain.items()}
+
     trace: list[dict[str, Any]] = []
-    prev_hash = upload_hash
 
     for stage in pipeline:
         name = _STAGE_NAME.get(type(stage).__name__, type(stage).__name__)
@@ -81,9 +101,9 @@ def run_pipeline_traced(pipeline, ctx, env, *, form: dict, config: dict, force_f
                 break
             continue
 
-        spec = op_spec_for_stage(name, form=form, config=config)
-        parents = [prev_hash] if prev_hash else []
-        nh = node_hash(parents, spec)
+        info = chain[name]
+        nh = info["node_hash"]
+        parents = info["parents"]
         existed = node_result_exists(project_root, nh)
 
         if name == "imputation" and existed and not force_full and _mice_requested(form, config):
@@ -104,11 +124,10 @@ def run_pipeline_traced(pipeline, ctx, env, *, form: dict, config: dict, force_f
         trace.append({
             "stage": name,
             "node_hash": nh,
-            "op_spec_hash": override_hash(spec),
+            "op_spec_hash": info["op_spec_hash"],
             "status": status,
             "parents": parents,
         })
-        prev_hash = nh
         if ctx.terminal_status in ("blocked", "failed"):
             break
 

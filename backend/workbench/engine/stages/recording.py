@@ -158,4 +158,17 @@ class RecordingStage:
 
         ctx.primary_type = primary_type
         ctx.artifacts["_dropped_vars"] = dropped_vars
+
+        # 2A.7 bridge: when the incremental cache is active, write node_index.json
+        # (graph node_id -> stage-output node_hash). graph.json is untouched
+        # (decorate-only) so golden stays 0-drift with the flag off.
+        _node_hashes = ctx.artifacts.get("_node_hashes")
+        if _node_hashes:
+            from ...lineage.node_index import write_node_index
+            write_node_index(
+                run_root, _node_hashes,
+                normalized_y=normalized_y, normalized_x=normalized_x,
+                model_results=model_results,
+            )
+
         return ctx
