@@ -54,8 +54,17 @@ STAGE_FORM_KEYS: dict[str, list[str]] = {
     ],
 }
 
-# Stages that may consume RNG and therefore MUST include the seed in their op_spec.
-_SEED_CONSUMING_STAGES: frozenset[str] = frozenset({"imputation", "diagnostics"})
+# Per-stage consumed CONFIG keys (from the WorkbenchConfig, not the form). A stage
+# that may consume RNG MUST include its seed; imputation also consumes the MICE
+# hyper-params, which therefore MUST enter its node_hash (else a hyper-param change
+# would stale-hit the materialized MICE cache — R1 cache poisoning).
+_STAGE_CONFIG_KEYS: dict[str, list[str]] = {
+    "imputation": [
+        "random_seed", "imputation_method", "imputation_m",
+        "imputation_max_iter", "max_missing_rate",
+    ],
+    "diagnostics": ["random_seed"],
+}
 
 
 def op_spec_for_stage(
@@ -86,7 +95,8 @@ def op_spec_for_stage(
         key: form[key] for key in consumed_keys if key in form
     }
 
-    if stage_name in _SEED_CONSUMING_STAGES:
-        op_spec["random_seed"] = config["random_seed"]
+    for ckey in _STAGE_CONFIG_KEYS.get(stage_name, []):
+        if ckey in config:
+            op_spec[ckey] = config[ckey]
 
     return op_spec

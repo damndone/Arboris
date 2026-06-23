@@ -33,12 +33,15 @@ def test_dryrun_writes_complete_trace(tmp_path, monkeypatch):
     # RecordingStage is NEVER cached (it builds the graph view, Loop 2A.7).
     assert "recording" not in names
 
-    # Each trace entry carries a real node_hash, op_spec_hash and parents.
+    # Each trace entry carries a real node_hash, op_spec_hash, parents and a
+    # valid status from the 2A.5 taxonomy. forest_min has no missing data, so no
+    # MICE skip — a fresh project run records every cacheable stage as executed.
+    _VALID = {"miss_executed", "hit_reused", "recomputed_same_hash", "recomputed_changed"}
     for t in trace:
         assert t["node_hash"] and isinstance(t["node_hash"], str)
         assert t["op_spec_hash"] and isinstance(t["op_spec_hash"], str)
         assert "parents" in t
-        assert t["status"] == "miss"  # dry-run: nothing skipped
+        assert t["status"] in _VALID
 
 
 def test_flag_off_writes_no_trace(tmp_path):

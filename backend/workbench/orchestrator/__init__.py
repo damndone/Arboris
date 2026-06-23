@@ -468,8 +468,17 @@ def _run_workflow(
             "prediction_cv_folds": prediction_cv_folds,
             "prediction_sampling_method": prediction_sampling_method,
         }
-        cfg = {"random_seed": getattr(config, "random_seed", 20260429)}
-        ctx = run_pipeline_traced(PIPELINE, ctx, env, form=form, config=cfg, upload_hash=upload_hash)
+        cfg = {
+            "random_seed": getattr(config, "random_seed", 20260429),
+            "imputation_method": getattr(config, "imputation_method", ""),
+            "imputation_m": getattr(config, "imputation_m", 5),
+            "imputation_max_iter": getattr(config, "imputation_max_iter", 10),
+            "max_missing_rate": getattr(config, "max_missing_rate", 0.4),
+        }
+        ctx = run_pipeline_traced(
+            PIPELINE, ctx, env, form=form, config=cfg,
+            force_full=flags.force_full_recompute(), upload_hash=upload_hash,
+        )
         return {"run_id": run_id, "status": ctx.terminal_status}
 
     for stage in PIPELINE:
