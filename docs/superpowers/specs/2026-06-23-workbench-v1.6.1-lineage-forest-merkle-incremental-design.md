@@ -309,6 +309,7 @@ IO（`tsset` 日/季频、字符串日期、`.dta`/Excel、图/数据集/smcl→
   6. **“跨 pipeline”收紧**：物理共存、默认不复用。
   - §6 拆 **2A/2B/2C** 分段验收；§14 开放问题按 PM 结论定。
 - **v3（2026-06-23，并入 PM 第二轮）**：§6 新增**实施硬护栏 G1/G2/G3**（2A 先证 model fork 最小链路增量复用；CAS 命中须生成完整 run 目录；FE forest 不绑 layout 重构）；2A 验收 + §13 门禁补 run 目录完整性断言。
+- **v4（2026-06-23，执行期 PM 决策 — 2A.5 rehydrate 策略）**：mutate-in-place 管线下，执行层复用走 **upstream bundle 边界缓存**（cut = ImputationStage 后、EstimationStage 前），非 per-stage 完整 replay（→ Slice 3）。`upstream_bundle_hash` 不含模型层键（model_type/covariance 是 fork 变量）。三套身份并存：per-stage `node_hash`（身份/trace/Slice3）、`incremental_trace.json`（hit/miss/replayed/skipped）、`upstream_bundle_hash`（真正 rehydrate/skip 键）。bundle 禁 pickle（no-pickle gate），DataFrame→parquet、其余→json。2A.5 改名 “Upstream bundle rehydrate for model-fork incrementality”，验收 = fork 命中 bundle + 只跑 estimation→report + run 目录完整 + force-full 逐字节一致。详见 plan Loop 2A.5。
 
 ---
 

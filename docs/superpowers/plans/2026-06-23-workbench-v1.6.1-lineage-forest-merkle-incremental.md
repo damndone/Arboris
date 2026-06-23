@@ -265,27 +265,50 @@ Fallback: 关闭 WORKBENCH_INCREMENTAL_CACHE flag
 
 ---
 
-### Loop 2A.5：Cache Hit Rehydrate + Dual-Write
+### Loop 2A.5：Upstream bundle rehydrate for model-fork incrementality
+
+> **PM 决策（2026-06-23）**：mutate-in-place 管线下，本版执行层复用走 **upstream bundle 边界缓存**（cut = ImputationStage 之后、EstimationStage 之前），非 per-stage 完整 replay（后者 = Slice 3）。per-stage `node_hash` / `incremental_trace` 作身份与观测层保留。
 
 ```
-Loop 2A.5: 真正命中跳过，重建 ctx/DataHandle；副作用 stage dual-write
-Input:  dry-run wrapper（2A.4）
-Change: 命中 → 跳过 stage.run，从 CAS 重建产物 + DataHandle；同时 dual-write run-relative 产物
-Verify: 第一次全 miss；第二次同输入命中上游；child run 目录仍有 run-relative artifacts；强制全算 vs 增量逐字节一致
-Exit:   最小增量测试通过
-Fallback: 退回 dry-run wrapper（命中关闭）
+Loop 2A.5: Upstream bundle rehydrate for model-fork incrementality
+Input:  dry-run wrapper（2A.4）；node_store（2A.2）；op_spec（2A.3）
+Change: estimation 前切一刀，命中 upstream bundle → rehydrate ctx，只跑 estimation→report
+Verify: model fork 命中 upstream bundle；source→imputation 不执行或只 replay metadata；
+        estimation/report 正常执行；child run run-relative artifacts 完整（G2）；
+        force-full vs bundle-rehydrate 产物逐字节一致（R1/R7/R9）
+Exit:   bundle rehydrate 端到端 + 逐字节一致通过
+Fallback: 退回 dry-run wrapper（不命中、不 rehydrate）
 ```
 
-**Files:** Modify `backend/workbench/lineage/incremental.py`, `backend/workbench/engine/context.py`（DataHandle 重建）· Test `tests/test_incremental_hit.py`
+**Bundle hash（模型层键 NOT 入内——它们是 fork 的变量，estimation 才消费）**
+```
+upstream_bundle_hash =
+  H(upload_sha256 + cleaned/imputed/model-input identity + selected columns +
+    upstream-relevant config + random_seed + PIPELINE_VERSION)
+```
 
-- [ ] **Step 1：写失败测试**（同一 project，跑两次相同 run：第一次 trace 全 `miss`；第二次 source/clean/imputation/estimation `hit`；断言第二次 run 目录仍含 `processed/cleaned_dataset.parquet`、`model_results/*.json`、`reports/report.html`（**G2**）；再用 `WORKBENCH_FORCE_FULL_RECOMPUTE=1` 跑一次，断言增量产物与全算产物逐字节一致（R1/R7/R9））。
+**Bundle 保存**：modeling_frame/DataHandle（parquet+meta）、normalized_y/normalized_x、categorical_vars、imputation summary/decisions、model_input_ids、stage-output hash trace、必要 ctx.artifacts 子集（上游派生项；输入 `_X` 不缓存、rerun 重注入）、派生字段 y_type/primary_type/exposure_col/roles/diagnostics。**禁 pickle**（仓库 no-pickle gate）：DataFrame→parquet，其余→json。
+
+**执行语义**
+```
+首次(miss): source→…→imputation → 写 bundle → estimation→recording→diagnostics→report
+model fork(hit): 命中 bundle → rehydrate ctx 到 estimation 前
+                 （恢复派生字段+DataHandle+派生 artifacts；输入 _X 用新 form 重注入；
+                  requested_model_type = 新 model_type）→ 只跑 estimation→report
+```
+
+**三套身份**：per-stage `node_hash`（trace/图层/Slice3）；`incremental_trace.json`（每 stage hit/miss/replayed/skipped）；`upstream_bundle_hash`（本版真正 rehydrate/skip 键）。
+
+**Files:** 新增 `backend/workbench/lineage/bundle.py`（save/restore）· Modify `backend/workbench/lineage/incremental.py` · Test `tests/test_bundle_rehydrate.py`
+
+- [ ] **Step 1：写失败测试**：① `WORKBENCH_INCREMENTAL_CACHE=1` 同 project 跑两次相同 run：第一次 miss、第二次命中 upstream bundle；断言第二次 run 目录仍含 `processed/cleaned_dataset.parquet`、`model_results/*.json`、`reports/report.html`（**G2**）。② `WORKBENCH_FORCE_FULL_RECOMPUTE=1` 跑同输入，断言 bundle-rehydrate 产物与 force-full 产物**逐字节一致**（model_results JSON + report.html）。
 - [ ] **Step 2：跑确认失败** → FAIL.
-- [ ] **Step 3：实现**：命中时（`node_result_exists` 且非 force-full）→ 不调 `stage.run`，从 CAS `read_node_result` 重建该 stage 的输出 `DataHandle`（`DataHandle.of` 或新 `DataHandle.from_cache`）+ 把缓存 artifacts **dual-write** 到 run-relative 路径（diagnostics/report 副作用 stage 必须物化，R9）；写 `status="hit"`。`add_head_ref` 记账。
-- [ ] **Step 4：跑确认通过** → PASS（含 G2 目录断言 + 逐字节对照）。
-- [ ] **Step 5：跑全 golden** → 0-drift。
-- [ ] **Step 6：Commit** — `git commit -m "feat(2A.5): cache hit rehydrate + dual-write run dir"`
+- [ ] **Step 3：实现** `bundle.py` + `incremental.py` 命中路径（命中 bundle → skip source..imputation、rehydrate、从 estimation 起跑；副作用 stage 正常重算 → run 目录自然完整）。`add_head_ref` 记账。逐字节 gate 守 bundle 子集完整性（缺字段→扩 bundle）。
+- [ ] **Step 4：跑确认通过**（G2 + 逐字节）→ PASS.
+- [ ] **Step 5：跑全 golden（flag off）** → 0-drift。
+- [ ] **Step 6：Commit** — `git commit -m "feat(2A.5): upstream bundle rehydrate for model-fork incrementality"`
 
-> **Progress note** — Loop: 2A.5 / Changed: incremental hit path, DataHandle rebuild / Verified: hit upstream + run dir complete + byte-identical vs force-full / Known risk: from_node 复用边界在 2A.6 验真 / Next: 2A.6
+> **Progress note** — Loop: 2A.5 / Changed: bundle.py, incremental.py hit path / Verified: bundle hit + run dir complete (G2) + byte-identical vs force-full / Known risk: bundle ctx-subset 完整性由逐字节 gate 守 / Next: 2A.6
 
 ---
 
