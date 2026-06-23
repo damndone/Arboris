@@ -38,7 +38,11 @@ from .orchestrator import (
     run_workflow,
 )
 from .projects import create_project, create_run
+from . import flags
+from .lineage.family import scan_family
 from .lineage.hashing import dag_hash, override_hash
+from .lineage.headset import build_headset
+from .lineage.node_index import NODE_INDEX_FILENAME
 from .lineage.op_contract import (
     OpOverrideError,
     resolve_operation_contract,
@@ -833,7 +837,7 @@ def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
 
 
 @app.get("/runs/{run_id}/graph")
-def get_run_graph(run_id: str, project_root: str):
+def get_run_graph(run_id: str, project_root: str, view: str | None = None):
     runs_root = _resolve_project_runs_dir(project_root)
     run_root = _resolve_run_root(project_root, run_id)  # 404 if run dir missing
     store = GraphStore(runs_root=runs_root)
@@ -846,11 +850,27 @@ def get_run_graph(run_id: str, project_root: str):
             message=f"graph.json for run {run_id} is corrupt or unreadable: {exc}",
             details={"run_id": run_id},
         ) from exc
+
+    # 2B.2 — head-set family view (flag- or query-gated, non-breaking by default).
+    headset_requested = view == "headset" or flags.graph_headset()
+    target_legacy = not (run_root / NODE_INDEX_FILENAME).is_file()
+    if headset_requested and not target_legacy:
+        family = scan_family(runs_root, run_id)
+        body = build_headset(
+            runs_root, family,
+            annotate=lambda node, manifest: _annotate_editable_nodes(
+                {"nodes": {node.get("id", "_"): node}}, manifest
+            ),
+        )
+        return body
+
     body = graph_to_json(graph)
     try:
         _annotate_editable_nodes(body, _read_manifest(run_root))
     except Exception:
         pass  # legacy / manifest-less runs stay non-editable (defensive)
+    if headset_requested and target_legacy:
+        body["legacy"] = True  # R5: opaque/legacy head, degrade to per-run shape
     sources = {edge.source_id for edge in graph.edges.values()}
     body["stats"] = {
         "node_count": len(graph.nodes),
