@@ -57,10 +57,11 @@ def build_headset(
     runs_dir: Path,
     family: Family,
     *,
-    annotate: Optional[Callable[[dict, dict], None]] = None,
+    annotate: Optional[Callable[..., None]] = None,
 ) -> dict[str, Any]:
     """Build the head-set union DAG for `family`. `annotate` (optional) is applied to
-    each NodeView with the manifest of the run that produced it (editable decoration)."""
+    each NodeView as `annotate(view, manifest, form)` with the manifest + run_inputs.form
+    of the run that produced it (editable decoration + 2B.4 value backfill)."""
     nodes: dict[str, dict] = {}
     edges: list[dict] = []
     edge_seen: set[tuple[str, str]] = set()
@@ -83,6 +84,11 @@ def build_headset(
             continue
         node_index = _read_node_index(runs_dir, run_id)
         manifest = _read_manifest(runs_dir, run_id)
+        try:
+            inputs = read_json(runs_dir / run_id / "run_inputs.json")
+        except (FileNotFoundError, OSError, ValueError):
+            inputs = {}
+        form = inputs.get("form") or {}
 
         # id -> dedup key for this run's nodes
         keymap = {nid: _node_key(nid, node_index) for nid in graph.get("nodes", {})}
@@ -98,7 +104,7 @@ def build_headset(
                 view["runs"] = [run_id]
                 if annotate is not None:
                     try:
-                        annotate(view, manifest)
+                        annotate(view, manifest, form)
                     except Exception:
                         pass
                 nodes[key] = view
@@ -119,11 +125,6 @@ def build_headset(
         leaves = [nid for nid in graph.get("nodes", {}) if nid not in sources]
         head_id = leaves[-1] if leaves else None
         head_key = keymap.get(head_id) if head_id else None
-        inputs = {}
-        try:
-            inputs = read_json(runs_dir / run_id / "run_inputs.json")
-        except (FileNotFoundError, OSError, ValueError):
-            inputs = {}
         heads.append({
             "run_id": run_id,
             "head_node_hash": nodes[head_key]["node_hash"] if head_key in nodes else None,

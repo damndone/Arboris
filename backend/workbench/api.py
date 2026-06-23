@@ -821,19 +821,41 @@ _TERMINAL_EVENTS = {
 }
 
 
-def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
+def _backfill_schema_values(editable_schema: list, form: dict) -> list:
+    """2B.4: overlay the run's real form values onto editable_schema[i].value (by key).
+    Copies (never mutates the shared capabilities list); missing/empty keys keep the
+    capabilities default."""
+    out = []
+    for param in editable_schema:
+        copy = dict(param)
+        key = copy.get("key")
+        if key in form and form[key] not in (None, ""):
+            copy["value"] = form[key]
+        out.append(copy)
+    return out
+
+
+def _annotate_editable_node(node: dict, manifest: dict, form: dict | None = None) -> None:
     """Guardrail #7: RESPONSE-TIME decoration only — never persisted to graph.json.
-    For each node whose stage is editable and resolves to an OperationContract, attach
-    editable/op_type/schema_id/editable_schema/editable_schema_source."""
-    for node in body.get("nodes", {}).values():
-        contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
-        if contract is None:
-            continue
-        node["editable"] = True
-        node["op_type"] = contract.op_type
-        node["schema_id"] = contract.schema_id
+    If `form` is given (head-set view), backfill each control's current value from the
+    run's run_inputs.form; otherwise keep capabilities defaults (legacy per-run shape)."""
+    contract = resolve_operation_contract(stage=node.get("stage"), manifest=manifest)
+    if contract is None:
+        return
+    node["editable"] = True
+    node["op_type"] = contract.op_type
+    node["schema_id"] = contract.schema_id
+    if form:
+        node["editable_schema"] = _backfill_schema_values(contract.editable_schema, form)
+        node["editable_schema_source"] = "run_inputs"
+    else:
         node["editable_schema"] = contract.editable_schema
         node["editable_schema_source"] = "capabilities"
+
+
+def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
+    for node in body.get("nodes", {}).values():
+        _annotate_editable_node(node, manifest)
 
 
 @app.get("/runs/{run_id}/graph")
@@ -856,12 +878,7 @@ def get_run_graph(run_id: str, project_root: str, view: str | None = None):
     target_legacy = not (run_root / NODE_INDEX_FILENAME).is_file()
     if headset_requested and not target_legacy:
         family = scan_family(runs_root, run_id)
-        body = build_headset(
-            runs_root, family,
-            annotate=lambda node, manifest: _annotate_editable_nodes(
-                {"nodes": {node.get("id", "_"): node}}, manifest
-            ),
-        )
+        body = build_headset(runs_root, family, annotate=_annotate_editable_node)
         return body
 
     body = graph_to_json(graph)
