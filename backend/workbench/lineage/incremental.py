@@ -46,6 +46,7 @@ _STAGE_NAME: dict[str, str] = {
     "ImputationStage": "imputation",
     "EstimationStage": "estimation",
     "RecordingStage": "recording",
+    "DiagnosticsStage": "diagnostics",
     "ReliabilityStage": "reliability",
     "ReportStage": "report",
 }
