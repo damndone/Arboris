@@ -162,7 +162,7 @@ PM 决定：第一刀**不跨版本拆**，但在 v1.6.1 内拆 **2A/2B/2C 三�
 
 ### 2A — BE 节点结果 CAS + stage-output Merkle + 增量执行（dual-write）
 - `node_hash`（per-stage-output Merkle）、`lineage/node_store.py`（CAS + 引用账本）、缓存 wrapper（按 §3.2 cacheable boundary，RecordingStage 特判）、dual-write。
-- **验收**：a→b→c 段复用（改 model 仅 model+下游重算）；**golden 0-drift**（首次/无编辑路径字节级不变）；**增量正确性**（命中产物与强制全算逐字节一致）。
+- **验收**：a→b→c 段复用（改 model 仅 model+下游重算）；**golden 0-drift**（首次/无编辑路径字节级不变）；**增量正确性**（命中产物与强制全算逐字节一致）；**缓存命中后 child run 目录完整**（仍含旧消费者期待的 run-relative 文件，见 G2）。
 
 ### 2B — head-set 图契约 + family serve-聚合 + from_node 语义 + 值回填
 - `GET /runs/{id}/graph` 升级为家族 head-set 并集 DAG；serve-layer 扫描聚合 family；`from_node` 语义（§3.4）；`editable_schema.value` 回填 `run_inputs` 实际值。
@@ -170,7 +170,13 @@ PM 决定：第一刀**不跨版本拆**，但在 v1.6.1 内拆 **2A/2B/2C 三�
 
 ### 2C — FE control_factory + 可编辑 OperationSection + 森林画布 + fork/trace/rollback
 - `controlFactory`（§8 硬约束）、`OperationSection` 只读→可编辑接 `/rerun`、点亮 `rerunFromNode`、森林画布渲染并集 DAG（hash 去重、分叉、选中回溯、激活祖先 head 回滚）。
-- **验收**：编辑 model → 森林原地长子分支；任意节点跨 run 回溯；激活祖先 head 回滚；tsc 0 / vitest 绿。
+- **验收**：编辑 model → 森林原地长子分支；任意节点跨 run 回溯；激活祖先 head 回滚；tsc 0 / vitest 绿。**在现有 `GraphCanvas` 上消费 head-set adapter，不绑定 layout 重构（见 G3）。**
+
+### 实施硬护栏（PM 第二轮，plan 必须遵守）
+
+- **G1 — 2A 先只证明 model fork 的增量复用**：不追求第一步让所有 stage 完美缓存。先打通 `source → clean → … → model → report` **最小链路**的增量复用，并带 **“强制全算 vs 增量”对照**；其余 stage 的缓存覆盖在 2A 内逐步补，但**验收门槛是 model fork 这一条链跑通**，不是全 stage 完美。
+- **G2 — CAS 命中必须仍能生成完整 run 目录**：本版保留 run-relative artifacts，**命中缓存后的 child run 目录仍须含旧消费者期待的全部文件**（`processed/*.parquet`、`model_results/*.json`、`reports/report.html` 等）。测试**必须断言**命中路径下 run 目录文件完整（dual-write 物化，见 R9）。
+- **G3 — FE forest 不与 layout 重构绑定**：先在**现有 `GraphCanvas`** 上消费 head-set adapter，完成 **hash 去重 / 分叉 / active head / trace / rollback** 的**功能闭环**；**视觉 / 布局精修另算**，不在本版 2C 关键路径。
 
 **不做（明确延后，见 §12）**：任意 DAG 拓扑/模型输出再入、per-stage/code 可编辑节点、时序/波动率/边际效应方法、节点 AskAI/报告撰写器、并发解除、CAS 的 GC、graph-node 级缓存、family 索引化。
 
@@ -274,6 +280,7 @@ IO（`tsset` 日/季频、字符串日期、`.dta`/Excel、图/数据集/smcl→
 - 门禁统一 `./scripts/gate.sh`（后端全量 + golden 0-drift + 前端 vitest + tsc），**绝不裸 pytest**。
 - **golden 0-drift 硬门禁**：CAS/增量层在“首次/无编辑”路径必须与现行为**字节级一致**（缓存只跳过、不改结果；dual-write 不改 run-relative 产物内容）。
 - **增量正确性专项门禁**：命中产物须与“强制全算”逐字节一致（防 R1/R7/R8/R9 缓存中毒）；提供“强制全算 vs 增量”对照测试。
+- **run 目录完整性门禁（G2）**：缓存命中后的 child run 目录必须含旧消费者期待的全部 run-relative 文件，断言式检查（非仅 CAS 写入）。
 - 三级审查：Implementer → Test & QA → Reviewer 再 commit；2A/2B/2C 各自过门禁。
 - 执行：subagent-driven（accuracy-first：机械/接线/前端内联，subagent 仅核心逻辑 + 两角色对抗审查，撞限额内联兜底）；subagent 不传 model 参数。
 - 每个 implementer prompt **禁止 `git push`**；推 main / 移动已发布 tag 需单独授权。
@@ -301,6 +308,7 @@ IO（`tsset` 日/季频、字符串日期、`.dta`/Excel、图/数据集/smcl→
   5. family 聚合 day-1 **serve-layer 扫描**，索引化 → Slice 3。
   6. **“跨 pipeline”收紧**：物理共存、默认不复用。
   - §6 拆 **2A/2B/2C** 分段验收；§14 开放问题按 PM 结论定。
+- **v3（2026-06-23，并入 PM 第二轮）**：§6 新增**实施硬护栏 G1/G2/G3**（2A 先证 model fork 最小链路增量复用；CAS 命中须生成完整 run 目录；FE forest 不绑 layout 重构）；2A 验收 + §13 门禁补 run 目录完整性断言。
 
 ---
 
