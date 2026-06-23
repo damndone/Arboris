@@ -96,6 +96,7 @@ def _write_manifest(
     x: list[str],
     requested_model_type: str | None = None,
     model_routing: dict[str, Any] | None = None,
+    rerun_of: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         "run_id": run_id,
@@ -110,6 +111,8 @@ def _write_manifest(
         payload["requested_model_type"] = requested_model_type
     if model_routing is not None:
         payload["model_routing"] = model_routing
+    if rerun_of is not None:
+        payload["rerun_of"] = rerun_of
     write_json(
         run_root / "run_manifest.json",
         payload,

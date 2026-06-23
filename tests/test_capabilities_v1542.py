@@ -25,7 +25,7 @@ def test_manifest_entries_have_labels():
 
 def test_manifest_backward_compatible():
     caps = build_capabilities()
-    assert caps["schema_version"] == 2
+    assert caps["schema_version"] == 3
     assert any(m["key"] == "auto" for m in caps["model_types"])
     assert "imputation_methods" in caps
 

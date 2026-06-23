@@ -1,37 +1,499 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
+  "editable_stages": [
+    "model"
+  ],
   "model_types": [
-    {"key": "auto",              "label": "Auto (infer from y)",         "group": "auto",   "description": "Pick the best model automatically based on y type."},
-    {"key": "ols",               "label": "OLS (linear)",                 "group": "Linear", "description": "Ordinary Least Squares with HC1 robust SE."},
-    {"key": "logit",             "label": "Logit",                        "group": "Binary", "description": "Logistic regression for binary outcomes."},
-    {"key": "probit",            "label": "Probit",                       "group": "Binary", "description": "Probit regression for binary outcomes."},
-    {"key": "poisson",           "label": "Poisson",                      "group": "Count",  "description": "Poisson regression for count outcomes."},
-    {"key": "negative_binomial", "label": "Negative Binomial",            "group": "Count",  "description": "For overdispersed count outcomes."},
-    {"key": "panel_ols",         "label": "Panel OLS",                    "group": "Panel",  "description": "Fixed/random effects panel OLS.", "requires": ["entity_or_time"]},
-    {"key": "iv_2sls",           "label": "IV / 2SLS",                    "group": "IV",     "description": "Two-stage least squares with instrumental variables for endogenous regressors.", "requires": ["endog", "instruments"]},
-    {"key": "did",               "label": "DID (Difference-in-Differences)", "group": "DID", "description": "Two-way fixed-effects DID with event study, parallel-trends test, and Goodman-Bacon decomposition.", "requires": ["entity", "time", "treatment_timing"]},
-    {"key": "cs_did",            "label": "Callaway-Sant'Anna DID",       "group": "DID", "description": "Heterogeneity-robust group-time ATT(g,t) with event-study, group, and calendar aggregations and simultaneous confidence bands. Eliminates the staggered-adoption bias of TWFE DID.", "requires": ["entity", "time", "treatment_timing"]},
-    {"key": "sa_did",            "label": "Sun-Abraham DID",              "group": "DID", "description": "Interaction-weighted event-study estimator (Sun & Abraham 2021). Heterogeneity-robust dynamic ATT using clean-control cohorts, immune to the contamination of TWFE event-study leads/lags under staggered adoption.", "requires": ["entity", "time", "treatment_timing"]},
-    {"key": "glm:binomial",      "label": "GLM · binomial",         "group": "GLM",    "description": "Generalized linear model with binomial family."},
-    {"key": "glm:poisson",       "label": "GLM · poisson",          "group": "GLM",    "description": "Generalized linear model with Poisson family."},
-    {"key": "glm:negative_binomial", "label": "GLM · negative binomial", "group": "GLM", "description": "Generalized linear model with negative binomial family."}
+    {
+      "key": "auto",
+      "label": "Auto (infer from y)",
+      "group": "auto",
+      "description": "Pick the best model automatically based on y type."
+    },
+    {
+      "key": "ols",
+      "label": "OLS (linear)",
+      "group": "Linear",
+      "description": "Ordinary Least Squares with HC1 robust SE.",
+      "schema_id": "ols@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "logit",
+      "label": "Logit",
+      "group": "Binary",
+      "description": "Logistic regression for binary outcomes.",
+      "schema_id": "logit@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "probit",
+      "label": "Probit",
+      "group": "Binary",
+      "description": "Probit regression for binary outcomes.",
+      "schema_id": "probit@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "poisson",
+      "label": "Poisson",
+      "group": "Count",
+      "description": "Poisson regression for count outcomes.",
+      "schema_id": "poisson@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "negative_binomial",
+      "label": "Negative Binomial",
+      "group": "Count",
+      "description": "For overdispersed count outcomes.",
+      "schema_id": "negative_binomial@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "panel_ols",
+      "label": "Panel OLS",
+      "group": "Panel",
+      "description": "Fixed/random effects panel OLS.",
+      "requires": [
+        "entity_or_time"
+      ],
+      "schema_id": "panel_ols@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        },
+        {
+          "key": "entity_col",
+          "kind": "columns",
+          "label": "Entity",
+          "required": false,
+          "role": "entity"
+        },
+        {
+          "key": "time_col",
+          "kind": "columns",
+          "label": "Time",
+          "required": false,
+          "role": "time"
+        }
+      ]
+    },
+    {
+      "key": "iv_2sls",
+      "label": "IV / 2SLS",
+      "group": "IV",
+      "description": "Two-stage least squares with instrumental variables for endogenous regressors.",
+      "requires": [
+        "endog",
+        "instruments"
+      ],
+      "schema_id": "iv_2sls@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        },
+        {
+          "key": "iv_endog",
+          "kind": "columns",
+          "label": "Endogenous",
+          "required": true,
+          "role": "endog"
+        },
+        {
+          "key": "iv_instruments",
+          "kind": "columns",
+          "label": "Instruments",
+          "required": true,
+          "role": "instruments"
+        }
+      ]
+    },
+    {
+      "key": "did",
+      "label": "DID (Difference-in-Differences)",
+      "group": "DID",
+      "description": "Two-way fixed-effects DID with event study, parallel-trends test, and Goodman-Bacon decomposition.",
+      "requires": [
+        "entity",
+        "time",
+        "treatment_timing"
+      ],
+      "schema_id": "did@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "cs_did",
+      "label": "Callaway-Sant'Anna DID",
+      "group": "DID",
+      "description": "Heterogeneity-robust group-time ATT(g,t) with event-study, group, and calendar aggregations and simultaneous confidence bands. Eliminates the staggered-adoption bias of TWFE DID.",
+      "requires": [
+        "entity",
+        "time",
+        "treatment_timing"
+      ],
+      "schema_id": "cs_did@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "sa_did",
+      "label": "Sun-Abraham DID",
+      "group": "DID",
+      "description": "Interaction-weighted event-study estimator (Sun & Abraham 2021). Heterogeneity-robust dynamic ATT using clean-control cohorts, immune to the contamination of TWFE event-study leads/lags under staggered adoption.",
+      "requires": [
+        "entity",
+        "time",
+        "treatment_timing"
+      ],
+      "schema_id": "sa_did@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "dcdh",
+      "label": "de Chaisemartin-D'Haultfoeuille DID",
+      "group": "DID",
+      "description": "Dynamic DID for binary NON-ABSORBING (switching) treatment using not-yet-switched controls (de Chaisemartin & D'Haultfoeuille). Handles treatments that turn on and off, which Callaway-Sant'Anna and Sun-Abraham cannot. Event study with native placebo pre-trend tests.",
+      "requires": [
+        "entity",
+        "time",
+        "treatment_path"
+      ],
+      "schema_id": "dcdh@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "glm:binomial",
+      "label": "GLM - binomial",
+      "group": "GLM",
+      "description": "Generalized linear model with binomial family.",
+      "schema_id": "glm:binomial@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "glm:poisson",
+      "label": "GLM - poisson",
+      "group": "GLM",
+      "description": "Generalized linear model with Poisson family.",
+      "schema_id": "glm:poisson@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    },
+    {
+      "key": "glm:negative_binomial",
+      "label": "GLM - negative binomial",
+      "group": "GLM",
+      "description": "Generalized linear model with negative binomial family.",
+      "schema_id": "glm:negative_binomial@v1",
+      "params": [
+        {
+          "key": "model_type",
+          "kind": "select",
+          "label": "Model",
+          "role": "model"
+        },
+        {
+          "key": "covariance",
+          "kind": "select",
+          "label": "Covariance",
+          "required": false,
+          "options": [
+            "robust",
+            "clustered",
+            "unadjusted"
+          ],
+          "value": "robust"
+        }
+      ]
+    }
   ],
   "imputation_methods": [
-    {"key": "mice", "label": "MICE (Multiple Imputation)", "description": "Multiple Imputation by Chained Equations. Recommended when more than 5–10% of rows would otherwise be dropped due to missing values."}
+    {
+      "key": "mice",
+      "label": "MICE (Multiple Imputation)",
+      "description": "Multiple Imputation by Chained Equations. Recommended when more than 5-10% of rows would otherwise be dropped due to missing values."
+    }
   ],
   "prediction_models": [
-    {"key": "prediction_lasso",         "label": "Lasso",         "description": "L1-regularized linear prediction."},
-    {"key": "prediction_ridge",         "label": "Ridge",         "description": "L2-regularized linear prediction."},
-    {"key": "prediction_random_forest", "label": "Random Forest", "description": "Tree-ensemble prediction."}
+    {
+      "key": "prediction_lasso",
+      "label": "Lasso",
+      "description": "L1-regularized linear prediction."
+    },
+    {
+      "key": "prediction_ridge",
+      "label": "Ridge",
+      "description": "L2-regularized linear prediction."
+    },
+    {
+      "key": "prediction_random_forest",
+      "label": "Random Forest",
+      "description": "Tree-ensemble prediction."
+    }
   ],
   "sampling_methods": [
-    {"key": "smote",       "label": "SMOTE"},
-    {"key": "oversample",  "label": "Oversample"},
-    {"key": "undersample", "label": "Undersample"}
+    {
+      "key": "smote",
+      "label": "SMOTE"
+    },
+    {
+      "key": "oversample",
+      "label": "Oversample"
+    },
+    {
+      "key": "undersample",
+      "label": "Undersample"
+    }
   ],
   "covariance_options": [
-    {"key": "robust",     "label": "Robust (default)"},
-    {"key": "clustered",  "label": "Clustered"},
-    {"key": "unadjusted", "label": "Unadjusted"}
+    {
+      "key": "robust",
+      "label": "Robust (default)"
+    },
+    {
+      "key": "clustered",
+      "label": "Clustered"
+    },
+    {
+      "key": "unadjusted",
+      "label": "Unadjusted"
+    }
   ]
 }

@@ -1,11 +1,23 @@
 export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV" | "DID";
 
+export interface EditableControlSpec {
+  key: string;
+  kind: "radio" | "select" | "multiselect" | "slider" | "text" | "textarea" | "toggle" | "columns";
+  label?: string;
+  role?: string;
+  required?: boolean;
+  value?: unknown;
+  options?: Array<string | { value: unknown; label: string }>;
+}
+
 export interface ModelTypeEntry {
   key: string;
   label: string;
   group: ModelGroup;
   description?: string;
   requires?: string[];
+  schema_id?: string;
+  params?: EditableControlSpec[];
 }
 
 export interface ImputationMethodEntry {
@@ -32,6 +44,7 @@ export interface CovarianceOption {
 
 export interface Capabilities {
   schema_version: number;
+  editable_stages?: string[];
   model_types: ModelTypeEntry[];
   imputation_methods: ImputationMethodEntry[];
   prediction_models?: PredictionModelEntry[];
