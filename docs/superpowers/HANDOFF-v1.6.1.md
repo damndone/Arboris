@@ -1,9 +1,14 @@
 # v1.6.1 续作对接（HANDOFF）
 
-新会话从这里接上。**当前：2A + 2B + 2C 功能闭环全部完成。NEXT = (A) 决定是否把 ForestCanvas 接进 live app 路由（已知集成缺口），然后 (B) 2C QA/Reviewer 收尾 + 用户授权后 push/merge/tag。**
+新会话从这里接上。**当前：2A + 2B + 2C（含 2C.6 live 集成 + 真实浏览器 smoke）全部完成。NEXT = 2C QA/Reviewer 对抗审查 → 用户授权后 push/merge/tag。**
 
 ## 0. 一句话状态
-worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `15c2b8f`+（off origin/main `61d45ef` = tag v1.6.0），**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。**GATE PASSED：BE 1202 / golden 23 0-drift / FE 661 / tsc 0。**
+worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `1089722`+（off origin/main `61d45ef` = tag v1.6.0），**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。**GATE PASSED：BE 1202 / golden 23 0-drift / FE 666 / tsc 0。**
+
+## 0.3 2C.6 live 集成已完成（集成缺口已闭合）
+- gate：`workbench/forestFlag.ts` `?forest=1`（ship-dark，默认关）。`WorkbenchRouteContainer` 拆出 `LegacyGraphWorkbench`（守 Rules of Hooks），forest 开时走 `views/ForestRouteView.tsx`（`hooks/useForestData.ts` 拉 head-set + adapt + refetch；loading/error/legacy 三态降级）。`adaptHeadSet` 加 nullish 防御（legacy 响应不崩）。
+- **真实浏览器 smoke 已过**（Chrome 148 via CDP；preview MCP 因 unicode 路径 `项目规划` spawn 失败，改自驱 Chrome）。URL = `/runs/{id}?project_root=...&tab=lineage&forest=1`（森林在 **lineage tab** 下 + `?forest=1`）。验证：6 节点(raw+共享 cleaning 一次+M1/M2+2report)、2 head chips、rollback 高亮翻转(零 fetch/mutation)、trace [raw,cleaning,M1]、截图无空白/崩溃。
+- 复现 smoke：起 backend(`WORKBENCH_INCREMENTAL_CACHE=1 uvicorn workbench.api:app :8000`) + vite(:5173) + seed run+rerun（见 `/tmp/seed_forest.py` 思路），CDP 脚本驱 Chrome（node 24 全局 WebSocket，reuse `/json/list` page target + Page.navigate）。
 
 ## 0.4 2C 已完成（5 loop，功能闭环；GATE PASSED FE 661 +24）
 - **2C.1** `graphViewTypes.ts`（EditableControl 对齐 + HeadSet*/ForestViewModel + `opNodeId`）+ `graphAdapter.ts::adaptHeadSet`。森林节点身份 = dedup key（node_hash 或 bare node_id），**非 node_id**（M1/M2 共享 id）；`opNodeId` 留原始 id 作 from_node。

@@ -39,8 +39,10 @@ describe("ForestRouteView", () => {
 
   it("degrades to a notice for a legacy target", async () => {
     vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue({
+      schema_version: 3,
       legacy: true,
       nodes: { "stage:cleaned": { id: "stage:cleaned", kind: "k", display_label: "C" } },
+      edges: { e1: { id: "e1", source_id: "stage:raw", target_id: "stage:cleaned" } },
     } as unknown as HeadSetResponse);
     render(<ForestRouteView projectRoot="/p" runId="old" />);
     await waitFor(() => expect(screen.getByTestId("forest-legacy")).toBeTruthy());

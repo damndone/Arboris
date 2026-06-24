@@ -87,4 +87,20 @@ describe("adaptHeadSet", () => {
     const forks = vm.edges.filter((e) => e.source === "C");
     expect(forks.map((e) => e.target).sort()).toEqual(["M1", "M2"]);
   });
+
+  it("degrades to a legacy marker on the old per-run shape (edges as dict, no heads)", () => {
+    // The REAL legacy ?view=headset response is the old per-run graph: nodes/edges
+    // are dicts-by-id and there is no `heads` array. adaptHeadSet must not throw.
+    const legacy = {
+      schema_version: 3,
+      legacy: true,
+      nodes: { "stage:cleaned": { id: "stage:cleaned", kind: "k", display_label: "C" } },
+      edges: { "e1": { id: "e1", source_id: "stage:raw", target_id: "stage:cleaned" } },
+    } as unknown as HeadSetResponse;
+    const vm = adaptHeadSet(legacy);
+    expect(vm.legacy).toBe(true);
+    expect(vm.nodes).toEqual([]);
+    expect(vm.edges).toEqual([]);
+    expect(vm.heads).toEqual([]);
+  });
 });
