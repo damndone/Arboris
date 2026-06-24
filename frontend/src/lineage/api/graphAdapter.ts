@@ -266,15 +266,18 @@ function adaptHeadSetNode(key: string, raw: HeadSetNodeRaw): HeadSetNode {
  * entry, camelCases the heads, and synthesizes edge ids from source/target dedup keys.
  */
 export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
-  const nodes: HeadSetNode[] = Object.entries(backend.nodes).map(([key, raw]) =>
-    adaptHeadSetNode(key, raw),
+  // Defensive: a legacy / degraded response is the old per-run shape (no `heads`,
+  // legacy:true). Tolerate missing fields so the forest view degrades to a legacy
+  // marker instead of throwing.
+  const nodes: HeadSetNode[] = Object.entries(backend.nodes ?? {}).map(
+    ([key, raw]) => adaptHeadSetNode(key, raw),
   );
-  const edges: GraphViewEdge[] = backend.edges.map((e) => ({
+  const edges: GraphViewEdge[] = (backend.edges ?? []).map((e) => ({
     id: `${e.source}->${e.target}`,
     source: e.source,
     target: e.target,
   }));
-  const heads: Head[] = backend.heads.map((h) => ({
+  const heads: Head[] = (backend.heads ?? []).map((h) => ({
     runId: h.run_id,
     headNodeHash: h.head_node_hash,
     fromNode: h.from_node,

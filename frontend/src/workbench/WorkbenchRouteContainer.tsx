@@ -43,6 +43,8 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
+import { forestViewEnabled } from "./forestFlag";
+import { ForestRouteView } from "./views/ForestRouteView";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -50,6 +52,20 @@ interface WorkbenchRouteContainerProps {
 }
 
 export function WorkbenchRouteContainer({
+  projectRoot,
+  runId,
+}: WorkbenchRouteContainerProps) {
+  // 2C.6 — ship-dark forest gate (?forest=1). Off by default: the legacy
+  // per-run graph workbench is untouched. On: a self-contained forest route
+  // that owns its own head-set load + canvas. Branch before any hook so each
+  // subtree calls its hooks unconditionally (Rules of Hooks).
+  if (forestViewEnabled()) {
+    return <ForestRouteView projectRoot={projectRoot} runId={runId} />;
+  }
+  return <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />;
+}
+
+function LegacyGraphWorkbench({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
