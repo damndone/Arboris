@@ -132,7 +132,6 @@ describe("NodeActionMenu", () => {
 
   it.each([
     ["Ask AI about this node"],
-    ["Rerun from here"],
     ["Mark needs review"],
   ] as const)(
     'disabled placeholder "%s" renders greyed-out with a reason tooltip (plan §11)',
@@ -145,6 +144,15 @@ describe("NodeActionMenu", () => {
       expect(item?.getAttribute("title")).toMatch(/V1\.5\.3/i);
     },
   );
+
+  // v1.6.1 (2C.3): "Rerun from here" is now live — enabled, no reason tooltip.
+  it('"Rerun from here" is live (enabled, no disabled tooltip)', () => {
+    renderMenu(makeNode());
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    const item = screen.getByText("Rerun from here").closest("button");
+    expect(item).not.toBeNull();
+    expect(item).not.toBeDisabled();
+  });
 
   it("V1.5.0-era reserved labels are no longer present (Pin to compare / Coming soon)", () => {
     renderMenu(makeNode());
