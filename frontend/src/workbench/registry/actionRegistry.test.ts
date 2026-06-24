@@ -99,7 +99,8 @@ describe("actionRegistry", () => {
   });
 
   it("disabled placeholders return a reason", () => {
-    const disabled = ["askAiAboutNode", "rerunFromNode", "markNeedsReview"];
+    // v1.6.1 (2C.3): rerunFromNode is now live (forks a sibling run).
+    const disabled = ["askAiAboutNode", "markNeedsReview"];
     for (const id of disabled) {
       const a = actionRegistry.find((x) => x.id === id)!;
       const out = a.disabled?.(ctx());
@@ -116,6 +117,7 @@ describe("actionRegistry", () => {
       "copyLineagePath",
       "focusUpstream",
       "pinUpstream",
+      "rerunFromNode",
     ];
     for (const id of live) {
       const a = actionRegistry.find((x) => x.id === id)!;

@@ -182,10 +182,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Rerun from here",
     surfaces: ["graph-context-menu", "drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Partial rerun backend lands in V1.5.3" }),
-    invoke: () => {
-      /* placeholder — wired in V1.5.3 with /runs/<id>/rerun */
-    },
+    // v1.6.1 (2C.3): live. Opens the node detail whose editable OperationSection
+    // submits POST /runs/<id>/rerun (forking a sibling branch in the forest).
+    invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
   },
   {
     id: "markNeedsReview",

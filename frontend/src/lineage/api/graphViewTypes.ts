@@ -66,7 +66,8 @@ export interface EditableControl {
     | "slider"
     | "text"
     | "textarea"
-    | "toggle";
+    | "toggle"
+    | "columns"; // v1.6.1: aligned with backend editable_schema (column-picker)
   key: string;
   label: string;
   value?: unknown;
@@ -75,6 +76,10 @@ export interface EditableControl {
   max?: number;
   step?: number;
   unit?: string;
+  // v1.6.1: backend-aligned annotations (correct the stale v1.5.0 shape).
+  role?: string; // semantic role (e.g. "model" — the op_type switch control)
+  required?: boolean;
+  visible_when?: Record<string, unknown>; // forward-compat; preserved, not yet enforced
 }
 
 export interface GraphViewNode {
@@ -152,4 +157,96 @@ export interface GraphViewModel {
     leafCount: number;
     hasDpCount: number;
   };
+}
+
+// ───────────────────────────────────────────────────────────────
+// v1.6.1 — head-set (cross-run lineage forest) contract + ViewModel
+// Backend: GET /runs/{id}/graph?view=headset (lineage/headset.py::build_headset)
+// ───────────────────────────────────────────────────────────────
+
+export interface CasRef {
+  node_hash: string;
+  artifact: string;
+}
+
+/** Raw backend NodeView — a per-run graph node decorated with node-hash identity
+ *  + editable annotation. Keyed in the response by its dedup key (node_hash, or the
+ *  bare node_id for non-cacheable nodes like the raw upload). */
+export interface HeadSetNodeRaw {
+  id: string;
+  kind: string;
+  display_label: string;
+  stage?: string | null;
+  summary?: string | null;
+  trust?: unknown;
+  trust_reason?: string | null;
+  parent_stage_id?: string | null;
+  created_at?: string;
+  decision_points?: unknown[];
+  node_hash: string | null;
+  producing_stage: string | null;
+  cas_ref: CasRef | null;
+  runs: string[];
+  editable?: boolean;
+  op_type?: string;
+  schema_id?: string;
+  editable_schema?: EditableControl[];
+  editable_schema_source?: "capabilities" | "run_inputs";
+}
+
+export interface HeadSetEdgeRaw {
+  source: string;
+  target: string;
+}
+
+export interface HeadRaw {
+  run_id: string;
+  head_node_hash: string | null;
+  from_node: string | null;
+  rerun_of: string | null;
+  rerun_reason: string | null;
+  status: string | null;
+  created_at: string | null;
+}
+
+export interface HeadSetResponse {
+  nodes: Record<string, HeadSetNodeRaw>;
+  edges: HeadSetEdgeRaw[];
+  heads: HeadRaw[];
+  schema_version: number;
+  legacy: boolean;
+}
+
+/** UI-facing forest node: the base GraphViewNode plus head-set identity + editability.
+ *  `id`/`nodeKey` are the dedup key (node_hash or bare node_id) — unique in the forest,
+ *  unlike `opNodeId` (the original per-run node id, reused as the rerun `from_node`). */
+export interface HeadSetNode extends GraphViewNode {
+  opNodeId: string;
+  nodeHash: string | null;
+  producingStage: string | null;
+  casRef: CasRef | null;
+  runs: string[];
+  editable?: boolean;
+  opType?: string;
+  schemaId?: string;
+  editableSchema?: EditableControl[];
+  editableSchemaSource?: "capabilities" | "run_inputs";
+}
+
+export interface Head {
+  runId: string;
+  headNodeHash: string | null;
+  fromNode: string | null;
+  rerunOf: string | null;
+  rerunReason: string | null;
+  status: string | null;
+  createdAt: string | null;
+}
+
+export interface ForestViewModel {
+  schemaVersion: number;
+  legacy: boolean;
+  nodes: HeadSetNode[];
+  edges: GraphViewEdge[];
+  heads: Head[];
 }

@@ -449,6 +449,38 @@ def _run_workflow(
     ctx.artifacts["_cs_cluster_var"] = normalize_column_name(cs_cluster_var) if cs_cluster_var else ""
     ctx.artifacts["_honest_did"] = bool(honest_did)
 
+    from .. import flags
+    if flags.incremental_cache():
+        from ..lineage.incremental import run_pipeline_traced
+        from ..lineage.upload_store import sha256_bytes
+        upload_hash = sha256_bytes(input_files[0].read_bytes()) if input_files else ""
+        form = {
+            "model_type": model_type,
+            "covariance": covariance,
+            "entity_col": entity_col,
+            "time_col": time_col,
+            "iv_endog": list(iv_endog or []),
+            "iv_instruments": list(iv_instruments or []),
+            "y": y,
+            "x": list(x),
+            "imputation": imputation,
+            "prediction_model_type": prediction_model_type,
+            "prediction_cv_folds": prediction_cv_folds,
+            "prediction_sampling_method": prediction_sampling_method,
+        }
+        cfg = {
+            "random_seed": getattr(config, "random_seed", 20260429),
+            "imputation_method": getattr(config, "imputation_method", ""),
+            "imputation_m": getattr(config, "imputation_m", 5),
+            "imputation_max_iter": getattr(config, "imputation_max_iter", 10),
+            "max_missing_rate": getattr(config, "max_missing_rate", 0.4),
+        }
+        ctx = run_pipeline_traced(
+            PIPELINE, ctx, env, form=form, config=cfg,
+            force_full=flags.force_full_recompute(), upload_hash=upload_hash,
+        )
+        return {"run_id": run_id, "status": ctx.terminal_status}
+
     for stage in PIPELINE:
         ctx = stage.run(ctx, env)
         if ctx.terminal_status in ("blocked", "failed"):

@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { GraphResponse } from "./lineage/types";
+import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
 
 export type ProjectResponse = {
   project_root: string;
@@ -842,6 +843,49 @@ export async function getRunGraph(
   );
   const response = await fetch(url);
   return readResponse<GraphResponse>(response);
+}
+
+// ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──
+
+/** Fetch the family head-set (union DAG across the rerun forest). */
+export async function getRunGraphHeadSet(
+  projectRoot: string,
+  runId: string,
+): Promise<HeadSetResponse> {
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}/graph?project_root=${encodeURIComponent(
+      projectRoot,
+    )}&view=headset`,
+  );
+  const response = await fetch(url);
+  return readResponse<HeadSetResponse>(response);
+}
+
+/** Create a child run by editing one node's operation (POST /runs/{id}/rerun).
+ *  `fromNode` is the replaced op node id; the new model forks off the shared
+ *  upstream prefix as a sibling (spec §3.4). Returns the child run id. */
+export async function rerunFromNode(
+  projectRoot: string,
+  runId: string,
+  args: {
+    fromNode: string;
+    opOverrides: Record<string, unknown>;
+    rerunReason?: string;
+  },
+): Promise<{ run_id: string }> {
+  const url = apiUrl(
+    `/runs/${encodeURIComponent(runId)}/rerun?project_root=${encodeURIComponent(projectRoot)}`,
+  );
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from_node: args.fromNode,
+      op_overrides: args.opOverrides,
+      rerun_reason: args.rerunReason ?? "manual_override",
+    }),
+  });
+  return readResponse<{ run_id: string }>(response);
 }
 
 export type RunProgressEvent = {
