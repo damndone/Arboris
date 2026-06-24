@@ -21,48 +21,51 @@ function forest(): ForestViewModel {
       { id: "C->M2", source: "C", target: "M2" },
     ],
     heads: [
-      { runId: "a", headNodeHash: "M1", fromNode: null, rerunOf: null,
-        rerunReason: null, status: "completed", createdAt: null },
-      { runId: "b", headNodeHash: "M2", fromNode: "model:ols_1", rerunOf: "a",
-        rerunReason: "manual_override", status: "completed", createdAt: null },
+      { runId: "a", headNodeHash: "M1", fromNode: null, rerunOf: null, rerunReason: null, status: "completed", createdAt: null },
+      { runId: "b", headNodeHash: "M2", fromNode: "model:ols_1", rerunOf: "a", rerunReason: "manual_override", status: "completed", createdAt: null },
     ],
   };
 }
 
 describe("forest rollback (non-mutating active-head selection)", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     fetchSpy = vi.fn(() =>
       Promise.resolve({ ok: true, json: () => Promise.resolve({}) } as Response),
     );
-    // NB: only stub fetch — do NOT unstubAllGlobals in teardown, that would also
-    // wipe the ResizeObserver/DOMRect mocks vitest.setup.ts installs for ReactFlow.
+    // Only stub fetch — do NOT unstubAllGlobals (that wipes the setup's
+    // ResizeObserver/DOMRect mocks ReactFlow needs).
     vi.stubGlobal("fetch", fetchSpy);
   });
 
-  it("switching to an ancestor head performs NO backend call and does not mutate the forest", () => {
+  it("selecting a head emits onActiveHead and performs NO backend call (rollback = view-state)", () => {
     const data = forest();
     const snapshot = JSON.parse(JSON.stringify(data));
-    const onRerun = vi.fn();
-    render(<ForestCanvas forest={data} projectRoot="/p" runId="b" onRerun={onRerun} />);
-
-    // Roll back to ancestor head `a` — active head flips.
+    const onActiveHead = vi.fn();
+    render(
+      <ForestCanvas
+        forest={data}
+        selectedNodeId={null}
+        onSelect={vi.fn()}
+        activeRunId="b"
+        onActiveHead={onActiveHead}
+      />,
+    );
     fireEvent.click(screen.getByTestId("forest-head-a"));
-    expect(screen.getByTestId("forest-head-a").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("forest-head-b").getAttribute("aria-pressed")).toBe("false");
-
-    // Rollback is pure view state: NO mutation.
+    expect(onActiveHead).toHaveBeenCalledWith("a");
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(onRerun).not.toHaveBeenCalled();
-    // Immutable runs intact: the forest data object is untouched.
+    // The forest data object is never mutated by a rollback.
     expect(data).toEqual(snapshot);
   });
 
-  it("rollback is reversible — re-selecting the head restores its active state", () => {
-    render(<ForestCanvas forest={forest()} projectRoot="/p" runId="b" />);
-    fireEvent.click(screen.getByTestId("forest-head-a"));
-    fireEvent.click(screen.getByTestId("forest-head-b"));
+  it("the active head prop drives which version is marked active", () => {
+    const { rerender } = render(
+      <ForestCanvas forest={forest()} selectedNodeId={null} onSelect={vi.fn()} activeRunId="a" onActiveHead={vi.fn()} />,
+    );
+    expect(screen.getByTestId("forest-head-a").getAttribute("aria-pressed")).toBe("true");
+    rerender(
+      <ForestCanvas forest={forest()} selectedNodeId={null} onSelect={vi.fn()} activeRunId="b" onActiveHead={vi.fn()} />,
+    );
     expect(screen.getByTestId("forest-head-b").getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByTestId("forest-head-a").getAttribute("aria-pressed")).toBe("false");
   });

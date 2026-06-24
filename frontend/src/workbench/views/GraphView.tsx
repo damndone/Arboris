@@ -25,10 +25,13 @@ import { GraphCanvas } from "../../lineage/graph/GraphCanvas";
 import { useLayoutMode } from "../../lineage/graph/useLayoutMode";
 import { useLineage } from "../../lineage/LineageContext";
 import { useWorkbenchOptional } from "../WorkbenchStateProvider";
+import { useForest } from "../ForestContext";
+import { ForestCanvas } from "../../lineage/graph/ForestCanvas";
 import { buildRunSnapshot } from "../RunSnapshotAdapter";
 
 export function GraphView() {
   const { model, selectedKey, select } = useLineage();
+  const forest = useForest();
   // useWorkbenchOptional() lets GraphView work both inside the new
   // WorkbenchRouteContainer AND inside V1.5.0/1.5.1 bare-mount tests.
   // When the provider is absent, focus/search overlay degrade to none
@@ -119,6 +122,30 @@ export function GraphView() {
   };
 
   if (model.legacy) return <LegacyBanner />;
+
+  // v1.6.1 — forest mode swaps ONLY the center canvas. The shell (run rail, DetailDrawer,
+  // bottom panels) is untouched; node selection still flows through `select` so the same
+  // drawer opens. Head chips + active-head/rollback live in the canvas overlay.
+  if (forest) {
+    return (
+      <div
+        className="lineage-root"
+        data-testid="graph-workbench"
+        data-view="forest"
+        style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+      >
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ForestCanvas
+            forest={forest.forest}
+            selectedNodeId={effectiveSelectedKey}
+            onSelect={select}
+            activeRunId={forest.activeRunId}
+            onActiveHead={forest.setActiveRunId}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

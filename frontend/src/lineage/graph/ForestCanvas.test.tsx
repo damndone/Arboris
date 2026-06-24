@@ -3,10 +3,10 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ForestCanvas } from "./ForestCanvas";
 import type { ForestViewModel, HeadSetNode } from "../api/graphViewTypes";
 
-// ReactFlow renders node content (titles) inline in jsdom; node-click → trace/edit
-// is interaction-heavy and verified in the browser smoke. Here we assert structure:
-// the real node boxes render, the shared prefix is deduped, and head chips drive
-// the active head (rollback) as pure view-state.
+// ReactFlow renders node content (titles) inline in jsdom; node-click selection is
+// lifted to the shell and verified in the browser smoke. Here we assert structure:
+// the real node boxes render, the shared prefix is deduped, and head chips drive the
+// active head (rollback) as pure view-state via the onActiveHead callback.
 
 function node(over: Partial<HeadSetNode> & { id: string }): HeadSetNode {
   return {
@@ -27,7 +27,6 @@ function node(over: Partial<HeadSetNode> & { id: string }): HeadSetNode {
   };
 }
 
-// raw → C → {M1, M2}; C shared by both runs, M1 only run_a, M2 only run_b.
 function forest(): ForestViewModel {
   return {
     schemaVersion: 4,
@@ -51,32 +50,39 @@ function forest(): ForestViewModel {
 }
 
 function renderForest(over: Partial<React.ComponentProps<typeof ForestCanvas>> = {}) {
-  return render(
-    <ForestCanvas forest={forest()} projectRoot="/p" runId="run_b" onRerun={vi.fn()} {...over} />,
+  const onSelect = vi.fn();
+  const onActiveHead = vi.fn();
+  render(
+    <ForestCanvas
+      forest={forest()}
+      selectedNodeId={null}
+      onSelect={onSelect}
+      activeRunId="run_b"
+      onActiveHead={onActiveHead}
+      {...over}
+    />,
   );
+  return { onSelect, onActiveHead };
 }
 
 describe("ForestCanvas", () => {
   it("renders every forest node once as a real box (shared prefix deduped)", () => {
     renderForest();
-    // Each title appears exactly once — the shared C is a single node.
     expect(screen.getAllByText("Cleaned data")).toHaveLength(1);
     expect(screen.getAllByText("Raw input data")).toHaveLength(1);
-    // Both sibling model branches are present.
     expect(screen.getByText("OLS robust")).toBeTruthy();
     expect(screen.getByText("OLS unadjusted")).toBeTruthy();
   });
 
-  it("defaults the active head to the viewed run", () => {
-    renderForest({ runId: "run_b" });
+  it("marks the active head and exposes the other as a rollback target", () => {
+    renderForest({ activeRunId: "run_b" });
     expect(screen.getByTestId("forest-head-run_b").getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByTestId("forest-head-run_a").getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("switching the active head is pure view-state (rollback)", () => {
-    renderForest({ runId: "run_b" });
+  it("clicking a head fires onActiveHead (rollback is owned by the shell)", () => {
+    const { onActiveHead } = renderForest({ activeRunId: "run_b" });
     fireEvent.click(screen.getByTestId("forest-head-run_a"));
-    expect(screen.getByTestId("forest-head-run_a").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("forest-head-run_b").getAttribute("aria-pressed")).toBe("false");
+    expect(onActiveHead).toHaveBeenCalledWith("run_a");
   });
 });

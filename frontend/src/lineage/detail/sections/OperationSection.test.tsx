@@ -67,6 +67,7 @@ describe("OperationSection (editable)", () => {
     expect(submitRerun).toHaveBeenCalledWith({
       fromNode: "model:ols_1",
       opOverrides: { covariance: "robust" },
+      runId: "run_a", // the node's owning run (forest nodes may differ from the viewed run)
     });
     await screen.findByTestId("operation-rerun-done");
   });
