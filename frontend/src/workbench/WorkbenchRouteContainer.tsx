@@ -43,11 +43,12 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
-import { forestViewEnabled } from "./forestFlag";
+import { readForestMode, writeForestMode } from "./forestMode";
 import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
-import { ForestContext } from "./ForestContext";
+import { ForestContext, ForestModeContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
+import { useCallback } from "react";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -58,14 +59,30 @@ export function WorkbenchRouteContainer({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
-  // 2C.6 — ship-dark forest gate (?forest=1). Off by default: the legacy per-run
-  // graph workbench is untouched. On: the SAME workbench shell (run rail, DetailDrawer,
-  // bottom panels) with only the center canvas swapped for the cross-run forest. Branch
-  // before any hook so each subtree calls its hooks unconditionally (Rules of Hooks).
-  if (forestViewEnabled()) {
-    return <ForestWorkbench projectRoot={projectRoot} runId={runId} />;
-  }
-  return <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />;
+  // 2C.6 — persistent forest mode (toggle in the topbar; survives run/tab navigation).
+  // Off → the legacy per-run workbench is untouched. On → the SAME shell (run rail,
+  // DetailDrawer, bottom panels) with only the center canvas swapped for the cross-run
+  // forest. The mode lives in ForestModeContext (wrapping BOTH branches) so the toolbar
+  // toggle can flip it from either view.
+  const [forestMode, setForestModeState] = useState<boolean>(readForestMode);
+  const setForestMode = useCallback((on: boolean) => {
+    writeForestMode(on);
+    setForestModeState(on);
+  }, []);
+  const modeValue = useMemo(
+    () => ({ forestMode, setForestMode }),
+    [forestMode, setForestMode],
+  );
+
+  return (
+    <ForestModeContext.Provider value={modeValue}>
+      {forestMode ? (
+        <ForestWorkbench projectRoot={projectRoot} runId={runId} />
+      ) : (
+        <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />
+      )}
+    </ForestModeContext.Provider>
+  );
 }
 
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {

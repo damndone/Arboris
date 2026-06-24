@@ -8,10 +8,17 @@
 // rail, the rich DetailDrawer (which owns node detail + edit/rerun), and the bottom
 // panels all stay. Selection is lifted to the shell (onSelect → LineageContext) so a
 // node click opens the same drawer the per-run view uses. The active head's lineage is
-// highlighted; selecting an ancestor head is rollback (pure view-state).
+// highlighted; selecting an ancestor head is rollback (pure view-state). Nodes are
+// draggable (dagre seeds the layout, positions are then owned by ReactFlow state).
 
-import { useMemo } from "react";
-import ReactFlow, { Background, Controls, MarkerType, Panel } from "reactflow";
+import { useEffect, useMemo } from "react";
+import ReactFlow, {
+  Background,
+  Controls,
+  MarkerType,
+  Panel,
+  useNodesState,
+} from "reactflow";
 import type { Node as RFNode, Edge as RFEdge } from "reactflow";
 import "reactflow/dist/style.css";
 import dagre from "dagre";
@@ -52,44 +59,60 @@ export function ForestCanvas({
   onActiveHead,
 }: ForestCanvasProps) {
   const activeSet = useMemo(() => headActiveSet(forest, activeRunId), [forest, activeRunId]);
-  const trace = useMemo(
-    () => (selectedNodeId ? tracePath(forest, selectedNodeId) : []),
-    [forest, selectedNodeId],
+
+  // Seed positions from dagre. Depends ONLY on graph structure so a selection (or a
+  // node drag) never re-snaps the layout — positions are then owned by ReactFlow state.
+  const seededNodes = useMemo(() => {
+    const base: RFNode[] = forest.nodes.map((n) => ({
+      id: n.id,
+      type: "lineageNode",
+      position: { x: 0, y: 0 },
+      data: { node: n, state: "related" as GraphNodeState },
+      connectable: false,
+    }));
+    const edges: RFEdge[] = forest.edges.map((e) => ({ id: e.id, source: e.source, target: e.target }));
+    return layoutLR(base, edges);
+  }, [forest]);
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState(seededNodes);
+  // Re-seed only when the forest structure changes (e.g. a rerun added a branch).
+  useEffect(() => setRfNodes(seededNodes), [seededNodes, setRfNodes]);
+
+  // Decorate (selection / active-head dim) WITHOUT touching positions — overlay only.
+  const decoratedNodes = useMemo(
+    () =>
+      rfNodes.map((n) => {
+        const active = activeSet.has(n.id);
+        const state: GraphNodeState =
+          n.id === selectedNodeId ? "selected" : active ? "related" : "dim";
+        return { ...n, data: { ...n.data, state }, selected: n.id === selectedNodeId };
+      }),
+    [rfNodes, activeSet, selectedNodeId],
   );
 
-  const { rfNodes, rfEdges } = useMemo(() => {
-    const traceSet = new Set(trace);
-    const baseNodes: RFNode[] = forest.nodes.map((n) => {
-      const active = activeSet.has(n.id);
-      const state: GraphNodeState =
-        n.id === selectedNodeId ? "selected" : active ? "related" : "dim";
-      return {
-        id: n.id,
-        type: "lineageNode",
-        position: { x: 0, y: 0 },
-        data: { node: n, state },
-        selected: n.id === selectedNodeId,
-        connectable: false,
-      };
-    });
-    const edges: RFEdge[] = forest.edges.map((e) => {
+  const rfEdges = useMemo<RFEdge[]>(() => {
+    const traceSet = new Set(selectedNodeId ? tracePath(forest, selectedNodeId) : []);
+    return forest.edges.map((e) => {
       const onActiveEdge = activeSet.has(e.source) && activeSet.has(e.target);
+      // Flow animation on the selected node's lineage + its immediate neighbours,
+      // and keep it animated for as long as a node is selected.
+      const touchesSelected = e.source === selectedNodeId || e.target === selectedNodeId;
       const onTrace = traceSet.has(e.source) && traceSet.has(e.target);
+      const lit = onTrace || touchesSelected;
       return {
         id: e.id,
         source: e.source,
         target: e.target,
-        animated: onTrace,
+        animated: lit,
         markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
         style: {
-          opacity: onActiveEdge ? 1 : 0.28,
-          strokeWidth: onTrace ? 2.5 : 1.5,
-          stroke: onTrace ? "var(--tint, #0a84ff)" : undefined,
+          opacity: onActiveEdge || lit ? 1 : 0.28,
+          strokeWidth: lit ? 2.5 : 1.5,
+          stroke: lit ? "var(--tint, #0a84ff)" : undefined,
         },
       };
     });
-    return { rfNodes: layoutLR(baseNodes, edges), rfEdges: edges };
-  }, [forest, activeSet, selectedNodeId, trace]);
+  }, [forest, activeSet, selectedNodeId]);
 
   return (
     <div
@@ -98,15 +121,18 @@ export function ForestCanvas({
       style={{ width: "100%", height: "100%", minHeight: 480, position: "relative" }}
     >
       <ReactFlow
-        nodes={rfNodes}
+        nodes={decoratedNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
         defaultEdgeOptions={{ type: "default" }}
+        onNodesChange={onNodesChange}
+        nodesDraggable={true}
+        nodesConnectable={false}
+        elementsSelectable={true}
         fitView
         fitViewOptions={{ padding: 0.18 }}
         minZoom={0.2}
         maxZoom={1.6}
-        nodesConnectable={false}
         onNodeClick={(_, n) => onSelect(n.id)}
         onPaneClick={() => onSelect(null)}
         proOptions={{ hideAttribution: true }}

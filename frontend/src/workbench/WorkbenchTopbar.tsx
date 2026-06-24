@@ -14,6 +14,7 @@ import {
   useWorkbench,
 } from "./WorkbenchStateProvider";
 import { useLineage } from "../lineage/LineageContext";
+import { useForestMode } from "./ForestContext";
 import type { ViewMode } from "./state/urlSchema";
 import {
   actionsForSurface,
@@ -34,6 +35,7 @@ const VIEW_TABS: TabSpec[] = [
 export function WorkbenchTopbar() {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
+  const forestMode = useForestMode();
 
   // V1.5.2 P7 — topbar action slot, plan §15. Driven by actionRegistry
   // filtered by surface="topbar". The action context needs a node;
@@ -95,6 +97,38 @@ export function WorkbenchTopbar() {
           </ViewTabButton>
         ))}
       </div>
+      {/* v1.6.1 — forest toggle. Persistent (sessionStorage) so it survives run/tab
+       *  navigation — switches the center canvas between the per-run graph and the
+       *  cross-run lineage forest. Only meaningful in the graph view. */}
+      {forestMode && state.view === "graph" && (
+        <button
+          type="button"
+          data-testid="forest-toggle"
+          aria-pressed={forestMode.forestMode}
+          onClick={() => forestMode.setForestMode(!forestMode.forestMode)}
+          title={
+            forestMode.forestMode
+              ? "Showing the cross-run lineage forest — click for the single-run graph"
+              : "Show the cross-run lineage forest (all reruns of this run)"
+          }
+          style={{
+            padding: "6px 12px",
+            borderRadius: 6,
+            border: forestMode.forestMode
+              ? "1px solid var(--tint, #0a84ff)"
+              : "1px solid var(--separator, #2e2e30)",
+            background: forestMode.forestMode
+              ? "var(--tint-bg, rgba(10,132,255,0.12))"
+              : "transparent",
+            color: forestMode.forestMode ? "var(--tint, #0a84ff)" : "var(--label-secondary)",
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: forestMode.forestMode ? 600 : 400,
+          }}
+        >
+          {forestMode.forestMode ? "Forest ✓" : "Forest"}
+        </button>
+      )}
       {/* Right-side action slot — V1.5.2 P7 plan §15. Driven by
        *  actionRegistry surface="topbar". V1.5.2 only has disabled
        *  Rerun + Generate report placeholders. */}
