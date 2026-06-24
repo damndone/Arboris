@@ -32,8 +32,9 @@ describe("ForestRouteView", () => {
     render(<ForestRouteView projectRoot="/p" runId="run_a" />);
     expect(screen.getByTestId("forest-loading")).toBeTruthy();
     await waitFor(() => expect(screen.getByTestId("forest-route")).toBeTruthy());
-    expect(screen.getByTestId("forest-node-C")).toBeTruthy();
-    expect(screen.getByTestId("forest-node-M1")).toBeTruthy();
+    // Nodes render as real boxes (ReactFlow renders the title text inline).
+    expect(screen.getByText("Cleaned")).toBeTruthy();
+    expect(screen.getByText("OLS")).toBeTruthy();
     expect(api.getRunGraphHeadSet).toHaveBeenCalledWith("/p", "run_a");
   });
 
