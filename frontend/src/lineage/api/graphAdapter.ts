@@ -21,9 +21,14 @@ import { getDPDisplay } from "../decisions/decisionRegistry";
 import type {
   DecisionReviewStatus,
   DecisionViewModel,
+  ForestViewModel,
   GraphViewEdge,
   GraphViewModel,
   GraphViewNode,
+  Head,
+  HeadSetNode,
+  HeadSetNodeRaw,
+  HeadSetResponse,
   Stage,
   Trust,
 } from "./graphViewTypes";
@@ -217,4 +222,72 @@ export function adaptRunGraph(backend: GraphResponse): GraphViewModel {
   if (ver === 2) return adaptGraphSchemaV2(backend);
   if (ver === 3) return adaptGraphSchemaV3(backend);
   throw new UnsupportedGraphSchemaError(ver);
+}
+
+// ───────────────────────────────────────────────────────────────
+// v1.6.1 — head-set (cross-run forest) adapter
+// ───────────────────────────────────────────────────────────────
+
+function adaptHeadSetNode(key: string, raw: HeadSetNodeRaw): HeadSetNode {
+  const stage = coerceStage(raw.stage);
+  const dps = (raw.decision_points ?? []) as DecisionPoint[];
+  return {
+    // The dedup KEY (node_hash, or bare node_id for non-cacheable nodes) is the forest
+    // identity — node_id alone is NOT unique across sibling reruns (M1/M2 share an id).
+    id: key,
+    nodeKey: key,
+    opNodeId: raw.id,
+    raw,
+    stage,
+    kind: raw.kind,
+    title: raw.display_label,
+    subtitle: stage !== "unknown" ? `${stage} · ${raw.kind}` : undefined,
+    summary: raw.summary ?? undefined,
+    parentStageId: raw.parent_stage_id ?? null,
+    trust: normalizeTrust(raw.trust as BackendTrust),
+    trustReason: raw.trust_reason ?? undefined,
+    decisions: dps.map(adaptDecisionPoint),
+    createdAt: raw.created_at,
+    nodeHash: raw.node_hash,
+    producingStage: raw.producing_stage,
+    casRef: raw.cas_ref,
+    runs: raw.runs ?? [],
+    editable: raw.editable,
+    opType: raw.op_type,
+    schemaId: raw.schema_id,
+    editableSchema: raw.editable_schema,
+    editableSchemaSource: raw.editable_schema_source,
+  };
+}
+
+/**
+ * Adapt the backend head-set response into the forest ViewModel. The backend has
+ * already deduped nodes by node_hash (shared prefixes appear once); this maps each
+ * entry, camelCases the heads, and synthesizes edge ids from source/target dedup keys.
+ */
+export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
+  const nodes: HeadSetNode[] = Object.entries(backend.nodes).map(([key, raw]) =>
+    adaptHeadSetNode(key, raw),
+  );
+  const edges: GraphViewEdge[] = backend.edges.map((e) => ({
+    id: `${e.source}->${e.target}`,
+    source: e.source,
+    target: e.target,
+  }));
+  const heads: Head[] = backend.heads.map((h) => ({
+    runId: h.run_id,
+    headNodeHash: h.head_node_hash,
+    fromNode: h.from_node,
+    rerunOf: h.rerun_of,
+    rerunReason: h.rerun_reason,
+    status: h.status,
+    createdAt: h.created_at,
+  }));
+  return {
+    schemaVersion: backend.schema_version,
+    legacy: backend.legacy,
+    nodes,
+    edges,
+    heads,
+  };
 }
