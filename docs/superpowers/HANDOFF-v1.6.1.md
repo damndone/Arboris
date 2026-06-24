@@ -1,9 +1,19 @@
 # v1.6.1 续作对接（HANDOFF）
 
-新会话从这里接上。**当前：2A + 2B（BE graph contract）完成，NEXT = 2C（FE 森林）。**
+新会话从这里接上。**当前：2A + 2B + 2C 功能闭环全部完成。NEXT = (A) 决定是否把 ForestCanvas 接进 live app 路由（已知集成缺口），然后 (B) 2C QA/Reviewer 收尾 + 用户授权后 push/merge/tag。**
 
 ## 0. 一句话状态
-worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `0a54852`+（off origin/main `61d45ef` = tag v1.6.0），**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。
+worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `15c2b8f`+（off origin/main `61d45ef` = tag v1.6.0），**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。**GATE PASSED：BE 1202 / golden 23 0-drift / FE 661 / tsc 0。**
+
+## 0.4 2C 已完成（5 loop，功能闭环；GATE PASSED FE 661 +24）
+- **2C.1** `graphViewTypes.ts`（EditableControl 对齐 + HeadSet*/ForestViewModel + `opNodeId`）+ `graphAdapter.ts::adaptHeadSet`。森林节点身份 = dedup key（node_hash 或 bare node_id），**非 node_id**（M1/M2 共享 id）；`opNodeId` 留原始 id 作 from_node。
+- **2C.2** `controls/controlFactory.tsx`：`CONTROL_REGISTRY` 查表（**无 switch**），8 kind 全注册，day-1 仅 select+columns 启用，其余占位；`visible_when` 透传不强制。
+- **2C.3** `detail/RerunContext.tsx`（Provider）+ `api.ts::rerunFromNode/getRunGraphHeadSet` + `OperationSection.tsx`（有 Provider→可编辑、无→只读降级）+ actionRegistry `rerunFromNode` 点亮（invoke=openDetail）。提交 = 仅改动键 op_overrides + from_node=opNodeId；成功不跳转（onRerun=refetch）。
+- **2C.4** `graph/forestGraph.ts`（parentMap/tracePath/headActiveSet 纯函数）+ `graph/ForestCanvas.tsx`。**决策：另建 ForestCanvas 而非改 648 行 GraphCanvas**（G3：功能闭环，视觉/layout 精修另算；GraphNode 绑 ReactFlow Handle）。
+- **2C.5** rollback = ForestCanvas 纯 useState 切 active head（零 fetch、零 mutation、forest 对象不变）。
+
+## 0.45 ⚠️ 已知集成缺口（NEXT 决策点）
+`ForestCanvas` 功能完整但**尚未挂进 live app 路由**——run-detail 视图仍渲染旧 `GraphCanvas`（per-run），没有 head-set 拉取（`getRunGraphHeadSet` 已就绪未被调用）+ forest 开关。要让用户真正用上跨 run 森林编辑，需一个集成 loop：在 run 详情处 flag-gated 挂 `ForestCanvas`（`WORKBENCH_GRAPH_HEADSET` 或前端 toggle）。**这是 plan 之外的整合工，2C 各 loop 文件清单未含**（plan 假设原地改 GraphCanvas）。建议作为 2C.6 / 集成 loop，需与用户确认范围。
 
 ## 0.5 2B 已完成（4 loop，GATE PASSED：BE 1202 / golden 23 0-drift / FE 637 / tsc 0）
 - **2B.1** `lineage/family.py::scan_family(runs_dir, run_id) -> Family{self_id, ancestors, descendants, siblings, members:{run_id->FamilyMember{run_id,rerun_of,legacy}}}`。legacy = 无 `node_index.json`。
