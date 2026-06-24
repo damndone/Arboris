@@ -1,9 +1,18 @@
 # v1.6.1 续作对接（HANDOFF）
 
-新会话从这里接上。**当前：2A（BE 增量底座）完成，NEXT = 2B。**
+新会话从这里接上。**当前：2A + 2B（BE graph contract）完成，NEXT = 2C（FE 森林）。**
 
 ## 0. 一句话状态
-worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `115eda4`（off origin/main `61d45ef` = tag v1.6.0），20 commits，无未提交，**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。
+worktree `.worktrees/workbench-v1.6.1`，branch `workbench-v1.6.1` @ `0a54852`+（off origin/main `61d45ef` = tag v1.6.0），**未 push / 未 merge / 未 tag**。venv 已建（worktree 根 `.venv`，全 extras）+ 前端 `npm ci` 已装。
+
+## 0.5 2B 已完成（4 loop，GATE PASSED：BE 1202 / golden 23 0-drift / FE 637 / tsc 0）
+- **2B.1** `lineage/family.py::scan_family(runs_dir, run_id) -> Family{self_id, ancestors, descendants, siblings, members:{run_id->FamilyMember{run_id,rerun_of,legacy}}}`。legacy = 无 `node_index.json`。
+- **2B.2** `lineage/headset.py::build_headset(runs_dir, family, *, annotate) -> {nodes(by node_hash), edges:[{source,target}], heads:[{run_id,head_node_hash,from_node,rerun_of,rerun_reason,status,created_at}], schema_version=4, legacy}`。`api.get_run_graph` 加 `view` query：`?view=headset` 或 `WORKBENCH_GRAPH_HEADSET=1` → head-set；否则旧形状。target legacy(无 node_index) + headset 请求 → 旧形状 + `legacy:true`。dedup key = node_hash（cacheable）或 bare node_id（raw 等，家族内确定性共享）。
+- **2B.3** rerun 无新生产代码：已走 2A 增量路径。from_node = 被替换 op 节点；M1/M2 是 cleaning 下兄弟（无 estimation→estimation 链）。`recomputed_changed` 仍 reserved（model-node-only 编辑下上游 hash 不变，不可达）。
+- **2B.4** `api._annotate_editable_node(node, manifest, form=None)` + `_backfill_schema_values`（COPY 不改共享 capabilities）。head-set 传 `run_inputs.form` → `editable_schema[i].value` 回填真实当前值，`editable_schema_source="run_inputs"`；空/缺 key 保留 capabilities 默认；旧 per-run 路径不变（`"capabilities"`）。
+
+## 0.6 2C 要消费的 BE 契约（head-set）
+`GET /runs/{id}/graph?view=headset` → 上面的 head-set 形状。FE 在现有 `GraphCanvas` 上：按 node_hash 去重并集 DAG、分叉、active head、trace、rollback（G3：不绑 layout 重构）。control_factory 消费 `editable_schema`（带回填 value）。`POST /runs/{id}/rerun` body `{from_node, op_overrides, rerun_reason}`。
 
 ## 1. 先读这四份（按序）
 1. `docs/superpowers/HANDOFF-v1.6.1.md`（本文）
