@@ -49,6 +49,9 @@ function fakeGraph(): GraphResponse {
 
 function mountAt(initialPath: string) {
   vi.spyOn(api, "getRunGraph").mockResolvedValue(fakeGraph());
+  // The graph view always tries the cross-run forest first; a legacy head-set makes it
+  // fall back to the per-run graph (these tests exercise the shell, not the forest).
+  vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue({ legacy: true } as never);
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>

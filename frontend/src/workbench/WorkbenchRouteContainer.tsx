@@ -43,12 +43,10 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
-import { readForestMode, writeForestMode } from "./forestMode";
 import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
-import { ForestContext, ForestModeContext } from "./ForestContext";
+import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
-import { useCallback } from "react";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -59,30 +57,11 @@ export function WorkbenchRouteContainer({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
-  // 2C.6 — persistent forest mode (toggle in the topbar; survives run/tab navigation).
-  // Off → the legacy per-run workbench is untouched. On → the SAME shell (run rail,
-  // DetailDrawer, bottom panels) with only the center canvas swapped for the cross-run
-  // forest. The mode lives in ForestModeContext (wrapping BOTH branches) so the toolbar
-  // toggle can flip it from either view.
-  const [forestMode, setForestModeState] = useState<boolean>(readForestMode);
-  const setForestMode = useCallback((on: boolean) => {
-    writeForestMode(on);
-    setForestModeState(on);
-  }, []);
-  const modeValue = useMemo(
-    () => ({ forestMode, setForestMode }),
-    [forestMode, setForestMode],
-  );
-
-  return (
-    <ForestModeContext.Provider value={modeValue}>
-      {forestMode ? (
-        <ForestWorkbench projectRoot={projectRoot} runId={runId} />
-      ) : (
-        <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />
-      )}
-    </ForestModeContext.Provider>
-  );
+  // v1.6.1 — the lineage graph IS the cross-run forest. Always render the forest; it
+  // falls back to the legacy per-run graph only for old runs that predate the lineage
+  // index (no node_index.json). No toggle: a run with no reruns is simply a linear
+  // forest, which is cleaner than the old per-run graph's variable folding.
+  return <ForestWorkbench projectRoot={projectRoot} runId={runId} />;
 }
 
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {

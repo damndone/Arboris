@@ -20,16 +20,3 @@ export const ForestContext = createContext<ForestContextValue | null>(null);
 export function useForest(): ForestContextValue | null {
   return useContext(ForestContext);
 }
-
-// ── forest-mode toggle (persistent; present in BOTH forest and legacy mode so the
-//    toolbar button can flip it from either side) ───────────────────────────────
-export interface ForestModeValue {
-  forestMode: boolean;
-  setForestMode: (on: boolean) => void;
-}
-
-export const ForestModeContext = createContext<ForestModeValue | null>(null);
-
-export function useForestMode(): ForestModeValue | null {
-  return useContext(ForestModeContext);
-}

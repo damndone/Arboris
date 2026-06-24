@@ -119,7 +119,10 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
 def test_headset_legacy_run_degrades(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKBENCH_GRAPH_HEADSET", "1")
     project = create_project(tmp_path, "demo")
-    run_id = _create_run(project.root)  # flag-off run -> no node_index.json
+    run_id = _create_run(project.root)
+    # v1.6.1: node_index is now ALWAYS written. A *legacy* run is one that predates the
+    # lineage index — simulate by removing it, then the head-set degrades to old shape.
+    (project.root / "runs" / run_id / "node_index.json").unlink()
     body = client.get(
         f"/runs/{run_id}/graph", params={"project_root": str(project.root)}
     ).json()

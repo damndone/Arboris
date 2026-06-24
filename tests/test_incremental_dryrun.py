@@ -44,7 +44,12 @@ def test_dryrun_writes_complete_trace(tmp_path, monkeypatch):
         assert t["status"] in _VALID
 
 
-def test_flag_off_writes_no_trace(tmp_path):
-    # Default (flag off) → no behavior change, no trace file.
+def test_flag_off_still_writes_trace_with_no_skips(tmp_path):
+    # v1.6.1: the traced pipeline is now the default (the graph view is the forest),
+    # so the trace is always written. With the cache flag OFF we force_full — nothing
+    # is reused, so no entry is `hit_reused` (results stay byte-identical / golden 0-drift).
     run_root, _ = _run(tmp_path)
-    assert not (run_root / "incremental_trace.json").exists()
+    assert (run_root / "incremental_trace.json").exists()
+    trace = json.loads((run_root / "incremental_trace.json").read_text())
+    assert trace, "trace should be non-empty"
+    assert all(t["status"] != "hit_reused" for t in trace)
