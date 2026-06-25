@@ -26,7 +26,6 @@ import { useLayoutMode } from "../../lineage/graph/useLayoutMode";
 import { useLineage } from "../../lineage/LineageContext";
 import { useWorkbenchOptional } from "../WorkbenchStateProvider";
 import { useForest } from "../ForestContext";
-import { ForestCanvas } from "../../lineage/graph/ForestCanvas";
 import { buildRunSnapshot } from "../RunSnapshotAdapter";
 
 export function GraphView() {
@@ -123,35 +122,22 @@ export function GraphView() {
 
   if (model.legacy) return <LegacyBanner />;
 
-  // v1.6.1 — forest mode swaps ONLY the center canvas. The shell (run rail, DetailDrawer,
-  // bottom panels) is untouched; node selection still flows through `select` so the same
-  // drawer opens. Head chips + active-head/rollback live in the canvas overlay.
-  if (forest) {
-    return (
-      <div
-        className="lineage-root"
-        data-testid="graph-workbench"
-        data-view="forest"
-        style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
-      >
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <ForestCanvas
-            forest={forest.forest}
-            selectedNodeId={effectiveSelectedKey}
-            onSelect={select}
-            activeRunId={forest.activeRunId}
-            onActiveHead={forest.setActiveRunId}
-          />
-        </div>
-      </div>
-    );
-  }
+  // v1.6.1 — the lineage graph IS the forest. In forest mode `model` is already the
+  // cross-run projection, so we render the SAME full-featured GraphCanvas (layout modes,
+  // search, context menu, hover, variable folding all come for free) and only add a
+  // head-chips bar on top for cross-run version switching / rollback. Picking a head
+  // focuses its lineage (active-head highlight via the existing focus mechanism).
+  const onPickHead = (runId: string, headNodeKey: string | null) => {
+    if (!forest) return;
+    forest.setActiveRunId(runId);
+    if (headNodeKey && wb) wb.dispatch.setFocusOnly(headNodeKey);
+  };
 
   return (
     <div
       className="lineage-root"
       data-testid="graph-workbench"
-      data-view="graph"
+      data-view={forest ? "forest" : "graph"}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -160,6 +146,13 @@ export function GraphView() {
       }}
     >
       {showLegacyHint && <LegacyStageHint onDismiss={dismissLegacyHint} />}
+      {forest && (
+        <ForestHeadBar
+          forest={forest.forest}
+          activeRunId={forest.activeRunId}
+          onPickHead={onPickHead}
+        />
+      )}
       <div style={{ flex: 1, minHeight: 0 }}>
         <GraphCanvas
           model={model}
@@ -181,6 +174,67 @@ export function GraphView() {
           searchCursorKey={searchCursorKey}
         />
       </div>
+    </div>
+  );
+}
+
+function ForestHeadBar({
+  forest,
+  activeRunId,
+  onPickHead,
+}: {
+  forest: import("../../lineage/api/graphViewTypes").ForestViewModel;
+  activeRunId: string;
+  onPickHead: (runId: string, headNodeKey: string | null) => void;
+}) {
+  if (forest.heads.length <= 1) return null; // no versions to switch between
+  const keyForHead = (headNodeHash: string | null) =>
+    forest.nodes.find((n) => n.nodeHash === headNodeHash)?.id ?? null;
+  return (
+    <div
+      data-testid="forest-heads"
+      role="group"
+      aria-label="Run versions (active head)"
+      style={{
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        alignItems: "center",
+        padding: "6px 12px",
+        borderBottom: "1px solid var(--separator, #2e2e30)",
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--label-tertiary)", marginRight: 4 }}>
+        Versions:
+      </span>
+      {forest.heads.map((h) => {
+        const isActive = h.runId === activeRunId;
+        return (
+          <button
+            key={h.runId}
+            type="button"
+            data-testid={`forest-head-${h.runId}`}
+            aria-pressed={isActive}
+            title={h.rerunOf ? `rerun of ${h.rerunOf}` : "original run"}
+            onClick={() => onPickHead(h.runId, keyForHead(h.headNodeHash))}
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--font-mono, monospace)",
+              padding: "4px 9px",
+              borderRadius: 6,
+              cursor: "pointer",
+              border: isActive
+                ? "1px solid var(--tint, #0a84ff)"
+                : "1px solid var(--separator, #2e2e30)",
+              background: isActive ? "var(--tint, #0a84ff)" : "transparent",
+              color: isActive ? "#fff" : "var(--label-secondary)",
+            }}
+          >
+            {h.rerunOf ? "↳ " : ""}
+            {h.runId.slice(-8)}
+          </button>
+        );
+      })}
     </div>
   );
 }

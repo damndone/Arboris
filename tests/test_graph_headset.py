@@ -105,10 +105,14 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
     assert len(body["heads"]) == 2
     run_ids = {h["run_id"] for h in body["heads"]}
     assert run_ids == {parent, child}
-    # Shared cleaning prefix appears exactly once (strict hash dedup).
-    cleaning_nodes = [n for n in body["nodes"].values()
-                      if n.get("producing_stage") == "cleaning"]
-    assert len(cleaning_nodes) == 1
+    # Shared cleaned-dataset node appears exactly once across the family (deduped by
+    # node_id + node_hash); its per-variable nodes are kept distinct (so variables stay
+    # visible) but each still dedups across the two runs to a single node.
+    cleaned_nodes = [n for n in body["nodes"].values() if n.get("id") == "stage:cleaned"]
+    assert len(cleaned_nodes) == 1
+    var_ids = [n.get("id") for n in body["nodes"].values()
+               if str(n.get("id", "")).startswith("var:")]
+    assert var_ids and len(var_ids) == len(set(var_ids))  # each variable once, not per-run
     # Two distinct model nodes (M1 / M2) — sibling branches off the shared prefix.
     model_hashes = {h for n in body["nodes"].values()
                     if n.get("producing_stage") == "estimation"
