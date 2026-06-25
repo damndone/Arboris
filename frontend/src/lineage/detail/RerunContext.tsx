@@ -12,19 +12,24 @@
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 import { rerunFromNode } from "../../api";
+import { resolveOwnerRun } from "../api/graphViewTypes";
 
 export interface RerunArgs {
   fromNode: string;
   opOverrides: Record<string, unknown>;
   rerunReason?: string;
-  /** The run that owns `fromNode` (the rerun parent). In the forest, the selected
-   *  node may belong to a different run than the one being viewed; omit to use the
-   *  provider's default run. */
-  runId?: string;
+  /** The runs that own `fromNode`. A forest node can be shared across runs (deduped),
+   *  so the parent is resolved against the active head (see resolveOwnerRun): if the
+   *  head owns the node it forks from the version the user is viewing, else from the
+   *  first owning run. Omit/empty → fall back to the provider's active run. */
+  candidateRuns?: string[];
 }
 
 export interface RerunContextValue {
   submitRerun: (args: RerunArgs) => Promise<void>;
+  /** The active head's run id — the rerun parent default and the run a node-detail
+   *  header should attribute the view to. */
+  activeRunId: string;
 }
 
 export const RerunContext = createContext<RerunContextValue | null>(null);
@@ -48,8 +53,12 @@ export function RerunProvider({
 }) {
   const value = useMemo<RerunContextValue>(
     () => ({
+      activeRunId: runId,
       submitRerun: async (args: RerunArgs) => {
-        const res = await rerunFromNode(projectRoot, args.runId ?? runId, args);
+        // `runId` here is the active head (see RerunProvider mount). For a shared node
+        // the parent must be the head when it owns the node, else an owning run.
+        const parent = resolveOwnerRun(args.candidateRuns, runId) ?? runId;
+        const res = await rerunFromNode(projectRoot, parent, args);
         onRerun?.(res.run_id);
       },
     }),

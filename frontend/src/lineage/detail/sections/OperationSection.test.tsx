@@ -38,7 +38,7 @@ function modelNode(): HeadSetNode {
 }
 
 function renderWithRerun(node: GraphViewNode, submitRerun = vi.fn().mockResolvedValue(undefined)) {
-  const value: RerunContextValue = { submitRerun };
+  const value: RerunContextValue = { submitRerun, activeRunId: "run_a" };
   render(
     <RerunContext.Provider value={value}>
       <OperationSection node={node} />
@@ -67,9 +67,23 @@ describe("OperationSection (editable)", () => {
     expect(submitRerun).toHaveBeenCalledWith({
       fromNode: "model:ols_1",
       opOverrides: { covariance: "robust" },
-      runId: "run_a", // the node's owning run (forest nodes may differ from the viewed run)
+      // Hand the provider every owning run; it resolves the parent against the active
+      // head (a shared/deduped node belongs to more than one run).
+      candidateRuns: ["run_a"],
     });
     await screen.findByTestId("operation-rerun-done");
+  });
+
+  it("forwards all owning runs of a deduped (shared) node as candidateRuns", async () => {
+    const node = modelNode();
+    node.runs = ["run_a", "run_b", "run_c"]; // shared across the forest
+    const { submitRerun } = renderWithRerun(node);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    await waitFor(() => expect(submitRerun).toHaveBeenCalledTimes(1));
+    expect(submitRerun).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateRuns: ["run_a", "run_b", "run_c"] }),
+    );
   });
 
   it("degrades to read-only without a RerunProvider", () => {
