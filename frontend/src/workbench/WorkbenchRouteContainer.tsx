@@ -93,7 +93,7 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     runId;
 
   return (
-    <RerunProvider projectRoot={projectRoot} runId={runId} onRerun={() => refetch()}>
+    <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={() => refetch()}>
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >

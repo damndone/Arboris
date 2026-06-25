@@ -250,3 +250,16 @@ export interface ForestViewModel {
   edges: GraphViewEdge[];
   heads: Head[];
 }
+
+/** Resolve which run owns a (possibly deduped) forest node for a rerun / display.
+ *  A node shared across runs (`runs.length > 1`) has no single owner, so prefer the
+ *  active head when it's one of them — that's the version the user is viewing and the
+ *  parent whose form the rerun must fork from. Otherwise fall back to the first run
+ *  that owns the node. Returns undefined only when `runs` is empty/absent. */
+export function resolveOwnerRun(
+  runs: string[] | undefined,
+  activeRunId: string | undefined,
+): string | undefined {
+  if (activeRunId && runs?.includes(activeRunId)) return activeRunId;
+  return runs?.[0];
+}

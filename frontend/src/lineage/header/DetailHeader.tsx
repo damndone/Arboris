@@ -11,7 +11,9 @@
 // menu on RF node ⋯ affordances). REV-3 F2.
 
 import { useLineage } from "../LineageContext";
-import type { GraphViewNode } from "../api/graphViewTypes";
+import type { GraphViewNode, HeadSetNode } from "../api/graphViewTypes";
+import { resolveOwnerRun } from "../api/graphViewTypes";
+import { useRerun } from "../detail/RerunContext";
 import { NodeActionMenu } from "../graph/NodeActionMenu";
 
 interface DetailHeaderProps {
@@ -26,6 +28,12 @@ export const DETAIL_HEADER_TITLE_ID = "detail-drawer-title";
 
 export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
   const { model } = useLineage();
+  // In the forest, `model.runId` is the URL run, not the run that owns the selected
+  // node. Attribute the node to the run a rerun would fork from (active head if it
+  // owns the node, else an owning run); fall back to model.runId per-run / legacy.
+  const rerun = useRerun();
+  const displayRunId =
+    resolveOwnerRun((node as HeadSetNode).runs, rerun?.activeRunId) ?? model.runId;
 
   return (
     <div className="dp-head">
@@ -53,7 +61,7 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
             letterSpacing: 0,
           }}
         >
-          {model.runId} · {node.nodeKey}
+          {displayRunId} · {node.nodeKey}
         </span>
         <div
           style={{

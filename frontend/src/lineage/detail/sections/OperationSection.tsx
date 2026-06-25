@@ -41,9 +41,10 @@ function EditableOperation({
   // The op node id (reused as `from_node`) is the forest node's original per-run
   // id, NOT its dedup key. Fall back to node.id for a plain per-run node.
   const fromNode = (node as HeadSetNode).opNodeId ?? node.id;
-  // In the forest, the selected node may belong to a different run than the one being
-  // viewed — rerun must target the node's own run. undefined → provider default.
-  const ownerRunId = (node as HeadSetNode).runs?.[0];
+  // A forest node can be shared (deduped) across runs. Hand the provider the full set
+  // of owning runs; it resolves the parent against the active head (resolveOwnerRun)
+  // so editing a shared node forks from the version actually being viewed, not runs[0].
+  const candidateRuns = (node as HeadSetNode).runs;
 
   const initial = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
@@ -76,7 +77,7 @@ function EditableOperation({
     setStatus("submitting");
     setError(null);
     try {
-      await rerun.submitRerun({ fromNode, opOverrides: overrides, runId: ownerRunId });
+      await rerun.submitRerun({ fromNode, opOverrides: overrides, candidateRuns });
       setStatus("done");
     } catch (e) {
       setStatus("error");
