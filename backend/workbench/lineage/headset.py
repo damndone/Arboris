@@ -47,9 +47,14 @@ def _read_manifest(runs_dir: Path, run_id: str) -> dict:
 
 
 def _node_key(node_id: str, node_index: dict[str, dict]) -> str:
+    """Cross-run dedup key. Two nodes merge iff they are the SAME node_id with the SAME
+    node_hash — so the shared prefix (raw/cleaned/variables) collapses across reruns, a
+    re-estimated model forks (same id, new hash → distinct), and distinct graph nodes that
+    happen to share a stage-output hash (e.g. the cleaned dataset and its per-variable
+    nodes) stay SEPARATE (different id → kept, so variables remain visible)."""
     entry = node_index.get(node_id)
     if entry and entry.get("node_hash"):
-        return entry["node_hash"]
+        return f"{entry['node_hash']}::{node_id}"
     return node_id
 
 
@@ -98,6 +103,13 @@ def build_headset(
             entry = node_index.get(nid) or {}
             if key not in nodes:
                 view = dict(node)
+                # Remap parent_stage_id to the parent's dedup KEY so the FE (whose node
+                # ids ARE the keys) can attach children (e.g. variable nodes) to their
+                # parent for folding / layout. The node's own `id` stays the per-run id
+                # (the adapter reuses it as opNodeId / rerun from_node).
+                parent = node.get("parent_stage_id")
+                if parent is not None:
+                    view["parent_stage_id"] = keymap.get(parent, parent)
                 view["node_hash"] = entry.get("node_hash")
                 view["producing_stage"] = entry.get("producing_stage")
                 view["cas_ref"] = entry.get("cas_ref")

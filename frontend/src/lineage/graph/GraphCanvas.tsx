@@ -519,6 +519,30 @@ export function GraphCanvas({
     handleAxis,
   ]);
 
+  // Edge decoration: flow-animate the edges touching the selected node (and the focus
+  // lineage, e.g. the active forest head) and keep them lit while the selection holds.
+  // Positions/structure are untouched — this is a pure overlay like decoratedNodes.
+  const decoratedEdges = useMemo(() => {
+    const focusSet = focusUpstreamKeys;
+    return rfEdges.map((e) => {
+      const touchesSelected =
+        selectedNodeId !== null &&
+        (e.source === selectedNodeId || e.target === selectedNodeId);
+      const onFocusLineage = !!focusSet && focusSet.has(e.source) && focusSet.has(e.target);
+      if (!touchesSelected && !onFocusLineage) return e;
+      return {
+        ...e,
+        animated: true,
+        style: {
+          ...(e.style ?? {}),
+          stroke: "var(--tint, #0a84ff)",
+          strokeWidth: 2,
+          opacity: 1,
+        },
+      };
+    });
+  }, [rfEdges, selectedNodeId, focusUpstreamKeys]);
+
   // ── T8.4 hover tooltip ──────────────────────────────────────────
   // Tracks the candidate node under the cursor + screen-space coords.
   // After TOOLTIP_HOVER_DELAY_MS the candidate becomes the visible
@@ -596,7 +620,7 @@ export function GraphCanvas({
     >
       <ReactFlow
         nodes={decoratedNodes}
-        edges={rfEdges}
+        edges={decoratedEdges}
         nodeTypes={nodeTypes}
         // V1.5.0.1 HF5: free node drag matches the prototype's contract
         // (uiux/app.jsx TWEAK_DEFAULTS layout=free; uiux/panels.jsx empty

@@ -52,7 +52,13 @@ def test_node_index_stamps_graph_nodes(tmp_path, monkeypatch):
         assert "node_hash" not in node
 
 
-def test_flag_off_writes_no_node_index(tmp_path):
+def test_node_index_always_written(tmp_path):
+    # v1.6.1: the lineage index is now ALWAYS written (the graph view is the forest,
+    # which needs node identity regardless of the incremental-cache flag). graph.json
+    # itself still stays decorate-free (node_hash lives only in node_index.json).
     project = create_project(tmp_path, "demo")
     run_root = _run(project.root, FIX / "forest_min.csv")
-    assert not (run_root / "node_index.json").exists()
+    assert (run_root / "node_index.json").exists()
+    graph = json.loads((run_root / "graph.json").read_text())
+    for node in graph["nodes"].values():
+        assert "node_hash" not in node  # graph.json unchanged (decorate-only)

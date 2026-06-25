@@ -3,7 +3,7 @@
 // v1.6.1 (2C.6) — fetch + adapt the cross-run head-set forest.
 //
 // Mirrors useGraphData's load/error/refetch contract but targets
-// GET /runs/{id}/graph?view=headset → ForestViewModel. Used by ForestRouteView
+// GET /runs/{id}/graph?view=headset → ForestViewModel. Used by ForestWorkbench
 // when the forest gate is on; the legacy useGraphData path is untouched.
 
 import { useCallback, useEffect, useState } from "react";

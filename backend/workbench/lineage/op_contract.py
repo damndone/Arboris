@@ -32,6 +32,32 @@ def _model_entry(op_type: str) -> dict | None:
     return None
 
 
+def _model_type_options() -> list[dict[str, str]]:
+    """Selectable model types for the `model_type` control (concrete models only —
+    excludes the submit-time 'auto'). Built from the registered handlers so a new
+    estimator shows up automatically."""
+    caps = build_capabilities()
+    return [
+        {"value": e["key"], "label": e.get("label", e["key"])}
+        for e in caps["model_types"]
+        if e["key"] != "auto"
+    ]
+
+
+def _fill_model_type_options(params: list[dict]) -> list[dict]:
+    """Inject the model list into the `model_type` select so the dropdown is usable.
+    Copies (never mutates the shared capabilities params); a control that already
+    declares its own options is left untouched."""
+    options = _model_type_options()
+    out: list[dict] = []
+    for param in params:
+        if param.get("key") == "model_type" and "options" not in param:
+            out.append({**param, "options": options})
+        else:
+            out.append(param)
+    return out
+
+
 def _contract_for_model_type(op_type: str) -> OperationContract | None:
     entry = _model_entry(op_type)
     if entry is None or "params" not in entry or "schema_id" not in entry:
@@ -39,7 +65,7 @@ def _contract_for_model_type(op_type: str) -> OperationContract | None:
     return OperationContract(
         op_type=op_type,
         schema_id=entry["schema_id"],
-        editable_schema=list(entry["params"]),
+        editable_schema=_fill_model_type_options(entry["params"]),
     )
 
 

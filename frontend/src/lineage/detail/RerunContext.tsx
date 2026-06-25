@@ -17,6 +17,10 @@ export interface RerunArgs {
   fromNode: string;
   opOverrides: Record<string, unknown>;
   rerunReason?: string;
+  /** The run that owns `fromNode` (the rerun parent). In the forest, the selected
+   *  node may belong to a different run than the one being viewed; omit to use the
+   *  provider's default run. */
+  runId?: string;
 }
 
 export interface RerunContextValue {
@@ -45,7 +49,7 @@ export function RerunProvider({
   const value = useMemo<RerunContextValue>(
     () => ({
       submitRerun: async (args: RerunArgs) => {
-        const res = await rerunFromNode(projectRoot, runId, args);
+        const res = await rerunFromNode(projectRoot, args.runId ?? runId, args);
         onRerun?.(res.run_id);
       },
     }),

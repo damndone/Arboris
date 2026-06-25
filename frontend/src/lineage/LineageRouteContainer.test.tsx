@@ -102,12 +102,14 @@ describe("LineageRouteContainer", () => {
     const retry = screen.getByRole("button", { name: /try again/i });
     expect(retry).toBeTruthy();
 
-    fetchMock.mockResolvedValueOnce(jsonResponse(v3Graph()));
+    // Retry: the graph view first tries the cross-run head-set (which, lacking `heads`,
+    // is treated as legacy) then the per-run graph — both served the same v3 payload.
+    fetchMock.mockResolvedValue(jsonResponse(v3Graph()));
     fireEvent.click(retry);
     await waitFor(() =>
       expect(screen.getByTestId("graph-workbench")).toBeTruthy(),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("error branch (network): shows title with Try again button that refetches", async () => {
@@ -121,12 +123,12 @@ describe("LineageRouteContainer", () => {
     const retry = screen.getByRole("button", { name: /try again/i });
     expect(retry).toBeTruthy();
 
-    fetchMock.mockResolvedValueOnce(jsonResponse(v3Graph()));
+    fetchMock.mockResolvedValue(jsonResponse(v3Graph()));
     fireEvent.click(retry);
     await waitFor(() =>
       expect(screen.getByTestId("graph-workbench")).toBeTruthy(),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("error branch (unsupported_schema): mentions the offending version", async () => {

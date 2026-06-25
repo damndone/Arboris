@@ -25,10 +25,12 @@ import { GraphCanvas } from "../../lineage/graph/GraphCanvas";
 import { useLayoutMode } from "../../lineage/graph/useLayoutMode";
 import { useLineage } from "../../lineage/LineageContext";
 import { useWorkbenchOptional } from "../WorkbenchStateProvider";
+import { useForest } from "../ForestContext";
 import { buildRunSnapshot } from "../RunSnapshotAdapter";
 
 export function GraphView() {
   const { model, selectedKey, select } = useLineage();
+  const forest = useForest();
   // useWorkbenchOptional() lets GraphView work both inside the new
   // WorkbenchRouteContainer AND inside V1.5.0/1.5.1 bare-mount tests.
   // When the provider is absent, focus/search overlay degrade to none
@@ -120,11 +122,22 @@ export function GraphView() {
 
   if (model.legacy) return <LegacyBanner />;
 
+  // v1.6.1 — the lineage graph IS the forest. In forest mode `model` is already the
+  // cross-run projection, so we render the SAME full-featured GraphCanvas (layout modes,
+  // search, context menu, hover, variable folding all come for free) and only add a
+  // head-chips bar on top for cross-run version switching / rollback. Picking a head
+  // focuses its lineage (active-head highlight via the existing focus mechanism).
+  const onPickHead = (runId: string, headNodeKey: string | null) => {
+    if (!forest) return;
+    forest.setActiveRunId(runId);
+    if (headNodeKey && wb) wb.dispatch.setFocusOnly(headNodeKey);
+  };
+
   return (
     <div
       className="lineage-root"
       data-testid="graph-workbench"
-      data-view="graph"
+      data-view={forest ? "forest" : "graph"}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -133,6 +146,13 @@ export function GraphView() {
       }}
     >
       {showLegacyHint && <LegacyStageHint onDismiss={dismissLegacyHint} />}
+      {forest && (
+        <ForestHeadBar
+          forest={forest.forest}
+          activeRunId={forest.activeRunId}
+          onPickHead={onPickHead}
+        />
+      )}
       <div style={{ flex: 1, minHeight: 0 }}>
         <GraphCanvas
           model={model}
@@ -154,6 +174,67 @@ export function GraphView() {
           searchCursorKey={searchCursorKey}
         />
       </div>
+    </div>
+  );
+}
+
+function ForestHeadBar({
+  forest,
+  activeRunId,
+  onPickHead,
+}: {
+  forest: import("../../lineage/api/graphViewTypes").ForestViewModel;
+  activeRunId: string;
+  onPickHead: (runId: string, headNodeKey: string | null) => void;
+}) {
+  if (forest.heads.length <= 1) return null; // no versions to switch between
+  const keyForHead = (headNodeHash: string | null) =>
+    forest.nodes.find((n) => n.nodeHash === headNodeHash)?.id ?? null;
+  return (
+    <div
+      data-testid="forest-heads"
+      role="group"
+      aria-label="Run versions (active head)"
+      style={{
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        alignItems: "center",
+        padding: "6px 12px",
+        borderBottom: "1px solid var(--separator, #2e2e30)",
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--label-tertiary)", marginRight: 4 }}>
+        Versions:
+      </span>
+      {forest.heads.map((h) => {
+        const isActive = h.runId === activeRunId;
+        return (
+          <button
+            key={h.runId}
+            type="button"
+            data-testid={`forest-head-${h.runId}`}
+            aria-pressed={isActive}
+            title={h.rerunOf ? `rerun of ${h.rerunOf}` : "original run"}
+            onClick={() => onPickHead(h.runId, keyForHead(h.headNodeHash))}
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--font-mono, monospace)",
+              padding: "4px 9px",
+              borderRadius: 6,
+              cursor: "pointer",
+              border: isActive
+                ? "1px solid var(--tint, #0a84ff)"
+                : "1px solid var(--separator, #2e2e30)",
+              background: isActive ? "var(--tint, #0a84ff)" : "transparent",
+              color: isActive ? "#fff" : "var(--label-secondary)",
+            }}
+          >
+            {h.rerunOf ? "↳ " : ""}
+            {h.runId.slice(-8)}
+          </button>
+        );
+      })}
     </div>
   );
 }

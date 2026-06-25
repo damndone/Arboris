@@ -43,8 +43,10 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
-import { forestViewEnabled } from "./forestFlag";
-import { ForestRouteView } from "./views/ForestRouteView";
+import { useForestData } from "../lineage/hooks/useForestData";
+import { forestToGraphViewModel } from "./forestModel";
+import { ForestContext } from "./ForestContext";
+import { RerunProvider } from "../lineage/detail/RerunContext";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -55,14 +57,54 @@ export function WorkbenchRouteContainer({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
-  // 2C.6 — ship-dark forest gate (?forest=1). Off by default: the legacy
-  // per-run graph workbench is untouched. On: a self-contained forest route
-  // that owns its own head-set load + canvas. Branch before any hook so each
-  // subtree calls its hooks unconditionally (Rules of Hooks).
-  if (forestViewEnabled()) {
-    return <ForestRouteView projectRoot={projectRoot} runId={runId} />;
+  // v1.6.1 — the lineage graph IS the cross-run forest. Always render the forest; it
+  // falls back to the legacy per-run graph only for old runs that predate the lineage
+  // index (no node_index.json). No toggle: a run with no reruns is simply a linear
+  // forest, which is cleaner than the old per-run graph's variable folding.
+  return <ForestWorkbench projectRoot={projectRoot} runId={runId} />;
+}
+
+function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
+  const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+
+  const model = useMemo(
+    () => (forest ? forestToGraphViewModel(forest, runId) : null),
+    [forest, runId],
+  );
+  const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(
+    () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
+    [model],
+  );
+
+  if (error !== null && forest === null) {
+    return <ErrorBanner error={error} onRetry={refetch} />;
   }
-  return <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />;
+  if (loading || forest === null || model === null) return <Loading />;
+  // Legacy target (no node identity) → fall back to the legacy per-run workbench.
+  if (forest.legacy) {
+    return <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />;
+  }
+
+  const effectiveActiveRunId =
+    activeRunId ??
+    forest.heads.find((h) => h.runId === runId)?.runId ??
+    forest.heads[forest.heads.length - 1]?.runId ??
+    runId;
+
+  return (
+    <RerunProvider projectRoot={projectRoot} runId={runId} onRerun={() => refetch()}>
+      <ForestContext.Provider
+        value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
+      >
+        <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
+          <LineageBridge model={model}>
+            <WorkbenchShell runId={runId} projectRoot={projectRoot} />
+          </LineageBridge>
+        </WorkbenchStateProvider>
+      </ForestContext.Provider>
+    </RerunProvider>
+  );
 }
 
 function LegacyGraphWorkbench({
