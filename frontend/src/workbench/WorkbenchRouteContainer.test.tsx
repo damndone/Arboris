@@ -10,12 +10,13 @@
 //   - selecting `table` / `pipeline` swaps WorkbenchMain content
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
 import type { GraphResponse } from "../lineage/types";
+import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
 
 function fakeGraph(): GraphResponse {
   return {
@@ -60,6 +61,111 @@ function mountAt(initialPath: string) {
           element={
             <WorkbenchRouteContainer projectRoot="/proj" runId="r1" />
           }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+function forestResponse(focusKey = "hash_model"): HeadSetResponse {
+  return {
+    schema_version: 2,
+    legacy: false,
+    nodes: {
+      hash_source: {
+        id: "source:upload",
+        kind: "dataset",
+        display_label: "Source",
+        stage: "source",
+        summary: null,
+        trust: "ok",
+        trust_reason: null,
+        parent_stage_id: null,
+        decision_points: [],
+        node_hash: "hash_source",
+        producing_stage: "source",
+        cas_ref: null,
+        runs: ["run_a", "run_child"],
+      },
+      [focusKey]: {
+        id: "model:ols_1",
+        kind: "model",
+        display_label: focusKey === "hash_child" ? "Child OLS" : "Original OLS",
+        stage: "model",
+        summary: null,
+        trust: "ok",
+        trust_reason: null,
+        parent_stage_id: null,
+        decision_points: [],
+        node_hash: focusKey,
+        producing_stage: "model",
+        cas_ref: null,
+        runs: focusKey === "hash_child" ? ["run_child"] : ["run_a"],
+        editable: true,
+        op_type: "ols",
+        schema_id: "ols@v1",
+        editable_schema_source: "run_inputs",
+        editable_schema: [
+          {
+            kind: "select",
+            key: "covariance",
+            label: "Covariance",
+            options: ["clustered", "robust"],
+            value: "clustered",
+          },
+        ],
+      },
+    },
+    edges: [{ source: "hash_source", target: focusKey }],
+    heads: [
+      {
+        run_id: "run_a",
+        head_node_hash: "hash_model",
+        from_node: null,
+        rerun_of: null,
+        rerun_reason: null,
+        status: "completed",
+        created_at: "2026-06-27T00:00:00Z",
+      },
+      {
+        run_id: "run_child",
+        head_node_hash: "hash_child",
+        from_node: "model:ols_1",
+        rerun_of: "run_a",
+        rerun_reason: "manual_override",
+        status: "completed",
+        created_at: "2026-06-27T00:01:00Z",
+      },
+    ],
+  };
+}
+
+function mountForestAt(initialPath: string) {
+  vi.spyOn(api, "getRunGraphHeadSet")
+    .mockResolvedValueOnce(forestResponse("hash_model"))
+    .mockResolvedValueOnce(forestResponse("hash_child"));
+  vi.spyOn(api, "rerunFromNode").mockResolvedValue({
+    run_id: "run_child",
+    new_run_id: "run_child",
+    new_active_head_id: "run_child",
+    focus: {
+      forest_node_key: "hash_child",
+      op_node_id: "model:ols_1",
+      node_hash: "hash_child",
+    },
+    rerun_from: {
+      owner_run_id: "run_a",
+      op_node_id: "model:ols_1",
+      node_hash: "hash_model",
+      forest_node_key: "hash_model",
+    },
+  });
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <Routes>
+        <Route
+          path="*"
+          element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
         />
       </Routes>
     </MemoryRouter>,
@@ -175,5 +281,28 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("run-rail")).toBeInTheDocument();
       expect(screen.getByTestId("bottom-panel")).toBeInTheDocument();
     });
+  });
+
+  it("switches active head and selects focus after context-driven rerun success", async () => {
+    mountForestAt("/?tab=lineage&tabs=hash_model&active=hash_model");
+    expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
+    expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+      "Original OLS",
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Child OLS",
+      ),
+    );
   });
 });

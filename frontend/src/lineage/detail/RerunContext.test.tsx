@@ -1,12 +1,6 @@
-/* RerunContext.test.tsx — v1.6.1.x forest rerun parent resolution.
- *
- * The blocker this guards: a deduped node shared across runs must fork from the
- * ACTIVE HEAD (the version being viewed), not from runs[0]. The provider is mounted
- * with runId = the active head; submitRerun resolves the parent against candidateRuns.
- * Mocked at the rerunFromNode boundary so we assert the POST target run id.
- */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import type { NodeOperationContextV1 } from "../api/nodeOperationContext";
 
 const { rerunFromNodeMock } = vi.hoisted(() => ({ rerunFromNodeMock: vi.fn() }));
 vi.mock("../../api", async () => {
@@ -17,6 +11,78 @@ vi.mock("../../api", async () => {
 import { RerunProvider, useRerun } from "./RerunContext";
 import type { RerunArgs } from "./RerunContext";
 
+function makeContext(): NodeOperationContextV1 {
+  return {
+    context_version: "node-operation-context/v1",
+    context_kind: "executed_lineage_node",
+    context_fingerprint: "nocv1:test",
+    selection: {
+      forest_node_key: "hash_shared_model",
+      node_hash: "hash_shared_model",
+      display_label: "Shared OLS",
+      kind: "model",
+      stage: "model",
+    },
+    ownership: {
+      active_head_run_id: "run_c",
+      candidate_run_refs: [
+        {
+          run_id: "run_a",
+          op_node_id: "model:ols_1",
+          node_hash: "hash_shared_model",
+          is_active_head: false,
+          path_contains_node: true,
+        },
+        {
+          run_id: "run_c",
+          op_node_id: "model:ols_1",
+          node_hash: "hash_shared_model",
+          is_active_head: true,
+          path_contains_node: true,
+        },
+      ],
+      candidate_run_ids: ["run_a", "run_c"],
+      shared_by_run_ids: ["run_a", "run_c"],
+      owner_run_id: "run_c",
+      owner_resolution: "active_head_contains_node",
+    },
+    operation_target: {
+      owner_run_id: "run_c",
+      op_node_id: "model:ols_1",
+      node_hash: "hash_shared_model",
+      node_state: "materialized",
+      editable_schema_source: "run_inputs",
+    },
+    lineage_context: {
+      path_run_id: "run_c",
+      upstream_path: [],
+      active_head_path_contains_node: true,
+    },
+    node_payload: {
+      decisions: [],
+      artifacts: [],
+      editable_schema: [],
+      params: {},
+    },
+    capabilities: {
+      can_rerun: true,
+      can_ask_ai: true,
+      can_compare: true,
+      can_rollback_focus: true,
+      can_edit_params: true,
+      disabled_reasons: [],
+    },
+    comparison_readiness: {
+      can_compare: true,
+      candidate_run_ids: ["run_a", "run_c"],
+      active_head_run_id: "run_c",
+      owner_run_id: "run_c",
+      shared_by_run_ids: ["run_a", "run_c"],
+    },
+    context_diagnostics: { warnings: [], resolution_notes: [] },
+  };
+}
+
 function Trigger({ args }: { args: RerunArgs }) {
   const rerun = useRerun()!;
   return (
@@ -26,49 +92,59 @@ function Trigger({ args }: { args: RerunArgs }) {
   );
 }
 
-function mount(activeHead: string, args: RerunArgs) {
+function mount(args: RerunArgs) {
   render(
-    <RerunProvider projectRoot="/p" runId={activeHead} onRerun={() => {}}>
+    <RerunProvider projectRoot="/p" runId="run_c" onRerun={() => {}}>
       <Trigger args={args} />
     </RerunProvider>,
   );
 }
 
-describe("RerunProvider submitRerun parent resolution", () => {
+describe("RerunProvider submitRerun", () => {
   beforeEach(() => {
     rerunFromNodeMock.mockReset();
-    rerunFromNodeMock.mockResolvedValue({ run_id: "child_1" });
+    rerunFromNodeMock.mockResolvedValue({
+      run_id: "child_1",
+      new_run_id: "child_1",
+      new_active_head_id: "child_1",
+      focus: null,
+      rerun_from: {
+        owner_run_id: "run_c",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_shared_model",
+        forest_node_key: "hash_shared_model",
+      },
+    });
+    vi.spyOn(Date, "now").mockReturnValue(12345);
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
   });
 
-  it("forks from the active head when it owns the shared node (NOT runs[0])", async () => {
-    mount("run_c", {
-      fromNode: "model:ols_1",
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("submits owner target fields from NodeOperationContextV1 instead of candidateRuns", async () => {
+    const context = makeContext();
+    mount({
+      context,
       opOverrides: { covariance: "robust" },
-      candidateRuns: ["run_a", "run_b", "run_c"],
+      rerunReason: "user_changed_covariance",
     });
     fireEvent.click(screen.getByText("go"));
     await waitFor(() => expect(rerunFromNodeMock).toHaveBeenCalledTimes(1));
-    expect(rerunFromNodeMock.mock.calls[0][1]).toBe("run_c"); // parent run id (path arg)
-  });
-
-  it("forks from the first owning run when the active head doesn't own the node", async () => {
-    mount("run_x", {
-      fromNode: "model:ols_1",
-      opOverrides: { covariance: "robust" },
-      candidateRuns: ["run_a", "run_b"],
+    expect(rerunFromNodeMock).toHaveBeenCalledWith("/p", "run_c", {
+      request_id: "rerun_12345_i",
+      operation: "rerun",
+      context_version: "node-operation-context/v1",
+      context_fingerprint: "nocv1:test",
+      owner_run_id: "run_c",
+      op_node_id: "model:ols_1",
+      node_hash: "hash_shared_model",
+      forest_node_key: "hash_shared_model",
+      owner_resolution: "active_head_contains_node",
+      active_head_run_id: "run_c",
+      op_overrides: { covariance: "robust" },
+      rerun_reason: "user_changed_covariance",
     });
-    fireEvent.click(screen.getByText("go"));
-    await waitFor(() => expect(rerunFromNodeMock).toHaveBeenCalledTimes(1));
-    expect(rerunFromNodeMock.mock.calls[0][1]).toBe("run_a");
-  });
-
-  it("falls back to the active head when no candidateRuns are given", async () => {
-    mount("run_head", {
-      fromNode: "model:ols_1",
-      opOverrides: { covariance: "robust" },
-    });
-    fireEvent.click(screen.getByText("go"));
-    await waitFor(() => expect(rerunFromNodeMock).toHaveBeenCalledTimes(1));
-    expect(rerunFromNodeMock.mock.calls[0][1]).toBe("run_head");
   });
 });

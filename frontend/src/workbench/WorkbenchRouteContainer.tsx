@@ -47,6 +47,7 @@ import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
+import type { RerunResponseV1 } from "../api";
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -67,6 +68,7 @@ export function WorkbenchRouteContainer({
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
 
   const model = useMemo(
     () => (forest ? forestToGraphViewModel(forest, runId) : null),
@@ -92,14 +94,25 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     forest.heads[forest.heads.length - 1]?.runId ??
     runId;
 
+  const handleRerun = (response: RerunResponseV1) => {
+    setActiveRunId(response.new_active_head_id ?? response.run_id);
+    setPendingFocusKey(response.focus?.forest_node_key ?? null);
+    void refetch();
+  };
+
   return (
-    <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={() => refetch()}>
+    <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >
         <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
           <LineageBridge model={model}>
-            <WorkbenchShell runId={runId} projectRoot={projectRoot} />
+            <WorkbenchShell
+              runId={runId}
+              projectRoot={projectRoot}
+              pendingFocusKey={pendingFocusKey}
+              onPendingFocusConsumed={() => setPendingFocusKey(null)}
+            />
           </LineageBridge>
         </WorkbenchStateProvider>
       </ForestContext.Provider>
@@ -140,9 +153,13 @@ function LegacyGraphWorkbench({
 function WorkbenchShell({
   runId,
   projectRoot,
+  pendingFocusKey = null,
+  onPendingFocusConsumed,
 }: {
   runId: string;
   projectRoot: string;
+  pendingFocusKey?: string | null;
+  onPendingFocusConsumed?: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
@@ -161,6 +178,13 @@ function WorkbenchShell({
     effectiveSelectedKey !== null
       ? (nodeIndex.get(effectiveSelectedKey) ?? null)
       : null;
+
+  useEffect(() => {
+    if (!pendingFocusKey) return;
+    if (!model.nodes.some((n) => n.nodeKey === pendingFocusKey)) return;
+    select(pendingFocusKey);
+    onPendingFocusConsumed?.();
+  }, [model.nodes, onPendingFocusConsumed, pendingFocusKey, select]);
 
   // REV-3 H1: external selection clear must close the modal.
   useEffect(() => {
