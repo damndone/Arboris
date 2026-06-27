@@ -44,6 +44,11 @@ def _model_node_id(project_root: Path, run_id: str) -> str:
     return model["id"]
 
 
+def _write_node_index(project_root: Path, run_id: str, node_id: str, node_hash: str) -> None:
+    path = project_root / "runs" / run_id / "node_index.json"
+    path.write_text(json.dumps({node_id: {"node_hash": node_hash}}), encoding="utf-8")
+
+
 def test_rerun_unknown_from_node_422(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_terminal_run(project.root)
@@ -87,6 +92,105 @@ def test_rerun_creates_child_with_rerun_of(tmp_path: Path):
     assert inputs["override_hash"] is not None
     parent_inputs = json.loads((project.root / "runs" / parent / "run_inputs.json").read_text())
     assert inputs["upload"]["sha256"] == parent_inputs["upload"]["sha256"]
+
+
+def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    owner = _create_terminal_run(project.root)
+    active_head = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, owner)
+    _write_node_index(project.root, owner, node_id, "hash_owner_model")
+
+    resp = client.post(
+        f"/runs/{active_head}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "request_id": "req_context_rerun",
+            "operation": "rerun",
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "fingerprint_owner",
+            "owner_run_id": owner,
+            "op_node_id": node_id,
+            "node_hash": "hash_owner_model",
+            "forest_node_key": "hash_owner_model",
+            "owner_resolution": "manual_candidate_selection",
+            "active_head_run_id": active_head,
+            "op_overrides": {"covariance": "unadjusted"},
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    child = body["run_id"]
+    assert body["new_run_id"] == child
+    assert body["new_active_head_id"] == child
+    assert body["rerun_from"] == {
+        "owner_run_id": owner,
+        "op_node_id": node_id,
+        "node_hash": "hash_owner_model",
+        "forest_node_key": "hash_owner_model",
+    }
+    assert body["accepted_context"]["owner_run_id"] == owner
+    assert body["accepted_context"]["op_node_id"] == node_id
+    _wait_terminal(project.root, child)
+    inputs = json.loads((project.root / "runs" / child / "run_inputs.json").read_text())
+    assert inputs["rerun_of"] == owner
+    assert inputs["from_node"] == node_id
+
+
+def test_context_driven_rerun_rejects_unsupported_context_version_400(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "request_id": "req_context_rerun",
+            "operation": "rerun",
+            "context_version": "node-operation-context/v9",
+            "context_fingerprint": "fingerprint_owner",
+            "owner_run_id": parent,
+            "op_node_id": node_id,
+            "node_hash": "hash_owner_model",
+            "forest_node_key": "hash_owner_model",
+            "owner_resolution": "active_head_contains_node",
+            "active_head_run_id": parent,
+            "op_overrides": {"covariance": "unadjusted"},
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "unsupported_context_version"
+
+
+def test_context_driven_rerun_rejects_node_hash_mismatch_409(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    _write_node_index(project.root, parent, node_id, "hash_persisted")
+
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "request_id": "req_context_rerun",
+            "operation": "rerun",
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "fingerprint_owner",
+            "owner_run_id": parent,
+            "op_node_id": node_id,
+            "node_hash": "hash_submitted",
+            "forest_node_key": "hash_submitted",
+            "owner_resolution": "active_head_contains_node",
+            "active_head_run_id": parent,
+            "op_overrides": {"covariance": "unadjusted"},
+        },
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "context_mismatch: node_hash"
 
 
 def test_rerun_missing_run_inputs_422_not_500(tmp_path: Path):
