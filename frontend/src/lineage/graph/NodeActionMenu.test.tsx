@@ -16,6 +16,9 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NodeActionMenu } from "./NodeActionMenu";
+import { ForestContext } from "../../workbench/ForestContext";
+import { NodeOperationContextProvider } from "../detail/NodeOperationContextProvider";
+import { makeOwnerResolutionSeedFixture } from "../api/nodeOperationContext";
 import type {
   GraphViewModel,
   GraphViewNode,
@@ -152,6 +155,31 @@ describe("NodeActionMenu", () => {
     const item = screen.getByText("Rerun from here").closest("button");
     expect(item).not.toBeNull();
     expect(item).not.toBeDisabled();
+  });
+
+  it("disables context-bound actions and prompts for owner selection on resolver failure", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find(
+      (n) => n.nodeKey === seed.sharedNodeKey,
+    )!;
+    render(
+      <ForestContext.Provider
+        value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
+      >
+        <NodeOperationContextProvider node={selected}>
+          <NodeActionMenu
+            node={selected}
+            model={seed.graphModel}
+            onShowJson={vi.fn()}
+          />
+        </NodeOperationContextProvider>
+      </ForestContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    expect(screen.getByText("Choose operation owner").closest("button")).toBeDisabled();
+    expect(screen.getByText("Ask AI about this node").closest("button")).toBeDisabled();
+    expect(screen.getByText("Rerun from here").closest("button")).toBeDisabled();
   });
 
   it("V1.5.0-era reserved labels are no longer present (Pin to compare / Coming soon)", () => {

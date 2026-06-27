@@ -18,17 +18,35 @@ import { buildRunSnapshot } from "../../../workbench/RunSnapshotAdapter";
 import { useWorkbenchOptional } from "../../../workbench/WorkbenchStateProvider";
 import { buildBranchPath } from "../../pathBuilder";
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
+
+interface ChainItem {
+  nodeKey: string;
+  title: string;
+  summary?: string;
+}
 
 export function LineageChainSection({ node }: { node: GraphViewNode }) {
   const { model, select } = useLineage();
   const wb = useWorkbenchOptional();
+  const resolvedContext = useResolvedNodeOperationContext();
   const [flash, setFlash] = useState(false);
 
   // Build the chip strip from RunSnapshotAdapter so semantics (parent
   // tie-break, depth cap) match canvas highlight + AI scope. Falls
   // back to "(no upstream)" when the node has no incoming edges.
   const snapshot = buildRunSnapshot(model);
-  const chain = snapshot.lineagePathTo(node.nodeKey);
+  const contextChain: ChainItem[] | null = resolvedContext?.ok
+    ? resolvedContext.context.lineage_context.upstream_path.map((pathNode) => ({
+        nodeKey: pathNode.key,
+        title: pathNode.label,
+        summary: pathNode.label,
+      }))
+    : resolvedContext
+      ? []
+      : null;
+  const chain: ChainItem[] =
+    contextChain ?? snapshot.lineagePathTo(node.nodeKey);
   // lineagePathTo always includes the target as the last element.
   // For visualisation we still want it (so the chip strip ends on
   // "you are here") but disable click on the active node.
@@ -36,7 +54,11 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
   // Copy uses pathBuilder so the copied string matches V1.5.0's
   // "raw.csv → log_income [DP: …]" enriched format. Chip click uses
   // lineagePathTo's pure node-id chain.
-  const copyTarget = hasUpstream ? buildBranchPath(model, node.id) : "";
+  const copyTarget = hasUpstream
+    ? contextChain
+      ? contextChain.map((pathNode) => pathNode.title).join(" → ")
+      : buildBranchPath(model, node.id)
+    : "";
 
   const copy = async () => {
     if (!copyTarget) return;

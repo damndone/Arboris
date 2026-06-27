@@ -20,6 +20,7 @@ import { DetailHeader, DETAIL_HEADER_TITLE_ID } from "../header/DetailHeader";
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
 import { DetailDrawerTabs } from "./DetailDrawerTabs";
+import { NodeOperationContextProvider } from "./NodeOperationContextProvider";
 import { sectionRegistry } from "./sections/sectionRegistry";
 
 interface DetailDrawerProps {
@@ -89,10 +90,12 @@ export function DetailDrawer({
           lastEvictedTabId={lastEvictedTabId}
         />
       )}
-      <DetailHeader node={resolved} onClose={onClose} onShowJson={onShowJson} />
-      {visibleSections.map((s) => (
-        <s.Component key={s.id} node={resolved} />
-      ))}
+      <NodeOperationContextProvider node={resolved}>
+        <DetailHeader node={resolved} onClose={onClose} onShowJson={onShowJson} />
+        {visibleSections.map((s) => (
+          <s.Component key={s.id} node={resolved} />
+        ))}
+      </NodeOperationContextProvider>
     </aside>
   );
 }

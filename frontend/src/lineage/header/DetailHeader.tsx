@@ -13,6 +13,8 @@
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode, HeadSetNode } from "../api/graphViewTypes";
 import { resolveOwnerRun } from "../api/graphViewTypes";
+import { ResolverFailureState } from "../detail/ResolverFailureState";
+import { useResolvedNodeOperationContext } from "../detail/NodeOperationContextProvider";
 import { useRerun } from "../detail/RerunContext";
 import { NodeActionMenu } from "../graph/NodeActionMenu";
 
@@ -32,8 +34,13 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
   // node. Attribute the node to the run a rerun would fork from (active head if it
   // owns the node, else an owning run); fall back to model.runId per-run / legacy.
   const rerun = useRerun();
-  const displayRunId =
+  const resolvedContext = useResolvedNodeOperationContext();
+  const context = resolvedContext?.ok ? resolvedContext.context : null;
+  const legacyDisplayRunId =
     resolveOwnerRun((node as HeadSetNode).runs, rerun?.activeRunId) ?? model.runId;
+  const displayRunId = context?.ownership.owner_run_id ?? legacyDisplayRunId;
+  const ownerResolution = context?.ownership.owner_resolution;
+  const warnings = context?.context_diagnostics.warnings ?? [];
 
   return (
     <div className="dp-head">
@@ -52,17 +59,46 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
         }}
       >
         <span>{node.kind}</span>
-        <span
-          className="id"
-          style={{
-            fontFamily: "var(--font-mono)",
-            color: "var(--label-secondary)",
-            textTransform: "none",
-            letterSpacing: 0,
-          }}
-        >
-          {displayRunId} · {node.nodeKey}
-        </span>
+        {resolvedContext && !resolvedContext.ok ? (
+          <ResolverFailureState result={resolvedContext} />
+        ) : (
+          <span
+            className="id"
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--label-secondary)",
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            {displayRunId} · {node.nodeKey}
+          </span>
+        )}
+        {ownerResolution && (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--label-tertiary)",
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            {ownerResolution}
+          </span>
+        )}
+        {warnings.map((warning) => (
+          <span
+            key={warning}
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--label-tertiary)",
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            {warning}
+          </span>
+        ))}
         <div
           style={{
             marginLeft: "auto",
