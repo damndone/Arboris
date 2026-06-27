@@ -13,6 +13,12 @@ from workbench.lineage.headset import build_headset
 from workbench.lineage.node_index import NODE_INDEX_FILENAME
 
 SUPPORTED_CONTEXT_VERSION = "node-operation-context/v1"
+OwnerResolution = Literal[
+    "active_head_contains_node",
+    "selected_run_hint",
+    "single_candidate",
+    "manual_candidate_selection",
+]
 
 
 class NodeWriteOperationRequestV1(BaseModel):
@@ -24,7 +30,7 @@ class NodeWriteOperationRequestV1(BaseModel):
     op_node_id: str
     node_hash: str
     forest_node_key: str
-    owner_resolution: str
+    owner_resolution: OwnerResolution
     active_head_run_id: str | None = None
 
 

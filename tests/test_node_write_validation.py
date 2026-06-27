@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
@@ -72,6 +73,11 @@ def test_rejects_unsupported_context_version(tmp_path: Path):
     req = _request(context_version="node-operation-context/v9")
     with pytest.raises(ValueError, match="unsupported_context_version"):
         validate_rerun_operation_target(tmp_path, req)
+
+
+def test_rejects_unknown_owner_resolution():
+    with pytest.raises(ValidationError):
+        _request(owner_resolution="runs_zero_guess")
 
 
 def test_missing_owner_run_raises_invalid_operation_target(tmp_path: Path):

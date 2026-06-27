@@ -162,6 +162,66 @@ describe("buildAskAIContextPacket", () => {
     expect(packet.artifacts[0].redactions).toContain("ask_ai_preview_truncated");
   });
 
+  it("enforces a global preview budget across artifacts", () => {
+    const context = successfulContext();
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: Array.from({ length: 6 }, (_, index) => ({
+          name: `preview-${index}.txt`,
+          mime: "text/plain",
+          sizeBytes: 50_000,
+          ai_visibility: "metadata_only",
+          preview: "x".repeat(2_000),
+        })) as NodeOperationContextV1["node_payload"]["artifacts"],
+      },
+    });
+
+    const totalPreviewChars = packet.artifacts.reduce((total, artifact) => {
+      return total + (typeof artifact.preview === "string" ? artifact.preview.length : 0);
+    }, 0);
+    expect(packet.context_visibility_notice.max_total_preview_chars).toBe(8_000);
+    expect(totalPreviewChars).toBeLessThanOrEqual(8_000);
+    expect(packet.artifacts[packet.artifacts.length - 1].redactions).toContain(
+      "ask_ai_preview_truncated",
+    );
+  });
+
+  it("caps table previews to ten rows and twenty columns", () => {
+    const context = successfulContext();
+    const rows = Array.from({ length: 25 }, (_, row) =>
+      Array.from({ length: 30 }, (_, column) => `${row}:${column}`),
+    );
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: [
+          {
+            name: "wide-table.csv",
+            mime: "text/csv",
+            sizeBytes: 100_000,
+            ai_visibility: "metadata_only",
+            preview: {
+              kind: "table",
+              content: rows,
+            },
+          } as unknown as NodeOperationContextV1["node_payload"]["artifacts"][number],
+        ],
+      },
+    });
+
+    const preview = packet.artifacts[0].preview as {
+      content?: unknown[][];
+    };
+    expect(packet.context_visibility_notice.max_table_preview_rows).toBe(10);
+    expect(packet.context_visibility_notice.max_table_preview_columns).toBe(20);
+    expect(preview.content).toHaveLength(10);
+    expect(preview.content?.[0]).toHaveLength(20);
+    expect(packet.artifacts[0].redactions).toContain("ask_ai_preview_truncated");
+  });
+
   it("omits binary previews even if a future artifact accidentally carries one", () => {
     const context = successfulContext();
     const packet = buildAskAIContextPacket({
