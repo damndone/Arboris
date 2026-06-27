@@ -992,6 +992,17 @@ Includes:
 - `explainResolveNodeOperationContext(...)` developer/debug helper
 - unit tests for active head, selected run hint source, single candidate, manual selection, ambiguous failure, and failure-returned `candidate_run_refs`
 
+PR 1 should introduce a minimal reusable seed fixture for owner-resolution regressions:
+
+```text
+run array order != active head
+shared upstream node
+active head contains selected node
+another candidate run also contains the same node_hash
+```
+
+This fixture should be reusable by PR 1, PR 3, PR 4, and PR 7.
+
 `explainResolveNodeOperationContext(...)` should output:
 
 - selected forest node
@@ -1084,6 +1095,7 @@ Includes:
 - backend context mismatch tests
 - Ask AI blocked artifact tests
 - rerun focus tests
+- reusable seed fixture from PR 1
 - golden 0-drift gate
 - browser acceptance seed project
 
