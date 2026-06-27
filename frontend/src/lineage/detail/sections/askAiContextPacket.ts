@@ -213,6 +213,11 @@ function sanitizeTablePreview(
     truncated = truncated || child.length > MAX_TABLE_PREVIEW_ROWS;
     output[key] = child.slice(0, MAX_TABLE_PREVIEW_ROWS).map((row) => {
       if (!Array.isArray(row)) {
+        if (row && typeof row === "object") {
+          const sanitized = sanitizeTableObjectRow(row, previewBudget);
+          if (sanitized.truncated) truncated = true;
+          return sanitized.value;
+        }
         const sanitized = sanitizePreviewValue(row, previewBudget);
         if (sanitized.truncated) truncated = true;
         return sanitized.value;
@@ -224,6 +229,21 @@ function sanitizeTablePreview(
         return sanitized.value;
       });
     });
+  }
+  return { value: output, truncated };
+}
+
+function sanitizeTableObjectRow(
+  row: object,
+  previewBudget: PreviewBudget,
+): { value: Record<string, unknown>; truncated: boolean } {
+  const entries = Object.entries(row);
+  let truncated = entries.length > MAX_TABLE_PREVIEW_COLUMNS;
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of entries.slice(0, MAX_TABLE_PREVIEW_COLUMNS)) {
+    const sanitized = sanitizePreviewValue(child, previewBudget);
+    if (sanitized.truncated) truncated = true;
+    output[key] = sanitized.value;
   }
   return { value: output, truncated };
 }

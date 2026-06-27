@@ -222,6 +222,38 @@ describe("buildAskAIContextPacket", () => {
     expect(packet.artifacts[0].redactions).toContain("ask_ai_preview_truncated");
   });
 
+  it("caps object-shaped table preview rows to twenty columns", () => {
+    const context = successfulContext();
+    const row = Object.fromEntries(
+      Array.from({ length: 30 }, (_, column) => [`column_${column}`, column]),
+    );
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: [
+          {
+            name: "object-table.json",
+            mime: "application/json",
+            sizeBytes: 100_000,
+            ai_visibility: "metadata_only",
+            preview: {
+              kind: "table",
+              content: Array.from({ length: 12 }, () => row),
+            },
+          } as unknown as NodeOperationContextV1["node_payload"]["artifacts"][number],
+        ],
+      },
+    });
+
+    const preview = packet.artifacts[0].preview as {
+      content?: Array<Record<string, unknown>>;
+    };
+    expect(preview.content).toHaveLength(10);
+    expect(Object.keys(preview.content?.[0] ?? {})).toHaveLength(20);
+    expect(packet.artifacts[0].redactions).toContain("ask_ai_preview_truncated");
+  });
+
   it("omits binary previews even if a future artifact accidentally carries one", () => {
     const context = successfulContext();
     const packet = buildAskAIContextPacket({
