@@ -1,5 +1,7 @@
 import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
 
+type ContextArtifact = NodeOperationContextV1["node_payload"]["artifacts"][number];
+
 export function buildAskAIContextPacket(context: NodeOperationContextV1) {
   return {
     packet_version: "ask-ai-context/v1" as const,
@@ -28,7 +30,7 @@ export function buildAskAIContextPacket(context: NodeOperationContextV1) {
       metrics: context.node_payload.metrics,
       execution_diagnostics: context.node_payload.execution_diagnostics,
     },
-    artifacts: context.node_payload.artifacts,
+    artifacts: context.node_payload.artifacts.map(sanitizeArtifactForAskAI),
     context_diagnostics: context.context_diagnostics,
     context_visibility_notice: {
       artifact_policy: "metadata_and_safe_preview_only" as const,
@@ -54,3 +56,40 @@ export function buildAskAIContextPacket(context: NodeOperationContextV1) {
 }
 
 export type AskAIContextPacket = ReturnType<typeof buildAskAIContextPacket>;
+
+function sanitizeArtifactForAskAI(artifact: ContextArtifact) {
+  const safeArtifact: {
+    name: ContextArtifact["name"];
+    mime: ContextArtifact["mime"];
+    sizeBytes?: ContextArtifact["sizeBytes"];
+    sha256?: ContextArtifact["sha256"];
+    ai_visibility: ContextArtifact["ai_visibility"];
+    summary?: unknown;
+    preview?: unknown;
+    redactions?: unknown;
+  } = {
+    name: artifact.name,
+    mime: artifact.mime,
+    ai_visibility: artifact.ai_visibility,
+  };
+
+  if (artifact.sizeBytes !== undefined) safeArtifact.sizeBytes = artifact.sizeBytes;
+  if (artifact.sha256 !== undefined) safeArtifact.sha256 = artifact.sha256;
+
+  const extendedArtifact = artifact as ContextArtifact & {
+    summary?: unknown;
+    preview?: unknown;
+    redactions?: unknown;
+  };
+  if (extendedArtifact.summary !== undefined) {
+    safeArtifact.summary = extendedArtifact.summary;
+  }
+  if (extendedArtifact.preview !== undefined) {
+    safeArtifact.preview = extendedArtifact.preview;
+  }
+  if (extendedArtifact.redactions !== undefined) {
+    safeArtifact.redactions = extendedArtifact.redactions;
+  }
+
+  return safeArtifact;
+}

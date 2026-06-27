@@ -89,6 +89,55 @@ describe("buildAskAIContextPacket", () => {
     expect(packet.artifacts.every((artifact) => artifact.ai_visibility)).toBe(true);
   });
 
+  it("strips artifact URLs and unknown full-content fields while preserving safe metadata", () => {
+    const context = successfulContext();
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: [
+          {
+            name: "training-data.csv",
+            mime: "text/csv",
+            sizeBytes: 4096,
+            sha256: "sha256:abc123",
+            url: "https://signed.example/download/training-data.csv",
+            ai_visibility: "metadata_only",
+            summary: "Rows and columns only",
+            preview: {
+              kind: "table",
+              truncated: true,
+              content: [["column"]],
+            },
+            redactions: ["large_table_truncated"],
+            content: "full raw dataset rows",
+            rows: [{ secret: "raw value" }],
+          } as unknown as NodeOperationContextV1["node_payload"]["artifacts"][number],
+        ],
+      },
+    });
+
+    expect(packet.artifacts).toEqual([
+      {
+        name: "training-data.csv",
+        mime: "text/csv",
+        sizeBytes: 4096,
+        sha256: "sha256:abc123",
+        ai_visibility: "metadata_only",
+        summary: "Rows and columns only",
+        preview: {
+          kind: "table",
+          truncated: true,
+          content: [["column"]],
+        },
+        redactions: ["large_table_truncated"],
+      },
+    ]);
+    expect("url" in packet.artifacts[0]).toBe(false);
+    expect("content" in packet.artifacts[0]).toBe(false);
+    expect("rows" in packet.artifacts[0]).toBe(false);
+  });
+
   it("does not include raw forest or run graph payload keys", () => {
     const packet = buildAskAIContextPacket(successfulContext());
     const keys = collectKeys(packet);
