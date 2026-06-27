@@ -38,7 +38,13 @@ export function OperationSection({ node }: { node: GraphViewNode }) {
       </ReadOnlyOperation>
     );
   }
-  return <EditableOperation schema={schema} context={resolved.context} />;
+  return (
+    <EditableOperation
+      key={`${resolved.context.context_fingerprint}:${resolved.context.selection.forest_node_key}`}
+      schema={schema}
+      context={resolved.context}
+    />
+  );
 }
 
 function EditableOperation({

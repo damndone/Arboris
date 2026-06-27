@@ -51,7 +51,7 @@ function modelNode(): HeadSetNode {
   };
 }
 
-function makeContext(): NodeOperationContextV1 {
+function makeContext(overrides: Partial<NodeOperationContextV1> = {}): NodeOperationContextV1 {
   return {
     context_version: "node-operation-context/v1",
     context_kind: "executed_lineage_node",
@@ -113,6 +113,7 @@ function makeContext(): NodeOperationContextV1 {
       shared_by_run_ids: ["run_a"],
     },
     context_diagnostics: { warnings: [], resolution_notes: [] },
+    ...overrides,
   };
 }
 
@@ -149,6 +150,78 @@ describe("OperationSection (editable)", () => {
       opOverrides: { covariance: "robust" },
     });
     await screen.findByTestId("operation-rerun-done");
+  });
+
+  it("resets edited values and submit state when context identity changes", async () => {
+    const firstContext = makeContext();
+    const secondContext = makeContext({
+      context_fingerprint: "nocv1:next",
+      selection: {
+        ...firstContext.selection,
+        forest_node_key: "M2",
+        node_hash: "M2",
+      },
+      operation_target: {
+        ...firstContext.operation_target,
+        node_hash: "M2",
+      },
+    });
+    const firstNode = modelNode();
+    const secondNode = modelNode();
+    secondNode.id = "M2";
+    secondNode.nodeKey = "M2";
+    secondNode.nodeHash = "M2";
+    secondNode.editableSchema = [
+      {
+        kind: "select",
+        key: "covariance",
+        label: "Covariance",
+        options: ["robust", "clustered", "unadjusted"],
+        value: "unadjusted",
+      },
+    ];
+
+    const submitRerun = vi.fn().mockResolvedValue({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: {
+        forest_node_key: "M2",
+        op_node_id: "model:ols_1",
+        node_hash: "M2",
+      },
+      rerun_from: {
+        owner_run_id: "run_a",
+        op_node_id: "model:ols_1",
+        node_hash: "M1",
+        forest_node_key: "M1",
+      },
+    });
+    const value: RerunContextValue = { submitRerun, activeRunId: "run_a" };
+    resolvedContextMock.current = { ok: true, context: firstContext };
+    const { rerender } = render(
+      <RerunContext.Provider value={value}>
+        <OperationSection node={firstNode} />
+      </RerunContext.Provider>,
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    await screen.findByTestId("operation-rerun-done");
+
+    resolvedContextMock.current = { ok: true, context: secondContext };
+    rerender(
+      <RerunContext.Provider value={value}>
+        <OperationSection node={secondNode} />
+      </RerunContext.Provider>,
+    );
+
+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(
+      "unadjusted",
+    );
+    expect(screen.queryByTestId("operation-rerun-done")).toBeNull();
+    expect(screen.queryByTestId("operation-rerun-error")).toBeNull();
+    expect((screen.getByTestId("operation-rerun-submit") as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("renders read-only controls and resolver failure state when context resolution fails", () => {
