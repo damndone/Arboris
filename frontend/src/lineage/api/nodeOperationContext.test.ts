@@ -120,6 +120,58 @@ describe("resolveNodeOperationContext", () => {
     expect(refreshedContext).toEqual(firstContext);
   });
 
+  it("changes fingerprint when selected node candidate owner set changes", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const first = resolveNodeOperationContext({
+      forest: seed.forest,
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+    const expanded = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey
+            ? { ...node, runs: [...node.runs, "run_d"] }
+            : node,
+        ),
+        heads: [
+          ...seed.forest.heads,
+          {
+            runId: "run_d",
+            headNodeHash: seed.sharedNodeKey,
+            fromNode: seed.sharedOpNodeId,
+            rerunOf: "run_a",
+            rerunReason: "manual_override",
+            status: "completed",
+            createdAt: "2026-06-27T00:03:00Z",
+          },
+        ],
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(expanded.ok).toBe(true);
+    if (!first.ok) throw new Error(first.reason);
+    if (!expanded.ok) throw new Error(expanded.reason);
+    expect(expanded.context.context_fingerprint).not.toBe(
+      first.context.context_fingerprint,
+    );
+    expect(expanded.context.ownership.candidate_run_ids).toEqual([
+      "run_a",
+      "run_c",
+      "run_d",
+    ]);
+    expect(expanded.context.ownership.shared_by_run_ids).toEqual([
+      "run_a",
+      "run_c",
+      "run_d",
+    ]);
+    expect(expanded.context.comparison_readiness.can_compare).toBe(true);
+  });
+
   it("excludes merged-forest upstream nodes that are not in the owner run", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const source = seed.forest.nodes.find((node) => node.nodeKey === "hash_source");
@@ -155,6 +207,44 @@ describe("resolveNodeOperationContext", () => {
     expect(
       result.context.lineage_context.upstream_path.map((node) => node.key),
     ).toEqual(["hash_source", seed.sharedNodeKey]);
+  });
+
+  it("fails closed when active-head resolution has no operation node id", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey ? { ...node, opNodeId: "" } : node,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.reason).toBe("missing_op_node");
+  });
+
+  it("fails closed when single-candidate resolution has no operation node id", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey
+            ? { ...node, opNodeId: "", runs: ["run_c"] }
+            : node,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: null,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failure");
+    expect(result.reason).toBe("missing_op_node");
   });
 
   it("explain helper includes owner-resolution trace", () => {

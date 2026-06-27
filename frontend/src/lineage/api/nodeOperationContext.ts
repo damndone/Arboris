@@ -144,6 +144,14 @@ export function resolveNodeOperationContext(
       selected_node_key: node.nodeKey,
     };
   }
+  if (!node.opNodeId) {
+    return {
+      ok: false,
+      reason: "missing_op_node",
+      selected_node_key: node.nodeKey,
+      node_hash: node.nodeHash,
+    };
+  }
 
   const candidate_run_refs = (node.runs ?? []).map((run_id) => ({
     run_id,
@@ -215,6 +223,11 @@ export function resolveNodeOperationContext(
     input.active_head_run_id ?? "",
     String(input.forest.schemaVersion),
     ownerHead?.createdAt ?? "",
+    stableFingerprintInput({
+      candidate_run_refs,
+      shared_by_run_ids: node.runs,
+      owner_head_created_at: ownerHead?.createdAt ?? "",
+    }),
   ]);
   const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
   const sharedByRunIds = [...node.runs];
@@ -413,6 +426,26 @@ function fingerprintParts(parts: string[]): string {
     hash = Math.imul(hash, 16777619);
   }
   return `nocv1:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function stableFingerprintInput(input: {
+  candidate_run_refs: CandidateRunRef[];
+  shared_by_run_ids: string[];
+  owner_head_created_at: string;
+}): string {
+  return JSON.stringify({
+    candidate_run_refs: [...input.candidate_run_refs]
+      .map((ref) => ({
+        run_id: ref.run_id,
+        op_node_id: ref.op_node_id,
+        node_hash: ref.node_hash,
+        is_active_head: ref.is_active_head,
+        path_contains_node: ref.path_contains_node,
+      }))
+      .sort((left, right) => left.run_id.localeCompare(right.run_id)),
+    shared_by_run_ids: [...input.shared_by_run_ids].sort(),
+    owner_head_created_at: input.owner_head_created_at,
+  });
 }
 
 function buildUpstreamPath(
