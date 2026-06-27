@@ -931,6 +931,7 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
     effective_run_id = run_id
     effective_from_node = body.from_node
     accepted_context: AcceptedContext | None = None
+    focus_target: dict[str, str] | None = None
 
     if body.context_version is not None:
         try:
@@ -957,6 +958,11 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         accepted_context = accepted_context_from(request)
         effective_run_id = request.owner_run_id
         effective_from_node = request.op_node_id
+        focus_target = {
+            "forest_node_key": request.forest_node_key,
+            "op_node_id": request.op_node_id,
+            "node_hash": request.node_hash,
+        }
     elif _has_context_target_fields(body):
         raise HTTPException(
             status_code=400,
@@ -1043,7 +1049,7 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             "run_id": child_id,
             "new_run_id": child_id,
             "new_active_head_id": child_id,
-            "focus": None,
+            "focus": focus_target,
             "rerun_from": {
                 "owner_run_id": effective_run_id,
                 "op_node_id": effective_from_node,

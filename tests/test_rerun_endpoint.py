@@ -128,6 +128,11 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
     child = body["run_id"]
     assert body["new_run_id"] == child
     assert body["new_active_head_id"] == child
+    assert body["focus"] == {
+        "forest_node_key": "hash_owner_model",
+        "op_node_id": node_id,
+        "node_hash": "hash_owner_model",
+    }
     assert body["rerun_from"] == {
         "owner_run_id": owner,
         "op_node_id": node_id,
