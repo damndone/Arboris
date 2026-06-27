@@ -99,6 +99,45 @@ describe("AskAISection", () => {
     );
   });
 
+  it("does not let an older response overwrite a newer answer after returning to the same context", async () => {
+    const stale = deferredAskAIResponse();
+    const fresh = deferredAskAIResponse();
+    vi.mocked(askAiForNode)
+      .mockReturnValueOnce(stale.promise)
+      .mockReturnValueOnce(fresh.promise);
+    const seed = makeOwnerResolutionSeedFixture();
+    const { rerenderWithActiveRunId } = renderAskAISection(seed.activeHeadRunId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+    expect(vi.mocked(askAiForNode)).toHaveBeenCalledTimes(1);
+
+    rerenderWithActiveRunId("run_not_owner");
+    expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
+      "ambiguous_owner_run",
+    );
+
+    rerenderWithActiveRunId(seed.activeHeadRunId);
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+    expect(vi.mocked(askAiForNode)).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      fresh.resolve({ text: "fresh answer from node A" });
+      await fresh.promise;
+    });
+    expect(screen.getByTestId("ask-ai-answer")).toHaveTextContent(
+      "fresh answer from node A",
+    );
+
+    await act(async () => {
+      stale.resolve({ text: "stale answer from node A" });
+      await stale.promise;
+    });
+
+    expect(screen.getByTestId("ask-ai-answer")).toHaveTextContent(
+      "fresh answer from node A",
+    );
+  });
+
   it("renders model JSON-looking response as text, not as an action", async () => {
     vi.mocked(askAiForNode).mockResolvedValueOnce({
       text: '{"operation":"rerun","owner_run_id":"run_a"}',

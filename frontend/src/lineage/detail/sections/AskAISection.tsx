@@ -20,6 +20,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
       ? null
       : `${packet.context_fingerprint}:${packet.selection.forest_node_key}`;
   const latestContextIdentityRef = useRef<string | null>(contextIdentity);
+  const requestVersionRef = useRef(0);
   latestContextIdentityRef.current = contextIdentity;
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    requestVersionRef.current += 1;
     setAnswer(null);
     setError(null);
     setIsSubmitting(false);
@@ -36,19 +38,34 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     event.preventDefault();
     const requestIdentity = contextIdentity;
     if (!packet || !requestIdentity || question.trim() === "") return;
+    const requestVersion = requestVersionRef.current + 1;
+    requestVersionRef.current = requestVersion;
 
     setIsSubmitting(true);
     setError(null);
     setAnswer(null);
     try {
       const response = await askAiForNode(packet, question);
-      if (latestContextIdentityRef.current !== requestIdentity) return;
+      if (
+        latestContextIdentityRef.current !== requestIdentity ||
+        requestVersionRef.current !== requestVersion
+      ) {
+        return;
+      }
       setAnswer(response.text);
     } catch (err) {
-      if (latestContextIdentityRef.current !== requestIdentity) return;
+      if (
+        latestContextIdentityRef.current !== requestIdentity ||
+        requestVersionRef.current !== requestVersion
+      ) {
+        return;
+      }
       setError(err instanceof Error ? err.message : "Ask AI failed");
     } finally {
-      if (latestContextIdentityRef.current === requestIdentity) {
+      if (
+        latestContextIdentityRef.current === requestIdentity &&
+        requestVersionRef.current === requestVersion
+      ) {
         setIsSubmitting(false);
       }
     }
