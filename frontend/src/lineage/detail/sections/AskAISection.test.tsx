@@ -1,10 +1,15 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../../workbench/ForestContext";
 import { makeOwnerResolutionSeedFixture } from "../../api/nodeOperationContext";
 import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
+import { askAiForNode } from "./askAiClient";
 import { AskAISection } from "./AskAISection";
+
+vi.mock("./askAiClient", () => ({
+  askAiForNode: vi.fn(),
+}));
 
 function renderAskAISection(activeRunId: string) {
   const seed = makeOwnerResolutionSeedFixture();
@@ -29,18 +34,36 @@ function renderAskAISection(activeRunId: string) {
 }
 
 describe("AskAISection", () => {
-  it("renders a disabled ask button and context preview JSON when context resolves", () => {
+  beforeEach(() => {
+    vi.mocked(askAiForNode).mockReset();
+  });
+
+  it("renders an enabled ask button and context preview JSON when context resolves", () => {
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);
 
     expect(
       screen.getByRole("button", { name: "Ask AI about this node" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     const preview = screen.getByTestId("ask-ai-context-preview");
     const packet = JSON.parse(preview.textContent ?? "{}");
     expect(packet.packet_version).toBe("ask-ai-context/v1");
     expect(packet.packet_scope.scope_type).toBe("selected_node");
     expect(packet.context_visibility_notice.full_datasets_included).toBe(false);
+  });
+
+  it("renders model JSON-looking response as text, not as an action", async () => {
+    vi.mocked(askAiForNode).mockResolvedValueOnce({
+      text: '{"operation":"rerun","owner_run_id":"run_a"}',
+    });
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+
+    const answer = await screen.findByTestId("ask-ai-answer");
+    expect(answer).toHaveTextContent('{"operation":"rerun","owner_run_id":"run_a"}');
+    expect(screen.queryByTestId("ask-ai-executable-action")).not.toBeInTheDocument();
   });
 
   it("shows resolver failure and omits packet preview when context cannot resolve", () => {
@@ -50,5 +73,27 @@ describe("AskAISection", () => {
       "ambiguous_owner_run",
     );
     expect(screen.queryByTestId("ask-ai-context-preview")).not.toBeInTheDocument();
+  });
+
+  it("does not call Ask AI when resolver fails", () => {
+    renderAskAISection("run_not_owner");
+
+    expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
+      "ambiguous_owner_run",
+    );
+    expect(vi.mocked(askAiForNode)).not.toHaveBeenCalled();
+  });
+
+  it("shows service errors as text and keeps the context preview visible", async () => {
+    vi.mocked(askAiForNode).mockRejectedValueOnce(new Error("Ask AI failed (501)"));
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Ask AI failed (501)");
+    });
+    expect(screen.getByTestId("ask-ai-context-preview")).toBeInTheDocument();
   });
 });

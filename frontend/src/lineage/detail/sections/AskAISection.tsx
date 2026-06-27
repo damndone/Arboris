@@ -1,9 +1,13 @@
 // frontend/src/lineage/detail/sections/AskAISection.tsx
 //
+import { FormEvent, useState } from "react";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
+import { askAiForNode } from "./askAiClient";
 import { buildAskAIContextPacket } from "./askAiContextPacket";
+
+const DEFAULT_QUESTION = "Explain this node and its risks.";
 
 export function AskAISection({ node }: { node: GraphViewNode }) {
   const resolvedContext = useResolvedNodeOperationContext();
@@ -11,6 +15,27 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     resolvedContext?.ok === true
       ? buildAskAIContextPacket(resolvedContext.context)
       : null;
+  const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!packet || question.trim() === "") return;
+
+    setIsSubmitting(true);
+    setError(null);
+    setAnswer(null);
+    try {
+      const response = await askAiForNode(packet, question);
+      setAnswer(response.text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ask AI failed");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
     <section
@@ -63,26 +88,78 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
             )}
           </>
         )}
-        <button
-          type="button"
-          disabled
-          data-testid="ask-ai-section-button"
-          title="Ask AI client lands in Task 6"
+        <form
+          onSubmit={handleSubmit}
           style={{
-            alignSelf: "flex-start",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
             marginTop: 4,
-            padding: "6px 12px",
-            borderRadius: 6,
-            border: "1px solid var(--separator)",
-            background: "transparent",
-            color: "var(--label-tertiary)",
-            cursor: "not-allowed",
-            fontSize: 12,
-            opacity: 0.7,
           }}
         >
-          Ask AI about this node
-        </button>
+          <textarea
+            aria-label="Ask AI question"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            rows={3}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              resize: "vertical",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              background: "var(--bg-card, rgba(255,255,255,0.06))",
+              color: "var(--label-primary)",
+              font: "inherit",
+              fontSize: 12,
+              padding: "8px 10px",
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!packet || isSubmitting || question.trim() === ""}
+            data-testid="ask-ai-section-button"
+            style={{
+              alignSelf: "flex-start",
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              background: packet
+                ? "var(--accent, rgba(40,120,255,0.18))"
+                : "transparent",
+              color: packet
+                ? "var(--label-primary)"
+                : "var(--label-tertiary)",
+              cursor: packet && !isSubmitting ? "pointer" : "not-allowed",
+              fontSize: 12,
+              opacity: !packet || isSubmitting ? 0.7 : 1,
+            }}
+          >
+            Ask AI about this node
+          </button>
+        </form>
+        {error && (
+          <div role="alert" style={{ color: "var(--danger, #b00020)" }}>
+            {error}
+          </div>
+        )}
+        {answer && (
+          <div
+            data-testid="ask-ai-answer"
+            role="status"
+            style={{
+              marginTop: 4,
+              padding: "6px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: "var(--label-primary)",
+            }}
+          >
+            {answer}
+          </div>
+        )}
       </div>
     </section>
   );
