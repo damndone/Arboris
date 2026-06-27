@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../../workbench/ForestContext";
 import { makeOwnerResolutionSeedFixture } from "../../api/nodeOperationContext";
 import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
+import type { AskAIResponse } from "./askAiClient";
 import { askAiForNode } from "./askAiClient";
 import { AskAISection } from "./AskAISection";
 
@@ -17,20 +18,41 @@ function renderAskAISection(activeRunId: string) {
     (node) => node.nodeKey === seed.sharedNodeKey,
   );
   if (!selected) throw new Error("missing selected node fixture");
+  const selectedNode = selected;
 
-  render(
-    <ForestContext.Provider
-      value={{
-        forest: seed.forest,
-        activeRunId,
-        setActiveRunId: vi.fn(),
-      }}
-    >
-      <NodeOperationContextProvider node={selected}>
-        <AskAISection node={selected} />
-      </NodeOperationContextProvider>
-    </ForestContext.Provider>,
-  );
+  function tree(nextActiveRunId: string) {
+    return (
+      <ForestContext.Provider
+        value={{
+          forest: seed.forest,
+          activeRunId: nextActiveRunId,
+          setActiveRunId: vi.fn(),
+        }}
+      >
+        <NodeOperationContextProvider node={selectedNode}>
+          <AskAISection node={selectedNode} />
+        </NodeOperationContextProvider>
+      </ForestContext.Provider>
+    );
+  }
+
+  const result = render(tree(activeRunId));
+  return {
+    ...result,
+    rerenderWithActiveRunId(nextActiveRunId: string) {
+      result.rerender(tree(nextActiveRunId));
+    },
+  };
+}
+
+function deferredAskAIResponse() {
+  let resolve!: (value: AskAIResponse) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<AskAIResponse>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("AskAISection", () => {
@@ -50,6 +72,31 @@ describe("AskAISection", () => {
     expect(packet.packet_version).toBe("ask-ai-context/v1");
     expect(packet.packet_scope.scope_type).toBe("selected_node");
     expect(packet.context_visibility_notice.full_datasets_included).toBe(false);
+  });
+
+  it("ignores stale responses after context switches to resolver failure", async () => {
+    const deferred = deferredAskAIResponse();
+    vi.mocked(askAiForNode).mockReturnValueOnce(deferred.promise);
+    const seed = makeOwnerResolutionSeedFixture();
+    const { rerenderWithActiveRunId } = renderAskAISection(seed.activeHeadRunId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+    expect(vi.mocked(askAiForNode)).toHaveBeenCalledTimes(1);
+
+    rerenderWithActiveRunId("run_not_owner");
+    expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
+      "ambiguous_owner_run",
+    );
+
+    await act(async () => {
+      deferred.resolve({ text: "stale answer from node A" });
+      await deferred.promise;
+    });
+
+    expect(screen.queryByTestId("ask-ai-answer")).not.toBeInTheDocument();
+    expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
+      "ambiguous_owner_run",
+    );
   });
 
   it("renders model JSON-looking response as text, not as an action", async () => {

@@ -1,6 +1,6 @@
 // frontend/src/lineage/detail/sections/AskAISection.tsx
 //
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
@@ -15,25 +15,42 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     resolvedContext?.ok === true
       ? buildAskAIContextPacket(resolvedContext.context)
       : null;
+  const contextIdentity =
+    packet === null
+      ? null
+      : `${packet.context_fingerprint}:${packet.selection.forest_node_key}`;
+  const latestContextIdentityRef = useRef<string | null>(contextIdentity);
+  latestContextIdentityRef.current = contextIdentity;
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    setAnswer(null);
+    setError(null);
+    setIsSubmitting(false);
+  }, [contextIdentity]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!packet || question.trim() === "") return;
+    const requestIdentity = contextIdentity;
+    if (!packet || !requestIdentity || question.trim() === "") return;
 
     setIsSubmitting(true);
     setError(null);
     setAnswer(null);
     try {
       const response = await askAiForNode(packet, question);
+      if (latestContextIdentityRef.current !== requestIdentity) return;
       setAnswer(response.text);
     } catch (err) {
+      if (latestContextIdentityRef.current !== requestIdentity) return;
       setError(err instanceof Error ? err.message : "Ask AI failed");
     } finally {
-      setIsSubmitting(false);
+      if (latestContextIdentityRef.current === requestIdentity) {
+        setIsSubmitting(false);
+      }
     }
   }
 
