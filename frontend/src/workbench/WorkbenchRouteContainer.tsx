@@ -48,6 +48,12 @@ import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
 import type { RerunResponseV1 } from "../api";
+import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
+
+type PendingFocusTarget = {
+  runId: string;
+  focus: NonNullable<RerunResponseV1["focus"]>;
+};
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -68,7 +74,8 @@ export function WorkbenchRouteContainer({
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null);
+  const [pendingFocusTarget, setPendingFocusTarget] =
+    useState<PendingFocusTarget | null>(null);
 
   const model = useMemo(
     () => (forest ? forestToGraphViewModel(forest, runId) : null),
@@ -95,8 +102,11 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     runId;
 
   const handleRerun = (response: RerunResponseV1) => {
-    setActiveRunId(response.new_active_head_id ?? response.run_id);
-    setPendingFocusKey(response.focus?.forest_node_key ?? null);
+    const nextActiveRunId = response.new_active_head_id ?? response.run_id;
+    setActiveRunId(nextActiveRunId);
+    setPendingFocusTarget(
+      response.focus ? { runId: nextActiveRunId, focus: response.focus } : null,
+    );
     void refetch();
   };
 
@@ -110,8 +120,8 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
             <WorkbenchShell
               runId={runId}
               projectRoot={projectRoot}
-              pendingFocusKey={pendingFocusKey}
-              onPendingFocusConsumed={() => setPendingFocusKey(null)}
+              pendingFocusTarget={pendingFocusTarget}
+              onPendingFocusConsumed={() => setPendingFocusTarget(null)}
             />
           </LineageBridge>
         </WorkbenchStateProvider>
@@ -144,6 +154,31 @@ function LegacyGraphWorkbench({
   );
 }
 
+function resolvePendingFocusKey(
+  nodes: GraphViewNode[],
+  pending: PendingFocusTarget,
+): string | null {
+  const runNode = nodes.find(
+    (node) =>
+      isHeadSetNode(node) &&
+      node.opNodeId === pending.focus.op_node_id &&
+      node.runs.includes(pending.runId),
+  );
+  if (runNode) return runNode.nodeKey;
+
+  const submittedKeyNode = nodes.find(
+    (node) =>
+      isHeadSetNode(node) &&
+      node.nodeKey === pending.focus.forest_node_key &&
+      node.runs.includes(pending.runId),
+  );
+  return submittedKeyNode?.nodeKey ?? null;
+}
+
+function isHeadSetNode(node: GraphViewNode): node is HeadSetNode {
+  return "runs" in node && Array.isArray((node as HeadSetNode).runs);
+}
+
 /**
  * Inner shell — split out so it can consume both contexts via hooks
  * (useLineage + useWorkbench) without putting the providers' children
@@ -153,12 +188,12 @@ function LegacyGraphWorkbench({
 function WorkbenchShell({
   runId,
   projectRoot,
-  pendingFocusKey = null,
+  pendingFocusTarget = null,
   onPendingFocusConsumed,
 }: {
   runId: string;
   projectRoot: string;
-  pendingFocusKey?: string | null;
+  pendingFocusTarget?: PendingFocusTarget | null;
   onPendingFocusConsumed?: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
@@ -180,11 +215,12 @@ function WorkbenchShell({
       : null;
 
   useEffect(() => {
+    if (!pendingFocusTarget) return;
+    const pendingFocusKey = resolvePendingFocusKey(model.nodes, pendingFocusTarget);
     if (!pendingFocusKey) return;
-    if (!model.nodes.some((n) => n.nodeKey === pendingFocusKey)) return;
     select(pendingFocusKey);
     onPendingFocusConsumed?.();
-  }, [model.nodes, onPendingFocusConsumed, pendingFocusKey, select]);
+  }, [model.nodes, onPendingFocusConsumed, pendingFocusTarget, select]);
 
   // REV-3 H1: external selection clear must close the modal.
   useEffect(() => {

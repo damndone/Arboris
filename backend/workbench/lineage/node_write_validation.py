@@ -66,6 +66,13 @@ def validate_rerun_operation_target(
     indexed_hash = _read_indexed_node_hash(run_root, request.op_node_id)
     if indexed_hash is not None and indexed_hash != request.node_hash:
         raise ValueError("context_mismatch: node_hash")
+    if indexed_hash is not None:
+        valid_forest_keys = {
+            request.node_hash,
+            f"{request.node_hash}::{request.op_node_id}",
+        }
+        if request.forest_node_key not in valid_forest_keys:
+            raise ValueError("context_mismatch: forest_node_key")
 
 
 def _is_simple_run_id(run_id: str) -> bool:

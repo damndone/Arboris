@@ -106,6 +106,33 @@ def test_node_index_hash_mismatch_raises_context_mismatch(tmp_path: Path):
         validate_rerun_operation_target(tmp_path, _request())
 
 
+def test_forest_node_key_mismatch_raises_context_mismatch(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    (tmp_path / "run_a" / "node_index.json").write_text(
+        json.dumps({"model:ols_1": {"node_hash": "hash_a"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="context_mismatch: forest_node_key"):
+        validate_rerun_operation_target(
+            tmp_path,
+            _request(forest_node_key="wrong_hash"),
+        )
+
+
+def test_composite_forest_node_key_passes_when_hash_matches(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    (tmp_path / "run_a" / "node_index.json").write_text(
+        json.dumps({"model:ols_1": {"node_hash": "hash_a"}}),
+        encoding="utf-8",
+    )
+
+    validate_rerun_operation_target(
+        tmp_path,
+        _request(forest_node_key="hash_a::model:ols_1"),
+    )
+
+
 def test_missing_node_index_entry_keeps_graph_only_validation(tmp_path: Path):
     _write_graph(tmp_path, "run_a")
     (tmp_path / "run_a" / "node_index.json").write_text(

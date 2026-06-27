@@ -140,6 +140,47 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
   };
 }
 
+function forkedForestResponse(): HeadSetResponse {
+  return {
+    ...forestResponse("hash_model"),
+    nodes: {
+      ...forestResponse("hash_model").nodes,
+      hash_child: {
+        id: "model:ols_1",
+        kind: "model",
+        display_label: "Child OLS",
+        stage: "model",
+        summary: null,
+        trust: "ok",
+        trust_reason: null,
+        parent_stage_id: null,
+        decision_points: [],
+        node_hash: "hash_child",
+        producing_stage: "model",
+        cas_ref: null,
+        runs: ["run_child"],
+        editable: true,
+        op_type: "ols",
+        schema_id: "ols@v1",
+        editable_schema_source: "run_inputs",
+        editable_schema: [
+          {
+            kind: "select",
+            key: "covariance",
+            label: "Covariance",
+            options: ["clustered", "robust"],
+            value: "robust",
+          },
+        ],
+      },
+    },
+    edges: [
+      { source: "hash_source", target: "hash_model" },
+      { source: "hash_source", target: "hash_child" },
+    ],
+  };
+}
+
 function mountForestAt(initialPath: string) {
   vi.spyOn(api, "getRunGraphHeadSet")
     .mockResolvedValueOnce(forestResponse("hash_model"))
@@ -289,6 +330,54 @@ describe("WorkbenchRouteContainer", () => {
     expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
       "Original OLS",
     );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Child OLS",
+      ),
+    );
+  });
+
+  it("selects the child run node by op node when the response focus key still names the parent", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet")
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forkedForestResponse());
+    vi.spyOn(api, "rerunFromNode").mockResolvedValue({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: {
+        forest_node_key: "hash_model",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_model",
+      },
+      rerun_from: {
+        owner_run_id: "run_a",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_model",
+        forest_node_key: "hash_model",
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
