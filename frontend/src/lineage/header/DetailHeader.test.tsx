@@ -1,6 +1,6 @@
 // frontend/src/lineage/header/DetailHeader.test.tsx
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../workbench/ForestContext";
 import { DETAIL_HEADER_TITLE_ID, DetailHeader } from "./DetailHeader";
@@ -124,7 +124,7 @@ describe("DetailHeader", () => {
     const selected = seed.forest.nodes.find(
       (n) => n.nodeKey === seed.sharedNodeKey,
     )!;
-    render(
+    const { container } = render(
       <ForestContext.Provider
         value={{
           forest: seed.forest,
@@ -143,9 +143,12 @@ describe("DetailHeader", () => {
         </LineageContext.Provider>
       </ForestContext.Provider>,
     );
-    expect(screen.getByText(/run_c/)).toBeInTheDocument();
-    expect(screen.getByText(/active_head_contains_node/)).toBeInTheDocument();
-    expect(screen.queryByText(/owner.*run_a/i)).not.toBeInTheDocument();
+    const header = container.querySelector(".dp-head");
+    expect(header).not.toBeNull();
+    const headerScope = within(header as HTMLElement);
+    expect(headerScope.getByText(/run_c/)).toBeInTheDocument();
+    expect(headerScope.getByText(/active_head_contains_node/)).toBeInTheDocument();
+    expect(headerScope.queryByText(/owner.*run_a/i)).not.toBeInTheDocument();
   });
 
   it("shows resolver failure instead of fabricated owner for ambiguous context", () => {
@@ -153,7 +156,7 @@ describe("DetailHeader", () => {
     const selected = seed.forest.nodes.find(
       (n) => n.nodeKey === seed.sharedNodeKey,
     )!;
-    render(
+    const { container } = render(
       <ForestContext.Provider
         value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
       >
@@ -168,9 +171,11 @@ describe("DetailHeader", () => {
         </LineageContext.Provider>
       </ForestContext.Provider>,
     );
-    expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
-      "ambiguous_owner_run",
-    );
+    const header = container.querySelector(".dp-head");
+    expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByTestId("resolver-failure-state"),
+    ).toHaveTextContent("ambiguous_owner_run");
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
     expect(screen.getByText("Rerun from here").closest("button")).toBeDisabled();
   });
