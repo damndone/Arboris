@@ -70,16 +70,17 @@ type SelectionContext = {
 ### 2.2 Ownership
 
 ```ts
+type CandidateRunRef = {
+  run_id: string;
+  op_node_id: string;
+  node_hash: string;
+  is_active_head: boolean;
+  path_contains_node: boolean;
+};
+
 type OwnershipContext = {
   active_head_run_id: string | null;
-
-  candidate_run_refs: Array<{
-    run_id: string;
-    op_node_id: string;
-    node_hash: string;
-    is_active_head: boolean;
-    path_contains_node: boolean;
-  }>;
+  candidate_run_refs: CandidateRunRef[];
 
   candidate_run_ids: string[];
   shared_by_run_ids: string[];
@@ -159,6 +160,17 @@ type NodeOperationCapabilities = {
 ```
 
 Capability flags are computed by the resolver and consumed by action surfaces. Consumers must not independently infer these flags from raw runs.
+
+Baseline capability behavior:
+
+| State | `can_rerun` | `can_ask_ai` | `can_edit_params` | Notes |
+| --- | --- | --- | --- | --- |
+| `materialized` | yes | yes | depends on schema | Normal executed node. |
+| `failed` | yes, if persisted operation target exists | yes, if failure context or diagnostics exist | depends on schema | Failure can be explained and may be rerun from the failed point. |
+| `stale` | yes | yes | depends on schema | Context should disclose upstream or lineage staleness. |
+| resolver failure | no | no | no | No successful context is produced. |
+
+This table is the resolver baseline. Specific nodes may still disable a capability with a `disabled_reasons` entry, but consumers must read that decision from context instead of reimplementing it.
 
 ### 2.7 Comparison Readiness
 
@@ -241,6 +253,7 @@ type ResolveNodeOperationContextResult =
       selected_node_key: string;
       active_head_run_id?: string | null;
       candidate_run_ids?: string[];
+      candidate_run_refs?: CandidateRunRef[];
       node_hash?: string;
       detail?: string;
     };
@@ -255,11 +268,29 @@ type ResolveNodeOperationContextResult =
 - `active_head_run_id`
 - run lineage version or `updated_at`
 
+The frontend creates the initial `context_fingerprint` from the resolved context. The backend recomputes validation using submitted operation target fields plus persisted run lineage version or `updated_at`. `forest_node_key` is included as a submitted UI selection identity for audit and mismatch detection, but the authoritative write target remains `owner_run_id + op_node_id + node_hash`.
+
 `AskAIContextPacket` may only be generated from a successful `NodeOperationContextV1`. If context resolution fails, Ask AI must show the resolver failure state instead of generating an AI packet.
 
 ## 3. Resolver Rules / Owner Resolution
 
 The resolver determines which run and op node a selected forest node operation binds to.
+
+```ts
+type SelectedRunHintSource =
+  | "none"
+  | "run_scoped_surface"
+  | "manual_candidate_selection";
+
+type ResolveNodeOperationContextInput = {
+  selected_forest_node_key: string;
+  active_head_run_id: string | null;
+  selected_run_hint?: string | null;
+  selected_run_hint_source?: SelectedRunHintSource;
+};
+```
+
+If `selected_run_hint_source` is omitted, the resolver must treat it as `"none"`.
 
 Owner resolution order:
 
@@ -294,6 +325,13 @@ owner_resolution = "selected_run_hint"
 `selected_run_hint` must come from explicit UI state, such as a run-scoped drawer, branch view, or history panel. It must not be derived from candidate array order.
 
 If `active_head_run_id` contains the selected node, `selected_run_hint` must not silently override it unless the operation comes from an explicitly run-scoped surface or the user has completed manual candidate selection.
+
+The override rule is:
+
+- normal graph operation: active head wins
+- `selected_run_hint_source = "run_scoped_surface"`: selected run hint may override active head
+- `selected_run_hint_source = "manual_candidate_selection"`: selected run hint may override active head
+- any other source: selected run hint must not silently override active head
 
 ### 3.3 Single Candidate
 
@@ -576,6 +614,8 @@ Ask AI v1 must not return:
 
 Ask AI v1 returns advisory text only. It cannot create or modify graph state, bypass `NodeOperationContext`, or infer hidden context from raw runs, raw forest state, or artifact files.
 
+The Ask AI UI must render all v1 responses as advisory text. Even if the model outputs JSON that resembles a backend payload, the UI must not bind it to an executable action.
+
 ### 5.4 Debug and Audit Preview
 
 Ask AI v1 should expose a developer/debug context preview showing the exact `AskAIContextPacket` sent to the AI service, including artifact visibility levels and redactions. This preview is for verification and audit only, not a user-editable payload.
@@ -626,6 +666,8 @@ The backend validator must check:
 `forest_node_key` is a UI selection identity and audit field. The authoritative write target is `owner_run_id + op_node_id + node_hash`.
 
 `active_head_run_id` validates the UI context under which ownership was resolved. It must not override `owner_run_id` as the rerun source.
+
+The backend must not depend on a UI-only forest key generation rule that it cannot reproduce. For stale and mismatch validation, the stable backend target is `owner_run_id + op_node_id + node_hash`, combined with persisted run lineage version or `updated_at`; `forest_node_key` is auxiliary audit and mismatch evidence.
 
 ### 6.3 Structured Errors
 
@@ -943,11 +985,12 @@ Includes:
 - `NodeOperationContextV1` types
 - `ResolveNodeOperationContextResult`
 - `candidate_run_refs`
+- `SelectedRunHintSource`
 - owner resolution rules
 - `context_fingerprint` generation
 - resolver failure states
 - `explainResolveNodeOperationContext(...)` developer/debug helper
-- unit tests for active head, selected run hint, single candidate, manual selection, and ambiguous failure
+- unit tests for active head, selected run hint source, single candidate, manual selection, ambiguous failure, and failure-returned `candidate_run_refs`
 
 `explainResolveNodeOperationContext(...)` should output:
 
@@ -1099,6 +1142,7 @@ Any implementation that requires planned node operations, AI-generated executabl
 | Invalid fallback | Multiple candidates with no owner | No successful context is produced | Unit |
 | Stale context | Run lineage updated after context generated | Backend returns `context_stale` or `context_mismatch` | Backend |
 | Wrong focus | Rerun succeeds | UI switches active head and selects new focus node | Browser |
+| Run-scoped hint override | Active head contains selected node, but operation launches from explicit run-scoped surface for another candidate run | Resolver uses `selected_run_hint` only when `selected_run_hint_source` is `run_scoped_surface` or `manual_candidate_selection` | Unit |
 
 ### 11.2 Non-blocker Behavior Matrix
 
@@ -1111,6 +1155,7 @@ Any implementation that requires planned node operations, AI-generated executabl
 | NodeActionMenu | Failed context | Disables rerun, edit, Ask AI, compare |
 | `focus: null` | Rerun succeeds but no focus target | Active head switches; UI refreshes; degraded toast shown |
 | Failed child run | Child run persisted but execution failed | New run becomes active; failed node selected |
+| Manual candidate selection | `ambiguous_owner_run`, then user selects candidate run | Resolver returns `manual_candidate_selection`; active head does not change until a write operation succeeds |
 
 ### 11.3 Ask AI Safety / Visibility Matrix
 
@@ -1123,7 +1168,7 @@ Any implementation that requires planned node operations, AI-generated executabl
 | Preview too large | Truncated and marked `truncated: true` |
 | Redacted preview | `redactions` populated |
 | User asks AI to rerun | AI refuses or explains v1 is advisory only |
-| AI response contains backend payload | Blocked or not rendered as action |
+| AI response contains backend payload | Rendered as advisory text only; never bound to an executable action |
 | AI claims full artifact knowledge | Must disclose visibility limits |
 
 ### 11.4 Release Gates
@@ -1141,3 +1186,5 @@ Release gates:
 9. `context_stale` and `context_mismatch` fail closed and require re-resolve.
 10. Browser acceptance seed project passes.
 11. Existing lineage forest rendering has no golden drift unless intentionally updated.
+12. Run-scoped selected hints override active head only when `selected_run_hint_source` is `run_scoped_surface` or `manual_candidate_selection`.
+13. Manual candidate selection does not switch active head before a successful write operation.
