@@ -1,16 +1,17 @@
 // frontend/src/lineage/detail/sections/AskAISection.tsx
 //
-// V1.5.2 P5 — AskAISection placeholder. Plan §13.
-//
-// Always renders (the AI slot is the V1.5.2 visible promise that AI
-// is coming). V1.5.2 makes ZERO LLM calls. The button is disabled
-// with a tooltip explaining the V1.5.3 backend dependency. When
-// /llm/chat lands, this becomes a streaming chat surface scoped to
-// the node's context.
-
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import { ResolverFailureState } from "../ResolverFailureState";
+import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
+import { buildAskAIContextPacket } from "./askAiContextPacket";
 
 export function AskAISection({ node }: { node: GraphViewNode }) {
+  const resolvedContext = useResolvedNodeOperationContext();
+  const packet =
+    resolvedContext?.ok === true
+      ? buildAskAIContextPacket(resolvedContext.context)
+      : null;
+
   return (
     <section
       aria-label="Ask AI"
@@ -35,15 +36,38 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
           color: "var(--label-secondary)",
         }}
       >
-        <span>
-          AI will use this node's context (kind: <code>{node.kind}</code>,
-          stage: <code>{node.stage}</code>) as its scope.
-        </span>
+        {resolvedContext?.ok === false ? (
+          <ResolverFailureState result={resolvedContext} />
+        ) : (
+          <>
+            <span>
+              AI will use this node's context (kind: <code>{node.kind}</code>,
+              stage: <code>{node.stage}</code>) as its scope.
+            </span>
+            {packet && (
+              <details>
+                <summary>Context preview</summary>
+                <pre
+                  data-testid="ask-ai-context-preview"
+                  style={{
+                    margin: "8px 0 0",
+                    maxHeight: 280,
+                    overflow: "auto",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {JSON.stringify(packet, null, 2)}
+                </pre>
+              </details>
+            )}
+          </>
+        )}
         <button
           type="button"
           disabled
           data-testid="ask-ai-section-button"
-          title="LLM backend lands in V1.5.3"
+          title="Ask AI client lands in Task 6"
           style={{
             alignSelf: "flex-start",
             marginTop: 4,
@@ -57,7 +81,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
             opacity: 0.7,
           }}
         >
-          Ask AI about this node — V1.5.3
+          Ask AI about this node
         </button>
       </div>
     </section>
