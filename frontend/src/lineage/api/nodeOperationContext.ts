@@ -1,0 +1,518 @@
+import type {
+  ArtifactRef,
+  EditableControl,
+  ForestViewModel,
+  GraphViewEdge,
+  GraphViewModel,
+  Head,
+  HeadSetNode,
+  Stage,
+} from "./graphViewTypes";
+
+export type OwnerResolution =
+  | "active_head_contains_node"
+  | "selected_run_hint"
+  | "single_candidate"
+  | "manual_candidate_selection";
+
+export type SelectedRunHintSource =
+  | "none"
+  | "run_scoped_surface"
+  | "manual_candidate_selection";
+
+export type NodeState = "materialized" | "failed" | "stale";
+
+export interface CandidateRunRef {
+  run_id: string;
+  op_node_id: string;
+  node_hash: string;
+  is_active_head: boolean;
+  path_contains_node: boolean;
+}
+
+export interface ResolveNodeOperationContextInput {
+  forest: ForestViewModel;
+  selected_forest_node_key: string;
+  active_head_run_id: string | null;
+  selected_run_hint?: string | null;
+  selected_run_hint_source?: SelectedRunHintSource;
+}
+
+export type ResolveNodeOperationContextResult =
+  | { ok: true; context: NodeOperationContextV1 }
+  | {
+      ok: false;
+      reason:
+        | "unsupported_planned_node"
+        | "missing_owner_run"
+        | "ambiguous_owner_run"
+        | "missing_op_node"
+        | "missing_node_hash"
+        | "context_stale";
+      selected_node_key: string;
+      active_head_run_id?: string | null;
+      candidate_run_ids?: string[];
+      candidate_run_refs?: CandidateRunRef[];
+      node_hash?: string;
+      detail?: string;
+    };
+
+export interface NodeOperationContextV1 {
+  context_version: "node-operation-context/v1";
+  context_kind: "executed_lineage_node";
+  context_fingerprint: string;
+  selection: {
+    forest_node_key: string;
+    node_hash: string;
+    display_label: string;
+    kind: string;
+    stage: string;
+  };
+  ownership: {
+    active_head_run_id: string | null;
+    candidate_run_refs: CandidateRunRef[];
+    candidate_run_ids: string[];
+    shared_by_run_ids: string[];
+    owner_run_id: string;
+    owner_resolution: OwnerResolution;
+    rerun_of?: string | null;
+    parent_run_id?: string | null;
+  };
+  operation_target: {
+    owner_run_id: string;
+    op_node_id: string;
+    node_hash: string;
+    node_state: NodeState;
+    editable_schema_source?: "run_inputs" | "capabilities";
+  };
+  lineage_context: {
+    path_run_id: string;
+    upstream_path: Array<{
+      key: string;
+      label: string;
+      kind: string;
+      stage: string;
+    }>;
+    downstream_hint?: { has_downstream: boolean; downstream_count?: number };
+    active_head_path_contains_node: boolean;
+  };
+  node_payload: {
+    decisions: HeadSetNode["decisions"];
+    artifacts: Array<ArtifactRef & { ai_visibility: "metadata_only" }>;
+    editable_schema: EditableControl[] | null;
+    params: Record<string, unknown>;
+    metrics?: Record<string, unknown>;
+    execution_diagnostics?: Array<{ level: string; message: string }>;
+  };
+  capabilities: {
+    can_rerun: boolean;
+    can_ask_ai: boolean;
+    can_compare: boolean;
+    can_rollback_focus: boolean;
+    can_edit_params: boolean;
+    disabled_reasons: string[];
+  };
+  comparison_readiness: {
+    can_compare: boolean;
+    candidate_run_ids: string[];
+    active_head_run_id: string | null;
+    owner_run_id: string;
+    parent_run_id?: string | null;
+    shared_by_run_ids: string[];
+  };
+  context_diagnostics: { warnings: string[]; resolution_notes: string[] };
+}
+
+export function resolveNodeOperationContext(
+  input: ResolveNodeOperationContextInput,
+): ResolveNodeOperationContextResult {
+  const source = input.selected_run_hint_source ?? "none";
+  const node = input.forest.nodes.find(
+    (n) => n.nodeKey === input.selected_forest_node_key,
+  );
+  if (!node) {
+    return {
+      ok: false,
+      reason: "missing_op_node",
+      selected_node_key: input.selected_forest_node_key,
+    };
+  }
+  if (!node.nodeHash) {
+    return {
+      ok: false,
+      reason: "missing_node_hash",
+      selected_node_key: node.nodeKey,
+    };
+  }
+
+  const candidate_run_refs = (node.runs ?? []).map((run_id) => ({
+    run_id,
+    op_node_id: node.opNodeId,
+    node_hash: node.nodeHash!,
+    is_active_head: run_id === input.active_head_run_id,
+    path_contains_node: true,
+  }));
+  if (candidate_run_refs.length === 0) {
+    return {
+      ok: false,
+      reason: "missing_owner_run",
+      selected_node_key: node.nodeKey,
+      node_hash: node.nodeHash,
+    };
+  }
+
+  const activeRef = candidate_run_refs.find(
+    (r) => r.run_id === input.active_head_run_id,
+  );
+  const hintRef = input.selected_run_hint
+    ? candidate_run_refs.find(
+        (r) =>
+          r.run_id === input.selected_run_hint &&
+          r.node_hash === node.nodeHash &&
+          Boolean(r.op_node_id),
+      )
+    : undefined;
+
+  let owner = activeRef;
+  let owner_resolution: OwnerResolution = "active_head_contains_node";
+  if (
+    hintRef &&
+    (source === "run_scoped_surface" || source === "manual_candidate_selection")
+  ) {
+    owner = hintRef;
+    owner_resolution =
+      source === "manual_candidate_selection"
+        ? "manual_candidate_selection"
+        : "selected_run_hint";
+  } else if (!owner && hintRef) {
+    owner = hintRef;
+    owner_resolution = "selected_run_hint";
+  } else if (!owner && candidate_run_refs.length === 1) {
+    owner = candidate_run_refs[0];
+    owner_resolution = "single_candidate";
+  }
+
+  if (!owner) {
+    return {
+      ok: false,
+      reason: "ambiguous_owner_run",
+      selected_node_key: node.nodeKey,
+      active_head_run_id: input.active_head_run_id,
+      candidate_run_ids: candidate_run_refs.map((r) => r.run_id),
+      candidate_run_refs,
+      node_hash: node.nodeHash,
+      detail:
+        "Multiple candidate runs own this node; explicit owner selection is required.",
+    };
+  }
+
+  const context_fingerprint = fingerprintParts([
+    node.nodeKey,
+    node.nodeHash,
+    owner.run_id,
+    owner.op_node_id,
+    input.active_head_run_id ?? "",
+    String(input.forest.schemaVersion),
+  ]);
+  const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
+  const sharedByRunIds = [...node.runs];
+  const activeHeadPathContainsNode = Boolean(activeRef);
+
+  return {
+    ok: true,
+    context: {
+      context_version: "node-operation-context/v1",
+      context_kind: "executed_lineage_node",
+      context_fingerprint,
+      selection: {
+        forest_node_key: node.nodeKey,
+        node_hash: node.nodeHash,
+        display_label: node.title,
+        kind: node.kind,
+        stage: node.stage,
+      },
+      ownership: {
+        active_head_run_id: input.active_head_run_id,
+        candidate_run_refs,
+        candidate_run_ids: candidateRunIds,
+        shared_by_run_ids: sharedByRunIds,
+        owner_run_id: owner.run_id,
+        owner_resolution,
+        rerun_of: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
+        parent_run_id: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
+      },
+      operation_target: {
+        owner_run_id: owner.run_id,
+        op_node_id: owner.op_node_id,
+        node_hash: owner.node_hash,
+        node_state: node.status === "failed" ? "failed" : "materialized",
+        editable_schema_source: node.editableSchemaSource,
+      },
+      lineage_context: {
+        path_run_id: owner.run_id,
+        upstream_path: buildUpstreamPath(input.forest, node.nodeKey),
+        downstream_hint: buildDownstreamHint(input.forest, node.nodeKey),
+        active_head_path_contains_node: activeHeadPathContainsNode,
+      },
+      node_payload: {
+        decisions: node.decisions,
+        artifacts: (node.artifacts ?? []).map((a) => ({
+          ...a,
+          ai_visibility: "metadata_only" as const,
+        })),
+        editable_schema: node.editableSchema ?? null,
+        params: {},
+        metrics: node.stats,
+      },
+      capabilities: resolveCapabilities(node, candidate_run_refs.length),
+      comparison_readiness: {
+        can_compare: candidate_run_refs.length > 1,
+        candidate_run_ids: candidateRunIds,
+        active_head_run_id: input.active_head_run_id,
+        owner_run_id: owner.run_id,
+        parent_run_id: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
+        shared_by_run_ids: sharedByRunIds,
+      },
+      context_diagnostics: {
+        warnings: [],
+        resolution_notes: [`owner_resolution=${owner_resolution}`],
+      },
+    },
+  };
+}
+
+export function explainResolveNodeOperationContext(
+  input: ResolveNodeOperationContextInput,
+): string {
+  const result = resolveNodeOperationContext(input);
+  const lines = [
+    `selected forest node: ${input.selected_forest_node_key}`,
+    `active_head_run_id: ${input.active_head_run_id ?? "none"}`,
+  ];
+
+  if (result.ok) {
+    lines.push(
+      `candidate_run_refs: ${JSON.stringify(
+        result.context.ownership.candidate_run_refs,
+      )}`,
+      `owner_resolution: ${result.context.ownership.owner_resolution}`,
+      `owner_run_id: ${result.context.ownership.owner_run_id}`,
+    );
+  } else {
+    lines.push(`reason: ${result.reason}`);
+    if (result.candidate_run_refs) {
+      lines.push(`candidate_run_refs: ${JSON.stringify(result.candidate_run_refs)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function makeOwnerResolutionSeedFixture(): {
+  forest: ForestViewModel;
+  graphModel: GraphViewModel;
+  sharedNodeKey: string;
+  sharedOpNodeId: string;
+  activeHeadRunId: string;
+} {
+  const sharedNodeKey = "hash_shared_model";
+  const sharedOpNodeId = "model:shared_ols";
+  const source = makeHeadSetNode({
+    nodeKey: "hash_source",
+    opNodeId: "source:upload",
+    nodeHash: "hash_source",
+    title: "Source data",
+    kind: "dataset",
+    stage: "source",
+    runs: ["run_a", "run_c"],
+  });
+  const shared = makeHeadSetNode({
+    nodeKey: sharedNodeKey,
+    opNodeId: sharedOpNodeId,
+    nodeHash: sharedNodeKey,
+    title: "Shared OLS model",
+    kind: "model",
+    stage: "model",
+    runs: ["run_a", "run_c"],
+    editable: true,
+    editableSchemaSource: "run_inputs",
+  });
+  const report = makeHeadSetNode({
+    nodeKey: "hash_report_c",
+    opNodeId: "report:summary",
+    nodeHash: "hash_report_c",
+    title: "Run C report",
+    kind: "report",
+    stage: "report",
+    runs: ["run_c"],
+  });
+  const edges: GraphViewEdge[] = [
+    { id: "hash_source->hash_shared_model", source: source.nodeKey, target: shared.nodeKey },
+    { id: "hash_shared_model->hash_report_c", source: shared.nodeKey, target: report.nodeKey },
+  ];
+  const heads: Head[] = [
+    {
+      runId: "run_a",
+      headNodeHash: sharedNodeKey,
+      fromNode: null,
+      rerunOf: null,
+      rerunReason: null,
+      status: "completed",
+      createdAt: "2026-06-27T00:00:00Z",
+    },
+    {
+      runId: "run_c",
+      headNodeHash: report.nodeHash,
+      fromNode: sharedOpNodeId,
+      rerunOf: "run_a",
+      rerunReason: "manual_override",
+      status: "completed",
+      createdAt: "2026-06-27T00:01:00Z",
+    },
+  ];
+  const forest: ForestViewModel = {
+    schemaVersion: 2,
+    legacy: false,
+    nodes: [source, shared, report],
+    edges,
+    heads,
+  };
+  const graphModel: GraphViewModel = {
+    schemaVersion: 2,
+    runId: "run_c",
+    legacy: false,
+    nodes: forest.nodes,
+    edges,
+    stats: {
+      nodeCount: forest.nodes.length,
+      edgeCount: edges.length,
+      leafCount: 1,
+      hasDpCount: 0,
+    },
+  };
+
+  return {
+    forest,
+    graphModel,
+    sharedNodeKey,
+    sharedOpNodeId,
+    activeHeadRunId: "run_c",
+  };
+}
+
+function fingerprintParts(parts: string[]): string {
+  const input = JSON.stringify(parts);
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `nocv1:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function buildUpstreamPath(
+  forest: ForestViewModel,
+  selectedNodeKey: string,
+): Array<{ key: string; label: string; kind: string; stage: string }> {
+  const nodesByKey = new Map(forest.nodes.map((node) => [node.nodeKey, node]));
+  const incomingByTarget = new Map<string, GraphViewEdge[]>();
+  for (const edge of forest.edges) {
+    const incoming = incomingByTarget.get(edge.target) ?? [];
+    incoming.push(edge);
+    incomingByTarget.set(edge.target, incoming);
+  }
+
+  const visited = new Set<string>();
+  const ordered: HeadSetNode[] = [];
+  const visit = (key: string) => {
+    if (visited.has(key)) return;
+    visited.add(key);
+    for (const edge of incomingByTarget.get(key) ?? []) {
+      visit(edge.source);
+    }
+    const node = nodesByKey.get(key);
+    if (node) ordered.push(node);
+  };
+
+  visit(selectedNodeKey);
+  return ordered.map((node) => ({
+    key: node.nodeKey,
+    label: node.title,
+    kind: node.kind,
+    stage: node.stage,
+  }));
+}
+
+function buildDownstreamHint(
+  forest: ForestViewModel,
+  selectedNodeKey: string,
+): { has_downstream: boolean; downstream_count?: number } {
+  const downstreamCount = forest.edges.filter(
+    (edge) => edge.source === selectedNodeKey,
+  ).length;
+  return {
+    has_downstream: downstreamCount > 0,
+    downstream_count: downstreamCount,
+  };
+}
+
+function resolveCapabilities(
+  node: HeadSetNode,
+  candidateCount: number,
+): NodeOperationContextV1["capabilities"] {
+  const canEditParams = Boolean(node.editable && node.editableSchema?.length);
+  return {
+    can_rerun: true,
+    can_ask_ai: true,
+    can_compare: candidateCount > 1,
+    can_rollback_focus: candidateCount > 1,
+    can_edit_params: canEditParams,
+    disabled_reasons: [],
+  };
+}
+
+function findHead(forest: ForestViewModel, runId: string): Head | undefined {
+  return forest.heads.find((head) => head.runId === runId);
+}
+
+function makeHeadSetNode(args: {
+  nodeKey: string;
+  opNodeId: string;
+  nodeHash: string;
+  title: string;
+  kind: string;
+  stage: Stage;
+  runs: string[];
+  editable?: boolean;
+  editableSchemaSource?: "capabilities" | "run_inputs";
+}): HeadSetNode {
+  return {
+    id: args.nodeKey,
+    nodeKey: args.nodeKey,
+    raw: {},
+    stage: args.stage,
+    kind: args.kind,
+    title: args.title,
+    parentStageId: null,
+    trust: "ok",
+    decisions: [],
+    opNodeId: args.opNodeId,
+    nodeHash: args.nodeHash,
+    producingStage: args.stage,
+    casRef: null,
+    runs: args.runs,
+    editable: args.editable,
+    editableSchema:
+      args.editable === true
+        ? [
+            {
+              kind: "text",
+              key: "formula",
+              label: "Formula",
+              value: "y ~ x",
+            },
+          ]
+        : undefined,
+    editableSchemaSource: args.editableSchemaSource,
+  };
+}

@@ -251,7 +251,13 @@ export interface ForestViewModel {
   heads: Head[];
 }
 
-/** Resolve which run owns a (possibly deduped) forest node for a rerun / display.
+/** Legacy resolver for old rerun / display paths only.
+ *  UNSAFE for new node operations: it cannot represent ambiguous ownership,
+ *  operation targets, node hashes, lineage paths, or context diagnostics.
+ *
+ *  New node operation consumers must use `resolveNodeOperationContext`.
+ *
+ *  Resolve which run owns a (possibly deduped) forest node for a rerun / display.
  *  A node shared across runs (`runs.length > 1`) has no single owner, so prefer the
  *  active head when it's one of them — that's the version the user is viewing and the
  *  parent whose form the rerun must fork from. Otherwise fall back to the first run
