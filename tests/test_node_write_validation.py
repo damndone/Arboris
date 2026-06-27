@@ -7,6 +7,7 @@ from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 from workbench.lineage.node_write_validation import (
     NodeWriteOperationRequestV1,
+    compute_context_fingerprint,
     validate_rerun_operation_target,
 )
 
@@ -49,6 +50,24 @@ def _request(**overrides) -> NodeWriteOperationRequestV1:
     return NodeWriteOperationRequestV1(**data)
 
 
+def _valid_request(runs_root: Path, **overrides) -> NodeWriteOperationRequestV1:
+    request = _request(**overrides)
+    request.context_fingerprint = compute_context_fingerprint(runs_root, request)
+    return request
+
+
+def _write_node_index(
+    runs_root: Path,
+    run_id: str = "run_a",
+    node_id: str = "model:ols_1",
+    node_hash: str = "hash_a",
+) -> None:
+    (runs_root / run_id / "node_index.json").write_text(
+        json.dumps({node_id: {"node_hash": node_hash}}),
+        encoding="utf-8",
+    )
+
+
 def test_rejects_unsupported_context_version(tmp_path: Path):
     req = _request(context_version="node-operation-context/v9")
     with pytest.raises(ValueError, match="unsupported_context_version"):
@@ -87,12 +106,20 @@ def test_op_node_not_in_owner_run_raises_invalid_operation_target(tmp_path: Path
 
 def test_matching_node_index_hash_passes(tmp_path: Path):
     _write_graph(tmp_path, "run_a")
-    (tmp_path / "run_a" / "node_index.json").write_text(
-        json.dumps({"model:ols_1": {"node_hash": "hash_a"}}),
-        encoding="utf-8",
-    )
+    _write_node_index(tmp_path)
 
-    validate_rerun_operation_target(tmp_path, _request())
+    validate_rerun_operation_target(tmp_path, _valid_request(tmp_path))
+
+
+def test_context_fingerprint_mismatch_fails_closed(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
+
+    with pytest.raises(ValueError, match="context_stale: context_fingerprint"):
+        validate_rerun_operation_target(
+            tmp_path,
+            _request(context_fingerprint="bad_fingerprint"),
+        )
 
 
 def test_node_index_hash_mismatch_raises_context_mismatch(tmp_path: Path):
@@ -129,25 +156,64 @@ def test_composite_forest_node_key_passes_when_hash_matches(tmp_path: Path):
 
     validate_rerun_operation_target(
         tmp_path,
-        _request(forest_node_key="hash_a::model:ols_1"),
+        _valid_request(tmp_path, forest_node_key="hash_a::model:ols_1"),
     )
 
 
-def test_missing_node_index_entry_keeps_graph_only_validation(tmp_path: Path):
+def test_missing_node_index_entry_fails_closed_for_context_write(tmp_path: Path):
     _write_graph(tmp_path, "run_a")
-    (tmp_path / "run_a" / "node_index.json").write_text(
-        json.dumps({"model:other": {"node_hash": "hash_b"}}),
-        encoding="utf-8",
-    )
+    _write_node_index(tmp_path, node_id="model:other", node_hash="hash_b")
 
-    validate_rerun_operation_target(tmp_path, _request())
+    with pytest.raises(ValueError, match="context_stale: node_index"):
+        validate_rerun_operation_target(tmp_path, _request())
+
+
+def test_missing_node_index_file_fails_closed_for_context_write(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+
+    with pytest.raises(ValueError, match="context_stale: node_index"):
+        validate_rerun_operation_target(tmp_path, _request())
 
 
 def test_active_head_run_id_never_overrides_owner_run_id(tmp_path: Path):
     _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
     _write_graph(tmp_path, "run_active", node_id="model:other")
+    _write_node_index(tmp_path, run_id="run_active", node_id="model:other")
 
     validate_rerun_operation_target(
         tmp_path,
-        _request(active_head_run_id="run_active", owner_run_id="run_a"),
+        _valid_request(
+            tmp_path,
+            active_head_run_id="run_active",
+            owner_run_id="run_a",
+            owner_resolution="manual_candidate_selection",
+        ),
     )
+
+
+def test_active_head_contains_node_requires_owner_active_match(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
+    _write_graph(tmp_path, "run_active")
+    _write_node_index(tmp_path, run_id="run_active")
+
+    with pytest.raises(ValueError, match="context_mismatch: active_head_run_id"):
+        validate_rerun_operation_target(
+            tmp_path,
+            _request(active_head_run_id="run_active", owner_run_id="run_a"),
+        )
+
+
+def test_missing_active_head_run_fails_closed(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
+
+    with pytest.raises(ValueError, match="context_stale: active_head_run_id"):
+        validate_rerun_operation_target(
+            tmp_path,
+            _request(
+                active_head_run_id="missing_active",
+                owner_resolution="manual_candidate_selection",
+            ),
+        )

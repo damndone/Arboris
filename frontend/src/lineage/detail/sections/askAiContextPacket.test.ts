@@ -138,6 +138,54 @@ describe("buildAskAIContextPacket", () => {
     expect("rows" in packet.artifacts[0]).toBe(false);
   });
 
+  it("caps large artifact previews and marks the redaction explicitly", () => {
+    const context = successfulContext();
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: [
+          {
+            name: "training-data.csv",
+            mime: "text/csv",
+            sizeBytes: 100_000,
+            ai_visibility: "metadata_only",
+            preview: "x".repeat(20_000),
+          } as unknown as NodeOperationContextV1["node_payload"]["artifacts"][number],
+        ],
+      },
+    });
+
+    const preview = packet.artifacts[0].preview;
+    expect(typeof preview).toBe("string");
+    expect(String(preview).length).toBeLessThan(2500);
+    expect(packet.artifacts[0].redactions).toContain("ask_ai_preview_truncated");
+  });
+
+  it("omits binary previews even if a future artifact accidentally carries one", () => {
+    const context = successfulContext();
+    const packet = buildAskAIContextPacket({
+      ...context,
+      node_payload: {
+        ...context.node_payload,
+        artifacts: [
+          {
+            name: "report.pdf",
+            mime: "application/pdf",
+            sizeBytes: 100_000,
+            ai_visibility: "metadata_only",
+            preview: "full pdf text should not be sent",
+          } as unknown as NodeOperationContextV1["node_payload"]["artifacts"][number],
+        ],
+      },
+    });
+
+    expect("preview" in packet.artifacts[0]).toBe(false);
+    expect(packet.artifacts[0].redactions).toContain(
+      "ask_ai_preview_omitted_for_mime",
+    );
+  });
+
   it("does not include raw forest or run graph payload keys", () => {
     const packet = buildAskAIContextPacket(successfulContext());
     const keys = collectKeys(packet);

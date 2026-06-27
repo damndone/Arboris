@@ -394,4 +394,50 @@ describe("WorkbenchRouteContainer", () => {
       ),
     );
   });
+
+  it("keeps polling and selects the child run node when context rerun returns focus null before the child is indexed", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet")
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forkedForestResponse());
+    vi.spyOn(api, "rerunFromNode").mockResolvedValue({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: null,
+      rerun_from: {
+        owner_run_id: "run_a",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_model",
+        forest_node_key: "hash_model",
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+
+    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Child OLS",
+      ),
+    );
+  });
 });

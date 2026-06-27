@@ -2,6 +2,11 @@ import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
 
 type ContextArtifact = NodeOperationContextV1["node_payload"]["artifacts"][number];
 
+const MAX_ARTIFACT_TEXT_CHARS = 2_000;
+const MAX_ARTIFACT_ARRAY_ITEMS = 20;
+const MAX_ARTIFACT_OBJECT_KEYS = 50;
+const TRUNCATION_SUFFIX = "...[truncated]";
+
 export function buildAskAIContextPacket(context: NodeOperationContextV1) {
   return {
     packet_version: "ask-ai-context/v1" as const,
@@ -72,6 +77,12 @@ function sanitizeArtifactForAskAI(artifact: ContextArtifact) {
     mime: artifact.mime,
     ai_visibility: artifact.ai_visibility,
   };
+  const redactions = new Set<string>(
+    Array.isArray((artifact as { redactions?: unknown }).redactions)
+      ? ((artifact as { redactions?: unknown[] }).redactions ?? [])
+          .filter((item): item is string => typeof item === "string")
+      : [],
+  );
 
   if (artifact.sizeBytes !== undefined) safeArtifact.sizeBytes = artifact.sizeBytes;
   if (artifact.sha256 !== undefined) safeArtifact.sha256 = artifact.sha256;
@@ -82,14 +93,72 @@ function sanitizeArtifactForAskAI(artifact: ContextArtifact) {
     redactions?: unknown;
   };
   if (extendedArtifact.summary !== undefined) {
-    safeArtifact.summary = extendedArtifact.summary;
+    const sanitized = sanitizePreviewValue(extendedArtifact.summary);
+    safeArtifact.summary = sanitized.value;
+    if (sanitized.truncated) redactions.add("ask_ai_summary_truncated");
   }
   if (extendedArtifact.preview !== undefined) {
-    safeArtifact.preview = extendedArtifact.preview;
+    if (allowsArtifactPreview(artifact.mime)) {
+      const sanitized = sanitizePreviewValue(extendedArtifact.preview);
+      safeArtifact.preview = sanitized.value;
+      if (sanitized.truncated) redactions.add("ask_ai_preview_truncated");
+    } else {
+      redactions.add("ask_ai_preview_omitted_for_mime");
+    }
   }
-  if (extendedArtifact.redactions !== undefined) {
-    safeArtifact.redactions = extendedArtifact.redactions;
-  }
+  if (redactions.size > 0) safeArtifact.redactions = [...redactions];
 
   return safeArtifact;
+}
+
+function allowsArtifactPreview(mime: string): boolean {
+  const normalized = mime.toLowerCase();
+  if (
+    normalized.startsWith("image/") ||
+    normalized.startsWith("audio/") ||
+    normalized.startsWith("video/")
+  ) {
+    return false;
+  }
+  return ![
+    "application/pdf",
+    "application/octet-stream",
+    "application/zip",
+    "application/x-parquet",
+  ].includes(normalized);
+}
+
+function sanitizePreviewValue(value: unknown): { value: unknown; truncated: boolean } {
+  if (typeof value === "string") {
+    if (value.length <= MAX_ARTIFACT_TEXT_CHARS) {
+      return { value, truncated: false };
+    }
+    return {
+      value: `${value.slice(0, MAX_ARTIFACT_TEXT_CHARS)}${TRUNCATION_SUFFIX}`,
+      truncated: true,
+    };
+  }
+  if (Array.isArray(value)) {
+    let truncated = value.length > MAX_ARTIFACT_ARRAY_ITEMS;
+    const items = value
+      .slice(0, MAX_ARTIFACT_ARRAY_ITEMS)
+      .map((item) => {
+        const sanitized = sanitizePreviewValue(item);
+        if (sanitized.truncated) truncated = true;
+        return sanitized.value;
+      });
+    return { value: items, truncated };
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value);
+    let truncated = entries.length > MAX_ARTIFACT_OBJECT_KEYS;
+    const output: Record<string, unknown> = {};
+    for (const [key, child] of entries.slice(0, MAX_ARTIFACT_OBJECT_KEYS)) {
+      const sanitized = sanitizePreviewValue(child);
+      if (sanitized.truncated) truncated = true;
+      output[key] = sanitized.value;
+    }
+    return { value: output, truncated };
+  }
+  return { value, truncated: false };
 }

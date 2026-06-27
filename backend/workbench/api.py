@@ -958,11 +958,7 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         accepted_context = accepted_context_from(request)
         effective_run_id = request.owner_run_id
         effective_from_node = request.op_node_id
-        focus_target = {
-            "forest_node_key": request.forest_node_key,
-            "op_node_id": request.op_node_id,
-            "node_hash": request.node_hash,
-        }
+        focus_target = None
     elif _has_context_target_fields(body):
         raise HTTPException(
             status_code=400,

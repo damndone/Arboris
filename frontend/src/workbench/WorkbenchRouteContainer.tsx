@@ -52,8 +52,16 @@ import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 
 type PendingFocusTarget = {
   runId: string;
-  focus: NonNullable<RerunResponseV1["focus"]>;
+  focus: {
+    forest_node_key: string | null;
+    op_node_id: string;
+    node_hash: string | null;
+  };
+  attempts: number;
 };
+
+const PENDING_FOCUS_RETRY_LIMIT = 20;
+const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -104,9 +112,16 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const handleRerun = (response: RerunResponseV1) => {
     const nextActiveRunId = response.new_active_head_id ?? response.run_id;
     setActiveRunId(nextActiveRunId);
-    setPendingFocusTarget(
-      response.focus ? { runId: nextActiveRunId, focus: response.focus } : null,
-    );
+    const focus = response.focus ?? response.rerun_from;
+    setPendingFocusTarget({
+      runId: nextActiveRunId,
+      focus: {
+        forest_node_key: focus.forest_node_key,
+        op_node_id: focus.op_node_id,
+        node_hash: focus.node_hash,
+      },
+      attempts: 0,
+    });
     void refetch();
   };
 
@@ -122,6 +137,14 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
               projectRoot={projectRoot}
               pendingFocusTarget={pendingFocusTarget}
               onPendingFocusConsumed={() => setPendingFocusTarget(null)}
+              onPendingFocusRetry={() => {
+                setPendingFocusTarget((current) =>
+                  current === null
+                    ? null
+                    : { ...current, attempts: current.attempts + 1 },
+                );
+                void refetch();
+              }}
             />
           </LineageBridge>
         </WorkbenchStateProvider>
@@ -190,11 +213,13 @@ function WorkbenchShell({
   projectRoot,
   pendingFocusTarget = null,
   onPendingFocusConsumed,
+  onPendingFocusRetry,
 }: {
   runId: string;
   projectRoot: string;
   pendingFocusTarget?: PendingFocusTarget | null;
   onPendingFocusConsumed?: () => void;
+  onPendingFocusRetry?: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
@@ -217,10 +242,22 @@ function WorkbenchShell({
   useEffect(() => {
     if (!pendingFocusTarget) return;
     const pendingFocusKey = resolvePendingFocusKey(model.nodes, pendingFocusTarget);
-    if (!pendingFocusKey) return;
+    if (!pendingFocusKey) {
+      if (pendingFocusTarget.attempts >= PENDING_FOCUS_RETRY_LIMIT) return;
+      const timer = window.setTimeout(() => {
+        onPendingFocusRetry?.();
+      }, PENDING_FOCUS_RETRY_DELAY_MS);
+      return () => window.clearTimeout(timer);
+    }
     select(pendingFocusKey);
     onPendingFocusConsumed?.();
-  }, [model.nodes, onPendingFocusConsumed, pendingFocusTarget, select]);
+  }, [
+    model.nodes,
+    onPendingFocusConsumed,
+    onPendingFocusRetry,
+    pendingFocusTarget,
+    select,
+  ]);
 
   // REV-3 H1: external selection clear must close the modal.
   useEffect(() => {

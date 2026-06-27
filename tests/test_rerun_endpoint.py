@@ -6,6 +6,10 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from workbench.api import app
+from workbench.lineage.node_write_validation import (
+    NodeWriteOperationRequestV1,
+    compute_context_fingerprint,
+)
 from workbench.projects import create_project
 
 client = TestClient(app)
@@ -51,6 +55,23 @@ def _write_node_index(project_root: Path, run_id: str, node_id: str, node_hash: 
 
 def _run_ids(project_root: Path) -> set[str]:
     return {entry.name for entry in (project_root / "runs").iterdir() if entry.is_dir()}
+
+
+def _context_fingerprint(project_root: Path, **overrides) -> str:
+    data = {
+        "request_id": "req_context_rerun",
+        "operation": "rerun",
+        "context_version": "node-operation-context/v1",
+        "context_fingerprint": "pending",
+        "owner_run_id": overrides["owner_run_id"],
+        "op_node_id": overrides["op_node_id"],
+        "node_hash": overrides["node_hash"],
+        "forest_node_key": overrides["forest_node_key"],
+        "owner_resolution": overrides["owner_resolution"],
+        "active_head_run_id": overrides.get("active_head_run_id"),
+    }
+    request = NodeWriteOperationRequestV1(**data)
+    return compute_context_fingerprint(project_root / "runs", request)
 
 
 def test_rerun_unknown_from_node_422(tmp_path: Path):
@@ -104,6 +125,15 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
     active_head = _create_terminal_run(project.root)
     node_id = _model_node_id(project.root, owner)
     _write_node_index(project.root, owner, node_id, "hash_owner_model")
+    context_fingerprint = _context_fingerprint(
+        project.root,
+        owner_run_id=owner,
+        op_node_id=node_id,
+        node_hash="hash_owner_model",
+        forest_node_key="hash_owner_model",
+        owner_resolution="manual_candidate_selection",
+        active_head_run_id=active_head,
+    )
 
     resp = client.post(
         f"/runs/{active_head}/rerun",
@@ -112,7 +142,7 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
             "request_id": "req_context_rerun",
             "operation": "rerun",
             "context_version": "node-operation-context/v1",
-            "context_fingerprint": "fingerprint_owner",
+            "context_fingerprint": context_fingerprint,
             "owner_run_id": owner,
             "op_node_id": node_id,
             "node_hash": "hash_owner_model",
@@ -128,11 +158,7 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
     child = body["run_id"]
     assert body["new_run_id"] == child
     assert body["new_active_head_id"] == child
-    assert body["focus"] == {
-        "forest_node_key": "hash_owner_model",
-        "op_node_id": node_id,
-        "node_hash": "hash_owner_model",
-    }
+    assert body["focus"] is None
     assert body["rerun_from"] == {
         "owner_run_id": owner,
         "op_node_id": node_id,
