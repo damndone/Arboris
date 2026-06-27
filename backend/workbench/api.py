@@ -928,8 +928,8 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
     structurally-validated overrides. Full-pipeline re-execution; lineage preserved."""
     root = Path(project_root)
     runs_root = _resolve_project_runs_dir(project_root)
-    effective_run_id = body.owner_run_id or run_id
-    effective_from_node = body.op_node_id or body.from_node
+    effective_run_id = run_id
+    effective_from_node = body.from_node
     accepted_context: AcceptedContext | None = None
 
     if body.context_version is not None:
@@ -955,6 +955,13 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
                 detail=str(exc),
             ) from exc
         accepted_context = accepted_context_from(request)
+        effective_run_id = request.owner_run_id
+        effective_from_node = request.op_node_id
+    elif _has_context_target_fields(body):
+        raise HTTPException(
+            status_code=400,
+            detail="context_version is required for context target fields.",
+        )
 
     if effective_from_node is None:
         raise HTTPException(status_code=422, detail="from_node is required.")
@@ -1063,6 +1070,23 @@ def _node_write_validation_status(message: str) -> int:
     if message.startswith("operation_not_allowed"):
         return 403
     return 400
+
+
+def _has_context_target_fields(body: RerunRequest) -> bool:
+    return any(
+        value is not None
+        for value in (
+            body.request_id,
+            body.operation,
+            body.context_fingerprint,
+            body.owner_run_id,
+            body.op_node_id,
+            body.node_hash,
+            body.forest_node_key,
+            body.owner_resolution,
+            body.active_head_run_id,
+        )
+    )
 
 
 @app.get("/runs/{run_id}/events")

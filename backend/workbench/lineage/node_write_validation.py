@@ -52,6 +52,8 @@ def validate_rerun_operation_target(
 ) -> None:
     if request.context_version != SUPPORTED_CONTEXT_VERSION:
         raise ValueError("unsupported_context_version")
+    if not _is_simple_run_id(request.owner_run_id):
+        raise ValueError("invalid_operation_target: owner_run_id")
 
     run_root = runs_root / request.owner_run_id
     if not run_root.exists():
@@ -64,6 +66,13 @@ def validate_rerun_operation_target(
     indexed_hash = _read_indexed_node_hash(run_root, request.op_node_id)
     if indexed_hash is not None and indexed_hash != request.node_hash:
         raise ValueError("context_mismatch: node_hash")
+
+
+def _is_simple_run_id(run_id: str) -> bool:
+    if not run_id or "/" in run_id or "\\" in run_id:
+        return False
+    path = Path(run_id)
+    return not path.is_absolute() and path.parts == (run_id,) and run_id not in {".", ".."}
 
 
 def _read_indexed_node_hash(run_root: Path, op_node_id: str) -> str | None:

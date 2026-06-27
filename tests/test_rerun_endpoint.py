@@ -49,6 +49,10 @@ def _write_node_index(project_root: Path, run_id: str, node_id: str, node_hash: 
     path.write_text(json.dumps({node_id: {"node_hash": node_hash}}), encoding="utf-8")
 
 
+def _run_ids(project_root: Path) -> set[str]:
+    return {entry.name for entry in (project_root / "runs").iterdir() if entry.is_dir()}
+
+
 def test_rerun_unknown_from_node_422(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_terminal_run(project.root)
@@ -136,6 +140,27 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
     inputs = json.loads((project.root / "runs" / child / "run_inputs.json").read_text())
     assert inputs["rerun_of"] == owner
     assert inputs["from_node"] == node_id
+
+
+def test_partial_context_without_context_version_does_not_rerun_from_owner(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    url_run = _create_terminal_run(project.root)
+    owner = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, owner)
+    before = _run_ids(project.root)
+
+    resp = client.post(
+        f"/runs/{url_run}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "owner_run_id": owner,
+            "op_node_id": node_id,
+            "op_overrides": {"covariance": "unadjusted"},
+        },
+    )
+
+    assert resp.status_code in {400, 422}
+    assert _run_ids(project.root) == before
 
 
 def test_context_driven_rerun_rejects_unsupported_context_version_400(tmp_path: Path):

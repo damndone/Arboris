@@ -62,6 +62,22 @@ def test_missing_owner_run_raises_invalid_operation_target(tmp_path: Path):
         validate_rerun_operation_target(tmp_path, req)
 
 
+def test_parent_traversal_owner_run_id_raises_invalid_operation_target(tmp_path: Path):
+    outside_run_id = "outside"
+    _write_graph(tmp_path.parent, outside_run_id)
+
+    with pytest.raises(ValueError, match="invalid_operation_target"):
+        validate_rerun_operation_target(tmp_path, _request(owner_run_id="../outside"))
+
+
+def test_absolute_owner_run_id_raises_invalid_operation_target(tmp_path: Path):
+    outside_root = tmp_path.parent / "absolute_outside"
+    _write_graph(outside_root.parent, outside_root.name)
+
+    with pytest.raises(ValueError, match="invalid_operation_target"):
+        validate_rerun_operation_target(tmp_path, _request(owner_run_id=str(outside_root)))
+
+
 def test_op_node_not_in_owner_run_raises_invalid_operation_target(tmp_path: Path):
     _write_graph(tmp_path, "run_a", node_id="model:other")
 
