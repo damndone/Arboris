@@ -206,6 +206,7 @@ export function resolveNodeOperationContext(
     };
   }
 
+  const ownerHead = findHead(input.forest, owner.run_id);
   const context_fingerprint = fingerprintParts([
     node.nodeKey,
     node.nodeHash,
@@ -213,6 +214,7 @@ export function resolveNodeOperationContext(
     owner.op_node_id,
     input.active_head_run_id ?? "",
     String(input.forest.schemaVersion),
+    ownerHead?.createdAt ?? "",
   ]);
   const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
   const sharedByRunIds = [...node.runs];
@@ -238,8 +240,8 @@ export function resolveNodeOperationContext(
         shared_by_run_ids: sharedByRunIds,
         owner_run_id: owner.run_id,
         owner_resolution,
-        rerun_of: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
-        parent_run_id: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
+        rerun_of: ownerHead?.rerunOf ?? null,
+        parent_run_id: ownerHead?.rerunOf ?? null,
       },
       operation_target: {
         owner_run_id: owner.run_id,
@@ -250,7 +252,7 @@ export function resolveNodeOperationContext(
       },
       lineage_context: {
         path_run_id: owner.run_id,
-        upstream_path: buildUpstreamPath(input.forest, node.nodeKey),
+        upstream_path: buildUpstreamPath(input.forest, node.nodeKey, owner.run_id),
         downstream_hint: buildDownstreamHint(input.forest, node.nodeKey),
         active_head_path_contains_node: activeHeadPathContainsNode,
       },
@@ -270,7 +272,7 @@ export function resolveNodeOperationContext(
         candidate_run_ids: candidateRunIds,
         active_head_run_id: input.active_head_run_id,
         owner_run_id: owner.run_id,
-        parent_run_id: findHead(input.forest, owner.run_id)?.rerunOf ?? null,
+        parent_run_id: ownerHead?.rerunOf ?? null,
         shared_by_run_ids: sharedByRunIds,
       },
       context_diagnostics: {
@@ -288,6 +290,8 @@ export function explainResolveNodeOperationContext(
   const lines = [
     `selected forest node: ${input.selected_forest_node_key}`,
     `active_head_run_id: ${input.active_head_run_id ?? "none"}`,
+    `selected_run_hint: ${input.selected_run_hint ?? "none"}`,
+    `selected_run_hint_source: ${input.selected_run_hint_source ?? "none"}`,
   ];
 
   if (result.ok) {
@@ -297,6 +301,7 @@ export function explainResolveNodeOperationContext(
       )}`,
       `owner_resolution: ${result.context.ownership.owner_resolution}`,
       `owner_run_id: ${result.context.ownership.owner_run_id}`,
+      `context_fingerprint: ${result.context.context_fingerprint}`,
     );
   } else {
     lines.push(`reason: ${result.reason}`);
@@ -413,10 +418,19 @@ function fingerprintParts(parts: string[]): string {
 function buildUpstreamPath(
   forest: ForestViewModel,
   selectedNodeKey: string,
+  ownerRunId: string,
 ): Array<{ key: string; label: string; kind: string; stage: string }> {
   const nodesByKey = new Map(forest.nodes.map((node) => [node.nodeKey, node]));
   const incomingByTarget = new Map<string, GraphViewEdge[]>();
   for (const edge of forest.edges) {
+    const source = nodesByKey.get(edge.source);
+    const target = nodesByKey.get(edge.target);
+    if (
+      !source?.runs.includes(ownerRunId) ||
+      !target?.runs.includes(ownerRunId)
+    ) {
+      continue;
+    }
     const incoming = incomingByTarget.get(edge.target) ?? [];
     incoming.push(edge);
     incomingByTarget.set(edge.target, incoming);
@@ -431,7 +445,7 @@ function buildUpstreamPath(
       visit(edge.source);
     }
     const node = nodesByKey.get(key);
-    if (node) ordered.push(node);
+    if (node?.runs.includes(ownerRunId)) ordered.push(node);
   };
 
   visit(selectedNodeKey);

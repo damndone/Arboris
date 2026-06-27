@@ -86,15 +86,91 @@ describe("resolveNodeOperationContext", () => {
     expect(result.context.ownership.active_head_run_id).toBe("run_not_owner");
   });
 
+  it("changes fingerprint when owner head freshness changes and context is otherwise stable", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const first = resolveNodeOperationContext({
+      forest: seed.forest,
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+    const refreshed = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        heads: seed.forest.heads.map((head) =>
+          head.runId === seed.activeHeadRunId
+            ? { ...head, createdAt: "2026-06-27T00:02:00Z" }
+            : head,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(refreshed.ok).toBe(true);
+    if (!first.ok) throw new Error(first.reason);
+    if (!refreshed.ok) throw new Error(refreshed.reason);
+    expect(refreshed.context.context_fingerprint).not.toBe(
+      first.context.context_fingerprint,
+    );
+    const { context_fingerprint: _firstFingerprint, ...firstContext } =
+      first.context;
+    const { context_fingerprint: _refreshedFingerprint, ...refreshedContext } =
+      refreshed.context;
+    expect(refreshedContext).toEqual(firstContext);
+  });
+
+  it("excludes merged-forest upstream nodes that are not in the owner run", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const source = seed.forest.nodes.find((node) => node.nodeKey === "hash_source");
+    if (!source) throw new Error("missing fixture source node");
+    const runAOnlySource = {
+      ...source,
+      id: "hash_run_a_only_source",
+      nodeKey: "hash_run_a_only_source",
+      nodeHash: "hash_run_a_only_source",
+      opNodeId: "source:run_a_only",
+      title: "Run A only source",
+      runs: ["run_a"],
+    };
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: [...seed.forest.nodes, runAOnlySource],
+        edges: [
+          ...seed.forest.edges,
+          {
+            id: "hash_run_a_only_source->hash_shared_model",
+            source: runAOnlySource.nodeKey,
+            target: seed.sharedNodeKey,
+          },
+        ],
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(
+      result.context.lineage_context.upstream_path.map((node) => node.key),
+    ).toEqual(["hash_source", seed.sharedNodeKey]);
+  });
+
   it("explain helper includes owner-resolution trace", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const trace = explainResolveNodeOperationContext({
       forest: seed.forest,
       selected_forest_node_key: seed.sharedNodeKey,
       active_head_run_id: seed.activeHeadRunId,
+      selected_run_hint: "run_a",
+      selected_run_hint_source: "run_scoped_surface",
     });
     expect(trace).toContain("selected forest node");
+    expect(trace).toContain("selected_run_hint: run_a");
+    expect(trace).toContain("selected_run_hint_source: run_scoped_surface");
     expect(trace).toContain("candidate_run_refs");
-    expect(trace).toContain("active_head_contains_node");
+    expect(trace).toContain("selected_run_hint");
+    expect(trace).toContain("context_fingerprint: nocv1:");
   });
 });
