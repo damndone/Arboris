@@ -57,7 +57,21 @@ function deferredAskAIResponse() {
 
 describe("AskAISection", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_WORKBENCH_ASK_AI", "1");
     vi.mocked(askAiForNode).mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is hidden by default when the Ask AI feature flag is off", () => {
+    vi.unstubAllEnvs();
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+
+    expect(screen.queryByTestId("ask-ai-section")).not.toBeInTheDocument();
+    expect(vi.mocked(askAiForNode)).not.toHaveBeenCalled();
   });
 
   it("renders an enabled ask button and context preview JSON when context resolves", () => {

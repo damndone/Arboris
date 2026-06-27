@@ -1,6 +1,7 @@
 // frontend/src/lineage/detail/sections/AskAISection.tsx
 //
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { isAskAIEnabled } from "../../../workbench/featureFlags";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
@@ -10,9 +11,10 @@ import { buildAskAIContextPacket } from "./askAiContextPacket";
 const DEFAULT_QUESTION = "Explain this node and its risks.";
 
 export function AskAISection({ node }: { node: GraphViewNode }) {
+  const askAIEnabled = isAskAIEnabled();
   const resolvedContext = useResolvedNodeOperationContext();
   const packet =
-    resolvedContext?.ok === true
+    askAIEnabled && resolvedContext?.ok === true
       ? buildAskAIContextPacket(resolvedContext.context)
       : null;
   const contextIdentity =
@@ -33,6 +35,8 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     setError(null);
     setIsSubmitting(false);
   }, [contextIdentity]);
+
+  if (!askAIEnabled) return null;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

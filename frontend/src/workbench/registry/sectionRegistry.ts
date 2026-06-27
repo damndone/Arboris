@@ -33,6 +33,7 @@ import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
+import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
 
 /**
@@ -59,14 +60,12 @@ function needsTrust(n: GraphViewNode): boolean {
 
 export const sectionRegistry: SectionEntry[] = [
   { id: "trust", order: 10, shouldRender: needsTrust, Component: TrustBanner },
-  // V1.5.2 P5 — AskAI is the only always-on placeholder; its visible
-  // disabled CTA is the V1.5.2 surface for "AI is coming". Operation
-  // + Code are data-gated so they don't pollute the drawer when no
-  // editable schema / source code is present.
+  // Ask AI is explicitly feature-flagged for v1.6.2 so read-only advisory
+  // UI cannot be exposed by default during release.
   {
     id: "askAi",
     order: 20,
-    shouldRender: () => true,
+    shouldRender: () => isAskAIEnabled(),
     Component: AskAISection,
   },
   {

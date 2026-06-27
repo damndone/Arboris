@@ -1,5 +1,5 @@
 // frontend/src/lineage/detail/sections/sectionRegistry.test.ts
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   _needsTrust,
   sectionRegistry,
@@ -43,6 +43,10 @@ function node(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
 }
 
 describe("sectionRegistry", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("exposes the V1.5.2 P5 section set (V1.5.0 four + V1.5.2 three placeholders)", () => {
     expect(sectionRegistry.map((s) => s.id)).toEqual([
       "trust",
@@ -61,13 +65,12 @@ describe("sectionRegistry", () => {
     ]);
   });
 
-  it(".filter(s => s.shouldRender(node)) on a plain node yields askAi/lineage/basic", () => {
-    // ok trust + no decisions + no code + no editableSchema → askAi
-    // (always on) + lineage + basic render. Operation + Code are
-    // data-gated.
+  it(".filter(s => s.shouldRender(node)) on a plain node yields lineage/basic by default", () => {
+    // ok trust + no decisions + no code + no editableSchema → lineage
+    // + basic render. Ask AI is feature-flagged off by default.
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
-    expect(visible.map((s) => s.id)).toEqual(["askAi", "lineage", "basic"]);
+    expect(visible.map((s) => s.id)).toEqual(["lineage", "basic"]);
   });
 
   it("decision section renders when decisions.length > 0", () => {
@@ -141,7 +144,15 @@ describe("sectionRegistry", () => {
   });
 
   describe("V1.5.2 P5 placeholders", () => {
-    it("askAi always renders (visible 'AI is coming' surface)", () => {
+    it("askAi is hidden by default", () => {
+      const visible = sectionRegistry
+        .filter((s) => s.shouldRender(node()))
+        .map((s) => s.id);
+      expect(visible).not.toContain("askAi");
+    });
+
+    it("askAi renders only when VITE_WORKBENCH_ASK_AI is enabled", () => {
+      vi.stubEnv("VITE_WORKBENCH_ASK_AI", "1");
       const visible = sectionRegistry
         .filter((s) => s.shouldRender(node()))
         .map((s) => s.id);
