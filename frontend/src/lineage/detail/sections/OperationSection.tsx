@@ -13,39 +13,48 @@
 // rows it shipped as in V1.5.2.
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   EditableControl,
   GraphViewNode,
-  HeadSetNode,
 } from "../../api/graphViewTypes";
 import { renderControl } from "../../controls/controlFactory";
+import { ResolverFailureState } from "../ResolverFailureState";
+import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import { useRerun } from "../RerunContext";
+import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
   const schema = node.editableSchema;
   const rerun = useRerun();
+  const resolved = useResolvedNodeOperationContext();
   if (!schema || schema.length === 0) return null;
   // No rerun context → keep the V1.5.2 read-only rendering.
   if (!rerun) return <ReadOnlyOperation schema={schema} />;
-  return <EditableOperation node={node} schema={schema} />;
+  if (!resolved || !resolved.ok) {
+    return (
+      <ReadOnlyOperation schema={schema}>
+        {resolved && !resolved.ok ? <ResolverFailureState result={resolved} /> : null}
+      </ReadOnlyOperation>
+    );
+  }
+  return (
+    <EditableOperation
+      key={`${resolved.context.context_fingerprint}:${resolved.context.selection.forest_node_key}`}
+      schema={schema}
+      context={resolved.context}
+    />
+  );
 }
 
 function EditableOperation({
-  node,
   schema,
+  context,
 }: {
-  node: GraphViewNode;
   schema: EditableControl[];
+  context: NodeOperationContextV1;
 }) {
   const rerun = useRerun()!;
-  // The op node id (reused as `from_node`) is the forest node's original per-run
-  // id, NOT its dedup key. Fall back to node.id for a plain per-run node.
-  const fromNode = (node as HeadSetNode).opNodeId ?? node.id;
-  // A forest node can be shared (deduped) across runs. Hand the provider the full set
-  // of owning runs; it resolves the parent against the active head (resolveOwnerRun)
-  // so editing a shared node forks from the version actually being viewed, not runs[0].
-  const candidateRuns = (node as HeadSetNode).runs;
-
   const initial = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
     for (const control of schema) {
@@ -77,8 +86,11 @@ function EditableOperation({
     setStatus("submitting");
     setError(null);
     try {
-      await rerun.submitRerun({ fromNode, opOverrides: overrides, candidateRuns });
+      const response = await rerun.submitRerun({ context, opOverrides: overrides });
       setStatus("done");
+      if (response?.focus === null) {
+        setError("Rerun completed, but focus target could not be resolved automatically.");
+      }
     } catch (e) {
       setStatus("error");
       setError(e instanceof Error ? e.message : String(e));
@@ -124,7 +136,7 @@ function EditableOperation({
           </button>
           {status === "done" && (
             <span data-testid="operation-rerun-done" style={{ color: "var(--accent-positive, #4caf50)" }}>
-              Branch created
+              {error ?? "Branch created"}
             </span>
           )}
           {status === "error" && (
@@ -138,7 +150,13 @@ function EditableOperation({
   );
 }
 
-function ReadOnlyOperation({ schema }: { schema: EditableControl[] }) {
+function ReadOnlyOperation({
+  schema,
+  children,
+}: {
+  schema: EditableControl[];
+  children?: ReactNode;
+}) {
   return (
     <section aria-label="Operation" data-testid="operation-section" style={{ marginTop: 18 }}>
       <div
@@ -171,6 +189,7 @@ function ReadOnlyOperation({ schema }: { schema: EditableControl[] }) {
         {schema.map((control) => (
           <ReadOnlyControlRow key={control.key} control={control} />
         ))}
+        {children}
       </div>
     </section>
   );

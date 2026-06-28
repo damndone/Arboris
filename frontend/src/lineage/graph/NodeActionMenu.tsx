@@ -30,6 +30,7 @@ import {
   type ActionContext,
 } from "../../workbench/registry/actionRegistry";
 import { useWorkbenchOptional } from "../../workbench/WorkbenchStateProvider";
+import { useResolvedNodeOperationContext } from "../detail/NodeOperationContextProvider";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
@@ -55,6 +56,7 @@ export function NodeActionMenu({
   onShowJson,
 }: NodeActionMenuProps) {
   const wb = useWorkbenchOptional();
+  const resolvedContext = useResolvedNodeOperationContext();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<PopupCoords | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -120,10 +122,30 @@ export function NodeActionMenu({
     },
   };
   const registryActions = actionsForSurface("drawer-header-menu", ctx);
+  const contextFailure =
+    resolvedContext && !resolvedContext.ok ? resolvedContext : null;
+  const capabilities = resolvedContext?.ok
+    ? resolvedContext.context.capabilities
+    : null;
 
   const closeAfter = (fn: () => void) => () => {
     fn();
     setOpen(false);
+  };
+
+  const disabledFromContext = (actionId: string): string | undefined => {
+    if (contextFailure) {
+      if (actionId === "askAiAboutNode" || actionId === "rerunFromNode") {
+        return `Node context resolution failed: ${contextFailure.reason}`;
+      }
+      return undefined;
+    }
+    if (!capabilities) return undefined;
+    const reason =
+      capabilities.disabled_reasons[0] ?? "Node context capability disabled";
+    if (actionId === "askAiAboutNode" && !capabilities.can_ask_ai) return reason;
+    if (actionId === "rerunFromNode" && !capabilities.can_rerun) return reason;
+    return undefined;
   };
 
   const popup =
@@ -152,14 +174,26 @@ export function NodeActionMenu({
           onClick={closeAfter(onShowJson)}
           testId="drawer-menu-item-view-raw-json"
         />
+        {contextFailure?.reason === "ambiguous_owner_run" && (
+          <MenuItem
+            label="Choose operation owner"
+            disabled="Choose an operation owner before running context-bound actions."
+            onClick={() => {}}
+            testId="drawer-menu-item-choose-operation-owner"
+          />
+        )}
         {registryActions.map((action) => {
-          const disabled = action.disabled?.(ctx);
+          const contextDisabled = disabledFromContext(action.id);
+          const registryDisabled = action.disabled?.(ctx);
+          const disabled = contextDisabled ?? (registryDisabled || undefined);
           return (
             <MenuItem
               key={action.id}
               label={action.label}
               shortcut={action.shortcut}
-              disabled={disabled ? disabled.reason : undefined}
+              disabled={
+                typeof disabled === "string" ? disabled : disabled?.reason
+              }
               onClick={closeAfter(() => action.invoke(ctx))}
               testId={`drawer-menu-item-${action.id}`}
             />

@@ -1,12 +1,16 @@
 // frontend/src/lineage/detail/sections/LineageChainSection.test.tsx
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LineageChainSection } from "./LineageChainSection";
+import { ForestContext } from "../../../workbench/ForestContext";
+import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
 import { LineageContext, type LineageContextValue } from "../../LineageContext";
 import type {
+  ForestViewModel,
   GraphViewModel,
   GraphViewNode,
+  HeadSetNode,
 } from "../../api/graphViewTypes";
 
 function makeNode(
@@ -58,6 +62,128 @@ function renderSection(model: GraphViewModel, node: GraphViewNode) {
     <LineageContext.Provider value={ctx}>
       <LineageChainSection node={node} />
     </LineageContext.Provider>,
+  );
+}
+
+function makeHeadNode(
+  nodeKey: string,
+  runs: string[],
+  overrides: Partial<HeadSetNode> = {},
+): HeadSetNode {
+  return {
+    id: nodeKey,
+    nodeKey,
+    raw: null,
+    stage: "model",
+    kind: "model",
+    title: nodeKey,
+    summary: nodeKey,
+    parentStageId: null,
+    trust: "ok",
+    decisions: [],
+    opNodeId: `op:${nodeKey}`,
+    nodeHash: nodeKey,
+    producingStage: "model",
+    casRef: null,
+    runs,
+    ...overrides,
+  };
+}
+
+function makeOwnerPathFixture(activeRunId: string = "run_c"): {
+  forest: ForestViewModel;
+  graphModel: GraphViewModel;
+  selected: HeadSetNode;
+  activeRunId: string;
+} {
+  const runAOnly = makeHeadNode("raw_a", ["run_a"], {
+    title: "Run A raw",
+    summary: "Run A raw",
+    kind: "dataset_stage",
+    stage: "source",
+    producingStage: "source",
+  });
+  const runCOnly = makeHeadNode("raw_c", ["run_c"], {
+    title: "Run C raw",
+    summary: "Run C raw",
+    kind: "dataset_stage",
+    stage: "source",
+    producingStage: "source",
+  });
+  const shared = makeHeadNode("shared_model", ["run_a", "run_c"], {
+    title: "Shared model",
+    summary: "Shared model",
+  });
+  const edges = [
+    { id: "a-to-shared", source: "raw_a", target: "shared_model" },
+    { id: "c-to-shared", source: "raw_c", target: "shared_model" },
+  ];
+  const forest: ForestViewModel = {
+    schemaVersion: 2,
+    legacy: false,
+    nodes: [runAOnly, runCOnly, shared],
+    edges,
+    heads: [
+      {
+        runId: "run_a",
+        headNodeHash: shared.nodeHash,
+        fromNode: null,
+        rerunOf: null,
+        rerunReason: null,
+        status: "completed",
+        createdAt: "2026-06-27T00:00:00Z",
+      },
+      {
+        runId: "run_c",
+        headNodeHash: shared.nodeHash,
+        fromNode: null,
+        rerunOf: "run_a",
+        rerunReason: "manual_override",
+        status: "completed",
+        createdAt: "2026-06-27T00:01:00Z",
+      },
+    ],
+  };
+  return {
+    forest,
+    graphModel: {
+      schemaVersion: 2,
+      runId: "run_c",
+      legacy: false,
+      nodes: forest.nodes,
+      edges: forest.edges,
+      stats: {
+        nodeCount: forest.nodes.length,
+        edgeCount: forest.edges.length,
+        leafCount: 1,
+        hasDpCount: 0,
+      },
+    },
+    selected: shared,
+    activeRunId,
+  };
+}
+
+function renderSectionWithNodeContext(fixture: ReturnType<typeof makeOwnerPathFixture>) {
+  const ctx: LineageContextValue = {
+    model: fixture.graphModel,
+    selectedKey: fixture.selected.nodeKey,
+    select: vi.fn(),
+  };
+  return render(
+    <ForestContext.Provider
+      value={{
+        forest: fixture.forest,
+        activeRunId: fixture.activeRunId,
+        setActiveRunId: vi.fn(),
+      }}
+    >
+      <LineageContext.Provider value={ctx}>
+        <NodeOperationContextProvider node={fixture.selected}>
+          <LineageChainSection node={fixture.selected} />
+        </NodeOperationContextProvider>
+      </LineageContext.Provider>
+    </ForestContext.Provider>,
   );
 }
 
@@ -200,7 +326,9 @@ describe("LineageChainSection", () => {
     );
     renderSection(m, target);
 
-    fireEvent.click(screen.getByRole("button", { name: /copy lineage path/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /copy lineage path/i }));
+    });
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     const written = writeText.mock.calls[0][0] as string;
     expect(written).toContain("Raw");
@@ -217,15 +345,16 @@ describe("LineageChainSection", () => {
     );
     renderSection(m, target);
 
-    fireEvent.click(screen.getByRole("button", { name: /copy lineage path/i }));
-    // Wait for the promise + state flip in real-event mode.
-    await vi.waitFor(() =>
-      expect(screen.getByText(/✓ copied/i)).toBeInTheDocument(),
-    );
-    vi.advanceTimersByTime(1600);
-    await vi.waitFor(() =>
-      expect(screen.queryByText(/✓ copied/i)).toBeNull(),
-    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /copy lineage path/i }));
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/✓ copied/i)).toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(1600);
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(/✓ copied/i)).toBeNull();
   });
 
   it("copy button is disabled when path is empty (isolated node)", () => {
@@ -235,6 +364,19 @@ describe("LineageChainSection", () => {
     expect(
       screen.getByRole("button", { name: /copy lineage path/i }),
     ).toBeDisabled();
+  });
+
+  it("uses the owner-run upstream path from NodeOperationContext when available", () => {
+    renderSectionWithNodeContext(makeOwnerPathFixture("run_c"));
+    expect(screen.queryByTestId("lineage-chip-raw_a")).toBeNull();
+    expect(screen.getByTestId("lineage-chip-raw_c")).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-chip-shared_model")).toBeInTheDocument();
+  });
+
+  it("does not render an owner-run path when context resolution fails", () => {
+    renderSectionWithNodeContext(makeOwnerPathFixture("run_x"));
+    expect(screen.queryByTestId("lineage-chain-chips")).toBeNull();
+    expect(screen.getByTestId("lineage-chain-empty")).toBeInTheDocument();
   });
 
   it("clipboard rejection is swallowed (no console errors)", async () => {

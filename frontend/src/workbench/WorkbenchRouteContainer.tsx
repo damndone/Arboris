@@ -47,6 +47,21 @@ import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
+import type { RerunResponseV1 } from "../api";
+import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
+
+type PendingFocusTarget = {
+  runId: string;
+  focus: {
+    forest_node_key: string | null;
+    op_node_id: string;
+    node_hash: string | null;
+  };
+  attempts: number;
+};
+
+const PENDING_FOCUS_RETRY_LIMIT = 20;
+const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
@@ -67,6 +82,8 @@ export function WorkbenchRouteContainer({
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [pendingFocusTarget, setPendingFocusTarget] =
+    useState<PendingFocusTarget | null>(null);
 
   const model = useMemo(
     () => (forest ? forestToGraphViewModel(forest, runId) : null),
@@ -92,14 +109,43 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     forest.heads[forest.heads.length - 1]?.runId ??
     runId;
 
+  const handleRerun = (response: RerunResponseV1) => {
+    const nextActiveRunId = response.new_active_head_id ?? response.run_id;
+    setActiveRunId(nextActiveRunId);
+    const focus = response.focus ?? response.rerun_from;
+    setPendingFocusTarget({
+      runId: nextActiveRunId,
+      focus: {
+        forest_node_key: focus.forest_node_key,
+        op_node_id: focus.op_node_id,
+        node_hash: focus.node_hash,
+      },
+      attempts: 0,
+    });
+    void refetch();
+  };
+
   return (
-    <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={() => refetch()}>
+    <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >
         <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
           <LineageBridge model={model}>
-            <WorkbenchShell runId={runId} projectRoot={projectRoot} />
+            <WorkbenchShell
+              runId={runId}
+              projectRoot={projectRoot}
+              pendingFocusTarget={pendingFocusTarget}
+              onPendingFocusConsumed={() => setPendingFocusTarget(null)}
+              onPendingFocusRetry={() => {
+                setPendingFocusTarget((current) =>
+                  current === null
+                    ? null
+                    : { ...current, attempts: current.attempts + 1 },
+                );
+                void refetch();
+              }}
+            />
           </LineageBridge>
         </WorkbenchStateProvider>
       </ForestContext.Provider>
@@ -131,6 +177,31 @@ function LegacyGraphWorkbench({
   );
 }
 
+function resolvePendingFocusKey(
+  nodes: GraphViewNode[],
+  pending: PendingFocusTarget,
+): string | null {
+  const runNode = nodes.find(
+    (node) =>
+      isHeadSetNode(node) &&
+      node.opNodeId === pending.focus.op_node_id &&
+      node.runs.includes(pending.runId),
+  );
+  if (runNode) return runNode.nodeKey;
+
+  const submittedKeyNode = nodes.find(
+    (node) =>
+      isHeadSetNode(node) &&
+      node.nodeKey === pending.focus.forest_node_key &&
+      node.runs.includes(pending.runId),
+  );
+  return submittedKeyNode?.nodeKey ?? null;
+}
+
+function isHeadSetNode(node: GraphViewNode): node is HeadSetNode {
+  return "runs" in node && Array.isArray((node as HeadSetNode).runs);
+}
+
 /**
  * Inner shell — split out so it can consume both contexts via hooks
  * (useLineage + useWorkbench) without putting the providers' children
@@ -140,9 +211,15 @@ function LegacyGraphWorkbench({
 function WorkbenchShell({
   runId,
   projectRoot,
+  pendingFocusTarget = null,
+  onPendingFocusConsumed,
+  onPendingFocusRetry,
 }: {
   runId: string;
   projectRoot: string;
+  pendingFocusTarget?: PendingFocusTarget | null;
+  onPendingFocusConsumed?: () => void;
+  onPendingFocusRetry?: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
@@ -161,6 +238,26 @@ function WorkbenchShell({
     effectiveSelectedKey !== null
       ? (nodeIndex.get(effectiveSelectedKey) ?? null)
       : null;
+
+  useEffect(() => {
+    if (!pendingFocusTarget) return;
+    const pendingFocusKey = resolvePendingFocusKey(model.nodes, pendingFocusTarget);
+    if (!pendingFocusKey) {
+      if (pendingFocusTarget.attempts >= PENDING_FOCUS_RETRY_LIMIT) return;
+      const timer = window.setTimeout(() => {
+        onPendingFocusRetry?.();
+      }, PENDING_FOCUS_RETRY_DELAY_MS);
+      return () => window.clearTimeout(timer);
+    }
+    select(pendingFocusKey);
+    onPendingFocusConsumed?.();
+  }, [
+    model.nodes,
+    onPendingFocusConsumed,
+    onPendingFocusRetry,
+    pendingFocusTarget,
+    select,
+  ]);
 
   // REV-3 H1: external selection clear must close the modal.
   useEffect(() => {

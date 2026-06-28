@@ -110,6 +110,7 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
     # visible) but each still dedups across the two runs to a single node.
     cleaned_nodes = [n for n in body["nodes"].values() if n.get("id") == "stage:cleaned"]
     assert len(cleaned_nodes) == 1
+    assert set(cleaned_nodes[0]["runs"]) == {parent, child}
     var_ids = [n.get("id") for n in body["nodes"].values()
                if str(n.get("id", "")).startswith("var:")]
     assert var_ids and len(var_ids) == len(set(var_ids))  # each variable once, not per-run

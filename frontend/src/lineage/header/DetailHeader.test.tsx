@@ -1,8 +1,11 @@
 // frontend/src/lineage/header/DetailHeader.test.tsx
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ForestContext } from "../../workbench/ForestContext";
 import { DETAIL_HEADER_TITLE_ID, DetailHeader } from "./DetailHeader";
+import { makeOwnerResolutionSeedFixture } from "../api/nodeOperationContext";
+import { DetailDrawer } from "../detail/DetailDrawer";
 import { LineageContext, type LineageContextValue } from "../LineageContext";
 import type {
   GraphViewModel,
@@ -114,5 +117,66 @@ describe("DetailHeader", () => {
       render(<DetailHeader node={makeNode()} onClose={vi.fn()} />),
     ).toThrow(/useLineage/);
     errSpy.mockRestore();
+  });
+
+  it("renders owner run from NodeOperationContext when available", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find(
+      (n) => n.nodeKey === seed.sharedNodeKey,
+    )!;
+    const { container } = render(
+      <ForestContext.Provider
+        value={{
+          forest: seed.forest,
+          activeRunId: seed.activeHeadRunId,
+          setActiveRunId: vi.fn(),
+        }}
+      >
+        <LineageContext.Provider
+          value={{
+            model: seed.graphModel,
+            selectedKey: selected.nodeKey,
+            select: vi.fn(),
+          }}
+        >
+          <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
+        </LineageContext.Provider>
+      </ForestContext.Provider>,
+    );
+    const header = container.querySelector(".dp-head");
+    expect(header).not.toBeNull();
+    const headerScope = within(header as HTMLElement);
+    expect(headerScope.getByText(/run_c/)).toBeInTheDocument();
+    expect(headerScope.getByText(/active_head_contains_node/)).toBeInTheDocument();
+    expect(headerScope.queryByText(/owner.*run_a/i)).not.toBeInTheDocument();
+  });
+
+  it("shows resolver failure instead of fabricated owner for ambiguous context", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find(
+      (n) => n.nodeKey === seed.sharedNodeKey,
+    )!;
+    const { container } = render(
+      <ForestContext.Provider
+        value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
+      >
+        <LineageContext.Provider
+          value={{
+            model: seed.graphModel,
+            selectedKey: selected.nodeKey,
+            select: vi.fn(),
+          }}
+        >
+          <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
+        </LineageContext.Provider>
+      </ForestContext.Provider>,
+    );
+    const header = container.querySelector(".dp-head");
+    expect(header).not.toBeNull();
+    expect(
+      within(header as HTMLElement).getByTestId("resolver-failure-state"),
+    ).toHaveTextContent("ambiguous_owner_run");
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    expect(screen.getByText("Rerun from here").closest("button")).toBeDisabled();
   });
 });

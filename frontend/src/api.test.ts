@@ -12,6 +12,7 @@ import {
   reportUrl,
   artifactDownloadUrl,
   waitForRunTerminal,
+  rerunFromNode,
 } from "./api";
 import * as XLSX from "xlsx";
 
@@ -155,6 +156,68 @@ test("artifactDownloadUrl encodes project_root and ids", () => {
 test("reportUrl encodes project_root", () => {
   const url = reportUrl("/tmp/demo", "abc");
   expect(url).toBe("/api/runs/abc/report?project_root=%2Ftmp%2Fdemo");
+});
+
+test("rerunFromNode posts context-driven rerun request body", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: {
+        forest_node_key: "hash_child",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_child",
+      },
+      rerun_from: {
+        owner_run_id: "run_c",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_shared",
+        forest_node_key: "hash_shared",
+      },
+    }),
+  );
+
+  await rerunFromNode("/tmp/demo", "run_c", {
+    request_id: "rerun_1",
+    operation: "rerun",
+    context_version: "node-operation-context/v1",
+    context_fingerprint: "nocv1:abc",
+    owner_run_id: "run_c",
+    op_node_id: "model:ols_1",
+    node_hash: "hash_shared",
+    forest_node_key: "hash_shared",
+    owner_resolution: "active_head_contains_node",
+    active_head_run_id: "run_c",
+    op_overrides: { covariance: "robust" },
+  });
+
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/runs/run_c/rerun?project_root=%2Ftmp%2Fdemo",
+    expect.objectContaining({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  const body = JSON.parse(
+    ((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit)
+      .body as string,
+  );
+  expect(body).toEqual({
+    request_id: "rerun_1",
+    operation: "rerun",
+    context_version: "node-operation-context/v1",
+    context_fingerprint: "nocv1:abc",
+    owner_run_id: "run_c",
+    op_node_id: "model:ols_1",
+    node_hash: "hash_shared",
+    forest_node_key: "hash_shared",
+    owner_resolution: "active_head_contains_node",
+    active_head_run_id: "run_c",
+    op_overrides: { covariance: "robust" },
+    from_node: "model:ols_1",
+    rerun_reason: "manual_override",
+  });
 });
 
 test("runBatchWorkflow posts y_list and x as form data", async () => {

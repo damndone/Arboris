@@ -861,31 +861,87 @@ export async function getRunGraphHeadSet(
   return readResponse<HeadSetResponse>(response);
 }
 
+export interface NodeWriteOperationRequestV1 {
+  request_id: string;
+  operation: "rerun";
+  context_version: "node-operation-context/v1";
+  context_fingerprint: string;
+  owner_run_id: string;
+  op_node_id: string;
+  node_hash: string;
+  forest_node_key: string;
+  owner_resolution: string;
+  active_head_run_id: string | null;
+  op_overrides: Record<string, unknown>;
+  rerun_reason?: string;
+}
+
+export interface RerunResponseV1 {
+  run_id: string;
+  new_run_id: string;
+  new_active_head_id: string;
+  focus: { forest_node_key: string; op_node_id: string; node_hash: string } | null;
+  rerun_from: {
+    owner_run_id: string;
+    op_node_id: string;
+    node_hash: string | null;
+    forest_node_key: string | null;
+  };
+  accepted_context?: {
+    context_version: "node-operation-context/v1";
+    context_fingerprint: string;
+    owner_run_id: string;
+    op_node_id: string;
+    node_hash: string;
+    validated_at: string;
+  };
+}
+
+export interface LegacyRerunFromNodeArgs {
+  fromNode: string;
+  opOverrides: Record<string, unknown>;
+  rerunReason?: string;
+}
+
+function isNodeWriteOperationRequestV1(
+  args: LegacyRerunFromNodeArgs | NodeWriteOperationRequestV1,
+): args is NodeWriteOperationRequestV1 {
+  return (
+    "operation" in args &&
+    args.operation === "rerun" &&
+    "context_version" in args &&
+    args.context_version === "node-operation-context/v1"
+  );
+}
+
 /** Create a child run by editing one node's operation (POST /runs/{id}/rerun).
- *  `fromNode` is the replaced op node id; the new model forks off the shared
- *  upstream prefix as a sibling (spec §3.4). Returns the child run id. */
+ *  Legacy callers may still pass `fromNode`; context-driven callers submit the
+ *  validated NodeOperationContext write target. */
 export async function rerunFromNode(
   projectRoot: string,
   runId: string,
-  args: {
-    fromNode: string;
-    opOverrides: Record<string, unknown>;
-    rerunReason?: string;
-  },
-): Promise<{ run_id: string }> {
+  args: LegacyRerunFromNodeArgs | NodeWriteOperationRequestV1,
+): Promise<RerunResponseV1> {
   const url = apiUrl(
     `/runs/${encodeURIComponent(runId)}/rerun?project_root=${encodeURIComponent(projectRoot)}`,
   );
+  const body = isNodeWriteOperationRequestV1(args)
+    ? {
+        ...args,
+        from_node: args.op_node_id,
+        rerun_reason: args.rerun_reason ?? "manual_override",
+      }
+    : {
+        from_node: args.fromNode,
+        op_overrides: args.opOverrides,
+        rerun_reason: args.rerunReason ?? "manual_override",
+      };
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from_node: args.fromNode,
-      op_overrides: args.opOverrides,
-      rerun_reason: args.rerunReason ?? "manual_override",
-    }),
+    body: JSON.stringify(body),
   });
-  return readResponse<{ run_id: string }>(response);
+  return readResponse<RerunResponseV1>(response);
 }
 
 export type RunProgressEvent = {

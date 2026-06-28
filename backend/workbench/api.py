@@ -5,10 +5,11 @@ import json
 import queue
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
@@ -43,6 +44,12 @@ from .lineage.family import scan_family
 from .lineage.hashing import dag_hash, override_hash
 from .lineage.headset import build_headset
 from .lineage.node_index import NODE_INDEX_FILENAME
+from .lineage.node_write_validation import (
+    AcceptedContext,
+    NodeWriteOperationRequestV1,
+    accepted_context_from,
+    validate_rerun_operation_target,
+)
 from .lineage.op_contract import (
     OpOverrideError,
     resolve_operation_contract,
@@ -899,17 +906,69 @@ def get_run_graph(run_id: str, project_root: str, view: str | None = None):
 
 
 class RerunRequest(BaseModel):
-    from_node: str
+    from_node: str | None = None
     op_overrides: dict = {}
     rerun_reason: str = "manual_override"
 
+    request_id: str | None = None
+    operation: str | None = None
+    context_version: str | None = None
+    context_fingerprint: str | None = None
+    owner_run_id: str | None = None
+    op_node_id: str | None = None
+    node_hash: str | None = None
+    forest_node_key: str | None = None
+    owner_resolution: str | None = None
+    active_head_run_id: str | None = None
+
 
 @app.post("/runs/{run_id}/rerun")
-def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, str]:
+def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[str, Any]:
     """Create a new immutable run from a parent run's editable node, applying
     structurally-validated overrides. Full-pipeline re-execution; lineage preserved."""
     root = Path(project_root)
-    run_root = _resolve_run_root(project_root, run_id)
+    runs_root = _resolve_project_runs_dir(project_root)
+    effective_run_id = run_id
+    effective_from_node = body.from_node
+    accepted_context: AcceptedContext | None = None
+    focus_target: dict[str, str] | None = None
+
+    if body.context_version is not None:
+        try:
+            request = NodeWriteOperationRequestV1(
+                request_id=body.request_id,
+                operation=body.operation,
+                context_version=body.context_version,
+                context_fingerprint=body.context_fingerprint,
+                owner_run_id=body.owner_run_id,
+                op_node_id=body.op_node_id,
+                node_hash=body.node_hash,
+                forest_node_key=body.forest_node_key,
+                owner_resolution=body.owner_resolution,
+                active_head_run_id=body.active_head_run_id,
+            )
+            validate_rerun_operation_target(runs_root, request)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail="invalid_operation_target") from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=_node_write_validation_status(str(exc)),
+                detail=str(exc),
+            ) from exc
+        accepted_context = accepted_context_from(request)
+        effective_run_id = request.owner_run_id
+        effective_from_node = request.op_node_id
+        focus_target = None
+    elif _has_context_target_fields(body):
+        raise HTTPException(
+            status_code=400,
+            detail="context_version is required for context target fields.",
+        )
+
+    if effective_from_node is None:
+        raise HTTPException(status_code=422, detail="from_node is required.")
+
+    run_root = _resolve_run_root(project_root, effective_run_id)
     manifest = _read_manifest(run_root)
 
     # Guardrail #8: parent must be terminal (else 409). Distinct from slot-busy 429.
@@ -920,19 +979,18 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         )
 
     # Guardrail #6: from_node must exist in the parent graph.
-    runs_root = _resolve_project_runs_dir(project_root)
-    graph = GraphStore(runs_root=runs_root).read(run_id)
-    node = graph.nodes.get(body.from_node)
+    graph = GraphStore(runs_root=runs_root).read(effective_run_id)
+    node = graph.nodes.get(effective_from_node)
     if node is None:
         raise HTTPException(
-            status_code=422, detail=f"from_node not in run graph: {body.from_node}"
+            status_code=422, detail=f"from_node not in run graph: {effective_from_node}"
         )
 
     stage = node.stage.value if node.stage is not None else None
     contract = resolve_operation_contract(stage=stage, manifest=manifest)
     if contract is None:
         raise HTTPException(
-            status_code=422, detail=f"Node {body.from_node} is not editable."
+            status_code=422, detail=f"Node {effective_from_node} is not editable."
         )
 
     # Guardrails #3 + #4: structural validation against the switch-resolved schema.
@@ -979,17 +1037,58 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         result = _submit_run(
             root, form=merged_form, upload_bytes=upload_bytes,
             upload_filename=inputs["upload"].get("filename") or "upload.csv",
-            started_at=started_at, rerun_of=run_id, from_node=body.from_node,
+            started_at=started_at, rerun_of=effective_run_id, from_node=effective_from_node,
             rerun_reason=body.rerun_reason, op_overrides=body.op_overrides,
         )
         child_id = result["run_id"]
-        return result
+        return {
+            "run_id": child_id,
+            "new_run_id": child_id,
+            "new_active_head_id": child_id,
+            "focus": focus_target,
+            "rerun_from": {
+                "owner_run_id": effective_run_id,
+                "op_node_id": effective_from_node,
+                "node_hash": body.node_hash,
+                "forest_node_key": body.forest_node_key,
+            },
+            "accepted_context": (
+                accepted_context.model_dump() if accepted_context is not None else None
+            ),
+        }
     except ValueError as exc:
         events.release_slot(child_id)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         events.release_slot(child_id)
         raise
+
+
+def _node_write_validation_status(message: str) -> int:
+    if message.startswith(("unsupported_context_version", "invalid_operation_target")):
+        return 400
+    if message.startswith(("context_mismatch", "context_stale")):
+        return 409
+    if message.startswith("operation_not_allowed"):
+        return 403
+    return 400
+
+
+def _has_context_target_fields(body: RerunRequest) -> bool:
+    return any(
+        value is not None
+        for value in (
+            body.request_id,
+            body.operation,
+            body.context_fingerprint,
+            body.owner_run_id,
+            body.op_node_id,
+            body.node_hash,
+            body.forest_node_key,
+            body.owner_resolution,
+            body.active_head_run_id,
+        )
+    )
 
 
 @app.get("/runs/{run_id}/events")
