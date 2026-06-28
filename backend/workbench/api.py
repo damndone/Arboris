@@ -56,6 +56,10 @@ from .lineage.op_contract import (
     resolve_overrides_target,
     validate_overrides,
 )
+from .lineage.rerun_provenance import (
+    pending_produced_lineage,
+    run_rerun_from_from_context,
+)
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
 from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
 
@@ -932,6 +936,7 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
     effective_from_node = body.from_node
     accepted_context: AcceptedContext | None = None
     focus_target: dict[str, str] | None = None
+    run_level_rerun_from: dict[str, Any] | None = None
 
     if body.context_version is not None:
         try:
@@ -956,6 +961,13 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
                 detail=str(exc),
             ) from exc
         accepted_context = accepted_context_from(request)
+        run_level_rerun_from = run_rerun_from_from_context(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            node_hash=request.node_hash,
+            context_fingerprint=request.context_fingerprint,
+        )
         effective_run_id = request.owner_run_id
         effective_from_node = request.op_node_id
         focus_target = None
@@ -1041,11 +1053,27 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             rerun_reason=body.rerun_reason, op_overrides=body.op_overrides,
         )
         child_id = result["run_id"]
+        if run_level_rerun_from is not None:
+            child_inputs_path = root / "runs" / child_id / "run_inputs.json"
+            child_inputs = json.loads(child_inputs_path.read_text(encoding="utf-8"))
+            child_inputs["rerun_from"] = run_level_rerun_from
+            child_inputs_path.write_text(
+                json.dumps(child_inputs, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
         return {
             "run_id": child_id,
             "new_run_id": child_id,
             "new_active_head_id": child_id,
             "focus": focus_target,
+            "produced_lineage": (
+                pending_produced_lineage(
+                    produced_owner_run_id=child_id,
+                    rerun_from=run_level_rerun_from,
+                )
+                if run_level_rerun_from is not None
+                else None
+            ),
             "rerun_from": {
                 "owner_run_id": effective_run_id,
                 "op_node_id": effective_from_node,

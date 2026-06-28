@@ -121,6 +121,34 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
     assert len(model_hashes) == 2
 
 
+def test_headset_exposes_run_level_rerun_from_on_child_head(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_run(project.root)
+    child = _create_run(project.root)
+    (project.root / "runs" / child / "run_inputs.json").write_text(
+        json.dumps({
+            "form": {},
+            "upload": {"sha256": "hash"},
+            "rerun_of": parent,
+            "from_node": "model:ols_1",
+            "rerun_from": {
+                "owner_run_id": parent,
+                "op_node_id": "model:ols_1",
+                "node_hash": "hash_parent_model",
+                "context_fingerprint": "nocv1:parent",
+                "rerun_request_id": "req_headset",
+            },
+        }),
+        encoding="utf-8",
+    )
+    body = client.get(
+        f"/runs/{child}/graph",
+        params={"project_root": str(project.root), "view": "headset"},
+    ).json()
+    child_head = next(head for head in body["heads"] if head["run_id"] == child)
+    assert child_head["rerun_from"]["rerun_request_id"] == "req_headset"
+
+
 def test_headset_legacy_run_degrades(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKBENCH_GRAPH_HEADSET", "1")
     project = create_project(tmp_path, "demo")

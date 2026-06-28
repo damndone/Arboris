@@ -142,6 +142,7 @@ def build_headset(
             "head_node_hash": nodes[head_key]["node_hash"] if head_key in nodes else None,
             "from_node": inputs.get("from_node"),
             "rerun_of": inputs.get("rerun_of"),
+            "rerun_from": inputs.get("rerun_from"),
             "rerun_reason": inputs.get("rerun_reason"),
             "status": manifest.get("status"),
             "created_at": manifest.get("started_at") or manifest.get("created_at"),
