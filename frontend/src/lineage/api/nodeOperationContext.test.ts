@@ -307,5 +307,9 @@ describe("resolveNodeOperationContext", () => {
     expect(trace).toContain("candidate_run_refs");
     expect(trace).toContain("selected_run_hint");
     expect(trace).toContain("context_fingerprint: nocv1:");
+    expect(trace).toContain("context_fingerprint_inputs:");
+    expect(trace).toContain("rerun_from:");
+    expect(trace).toContain("run_rerun_from:");
+    expect(trace).not.toContain("runs[0]");
   });
 });

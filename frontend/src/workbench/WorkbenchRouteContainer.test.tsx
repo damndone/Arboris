@@ -181,6 +181,20 @@ function forkedForestResponse(): HeadSetResponse {
   };
 }
 
+function forkedForestResponseWithProducedOp(): HeadSetResponse {
+  const response = forkedForestResponse();
+  return {
+    ...response,
+    nodes: {
+      ...response.nodes,
+      hash_child: {
+        ...response.nodes.hash_child,
+        id: "model:ols_child",
+      },
+    },
+  };
+}
+
 function mountForestAt(initialPath: string) {
   vi.spyOn(api, "getRunGraphHeadSet")
     .mockResolvedValueOnce(forestResponse("hash_model"))
@@ -416,6 +430,66 @@ describe("WorkbenchRouteContainer", () => {
         op_node_id: "model:ols_1",
         node_hash: "hash_model",
         forest_node_key: "hash_model",
+      },
+    });
+    render(
+      <MemoryRouter initialEntries={["/?tab=lineage&tabs=hash_model&active=hash_model"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    confirmOperationRerun();
+
+    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Child OLS",
+      ),
+    );
+  });
+
+  it("uses produced lineage pending_index to poll by rerun request id without guessing runs[0]", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet")
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forkedForestResponseWithProducedOp());
+    vi.spyOn(api, "rerunFromNode").mockResolvedValue({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: null,
+      rerun_from: {
+        owner_run_id: "run_source",
+        op_node_id: "model:source_ols",
+        node_hash: "hash_source",
+        forest_node_key: "hash_source::model:source_ols",
+      },
+      produced_lineage: {
+        produced_owner_run_id: "run_child",
+        produced_op_node_id: "model:ols_child",
+        produced_node_hash: "hash_child",
+        rerun_request_id: "req_focus",
+        status: "pending_index",
+        rerun_from: {
+          owner_run_id: "run_source",
+          op_node_id: "model:source_ols",
+          node_hash: "hash_source",
+          context_fingerprint: "nocv1:source",
+          rerun_request_id: "req_focus",
+        },
       },
     });
     render(

@@ -128,6 +128,17 @@ def test_context_fingerprint_mismatch_fails_closed(tmp_path: Path):
         )
 
 
+def test_fingerprint_mismatch_error_includes_expected_code(tmp_path: Path):
+    _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
+
+    with pytest.raises(ValueError, match="context_stale: context_fingerprint"):
+        validate_rerun_operation_target(
+            tmp_path,
+            _request(context_fingerprint="wrong"),
+        )
+
+
 def test_node_index_hash_mismatch_raises_context_mismatch(tmp_path: Path):
     _write_graph(tmp_path, "run_a")
     (tmp_path / "run_a" / "node_index.json").write_text(

@@ -227,6 +227,11 @@ export function resolveNodeOperationContext(
   }
 
   const ownerHead = findHead(input.forest, owner.run_id);
+  const contextFingerprintInputs = stableFingerprintInput({
+    candidate_run_refs,
+    shared_by_run_ids: node.runs,
+    owner_head_created_at: ownerHead?.createdAt ?? "",
+  });
   const context_fingerprint = fingerprintParts([
     node.nodeKey,
     node.nodeHash,
@@ -235,11 +240,7 @@ export function resolveNodeOperationContext(
     input.active_head_run_id ?? "",
     String(input.forest.schemaVersion),
     ownerHead?.createdAt ?? "",
-    stableFingerprintInput({
-      candidate_run_refs,
-      shared_by_run_ids: node.runs,
-      owner_head_created_at: ownerHead?.createdAt ?? "",
-    }),
+    contextFingerprintInputs,
   ]);
   const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
   const sharedByRunIds = [...node.runs];
@@ -254,7 +255,10 @@ export function resolveNodeOperationContext(
     `candidate_run_refs: ${JSON.stringify(candidate_run_refs)}`,
     `owner_resolution: ${owner_resolution}`,
     `owner_run_id: ${owner.run_id}`,
+    `context_fingerprint_inputs: ${contextFingerprintInputs}`,
     `context_fingerprint: ${context_fingerprint}`,
+    `rerun_from: ${JSON.stringify(nodeRerunFrom ?? null)}`,
+    `run_rerun_from: ${JSON.stringify(runRerunFrom ?? null)}`,
   ];
 
   return {
@@ -335,14 +339,7 @@ export function explainResolveNodeOperationContext(
   ];
 
   if (result.ok) {
-    lines.push(
-      `candidate_run_refs: ${JSON.stringify(
-        result.context.ownership.candidate_run_refs,
-      )}`,
-      `owner_resolution: ${result.context.ownership.owner_resolution}`,
-      `owner_run_id: ${result.context.ownership.owner_run_id}`,
-      `context_fingerprint: ${result.context.context_fingerprint}`,
-    );
+    return (result.context.resolver_trace ?? lines).join("\n");
   } else {
     lines.push(`reason: ${result.reason}`);
     if (result.candidate_run_refs) {

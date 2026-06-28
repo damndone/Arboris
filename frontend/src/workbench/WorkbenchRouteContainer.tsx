@@ -112,14 +112,21 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const handleRerun = (response: RerunResponseV1) => {
     const nextActiveRunId = response.new_active_head_id ?? response.run_id;
     setActiveRunId(nextActiveRunId);
-    const focus = response.focus ?? response.rerun_from;
+    const lineage = response.produced_lineage;
+    const focus = response.focus
+      ? {
+          forest_node_key: response.focus.forest_node_key,
+          op_node_id: response.focus.op_node_id,
+          node_hash: response.focus.node_hash,
+        }
+      : {
+          forest_node_key: null,
+          op_node_id: lineage?.produced_op_node_id ?? response.rerun_from.op_node_id,
+          node_hash: lineage?.produced_node_hash ?? null,
+        };
     setPendingFocusTarget({
       runId: nextActiveRunId,
-      focus: {
-        forest_node_key: focus.forest_node_key,
-        op_node_id: focus.op_node_id,
-        node_hash: focus.node_hash,
-      },
+      focus,
       attempts: 0,
     });
     void refetch();
