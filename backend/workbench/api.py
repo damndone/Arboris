@@ -134,6 +134,7 @@ def _submit_run(
     from_node: str | None = None,
     rerun_reason: str = "initial",
     op_overrides: dict | None = None,
+    rerun_from: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
 
@@ -157,6 +158,7 @@ def _submit_run(
         rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form),
+        rerun_from=rerun_from,
     )
 
     uploads_dir = run.root / "_uploads"
@@ -1051,16 +1053,9 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             upload_filename=inputs["upload"].get("filename") or "upload.csv",
             started_at=started_at, rerun_of=effective_run_id, from_node=effective_from_node,
             rerun_reason=body.rerun_reason, op_overrides=body.op_overrides,
+            rerun_from=run_level_rerun_from,
         )
         child_id = result["run_id"]
-        if run_level_rerun_from is not None:
-            child_inputs_path = root / "runs" / child_id / "run_inputs.json"
-            child_inputs = json.loads(child_inputs_path.read_text(encoding="utf-8"))
-            child_inputs["rerun_from"] = run_level_rerun_from
-            child_inputs_path.write_text(
-                json.dumps(child_inputs, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
         return {
             "run_id": child_id,
             "new_run_id": child_id,
