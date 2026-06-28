@@ -231,6 +231,7 @@ def test_context_rerun_persists_run_level_rerun_from_and_returns_pending_lineage
 def test_manual_patch_idempotency_reuses_existing_child(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_terminal_run(project.root)
+    url_run = _create_terminal_run(project.root)
     node_id = _model_node_id(project.root, parent)
     _write_node_index(project.root, parent, node_id, "hash_parent_model")
     fingerprint = _context_fingerprint(
@@ -278,13 +279,18 @@ def test_manual_patch_idempotency_reuses_existing_child(tmp_path: Path):
         json=payload,
     )
     second = client.post(
-        f"/runs/{parent}/rerun",
+        f"/runs/{url_run}/rerun",
         params={"project_root": str(project.root)},
         json=payload,
     )
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["run_id"] == first.json()["run_id"]
+    inputs = json.loads(
+        (project.root / "runs" / first.json()["run_id"] / "run_inputs.json").read_text()
+    )
+    assert inputs["rerun_of"] == parent
+    assert inputs["rerun_from"]["patch_id"] == "patch_same"
     _wait_terminal(project.root, first.json()["run_id"])
 
 

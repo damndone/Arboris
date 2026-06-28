@@ -147,6 +147,12 @@ function EditableOperation({
           fontSize: 12,
         }}
       >
+        <div
+          data-testid="operation-rerun-label"
+          style={{ color: "var(--label-secondary)", fontWeight: 600 }}
+        >
+          Rerun source with changes
+        </div>
         {schema.map((control) => (
           <label
             key={control.key}

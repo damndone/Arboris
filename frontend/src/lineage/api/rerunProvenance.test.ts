@@ -122,6 +122,20 @@ describe("getCompareWithSourceGate", () => {
     expect(result).toEqual({ ok: false, reason: "missing_rerun_from" });
   });
 
+  it("does not use candidate_run_ids[0] as compare source when rerun_from is absent", () => {
+    const result = getCompareWithSourceGate(
+      context({
+        ownership: {
+          ...context().ownership,
+          candidate_run_ids: ["run_source_like", "run_child"],
+          shared_by_run_ids: ["run_source_like", "run_child"],
+        },
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, reason: "missing_rerun_from" });
+  });
+
   it("fails closed when node-level and run-level rerun_from disagree", () => {
     const result = getCompareWithSourceGate(
       context({

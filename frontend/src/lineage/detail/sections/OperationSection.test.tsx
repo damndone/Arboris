@@ -142,6 +142,9 @@ describe("OperationSection (editable)", () => {
 
   it("previews a manual patch before submitting rerun", async () => {
     const { submitRerun } = renderWithRerun(modelNode());
+    expect(screen.getByTestId("operation-rerun-label")).toHaveTextContent(
+      "Rerun source with changes",
+    );
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent("covariance");

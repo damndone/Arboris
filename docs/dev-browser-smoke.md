@@ -154,3 +154,16 @@ lsof -i :8000 -i :5173 | awk 'NR>1 {print $2}' | sort -u | xargs kill
 A `.claude/launch.json` may exist locally for the Claude Code preview
 tooling — it's gitignored, optional, and not required. Use the
 plain terminal flow above if you don't have that tool.
+
+## V1.6.3 Context Hardening + Compare/Edit Smoke
+
+Create a source run, rerun it through a context-driven node operation, open the rerun child node, and verify:
+
+- `Compare with source` appears only on the rerun child node.
+- The compare view shows summary sections for params, metrics, diagnostics, artifacts, and upstream path.
+- The operation panel says `Rerun source with changes`.
+- Preview shows old/new values before submit.
+- Confirming rerun creates a new child.
+- The UI reflects the backend-updated active head.
+- If focus is pending, polling selects the child after indexing.
+- No source, focus, owner, or patch target is inferred from `runs[0]`.
