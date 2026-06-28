@@ -23,6 +23,10 @@ import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import { useRerun } from "../RerunContext";
 import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
+import {
+  buildManualRerunPatch,
+  type ManualRerunPatch,
+} from "./manualRerunPatch";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
   const schema = node.editableSchema;
@@ -41,6 +45,7 @@ export function OperationSection({ node }: { node: GraphViewNode }) {
   return (
     <EditableOperation
       key={`${resolved.context.context_fingerprint}:${resolved.context.selection.forest_node_key}`}
+      node={node}
       schema={schema}
       context={resolved.context}
     />
@@ -48,9 +53,11 @@ export function OperationSection({ node }: { node: GraphViewNode }) {
 }
 
 function EditableOperation({
+  node,
   schema,
   context,
 }: {
+  node: GraphViewNode;
   schema: EditableControl[];
   context: NodeOperationContextV1;
 }) {
@@ -68,6 +75,7 @@ function EditableOperation({
     "idle",
   );
   const [error, setError] = useState<string | null>(null);
+  const [previewPatch, setPreviewPatch] = useState<ManualRerunPatch | null>(null);
 
   const overrides = useMemo(() => {
     const diff: Record<string, unknown> = {};
@@ -79,15 +87,41 @@ function EditableOperation({
 
   const dirty = Object.keys(overrides).length > 0;
 
-  const onChange = (key: string, value: unknown) =>
+  const onChange = (key: string, value: unknown) => {
+    setPreviewPatch(null);
     setValues((prev) => ({ ...prev, [key]: value }));
+  };
 
   const onSubmit = async () => {
+    if (!previewPatch) {
+      const patch = buildManualRerunPatch({
+        patchId: `patch_${context.context_fingerprint}_${Object.keys(overrides).join("_")}`,
+        sourceContextFingerprint: context.context_fingerprint,
+        editableSchemaVersion:
+          "editableSchemaVersion" in node && typeof node.editableSchemaVersion === "string"
+            ? node.editableSchemaVersion
+            : context.operation_target.editable_schema_source ?? "run_inputs",
+        target: {
+          owner_run_id: context.operation_target.owner_run_id,
+          op_node_id: context.operation_target.op_node_id,
+          node_hash: context.operation_target.node_hash,
+        },
+        initialValues: initial,
+        currentValues: values,
+      });
+      setPreviewPatch(patch);
+      return;
+    }
     setStatus("submitting");
     setError(null);
     try {
-      const response = await rerun.submitRerun({ context, opOverrides: overrides });
+      const response = await rerun.submitRerun({
+        context,
+        opOverrides: {},
+        manualPatch: previewPatch,
+      });
       setStatus("done");
+      setPreviewPatch(null);
       if (response?.focus === null) {
         setError("Rerun completed, but focus target could not be resolved automatically.");
       }
@@ -132,7 +166,11 @@ function EditableOperation({
             disabled={!dirty || status === "submitting"}
             onClick={onSubmit}
           >
-            {status === "submitting" ? "Rerunning…" : "Rerun from here"}
+            {status === "submitting"
+              ? "Rerunning..."
+              : previewPatch
+                ? "Confirm rerun source with changes"
+                : "Preview source changes"}
           </button>
           {status === "done" && (
             <span data-testid="operation-rerun-done" style={{ color: "var(--accent-positive, #4caf50)" }}>
@@ -145,6 +183,19 @@ function EditableOperation({
             </span>
           )}
         </div>
+        {previewPatch && (
+          <div
+            data-testid="manual-patch-preview"
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            {previewPatch.changes.map((change) => (
+              <div key={change.field_id}>
+                <strong>{change.field_id}</strong>: {String(change.old_value)} -&gt;{" "}
+                {String(change.new_value)}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

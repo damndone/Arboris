@@ -213,6 +213,12 @@ function mountForestAt(initialPath: string) {
   );
 }
 
+function confirmOperationRerun() {
+  fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+  expect(screen.getByTestId("manual-patch-preview")).toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+}
+
 describe("WorkbenchRouteContainer", () => {
   it("renders the topbar with three view tabs once data loads", async () => {
     mountAt("/?tab=lineage");
@@ -332,7 +338,7 @@ describe("WorkbenchRouteContainer", () => {
     );
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
-    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    confirmOperationRerun();
 
     await waitFor(() =>
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
@@ -380,7 +386,7 @@ describe("WorkbenchRouteContainer", () => {
     expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
-    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    confirmOperationRerun();
 
     await waitFor(() =>
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
@@ -425,7 +431,7 @@ describe("WorkbenchRouteContainer", () => {
     expect(await screen.findByTestId("detail-drawer")).toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
-    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    confirmOperationRerun();
 
     await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(3));
     await waitFor(() =>
