@@ -73,6 +73,62 @@ describe("adaptHeadSet", () => {
     expect(b.rerunOf).toBe("run_a");
   });
 
+  it("carries head-level rerun_from without attaching it to an unrelated source node", () => {
+    const backend = fixture();
+    backend.heads = backend.heads.map((head) =>
+      head.run_id === "run_b"
+        ? {
+            ...head,
+            rerun_from: {
+              owner_run_id: "run_a",
+              op_node_id: "model:ols_1",
+              node_hash: "M1",
+              context_fingerprint: "nocv1:source",
+              rerun_request_id: "req_source",
+            },
+          }
+        : head,
+    );
+
+    const vm = adaptHeadSet(backend);
+    const runBHead = vm.heads.find((h) => h.runId === "run_b")!;
+    const sourceNode = vm.nodes.find((n) => n.nodeHash === "M1")!;
+    const childNode = vm.nodes.find((n) => n.nodeHash === "M2")!;
+
+    expect(runBHead.runRerunFrom?.rerun_request_id).toBe("req_source");
+    expect(sourceNode.runRerunFrom).toBeUndefined();
+    expect(childNode.runRerunFrom).toBeUndefined();
+  });
+
+  it("attaches run-level fallback only to the unique produced head node", () => {
+    const backend = fixture();
+    backend.heads = backend.heads.map((head) =>
+      head.run_id === "run_b"
+        ? {
+            ...head,
+            rerun_from: {
+              owner_run_id: "run_a",
+              op_node_id: "model:ols_1",
+              node_hash: "M1",
+              context_fingerprint: "nocv1:source",
+              rerun_request_id: "req_head",
+            },
+          }
+        : head,
+    );
+    backend.nodes.M2 = {
+      ...backend.nodes.M2,
+      produced_by_rerun_request_id: "req_head",
+    };
+
+    const vm = adaptHeadSet(backend);
+    const childNode = vm.nodes.find((n) => n.nodeHash === "M2")!;
+    const sourceNode = vm.nodes.find((n) => n.nodeHash === "M1")!;
+
+    expect(childNode.runRerunFrom?.rerun_request_id).toBe("req_head");
+    expect(sourceNode.runRerunFrom).toBeUndefined();
+  });
+
   it("carries the backfilled editable schema value through", () => {
     const vm = adaptHeadSet(fixture());
     const m2 = vm.nodes.find((n) => n.nodeHash === "M2")!;

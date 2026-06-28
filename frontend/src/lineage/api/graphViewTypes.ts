@@ -8,6 +8,8 @@
 //
 // Spec: docs/superpowers/specs/2026-05-22-v1.5.0-uiux-integration-design.md §4
 
+import type { RerunFromProvenance } from "./nodeOperationContext";
+
 export type Stage =
   | "source"
   | "eda"
@@ -192,6 +194,9 @@ export interface HeadSetNodeRaw {
   schema_id?: string;
   editable_schema?: EditableControl[];
   editable_schema_source?: "capabilities" | "run_inputs";
+  editable_schema_version?: string;
+  rerun_from?: RerunFromProvenance;
+  produced_by_rerun_request_id?: string;
 }
 
 export interface HeadSetEdgeRaw {
@@ -207,6 +212,7 @@ export interface HeadRaw {
   rerun_reason: string | null;
   status: string | null;
   created_at: string | null;
+  rerun_from?: RerunFromProvenance | null;
 }
 
 export interface HeadSetResponse {
@@ -231,6 +237,9 @@ export interface HeadSetNode extends GraphViewNode {
   schemaId?: string;
   editableSchema?: EditableControl[];
   editableSchemaSource?: "capabilities" | "run_inputs";
+  editableSchemaVersion?: string;
+  rerunFrom?: RerunFromProvenance;
+  runRerunFrom?: RerunFromProvenance;
 }
 
 export interface Head {
@@ -241,6 +250,7 @@ export interface Head {
   rerunReason: string | null;
   status: string | null;
   createdAt: string | null;
+  runRerunFrom?: RerunFromProvenance | null;
 }
 
 export interface ForestViewModel {

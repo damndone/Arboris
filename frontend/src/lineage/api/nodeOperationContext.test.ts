@@ -6,6 +6,45 @@ import {
 } from "./nodeOperationContext";
 
 describe("resolveNodeOperationContext", () => {
+  it("carries node and run rerun provenance into the resolved context", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const nodeRerunFrom = {
+      owner_run_id: "run_source",
+      op_node_id: "model:shared_ols",
+      node_hash: "hash_source_model",
+      context_fingerprint: "nocv1:source",
+      rerun_request_id: "req_node",
+    };
+    const runRerunFrom = { ...nodeRerunFrom };
+    const result = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey
+            ? {
+                ...node,
+                rerunFrom: nodeRerunFrom,
+                runRerunFrom,
+              }
+            : node,
+        ),
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.context.rerun_from).toEqual(nodeRerunFrom);
+    expect(result.context.run_rerun_from).toEqual(runRerunFrom);
+    expect(result.context.resolver_trace).toEqual(
+      expect.arrayContaining([
+        `selected forest node: ${seed.sharedNodeKey}`,
+        `active_head_run_id: ${seed.activeHeadRunId}`,
+      ]),
+    );
+  });
+
   it("prefers active head when it owns the shared node and is not runs[0]", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const result = resolveNodeOperationContext({
@@ -113,10 +152,16 @@ describe("resolveNodeOperationContext", () => {
     expect(refreshed.context.context_fingerprint).not.toBe(
       first.context.context_fingerprint,
     );
-    const { context_fingerprint: _firstFingerprint, ...firstContext } =
-      first.context;
-    const { context_fingerprint: _refreshedFingerprint, ...refreshedContext } =
-      refreshed.context;
+    const {
+      context_fingerprint: _firstFingerprint,
+      resolver_trace: _firstTrace,
+      ...firstContext
+    } = first.context;
+    const {
+      context_fingerprint: _refreshedFingerprint,
+      resolver_trace: _refreshedTrace,
+      ...refreshedContext
+    } = refreshed.context;
     expect(refreshedContext).toEqual(firstContext);
   });
 

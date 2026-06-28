@@ -30,6 +30,15 @@ export interface CandidateRunRef {
   path_contains_node: boolean;
 }
 
+export interface RerunFromProvenance {
+  owner_run_id: string;
+  op_node_id: string;
+  node_hash: string;
+  context_fingerprint: string;
+  patch_id?: string;
+  rerun_request_id: string;
+}
+
 export interface ResolveNodeOperationContextInput {
   forest: ForestViewModel;
   selected_forest_node_key: string;
@@ -61,6 +70,9 @@ export interface NodeOperationContextV1 {
   context_version: "node-operation-context/v1";
   context_kind: "executed_lineage_node";
   context_fingerprint: string;
+  rerun_from?: RerunFromProvenance;
+  run_rerun_from?: RerunFromProvenance;
+  resolver_trace?: string[];
   selection: {
     forest_node_key: string;
     node_hash: string;
@@ -232,6 +244,18 @@ export function resolveNodeOperationContext(
   const candidateRunIds = candidate_run_refs.map((r) => r.run_id);
   const sharedByRunIds = [...node.runs];
   const activeHeadPathContainsNode = Boolean(activeRef);
+  const nodeRerunFrom = node.rerunFrom;
+  const runRerunFrom = node.runRerunFrom;
+  const resolverTrace = [
+    `selected forest node: ${input.selected_forest_node_key}`,
+    `active_head_run_id: ${input.active_head_run_id ?? "none"}`,
+    `selected_run_hint: ${input.selected_run_hint ?? "none"}`,
+    `selected_run_hint_source: ${source}`,
+    `candidate_run_refs: ${JSON.stringify(candidate_run_refs)}`,
+    `owner_resolution: ${owner_resolution}`,
+    `owner_run_id: ${owner.run_id}`,
+    `context_fingerprint: ${context_fingerprint}`,
+  ];
 
   return {
     ok: true,
@@ -239,6 +263,9 @@ export function resolveNodeOperationContext(
       context_version: "node-operation-context/v1",
       context_kind: "executed_lineage_node",
       context_fingerprint,
+      rerun_from: nodeRerunFrom,
+      run_rerun_from: runRerunFrom,
+      resolver_trace: resolverTrace,
       selection: {
         forest_node_key: node.nodeKey,
         node_hash: node.nodeHash,
