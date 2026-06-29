@@ -8,6 +8,7 @@ import { TrustBanner } from "./TrustBanner";
 import { LineageChainSection } from "./LineageChainSection";
 import { BasicInfoSection } from "./BasicInfoSection";
 import { DecisionSection } from "./DecisionSection";
+import { CompareWithSourceSection } from "./CompareWithSourceSection";
 import type {
   DecisionViewModel,
   GraphViewNode,
@@ -47,10 +48,11 @@ describe("sectionRegistry", () => {
     vi.unstubAllEnvs();
   });
 
-  it("exposes the V1.5.2 P5 section set (V1.5.0 four + V1.5.2 three placeholders)", () => {
+  it("exposes the V1.6.3 section set with source compare near operation", () => {
     expect(sectionRegistry.map((s) => s.id)).toEqual([
       "trust",
       "askAi",
+      "compareWithSource",
       "operation",
       "code",
       "lineage",
@@ -59,9 +61,9 @@ describe("sectionRegistry", () => {
     ]);
   });
 
-  it("orders match spec §8.1 + P5 additions: 10/20/30/40/50/60/70", () => {
+  it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      10, 20, 30, 40, 50, 60, 70,
+      10, 20, 25, 30, 40, 50, 60, 70,
     ]);
   });
 
@@ -71,6 +73,12 @@ describe("sectionRegistry", () => {
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
     expect(visible.map((s) => s.id)).toEqual(["lineage", "basic"]);
+  });
+
+  it("compareWithSource renders only for forest nodes with run ownership metadata", () => {
+    const entry = sectionRegistry.find((s) => s.id === "compareWithSource")!;
+    expect(entry.shouldRender(node())).toBe(false);
+    expect(entry.shouldRender(node({ runs: ["run_child"] } as Partial<GraphViewNode>))).toBe(true);
   });
 
   it("decision section renders when decisions.length > 0", () => {
@@ -138,6 +146,7 @@ describe("sectionRegistry", () => {
     // means the drawer would render the wrong section.
     const byId = Object.fromEntries(sectionRegistry.map((s) => [s.id, s]));
     expect(byId.trust.Component).toBe(TrustBanner);
+    expect(byId.compareWithSource.Component).toBe(CompareWithSourceSection);
     expect(byId.lineage.Component).toBe(LineageChainSection);
     expect(byId.basic.Component).toBe(BasicInfoSection);
     expect(byId.decision.Component).toBe(DecisionSection);

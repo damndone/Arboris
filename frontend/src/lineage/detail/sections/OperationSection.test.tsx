@@ -140,14 +140,30 @@ describe("OperationSection (editable)", () => {
     expect((screen.getByTestId("operation-rerun-submit") as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("submits context + only-changed op_overrides, then shows success without navigating", async () => {
+  it("previews a manual patch before submitting rerun", async () => {
     const { submitRerun } = renderWithRerun(modelNode());
+    expect(screen.getByTestId("operation-rerun-label")).toHaveTextContent(
+      "Rerun source with changes",
+    );
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    expect(screen.getByTestId("manual-patch-preview")).toHaveTextContent("covariance");
+    expect(submitRerun).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     await waitFor(() => expect(submitRerun).toHaveBeenCalledTimes(1));
     expect(submitRerun).toHaveBeenCalledWith({
       context: makeContext(),
-      opOverrides: { covariance: "robust" },
+      opOverrides: {},
+      manualPatch: expect.objectContaining({
+        patch_source: "MANUAL_EDIT",
+        changes: [
+          {
+            field_id: "covariance",
+            old_value: "clustered",
+            new_value: "robust",
+          },
+        ],
+      }),
     });
     await screen.findByTestId("operation-rerun-done");
   });
@@ -206,6 +222,7 @@ describe("OperationSection (editable)", () => {
     );
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     await screen.findByTestId("operation-rerun-done");
 
@@ -287,10 +304,19 @@ describe("OperationSection (editable)", () => {
     );
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
     await waitFor(() => expect(submitRerun).toHaveBeenCalledTimes(1));
     expect(submitRerun).toHaveBeenCalledWith({
       context,
-      opOverrides: { covariance: "robust" },
+      opOverrides: {},
+      manualPatch: expect.objectContaining({
+        patch_source: "MANUAL_EDIT",
+        target: {
+          owner_run_id: "run_a",
+          op_node_id: "model:ols_1",
+          node_hash: "M1",
+        },
+      }),
     });
   });
 

@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import type { GraphResponse } from "./lineage/types";
 import type { HeadSetResponse } from "./lineage/api/graphViewTypes";
+import type { ManualRerunPatch } from "./lineage/detail/sections/manualRerunPatch";
 
 export type ProjectResponse = {
   project_root: string;
@@ -873,6 +874,7 @@ export interface NodeWriteOperationRequestV1 {
   owner_resolution: string;
   active_head_run_id: string | null;
   op_overrides: Record<string, unknown>;
+  manual_patch?: ManualRerunPatch;
   rerun_reason?: string;
 }
 
@@ -895,6 +897,21 @@ export interface RerunResponseV1 {
     node_hash: string;
     validated_at: string;
   };
+  produced_lineage?: {
+    produced_owner_run_id: string;
+    produced_op_node_id?: string | null;
+    produced_node_hash?: string | null;
+    rerun_request_id: string;
+    rerun_from: {
+      owner_run_id: string;
+      op_node_id: string;
+      node_hash: string;
+      context_fingerprint: string;
+      patch_id?: string;
+      rerun_request_id: string;
+    };
+    status: "indexed" | "pending_index";
+  } | null;
 }
 
 export interface LegacyRerunFromNodeArgs {

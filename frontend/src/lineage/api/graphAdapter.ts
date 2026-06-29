@@ -229,6 +229,14 @@ export function adaptRunGraph(backend: GraphResponse): GraphViewModel {
 // ───────────────────────────────────────────────────────────────
 
 function adaptHeadSetNode(key: string, raw: HeadSetNodeRaw): HeadSetNode {
+  return adaptHeadSetNodeWithRunProvenance(key, raw);
+}
+
+function adaptHeadSetNodeWithRunProvenance(
+  key: string,
+  raw: HeadSetNodeRaw,
+  runRerunFrom?: HeadSetNode["runRerunFrom"],
+): HeadSetNode {
   const stage = coerceStage(raw.stage);
   const dps = (raw.decision_points ?? []) as DecisionPoint[];
   return {
@@ -257,6 +265,9 @@ function adaptHeadSetNode(key: string, raw: HeadSetNodeRaw): HeadSetNode {
     schemaId: raw.schema_id,
     editableSchema: raw.editable_schema,
     editableSchemaSource: raw.editable_schema_source,
+    editableSchemaVersion: raw.editable_schema_version,
+    rerunFrom: raw.rerun_from,
+    runRerunFrom,
   };
 }
 
@@ -279,14 +290,6 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
       heads: [],
     };
   }
-  const nodes: HeadSetNode[] = Object.entries(backend.nodes ?? {}).map(
-    ([key, raw]) => adaptHeadSetNode(key, raw),
-  );
-  const edges: GraphViewEdge[] = (backend.edges ?? []).map((e) => ({
-    id: `${e.source}->${e.target}`,
-    source: e.source,
-    target: e.target,
-  }));
   const heads: Head[] = (backend.heads ?? []).map((h) => ({
     runId: h.run_id,
     headNodeHash: h.head_node_hash,
@@ -295,6 +298,27 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
     rerunReason: h.rerun_reason,
     status: h.status,
     createdAt: h.created_at,
+    runRerunFrom: h.rerun_from ?? null,
+  }));
+  const runRerunFromByRun = new Map(
+    heads
+      .filter((head) => head.runRerunFrom)
+      .map((head) => [head.runId, head] as const),
+  );
+  const nodes: HeadSetNode[] = Object.entries(backend.nodes ?? {}).map(
+    ([key, raw]) => {
+      const runRerunFrom = findConservativeRunRerunFromForNode(
+        key,
+        raw,
+        runRerunFromByRun,
+      );
+      return adaptHeadSetNodeWithRunProvenance(key, raw, runRerunFrom);
+    },
+  );
+  const edges: GraphViewEdge[] = (backend.edges ?? []).map((e) => ({
+    id: `${e.source}->${e.target}`,
+    source: e.source,
+    target: e.target,
   }));
   return {
     schemaVersion: backend.schema_version,
@@ -303,4 +327,28 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
     edges,
     heads,
   };
+}
+
+function findConservativeRunRerunFromForNode(
+  key: string,
+  raw: HeadSetNodeRaw,
+  headByRun: Map<string, Head>,
+): HeadSetNode["runRerunFrom"] {
+  if (raw.runs.length !== 1 || !raw.produced_by_rerun_request_id) {
+    return undefined;
+  }
+  const head = headByRun.get(raw.runs[0]);
+  const rerunFrom = head?.runRerunFrom ?? undefined;
+  if (!head || !rerunFrom) {
+    return undefined;
+  }
+  const nodeIdentity = raw.node_hash ?? key;
+  if (
+    head.headNodeHash !== nodeIdentity ||
+    head.fromNode !== raw.id ||
+    raw.produced_by_rerun_request_id !== rerunFrom.rerun_request_id
+  ) {
+    return undefined;
+  }
+  return rerunFrom;
 }

@@ -11,6 +11,7 @@
 // Order slots (10..110) leave room for future sections without renumbering:
 //   10  TrustBanner            — V1.5.0
 //   20  AskAISection           — V1.5.2 (placeholder slot, P5)
+//   25  CompareWithSource      — V1.6.3 source-bound compare gate
 //   30  OperationSection       — V1.5.2 (placeholder slot, P5)
 //   40  CodeSection            — V1.5.1 read-only (placeholder slot, P5)
 //   50  LineageChainSection    — V1.5.0
@@ -31,6 +32,7 @@ import { LineageChainSection } from "../../lineage/detail/sections/LineageChainS
 import { BasicInfoSection } from "../../lineage/detail/sections/BasicInfoSection";
 import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
+import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { isAskAIEnabled } from "../featureFlags";
@@ -67,6 +69,12 @@ export const sectionRegistry: SectionEntry[] = [
     order: 20,
     shouldRender: () => isAskAIEnabled(),
     Component: AskAISection,
+  },
+  {
+    id: "compareWithSource",
+    order: 25,
+    shouldRender: (n) => "runs" in n,
+    Component: CompareWithSourceSection,
   },
   {
     id: "operation",

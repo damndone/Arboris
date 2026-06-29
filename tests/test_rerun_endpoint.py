@@ -173,6 +173,217 @@ def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):
     assert inputs["from_node"] == node_id
 
 
+def test_context_rerun_persists_run_level_rerun_from_and_returns_pending_lineage(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    owner = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, owner)
+    _write_node_index(project.root, owner, node_id, "hash_owner_model")
+    fingerprint = _context_fingerprint(
+        project.root,
+        owner_run_id=owner,
+        op_node_id=node_id,
+        node_hash="hash_owner_model",
+        forest_node_key="hash_owner_model",
+        owner_resolution="active_head_contains_node",
+        active_head_run_id=owner,
+    )
+
+    resp = client.post(
+        f"/runs/{owner}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "request_id": "req_provenance",
+            "operation": "rerun",
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": fingerprint,
+            "owner_run_id": owner,
+            "op_node_id": node_id,
+            "node_hash": "hash_owner_model",
+            "forest_node_key": "hash_owner_model",
+            "owner_resolution": "active_head_contains_node",
+            "active_head_run_id": owner,
+            "op_overrides": {"covariance": "unadjusted"},
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["produced_lineage"] == {
+        "produced_owner_run_id": body["run_id"],
+        "produced_op_node_id": None,
+        "produced_node_hash": None,
+        "rerun_request_id": "req_provenance",
+        "status": "pending_index",
+        "rerun_from": {
+            "owner_run_id": owner,
+            "op_node_id": node_id,
+            "node_hash": "hash_owner_model",
+            "context_fingerprint": fingerprint,
+            "rerun_request_id": "req_provenance",
+        },
+    }
+    stored = json.loads((project.root / "runs" / body["run_id"] / "run_inputs.json").read_text())
+    assert stored["rerun_from"]["owner_run_id"] == owner
+    assert stored["rerun_from"]["op_node_id"] == node_id
+    _wait_terminal(project.root, body["run_id"])
+
+
+def test_manual_patch_idempotency_reuses_existing_child(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    url_run = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    _write_node_index(project.root, parent, node_id, "hash_parent_model")
+    fingerprint = _context_fingerprint(
+        project.root,
+        owner_run_id=parent,
+        op_node_id=node_id,
+        node_hash="hash_parent_model",
+        forest_node_key="hash_parent_model",
+        owner_resolution="active_head_contains_node",
+        active_head_run_id=parent,
+    )
+    payload = {
+        "request_id": "req_patch_1",
+        "operation": "rerun",
+        "context_version": "node-operation-context/v1",
+        "context_fingerprint": fingerprint,
+        "owner_run_id": parent,
+        "op_node_id": node_id,
+        "node_hash": "hash_parent_model",
+        "forest_node_key": "hash_parent_model",
+        "owner_resolution": "active_head_contains_node",
+        "active_head_run_id": parent,
+        "manual_patch": {
+            "patch_id": "patch_same",
+            "patch_source": "MANUAL_EDIT",
+            "source_context_fingerprint": fingerprint,
+            "editable_schema_version": "run_inputs",
+            "target": {
+                "owner_run_id": parent,
+                "op_node_id": node_id,
+                "node_hash": "hash_parent_model",
+            },
+            "changes": [
+                {
+                    "field_id": "covariance",
+                    "old_value": "robust",
+                    "new_value": "unadjusted",
+                }
+            ],
+        },
+    }
+    first = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json=payload,
+    )
+    second = client.post(
+        f"/runs/{url_run}/rerun",
+        params={"project_root": str(project.root)},
+        json=payload,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["run_id"] == first.json()["run_id"]
+    inputs = json.loads(
+        (project.root / "runs" / first.json()["run_id"] / "run_inputs.json").read_text()
+    )
+    assert inputs["rerun_of"] == parent
+    assert inputs["rerun_from"]["patch_id"] == "patch_same"
+    _wait_terminal(project.root, first.json()["run_id"])
+
+
+def test_manual_patch_requires_context_version(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "from_node": node_id,
+            "manual_patch": {
+                "patch_id": "patch_without_context",
+                "patch_source": "MANUAL_EDIT",
+                "source_context_fingerprint": "nocv1:missing",
+                "editable_schema_version": "run_inputs",
+                "target": {
+                    "owner_run_id": parent,
+                    "op_node_id": node_id,
+                    "node_hash": "hash_parent_model",
+                },
+                "changes": [
+                    {
+                        "field_id": "covariance",
+                        "old_value": "robust",
+                        "new_value": "unadjusted",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "context_version is required for context target fields."
+
+
+def test_manual_patch_rejects_mixed_op_overrides(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    _write_node_index(project.root, parent, node_id, "hash_parent_model")
+    fingerprint = _context_fingerprint(
+        project.root,
+        owner_run_id=parent,
+        op_node_id=node_id,
+        node_hash="hash_parent_model",
+        forest_node_key="hash_parent_model",
+        owner_resolution="active_head_contains_node",
+        active_head_run_id=parent,
+    )
+
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "request_id": "req_patch_mixed",
+            "operation": "rerun",
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": fingerprint,
+            "owner_run_id": parent,
+            "op_node_id": node_id,
+            "node_hash": "hash_parent_model",
+            "forest_node_key": "hash_parent_model",
+            "owner_resolution": "active_head_contains_node",
+            "active_head_run_id": parent,
+            "op_overrides": {"covariance": "clustered"},
+            "manual_patch": {
+                "patch_id": "patch_mixed",
+                "patch_source": "MANUAL_EDIT",
+                "source_context_fingerprint": fingerprint,
+                "editable_schema_version": "run_inputs",
+                "target": {
+                    "owner_run_id": parent,
+                    "op_node_id": node_id,
+                    "node_hash": "hash_parent_model",
+                },
+                "changes": [
+                    {
+                        "field_id": "covariance",
+                        "old_value": "robust",
+                        "new_value": "unadjusted",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "MANUAL_PATCH_WITH_OP_OVERRIDES"
+
+
 def test_partial_context_without_context_version_does_not_rerun_from_owner(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     url_run = _create_terminal_run(project.root)

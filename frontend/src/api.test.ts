@@ -220,6 +220,80 @@ test("rerunFromNode posts context-driven rerun request body", async () => {
   });
 });
 
+test("rerunFromNode posts manual patch payload", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    jsonResponse({
+      run_id: "run_child",
+      new_run_id: "run_child",
+      new_active_head_id: "run_child",
+      focus: null,
+      rerun_from: {
+        owner_run_id: "run_c",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_shared",
+        forest_node_key: "hash_shared",
+      },
+      produced_lineage: {
+        produced_owner_run_id: "run_child",
+        produced_op_node_id: null,
+        produced_node_hash: null,
+        rerun_request_id: "rerun_1",
+        rerun_from: {
+          owner_run_id: "run_c",
+          op_node_id: "model:ols_1",
+          node_hash: "hash_shared",
+          context_fingerprint: "nocv1:abc",
+          patch_id: "patch_1",
+          rerun_request_id: "rerun_1",
+        },
+        status: "pending_index",
+      },
+    }),
+  );
+
+  await rerunFromNode("/tmp/demo", "run_c", {
+    request_id: "rerun_1",
+    operation: "rerun",
+    context_version: "node-operation-context/v1",
+    context_fingerprint: "nocv1:abc",
+    owner_run_id: "run_c",
+    op_node_id: "model:ols_1",
+    node_hash: "hash_shared",
+    forest_node_key: "hash_shared",
+    owner_resolution: "active_head_contains_node",
+    active_head_run_id: "run_c",
+    op_overrides: {},
+    manual_patch: {
+      patch_id: "patch_1",
+      patch_source: "MANUAL_EDIT",
+      source_context_fingerprint: "nocv1:abc",
+      editable_schema_version: "run_inputs",
+      target: {
+        owner_run_id: "run_c",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_shared",
+      },
+      changes: [
+        {
+          field_id: "covariance",
+          old_value: "clustered",
+          new_value: "robust",
+        },
+      ],
+    },
+  });
+
+  const body = JSON.parse(
+    ((fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1] as RequestInit)
+      .body as string,
+  );
+  expect(body.manual_patch).toMatchObject({
+    patch_id: "patch_1",
+    patch_source: "MANUAL_EDIT",
+  });
+  expect(body.op_overrides).toEqual({});
+});
+
 test("runBatchWorkflow posts y_list and x as form data", async () => {
   (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
     jsonResponse({

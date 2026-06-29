@@ -5,7 +5,7 @@ import json
 import queue
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -50,11 +50,20 @@ from .lineage.node_write_validation import (
     accepted_context_from,
     validate_rerun_operation_target,
 )
+from .lineage.manual_patch_validation import (
+    ManualPatchValidationError,
+    ManualRerunPatch,
+    validate_manual_patch,
+)
 from .lineage.op_contract import (
     OpOverrideError,
     resolve_operation_contract,
     resolve_overrides_target,
     validate_overrides,
+)
+from .lineage.rerun_provenance import (
+    pending_produced_lineage,
+    run_rerun_from_from_context,
 )
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
 from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
@@ -130,6 +139,8 @@ def _submit_run(
     from_node: str | None = None,
     rerun_reason: str = "initial",
     op_overrides: dict | None = None,
+    rerun_from: dict[str, Any] | None = None,
+    before_dispatch: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
 
@@ -153,6 +164,7 @@ def _submit_run(
         rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form),
+        rerun_from=rerun_from,
     )
 
     uploads_dir = run.root / "_uploads"
@@ -167,6 +179,8 @@ def _submit_run(
         requested_model_type=form.get("model_type", "auto"),
         rerun_of=rerun_of,
     )
+    if before_dispatch is not None:
+        before_dispatch(run.run_id)
 
     events = get_event_manager()
     events.register_run(run.run_id)
@@ -909,6 +923,7 @@ class RerunRequest(BaseModel):
     from_node: str | None = None
     op_overrides: dict = {}
     rerun_reason: str = "manual_override"
+    manual_patch: dict[str, Any] | None = None
 
     request_id: str | None = None
     operation: str | None = None
@@ -932,6 +947,9 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
     effective_from_node = body.from_node
     accepted_context: AcceptedContext | None = None
     focus_target: dict[str, str] | None = None
+    run_level_rerun_from: dict[str, Any] | None = None
+    manual_patch: ManualRerunPatch | None = None
+    effective_op_overrides = body.op_overrides
 
     if body.context_version is not None:
         try:
@@ -956,6 +974,29 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
                 detail=str(exc),
             ) from exc
         accepted_context = accepted_context_from(request)
+        run_level_rerun_from = run_rerun_from_from_context(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            node_hash=request.node_hash,
+            context_fingerprint=request.context_fingerprint,
+        )
+        if body.manual_patch is not None:
+            if body.op_overrides:
+                raise HTTPException(status_code=400, detail="MANUAL_PATCH_WITH_OP_OVERRIDES")
+            try:
+                manual_patch = ManualRerunPatch(**body.manual_patch)
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail="INVALID_MANUAL_PATCH") from exc
+            if manual_patch.source_context_fingerprint != request.context_fingerprint:
+                raise HTTPException(status_code=409, detail="SOURCE_CONTEXT_MISMATCH")
+            if (
+                manual_patch.target.owner_run_id != request.owner_run_id
+                or manual_patch.target.op_node_id != request.op_node_id
+                or manual_patch.target.node_hash != request.node_hash
+            ):
+                raise HTTPException(status_code=409, detail="PATCH_TARGET_MISMATCH")
+            run_level_rerun_from["patch_id"] = manual_patch.patch_id
         effective_run_id = request.owner_run_id
         effective_from_node = request.op_node_id
         focus_target = None
@@ -1028,34 +1069,86 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         **{k: _encode_override(v) for k, v in body.op_overrides.items()},
     }
 
+    manual_patch_result: dict[str, Any] | None = None
+    if manual_patch is not None:
+        editable_schema = _backfill_schema_values(contract.editable_schema, inputs["form"])
+        current_values = {
+            item["key"]: item.get("value")
+            for item in editable_schema
+            if item.get("key")
+        }
+        try:
+            patch_overrides = validate_manual_patch(
+                patch=manual_patch,
+                current_values=current_values,
+                editable_schema=editable_schema,
+                editable_schema_version="run_inputs",
+            )
+        except ManualPatchValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        merged_form = {
+            **inputs["form"],
+            **{k: _encode_override(v) for k, v in patch_overrides.items()},
+        }
+        effective_op_overrides = patch_overrides
+        manual_patch_result = _manual_patch_idempotency_result(
+            root=root,
+            owner_run_id=effective_run_id,
+            patch=manual_patch,
+        )
+        if manual_patch_result is not None:
+            return manual_patch_result
+
     events = get_event_manager()
     if not events.try_acquire_slot():
         raise HTTPException(status_code=429, detail="A run is already in progress.")
     child_id: str | None = None
     try:
         started_at = datetime.now(timezone.utc).isoformat()
+        def _response_for(new_child_id: str) -> dict[str, Any]:
+            return {
+                "run_id": new_child_id,
+                "new_run_id": new_child_id,
+                "new_active_head_id": new_child_id,
+                "focus": focus_target,
+                "produced_lineage": (
+                    pending_produced_lineage(
+                        produced_owner_run_id=new_child_id,
+                        rerun_from=run_level_rerun_from,
+                    )
+                    if run_level_rerun_from is not None
+                    else None
+                ),
+                "rerun_from": {
+                    "owner_run_id": effective_run_id,
+                    "op_node_id": effective_from_node,
+                    "node_hash": body.node_hash,
+                    "forest_node_key": body.forest_node_key,
+                },
+                "accepted_context": (
+                    accepted_context.model_dump() if accepted_context is not None else None
+                ),
+            }
+
+        def _record_idempotency_before_dispatch(new_child_id: str) -> None:
+            if manual_patch is not None:
+                _record_manual_patch_idempotency(
+                    root=root,
+                    owner_run_id=effective_run_id,
+                    patch=manual_patch,
+                    response=_response_for(new_child_id),
+                )
+
         result = _submit_run(
             root, form=merged_form, upload_bytes=upload_bytes,
             upload_filename=inputs["upload"].get("filename") or "upload.csv",
             started_at=started_at, rerun_of=effective_run_id, from_node=effective_from_node,
-            rerun_reason=body.rerun_reason, op_overrides=body.op_overrides,
+            rerun_reason=body.rerun_reason, op_overrides=effective_op_overrides,
+            rerun_from=run_level_rerun_from,
+            before_dispatch=_record_idempotency_before_dispatch,
         )
         child_id = result["run_id"]
-        return {
-            "run_id": child_id,
-            "new_run_id": child_id,
-            "new_active_head_id": child_id,
-            "focus": focus_target,
-            "rerun_from": {
-                "owner_run_id": effective_run_id,
-                "op_node_id": effective_from_node,
-                "node_hash": body.node_hash,
-                "forest_node_key": body.forest_node_key,
-            },
-            "accepted_context": (
-                accepted_context.model_dump() if accepted_context is not None else None
-            ),
-        }
+        return _response_for(child_id)
     except ValueError as exc:
         events.release_slot(child_id)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1087,8 +1180,61 @@ def _has_context_target_fields(body: RerunRequest) -> bool:
             body.forest_node_key,
             body.owner_resolution,
             body.active_head_run_id,
+            body.manual_patch,
         )
     )
+
+
+def _manual_patch_idempotency_path(root: Path, owner_run_id: str) -> Path:
+    return root / "runs" / owner_run_id / "manual_patch_idempotency.json"
+
+
+def _manual_patch_idempotency_payload(patch: ManualRerunPatch) -> str:
+    return json.dumps(patch.model_dump(), sort_keys=True, separators=(",", ":"))
+
+
+def _manual_patch_idempotency_result(
+    *,
+    root: Path,
+    owner_run_id: str,
+    patch: ManualRerunPatch,
+) -> dict[str, Any] | None:
+    path = _manual_patch_idempotency_path(root, owner_run_id)
+    if not path.is_file():
+        return None
+    try:
+        index = read_json(path)
+    except (OSError, ValueError):
+        return None
+    entry = (index.get("patches") or {}).get(patch.patch_id)
+    if entry is None:
+        return None
+    if entry.get("payload") != _manual_patch_idempotency_payload(patch):
+        raise HTTPException(status_code=409, detail="PATCH_ID_CONFLICT")
+    response = entry.get("response")
+    if not isinstance(response, dict):
+        return None
+    return response
+
+
+def _record_manual_patch_idempotency(
+    *,
+    root: Path,
+    owner_run_id: str,
+    patch: ManualRerunPatch,
+    response: dict[str, Any],
+) -> None:
+    path = _manual_patch_idempotency_path(root, owner_run_id)
+    try:
+        index = read_json(path) if path.is_file() else {}
+    except (OSError, ValueError):
+        index = {}
+    patches = dict(index.get("patches") or {})
+    patches[patch.patch_id] = {
+        "payload": _manual_patch_idempotency_payload(patch),
+        "response": response,
+    }
+    write_json(path, {"patches": patches})
 
 
 @app.get("/runs/{run_id}/events")

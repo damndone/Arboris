@@ -17,10 +17,12 @@ import type {
   RerunResponseV1,
 } from "../../api";
 import type { NodeOperationContextV1 } from "../api/nodeOperationContext";
+import type { ManualRerunPatch } from "./sections/manualRerunPatch";
 
 export interface RerunArgs {
   context: NodeOperationContextV1;
   opOverrides: Record<string, unknown>;
+  manualPatch?: ManualRerunPatch;
   rerunReason?: string;
 }
 
@@ -64,7 +66,8 @@ export function RerunProvider({
           forest_node_key: args.context.selection.forest_node_key,
           owner_resolution: args.context.ownership.owner_resolution,
           active_head_run_id: args.context.ownership.active_head_run_id,
-          op_overrides: args.opOverrides,
+          op_overrides: args.manualPatch ? {} : args.opOverrides,
+          manual_patch: args.manualPatch,
           rerun_reason: args.rerunReason,
         };
         const res = await rerunFromNode(projectRoot, target.owner_run_id, request);

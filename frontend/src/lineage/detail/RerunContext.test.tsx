@@ -147,4 +147,43 @@ describe("RerunProvider submitRerun", () => {
       rerun_reason: "user_changed_covariance",
     });
   });
+
+  it("submits manual_patch and clears op_overrides", async () => {
+    const context = makeContext();
+    const manualPatch = {
+      patch_id: "patch_1",
+      patch_source: "MANUAL_EDIT" as const,
+      source_context_fingerprint: "nocv1:test",
+      editable_schema_version: "run_inputs",
+      target: {
+        owner_run_id: "run_c",
+        op_node_id: "model:ols_1",
+        node_hash: "hash_shared_model",
+      },
+      changes: [
+        {
+          field_id: "covariance",
+          old_value: "clustered",
+          new_value: "robust",
+        },
+      ],
+    };
+    mount({
+      context,
+      opOverrides: { covariance: "robust" },
+      manualPatch,
+    });
+
+    fireEvent.click(screen.getByText("go"));
+
+    await waitFor(() => expect(rerunFromNodeMock).toHaveBeenCalledTimes(1));
+    expect(rerunFromNodeMock).toHaveBeenCalledWith(
+      "/p",
+      "run_c",
+      expect.objectContaining({
+        op_overrides: {},
+        manual_patch: manualPatch,
+      }),
+    );
+  });
 });
