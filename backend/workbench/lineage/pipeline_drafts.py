@@ -99,6 +99,12 @@ class StoredDraft:
     draft_hash: str
 
 
+@dataclass(frozen=True)
+class DedupeRecord:
+    run_id: str
+    executed_draft_hash: str
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -215,6 +221,34 @@ class PipelineDraftStore:
 
     def execution_lock(self, draft_id: str) -> threading.Lock:
         return self._lock_for(draft_id)
+
+    def dedupe_path(self, draft_id: str, key: str) -> Path:
+        validate_draft_id(draft_id)
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return self.drafts_dir / f"{draft_id}.{digest}.execution.json"
+
+    def get_dedupe(self, draft_id: str, key: str) -> DedupeRecord | None:
+        path = self.dedupe_path(draft_id, key)
+        if not path.is_file():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return DedupeRecord(
+            run_id=payload["run_id"],
+            executed_draft_hash=payload["executed_draft_hash"],
+        )
+
+    def record_dedupe(
+        self,
+        draft_id: str,
+        key: str,
+        *,
+        run_id: str,
+        executed_draft_hash: str,
+    ) -> None:
+        self._write_atomic(
+            self.dedupe_path(draft_id, key),
+            {"run_id": run_id, "executed_draft_hash": executed_draft_hash},
+        )
 
 
 def check(

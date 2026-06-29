@@ -9,7 +9,7 @@ from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from .api_errors import (
     ERROR_ARTIFACT_NOT_FOUND,
@@ -65,6 +65,7 @@ from .lineage.pipeline_drafts import (
     DraftHashConflict,
     DraftNotFound,
     PipelineDraftStore,
+    compute_executable_draft_hash,
     new_draft_id,
     schema_hash,
     utc_now,
@@ -929,6 +930,8 @@ def get_run_graph(run_id: str, project_root: str, view: str | None = None):
 
 
 class RerunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     from_node: str | None = None
     op_overrides: dict = {}
     rerun_reason: str = "manual_override"
@@ -962,6 +965,12 @@ class PipelineDraftPatchRequest(BaseModel):
 
 class PipelineDraftValidateRequest(BaseModel):
     execution_mode: Literal["rerun_child", "new_run"] | None = None
+
+
+class PipelineDraftExecuteRequest(BaseModel):
+    validated_draft_hash: str
+    execution_mode: Literal["rerun_child", "new_run"]
+    idempotency_key: str | None = None
 
 
 def _pipeline_draft_store(project_root: str) -> PipelineDraftStore:
@@ -1156,6 +1165,184 @@ def validate_pipeline_draft(
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return validate_draft_for_execution(stored.draft, execution_mode=body.execution_mode)
+
+
+@app.post("/pipeline-drafts/{draft_id}/execute")
+def execute_pipeline_draft(
+    draft_id: str,
+    project_root: str,
+    body: PipelineDraftExecuteRequest,
+) -> dict[str, Any]:
+    if body.execution_mode == "new_run":
+        raise HTTPException(status_code=409, detail="NEW_RUN_EXECUTION_NOT_ENABLED")
+
+    root = Path(project_root)
+    store = _pipeline_draft_store(project_root)
+    try:
+        first = store.get(draft_id)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    if first.draft_hash != body.validated_draft_hash:
+        raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
+
+    dedupe_key = (
+        body.idempotency_key
+        or f"{draft_id}:{body.validated_draft_hash}:{body.execution_mode}"
+    )
+    existing = store.get_dedupe(draft_id, dedupe_key)
+    if existing is not None:
+        validation = validate_draft_for_execution(first.draft, execution_mode=body.execution_mode)
+        return {
+            "ok": True,
+            "run_id": existing.run_id,
+            "draft_id": draft_id,
+            "executed_draft_hash": existing.executed_draft_hash,
+            "execution_mode": "rerun_child",
+            "deduped": True,
+            "produced_lineage": validation["resolved_execution"],
+            "focus": {
+                "status": "pending_index",
+                "run_id": existing.run_id,
+                "poll": validation["resolved_execution"],
+            },
+        }
+
+    with store.execution_lock(draft_id):
+        current = store.get(draft_id)
+        if current.draft_hash != body.validated_draft_hash:
+            raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
+
+        validation = validate_draft_for_execution(current.draft, execution_mode=body.execution_mode)
+        if not validation.get("executable"):
+            raise HTTPException(status_code=409, detail="VALIDATION_REQUIRED")
+        if validation.get("validated_execution_mode") != body.execution_mode:
+            raise HTTPException(status_code=409, detail="VALIDATION_REQUIRED")
+
+        existing = store.get_dedupe(draft_id, dedupe_key)
+        if existing is not None:
+            return {
+                "ok": True,
+                "run_id": existing.run_id,
+                "draft_id": draft_id,
+                "executed_draft_hash": existing.executed_draft_hash,
+                "execution_mode": "rerun_child",
+                "deduped": True,
+                "produced_lineage": validation["resolved_execution"],
+                "focus": {
+                    "status": "pending_index",
+                    "run_id": existing.run_id,
+                    "poll": validation["resolved_execution"],
+                },
+            }
+
+        draft = current.draft
+        source = draft["created_from"]
+        model = next(node for node in draft["graph"]["nodes"] if node.get("node_type") == "model")
+        run_root = _resolve_run_root(project_root, source["source_run_id"])
+        try:
+            inputs = read_run_inputs(run_root)
+        except (FileNotFoundError, OSError) as exc:
+            raise HTTPException(status_code=422, detail="SOURCE_RUN_INPUTS_UNAVAILABLE") from exc
+        parent_sha = (inputs.get("upload") or {}).get("sha256")
+        if not parent_sha:
+            raise HTTPException(status_code=422, detail="SOURCE_INPUT_FINGERPRINT_UNAVAILABLE")
+        try:
+            upload_bytes = verify_upload(root, parent_sha).read_bytes()
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"Parent upload unusable: {exc}") from exc
+
+        op_overrides = {
+            key: value
+            for key, value in model["params"].items()
+            if model.get("source_params", {}).get(key) != value
+        }
+
+        def _encode_override(value: object) -> str:
+            return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
+
+        merged_form = {
+            **inputs["form"],
+            **{key: _encode_override(value) for key, value in op_overrides.items()},
+        }
+        run_level_rerun_from = run_rerun_from_from_context(
+            request_id=f"draft:{draft_id}",
+            owner_run_id=source["source_run_id"],
+            op_node_id=source["source_op_node_id"],
+            node_hash=source["source_node_hash"],
+            context_fingerprint=source["source_context_fingerprint"],
+        )
+        executed_hash = compute_executable_draft_hash(draft)
+
+        def _record_snapshot_before_dispatch(new_run_id: str) -> None:
+            run_dir = root / "runs" / new_run_id
+            (run_dir / "executed_pipeline_draft.json").write_text(
+                json.dumps(
+                    {
+                        "executed_at": utc_now(),
+                        "source_draft_id": draft_id,
+                        "executed_draft_hash": executed_hash,
+                        "execution_request": {
+                            "execution_mode": "rerun_child",
+                            "validated_draft_hash": body.validated_draft_hash,
+                        },
+                        "draft": draft,
+                    },
+                    sort_keys=True,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            store.record_dedupe(
+                draft_id,
+                dedupe_key,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
+
+        events = get_event_manager()
+        if not events.try_acquire_slot():
+            raise HTTPException(status_code=429, detail="A run is already in progress.")
+        try:
+            result = _submit_run(
+                root,
+                form=merged_form,
+                upload_bytes=upload_bytes,
+                upload_filename=inputs["upload"].get("filename") or "upload.csv",
+                started_at=datetime.now(timezone.utc).isoformat(),
+                rerun_of=source["source_run_id"],
+                from_node=source["source_op_node_id"],
+                rerun_reason="pipeline_draft",
+                op_overrides=op_overrides,
+                rerun_from=run_level_rerun_from,
+                before_dispatch=_record_snapshot_before_dispatch,
+            )
+        except Exception:
+            events.release_slot(None)
+            raise
+
+        return {
+            "ok": True,
+            "run_id": result["run_id"],
+            "draft_id": draft_id,
+            "executed_draft_hash": executed_hash,
+            "execution_mode": "rerun_child",
+            "produced_lineage": {
+                "rerun_from_run_id": source["source_run_id"],
+                "rerun_from_model_node_id": source["source_model_node_id"],
+                "rerun_from_op_node_id": source["source_op_node_id"],
+            },
+            "focus": {
+                "status": "pending_index",
+                "run_id": result["run_id"],
+                "poll": {
+                    "rerun_from_run_id": source["source_run_id"],
+                    "rerun_from_model_node_id": source["source_model_node_id"],
+                    "rerun_from_op_node_id": source["source_op_node_id"],
+                },
+            },
+        }
 
 
 @app.post("/runs/{run_id}/rerun")

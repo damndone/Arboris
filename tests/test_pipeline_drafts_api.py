@@ -152,3 +152,85 @@ def test_patch_requires_base_hash_and_validate_returns_hash(tmp_path: Path) -> N
     )
     assert validate.status_code == 200
     assert validate.json()["validated_draft_hash"] == ok.json()["draft_hash"]
+
+
+def test_execute_rejects_new_run_and_stale_hash(tmp_path: Path) -> None:
+    client = _client()
+    run_id, project_root = _create_completed_run(client, tmp_path)
+    graph = client.get(f"/runs/{run_id}/graph", params={"project_root": project_root}).json()
+    model = _model_node(graph)
+    node_hash = _node_hash(project_root, run_id, model["id"])
+    create = client.post(
+        "/pipeline-drafts/from-node",
+        params={"project_root": project_root},
+        json={
+            "source_run_id": run_id,
+            "source_model_node_id": model["id"],
+            "source_op_node_id": model["id"],
+            "source_node_hash": node_hash,
+            "source_context_fingerprint": _context_fingerprint(project_root, run_id, model["id"], node_hash),
+        },
+    ).json()
+    draft_id = create["draft"]["draft_id"]
+    new_run = client.post(
+        f"/pipeline-drafts/{draft_id}/execute",
+        params={"project_root": project_root},
+        json={"validated_draft_hash": create["draft_hash"], "execution_mode": "new_run"},
+    )
+    assert new_run.status_code == 409
+    assert new_run.json()["detail"] == "NEW_RUN_EXECUTION_NOT_ENABLED"
+    stale = client.post(
+        f"/pipeline-drafts/{draft_id}/execute",
+        params={"project_root": project_root},
+        json={"validated_draft_hash": "stale", "execution_mode": "rerun_child"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "VALIDATED_DRAFT_HASH_MISMATCH"
+
+
+def test_execute_writes_snapshot_and_returns_deduped_on_retry(tmp_path: Path) -> None:
+    client = _client()
+    run_id, project_root = _create_completed_run(client, tmp_path)
+    graph = client.get(f"/runs/{run_id}/graph", params={"project_root": project_root}).json()
+    model = _model_node(graph)
+    node_hash = _node_hash(project_root, run_id, model["id"])
+    create = client.post(
+        "/pipeline-drafts/from-node",
+        params={"project_root": project_root},
+        json={
+            "source_run_id": run_id,
+            "source_model_node_id": model["id"],
+            "source_op_node_id": model["id"],
+            "source_node_hash": node_hash,
+            "source_context_fingerprint": _context_fingerprint(project_root, run_id, model["id"], node_hash),
+        },
+    ).json()
+    draft_id = create["draft"]["draft_id"]
+    validation = client.post(
+        f"/pipeline-drafts/{draft_id}/validate",
+        params={"project_root": project_root},
+        json={"execution_mode": "rerun_child"},
+    ).json()
+    request = {
+        "validated_draft_hash": validation["validated_draft_hash"],
+        "execution_mode": "rerun_child",
+    }
+    first = client.post(
+        f"/pipeline-drafts/{draft_id}/execute",
+        params={"project_root": project_root},
+        json=request,
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["execution_mode"] == "rerun_child"
+    assert body["produced_lineage"]["rerun_from_run_id"] == run_id
+    assert (tmp_path / "runs" / body["run_id"] / "executed_pipeline_draft.json").is_file()
+    _wait_terminal(client, project_root, body["run_id"])
+    second = client.post(
+        f"/pipeline-drafts/{draft_id}/execute",
+        params={"project_root": project_root},
+        json=request,
+    )
+    assert second.status_code == 200
+    assert second.json()["run_id"] == body["run_id"]
+    assert second.json()["deduped"] is True
