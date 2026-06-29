@@ -18,6 +18,7 @@ import { RunHistoryPanel } from "./runHistory";
 import { RunDetailRoute } from "./runDetail";
 import { RunForm } from "./runForm/RunForm";
 import { ThemeProvider, ThemeToggle } from "./theme";
+import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
@@ -394,6 +395,7 @@ export default function App() {
           <Route index element={<SubmitRoute />} />
           <Route path="runs" element={<RunHistoryRoute />} />
           <Route path="runs/:runId" element={<RunDetailRoute />} />
+          <Route path="pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
         </Route>
       </Routes>
     </ThemeProvider>
