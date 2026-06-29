@@ -25,7 +25,8 @@
 // Table / Pipeline views compose into the same shell so the drawer +
 // rail + panel + search palette work identically across them.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
@@ -80,10 +81,12 @@ export function WorkbenchRouteContainer({
 }
 
 function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
+  const [searchParams] = useSearchParams();
   const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
+  const initializedPendingQueryKey = useRef<string | null>(null);
 
   const model = useMemo(
     () => (forest ? forestToGraphViewModel(forest, runId) : null),
@@ -93,6 +96,30 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
     [model],
   );
+
+  const pendingSourceRunId = searchParams.get("pending_source_run_id");
+  const pendingSourceModelNodeId = searchParams.get("pending_source_model_node_id");
+  const pendingSourceOpNodeId = searchParams.get("pending_source_op_node_id");
+  const pendingQueryKey =
+    pendingSourceRunId && pendingSourceModelNodeId && pendingSourceOpNodeId
+      ? `${runId}:${pendingSourceRunId}:${pendingSourceModelNodeId}:${pendingSourceOpNodeId}`
+      : null;
+
+  useEffect(() => {
+    if (!pendingQueryKey || !pendingSourceOpNodeId) return;
+    if (initializedPendingQueryKey.current === pendingQueryKey) return;
+    initializedPendingQueryKey.current = pendingQueryKey;
+    setActiveRunId(runId);
+    setPendingFocusTarget({
+      runId,
+      focus: {
+        forest_node_key: null,
+        op_node_id: pendingSourceOpNodeId,
+        node_hash: null,
+      },
+      attempts: 0,
+    });
+  }, [pendingQueryKey, pendingSourceOpNodeId, runId]);
 
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
