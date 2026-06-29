@@ -167,3 +167,13 @@ Create a source run, rerun it through a context-driven node operation, open the 
 - The UI reflects the backend-updated active head.
 - If focus is pending, polling selects the child after indexing.
 - No source, focus, owner, or patch target is inferred from `runs[0]`.
+
+## V1.6.4 Draft Graph Smoke
+
+Open an eligible executed model node from Lineage Detail and verify:
+
+- `Open as Draft Graph` appears only for a resolved editable model node.
+- The action creates a `PipelineDraft` and navigates to `/pipeline-drafts/<draft_id>?project_root=<root>`.
+- The Draft Graph view renders the fixed `Input Dataset -> Model` graph.
+- `Execute Draft` stays disabled until `Validate` returns a matching `validated_draft_hash`.
+- Run-level `Open in Graph` remains deferred until the route can prove exactly one eligible model node without guessing.
