@@ -215,3 +215,225 @@ class PipelineDraftStore:
 
     def execution_lock(self, draft_id: str) -> threading.Lock:
         return self._lock_for(draft_id)
+
+
+def check(
+    code: str,
+    message: str,
+    *,
+    node_id: str | None = None,
+    level: str = "error",
+    blocking: bool = True,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "code": code,
+        "level": level,
+        "message": message,
+        "blocking": blocking,
+    }
+    if node_id is not None:
+        out["node_id"] = node_id
+    return out
+
+
+def _nodes_by_type(draft: dict[str, Any], node_type: str) -> list[dict[str, Any]]:
+    return [
+        node
+        for node in draft.get("graph", {}).get("nodes", [])
+        if node.get("node_type") == node_type
+    ]
+
+
+def _validate_graph_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    inputs = _nodes_by_type(draft, "input.dataset")
+    models = _nodes_by_type(draft, "model")
+    edges = draft.get("graph", {}).get("edges", [])
+
+    if len(inputs) != 1:
+        checks.append(check("MISSING_INPUT_NODE", "Draft must contain exactly one input.dataset node."))
+    if len(models) != 1:
+        checks.append(check("MISSING_MODEL_NODE", "Draft must contain exactly one model node."))
+
+    if (
+        len(edges) != 1
+        or len(inputs) != 1
+        or len(models) != 1
+        or edges[0].get("from") != inputs[0].get("node_id")
+        or edges[0].get("to") != models[0].get("node_id")
+    ):
+        checks.append(check("INVALID_DRAFT_GRAPH_SHAPE", "v1.6.4 supports only InputNode -> ModelNode."))
+
+    for node in draft.get("graph", {}).get("nodes", []):
+        if node.get("node_type") not in {"input.dataset", "model"}:
+            checks.append(
+                check(
+                    "UNKNOWN_DRAFT_NODE_TYPE",
+                    f"Unsupported draft node_type {node.get('node_type')!r}.",
+                    node_id=node.get("node_id"),
+                )
+            )
+    return checks
+
+
+def _editable_keys(model: dict[str, Any]) -> set[str]:
+    return {
+        str(item.get("key"))
+        for item in model.get("editable_schema", [])
+        if item.get("key")
+    }
+
+
+def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    allowed = _editable_keys(model)
+    for key in model.get("params", {}):
+        if key not in allowed:
+            checks.append(
+                check(
+                    "NON_EDITABLE_PARAM",
+                    f"Param {key!r} is not declared in editable_schema.",
+                    node_id=model.get("node_id"),
+                )
+            )
+    for key in allowed:
+        if key not in model.get("params", {}):
+            checks.append(
+                check(
+                    "MISSING_EDITABLE_PARAM",
+                    f"Param {key!r} is required by editable_schema.",
+                    node_id=model.get("node_id"),
+                )
+            )
+    return checks
+
+
+def _validate_created_from_source_ref(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    created_from = draft.get("created_from")
+    models = _nodes_by_type(draft, "model")
+    if not created_from or len(models) != 1:
+        return checks
+
+    model = models[0]
+    source_ref = model.get("source_ref") or {}
+    fields = [
+        "source_run_id",
+        "source_model_node_id",
+        "source_op_node_id",
+        "source_node_hash",
+        "source_context_fingerprint",
+    ]
+    if any(source_ref.get(field) != created_from.get(field) for field in fields):
+        checks.append(
+            check(
+                "MODEL_SOURCE_REF_MISMATCH",
+                "Model source_ref must match PipelineDraft.created_from.",
+                node_id=model.get("node_id"),
+            )
+        )
+    return checks
+
+
+def _resolved_execution(
+    draft: dict[str, Any],
+    execution_mode: str,
+    *,
+    compare_source_available: bool,
+) -> dict[str, Any]:
+    created_from = draft.get("created_from") or {}
+    out: dict[str, Any] = {
+        "execution_mode": execution_mode,
+        "compare_source_available": compare_source_available,
+    }
+    if created_from:
+        out.update(
+            {
+                "rerun_from_run_id": created_from.get("source_run_id"),
+                "rerun_from_model_node_id": created_from.get("source_model_node_id"),
+                "rerun_from_op_node_id": created_from.get("source_op_node_id"),
+            }
+        )
+    return out
+
+
+def validate_draft_for_execution(
+    draft: dict[str, Any],
+    *,
+    execution_mode: Literal["rerun_child", "new_run"] | None = None,
+) -> dict[str, Any]:
+    mode = execution_mode or draft.get("default_execution_mode", "rerun_child")
+    checks: list[dict[str, Any]] = []
+
+    try:
+        PipelineDraftV1(**draft)
+    except Exception as exc:
+        checks.append(check("INVALID_PIPELINE_DRAFT", str(exc)))
+
+    if mode == "new_run":
+        checks.append(
+            check(
+                "NEW_RUN_EXECUTION_NOT_ENABLED",
+                "new_run execution is reserved but disabled in v1.6.4.",
+            )
+        )
+    elif mode != "rerun_child":
+        checks.append(check("INVALID_EXECUTION_MODE", f"Unsupported execution_mode {mode!r}."))
+
+    checks.extend(_validate_graph_shape(draft))
+    checks.extend(_validate_created_from_source_ref(draft))
+
+    models = _nodes_by_type(draft, "model")
+    if len(models) == 1:
+        checks.extend(_validate_params(models[0]))
+
+    created_from = draft.get("created_from")
+    if mode == "rerun_child" and not created_from:
+        checks.append(
+            check(
+                "CREATED_FROM_REQUIRED_FOR_RERUN_CHILD",
+                "rerun_child execution requires PipelineDraft.created_from.",
+            )
+        )
+
+    inputs = _nodes_by_type(draft, "input.dataset")
+    compare_source_available = bool(mode == "rerun_child" and created_from and len(inputs) == 1)
+    if mode == "rerun_child" and created_from and len(inputs) == 1:
+        input_node = inputs[0]
+        if input_node.get("source_type") != "run_input":
+            checks.append(
+                check(
+                    "INPUT_BINDING_NOT_SUPPORTED",
+                    "v1.6.4 rerun_child execution supports only run_input bindings.",
+                    node_id=input_node.get("node_id"),
+                )
+            )
+        if input_node.get("input_fingerprint") != created_from.get("source_input_fingerprint"):
+            checks.append(
+                check(
+                    "SOURCE_INPUT_FINGERPRINT_MISMATCH",
+                    "InputNode fingerprint must match PipelineDraft.created_from.",
+                    node_id=input_node.get("node_id"),
+                )
+            )
+
+    blocking = [item for item in checks if item.get("blocking", True)]
+    executable = not blocking and mode == "rerun_child"
+    status = "valid" if executable else ("blocked" if any(c["code"] == "NEW_RUN_EXECUTION_NOT_ENABLED" for c in blocking) else "invalid")
+
+    result: dict[str, Any] = {
+        "ok": executable,
+        "status": status,
+        "executable": executable,
+        "checks": checks,
+        "resolved_execution": _resolved_execution(
+            draft,
+            str(mode),
+            compare_source_available=compare_source_available,
+        ),
+        "validated_at": utc_now(),
+    }
+    if executable:
+        result["validated_execution_mode"] = mode
+        result["validated_draft_hash"] = compute_executable_draft_hash(draft)
+    return result

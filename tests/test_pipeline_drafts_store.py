@@ -11,6 +11,7 @@ from workbench.lineage.pipeline_drafts import (
     PipelineDraftStore,
     compute_executable_draft_hash,
     new_draft_id,
+    validate_draft_for_execution,
 )
 
 
@@ -108,3 +109,45 @@ def test_store_roundtrip_and_base_hash_conflict(tmp_path: Path) -> None:
             base_draft_hash="stale",
             params={"x": ["x2"]},
         )
+
+
+def test_validate_passes_exact_input_to_model_shape() -> None:
+    result = validate_draft_for_execution(_draft(), execution_mode="rerun_child")
+    assert result["ok"] is True
+    assert result["status"] == "valid"
+    assert result["executable"] is True
+    assert result["validated_draft_hash"] == compute_executable_draft_hash(_draft())
+    assert result["validated_execution_mode"] == "rerun_child"
+
+
+def test_validate_blocks_new_run() -> None:
+    result = validate_draft_for_execution(_draft(), execution_mode="new_run")
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["executable"] is False
+    assert result["checks"][0]["code"] == "NEW_RUN_EXECUTION_NOT_ENABLED"
+    assert "validated_draft_hash" not in result
+
+
+def test_validate_blocks_missing_created_from_for_rerun_child() -> None:
+    draft = _draft()
+    draft.pop("created_from")
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+    assert result["ok"] is False
+    assert any(c["code"] == "CREATED_FROM_REQUIRED_FOR_RERUN_CHILD" for c in result["checks"])
+
+
+def test_validate_blocks_source_ref_mismatch() -> None:
+    draft = _draft()
+    draft["graph"]["nodes"][1]["source_ref"]["source_node_hash"] = "different"
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+    assert result["ok"] is False
+    assert any(c["code"] == "MODEL_SOURCE_REF_MISMATCH" for c in result["checks"])
+
+
+def test_validate_blocks_invalid_graph_shape() -> None:
+    draft = _draft()
+    draft["graph"]["edges"] = []
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+    assert result["ok"] is False
+    assert any(c["code"] == "INVALID_DRAFT_GRAPH_SHAPE" for c in result["checks"])
