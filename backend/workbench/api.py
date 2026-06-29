@@ -5,7 +5,7 @@ import json
 import queue
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -60,6 +60,15 @@ from .lineage.op_contract import (
     resolve_operation_contract,
     resolve_overrides_target,
     validate_overrides,
+)
+from .lineage.pipeline_drafts import (
+    DraftHashConflict,
+    DraftNotFound,
+    PipelineDraftStore,
+    new_draft_id,
+    schema_hash,
+    utc_now,
+    validate_draft_for_execution,
 )
 from .lineage.rerun_provenance import (
     pending_produced_lineage,
@@ -935,6 +944,218 @@ class RerunRequest(BaseModel):
     forest_node_key: str | None = None
     owner_resolution: str | None = None
     active_head_run_id: str | None = None
+
+
+class PipelineDraftFromNodeRequest(BaseModel):
+    source_run_id: str
+    source_model_node_id: str
+    source_op_node_id: str
+    source_node_hash: str
+    source_context_fingerprint: str
+
+
+class PipelineDraftPatchRequest(BaseModel):
+    model_node_id: str
+    base_draft_hash: str
+    params: dict[str, Any]
+
+
+class PipelineDraftValidateRequest(BaseModel):
+    execution_mode: Literal["rerun_child", "new_run"] | None = None
+
+
+def _pipeline_draft_store(project_root: str) -> PipelineDraftStore:
+    return PipelineDraftStore(Path(project_root))
+
+
+def _draft_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, DraftNotFound):
+        return HTTPException(status_code=404, detail="DRAFT_NOT_FOUND")
+    if isinstance(exc, DraftHashConflict):
+        return HTTPException(status_code=409, detail="DRAFT_HASH_CONFLICT")
+    return HTTPException(status_code=422, detail=str(exc))
+
+
+def _read_indexed_node_hash(run_root: Path, node_id: str) -> str | None:
+    index_path = run_root / NODE_INDEX_FILENAME
+    if not index_path.is_file():
+        return None
+    index = read_json(index_path)
+    entry = index.get(node_id)
+    if not isinstance(entry, dict):
+        return None
+    node_hash = entry.get("node_hash")
+    return str(node_hash) if node_hash else None
+
+
+def _source_params_from_schema(editable_schema: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        item["key"]: item.get("value")
+        for item in editable_schema
+        if item.get("key")
+    }
+
+
+@app.post("/pipeline-drafts/from-node")
+def create_pipeline_draft_from_node(
+    project_root: str,
+    body: PipelineDraftFromNodeRequest,
+) -> dict[str, Any]:
+    runs_root = _resolve_project_runs_dir(project_root)
+    run_root = _resolve_run_root(project_root, body.source_run_id)
+    manifest = _read_manifest(run_root)
+    if manifest.get("status") not in _TERMINAL_RUN_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Source run not terminal (status={manifest.get('status')}).",
+        )
+
+    graph = GraphStore(runs_root=runs_root).read(body.source_run_id)
+    node = graph.nodes.get(body.source_op_node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="SOURCE_MODEL_NODE_NOT_FOUND")
+    if body.source_model_node_id != body.source_op_node_id:
+        raise HTTPException(status_code=409, detail="SOURCE_MODEL_NODE_MISMATCH")
+
+    indexed_hash = _read_indexed_node_hash(run_root, body.source_op_node_id)
+    if indexed_hash is None:
+        raise HTTPException(status_code=422, detail="SOURCE_NODE_HASH_UNAVAILABLE")
+    if indexed_hash != body.source_node_hash:
+        raise HTTPException(status_code=409, detail="SOURCE_NODE_HASH_MISMATCH")
+
+    try:
+        request = NodeWriteOperationRequestV1(
+            request_id="pipeline_draft_from_node",
+            operation="rerun",
+            context_version="node-operation-context/v1",
+            context_fingerprint=body.source_context_fingerprint,
+            owner_run_id=body.source_run_id,
+            op_node_id=body.source_op_node_id,
+            node_hash=body.source_node_hash,
+            forest_node_key=body.source_node_hash,
+            owner_resolution="single_candidate",
+            active_head_run_id=body.source_run_id,
+        )
+        validate_rerun_operation_target(runs_root, request)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=f"SOURCE_CONTEXT_MISMATCH: {exc}") from exc
+
+    stage = node.stage.value if node.stage is not None else None
+    contract = resolve_operation_contract(stage=stage, manifest=manifest)
+    if contract is None:
+        raise HTTPException(status_code=422, detail="MODEL_NODE_NOT_ELIGIBLE")
+
+    try:
+        inputs = read_run_inputs(run_root)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="SOURCE_RUN_INPUTS_UNAVAILABLE") from exc
+    upload = inputs.get("upload") or {}
+    source_input_fingerprint = upload.get("sha256")
+    if not source_input_fingerprint:
+        raise HTTPException(status_code=422, detail="SOURCE_INPUT_FINGERPRINT_UNAVAILABLE")
+
+    now = utc_now()
+    draft_id = new_draft_id()
+    editable_schema = _backfill_schema_values(contract.editable_schema, inputs.get("form") or {})
+    source_params = _source_params_from_schema(editable_schema)
+    draft = {
+        "draft_id": draft_id,
+        "schema_version": "pipeline_draft.v1",
+        "created_at": now,
+        "updated_at": now,
+        "status": "draft",
+        "created_from": {
+            "source_type": "run",
+            "source_run_id": body.source_run_id,
+            "source_model_node_id": body.source_model_node_id,
+            "source_op_node_id": body.source_op_node_id,
+            "source_node_hash": body.source_node_hash,
+            "source_context_fingerprint": body.source_context_fingerprint,
+            "source_input_fingerprint": source_input_fingerprint,
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "input_1",
+                    "node_type": "input.dataset",
+                    "source_type": "run_input",
+                    "run_input_id": body.source_run_id,
+                    "schema_fingerprint": inputs.get("dag_hash") or source_input_fingerprint,
+                    "input_fingerprint": source_input_fingerprint,
+                    "columns_summary": [
+                        {"name": key}
+                        for key in sorted((inputs.get("form") or {}).keys())
+                    ],
+                    "status": "bound",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": contract.op_type,
+                    "schema_id": contract.schema_id,
+                    "editable_schema": editable_schema,
+                    "editable_schema_hash": schema_hash(editable_schema),
+                    "source_ref": {
+                        "source_run_id": body.source_run_id,
+                        "source_model_node_id": body.source_model_node_id,
+                        "source_op_node_id": body.source_op_node_id,
+                        "source_node_hash": body.source_node_hash,
+                        "source_context_fingerprint": body.source_context_fingerprint,
+                    },
+                    "source_params": source_params,
+                    "params": source_params,
+                },
+            ],
+            "edges": [{"from": "input_1", "to": "model_1"}],
+        },
+        "default_execution_mode": "rerun_child",
+    }
+    try:
+        stored = _pipeline_draft_store(project_root).create(draft)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+@app.get("/pipeline-drafts/{draft_id}")
+def get_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+    try:
+        stored = _pipeline_draft_store(project_root).get(draft_id)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+@app.patch("/pipeline-drafts/{draft_id}")
+def patch_pipeline_draft(
+    draft_id: str,
+    project_root: str,
+    body: PipelineDraftPatchRequest,
+) -> dict[str, Any]:
+    try:
+        stored = _pipeline_draft_store(project_root).update_params(
+            draft_id,
+            model_node_id=body.model_node_id,
+            base_draft_hash=body.base_draft_hash,
+            params=body.params,
+        )
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+@app.post("/pipeline-drafts/{draft_id}/validate")
+def validate_pipeline_draft(
+    draft_id: str,
+    project_root: str,
+    body: PipelineDraftValidateRequest,
+) -> dict[str, Any]:
+    try:
+        stored = _pipeline_draft_store(project_root).get(draft_id)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return validate_draft_for_execution(stored.draft, execution_mode=body.execution_mode)
 
 
 @app.post("/runs/{run_id}/rerun")
