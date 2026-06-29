@@ -323,6 +323,7 @@ verify resolved source_node_hash matches request.source_node_hash
 verify resolved context_fingerprint matches request.source_context_fingerprint
 extract source run_inputs / input_fingerprint
 extract editable_schema and source_params
+create PipelineDraftV1 with default_execution_mode = "rerun_child"
 create data/pipeline_drafts/{draft_id}.json
 return PipelineDraftV1 + draft_hash
 ```
@@ -381,7 +382,7 @@ reject dataset patch
 reject code patch
 reject artifact patch
 reject non-editable model field mutation
-update ModelDraftNode.params
+replace ModelDraftNode.params with request.params
 update updated_at
 return PipelineDraftV1 + draft_hash
 ```
@@ -389,6 +390,8 @@ return PipelineDraftV1 + draft_hash
 This is a controlled params update endpoint, not a generic JSON Patch endpoint.
 
 If `base_draft_hash` does not match the current executable draft hash, the server returns `DRAFT_HASH_CONFLICT`. PATCH must not silently overwrite another tab's saved draft changes.
+
+`params` is the full current editable parameter value map. It replaces `ModelDraftNode.params`; it is not a partial merge. Missing required editable_schema fields are validation-blocking.
 
 ### 5.4 Validate Draft
 
@@ -488,10 +491,13 @@ reject execution_mode = new_run with NEW_RUN_EXECUTION_NOT_ENABLED
 load draft
 recompute current draft_hash
 require current draft_hash == request.validated_draft_hash
+acquire draft execution lock
+reload draft
+recompute current draft_hash again
+require current draft_hash == request.validated_draft_hash again
 server-side revalidate draft using request.execution_mode
 require validation executable = true
 require request.execution_mode == validation.validated_execution_mode
-acquire draft execution lock
 dedupe by idempotency_key if provided, else by draft_id + validated_draft_hash + execution_mode
 build frozen executed_pipeline_draft payload in memory
 allocate child run id / create pending run record
@@ -504,18 +510,22 @@ return run_id + produced_lineage + focus / pending_index poll information
 
 A run must not become visible as a comparable child until both `executed_pipeline_draft.json` and pipeline-draft provenance have been written.
 
+Execute acquires the draft execution lock before final revalidation and snapshot freezing. After acquiring the lock, the server reloads the draft, recomputes `current_draft_hash`, requires it still equals `validated_draft_hash`, and then revalidates. This closes the race where another tab patches the draft between revalidation and snapshot freezing.
+
 Duplicate execute semantics:
 
 ```text
 same dedupe key while execution is pending:
-  return the existing pending run_id
+  return the existing pending run_id with deduped = true
 
 same dedupe key after a run has been created:
-  return the existing run_id
+  return the existing run_id with deduped = true
 
 same draft_id but different validated_draft_hash:
   allowed, because the executable draft content changed
 ```
+
+`DRAFT_EXECUTION_IN_PROGRESS` and `DUPLICATE_DRAFT_EXECUTION` are reserved for cases where the server detects a duplicate but cannot safely resolve the existing run id.
 
 Response:
 
@@ -526,6 +536,7 @@ type DraftExecutionResult = {
   draft_id: string;
   executed_draft_hash: string;
   execution_mode: "rerun_child";
+  deduped?: boolean;
 
   produced_lineage: {
     rerun_from_run_id: string;
@@ -650,11 +661,14 @@ with:
 ```ts
 {
   model_node_id: string;
+  base_draft_hash: string;
   params: Record<string, unknown>;
 }
 ```
 
-The endpoint updates only `ModelDraftNode.params`.
+`Save changes` must send the latest `draft_hash` returned by `GET /pipeline-drafts/{draft_id}` or the previous successful `PATCH` as `base_draft_hash`. If PATCH returns `DRAFT_HASH_CONFLICT`, the UI reloads the draft and marks local edits conflicted or stale.
+
+The endpoint replaces only `ModelDraftNode.params`.
 
 ### 6.6 Draft state model
 
@@ -988,9 +1002,10 @@ Gate:
   graph shape tests
   editable_schema param tests
   GET returns draft + draft_hash
-  PATCH only updates ModelDraftNode.params
+  PATCH only replaces ModelDraftNode.params
   PATCH requires base_draft_hash
   PATCH rejects stale base_draft_hash with DRAFT_HASH_CONFLICT
+  PATCH params replace the full editable value map
   no dry-run validation tests
 ```
 
@@ -1004,7 +1019,9 @@ Gate:
   request.execution_mode must match validated_execution_mode
   new_run rejected with NEW_RUN_EXECUTION_NOT_ENABLED
   duplicate execute submit protected
+  duplicate submit returns existing run_id with deduped = true when resolvable
   execution lock prevents PATCH during snapshot freezing
+  lock acquired before final reload / hash check / revalidation
   executed snapshot written
   child run provenance written
   Compare source available
@@ -1062,8 +1079,13 @@ existing runs remain readable
 existing direct rerun remains unchanged
 saved PipelineDraft JSON files remain inert
 Draft Graph entrypoints are hidden or disabled
-/pipeline-drafts execution APIs reject when feature flag is disabled
+POST /pipeline-drafts/from-node rejects
+PATCH /pipeline-drafts/{draft_id} rejects
+POST /pipeline-drafts/{draft_id}/validate rejects
+POST /pipeline-drafts/{draft_id}/execute rejects
 ```
+
+`GET /pipeline-drafts/{draft_id}` may either reject or remain read-only behind an explicit product decision. The simplest v1.6.4 rollback posture is that all `/pipeline-drafts` APIs reject except health or internal migration checks.
 
 Rollback must not require deleting draft files or mutating existing run directories.
 
@@ -1098,6 +1120,7 @@ from-node fails closed on source_node_hash mismatch
 from-node fails closed on source_context_fingerprint mismatch
 from-node requires eligible model node
 from-node requires editable_schema
+from-node creates default_execution_mode = rerun_child
 from-node does not guess source, owner, operation node, or input binding
 
 GET returns draft + executable-content hash
@@ -1106,10 +1129,11 @@ updated_at/status changes do not change draft_hash
 params changes do change draft_hash
 draft_id is server-generated and path-safe
 
-PATCH only updates ModelDraftNode.params
+PATCH only replaces ModelDraftNode.params
 PATCH requires base_draft_hash
 PATCH rejects stale base_draft_hash with DRAFT_HASH_CONFLICT
 PATCH rejects mutation while Execute holds DRAFT_LOCKED_FOR_EXECUTION
+PATCH params replace the full editable value map
 PATCH rejects non-editable field mutation
 PATCH rejects dataset patch
 PATCH rejects code patch
@@ -1138,8 +1162,9 @@ Execute rejects stale validated_draft_hash
 Execute rejects execution_mode different from validated_execution_mode
 Execute revalidates server-side before running
 Execute dedupes same draft_id + validated_draft_hash + execution_mode
-Execute returns existing run_id for duplicate pending/completed submit
+Execute returns existing run_id with deduped = true for duplicate pending/completed submit
 Execute locks draft during snapshot freezing
+Execute lock is acquired before final reload, hash check, and revalidation
 Execute writes snapshot and provenance before child is comparable
 Execute writes executed_pipeline_draft snapshot
 Execute records pipeline_draft provenance in new run metadata
@@ -1154,6 +1179,7 @@ Draft route loads via GET
 InputNode inspector is read-only
 ModelNode Save changes calls controlled PATCH
 ModelNode Save changes sends base_draft_hash
+ModelNode Save changes handles DRAFT_HASH_CONFLICT by reloading and marking edits stale/conflicted
 Validate disabled while unsaved
 Execute disabled until current hash is validated
 Execute enabled only when saved and current_draft_hash == validated_draft_hash
