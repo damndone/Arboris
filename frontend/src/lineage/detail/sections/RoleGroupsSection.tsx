@@ -14,6 +14,7 @@ import { groupVariablesByRole } from "../../../workbench/RunSnapshotAdapter";
 import { ROLE_OF_EDGE_OP } from "../../roles";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { RoleGroups } from "./RoleGroups";
+import { ModelSpecBlocks, deriveModelSpec } from "./ModelSpecBlocks";
 
 /** Role groups that count as a "specified" RHS (i.e. not the fallback). */
 const RHS_SPECIFIED = new Set([
@@ -74,6 +75,7 @@ export function RoleGroupsSection({ node }: { node: GraphViewNode }) {
           </span>
         )}
       </div>
+      <ModelSpecBlocks spec={deriveModelSpec(groups)} />
       <RoleGroups groups={groups} />
     </section>
   );
