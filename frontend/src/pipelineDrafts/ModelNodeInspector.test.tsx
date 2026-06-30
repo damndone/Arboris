@@ -40,3 +40,37 @@ test("saves full params with base_draft_hash", () => {
     params: { model_type: "logit" },
   });
 });
+
+test("exposes a focal_x multiselect control and saves it", () => {
+  const onSave = vi.fn();
+  render(
+    <ModelNodeInspector
+      draftHash="h"
+      node={{
+        node_type: "model",
+        node_id: "m",
+        model_type: "ols",
+        schema_id: "s",
+        params: { focal_x: [] },
+        source_params: { focal_x: [] },
+        editable_schema: [
+          {
+            key: "focal_x",
+            kind: "multiselect",
+            label: "Focal X",
+            options: ["education", "age"],
+            value: [],
+          },
+        ],
+      } as never}
+      onSave={onSave}
+    />,
+  );
+  fireEvent.click(screen.getByLabelText("education"));
+  fireEvent.click(screen.getByText("Save changes"));
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      params: expect.objectContaining({ focal_x: ["education"] }),
+    }),
+  );
+});

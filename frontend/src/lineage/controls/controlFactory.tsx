@@ -38,6 +38,7 @@ export const CONTROL_KINDS: readonly ControlKind[] = [
 export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set([
   "select",
   "columns",
+  "multiselect",
 ]);
 
 // ── option normalisation ───────────────────────────────────────
@@ -74,7 +75,13 @@ function SelectControl({ control, onChange }: ControlProps): ReactElement {
   );
 }
 
-function ColumnsControl({ control, onChange }: ControlProps): ReactElement {
+/** Shared checkbox-list control body. `columns` and `multiselect` are the
+ *  same interaction (toggle membership in a string[] value); they differ only
+ *  in semantic intent and test id. */
+function CheckboxListControl(
+  { control, onChange }: ControlProps,
+  testid: string,
+): ReactElement {
   const options = normalizeOptions(control);
   const selected = Array.isArray(control.value)
     ? (control.value as unknown[]).map(String)
@@ -86,7 +93,7 @@ function ColumnsControl({ control, onChange }: ControlProps): ReactElement {
     onChange(control.key, next);
   };
   return (
-    <fieldset data-testid="control-columns" aria-label={control.label}>
+    <fieldset data-testid={testid} aria-label={control.label}>
       {options.map((o) => (
         <label key={o.value}>
           <input
@@ -100,6 +107,16 @@ function ColumnsControl({ control, onChange }: ControlProps): ReactElement {
       ))}
     </fieldset>
   );
+}
+
+function ColumnsControl(props: ControlProps): ReactElement {
+  return CheckboxListControl(props, "control-columns");
+}
+
+// v1.6.5 — multiselect is now functional (role layer focal_x picker). Same
+// checkbox-list interaction as `columns`, distinct test id / intent.
+function MultiselectControl(props: ControlProps): ReactElement {
+  return CheckboxListControl(props, "control-multiselect");
 }
 
 // ── structural placeholders (registered, read-only until enabled) ──
@@ -126,7 +143,7 @@ export const CONTROL_REGISTRY: Record<
   select: SelectControl,
   columns: ColumnsControl,
   radio: makePlaceholder("radio"),
-  multiselect: makePlaceholder("multiselect"),
+  multiselect: MultiselectControl,
   slider: makePlaceholder("slider"),
   text: makePlaceholder("text"),
   textarea: makePlaceholder("textarea"),

@@ -90,6 +90,36 @@ def _parse_focal_x(raw: str, x_columns: list[str]) -> list[str]:
     """Canonicalize the form's focal_x against the run's x columns."""
     return canonicalize_focal_x(raw, x_columns)
 
+
+def _inject_focal_x_control(
+    editable_schema: list[dict[str, Any]],
+    form: dict[str, Any],
+    model_type: str,
+) -> list[dict[str, Any]]:
+    """v1.6.5 — add a `focal_x` multiselect to a model node's editable_schema so
+    the draft inspector can re-declare the focal explanatory variable(s).
+
+    Omitted for structural-focal families (IV/DID/CS/SA/dCDH), where
+    focal/treatment is structural — mirrors the run-POST clear (spec §5). The
+    options are the run's x columns; the value is the run's canonicalized
+    focal_x. No-op when there are no x columns or the control already exists."""
+    if model_type in _STRUCTURAL_FOCAL_FAMILIES:
+        return editable_schema
+    if any(item.get("key") == "focal_x" for item in editable_schema):
+        return editable_schema
+    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
+    if not x_columns:
+        return editable_schema
+    value = _parse_focal_x(form.get("focal_x", ""), x_columns)
+    control = {
+        "key": "focal_x",
+        "kind": "multiselect",
+        "label": "Focal explanatory variable(s)",
+        "options": list(x_columns),
+        "value": value,
+    }
+    return [*editable_schema, control]
+
 # A parent run must be in one of these (non-running) states to be rerun-from.
 _TERMINAL_RUN_STATUSES = {
     "completed", "failed", "cancelled", "interrupted", "partial", "blocked",
@@ -1095,7 +1125,9 @@ def create_pipeline_draft_from_node(
 
     now = utc_now()
     draft_id = new_draft_id()
-    editable_schema = _backfill_schema_values(contract.editable_schema, inputs.get("form") or {})
+    _draft_form = inputs.get("form") or {}
+    editable_schema = _backfill_schema_values(contract.editable_schema, _draft_form)
+    editable_schema = _inject_focal_x_control(editable_schema, _draft_form, contract.op_type)
     source_params = _source_params_from_schema(editable_schema)
     draft = {
         "draft_id": draft_id,
@@ -1294,6 +1326,15 @@ def execute_pipeline_draft(
             **inputs["form"],
             **{key: _encode_override(value) for key, value in op_overrides.items()},
         }
+        # v1.6.5: focal_x is a run-form field carrying a comma-joined column
+        # list, NOT a JSON-encoded override. _encode_override would emit
+        # ["x"], which the dispatch's comma-split parser cannot read — coerce
+        # it back to the form wire format so the role layer sees the picks.
+        if "focal_x" in op_overrides:
+            _focal = op_overrides["focal_x"]
+            merged_form["focal_x"] = (
+                ",".join(_focal) if isinstance(_focal, list) else str(_focal)
+            )
         run_level_rerun_from = run_rerun_from_from_context(
             request_id=f"draft:{draft_id}",
             owner_run_id=source["source_run_id"],
