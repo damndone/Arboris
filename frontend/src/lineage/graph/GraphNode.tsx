@@ -32,7 +32,22 @@
 
 import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
-import type { GraphViewNode, Stage, Trust } from "../api/graphViewTypes";
+import type { GraphViewNode, HeadSetNode, Stage, Trust } from "../api/graphViewTypes";
+import { ModelNodeBadge } from "../../workbench/ModelNodeBadge";
+
+/** v1.6.5 (Problem 6) — when a node is a forest model node (carries a
+ *  content `nodeHash` and at least one owning run), expose the identity the
+ *  badge needs to disambiguate same-named reruns. Returns null otherwise. */
+function forestModelIdentity(
+  node: GraphViewNode,
+): { runId: string; nodeHash: string; role: "source" | "rerun" } | null {
+  const isModel = node.kind === "model" || node.stage === "model";
+  if (!isModel) return null;
+  const hs = node as Partial<HeadSetNode>;
+  if (!hs.nodeHash || !hs.runs || hs.runs.length === 0) return null;
+  const role = hs.rerunFrom || hs.runRerunFrom ? "rerun" : "source";
+  return { runId: hs.runs[0], nodeHash: hs.nodeHash, role };
+}
 
 // T8.5 + V1.5.2 P6: 5-level highlight model. Plan §8.
 //
@@ -182,6 +197,14 @@ export function GraphNode({ data }: GraphNodeProps) {
           )}
         </div>
         <div className="ln-graph-node__title">{node.title}</div>
+        {(() => {
+          const id = forestModelIdentity(node);
+          return id ? (
+            <div className="ln-graph-node__meta" data-testid="node-model-badge">
+              <ModelNodeBadge runId={id.runId} nodeHash={id.nodeHash} role={id.role} />
+            </div>
+          ) : null;
+        })()}
         {node.summary && (
           <div className="ln-graph-node__meta" data-testid="node-summary">
             {node.summary}

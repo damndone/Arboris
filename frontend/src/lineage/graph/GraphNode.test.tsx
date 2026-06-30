@@ -71,6 +71,35 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
     expect(screen.queryByTestId("node-summary")).toBeNull();
   });
 
+  it("stamps a forest identity badge on a model node with nodeHash + runs", () => {
+    mountNode(
+      vn({
+        nodeHash: "bb21bce0deadbeef",
+        runs: ["20260630_021506_881210_d5cbd8a7"],
+      } as Partial<GraphViewNode>),
+    );
+    const badge = screen.getByTestId("node-model-badge");
+    expect(badge).toHaveTextContent("021506");
+    expect(badge).toHaveTextContent("bb21b");
+    expect(badge).toHaveTextContent("source");
+  });
+
+  it("marks a rerun forest model node with the rerun role", () => {
+    mountNode(
+      vn({
+        nodeHash: "cc44d",
+        runs: ["a_b"],
+        rerunFrom: { owner_run_id: "x" },
+      } as Partial<GraphViewNode>),
+    );
+    expect(screen.getByTestId("model-node-badge")).toHaveAttribute("data-role", "rerun");
+  });
+
+  it("renders no identity badge for a single-run model node (no nodeHash)", () => {
+    mountNode(vn());
+    expect(screen.queryByTestId("node-model-badge")).toBeNull();
+  });
+
   it("shows no badge when trust=ok and no review needed", () => {
     mountNode(vn());
     expect(screen.queryByTestId("node-badge")).toBeNull();
