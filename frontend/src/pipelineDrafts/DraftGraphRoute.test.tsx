@@ -11,7 +11,15 @@ vi.mock("react-router-dom", async () => {
 
 vi.mock("../api");
 
-function makeDraftResponse({ draftHash = "h1" }: { draftHash?: string } = {}) {
+function makeDraftResponse({
+  draftHash = "h1",
+  covariance = "",
+  editable = false,
+}: {
+  draftHash?: string;
+  covariance?: string;
+  editable?: boolean;
+} = {}) {
   return {
     draft_hash: draftHash,
     draft: {
@@ -37,11 +45,21 @@ function makeDraftResponse({ draftHash = "h1" }: { draftHash?: string } = {}) {
             model_family: "regression",
             model_type: "ols",
             schema_id: "ols@v1",
-            editable_schema: [],
+            editable_schema: editable
+              ? [
+                  {
+                    kind: "select",
+                    key: "covariance",
+                    label: "Covariance",
+                    value: covariance,
+                    options: ["", "robust", "clustered"],
+                  },
+                ]
+              : [],
             editable_schema_hash: "schema",
             source_ref: {},
-            source_params: {},
-            params: {},
+            source_params: editable ? { covariance: "" } : {},
+            params: editable ? { covariance } : {},
           },
         ],
         edges: [{ from: "input_1", to: "model_1" }],
@@ -141,4 +159,68 @@ test("execute pending_index navigates to lineage without requiring target node i
       "/runs/run_child?project_root=%2Ftmp%2Fproject&tab=lineage&pending_source_run_id=run_parent&pending_source_model_node_id=model_parent&pending_source_op_node_id=op_parent",
     ),
   );
+});
+
+test("disables validate and execute while model edits are unsaved", async () => {
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(
+    makeDraftResponse({ draftHash: "h1", editable: true }),
+  );
+  vi.mocked(api.validatePipelineDraft).mockResolvedValue({
+    ok: true,
+    status: "valid",
+    executable: true,
+    checks: [],
+    resolved_execution: {
+      execution_mode: "rerun_child",
+      compare_source_available: true,
+    },
+    validated_execution_mode: "rerun_child",
+    validated_draft_hash: "h1",
+    validated_at: "",
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("Input Dataset");
+  fireEvent.click(screen.getByRole("button", { name: /Model ols/ }));
+  fireEvent.change(screen.getByLabelText("Covariance"), { target: { value: "robust" } });
+
+  expect(screen.getByText("Unsaved")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Execute Draft" })).toBeDisabled();
+});
+
+test("reloads draft and marks validation stale after draft hash conflict", async () => {
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
+  const latest = makeDraftResponse({ draftHash: "h2", covariance: "clustered", editable: true });
+  vi.mocked(api.getPipelineDraft)
+    .mockResolvedValueOnce(makeDraftResponse({ draftHash: "h1", editable: true }))
+    .mockResolvedValue(latest);
+  vi.mocked(api.patchPipelineDraftParams).mockRejectedValue({ status: 409 });
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("Input Dataset");
+  fireEvent.click(screen.getByRole("button", { name: /Model ols/ }));
+  fireEvent.change(screen.getByLabelText("Covariance"), { target: { value: "robust" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+  await waitFor(() => expect(screen.getByText("Validation stale")).toBeInTheDocument());
+  expect(api.getPipelineDraft).toHaveBeenCalledWith("/tmp/project", "draft_1");
+  expect(vi.mocked(api.getPipelineDraft).mock.calls.length).toBeGreaterThanOrEqual(2);
+  expect(api.getPipelineDraft).toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Execute Draft" })).toBeDisabled();
 });

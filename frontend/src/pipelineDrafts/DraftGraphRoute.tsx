@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
+  ApiError,
   executePipelineDraft,
   getPipelineDraft,
   patchPipelineDraftParams,
@@ -21,6 +22,8 @@ export function DraftGraphRoute() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [validation, setValidation] = useState<DraftValidationResult | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [validationStale, setValidationStale] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,8 +43,13 @@ export function DraftGraphRoute() {
     [draft, selectedNodeId],
   );
   const validatedHash = validation?.validated_draft_hash;
+  const isValidationStale = Boolean(validationStale || (validation && validatedHash !== draftHash));
   const canExecute = Boolean(
-    draft && !isSaving && validation?.status === "valid" && validatedHash === draftHash,
+    draft
+      && !isSaving
+      && !hasUnsavedChanges
+      && validation?.status === "valid"
+      && validatedHash === draftHash,
   );
 
   if (!draft) return <section className="panel">Loading draft...</section>;
@@ -53,12 +61,13 @@ export function DraftGraphRoute() {
         <span>{draft.draft_id}</span>
       </div>
       <div className="draft-toolbar">
-        <span>{validation && validatedHash !== draftHash ? "Validation stale" : "Saved"}</span>
+        <span>{hasUnsavedChanges ? "Unsaved" : isValidationStale ? "Validation stale" : "Saved"}</span>
         <button
           type="button"
-          disabled={isSaving}
+          disabled={isSaving || hasUnsavedChanges}
           onClick={async () => {
             setValidation(await validatePipelineDraft(projectRoot, draftId, "rerun_child"));
+            setValidationStale(false);
           }}
         >
           Validate
@@ -102,6 +111,7 @@ export function DraftGraphRoute() {
         <ModelNodeInspector
           node={selectedNode}
           draftHash={draftHash}
+          onDirtyChange={setHasUnsavedChanges}
           onSave={async (body) => {
             setIsSaving(true);
             try {
@@ -109,6 +119,22 @@ export function DraftGraphRoute() {
               setDraft(res.draft);
               setDraftHash(res.draft_hash);
               setValidation(null);
+              setValidationStale(true);
+              setHasUnsavedChanges(false);
+            } catch (error) {
+              const status = error instanceof ApiError
+                ? error.status
+                : (error as { status?: unknown })?.status;
+              if (status === 409) {
+                const latest = await getPipelineDraft(projectRoot, draftId);
+                setDraft(latest.draft);
+                setDraftHash(latest.draft_hash);
+                setValidation(null);
+                setValidationStale(true);
+                setHasUnsavedChanges(false);
+                return;
+              }
+              throw error;
             } finally {
               setIsSaving(false);
             }

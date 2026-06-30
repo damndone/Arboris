@@ -1,6 +1,7 @@
 // frontend/src/lineage/header/DetailHeader.test.tsx
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../workbench/ForestContext";
 import { DETAIL_HEADER_TITLE_ID, DetailHeader } from "./DetailHeader";
@@ -48,9 +49,11 @@ function renderHeader(
 ) {
   const ctx: LineageContextValue = { model, selectedKey: node.id, select: vi.fn() };
   return render(
-    <LineageContext.Provider value={ctx}>
-      <DetailHeader node={node} onClose={onClose} onShowJson={onShowJson} />
-    </LineageContext.Provider>,
+    <MemoryRouter>
+      <LineageContext.Provider value={ctx}>
+        <DetailHeader node={node} onClose={onClose} onShowJson={onShowJson} />
+      </LineageContext.Provider>
+    </MemoryRouter>,
   );
 }
 
@@ -114,7 +117,11 @@ describe("DetailHeader", () => {
   it("throws if mounted outside LineageContext (uses runId)", () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() =>
-      render(<DetailHeader node={makeNode()} onClose={vi.fn()} />),
+      render(
+        <MemoryRouter>
+          <DetailHeader node={makeNode()} onClose={vi.fn()} />
+        </MemoryRouter>,
+      ),
     ).toThrow(/useLineage/);
     errSpy.mockRestore();
   });
@@ -125,23 +132,25 @@ describe("DetailHeader", () => {
       (n) => n.nodeKey === seed.sharedNodeKey,
     )!;
     const { container } = render(
-      <ForestContext.Provider
-        value={{
-          forest: seed.forest,
-          activeRunId: seed.activeHeadRunId,
-          setActiveRunId: vi.fn(),
-        }}
-      >
-        <LineageContext.Provider
+      <MemoryRouter>
+        <ForestContext.Provider
           value={{
-            model: seed.graphModel,
-            selectedKey: selected.nodeKey,
-            select: vi.fn(),
+            forest: seed.forest,
+            activeRunId: seed.activeHeadRunId,
+            setActiveRunId: vi.fn(),
           }}
         >
-          <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
-        </LineageContext.Provider>
-      </ForestContext.Provider>,
+          <LineageContext.Provider
+            value={{
+              model: seed.graphModel,
+              selectedKey: selected.nodeKey,
+              select: vi.fn(),
+            }}
+          >
+            <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
     );
     const header = container.querySelector(".dp-head");
     expect(header).not.toBeNull();
@@ -157,19 +166,21 @@ describe("DetailHeader", () => {
       (n) => n.nodeKey === seed.sharedNodeKey,
     )!;
     const { container } = render(
-      <ForestContext.Provider
-        value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
-      >
-        <LineageContext.Provider
-          value={{
-            model: seed.graphModel,
-            selectedKey: selected.nodeKey,
-            select: vi.fn(),
-          }}
+      <MemoryRouter>
+        <ForestContext.Provider
+          value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
         >
-          <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
-        </LineageContext.Provider>
-      </ForestContext.Provider>,
+          <LineageContext.Provider
+            value={{
+              model: seed.graphModel,
+              selectedKey: selected.nodeKey,
+              select: vi.fn(),
+            }}
+          >
+            <DetailDrawer node={selected} onClose={vi.fn()} onShowJson={vi.fn()} />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
     );
     const header = container.querySelector(".dp-head");
     expect(header).not.toBeNull();

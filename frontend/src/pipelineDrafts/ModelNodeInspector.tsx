@@ -1,20 +1,49 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PipelineDraftNode, PipelineDraftPatchRequest } from "../api";
 import type { EditableControl } from "../lineage/api/graphViewTypes";
 import { renderControl } from "../lineage/controls/controlFactory";
 
 type ModelNode = Extract<PipelineDraftNode, { node_type: "model" }>;
 
+function stableParams(value: Record<string, unknown>): string {
+  const normalize = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(normalize);
+    if (item && typeof item === "object") {
+      return Object.fromEntries(
+        Object.entries(item as Record<string, unknown>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, nested]) => [key, normalize(nested)]),
+      );
+    }
+    return item;
+  };
+  return JSON.stringify(normalize(value));
+}
+
 export function ModelNodeInspector({
   node,
   draftHash,
   onSave,
+  onDirtyChange,
 }: {
   node: ModelNode;
   draftHash: string;
   onSave: (body: PipelineDraftPatchRequest) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [params, setParams] = useState<Record<string, unknown>>(node.params);
+  const baseParamsKey = useMemo(() => stableParams(node.params), [node.params]);
+  const paramsKey = useMemo(() => stableParams(params), [params]);
+  const dirty = paramsKey !== baseParamsKey;
+
+  useEffect(() => {
+    setParams(node.params);
+  }, [node]);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+
   const controls = node.editable_schema as EditableControl[];
   const controlsWithValues = controls.map((control) => ({
     ...control,
