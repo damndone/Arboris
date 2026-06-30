@@ -102,7 +102,7 @@ identifies_as_instruments
 configures_unit · configures_time · configures_cluster
 ```
 
-Role source by family: **Focal** is user-declared (`focal_x`) for regression/panel and is the **endogenous** regressor for IV (structural). **Treatment** is structural for DID/dCDH and is never user-set via `focal_x`. A single column may hold **more than one role** (e.g. clustering on the entity ⇒ the same column is both Unit and Cluster) and then emits one edge per role — see §4 for the data structure and the conflict policy.
+Role source by family: **Focal** is user-declared (`focal_x`) for user-focal families (regression, poisson, panel) and is the **endogenous** regressor for IV (structural). **Treatment** is structural for DID/dCDH and is never user-set via `focal_x`. A single column may hold **more than one role** (e.g. clustering on the entity ⇒ the same column is both Unit and Cluster) and then emits one edge per role — see §4 for the data structure and the conflict policy.
 
 ---
 
@@ -123,7 +123,7 @@ RoleAssignment:
 ```
 A `{column: role}` map is **rejected**: it clobbers a column that holds two roles (e.g. `Unit = firm_id` and `Cluster = firm_id`). The list form emits both `configures_unit` and `configures_cluster` for `firm_id`. `estimator_family` drives generic rendering; `estimator_key` is the precise estimator (`cs_did` vs `sa_did` vs `dcdh`, `glm:poisson`, …) for tests/debugging. Together they disambiguate the same role across families (`Focal` is `focal_x` in regression but `_iv_endog` in IV).
 
-**Uniqueness:** a `RoleAssignment` is unique by `(model_node_id, column, role, source)`. Recording de-duplicates identical assignments before emitting edges, so a repeated column in a covariates list — or a DID mode that resolves the same treatment column twice — never produces duplicate edges.
+**Edge uniqueness:** emitted edges are de-duplicated by `(model_node_id, column, role, edge_kind)` — **not** by `source`. So the same `(column, role)` reached from two sources (e.g. a `treat` column resolved via both `_did_treat_col` and `_did_status_col`) collapses to **one** edge while provenance keeps the **merged `source` list**. A repeated column in a covariates list likewise yields one edge.
 
 Sources below are the exact artifacts each handler reads.
 
@@ -226,7 +226,7 @@ A column may hold more than one role, but the role layer honors a hard guardrail
 
 ```
 Mutually-exclusive roles — a column may hold AT MOST ONE of:
-  Outcome · Focal · Treatment · Covariates · Instruments · Exposure
+  Outcome · Focal · Treatment · Covariates · Explanatory_unspecified · Instruments · Exposure
   → any two of these on one column = HARD conflict (fail).
   (Real spec contradictions; most are already prevented upstream by
    validate_iv_spec / EstimationStage.)
@@ -235,10 +235,12 @@ Dimension & inference roles { Unit, Time, Cluster }:
   Unit + Cluster   → allowed (cluster on the entity — standard)
   Time + Cluster   → allowed (cluster on time)
   Unit + Time      → rejected (entity and time are distinct indices)
-  A dimension/inference role MAY co-occur with a substantive role on the
-  same column when the estimator already accepts it — e.g. Cluster on a
-  Covariate (cluster SE on a regressor) or Cluster on the Unit. The role
-  layer adds NO restriction the estimator lacks; at most it warns.
+  Unit / Time + any substantive role  → rejected (the entity/time index is
+       not a regressor, e.g. Unit + Covariates is a conflict)
+  Cluster + (Unit | Time | Covariates)  → allowed when the estimator accepts
+       it (clustering on a regressor/entity is standard). Cluster is the only
+       role permitted to overlap a substantive role; the role layer adds NO
+       restriction the estimator lacks, at most a warning.
 ```
 `derive_roles` fails loudly on a hard conflict and **never silently demotes** a conflicting column into Covariates.
 
@@ -278,9 +280,9 @@ The single recording path gains role awareness. Behavior with the role layer:
 
 1. `derive_roles(resolved_inputs)` produces the `RoleAssignment` list for the run (§4).
 2. For **every** assignment (including the previously-invisible Unit / Time / Treatment / Instruments / Exposure / Cluster), record the column's **identity node** (one per column) if absent and keep `Cleaned → var` provenance (op `select_column`). The role lives on the edge, not the node — a column with two roles reuses the one identity node and emits two `var → model` edges.
-3. Record `var → model` edges with the assignment's edge op: `enters_as_{role}`, `offsets_as_exposure`, `identifies_as_instruments`, or `configures_{role}`. **De-duplicate identical assignments** (§4 uniqueness) before emitting; emit **no** `configures_cluster` edge when `_cs_cluster_var` is absent.
+3. Record `var → model` edges with the assignment's edge op: `enters_as_{role}`, `offsets_as_exposure`, `identifies_as_instruments`, or `configures_{role}`. **De-duplicate edges by the §4 edge key** `(model_node_id, column, role, edge_kind)` (merging provenance) before emitting; emit **no** `configures_cluster` edge when `_cs_cluster_var` is absent.
 4. **Dropped variables**: `dropped` is applied **after** role assignment — a dropped variable retains the role it held in the pre-drop resolved design (never re-inferred from the post-drop design matrix). It renders inside that role group flagged `dropped`. A dropped Focal/Treatment is highlighted — it may change the estimand or threaten identification and must be surfaced prominently; a dropped covariate is informational.
-5. **Unspecified fallback:** when `focal_x` is empty for a regression-family run, regressors get role `Explanatory_unspecified` and the model node is tagged `roles: unspecified`. No fake focal/covariate split.
+5. **Unspecified fallback:** when `focal_x` is empty for a user-focal family run (regression / poisson / panel), the RHS regressors get role `Explanatory_unspecified` and the model node is tagged `roles: unspecified`. No fake focal/covariate split.
 6. Model node summary stays **estimation identity only** (`OLS · HC1 · n=36`); the reproducible spec (`y ~ x…`, `se_type`, `estimator`, per-variable roles) lives in the node detail drawer.
 
 **Golden impact:** graph goldens across all in-scope families regenerate (new nodes + edges). Estimation-result goldens stay 0-drift (§1 guardrail).
@@ -295,7 +297,7 @@ The single recording path gains role awareness. Behavior with the role layer:
   For `poisson_rate`, `exposure_col` cannot be marked Focal (validation rejects it). Zero change to existing fields; IV/DID forms keep their endog/treatment fields, which drive Focal/Treatment structurally.
 - **Draft editor** (`ModelNodeInspector`, built in v1.6.4): extend the PATCH params surface to edit `focal_x`, so a rerun can re-assign the focal/covariate split (research-design iteration on an existing model node).
 - **Node detail drawer:** reproducible spec in **separated blocks**, so Exposure/Instruments are never shown inside the RHS formula:
-  - Formula: `y ~ focal + covariates` (+ `se_type`, `estimator`)
+  - Formula: `y ~ focal + covariates` when Focal is declared; `y ~ explanatory variables` when `focal_x` is empty (no forced focal/covariate split) (+ `se_type`, `estimator`)
   - Identification: instruments (IV)
   - Offset: exposure (Poisson rate)
   - Panel / inference: unit, time, cluster
