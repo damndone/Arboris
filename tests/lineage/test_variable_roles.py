@@ -25,3 +25,23 @@ def test_role_assignment_edge_kind_derived_from_op():
     cl = RoleAssignment(column="firm", role=Role.CLUSTER, source="_cs_cluster_var",
                         estimator_family="did", estimator_key="cs_did")
     assert cl.edge_kind == "configures_"
+
+
+from workbench.lineage.variable_roles import canonicalize_focal_x
+
+def test_canonicalize_orders_by_resolved_rhs_and_dedups():
+    rhs = ["age", "education", "income", "region"]
+    assert canonicalize_focal_x("income, education", rhs) == ["education", "income"]
+
+def test_canonicalize_strips_whitespace_and_dups_preserves_case():
+    rhs = ["Income", "Education"]
+    assert canonicalize_focal_x(" Income , Income ,Education ", rhs) == ["Income", "Education"]
+    # case-sensitive: a differently-cased token that is not in rhs is dropped
+    assert canonicalize_focal_x("income", ["Income"]) == []
+
+def test_canonicalize_accepts_list_input():
+    assert canonicalize_focal_x(["b", "a"], ["a", "b", "c"]) == ["a", "b"]
+
+def test_canonicalize_empty():
+    assert canonicalize_focal_x("", ["a"]) == []
+    assert canonicalize_focal_x(None, ["a"]) == []

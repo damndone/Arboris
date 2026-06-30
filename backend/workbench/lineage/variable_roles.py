@@ -62,3 +62,19 @@ class RoleAssignment:
     @property
     def edge_kind(self) -> str:
         return _edge_kind(self.edge_op)
+
+
+def canonicalize_focal_x(raw: "str | list[str] | None", resolved_rhs: list[str]) -> list[str]:
+    """Parse focal_x once into a canonical, ordered, de-duplicated list.
+
+    Order follows resolved_rhs (model-matrix order), NOT user input order.
+    Column names are case-sensitive; tokens not present in resolved_rhs are
+    dropped (they cannot be regressors)."""
+    if raw is None:
+        tokens: list[str] = []
+    elif isinstance(raw, str):
+        tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    else:
+        tokens = [str(t).strip() for t in raw if str(t).strip()]
+    wanted = set(tokens)
+    return [col for col in resolved_rhs if col in wanted]
