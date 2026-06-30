@@ -39,3 +39,25 @@ export function roleLabel(role: Role): string {
 }
 
 export const DASHED_ROLES: Set<Role> = new Set(["unit", "time", "cluster"]);
+
+// v1.6.5 canvas helpers — role colour token + short on-node abbreviation.
+export function roleColorVar(role: Role): string {
+  return `var(--role-${role.replace(/_/g, "-")})`;
+}
+
+const ABBREV: Record<Role, string> = {
+  outcome: "Y",
+  focal: "X",
+  treatment: "D",
+  covariates: "Z",
+  explanatory_unspecified: "X?",
+  instruments: "IV",
+  exposure: "off",
+  unit: "U",
+  time: "T",
+  cluster: "C",
+};
+
+export function roleAbbrev(role: Role): string {
+  return ABBREV[role];
+}
