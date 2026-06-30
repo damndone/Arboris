@@ -25,7 +25,7 @@ research question → theory/DAG → define Outcome Y / Focal X / Covariates Z �
 
 Variables are **upstream inputs that play roles in the model specification**, not co-equal byproducts of the cleaned dataset. The current graph is a *data-artifact* lineage; it does not express *research-design* semantics.
 
-**Root cause (verified in code):** the model spec stores only a flat `y` and a flat comma-separated `x` (`api.py` `x_columns = form["x"].split(",")`). The system has **no concept of variable role** — which regressor is focal vs. control — so `recording.py` can only record `var:{y}:cleaned` and `var:{x}:cleaned` as cleaned-data children. For causal/panel estimators the identifying columns (treatment, instruments, entity, time, exposure, cluster) are pulled from separate form fields and are **not recorded as nodes at all** — they are invisible in lineage.
+**Root cause (verified in code):** the model spec stores only a flat `y` and a flat comma-separated `x` (`api.py` `x_columns = form["x"].split(",")`). The system has **no concept of variable role** — which regressor is focal vs. covariate — so `recording.py` can only record `var:{y}:cleaned` and `var:{x}:cleaned` as cleaned-data children. For causal/panel estimators the identifying columns (treatment, instruments, entity, time, exposure, cluster) are pulled from separate form fields and are **not recorded as nodes at all** — they are invisible in lineage.
 
 **This is not a rendering bug to be patched in the frontend.** The fix is to make variable role a first-class, persisted part of the spec, derive roles per estimator family, and record role-bearing variable nodes that flow into the model.
 
@@ -122,16 +122,22 @@ RoleAssignment:
 ```
 A `{column: role}` map is **rejected**: it clobbers a column that holds two roles (e.g. `Unit = firm_id` and `Cluster = firm_id`). The list form emits both `configures_unit` and `configures_cluster` for `firm_id`. `estimator_family` disambiguates the same role across families (`Focal` is `focal_x` in regression but `_iv_endog` in IV) and keeps tests/debugging legible.
 
+**Uniqueness:** a `RoleAssignment` is unique by `(model_node_id, column, role, source)`. Recording de-duplicates identical assignments before emitting edges, so a repeated column in a covariates list — or a DID mode that resolves the same treatment column twice — never produces duplicate edges.
+
 Sources below are the exact artifacts each handler reads.
+
+**User-focal families (regression, poisson, panel) share one focal rule** over their resolved RHS `resolved_x` (regression `_normalized_x`; poisson `_poisson_x`; panel `_normalized_x`):
+```
+if focal_x non-empty:  Focal = focal_x ;  Covariates = resolved_x − focal_x
+if focal_x empty:      Explanatory_unspecified = resolved_x ;  no Focal, no Covariates
+```
+IV/DID/dCDH do **not** use this rule — Focal/Treatment are structural and `focal_x` is empty there (§5).
 
 ### 4.1 Regression: ols / logit / probit / negative_binomial / glm
 `_fit_ols/_fit_logit/_fit_probit/_fit_negative_binomial/_fit_glm` → `y=_normalized_y, x=_normalized_x`.
 ```
-Outcome     = _normalized_y
-Focal       = focal_x            (⊆ _normalized_x, user-declared)
-Covariates  = _normalized_x − focal_x
-if focal_x is empty:
-    Explanatory_unspecified = _normalized_x   (no forced X/Z split)
+Outcome    = _normalized_y
+resolved_x = _normalized_x        → apply the user-focal rule above
 ```
 
 ### 4.2 Poisson / Poisson rate
@@ -144,20 +150,19 @@ else (plain poisson):
     no Exposure role
     _poisson_x  = _normalized_x
 
-Outcome     = _normalized_y
-Focal       = focal_x                      (must be ⊆ _poisson_x — see validation)
-Covariates  = _poisson_x − focal_x
+Outcome    = _normalized_y
+resolved_x = _poisson_x                     → apply the user-focal rule above
+                                              (focal_x must be ⊆ _poisson_x — see validation)
 ```
 **Validation:** when an exposure is present, `focal_x` must not contain `exposure_col`. If it does, fail with a role-conflict error — exposure is an offset, not a focal regressor; no silent drop.
 
 ### 4.3 Panel FE/RE
 `_fit_panel_ols` → `x=_normalized_x, entity=id_cands[0], time=t_cands[0]`.
 ```
-Outcome     = _normalized_y
-Focal       = focal_x
-Covariates  = _normalized_x − focal_x
-Unit        = id_cands[0]       (configures_)
-Time        = t_cands[0]        (configures_)
+Outcome    = _normalized_y
+resolved_x = _normalized_x                  → apply the user-focal rule above
+Unit       = id_cands[0]       (configures_)
+Time       = t_cands[0]        (configures_)
 ```
 
 ### 4.4 IV / 2SLS
@@ -186,9 +191,10 @@ The Treatment group may hold **multiple columns** (e.g. treat + post) — the ro
 ### 4.6 CS-DID / SA-DID
 `_fit_cs_did` (`covariates=_normalized_x`) / `_fit_sa_did` (**no covariates passed**); both `normalize_did_input(...)`, `cluster_var=_cs_cluster_var`.
 ```
-CS-DID: Outcome + Treatment(cohort) + Unit + Time + Covariates(_normalized_x) + Cluster(_cs_cluster_var)
-SA-DID: Outcome + Treatment(cohort) + Unit + Time + Cluster(_cs_cluster_var)        (no Covariates)
+CS-DID: Outcome + Treatment(cohort) + Unit + Time + Covariates(_normalized_x) + Cluster(_cs_cluster_var if present)
+SA-DID: Outcome + Treatment(cohort) + Unit + Time + Cluster(_cs_cluster_var if present)   (no Covariates)
 ```
+Cluster: if `_cs_cluster_var` is null/empty, emit **no** Cluster assignment and no `configures_cluster` edge.
 
 ### 4.7 dCDH
 `_fit_dcdh` → `normalize_treatment_path(entity, time, y, treatment=_dcdh_treatment_col)`, `run_dcdh(norm, cluster_var=_cs_cluster_var)`. **No covariates.**
@@ -197,46 +203,42 @@ Outcome   = norm.y
 Treatment = _dcdh_treatment_col       (switching path, structural focal)
 Unit      = entity   (configures_)
 Time      = time     (configures_)
-Cluster   = _cs_cluster_var (optional inference role)
+Cluster   = _cs_cluster_var if present     (else no Cluster assignment / no configures_cluster edge)
 (no Covariates)
 ```
 
 ### Frozen per-family summary
 ```
-Regression : Outcome + Focal? + Covariates  | or Explanatory_unspecified
-Poisson    : Outcome + Focal? + Covariates + Exposure
-Panel      : Outcome + Focal? + Covariates + Unit + Time
+Regression : Outcome + (Focal + Covariates | Explanatory_unspecified)
+Poisson    : Outcome + (Focal + Covariates | Explanatory_unspecified) + Exposure?
+Panel      : Outcome + (Focal + Covariates | Explanatory_unspecified) + Unit + Time
 IV/2SLS    : Outcome + Endogenous(Focal) + Instruments + Exogenous Covariates
 DID        : Outcome + Treatment + Unit + Time + Covariates
-CS-DID     : Outcome + Treatment + Unit + Time + Covariates + Cluster
-SA-DID     : Outcome + Treatment + Unit + Time + Cluster
-dCDH       : Outcome + Treatment + Unit + Time + Cluster
+CS-DID     : Outcome + Treatment + Unit + Time + Covariates + Cluster?
+SA-DID     : Outcome + Treatment + Unit + Time + Cluster?
+dCDH       : Outcome + Treatment + Unit + Time + Cluster?
 ```
 
 ### 4.8 Role Conflict Policy
 
-A column may legitimately hold two roles, but most overlaps are errors. `derive_roles` validates overlaps and **fails loudly** on illegal ones — it must **never silently demote a conflicting column into Covariates**.
+A column may hold two roles, but only by **explicit allowlist**. `derive_roles` validates overlaps and **fails loudly** otherwise — it must **never silently demote a conflicting column into Covariates**.
 
 ```
-Allowed overlaps:
+Allowed multi-role overlaps (the ENTIRE allowlist):
   Unit + Cluster        (cluster on the entity — standard)
   Time + Cluster        (cluster on time)
 
-Rejected overlaps (role conflict → fail):
-  Outcome with any other role
-  Focal + Covariates
-  Treatment + Covariates
-  Instruments + Covariates | Instruments + Focal
-  Exposure + Focal | Exposure + Covariates
-  Unit + Time           (a column cannot be both entity and time)
+Every other multi-role overlap is REJECTED by default (role conflict → fail).
+A future estimator needing another valid overlap must add it here
+explicitly, with a test.
 ```
-Structural/identification roles take validation precedence over Covariates: a column resolving to both a structural role and `_normalized_x` is a conflict to surface, not a demotion to absorb. Most such overlaps are already prevented upstream (`validate_iv_spec` partitions IV columns; `EstimationStage` removes `exposure_col` from the Poisson RHS), so this policy is the backstop.
+Structural/identification roles take precedence over Covariates: a column resolving to both a structural role and `_normalized_x` is a conflict to surface, not a demotion to absorb. Most overlaps are already prevented upstream (`validate_iv_spec` partitions IV columns; `EstimationStage` removes `exposure_col` from the Poisson RHS); this policy is the backstop.
 
 ---
 
 ## 5. Data Model & Persistence
 
-- New **optional** spec field `focal_x`. The form keeps a comma-separated string for backward-compatible UI; it is **parsed once into a canonical, ordered, de-duplicated `list[str]`** before validation and role derivation. Persist the canonical list in `manifest.json` and `run_inputs.json` (not the raw string), so spacing/case/order/duplicate issues resolve at one boundary.
+- New **optional** spec field `focal_x`. The form keeps a comma-separated string for backward-compatible UI; it is **parsed once into a canonical, ordered, de-duplicated `list[str]`** before validation and role derivation. Persist the canonical list in `manifest.json` and `run_inputs.json` (not the raw string), so spacing/case/order/duplicate issues resolve at one boundary. **Canonical order follows the resolved RHS order (`resolved_x`), not raw user input** — e.g. `x=[age,education,income,region]`, `focal_x="income, education"` ⇒ `[education, income]`, aligned with the model matrix / regression table.
 - Validation (regression/panel only): `focal_x ⊆ x`, `focal_x ∌ y`, de-duplicated. For `poisson_rate` with an exposure, additionally `focal_x ∌ exposure_col` (role conflict → fail, no silent drop).
 - **IV / DID / CS-DID / SA-DID / dCDH: `focal_x` is not applicable.** The form normalizer must **clear it** — persisted `focal_x` MUST be empty for these families, and the node drawer derives Focal/Treatment **only** from structural fields (`_iv_endog`, treatment design), never from a stale `focal_x` left over from an OLS→IV draft edit.
 - The user-facing `x` field and **all estimator runner inputs remain unchanged**. Role derivation mirrors the resolved estimator inputs (§4); it must not change which columns are passed to estimation. (`exposure_col` is already removed from the Poisson RHS upstream — role derivation reflects that, it does not cause it.)
@@ -250,7 +252,7 @@ The single recording path gains role awareness. Behavior with the role layer:
 
 1. `derive_roles(resolved_inputs)` produces the `RoleAssignment` list for the run (§4).
 2. For **every** assignment (including the previously-invisible Unit / Time / Treatment / Instruments / Exposure / Cluster), record the column's **identity node** (one per column) if absent and keep `Cleaned → var` provenance (op `select_column`). The role lives on the edge, not the node — a column with two roles reuses the one identity node and emits two `var → model` edges.
-3. Record `var → model` edges with the assignment's edge op: `enters_as_{role}`, `offsets_as_exposure`, `identifies_as_instruments`, or `configures_{role}`.
+3. Record `var → model` edges with the assignment's edge op: `enters_as_{role}`, `offsets_as_exposure`, `identifies_as_instruments`, or `configures_{role}`. **De-duplicate identical assignments** (§4 uniqueness) before emitting; emit **no** `configures_cluster` edge when `_cs_cluster_var` is absent.
 4. **Dropped variables**: `dropped` is applied **after** role assignment — a dropped variable retains the role it held in the pre-drop resolved design (never re-inferred from the post-drop design matrix). It renders inside that role group flagged `dropped`. A dropped Focal/Treatment is highlighted — it may change the estimand or threaten identification and must be surfaced prominently; a dropped covariate is informational.
 5. **Unspecified fallback:** when `focal_x` is empty for a regression-family run, regressors get role `Explanatory_unspecified` and the model node is tagged `roles: unspecified`. No fake focal/covariate split.
 6. Model node summary stays **estimation identity only** (`OLS · HC1 · n=36`); the reproducible spec (`y ~ x…`, `se_type`, `estimator`, per-variable roles) lives in the node detail drawer.
@@ -282,7 +284,9 @@ The single recording path gains role awareness. Behavior with the role layer:
 ## 9. Testing
 
 - **Backend unit:** `derive_roles` per family (table-driven over §4); `focal_x` validation; empty→unspecified; exposure excluded from covariates; IV partition invariant; DID multi-column treatment; SA/dCDH no-covariates; **role-conflict policy (§4.8) — Unit+Cluster allowed, rejected overlaps fail**; **IV/DID persist empty `focal_x` (no stale leak)**; multi-role column emits two edges off one identity node.
-- **Recording:** `enters_as_` / `offsets_as_exposure` / `identifies_as_instruments` / `configures_` edges emitted; dropped retains pre-drop role; previously-invisible columns now recorded.
+- **Recording:** `enters_as_` / `offsets_as_exposure` / `identifies_as_instruments` / `configures_` edges emitted; dropped retains pre-drop role; previously-invisible columns now recorded; duplicate assignments collapse to one edge; absent cluster ⇒ no `configures_cluster` edge.
+- **Empty-focal fallback (every user-focal family):** Panel with empty `focal_x` ⇒ `Explanatory_unspecified + Unit + Time` (not Covariates); `poisson_rate` with empty `focal_x` ⇒ `Explanatory_unspecified + Exposure` (not Covariates); regression with empty `focal_x` ⇒ `Explanatory_unspecified`.
+- **Conflict:** a Unit column also present in `_normalized_x` (Covariates) ⇒ role-conflict error (allowlist enforced, no silent demotion).
 - **Golden:** **regenerate graph goldens** for all in-scope families; **assert estimation-result goldens unchanged** (the estimation-invariance guardrail) — this is the headline test.
 - **Frontend:** generic role grouping; unspecified fallback; dropped-in-role; badge; draft-editor focal edit.
 - **Gate:** `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash ./scripts/gate.sh` — backend / golden / frontend / typecheck all green, run inside the worktree.
