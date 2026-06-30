@@ -65,7 +65,7 @@ Plus the v1.6.4 product issues that ride on the same surfaces:
 
 ```
 Outcome                 Y — the dependent variable
-Focal                   user-declared focal regressor (regression/panel); the endogenous regressor in IV/2SLS
+Focal                   user-declared focal regressor for user-focal families (regression, poisson, panel); the endogenous regressor in IV/2SLS
 Treatment               structural focal variable for the DID/dCDH families (treatment/cohort/post/status)
 Covariates              Z — other regressors entering the RHS
 Instruments             IV instruments (identification inputs, never RHS covariates)
@@ -117,10 +117,11 @@ RoleAssignment:
   role              Role
   source            resolved field it came from (e.g. "_iv_endog", "exposure_col")
   edge_kind         enters_as_ | offsets_as_ | identifies_as_ | configures_
-  estimator_family  regression | panel | iv | did
+  estimator_family  regression | panel | iv | did                       (generic rendering)
+  estimator_key     ols | logit | … | cs_did | sa_did | dcdh | glm:poisson   (tests/debug)
   dropped           bool
 ```
-A `{column: role}` map is **rejected**: it clobbers a column that holds two roles (e.g. `Unit = firm_id` and `Cluster = firm_id`). The list form emits both `configures_unit` and `configures_cluster` for `firm_id`. `estimator_family` disambiguates the same role across families (`Focal` is `focal_x` in regression but `_iv_endog` in IV) and keeps tests/debugging legible.
+A `{column: role}` map is **rejected**: it clobbers a column that holds two roles (e.g. `Unit = firm_id` and `Cluster = firm_id`). The list form emits both `configures_unit` and `configures_cluster` for `firm_id`. `estimator_family` drives generic rendering; `estimator_key` is the precise estimator (`cs_did` vs `sa_did` vs `dcdh`, `glm:poisson`, …) for tests/debugging. Together they disambiguate the same role across families (`Focal` is `focal_x` in regression but `_iv_endog` in IV).
 
 **Uniqueness:** a `RoleAssignment` is unique by `(model_node_id, column, role, source)`. Recording de-duplicates identical assignments before emitting edges, so a repeated column in a covariates list — or a DID mode that resolves the same treatment column twice — never produces duplicate edges.
 
@@ -186,7 +187,7 @@ Unit        = entity   (configures_)
 Time        = time     (configures_)
 Covariates  = _normalized_x
 ```
-The Treatment group may hold **multiple columns** (e.g. treat + post) — the role group is not single-column.
+The Treatment group may hold **multiple columns** (e.g. treat + post) — not single-column. Treatment assignments **preserve the deterministic order returned by `normalize_did_input`** (omitting absent columns) so graph goldens stay stable.
 
 ### 4.6 CS-DID / SA-DID
 `_fit_cs_did` (`covariates=_normalized_x`) / `_fit_sa_did` (**no covariates passed**); both `normalize_did_input(...)`, `cluster_var=_cs_cluster_var`.
@@ -221,28 +222,53 @@ dCDH       : Outcome + Treatment + Unit + Time + Cluster?
 
 ### 4.8 Role Conflict Policy
 
-A column may hold two roles, but only by **explicit allowlist**. `derive_roles` validates overlaps and **fails loudly** otherwise — it must **never silently demote a conflicting column into Covariates**.
+A column may hold more than one role, but the role layer honors a hard guardrail: **it must never reject a column combination that `estimation.py` already accepts and runs** — roles are interpretive metadata (§1). Conflicts are therefore limited to genuine spec contradictions, organized in two tiers:
 
 ```
-Allowed multi-role overlaps (the ENTIRE allowlist):
-  Unit + Cluster        (cluster on the entity — standard)
-  Time + Cluster        (cluster on time)
+Mutually-exclusive roles — a column may hold AT MOST ONE of:
+  Outcome · Focal · Treatment · Covariates · Instruments · Exposure
+  → any two of these on one column = HARD conflict (fail).
+  (Real spec contradictions; most are already prevented upstream by
+   validate_iv_spec / EstimationStage.)
 
-Every other multi-role overlap is REJECTED by default (role conflict → fail).
-A future estimator needing another valid overlap must add it here
-explicitly, with a test.
+Dimension & inference roles { Unit, Time, Cluster }:
+  Unit + Cluster   → allowed (cluster on the entity — standard)
+  Time + Cluster   → allowed (cluster on time)
+  Unit + Time      → rejected (entity and time are distinct indices)
+  A dimension/inference role MAY co-occur with a substantive role on the
+  same column when the estimator already accepts it — e.g. Cluster on a
+  Covariate (cluster SE on a regressor) or Cluster on the Unit. The role
+  layer adds NO restriction the estimator lacks; at most it warns.
 ```
-Structural/identification roles take precedence over Covariates: a column resolving to both a structural role and `_normalized_x` is a conflict to surface, not a demotion to absorb. Most overlaps are already prevented upstream (`validate_iv_spec` partitions IV columns; `EstimationStage` removes `exposure_col` from the Poisson RHS); this policy is the backstop.
+`derive_roles` fails loudly on a hard conflict and **never silently demotes** a conflicting column into Covariates.
+
+### 4.9 Derivation & recording phase order
+
+The implementation MUST follow this order. In particular `dropped` is applied **after** role assignment and never re-inferred from the post-drop design matrix — otherwise a dropped Focal/Treatment would be lost:
+```
+1. Parse focal_x into the canonical list (§5).
+2. Resolve estimator inputs via existing estimation.py logic (unchanged).
+3. Derive pre-drop RoleAssignments from the resolved inputs (§4).
+4. Validate role conflicts (§4.8).
+5. Run the estimator with unchanged inputs (estimation invariance, §1).
+6. Apply dropped-variable metadata onto the existing RoleAssignments.
+7. Record column identity nodes + role-bearing edges (§6).
+```
 
 ---
 
 ## 5. Data Model & Persistence
 
-- New **optional** spec field `focal_x`. The form keeps a comma-separated string for backward-compatible UI; it is **parsed once into a canonical, ordered, de-duplicated `list[str]`** before validation and role derivation. Persist the canonical list in `manifest.json` and `run_inputs.json` (not the raw string), so spacing/case/order/duplicate issues resolve at one boundary. **Canonical order follows the resolved RHS order (`resolved_x`), not raw user input** — e.g. `x=[age,education,income,region]`, `focal_x="income, education"` ⇒ `[education, income]`, aligned with the model matrix / regression table.
-- Validation (regression/panel only): `focal_x ⊆ x`, `focal_x ∌ y`, de-duplicated. For `poisson_rate` with an exposure, additionally `focal_x ∌ exposure_col` (role conflict → fail, no silent drop).
+- New **optional** spec field `focal_x`. The form keeps a comma-separated string for backward-compatible UI; it is **parsed once into a canonical, ordered, de-duplicated `list[str]`** before validation and role derivation. Persist the canonical list in `manifest.json` and `run_inputs.json` (not the raw string), so whitespace/order/duplicate issues resolve at one boundary. **Column names preserve exact resolved column identity, including case** — no lowercasing (`Income` ≠ `income`). **Canonical order follows the resolved RHS order (`resolved_x`), not raw user input** — e.g. `x=[age,education,income,region]`, `focal_x="income, education"` ⇒ `[education, income]`, aligned with the model matrix / regression table.
+- Validation (regression / poisson / panel): `focal_x ⊆ resolved_x`, `focal_x ∌ y`, de-duplicated. For `poisson_rate` with an exposure, additionally `focal_x ∌ exposure_col` (role conflict → fail, no silent drop).
 - **IV / DID / CS-DID / SA-DID / dCDH: `focal_x` is not applicable.** The form normalizer must **clear it** — persisted `focal_x` MUST be empty for these families, and the node drawer derives Focal/Treatment **only** from structural fields (`_iv_endog`, treatment design), never from a stale `focal_x` left over from an OLS→IV draft edit.
 - The user-facing `x` field and **all estimator runner inputs remain unchanged**. Role derivation mirrors the resolved estimator inputs (§4); it must not change which columns are passed to estimation. (`exposure_col` is already removed from the Poisson RHS upstream — role derivation reflects that, it does not cause it.)
 - `focal_x` flows through the rerun/draft path so a child run carries edited roles. All other role sources (`_iv_endog`, `_did_treat_col`, `exposure_col`, `_cs_cluster_var`, entity/time candidates, …) already persist; `derive_roles` reads them — no new capture for causal roles beyond `focal_x`.
+
+**Backward compatibility (old runs / old manifests):**
+- A manifest without `focal_x` is read as `focal_x = []` ⇒ `Explanatory_unspecified` for user-focal families. No migration required.
+- Old graph records are **not** backfilled; role nodes/edges appear only when graph goldens / lineage are regenerated.
+- A legacy model node with no role edges renders via the existing graph fallback, tagged `roles: legacy_unspecified`; its drawer shows whatever the old `run_inputs` held. New runs use the full role layer.
 
 ---
 
@@ -268,7 +294,13 @@ The single recording path gains role awareness. Behavior with the role layer:
   - **none declared** → all `x` = `Explanatory_unspecified` (no forced X/Z split).
   For `poisson_rate`, `exposure_col` cannot be marked Focal (validation rejects it). Zero change to existing fields; IV/DID forms keep their endog/treatment fields, which drive Focal/Treatment structurally.
 - **Draft editor** (`ModelNodeInspector`, built in v1.6.4): extend the PATCH params surface to edit `focal_x`, so a rerun can re-assign the focal/covariate split (research-design iteration on an existing model node).
-- **Node detail drawer:** reproducible spec block (formula + se_type + estimator + role list). For causal families, Focal/Treatment in the drawer is derived from structural fields, never from a persisted `focal_x` (which is empty there per §5).
+- **Node detail drawer:** reproducible spec in **separated blocks**, so Exposure/Instruments are never shown inside the RHS formula:
+  - Formula: `y ~ focal + covariates` (+ `se_type`, `estimator`)
+  - Identification: instruments (IV)
+  - Offset: exposure (Poisson rate)
+  - Panel / inference: unit, time, cluster
+
+  For causal families, Focal/Treatment in the drawer is derived from structural fields, never from a persisted `focal_x` (which is empty there per §5).
 
 ---
 
