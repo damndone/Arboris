@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,14 @@ class DraftHashConflict(PipelineDraftError):
 
 class DraftPathError(PipelineDraftError):
     code = "INVALID_DRAFT_ID"
+
+
+class DraftLockedForExecution(PipelineDraftError):
+    code = "DRAFT_LOCKED_FOR_EXECUTION"
+
+
+class DraftValidationFailure(PipelineDraftError):
+    code = "DRAFT_PARAM_VALIDATION_FAILED"
 
 
 class InputDatasetNode(BaseModel):
@@ -142,11 +150,13 @@ def schema_hash(editable_schema: list[dict[str, Any]]) -> str:
 
 
 class PipelineDraftStore:
+    _shared_locks: ClassVar[dict[tuple[str, str], threading.Lock]] = {}
+    _shared_locks_guard: ClassVar[threading.Lock] = threading.Lock()
+
     def __init__(self, project_root: Path):
         self.root = project_root
         self.drafts_dir = project_root / "data" / "pipeline_drafts"
-        self._locks: dict[str, threading.Lock] = {}
-        self._locks_guard = threading.Lock()
+        self._lock_root = str(project_root.resolve())
 
     def _path(self, draft_id: str) -> Path:
         validate_draft_id(draft_id)
@@ -154,8 +164,9 @@ class PipelineDraftStore:
 
     def _lock_for(self, draft_id: str) -> threading.Lock:
         validate_draft_id(draft_id)
-        with self._locks_guard:
-            return self._locks.setdefault(draft_id, threading.Lock())
+        key = (self._lock_root, draft_id)
+        with self._shared_locks_guard:
+            return self._shared_locks.setdefault(key, threading.Lock())
 
     def _write_atomic(self, path: Path, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,7 +209,10 @@ class PipelineDraftStore:
         base_draft_hash: str,
         params: dict[str, Any],
     ) -> StoredDraft:
-        with self._lock_for(draft_id):
+        lock = self._lock_for(draft_id)
+        if not lock.acquire(blocking=False):
+            raise DraftLockedForExecution("draft is locked for execution")
+        try:
             stored = self.get(draft_id)
             if stored.draft_hash != base_draft_hash:
                 raise DraftHashConflict("base_draft_hash does not match current draft")
@@ -214,10 +228,16 @@ class PipelineDraftStore:
             if model_node is None:
                 raise ValueError("MISSING_MODEL_NODE")
             model_node["params"] = params
+            param_checks = _validate_params(model_node)
+            if param_checks:
+                codes = ", ".join(item["code"] for item in param_checks)
+                raise DraftValidationFailure(codes)
             draft["updated_at"] = utc_now()
             PipelineDraftV1(**draft)
             self._write_atomic(self._path(draft_id), draft)
             return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+        finally:
+            lock.release()
 
     def execution_lock(self, draft_id: str) -> threading.Lock:
         return self._lock_for(draft_id)
@@ -310,17 +330,119 @@ def _validate_graph_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
     return checks
 
 
-def _editable_keys(model: dict[str, Any]) -> set[str]:
+def _editable_controls(model: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
-        str(item.get("key"))
+        str(item["key"]): item
         for item in model.get("editable_schema", [])
         if item.get("key")
     }
 
 
+def _option_values(options: Any) -> set[Any]:
+    if not isinstance(options, list):
+        return set()
+    return {
+        option.get("value") if isinstance(option, dict) else option
+        for option in options
+    }
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _validate_control_value(
+    key: str,
+    value: Any,
+    control: dict[str, Any],
+    *,
+    node_id: str | None,
+) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    kind = control.get("kind")
+    options = _option_values(control.get("options"))
+
+    if kind in {"columns", "multiselect"}:
+        if not isinstance(value, list):
+            return [
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {key!r} must be a list.",
+                    node_id=node_id,
+                )
+            ]
+        if options:
+            invalid = [item for item in value if item not in options]
+            if invalid:
+                checks.append(
+                    check(
+                        "INVALID_PARAM_OPTION",
+                        f"Param {key!r} contains values outside editable_schema options.",
+                        node_id=node_id,
+                    )
+                )
+        return checks
+
+    if kind == "toggle":
+        if not isinstance(value, bool):
+            checks.append(
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {key!r} must be a boolean.",
+                    node_id=node_id,
+                )
+            )
+        return checks
+
+    if kind == "slider":
+        if not _is_number(value):
+            return [
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {key!r} must be a number.",
+                    node_id=node_id,
+                )
+            ]
+        minimum = control.get("min")
+        maximum = control.get("max")
+        if _is_number(minimum) and value < minimum:
+            checks.append(check("PARAM_BELOW_MIN", f"Param {key!r} is below min.", node_id=node_id))
+        if _is_number(maximum) and value > maximum:
+            checks.append(check("PARAM_ABOVE_MAX", f"Param {key!r} is above max.", node_id=node_id))
+
+    if kind in {"select", "radio"} and isinstance(value, (dict, list)):
+        checks.append(
+            check(
+                "INVALID_PARAM_TYPE",
+                f"Param {key!r} must be a scalar option value.",
+                node_id=node_id,
+            )
+        )
+
+    if options and value not in options:
+        checks.append(
+            check(
+                "INVALID_PARAM_OPTION",
+                f"Param {key!r} is outside editable_schema options.",
+                node_id=node_id,
+            )
+        )
+    return checks
+
+
 def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    allowed = _editable_keys(model)
+    controls = _editable_controls(model)
+    allowed = set(controls)
+    expected_schema_hash = schema_hash(model.get("editable_schema", []))
+    if model.get("editable_schema_hash") != expected_schema_hash:
+        checks.append(
+            check(
+                "EDITABLE_SCHEMA_HASH_MISMATCH",
+                "editable_schema_hash must match editable_schema.",
+                node_id=model.get("node_id"),
+            )
+        )
     for key in model.get("params", {}):
         if key not in allowed:
             checks.append(
@@ -330,6 +452,15 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
                     node_id=model.get("node_id"),
                 )
             )
+            continue
+        checks.extend(
+            _validate_control_value(
+                key,
+                model.get("params", {}).get(key),
+                controls[key],
+                node_id=model.get("node_id"),
+            )
+        )
     for key in allowed:
         if key not in model.get("params", {}):
             checks.append(

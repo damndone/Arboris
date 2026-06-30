@@ -63,7 +63,9 @@ from .lineage.op_contract import (
 )
 from .lineage.pipeline_drafts import (
     DraftHashConflict,
+    DraftLockedForExecution,
     DraftNotFound,
+    DraftValidationFailure,
     PipelineDraftStore,
     compute_executable_draft_hash,
     new_draft_id,
@@ -982,6 +984,10 @@ def _draft_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail="DRAFT_NOT_FOUND")
     if isinstance(exc, DraftHashConflict):
         return HTTPException(status_code=409, detail="DRAFT_HASH_CONFLICT")
+    if isinstance(exc, DraftLockedForExecution):
+        return HTTPException(status_code=409, detail="DRAFT_LOCKED_FOR_EXECUTION")
+    if isinstance(exc, DraftValidationFailure):
+        return HTTPException(status_code=422, detail=str(exc))
     return HTTPException(status_code=422, detail=str(exc))
 
 

@@ -197,6 +197,27 @@ def test_patch_requires_base_hash_and_validate_returns_hash(tmp_path: Path) -> N
     assert validate.json()["validated_draft_hash"] == ok.json()["draft_hash"]
 
 
+def test_patch_rejects_params_outside_editable_schema_options(tmp_path: Path) -> None:
+    client = _client()
+    run_id, project_root = _create_completed_run(client, tmp_path)
+    create = _create_draft_from_first_model_node(client, project_root, run_id)
+    draft_id = create["draft"]["draft_id"]
+    model = next(node for node in create["draft"]["graph"]["nodes"] if node["node_type"] == "model")
+
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}",
+        params={"project_root": project_root},
+        json={
+            "model_node_id": "model_1",
+            "base_draft_hash": create["draft_hash"],
+            "params": {**model["params"], "covariance": "not_allowed"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "INVALID_PARAM_OPTION" in response.json()["detail"]
+
+
 def test_validate_does_not_create_run_or_snapshot(tmp_path: Path) -> None:
     client = _client()
     run_id, project_root = _create_completed_run(client, tmp_path)

@@ -8,14 +8,17 @@ import pytest
 from workbench.lineage.pipeline_drafts import (
     DRAFT_SCHEMA_VERSION,
     DraftHashConflict,
+    DraftLockedForExecution,
     PipelineDraftStore,
     compute_executable_draft_hash,
     new_draft_id,
+    schema_hash,
     validate_draft_for_execution,
 )
 
 
 def _draft() -> dict:
+    editable_schema = [{"key": "x", "kind": "columns", "label": "X"}]
     return {
         "draft_id": "draft_abc123",
         "schema_version": DRAFT_SCHEMA_VERSION,
@@ -51,8 +54,8 @@ def _draft() -> dict:
                     "model_family": "regression",
                     "model_type": "ols",
                     "schema_id": "ols@v1",
-                    "editable_schema": [{"key": "x", "kind": "columns", "label": "X"}],
-                    "editable_schema_hash": "schema_hash",
+                    "editable_schema": editable_schema,
+                    "editable_schema_hash": schema_hash(editable_schema),
                     "source_ref": {
                         "source_run_id": "run_source",
                         "source_model_node_id": "model_node",
@@ -111,6 +114,26 @@ def test_store_roundtrip_and_base_hash_conflict(tmp_path: Path) -> None:
         )
 
 
+def test_store_locks_are_shared_across_instances(tmp_path: Path) -> None:
+    store_a = PipelineDraftStore(tmp_path)
+    store_b = PipelineDraftStore(tmp_path)
+    draft = _draft()
+    saved = store_a.create(draft)
+
+    lock = store_a.execution_lock("draft_abc123")
+    lock.acquire()
+    try:
+        with pytest.raises(DraftLockedForExecution):
+            store_b.update_params(
+                "draft_abc123",
+                model_node_id="model_1",
+                base_draft_hash=saved.draft_hash,
+                params={"x": ["x2"]},
+            )
+    finally:
+        lock.release()
+
+
 def test_validate_passes_exact_input_to_model_shape() -> None:
     result = validate_draft_for_execution(_draft(), execution_mode="rerun_child")
     assert result["ok"] is True
@@ -151,3 +174,32 @@ def test_validate_blocks_invalid_graph_shape() -> None:
     result = validate_draft_for_execution(draft, execution_mode="rerun_child")
     assert result["ok"] is False
     assert any(c["code"] == "INVALID_DRAFT_GRAPH_SHAPE" for c in result["checks"])
+
+
+def test_validate_blocks_invalid_editable_schema_hash() -> None:
+    draft = _draft()
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = "tampered"
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+    assert result["ok"] is False
+    assert any(c["code"] == "EDITABLE_SCHEMA_HASH_MISMATCH" for c in result["checks"])
+
+
+def test_validate_blocks_invalid_select_option() -> None:
+    draft = _draft()
+    schema = [
+        {
+            "key": "covariance",
+            "kind": "select",
+            "label": "Covariance",
+            "options": ["robust", "clustered"],
+        }
+    ]
+    draft["graph"]["nodes"][1]["editable_schema"] = schema
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = schema_hash(schema)
+    draft["graph"]["nodes"][1]["source_params"] = {"covariance": "robust"}
+    draft["graph"]["nodes"][1]["params"] = {"covariance": "not_allowed"}
+
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+
+    assert result["ok"] is False
+    assert any(c["code"] == "INVALID_PARAM_OPTION" for c in result["checks"])

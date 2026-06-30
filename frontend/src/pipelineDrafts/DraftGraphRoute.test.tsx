@@ -224,3 +224,79 @@ test("reloads draft and marks validation stale after draft hash conflict", async
   expect(api.getPipelineDraft).toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Execute Draft" })).toBeDisabled();
 });
+
+test("shows an error when draft loading fails", async () => {
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(api.getPipelineDraft).mockRejectedValue(
+    Object.assign(new Error("DRAFT_NOT_FOUND"), { status: 404 }),
+  );
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("DRAFT_NOT_FOUND");
+});
+
+test("keeps execute disabled and surfaces validation errors", async () => {
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(makeDraftResponse({ draftHash: "h1" }));
+  vi.mocked(api.validatePipelineDraft).mockRejectedValue(
+    Object.assign(new Error("VALIDATION_REQUIRED"), { status: 409 }),
+  );
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("Input Dataset");
+  fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("VALIDATION_REQUIRED");
+  expect(screen.getByRole("button", { name: "Execute Draft" })).toBeDisabled();
+});
+
+test("keeps the draft open and surfaces execute errors", async () => {
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(makeDraftResponse({ draftHash: "h1" }));
+  vi.mocked(api.validatePipelineDraft).mockResolvedValue({
+    ok: true,
+    status: "valid",
+    executable: true,
+    checks: [],
+    resolved_execution: {
+      execution_mode: "rerun_child",
+      compare_source_available: true,
+    },
+    validated_execution_mode: "rerun_child",
+    validated_draft_hash: "h1",
+    validated_at: "",
+  });
+  vi.mocked(api.executePipelineDraft).mockRejectedValue(
+    Object.assign(new Error("VALIDATED_DRAFT_HASH_MISMATCH"), { status: 409 }),
+  );
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("Input Dataset");
+  fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Execute Draft" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Execute Draft" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("VALIDATED_DRAFT_HASH_MISMATCH");
+  expect(screen.getByText("Draft Graph")).toBeInTheDocument();
+});
