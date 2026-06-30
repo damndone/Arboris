@@ -947,6 +947,7 @@ export type PipelineDraftFromNodeRequest = {
   source_model_node_id: string;
   source_op_node_id: string;
   source_node_hash: string;
+  source_forest_node_key?: string;
   source_context_fingerprint: string;
 };
 

@@ -333,6 +333,15 @@ describe("NodeActionMenu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /open as draft graph/i }));
 
     await waitFor(() =>
+      expect(api.createPipelineDraftFromNode).toHaveBeenCalledWith(
+        "/tmp/project",
+        expect.objectContaining({
+          source_forest_node_key: seed.sharedNodeKey,
+          source_op_node_id: seed.sharedOpNodeId,
+        }),
+      ),
+    );
+    await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith(
         "/pipeline-drafts/draft_1?project_root=%2Ftmp%2Fproject",
       ),

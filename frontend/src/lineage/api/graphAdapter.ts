@@ -342,9 +342,7 @@ function findConservativeRunRerunFromForNode(
   if (!head || !rerunFrom) {
     return undefined;
   }
-  const nodeIdentity = raw.node_hash ?? key;
   if (
-    head.headNodeHash !== nodeIdentity ||
     head.fromNode !== raw.id ||
     raw.produced_by_rerun_request_id !== rerunFrom.rerun_request_id
   ) {

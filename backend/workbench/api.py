@@ -956,6 +956,7 @@ class PipelineDraftFromNodeRequest(BaseModel):
     source_model_node_id: str
     source_op_node_id: str
     source_node_hash: str
+    source_forest_node_key: str | None = None
     source_context_fingerprint: str
 
 
@@ -1047,7 +1048,7 @@ def create_pipeline_draft_from_node(
             owner_run_id=body.source_run_id,
             op_node_id=body.source_op_node_id,
             node_hash=body.source_node_hash,
-            forest_node_key=body.source_node_hash,
+            forest_node_key=body.source_forest_node_key or body.source_node_hash,
             owner_resolution="single_candidate",
             active_head_run_id=body.source_run_id,
         )

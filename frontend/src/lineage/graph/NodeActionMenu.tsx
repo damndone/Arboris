@@ -148,6 +148,7 @@ export function NodeActionMenu({
       source_model_node_id: context.operation_target.op_node_id,
       source_op_node_id: context.operation_target.op_node_id,
       source_node_hash: context.operation_target.node_hash,
+      source_forest_node_key: context.selection.forest_node_key,
       source_context_fingerprint: context.context_fingerprint,
     });
     navigate(

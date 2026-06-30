@@ -129,6 +129,47 @@ describe("adaptHeadSet", () => {
     expect(sourceNode.runRerunFrom).toBeUndefined();
   });
 
+  it("attaches run-level fallback to the produced op node when the run head is a report", () => {
+    const backend = fixture();
+    backend.nodes.R2 = {
+      id: "report:html",
+      kind: "report",
+      display_label: "Report",
+      stage: "report",
+      trust: "ok",
+      node_hash: "R2",
+      producing_stage: "report",
+      cas_ref: null,
+      runs: ["run_b"],
+    };
+    backend.heads = backend.heads.map((head) =>
+      head.run_id === "run_b"
+        ? {
+            ...head,
+            head_node_hash: "R2",
+            rerun_from: {
+              owner_run_id: "run_a",
+              op_node_id: "model:ols_1",
+              node_hash: "M1",
+              context_fingerprint: "nocv1:source",
+              rerun_request_id: "req_report_head",
+            },
+          }
+        : head,
+    );
+    backend.nodes.M2 = {
+      ...backend.nodes.M2,
+      produced_by_rerun_request_id: "req_report_head",
+    };
+
+    const vm = adaptHeadSet(backend);
+    const childModel = vm.nodes.find((n) => n.nodeHash === "M2")!;
+    const childReport = vm.nodes.find((n) => n.nodeHash === "R2")!;
+
+    expect(childModel.runRerunFrom?.rerun_request_id).toBe("req_report_head");
+    expect(childReport.runRerunFrom).toBeUndefined();
+  });
+
   it("carries the backfilled editable schema value through", () => {
     const vm = adaptHeadSet(fixture());
     const m2 = vm.nodes.find((n) => n.nodeHash === "M2")!;

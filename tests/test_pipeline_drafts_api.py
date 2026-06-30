@@ -67,7 +67,14 @@ def _node_hash(project_root: str, run_id: str, node_id: str) -> str:
     return str(index[node_id]["node_hash"])
 
 
-def _context_fingerprint(project_root: str, run_id: str, node_id: str, node_hash: str) -> str:
+def _context_fingerprint(
+    project_root: str,
+    run_id: str,
+    node_id: str,
+    node_hash: str,
+    *,
+    forest_node_key: str | None = None,
+) -> str:
     request = NodeWriteOperationRequestV1(
         request_id="req_pipeline_draft",
         operation="rerun",
@@ -76,7 +83,7 @@ def _context_fingerprint(project_root: str, run_id: str, node_id: str, node_hash
         owner_run_id=run_id,
         op_node_id=node_id,
         node_hash=node_hash,
-        forest_node_key=node_hash,
+        forest_node_key=forest_node_key or node_hash,
         owner_resolution="single_candidate",
         active_head_run_id=run_id,
     )
@@ -124,6 +131,37 @@ def test_from_node_creates_draft_and_get_reads_hash(tmp_path: Path) -> None:
     get_response = client.get(f"/pipeline-drafts/{draft_id}", params={"project_root": project_root})
     assert get_response.status_code == 200
     assert get_response.json()["draft_hash"] == payload["draft_hash"]
+
+
+def test_from_node_accepts_headset_forest_node_key_context(tmp_path: Path) -> None:
+    client = _client()
+    run_id, project_root = _create_completed_run(client, tmp_path)
+    graph = client.get(f"/runs/{run_id}/graph", params={"project_root": project_root}).json()
+    model = _model_node(graph)
+    node_hash = _node_hash(project_root, run_id, model["id"])
+    forest_node_key = f"{node_hash}::{model['id']}"
+
+    response = client.post(
+        "/pipeline-drafts/from-node",
+        params={"project_root": project_root},
+        json={
+            "source_run_id": run_id,
+            "source_model_node_id": model["id"],
+            "source_op_node_id": model["id"],
+            "source_node_hash": node_hash,
+            "source_forest_node_key": forest_node_key,
+            "source_context_fingerprint": _context_fingerprint(
+                project_root,
+                run_id,
+                model["id"],
+                node_hash,
+                forest_node_key=forest_node_key,
+            ),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["draft"]["created_from"]["source_op_node_id"] == model["id"]
 
 
 def test_from_node_hash_mismatch_fails_closed(tmp_path: Path) -> None:

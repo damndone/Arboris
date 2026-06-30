@@ -71,6 +71,7 @@ def build_headset(
     edges: list[dict] = []
     edge_seen: set[tuple[str, str]] = set()
     heads: list[dict] = []
+    produced_markers: list[tuple[str, str, str]] = []
 
     members = [family.self_id, *family.ancestors, *family.descendants, *family.siblings]
     seen_members: set[str] = set()
@@ -97,6 +98,17 @@ def build_headset(
 
         # id -> dedup key for this run's nodes
         keymap = {nid: _node_key(nid, node_index) for nid in graph.get("nodes", {})}
+        rerun_from = inputs.get("rerun_from")
+        from_node = inputs.get("from_node")
+        if (
+            isinstance(rerun_from, dict)
+            and isinstance(from_node, str)
+            and rerun_from.get("op_node_id") == from_node
+            and from_node in keymap
+        ):
+            request_id = rerun_from.get("rerun_request_id")
+            if request_id:
+                produced_markers.append((run_id, keymap[from_node], str(request_id)))
 
         for nid, node in graph.get("nodes", {}).items():
             key = keymap[nid]
@@ -142,11 +154,16 @@ def build_headset(
             "head_node_hash": nodes[head_key]["node_hash"] if head_key in nodes else None,
             "from_node": inputs.get("from_node"),
             "rerun_of": inputs.get("rerun_of"),
-            "rerun_from": inputs.get("rerun_from"),
+            "rerun_from": rerun_from,
             "rerun_reason": inputs.get("rerun_reason"),
             "status": manifest.get("status"),
             "created_at": manifest.get("started_at") or manifest.get("created_at"),
         })
+
+    for run_id, produced_key, request_id in produced_markers:
+        node = nodes.get(produced_key)
+        if node is not None and node.get("runs") == [run_id]:
+            node["produced_by_rerun_request_id"] = request_id
 
     return {
         "nodes": nodes,
