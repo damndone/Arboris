@@ -337,6 +337,28 @@
   background: transparent;
   border: 1px solid var(--separator);
 }
+
+/* v1.6.5 — variable-role badge + model roles tag (canvas) */
+.ln-graph-node__role-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--role-color, var(--label-tertiary));
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 6px;
+}
+.ln-graph-node__roles-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  margin-left: 6px;
+}
 .ln-graph-node__badge--review {
   color: var(--review);
   border-color: color-mix(in oklch, var(--review) 35%, transparent);
