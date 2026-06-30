@@ -15,7 +15,7 @@
 ## Conventions for every task
 
 - Worktree: `.worktrees/workbench-v1.6.5`, branch `codex/workbench-v1.6.5`. Do **not** push/merge/tag.
-- Run backend tests with UTF-8: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest …` from the worktree root.
+- Run backend tests with UTF-8: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest …` from the worktree root.
 - Full gate (run at phase boundaries): `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash ./scripts/gate.sh`.
 - Frontend tests: `cd frontend && npx vitest run <path>`.
 - Commit after every green step. Never commit `frontend/node_modules`.
@@ -26,7 +26,7 @@
 
 **New backend files**
 - `backend/workbench/lineage/variable_roles.py` — `Role` enum, `RoleAssignment`, `ResolvedRoleInputs`, `ROLE_EDGE_OP`, `canonicalize_focal_x`, `derive_roles`, `validate_role_conflicts`, `dedup_edges`. Pure, no I/O.
-- `backend/tests/lineage/test_variable_roles.py` — table-driven unit tests for the above.
+- `tests/lineage/test_variable_roles.py` — table-driven unit tests for the above.
 
 **Modified backend files**
 - `backend/workbench/engine/stages/recording.py` — record identity nodes + role edges from `derive_roles`.
@@ -51,12 +51,12 @@
 
 **Files:**
 - Create: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/lineage/test_variable_roles.py
+# tests/lineage/test_variable_roles.py
 from workbench.lineage.variable_roles import Role, RoleAssignment, ROLE_EDGE_OP
 
 def test_every_role_has_an_edge_op():
@@ -87,7 +87,7 @@ def test_role_assignment_edge_kind_derived_from_op():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -v`
 Expected: FAIL — `ModuleNotFoundError: workbench.lineage.variable_roles`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -161,13 +161,13 @@ class RoleAssignment:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): role vocabulary, edge-op map, RoleAssignment"
 ```
 
@@ -177,7 +177,7 @@ git commit -m "feat(roles): role vocabulary, edge-op map, RoleAssignment"
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -204,7 +204,7 @@ def test_canonicalize_empty():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k canonicalize -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k canonicalize -v`
 Expected: FAIL — `ImportError: cannot import name 'canonicalize_focal_x'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -229,13 +229,13 @@ def canonicalize_focal_x(raw: "str | list[str] | None", resolved_rhs: list[str])
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k canonicalize -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k canonicalize -v`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): canonicalize_focal_x ordered by resolved RHS, case-preserving"
 ```
 
@@ -245,7 +245,7 @@ git commit -m "feat(roles): canonicalize_focal_x ordered by resolved RHS, case-p
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -281,7 +281,7 @@ def test_regression_focal_empty_is_unspecified():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k regression -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k regression -v`
 Expected: FAIL — `ImportError: cannot import name 'ResolvedRoleInputs'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -348,13 +348,13 @@ def dedup_edges(assignments: list[RoleAssignment]) -> list[RoleAssignment]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k regression -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k regression -v`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): ResolvedRoleInputs + derive_roles regression family"
 ```
 
@@ -364,7 +364,7 @@ git commit -m "feat(roles): ResolvedRoleInputs + derive_roles regression family"
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -398,7 +398,7 @@ Note: `rhs` is already exposure-stripped by the caller (Task B3), so `exposure_y
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k poisson -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k poisson -v`
 Expected: FAIL — `ImportError: cannot import name 'RoleConflictError'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -422,13 +422,13 @@ class RoleConflictError(ValueError):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k poisson -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k poisson -v`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): poisson exposure offset + focal/exposure conflict"
 ```
 
@@ -438,7 +438,7 @@ git commit -m "feat(roles): poisson exposure offset + focal/exposure conflict"
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -469,7 +469,7 @@ def test_iv_endog_is_focal_instruments_separate():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k "panel or iv" -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k "panel or iv" -v`
 Expected: FAIL — `ValueError: unsupported estimator_family 'panel'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -506,13 +506,13 @@ Update the `regression` branch's final line to `return validate_role_conflicts(d
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k "panel or iv" -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k "panel or iv" -v`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): panel + iv families"
 ```
 
@@ -522,7 +522,7 @@ git commit -m "feat(roles): panel + iv families"
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -561,7 +561,7 @@ def test_did_no_cluster_when_absent():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k did -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k did -v`
 Expected: FAIL — `ValueError: unsupported estimator_family 'did'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -585,13 +585,13 @@ Expected: FAIL — `ValueError: unsupported estimator_family 'did'`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k did -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k did -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): DID family (treatment/unit/time/covariates/cluster)"
 ```
 
@@ -601,7 +601,7 @@ git commit -m "feat(roles): DID family (treatment/unit/time/covariates/cluster)"
 
 **Files:**
 - Modify: `backend/workbench/lineage/variable_roles.py`
-- Test: `backend/tests/lineage/test_variable_roles.py`
+- Test: `tests/lineage/test_variable_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -637,7 +637,7 @@ def test_dedup_same_column_role_two_sources_one_edge():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -k "allowed or rejected or dedup" -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -k "allowed or rejected or dedup" -v`
 Expected: FAIL — `test_unit_plus_covariate_rejected` does not raise; `test_dedup…` returns 2 assignments.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -691,13 +691,13 @@ def validate_role_conflicts(assignments: list[RoleAssignment]) -> list[RoleAssig
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_variable_roles.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_variable_roles.py -v`
 Expected: PASS (all Phase A tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/variable_roles.py backend/tests/lineage/test_variable_roles.py
+git add backend/workbench/lineage/variable_roles.py tests/lineage/test_variable_roles.py
 git commit -m "feat(roles): conflict policy (tiered allowlist) + edge de-dup"
 ```
 
@@ -709,12 +709,12 @@ git commit -m "feat(roles): conflict policy (tiered allowlist) + edge de-dup"
 
 **Files:**
 - Modify: `backend/workbench/api.py` (the `/runs` form handler and `_start_run` dispatch — see `x_columns = form.get("x", "")…` around line 164)
-- Test: `backend/tests/test_api_focal_x.py` (new)
+- Test: `tests/test_api_focal_x.py` (new)
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/test_api_focal_x.py
+# tests/test_api_focal_x.py
 from workbench.api import _parse_focal_x   # thin parser we add
 
 def test_parse_focal_x_canonicalizes_against_x():
@@ -726,7 +726,7 @@ def test_parse_focal_x_empty():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_api_focal_x.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_api_focal_x.py -v`
 Expected: FAIL — `ImportError: cannot import name '_parse_focal_x'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -749,13 +749,13 @@ Thread `focal_x` into `write_run_inputs(...)` and `_write_manifest(...)` calls (
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_api_focal_x.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_api_focal_x.py -v`
 Expected: PASS (2 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/api.py backend/tests/test_api_focal_x.py
+git add backend/workbench/api.py tests/test_api_focal_x.py
 git commit -m "feat(roles): parse + canonicalize focal_x from run form"
 ```
 
@@ -766,12 +766,12 @@ git commit -m "feat(roles): parse + canonicalize focal_x from run form"
 **Files:**
 - Modify: `backend/workbench/orchestrator/_manifest.py` (`_write_manifest`, around line 87)
 - Modify: `backend/workbench/lineage/run_inputs.py` (`write_run_inputs`, around line 32)
-- Test: `backend/tests/test_focal_x_persistence.py` (new)
+- Test: `tests/test_focal_x_persistence.py` (new)
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/test_focal_x_persistence.py
+# tests/test_focal_x_persistence.py
 import json
 from pathlib import Path
 from workbench.orchestrator._manifest import _write_manifest
@@ -786,7 +786,7 @@ def test_manifest_includes_focal_x(tmp_path: Path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_focal_x_persistence.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_focal_x_persistence.py -v`
 Expected: FAIL — `_write_manifest() got an unexpected keyword argument 'focal_x'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -795,13 +795,13 @@ In `_manifest.py`, add `focal_x: list[str] | None = None` to `_write_manifest`'s
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_focal_x_persistence.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_focal_x_persistence.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/orchestrator/_manifest.py backend/workbench/lineage/run_inputs.py backend/workbench/api.py backend/tests/test_focal_x_persistence.py
+git add backend/workbench/orchestrator/_manifest.py backend/workbench/lineage/run_inputs.py backend/workbench/api.py tests/test_focal_x_persistence.py
 git commit -m "feat(roles): persist focal_x in manifest + run_inputs"
 ```
 
@@ -811,7 +811,7 @@ git commit -m "feat(roles): persist focal_x in manifest + run_inputs"
 
 **Files:**
 - Modify: the engine entry that seeds `ctx.artifacts` from the run inputs (search: `ctx.artifacts["_normalized_x"]` producer in `engine/stages/ytype.py` and the parse stage that reads the form). Add `ctx.artifacts["_focal_x"]`.
-- Test: extend `backend/tests/test_focal_x_persistence.py`
+- Test: extend `tests/test_focal_x_persistence.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -826,7 +826,7 @@ def test_focal_x_reaches_ctx_artifacts(run_a_minimal_ols_run):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_focal_x_persistence.py -k ctx -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_focal_x_persistence.py -k ctx -v`
 Expected: FAIL — `KeyError: '_focal_x'`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -835,13 +835,13 @@ Seed `ctx.artifacts["_focal_x"]` where the other `_normalized_*`/form-derived ar
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/test_focal_x_persistence.py -k ctx -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/test_focal_x_persistence.py -k ctx -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/engine backend/tests/test_focal_x_persistence.py
+git add backend/workbench/engine tests/test_focal_x_persistence.py
 git commit -m "feat(roles): thread focal_x into ctx artifacts"
 ```
 
@@ -853,12 +853,12 @@ git commit -m "feat(roles): thread focal_x into ctx artifacts"
 
 **Files:**
 - Create: `backend/workbench/lineage/role_inputs_from_ctx.py`
-- Test: `backend/tests/lineage/test_role_inputs_from_ctx.py`
+- Test: `tests/lineage/test_role_inputs_from_ctx.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/lineage/test_role_inputs_from_ctx.py
+# tests/lineage/test_role_inputs_from_ctx.py
 from workbench.lineage.role_inputs_from_ctx import build_resolved_inputs
 
 class _Ctx:
@@ -881,7 +881,7 @@ def test_iv_inputs_mapped():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_role_inputs_from_ctx.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_role_inputs_from_ctx.py -v`
 Expected: FAIL — module missing.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -947,13 +947,13 @@ def build_resolved_inputs(ctx) -> ResolvedRoleInputs:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/lineage/test_role_inputs_from_ctx.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/lineage/test_role_inputs_from_ctx.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/lineage/role_inputs_from_ctx.py backend/tests/lineage/test_role_inputs_from_ctx.py
+git add backend/workbench/lineage/role_inputs_from_ctx.py tests/lineage/test_role_inputs_from_ctx.py
 git commit -m "feat(roles): build ResolvedRoleInputs from ctx artifacts"
 ```
 
@@ -963,12 +963,12 @@ git commit -m "feat(roles): build ResolvedRoleInputs from ctx artifacts"
 
 **Files:**
 - Modify: `backend/workbench/engine/stages/recording.py`
-- Test: `backend/tests/engine/test_recording_roles.py` (new) — drive a minimal OLS run and assert edges.
+- Test: `tests/engine/test_recording_roles.py` (new) — drive a minimal OLS run and assert edges.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# backend/tests/engine/test_recording_roles.py
+# tests/engine/test_recording_roles.py
 # Uses the existing end-to-end run helper (see other engine tests for the fixture
 # that fits a tiny OLS and returns the run root). Assert role edges exist.
 import json
@@ -983,11 +983,11 @@ def test_ols_emits_role_edges(tmp_path):
     assert ("var:y:cleaned", "model:ols_1", "enters_as_outcome") in ops
 ```
 
-(Confirm the exact run helper name/signature from a neighbouring test in `backend/tests/engine/`; reuse it rather than building a new harness.)
+(Confirm the exact run helper name/signature from a neighbouring test in `tests/engine/`; reuse it rather than building a new harness.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/engine/test_recording_roles.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/engine/test_recording_roles.py -v`
 Expected: FAIL — no `enters_as_*` edges in the graph.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1031,13 +1031,13 @@ Keep the existing `e:cleaned-model-primary` edge — it is the data-provenance e
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/engine/test_recording_roles.py -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/engine/test_recording_roles.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/engine/stages/recording.py backend/tests/engine/test_recording_roles.py
+git add backend/workbench/engine/stages/recording.py tests/engine/test_recording_roles.py
 git commit -m "feat(roles): emit role-bearing var->model edges in recording"
 ```
 
@@ -1047,7 +1047,7 @@ git commit -m "feat(roles): emit role-bearing var->model edges in recording"
 
 **Files:**
 - Modify: `backend/workbench/engine/stages/recording.py`
-- Test: `backend/tests/engine/test_recording_roles.py`
+- Test: `tests/engine/test_recording_roles.py`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1064,7 +1064,7 @@ def test_dropped_focal_keeps_role(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/engine/test_recording_roles.py -k dropped -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/engine/test_recording_roles.py -k dropped -v`
 Expected: FAIL — `dropped` is False (assignment built before drop info applied).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -1086,13 +1086,13 @@ assignments = [
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 pytest backend/tests/engine/test_recording_roles.py -k dropped -v`
+Run: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/engine/test_recording_roles.py -k dropped -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/workbench/engine/stages/recording.py backend/tests/engine/test_recording_roles.py
+git add backend/workbench/engine/stages/recording.py tests/engine/test_recording_roles.py
 git commit -m "feat(roles): mark dropped role assignments post-derivation"
 ```
 
