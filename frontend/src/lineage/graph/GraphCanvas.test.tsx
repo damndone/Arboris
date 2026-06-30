@@ -851,3 +851,98 @@ describe("GraphCanvas — v1.6.5 variable container", () => {
     expect(document.body.textContent ?? "").not.toMatch(/\(expanded\)/);
   });
 });
+
+describe("GraphCanvas — v1.6.5 model roles tag", () => {
+  function tagGraph(opts: { roleEdges: boolean; unspecified: boolean }): GraphResponse {
+    const nodes: Record<string, LineageNode> = {
+      "stage:cleaned": node({
+        id: "stage:cleaned",
+        kind: "dataset_stage",
+        display_label: "Cleaned data",
+      }),
+      "model:ols_1": node({
+        id: "model:ols_1",
+        kind: "model",
+        display_label: "ols_robust (primary)",
+      }),
+      "var:wage:cleaned": node({
+        id: "var:wage:cleaned",
+        display_label: "wage (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+      "var:a:cleaned": node({
+        id: "var:a:cleaned",
+        display_label: "a (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+    };
+    const mk = (id: string, s: string, t: string, op: string): LineageEdge => ({
+      id, source_id: s, target_id: t, op, params: {}, reversible: false, inverse_op: null,
+    });
+    const edges: Record<string, LineageEdge> = {
+      fit: mk("fit", "stage:cleaned", "model:ols_1", "ols_robust.fit"),
+    };
+    if (opts.roleEdges) {
+      edges.out = mk("out", "var:wage:cleaned", "model:ols_1", "enters_as_outcome");
+      edges.rhs = mk(
+        "rhs",
+        "var:a:cleaned",
+        "model:ols_1",
+        opts.unspecified ? "enters_as_explanatory_unspecified" : "enters_as_focal",
+      );
+    }
+    return {
+      schema_version: 2,
+      run_id: "r1",
+      legacy: false,
+      stats: { node_count: 4, edge_count: Object.keys(edges).length, leaf_count: 1, has_dp_count: 0 },
+      nodes,
+      edges,
+      branches: {},
+    };
+  }
+
+  function tagOf(): string | null {
+    const el = document.querySelector('[data-testid="node-roles-tag"]');
+    return el ? el.textContent : null;
+  }
+
+  it("tags the model node 'unspecified' when RHS is only the explanatory fallback", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: true, unspecified: true }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toMatch(/roles: unspecified/);
+  });
+
+  it("tags the model node 'legacy_unspecified' when the run has no role edges", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: false, unspecified: false }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toMatch(/roles: legacy_unspecified/);
+  });
+
+  it("shows no roles tag when a focal/covariate split is declared", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: true, unspecified: false }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toBeNull();
+  });
+});

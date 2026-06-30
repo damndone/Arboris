@@ -347,6 +347,29 @@ export function GraphCanvas({
       model.nodes.find((n) => n.kind === "model")?.id ?? "";
     const varRoles = rolesByVariable(model.edges, primaryModelId);
 
+    // v1.6.5: model-node roles tag (spec §5 back-compat). `legacy_unspecified`
+    // = run predates the role layer (no role edges at all); `unspecified` =
+    // RHS has only the explanatory fallback (no declared focal/covariate split).
+    const anyRoleEdges = model.edges.some((e) => isRoleOp(e.op));
+    const rhsRoles = new Set(
+      [...varRoles.values()].flat().filter((r) =>
+        [
+          "focal",
+          "treatment",
+          "covariates",
+          "instruments",
+          "exposure",
+          "explanatory_unspecified",
+        ].includes(r),
+      ),
+    );
+    const modelTag = !anyRoleEdges
+      ? "legacy_unspecified"
+      : rhsRoles.size > 0 &&
+          [...rhsRoles].every((r) => r === "explanatory_unspecified")
+        ? "unspecified"
+        : undefined;
+
     const visible = new Set<string>(kept.map((n) => n.id));
     groups.forEach((g) => visible.add(g.id));
 
@@ -383,6 +406,7 @@ export function GraphCanvas({
           node: n,
           state: "related",
           ...(roles && roles.length ? { role: primaryRole(roles) } : {}),
+          ...(n.kind === "model" && modelTag ? { rolesTag: modelTag } : {}),
         },
         selected: false,
       };
