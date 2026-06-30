@@ -61,3 +61,52 @@ def test_inject_focal_x_control_idempotent():
     ]
     out = _inject_focal_x_control(schema, {"x": "a, b"}, "ols")
     assert sum(1 for c in out if c["key"] == "focal_x") == 1
+
+
+def test_post_runs_endpoint_persists_focal_x_into_run_inputs(tmp_path):
+    """Regression: the POST /runs HTTP endpoint must forward the focal_x form
+    field into run_inputs. The Form param + form-dict wiring was missing in the
+    first v1.6.5 cut, so the run-form focal declaration silently did nothing
+    end-to-end even though _submit_run/_parse_focal_x were correct."""
+    import json
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from workbench.api import app
+
+    client = TestClient(app)
+    csv = tmp_path / "input.csv"
+    rows = "\n".join(f"{1 + 2 * i},{i},{i % 3},{i + 1}" for i in range(40))
+    csv.write_text("wage,education,age,exper\n" + rows + "\n", encoding="utf-8")
+
+    with csv.open("rb") as fh:
+        resp = client.post(
+            "/runs",
+            data={
+                "project_root": str(tmp_path),
+                "mode": "auto",
+                "model_type": "ols",
+                "y": "wage",
+                "x": "education,age,exper",
+                "focal_x": "education",
+            },
+            files={"file": ("input.csv", fh, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    run_id = resp.json()["run_id"]
+
+    terminal = {"completed", "failed", "cancelled", "interrupted", "partial"}
+    for _ in range(100):
+        status = client.get(
+            f"/runs/{run_id}", params={"project_root": str(tmp_path)}
+        ).json().get("status")
+        if status in terminal:
+            break
+        time.sleep(0.1)
+    assert status == "completed", status
+
+    inputs = json.loads(
+        (tmp_path / "runs" / run_id / "run_inputs.json").read_text(encoding="utf-8")
+    )
+    assert inputs["form"].get("focal_x") == "education"

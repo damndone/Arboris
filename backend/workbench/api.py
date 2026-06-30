@@ -300,6 +300,7 @@ async def run_endpoint(
     cs_cluster_var: str = Form(""),
     cs_anticipation: int = Form(0),
     honest_did: bool = Form(False),
+    focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -329,6 +330,7 @@ async def run_endpoint(
             "cs_control_group": cs_control_group, "cs_est_method": cs_est_method,
             "cs_base_period": cs_base_period, "cs_cluster_var": cs_cluster_var,
             "cs_anticipation": str(cs_anticipation), "honest_did": str(honest_did).lower(),
+            "focal_x": focal_x,
         }
         started_at = datetime.now(timezone.utc).isoformat()
         try:
