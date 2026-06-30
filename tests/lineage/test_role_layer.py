@@ -1,5 +1,5 @@
 # tests/lineage/test_variable_roles.py
-from workbench.lineage.variable_roles import Role, RoleAssignment, ROLE_EDGE_OP
+from workbench.lineage.role_layer import Role, RoleAssignment, ROLE_EDGE_OP
 
 def test_every_role_has_an_edge_op():
     for role in Role:
@@ -27,7 +27,7 @@ def test_role_assignment_edge_kind_derived_from_op():
     assert cl.edge_kind == "configures_"
 
 
-from workbench.lineage.variable_roles import canonicalize_focal_x
+from workbench.lineage.role_layer import canonicalize_focal_x
 
 def test_canonicalize_orders_by_resolved_rhs_and_dedups():
     rhs = ["age", "education", "income", "region"]
@@ -48,7 +48,7 @@ def test_canonicalize_empty():
 
 
 import pytest
-from workbench.lineage.variable_roles import (
+from workbench.lineage.role_layer import (
     ResolvedRoleInputs, derive_roles, RoleConflictError,
 )
 

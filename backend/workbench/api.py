@@ -78,7 +78,17 @@ from .lineage.rerun_provenance import (
     run_rerun_from_from_context,
 )
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
+from .lineage.role_layer import canonicalize_focal_x
 from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
+
+# Estimator families whose focal/treatment variable is structural (not user-declared
+# via focal_x). For these, persisted focal_x MUST be empty (spec §5).
+_STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
+
+
+def _parse_focal_x(raw: str, x_columns: list[str]) -> list[str]:
+    """Canonicalize the form's focal_x against the run's x columns."""
+    return canonicalize_focal_x(raw, x_columns)
 
 # A parent run must be in one of these (non-running) states to be rerun-from.
 _TERMINAL_RUN_STATUSES = {
@@ -166,16 +176,29 @@ def _submit_run(
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
     iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
 
+    # focal_x: canonicalize against x; clear for families whose focal/treatment is
+    # structural. Persist into run_inputs (the engine reads it back at recording).
+    # Only mutate the form when there is something to set/clear, so runs that never
+    # declare a focal keep byte-identical run_inputs (spec §5 backward compat).
+    focal_x = _parse_focal_x(form.get("focal_x", ""), x_columns)
+    if form.get("model_type", "auto") in _STRUCTURAL_FOCAL_FAMILIES:
+        focal_x = []
+    form_for_persist = form
+    if focal_x:
+        form_for_persist = {**form, "focal_x": ",".join(focal_x)}
+    elif form.get("focal_x"):
+        form_for_persist = {**form, "focal_x": ""}
+
     sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
     run = create_run(root, mode=form.get("mode", "auto"))
 
     write_run_inputs(
         run.root,
-        form=form,
+        form=form_for_persist,
         upload={"sha256": sha, "filename": upload_filename},
         rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
         override_hash=override_hash(op_overrides) if op_overrides else None,
-        dag_hash=dag_hash(sha, form),
+        dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
     )
 
