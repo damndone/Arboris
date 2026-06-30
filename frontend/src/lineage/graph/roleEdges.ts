@@ -38,7 +38,15 @@ export function suppressAggregateEdges(edges: GraphViewEdge[]): GraphViewEdge[] 
     const isAggregateIntoRoleModel =
       !isRoleOp(e.op) &&
       modelsWithRoles.has(e.target) &&
-      e.source.startsWith("stage:");
+      isStageNodeId(e.source);
     return !isAggregateIntoRoleModel;
   });
+}
+
+/** True for a stage node id, whether bare (`stage:cleaned`) or forest-keyed
+ *  (`<hash>::stage:cleaned`). The forest projection prefixes ids with the
+ *  content hash, so a plain `startsWith("stage:")` would miss the fit edge. */
+function isStageNodeId(id: string): boolean {
+  const local = id.includes("::") ? id.slice(id.lastIndexOf("::") + 2) : id;
+  return local.startsWith("stage:");
 }

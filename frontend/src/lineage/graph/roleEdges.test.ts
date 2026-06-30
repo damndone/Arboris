@@ -41,4 +41,12 @@ describe("suppressAggregateEdges", () => {
     ];
     expect(suppressAggregateEdges(edges).map((e) => e.id)).toEqual(["1"]);
   });
+
+  it("drops the fit edge in the forest projection (hash-prefixed stage id)", () => {
+    const edges: GraphViewEdge[] = [
+      { id: "1", source: "h1::stage:cleaned", target: "h2::model:ols_1", op: "ols_robust.fit" },
+      { id: "2", source: "h1::var:y:cleaned", target: "h2::model:ols_1", op: "enters_as_outcome" },
+    ];
+    expect(suppressAggregateEdges(edges).map((e) => e.id)).toEqual(["2"]);
+  });
 });

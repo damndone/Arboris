@@ -946,3 +946,65 @@ describe("GraphCanvas — v1.6.5 model roles tag", () => {
     expect(tagOf()).toBeNull();
   });
 });
+
+describe("GraphCanvas — v1.6.5 forest (headset) role rendering", () => {
+  // Forest projection prefixes node ids with the content hash and carries the
+  // role op on the edge. This is the path the Graph tab actually renders
+  // (view=headset), so it must show role badges just like the single-run view.
+  function forestModel() {
+    const H = "abc123::";
+    const vnode = (id: string, kind: string, label: string) => ({
+      id: H + id,
+      nodeKey: H + id,
+      raw: null,
+      stage: (kind === "model" ? "model" : kind === "dataset_stage" ? "clean" : "transform") as never,
+      kind,
+      title: label,
+      parentStageId: kind === "variable" ? H + "stage:cleaned" : null,
+      trust: "ok" as const,
+      decisions: [],
+    });
+    const edge = (s: string, t: string, op: string) => ({
+      id: `${H}${s}->${H}${t}`,
+      source: H + s,
+      target: H + t,
+      op,
+    });
+    return {
+      schemaVersion: 3,
+      runId: "r1",
+      legacy: false,
+      nodes: [
+        vnode("stage:cleaned", "dataset_stage", "Cleaned data"),
+        vnode("model:ols_1", "model", "ols_robust (primary)"),
+        vnode("var:wage:cleaned", "variable", "wage (cleaned)"),
+        vnode("var:firm:cleaned", "variable", "firm (cleaned)"),
+      ],
+      edges: [
+        edge("stage:cleaned", "model:ols_1", "ols_robust.fit"),
+        edge("var:wage:cleaned", "model:ols_1", "enters_as_outcome"),
+        edge("var:firm:cleaned", "model:ols_1", "configures_cluster"),
+      ],
+      stats: { nodeCount: 4, edgeCount: 3, leafCount: 1, hasDpCount: 0 },
+    } as never;
+  }
+
+  it("renders role badges in the forest projection (hash-prefixed ids + edge op)", () => {
+    render(
+      <GraphCanvas
+        model={forestModel()}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const byRole = new Map(
+      Array.from(document.querySelectorAll('[data-testid="node-role-badge"]')).map(
+        (b) => [b.getAttribute("data-role"), b.textContent],
+      ),
+    );
+    expect(byRole.get("outcome")).toBe("Y");
+    expect(byRole.get("cluster")).toBe("C");
+  });
+});

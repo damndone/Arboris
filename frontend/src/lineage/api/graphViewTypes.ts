@@ -206,6 +206,10 @@ export interface HeadSetNodeRaw {
 export interface HeadSetEdgeRaw {
   source: string;
   target: string;
+  /** v1.6.5 — edge op + params carried into the forest projection so the
+   *  canvas can render variable roles (role lives on the edge). */
+  op?: string | null;
+  params?: Record<string, unknown> | null;
 }
 
 export interface HeadRaw {
