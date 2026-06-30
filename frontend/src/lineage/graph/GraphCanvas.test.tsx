@@ -757,3 +757,75 @@ describe("GraphCanvas", () => {
     expect(afterSelection.style.transform).toBe(initialTransform);
   });
 });
+
+describe("GraphCanvas — v1.6.5 variable roles", () => {
+  function roleGraph(): GraphResponse {
+    const nodes: Record<string, LineageNode> = {
+      "stage:cleaned": node({
+        id: "stage:cleaned",
+        kind: "dataset_stage",
+        display_label: "Cleaned data",
+        summary: "Cleaned: 40 rows",
+      }),
+      "model:ols_1": node({
+        id: "model:ols_1",
+        kind: "model",
+        display_label: "ols_robust (primary)",
+        summary: "OLS",
+      }),
+      "var:wage:cleaned": node({
+        id: "var:wage:cleaned",
+        display_label: "wage (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+      "var:firm:cleaned": node({
+        id: "var:firm:cleaned",
+        display_label: "firm (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+    };
+    const mkEdge = (id: string, s: string, t: string, op: string): LineageEdge => ({
+      id,
+      source_id: s,
+      target_id: t,
+      op,
+      params: {},
+      reversible: false,
+      inverse_op: null,
+    });
+    const edges: Record<string, LineageEdge> = {
+      fit: mkEdge("fit", "stage:cleaned", "model:ols_1", "ols_robust.fit"),
+      out: mkEdge("out", "var:wage:cleaned", "model:ols_1", "enters_as_outcome"),
+      clu: mkEdge("clu", "var:firm:cleaned", "model:ols_1", "configures_cluster"),
+    };
+    return {
+      schema_version: 2,
+      run_id: "r1",
+      legacy: false,
+      stats: { node_count: 4, edge_count: 3, leaf_count: 1, has_dp_count: 0 },
+      nodes,
+      edges,
+      branches: {},
+    };
+  }
+
+  it("stamps role badges on variable nodes from their role edges", () => {
+    render(
+      <GraphCanvas
+        model={model(roleGraph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const badges = Array.from(
+      document.querySelectorAll('[data-testid="node-role-badge"]'),
+    );
+    const byRole = new Map(
+      badges.map((b) => [b.getAttribute("data-role"), b.textContent]),
+    );
+    expect(byRole.get("outcome")).toBe("Y");
+    expect(byRole.get("cluster")).toBe("C");
+  });
+});

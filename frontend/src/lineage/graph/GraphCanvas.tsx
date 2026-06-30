@@ -18,6 +18,8 @@ import type {
   Stage,
 } from "../api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "../folding";
+import { rolesByVariable, primaryRole } from "./variableRoles";
+import { roleEdgeStyle, suppressAggregateEdges, isRoleOp } from "./roleEdges";
 
 // T8.4: 240ms hover delay before the tooltip mounts. Matches V1.4.1
 // NodeTooltip and the prototype (uiux/graph.jsx L228).
@@ -346,6 +348,12 @@ export function GraphCanvas({
   const { seedNodes, rfEdges, memberToGroup } = useMemo(() => {
     const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
 
+    // v1.6.5: which role(s) each variable node holds for the primary model,
+    // derived from the role-bearing var→model edges.
+    const primaryModelId =
+      model.nodes.find((n) => n.kind === "model")?.id ?? "";
+    const varRoles = rolesByVariable(model.edges, primaryModelId);
+
     const visible = new Set<string>(kept.map((n) => n.id));
     groups.forEach((g) => visible.add(g.id));
 
@@ -369,15 +377,23 @@ export function GraphCanvas({
       g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
     );
 
-    const realNodes: RFNode[] = kept.map((n) => ({
-      id: n.id,
-      type: "lineageNode",
-      position: { x: 0, y: 0 },
-      // T8.3: GraphNode consumes V1.5.0 GraphViewNode directly. Selection
-      // state is overlaid by the decoratedNodes useMemo, not here.
-      data: { node: n, state: "related" },
-      selected: false,
-    }));
+    const realNodes: RFNode[] = kept.map((n) => {
+      const roles = varRoles.get(n.id);
+      return {
+        id: n.id,
+        type: "lineageNode",
+        position: { x: 0, y: 0 },
+        // T8.3: GraphNode consumes V1.5.0 GraphViewNode directly. Selection
+        // state is overlaid by the decoratedNodes useMemo, not here.
+        // v1.6.5: variable nodes carry their primary role for badge/colour.
+        data: {
+          node: n,
+          state: "related",
+          ...(roles && roles.length ? { role: primaryRole(roles) } : {}),
+        },
+        selected: false,
+      };
+    });
     const groupNodes: RFNode[] = groups.map((g) => ({
       id: g.id,
       type: "lineageNode",
@@ -406,7 +422,10 @@ export function GraphCanvas({
         style: { strokeDasharray: "4 4", opacity: 0.4 },
       });
     }
-    for (const e of model.edges) {
+    // v1.6.5: drop the legacy aggregate stage→model fit edge when role edges
+    // feed that model (P1: avoids a redundant parallel path), and style the
+    // role edges solid/dashed + coloured by role.
+    for (const e of suppressAggregateEdges(model.edges)) {
       const src = memberToGroup.get(e.source) ?? e.source;
       const tgt = memberToGroup.get(e.target) ?? e.target;
       if (src === tgt) continue;
@@ -416,6 +435,7 @@ export function GraphCanvas({
         source: src,
         target: tgt,
         animated: false,
+        ...(isRoleOp(e.op) ? { style: roleEdgeStyle(e.op!) } : {}),
       });
     }
     const seen = new Set<string>();
