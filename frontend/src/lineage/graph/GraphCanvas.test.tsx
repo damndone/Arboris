@@ -98,7 +98,7 @@ function mixedVariantGraph(): GraphResponse {
 }
 
 describe("GraphCanvas", () => {
-  it("renders a fold-back marker for expanded variable groups", async () => {
+  it("wraps an expanded variable group in a titled container (fold-back affordance)", async () => {
     render(
       <GraphCanvas
         model={model(graph())}
@@ -109,8 +109,11 @@ describe("GraphCanvas", () => {
       />,
     );
 
-    expect(await screen.findByText("▼ Variables (expanded)")).toBeInTheDocument();
-    expect(screen.getByText("Tap to fold back")).toBeInTheDocument();
+    // v1.6.5: the stray "▼ Variables (expanded)" marker node is replaced by a
+    // titled container box drawn behind the variables.
+    const box = await screen.findByTestId("var-container");
+    expect(box.textContent ?? "").toMatch(/Variables \(4\)/);
+    expect(screen.queryByText("▼ Variables (expanded)")).not.toBeInTheDocument();
   });
 
   it("keeps a sibling 'dropped' group folded when only the 'cleaned' group is expanded", async () => {
@@ -133,8 +136,9 @@ describe("GraphCanvas", () => {
     expect(await screen.findByText("x1 (cleaned)")).toBeInTheDocument();
     expect(screen.getByText("x4 (cleaned)")).toBeInTheDocument();
 
-    // Cleaned cluster shows a fold-back affordance.
-    expect(screen.getByText("▼ Variables (expanded)")).toBeInTheDocument();
+    // Cleaned cluster shows a fold-back affordance: a titled container box.
+    const containers = screen.getAllByTestId("var-container");
+    expect(containers.some((c) => /Variables \(4\)/.test(c.textContent ?? ""))).toBe(true);
 
     // Dropped sibling group stays folded as a summary node.
     expect(screen.getByText("Dropped variables (4)")).toBeInTheDocument();
@@ -827,5 +831,23 @@ describe("GraphCanvas — v1.6.5 variable roles", () => {
     );
     expect(byRole.get("outcome")).toBe("Y");
     expect(byRole.get("cluster")).toBe("C");
+  });
+});
+
+describe("GraphCanvas — v1.6.5 variable container", () => {
+  it("wraps an expanded variable cluster in a titled container, no stray marker", () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const box = document.querySelector('[data-testid="var-container"]');
+    expect(box).not.toBeNull();
+    expect(box?.textContent ?? "").toMatch(/Variables/);
+    expect(document.body.textContent ?? "").not.toMatch(/\(expanded\)/);
   });
 });

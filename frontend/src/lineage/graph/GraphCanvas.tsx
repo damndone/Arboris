@@ -192,7 +192,19 @@ function CanvasLegend() {
   );
 }
 
-const nodeTypes = { lineageNode: GraphNode };
+// v1.6.5 — non-interactive container drawn BEHIND an expanded variable
+// cluster so the user sees the variables belong to one logical group. The
+// header is the fold-back affordance (click → onExpandGroup, routed by id in
+// onNodeClick). Sized by GraphCanvas to the members' bounding box.
+function VarContainerNode({ data }: { data: { label: string; gid: string } }) {
+  return (
+    <div className="ln-var-container" data-testid="var-container">
+      <div className="ln-var-container__header">{data.label}</div>
+    </div>
+  );
+}
+
+const nodeTypes = { lineageNode: GraphNode, varContainer: VarContainerNode };
 
 interface GraphCanvasProps {
   model: GraphViewModel;
@@ -279,25 +291,6 @@ function parseGroupId(
   return {
     variantLabel: m[1] === "variables" ? "Variables" : "Dropped variables",
     parent: m[2],
-  };
-}
-
-function markerAsNode(
-  gid: string,
-  variantLabel: string,
-  parent: string,
-): GraphViewNode {
-  return {
-    id: gid,
-    nodeKey: gid,
-    raw: null,
-    stage: "unknown",
-    kind: "operation",
-    title: `▼ ${variantLabel} (expanded)`,
-    summary: "Tap to fold back",
-    parentStageId: parent,
-    trust: "ok",
-    decisions: [],
   };
 }
 
@@ -401,27 +394,7 @@ export function GraphCanvas({
       data: { node: groupAsNode(g), state: "related" },
       selected: false,
     }));
-    const markerNodes: RFNode[] = expandedMarkers.map((m) => ({
-      id: m.gid,
-      type: "lineageNode",
-      position: { x: 0, y: 0 },
-      data: {
-        node: markerAsNode(m.gid, m.variantLabel, m.parent),
-        state: "related",
-      },
-      selected: false,
-    }));
-
     const candidateEdges: RFEdge[] = [];
-    for (const m of expandedMarkers) {
-      candidateEdges.push({
-        id: `${m.parent}->${m.gid}`,
-        source: m.parent,
-        target: m.gid,
-        animated: false,
-        style: { strokeDasharray: "4 4", opacity: 0.4 },
-      });
-    }
     // v1.6.5: drop the legacy aggregate stage→model fit edge when role edges
     // feed that model (P1: avoids a redundant parallel path), and style the
     // role edges solid/dashed + coloured by role.
@@ -453,11 +426,52 @@ export function GraphCanvas({
     // useMemo and produces a fresh dagre snap.
     const rankdir: "TB" | "LR" = layout === "TB" ? "TB" : "LR";
     const layouted = layoutDagre(
-      [...realNodes, ...groupNodes, ...markerNodes],
+      [...realNodes, ...groupNodes],
       uniqEdges,
       rankdir,
     );
-    return { seedNodes: layouted, rfEdges: uniqEdges, memberToGroup };
+
+    // v1.6.5: for each expanded variable group, draw a titled container box
+    // behind its member variables (their dagre bounding box + padding). This
+    // replaces the old stray "(expanded)" marker node (P2/P3). The header is
+    // the fold-back affordance (routed by `container:` id in onNodeClick).
+    const PAD = 24;
+    const HEADER = 28;
+    const NODE_W = 240;
+    const NODE_H = 80;
+    const containerNodes: RFNode[] = [];
+    for (const m of expandedMarkers) {
+      const wantDropped = m.gid.startsWith("group:dropped-variables:");
+      const members = layouted.filter((rn) => {
+        const orig = nodeById.get(rn.id);
+        if (!orig || orig.kind !== "variable") return false;
+        if (orig.parentStageId !== m.parent) return false;
+        return rn.id.endsWith(":dropped") === wantDropped;
+      });
+      if (members.length === 0) continue;
+      const xs = members.map((n) => n.position.x);
+      const ys = members.map((n) => n.position.y);
+      const minX = Math.min(...xs) - PAD;
+      const minY = Math.min(...ys) - PAD - HEADER;
+      const maxX = Math.max(...xs) + NODE_W + PAD;
+      const maxY = Math.max(...ys) + NODE_H + PAD;
+      containerNodes.push({
+        id: `container:${m.gid}`,
+        type: "varContainer",
+        position: { x: minX, y: minY },
+        data: { label: `${m.variantLabel} (${members.length})`, gid: m.gid },
+        style: { width: maxX - minX, height: maxY - minY, zIndex: -1 },
+        selectable: false,
+        draggable: false,
+      });
+    }
+
+    // Containers first so React Flow paints them behind the variables.
+    return {
+      seedNodes: [...containerNodes, ...layouted],
+      rfEdges: uniqEdges,
+      memberToGroup,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, expandedGroups, nodeById, layout, layoutVersion]);
 
@@ -656,6 +670,8 @@ export function GraphCanvas({
         elementsSelectable={true}
         onNodeClick={(_, n) => {
           if (n.id.startsWith("group:")) onExpandGroup(n.id);
+          else if (n.id.startsWith("container:"))
+            onExpandGroup(n.id.slice("container:".length));
           else onSelect(n.id);
         }}
         onNodeContextMenu={(e, n) => {
