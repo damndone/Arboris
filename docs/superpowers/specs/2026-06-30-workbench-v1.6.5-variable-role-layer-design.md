@@ -1,6 +1,6 @@
 # Workbench v1.6.5 — Variable Role Layer (Research-Design Semantics in Lineage)
 
-- **Status:** Spec review in progress (incorporating review rounds) → writing-plans
+- **Status:** Frozen — approved after five review rounds; entering writing-plans
 - **Date:** 2026-06-30
 - **Worktree:** `.worktrees/workbench-v1.6.5`, branch `codex/workbench-v1.6.5` (off `codex/workbench-v1.6.4` @ `ddf58c9`)
 - **Predecessor:** v1.6.4 Pipeline Draft MVP (draft create → edit params → validate → execute → child run → compare)
