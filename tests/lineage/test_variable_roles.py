@@ -45,3 +45,161 @@ def test_canonicalize_accepts_list_input():
 def test_canonicalize_empty():
     assert canonicalize_focal_x("", ["a"]) == []
     assert canonicalize_focal_x(None, ["a"]) == []
+
+
+import pytest
+from workbench.lineage.variable_roles import (
+    ResolvedRoleInputs, derive_roles, RoleConflictError,
+)
+
+
+def _roles(assignments):
+    return {(a.column, a.role) for a in assignments}
+
+
+# --- A3 regression ---------------------------------------------------------
+
+def test_regression_focal_declared():
+    ri = ResolvedRoleInputs(
+        estimator_family="regression", estimator_key="ols",
+        outcome="y", rhs=["education", "age", "region"], focal_x=["education"],
+    )
+    assert _roles(derive_roles(ri)) == {
+        ("y", Role.OUTCOME),
+        ("education", Role.FOCAL),
+        ("age", Role.COVARIATES),
+        ("region", Role.COVARIATES),
+    }
+
+
+def test_regression_focal_empty_is_unspecified():
+    ri = ResolvedRoleInputs(
+        estimator_family="regression", estimator_key="logit",
+        outcome="y", rhs=["a", "b"], focal_x=[],
+    )
+    assert _roles(derive_roles(ri)) == {
+        ("y", Role.OUTCOME),
+        ("a", Role.EXPLANATORY_UNSPECIFIED),
+        ("b", Role.EXPLANATORY_UNSPECIFIED),
+    }
+
+
+# --- A4 poisson ------------------------------------------------------------
+
+def test_poisson_rate_exposure_is_offset_not_covariate():
+    ri = ResolvedRoleInputs(
+        estimator_family="regression", estimator_key="poisson_rate",
+        outcome="claims", rhs=["age"], focal_x=[], exposure="exposure_years",
+    )
+    got = {(a.column, a.role) for a in derive_roles(ri)}
+    assert got == {
+        ("claims", Role.OUTCOME),
+        ("age", Role.EXPLANATORY_UNSPECIFIED),
+        ("exposure_years", Role.EXPOSURE),
+    }
+
+
+def test_poisson_focal_must_not_be_exposure():
+    ri = ResolvedRoleInputs(
+        estimator_family="regression", estimator_key="poisson_rate",
+        outcome="claims", rhs=["age"], focal_x=["exposure_years"],
+        exposure="exposure_years",
+    )
+    with pytest.raises(RoleConflictError):
+        derive_roles(ri)
+
+
+# --- A5 panel + iv ---------------------------------------------------------
+
+def test_panel_unit_time_plus_focal():
+    ri = ResolvedRoleInputs(
+        estimator_family="panel", estimator_key="panel_ols",
+        outcome="y", rhs=["x1", "x2"], focal_x=["x1"], unit="firm", time="year",
+    )
+    assert _roles(derive_roles(ri)) == {
+        ("y", Role.OUTCOME), ("x1", Role.FOCAL), ("x2", Role.COVARIATES),
+        ("firm", Role.UNIT), ("year", Role.TIME),
+    }
+
+
+def test_iv_endog_is_focal_instruments_separate():
+    ri = ResolvedRoleInputs(
+        estimator_family="iv", estimator_key="iv_2sls",
+        outcome="wage", rhs=["age"], endog=["schooling"],
+        instruments=["quarter_of_birth"],
+    )
+    assert _roles(derive_roles(ri)) == {
+        ("wage", Role.OUTCOME),
+        ("schooling", Role.FOCAL),
+        ("quarter_of_birth", Role.INSTRUMENTS),
+        ("age", Role.COVARIATES),
+    }
+
+
+# --- A6 did ----------------------------------------------------------------
+
+def test_classic_did_multi_column_treatment():
+    ri = ResolvedRoleInputs(
+        estimator_family="did", estimator_key="did",
+        outcome="emp", rhs=["sector"], unit="county", time="year",
+        treatment=["treat", "post"], cluster=None,
+    )
+    assert _roles(derive_roles(ri)) == {
+        ("emp", Role.OUTCOME), ("treat", Role.TREATMENT), ("post", Role.TREATMENT),
+        ("sector", Role.COVARIATES), ("county", Role.UNIT), ("year", Role.TIME),
+    }
+
+
+def test_sa_did_has_cluster_no_covariates():
+    ri = ResolvedRoleInputs(
+        estimator_family="did", estimator_key="sa_did",
+        outcome="emp", rhs=[], unit="county", time="year",
+        treatment=["cohort"], cluster="county",
+    )
+    got = {(a.column, a.role) for a in derive_roles(ri)}
+    assert got == {
+        ("emp", Role.OUTCOME), ("cohort", Role.TREATMENT),
+        ("county", Role.UNIT), ("year", Role.TIME), ("county", Role.CLUSTER),
+    }
+
+
+def test_did_no_cluster_when_absent():
+    ri = ResolvedRoleInputs(
+        estimator_family="did", estimator_key="dcdh",
+        outcome="emp", rhs=[], unit="county", time="year",
+        treatment=["switch"], cluster=None,
+    )
+    assert not any(a.role == Role.CLUSTER for a in derive_roles(ri))
+
+
+# --- A7 conflict policy + dedup --------------------------------------------
+
+def test_unit_plus_cluster_allowed():
+    ri = ResolvedRoleInputs(
+        estimator_family="did", estimator_key="cs_did",
+        outcome="y", rhs=["z"], unit="firm", time="year",
+        treatment=["cohort"], cluster="firm",   # cluster == unit -> allowed
+    )
+    pairs = {(a.column, a.role) for a in derive_roles(ri)}
+    assert ("firm", Role.UNIT) in pairs and ("firm", Role.CLUSTER) in pairs
+
+
+def test_unit_plus_covariate_rejected():
+    # firm appears both as entity AND as a covariate -> hard conflict
+    ri = ResolvedRoleInputs(
+        estimator_family="panel", estimator_key="panel_ols",
+        outcome="y", rhs=["firm", "x"], focal_x=[], unit="firm", time="year",
+    )
+    with pytest.raises(RoleConflictError):
+        derive_roles(ri)
+
+
+def test_dedup_same_column_role_two_sources_one_edge():
+    ri = ResolvedRoleInputs(
+        estimator_family="did", estimator_key="did",
+        outcome="y", rhs=[], unit="c", time="t",
+        treatment=["treat", "treat"],   # duplicate source resolution
+    )
+    treat = [a for a in derive_roles(ri) if a.column == "treat"]
+    assert len(treat) == 1
+    assert "treatment" in treat[0].source  # provenance retained
