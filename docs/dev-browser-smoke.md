@@ -175,5 +175,14 @@ Open an eligible executed model node from Lineage Detail and verify:
 - `Open as Draft Graph` appears only for a resolved editable model node.
 - The action creates a `PipelineDraft` and navigates to `/pipeline-drafts/<draft_id>?project_root=<root>`.
 - The Draft Graph view renders the fixed `Input Dataset -> Model` graph.
+- The InputNode inspector is read-only.
+- Selecting ModelNode shows editable controls from `editable_schema`.
+- Changing one editable field marks the draft `Unsaved` and keeps `Validate` and `Execute Draft` disabled.
+- Clicking `Save changes` persists the draft, marks any prior validation stale, enables `Validate`, and keeps `Execute Draft` disabled.
 - `Execute Draft` stays disabled until `Validate` returns a matching `validated_draft_hash`.
+- After `Validate`, `Execute Draft` is enabled only for the current draft hash.
+- Clicking `Execute Draft` creates/navigates to the child run lineage view.
+- If the focus is pending, polling resolves using source run/model/op identifiers.
+- Selecting the produced child model node exposes `Compare with source`.
+- Direct `/runs/{run_id}/rerun` still works from the operation section.
 - Run-level `Open in Graph` remains deferred until the route can prove exactly one eligible model node without guessing.
