@@ -143,6 +143,10 @@ export interface GraphViewEdge {
   source: string;
   target: string;
   op?: string;
+  /** v1.6.5 — edge params (e.g. role-bearing var->model edges carry
+   *  `{ role, source, estimator_family, dropped }`). Optional; only
+   *  populated by the single-run graph adapter. */
+  params?: Record<string, unknown>;
   reversible?: boolean;
   inverseOp?: string | null;
 }

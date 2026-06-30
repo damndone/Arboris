@@ -34,6 +34,7 @@ import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
+import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
@@ -81,6 +82,12 @@ export const sectionRegistry: SectionEntry[] = [
     order: 30,
     shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0,
     Component: OperationSection,
+  },
+  {
+    id: "roleGroups",
+    order: 35,
+    shouldRender: (n) => n.kind === "model" || n.stage === "model",
+    Component: RoleGroupsSection,
   },
   {
     id: "code",

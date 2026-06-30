@@ -167,6 +167,7 @@ function adaptEdge(raw: LineageEdge): GraphViewEdge {
     source: raw.source_id,
     target: raw.target_id,
     op: raw.op || undefined,
+    params: raw.params,
     reversible: raw.reversible,
     inverseOp: raw.inverse_op,
   };
