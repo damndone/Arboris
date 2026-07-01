@@ -102,9 +102,18 @@ export function DraftGraphRoute() {
     );
   }
 
+  const modelNode = draft.graph.nodes.find((n) => n.node_type === "model");
+  const modelType = modelNode && "model_type" in modelNode ? modelNode.model_type : "";
+  const draftState = hasUnsavedChanges
+    ? "Unsaved"
+    : isValidationStale
+      ? "Validation stale"
+      : "Saved";
+
   return (
-    <section className="panel" aria-label="Draft Graph">
-      <div className="panel-heading">
+    <section className="panel draft-layout" aria-label="Draft Graph">
+      {/* §6.3 Toolbar: back · title · source run/model · state · Validate · Execute */}
+      <header className="draft-toolbar" aria-label="Draft toolbar">
         <button
           type="button"
           className="draft-back-link"
@@ -113,118 +122,153 @@ export function DraftGraphRoute() {
         >
           ← Back to Lineage
         </button>
-        <h2>Draft Graph</h2>
-        <span>{draft.draft_id}</span>
-      </div>
-      <div className="draft-toolbar">
-        <span>{hasUnsavedChanges ? "Unsaved" : isValidationStale ? "Validation stale" : "Saved"}</span>
-        <button
-          type="button"
-          disabled={isSaving || isValidating || hasUnsavedChanges}
-          onClick={async () => {
-            setIsValidating(true);
-            setError(null);
-            try {
-              setValidation(await validatePipelineDraft(projectRoot, draftId, "rerun_child"));
-              setValidationStale(false);
-            } catch (validateError) {
-              setValidation(null);
-              setError(errorMessage(validateError));
-            } finally {
-              setIsValidating(false);
-            }
-          }}
-        >
-          Validate
-        </button>
-        <button
-          type="button"
-          disabled={!canExecute}
-          onClick={async () => {
-            setIsExecuting(true);
-            setError(null);
-            try {
-              const result = await executePipelineDraft(projectRoot, draftId, {
-                validated_draft_hash: validatedHash ?? "",
-                execution_mode: "rerun_child",
-              });
-              const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
-              if (result.focus.target_model_node_id) {
-                params.set("focus", result.focus.target_model_node_id);
-              }
-              if (result.focus.status === "pending_index" && result.focus.poll) {
-                params.set("pending_source_run_id", result.focus.poll.rerun_from_run_id);
-                params.set("pending_source_model_node_id", result.focus.poll.rerun_from_model_node_id);
-                params.set("pending_source_op_node_id", result.focus.poll.rerun_from_op_node_id);
-              }
-              navigate(`/runs/${result.run_id}?${params.toString()}`);
-            } catch (executeError) {
-              setError(errorMessage(executeError));
-            } finally {
-              setIsExecuting(false);
-            }
-          }}
-        >
-          Execute Draft
-        </button>
-      </div>
-      {error && <p role="alert">{error}</p>}
-      <DraftGraphCanvas
-        draft={draft}
-        selectedNodeId={selectedNodeId}
-        onSelectNode={setSelectedNodeId}
-      />
-      {selectedNode?.node_type === "input.dataset" && (
-        <section aria-label="Input node inspector">
-          <h2>InputNode</h2>
-          <p>{selectedNode.run_input_id}</p>
-          <p>{selectedNode.input_fingerprint}</p>
-        </section>
-      )}
-      {selectedNode?.node_type === "model" && (
-        <ModelNodeInspector
-          node={selectedNode}
-          draftHash={draftHash}
-          onDirtyChange={setHasUnsavedChanges}
-          onSave={async (body) => {
-            setIsSaving(true);
-            setError(null);
-            try {
-              const res = await patchPipelineDraftParams(projectRoot, draftId, body);
-              setDraft(res.draft);
-              setDraftHash(res.draft_hash);
-              setValidation(null);
-              setValidationStale(true);
-              setHasUnsavedChanges(false);
-            } catch (error) {
-              const status = error instanceof ApiError
-                ? error.status
-                : (error as { status?: unknown })?.status;
-              if (status === 409) {
-                const latest = await getPipelineDraft(projectRoot, draftId);
-                setDraft(latest.draft);
-                setDraftHash(latest.draft_hash);
+        <div className="draft-toolbar__title">
+          <h2>Draft Graph</h2>
+          <span className="draft-toolbar__source">
+            {sourceRunId ? `source: ${sourceRunId}` : draft.draft_id}
+            {modelType ? ` · ${modelType}` : ""}
+          </span>
+        </div>
+        <span className="draft-toolbar__state" data-state={draftState}>
+          {draftState}
+        </span>
+        <div className="draft-toolbar__actions">
+          <button
+            type="button"
+            disabled={isSaving || isValidating || hasUnsavedChanges}
+            onClick={async () => {
+              setIsValidating(true);
+              setError(null);
+              try {
+                setValidation(await validatePipelineDraft(projectRoot, draftId, "rerun_child"));
+                setValidationStale(false);
+              } catch (validateError) {
                 setValidation(null);
-                setValidationStale(true);
-                setHasUnsavedChanges(false);
-                return;
+                setError(errorMessage(validateError));
+              } finally {
+                setIsValidating(false);
               }
-              setError(errorMessage(error));
-            } finally {
-              setIsSaving(false);
-            }
-          }}
-        />
+            }}
+          >
+            Validate
+          </button>
+          <button
+            type="button"
+            disabled={!canExecute}
+            onClick={async () => {
+              setIsExecuting(true);
+              setError(null);
+              try {
+                const result = await executePipelineDraft(projectRoot, draftId, {
+                  validated_draft_hash: validatedHash ?? "",
+                  execution_mode: "rerun_child",
+                });
+                const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
+                if (result.focus.target_model_node_id) {
+                  params.set("focus", result.focus.target_model_node_id);
+                }
+                if (result.focus.status === "pending_index" && result.focus.poll) {
+                  params.set("pending_source_run_id", result.focus.poll.rerun_from_run_id);
+                  params.set("pending_source_model_node_id", result.focus.poll.rerun_from_model_node_id);
+                  params.set("pending_source_op_node_id", result.focus.poll.rerun_from_op_node_id);
+                }
+                navigate(`/runs/${result.run_id}?${params.toString()}`);
+              } catch (executeError) {
+                setError(errorMessage(executeError));
+              } finally {
+                setIsExecuting(false);
+              }
+            }}
+          >
+            Execute Draft
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <p role="alert" className="draft-error">
+          {error}
+        </p>
       )}
-      {validation && (
-        <section aria-label="Validation panel">
-          {validation.checks.map((check) => (
-            <p key={`${check.code}:${check.node_id ?? ""}`}>
-              {check.code}: {check.message}
-            </p>
-          ))}
+
+      <div className="draft-body">
+        {/* §6.3 Canvas region */}
+        <section className="draft-canvas-region" aria-label="Draft canvas">
+          <DraftGraphCanvas
+            draft={draft}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={setSelectedNodeId}
+          />
         </section>
-      )}
+
+        {/* §6.3 Inspector + Validation side panel */}
+        <aside className="draft-side">
+          {selectedNode?.node_type === "input.dataset" && (
+            <section className="draft-inspector" aria-label="Input node inspector">
+              <h2>InputNode</h2>
+              <dl>
+                <dt>run_input_id</dt>
+                <dd>{selectedNode.run_input_id}</dd>
+                <dt>input_fingerprint</dt>
+                <dd>{selectedNode.input_fingerprint}</dd>
+              </dl>
+            </section>
+          )}
+          {selectedNode?.node_type === "model" && (
+            <section className="draft-inspector" aria-label="Model node inspector wrapper">
+              <ModelNodeInspector
+                node={selectedNode}
+                draftHash={draftHash}
+                onDirtyChange={setHasUnsavedChanges}
+                onSave={async (body) => {
+                  setIsSaving(true);
+                  setError(null);
+                  try {
+                    const res = await patchPipelineDraftParams(projectRoot, draftId, body);
+                    setDraft(res.draft);
+                    setDraftHash(res.draft_hash);
+                    setValidation(null);
+                    setValidationStale(true);
+                    setHasUnsavedChanges(false);
+                  } catch (error) {
+                    const status = error instanceof ApiError
+                      ? error.status
+                      : (error as { status?: unknown })?.status;
+                    if (status === 409) {
+                      const latest = await getPipelineDraft(projectRoot, draftId);
+                      setDraft(latest.draft);
+                      setDraftHash(latest.draft_hash);
+                      setValidation(null);
+                      setValidationStale(true);
+                      setHasUnsavedChanges(false);
+                      return;
+                    }
+                    setError(errorMessage(error));
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+              />
+            </section>
+          )}
+          {validation && (
+            <section className="draft-validation" aria-label="Validation panel">
+              <h3>Validation</h3>
+              {validation.checks.length === 0 ? (
+                <p className="draft-validation__ok">No blocking issues.</p>
+              ) : (
+                <ul>
+                  {validation.checks.map((check) => (
+                    <li key={`${check.code}:${check.node_id ?? ""}`}>
+                      {check.code}: {check.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </aside>
+      </div>
     </section>
   );
 }
