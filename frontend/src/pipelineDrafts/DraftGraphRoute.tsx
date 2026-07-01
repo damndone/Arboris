@@ -66,6 +66,22 @@ export function DraftGraphRoute() {
     () => draft?.graph.nodes.find((node) => node.node_id === selectedNodeId) ?? null,
     [draft, selectedNodeId],
   );
+
+  // v1.6.5 (P6): return to the source run's lineage. The draft records its
+  // origin run in `created_from`; fall back to the bound input node's
+  // `run_input_id` for older drafts that lack it.
+  const sourceRunId =
+    draft?.created_from?.source_run_id ??
+    draft?.graph.nodes.find(
+      (n): n is Extract<typeof n, { node_type: "input.dataset" }> =>
+        n.node_type === "input.dataset",
+    )?.run_input_id ??
+    null;
+  const goBackToLineage = () => {
+    if (!sourceRunId) return;
+    const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
+    navigate(`/runs/${sourceRunId}?${params.toString()}`);
+  };
   const validatedHash = validation?.validated_draft_hash;
   const isValidationStale = Boolean(validationStale || (validation && validatedHash !== draftHash));
   const canExecute = Boolean(
@@ -89,6 +105,14 @@ export function DraftGraphRoute() {
   return (
     <section className="panel" aria-label="Draft Graph">
       <div className="panel-heading">
+        <button
+          type="button"
+          className="draft-back-link"
+          onClick={goBackToLineage}
+          disabled={!sourceRunId}
+        >
+          ← Back to Lineage
+        </button>
         <h2>Draft Graph</h2>
         <span>{draft.draft_id}</span>
       </div>
