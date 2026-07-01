@@ -6,6 +6,10 @@ const PAGE_SIZE = 25;
 type Props = {
   runs: RunSummary[] | null;
   onSelect: (runId: string) => void;
+  /** v1.6.5 — the resolved project_root does not exist yet (e.g. a stale
+   *  `lastProjectRoot` from a previous session). Show a friendly empty state
+   *  instead of a raw red "Request error" banner. */
+  projectMissing?: boolean;
 };
 
 function statusBadgeClass(status: string): string {
@@ -19,7 +23,7 @@ function statusLabel(status: string): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-export function RunHistoryPanel({ runs, onSelect }: Props) {
+export function RunHistoryPanel({ runs, onSelect, projectMissing }: Props) {
   const [page, setPage] = useState(1);
 
   const totalPages = runs ? Math.max(1, Math.ceil(runs.length / PAGE_SIZE)) : 1;
@@ -35,6 +39,17 @@ export function RunHistoryPanel({ runs, onSelect }: Props) {
     setPage(1);
   }, [runs]);
 
+  if (projectMissing) {
+    return (
+      <div className="muted" data-testid="history-project-missing">
+        <p>This project doesn't exist yet.</p>
+        <p>
+          Pick an existing project folder above, or submit a run to create it —
+          your last-used path may be stale.
+        </p>
+      </div>
+    );
+  }
   if (runs === null) {
     return <p className="muted">Loading runs…</p>;
   }

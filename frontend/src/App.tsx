@@ -206,6 +206,7 @@ function RunHistoryRoute() {
   const { projectRoot, setError } = useAppContext();
   const navigate = useNavigate();
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [projectMissing, setProjectMissing] = useState(false);
 
   useEffect(() => {
     setError(null);
@@ -218,12 +219,20 @@ function RunHistoryRoute() {
     }
     let cancelled = false;
     setRuns(null);
+    setProjectMissing(false);
     fetchRuns(projectRoot)
       .then((res) => {
         if (!cancelled) setRuns(res.runs);
       })
       .catch((error) => {
         if (cancelled) return;
+        // v1.6.5: a non-existent project_root (e.g. a stale localStorage
+        // `lastProjectRoot`) is not an error worth a red banner — show a
+        // friendly empty state in the History panel instead.
+        if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
+          setProjectMissing(true);
+          return;
+        }
         const message =
           error instanceof ApiError
             ? `[${error.code ?? `HTTP ${error.status}`}] ${error.message}`
@@ -258,6 +267,7 @@ function RunHistoryRoute() {
       </div>
       <RunHistoryPanel
         runs={runs}
+        projectMissing={projectMissing}
         onSelect={(runId) => {
           const params = new URLSearchParams({
             project_root: projectRoot,
