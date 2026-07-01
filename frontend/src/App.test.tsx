@@ -683,7 +683,9 @@ test("run detail renders warning issues separately from blockers", async () => {
   expect(screen.getByText("Warnings")).toBeInTheDocument();
 });
 
-test("history tab surfaces PROJECT_NOT_FOUND envelope in error panel", async () => {
+test("history tab shows a friendly empty state (not a red error) for PROJECT_NOT_FOUND", async () => {
+  // v1.6.5: a non-existent project_root (e.g. stale localStorage) is no longer
+  // a red "Request error" banner — History renders a friendly empty state.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
   fetchMock.mockResolvedValueOnce(
@@ -704,9 +706,11 @@ test("history tab surfaces PROJECT_NOT_FOUND envelope in error panel", async () 
   fireEvent.click(screen.getByRole("tab", { name: "History" }));
 
   await waitFor(() => {
-    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByTestId("history-project-missing")).toBeInTheDocument();
   });
-  expect(screen.getByRole("alert")).toHaveTextContent("PROJECT_NOT_FOUND");
+  expect(screen.getByTestId("history-project-missing")).toHaveTextContent(/project/i);
+  // no red error banner for this case
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("run detail shows artifact list with download links", async () => {
