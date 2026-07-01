@@ -14,7 +14,9 @@
 
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useNavigate } from "react-router-dom";
+import * as api from "../../api";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { ForestContext } from "../../workbench/ForestContext";
 import { NodeOperationContextProvider } from "../detail/NodeOperationContextProvider";
@@ -23,6 +25,11 @@ import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: vi.fn() };
+});
 
 function makeNode(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
   return {
@@ -73,11 +80,13 @@ function renderMenu(
   onShowJson: () => void = vi.fn(),
 ) {
   return render(
-    <NodeActionMenu
-      node={node}
-      model={makeModel(node)}
-      onShowJson={onShowJson}
-    />,
+    <MemoryRouter>
+      <NodeActionMenu
+        node={node}
+        model={makeModel(node)}
+        onShowJson={onShowJson}
+      />
+    </MemoryRouter>,
   );
 }
 
@@ -85,6 +94,7 @@ const writeText = vi.fn();
 let _origClipboard: PropertyDescriptor | undefined;
 beforeEach(() => {
   writeText.mockReset().mockResolvedValue(undefined);
+  vi.mocked(useNavigate).mockReturnValue(vi.fn());
   _origClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -163,17 +173,19 @@ describe("NodeActionMenu", () => {
       (n) => n.nodeKey === seed.sharedNodeKey,
     )!;
     render(
-      <ForestContext.Provider
-        value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
-      >
-        <NodeOperationContextProvider node={selected}>
-          <NodeActionMenu
-            node={selected}
-            model={seed.graphModel}
-            onShowJson={vi.fn()}
-          />
-        </NodeOperationContextProvider>
-      </ForestContext.Provider>,
+      <MemoryRouter>
+        <ForestContext.Provider
+          value={{ forest: seed.forest, activeRunId: "run_x", setActiveRunId: vi.fn() }}
+        >
+          <NodeOperationContextProvider node={selected}>
+            <NodeActionMenu
+              node={selected}
+              model={seed.graphModel}
+              onShowJson={vi.fn()}
+            />
+          </NodeOperationContextProvider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
@@ -284,5 +296,55 @@ describe("NodeActionMenu", () => {
     expect(btn.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(btn);
     expect(btn.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens an eligible model node as a draft graph", async () => {
+    const navigate = vi.fn();
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+    vi.mocked(useNavigate).mockReturnValue(navigate);
+    vi.spyOn(api, "createPipelineDraftFromNode").mockResolvedValue({
+      draft: { draft_id: "draft_1" } as any,
+      draft_hash: "h1",
+    });
+
+    render(
+      <MemoryRouter>
+        <ForestContext.Provider
+          value={{
+            forest: seed.forest,
+            activeRunId: "run_a",
+            setActiveRunId: vi.fn(),
+          }}
+        >
+          <NodeOperationContextProvider node={selected}>
+            <NodeActionMenu
+              node={selected}
+              model={seed.graphModel}
+              onShowJson={vi.fn()}
+              projectRoot="/tmp/project"
+            />
+          </NodeOperationContextProvider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /open as draft graph/i }));
+
+    await waitFor(() =>
+      expect(api.createPipelineDraftFromNode).toHaveBeenCalledWith(
+        "/tmp/project",
+        expect.objectContaining({
+          source_forest_node_key: seed.sharedNodeKey,
+          source_op_node_id: seed.sharedOpNodeId,
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith(
+        "/pipeline-drafts/draft_1?project_root=%2Ftmp%2Fproject",
+      ),
+    );
   });
 });

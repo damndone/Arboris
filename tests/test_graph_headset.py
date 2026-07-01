@@ -124,11 +124,19 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
 def test_headset_exposes_run_level_rerun_from_on_child_head(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_run(project.root)
-    child = _create_run(project.root)
-    (project.root / "runs" / child / "run_inputs.json").write_text(
-        json.dumps({
-            "form": {},
-            "upload": {"sha256": "hash"},
+    node_id = _model_node_id(project.root, parent)
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={"from_node": node_id, "op_overrides": {"covariance": "unadjusted"}},
+    )
+    assert resp.status_code == 200
+    child = resp.json()["run_id"]
+    _wait_terminal(project.root, child)
+    run_inputs_path = project.root / "runs" / child / "run_inputs.json"
+    run_inputs = json.loads(run_inputs_path.read_text(encoding="utf-8"))
+    run_inputs.update(
+        {
             "rerun_of": parent,
             "from_node": "model:ols_1",
             "rerun_from": {
@@ -138,7 +146,10 @@ def test_headset_exposes_run_level_rerun_from_on_child_head(tmp_path: Path):
                 "context_fingerprint": "nocv1:parent",
                 "rerun_request_id": "req_headset",
             },
-        }),
+        }
+    )
+    run_inputs_path.write_text(
+        json.dumps(run_inputs),
         encoding="utf-8",
     )
     body = client.get(
@@ -147,6 +158,12 @@ def test_headset_exposes_run_level_rerun_from_on_child_head(tmp_path: Path):
     ).json()
     child_head = next(head for head in body["heads"] if head["run_id"] == child)
     assert child_head["rerun_from"]["rerun_request_id"] == "req_headset"
+    child_model = next(
+        node
+        for node in body["nodes"].values()
+        if node.get("id") == "model:ols_1" and node.get("runs") == [child]
+    )
+    assert child_model["produced_by_rerun_request_id"] == "req_headset"
 
 
 def test_headset_legacy_run_degrades(monkeypatch, tmp_path: Path) -> None:

@@ -13,6 +13,11 @@ import {
   artifactDownloadUrl,
   waitForRunTerminal,
   rerunFromNode,
+  createPipelineDraftFromNode,
+  executePipelineDraft,
+  getPipelineDraft,
+  patchPipelineDraftParams,
+  validatePipelineDraft,
 } from "./api";
 import * as XLSX from "xlsx";
 
@@ -218,6 +223,44 @@ test("rerunFromNode posts context-driven rerun request body", async () => {
     from_node: "model:ols_1",
     rerun_reason: "manual_override",
   });
+});
+
+test("pipeline draft client calls draft endpoints", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify({ draft: { draft_id: "draft_1" }, draft_hash: "h1" }),
+        { status: 200 },
+      );
+    }),
+  );
+
+  await createPipelineDraftFromNode("/tmp/project", {
+    source_run_id: "run_1",
+    source_model_node_id: "model_1",
+    source_op_node_id: "op_1",
+    source_node_hash: "hash_1",
+    source_context_fingerprint: "ctx_1",
+  });
+  await getPipelineDraft("/tmp/project", "draft_1");
+  await patchPipelineDraftParams("/tmp/project", "draft_1", {
+    model_node_id: "model_1",
+    base_draft_hash: "h1",
+    params: { covariance: "robust" },
+  });
+  await validatePipelineDraft("/tmp/project", "draft_1", "rerun_child");
+  await executePipelineDraft("/tmp/project", "draft_1", {
+    validated_draft_hash: "h1",
+    execution_mode: "rerun_child",
+  });
+
+  expect(calls.map((c) => c.url).join("\n")).toContain("/pipeline-drafts/from-node");
+  expect(calls.map((c) => c.url).join("\n")).toContain("/pipeline-drafts/draft_1");
+  expect(calls.map((c) => c.url).join("\n")).toContain("/pipeline-drafts/draft_1/validate");
+  expect(calls.map((c) => c.url).join("\n")).toContain("/pipeline-drafts/draft_1/execute");
 });
 
 test("rerunFromNode posts manual patch payload", async () => {

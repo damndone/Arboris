@@ -21,10 +21,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
+import { createPipelineDraftFromNode } from "../../api";
 import {
   actionsForSurface,
   type ActionContext,
@@ -41,6 +43,7 @@ export interface NodeActionMenuProps {
    *  drawer-local (not a registry action) because it controls a
    *  drawer-owned modal, not a node-scoped imperative. */
   onShowJson: () => void;
+  projectRoot?: string;
 }
 
 interface PopupCoords {
@@ -54,7 +57,9 @@ export function NodeActionMenu({
   node,
   model,
   onShowJson,
+  projectRoot,
 }: NodeActionMenuProps) {
+  const navigate = useNavigate();
   const wb = useWorkbenchOptional();
   const resolvedContext = useResolvedNodeOperationContext();
   const [open, setOpen] = useState(false);
@@ -127,6 +132,31 @@ export function NodeActionMenu({
   const capabilities = resolvedContext?.ok
     ? resolvedContext.context.capabilities
     : null;
+  const effectiveProjectRoot =
+    projectRoot ?? new URLSearchParams(window.location.search).get("project_root") ?? "";
+  const canOpenDraft = Boolean(
+    resolvedContext?.ok &&
+      effectiveProjectRoot &&
+      resolvedContext.context.node_payload.editable_schema?.length,
+  );
+
+  async function onOpenDraftGraph() {
+    if (!canOpenDraft || !resolvedContext?.ok) return;
+    const context = resolvedContext.context;
+    const result = await createPipelineDraftFromNode(effectiveProjectRoot, {
+      source_run_id: context.operation_target.owner_run_id,
+      source_model_node_id: context.operation_target.op_node_id,
+      source_op_node_id: context.operation_target.op_node_id,
+      source_node_hash: context.operation_target.node_hash,
+      source_forest_node_key: context.selection.forest_node_key,
+      source_context_fingerprint: context.context_fingerprint,
+    });
+    navigate(
+      `/pipeline-drafts/${result.draft.draft_id}?project_root=${encodeURIComponent(
+        effectiveProjectRoot,
+      )}`,
+    );
+  }
 
   const closeAfter = (fn: () => void) => () => {
     fn();
@@ -180,6 +210,13 @@ export function NodeActionMenu({
             disabled="Choose an operation owner before running context-bound actions."
             onClick={() => {}}
             testId="drawer-menu-item-choose-operation-owner"
+          />
+        )}
+        {canOpenDraft && (
+          <MenuItem
+            label="Open as Draft Graph"
+            onClick={closeAfter(onOpenDraftGraph)}
+            testId="drawer-menu-item-open-as-draft-graph"
           />
         )}
         {registryActions.map((action) => {

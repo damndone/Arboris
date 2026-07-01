@@ -846,6 +846,197 @@ export async function getRunGraph(
   return readResponse<GraphResponse>(response);
 }
 
+export type DraftExecutionMode = "rerun_child" | "new_run";
+
+export type PipelineDraftNode =
+  | {
+      node_id: string;
+      node_type: "input.dataset";
+      source_type: "run_input" | "upload";
+      run_input_id?: string;
+      upload_sha?: string;
+      dataset_snapshot_id?: string;
+      schema_fingerprint: string;
+      input_fingerprint: string;
+      row_count?: number;
+      column_count?: number;
+      columns_summary?: Array<{ name: string; dtype?: string }>;
+      status: "bound" | "missing" | "invalid";
+    }
+  | {
+      node_id: string;
+      node_type: "model";
+      model_family: string;
+      model_type: string;
+      schema_id: string;
+      editable_schema: unknown[];
+      editable_schema_hash: string;
+      source_ref: Record<string, string>;
+      source_params: Record<string, unknown>;
+      params: Record<string, unknown>;
+    };
+
+export type PipelineDraftV1 = {
+  draft_id: string;
+  schema_version: "pipeline_draft.v1";
+  created_at: string;
+  updated_at: string;
+  status: string;
+  created_from?: Record<string, string>;
+  graph: {
+    nodes: PipelineDraftNode[];
+    edges: Array<{ from: string; to: string }>;
+  };
+  default_execution_mode: DraftExecutionMode;
+};
+
+export type PipelineDraftResponse = {
+  draft: PipelineDraftV1;
+  draft_hash: string;
+};
+
+export type DraftValidationResult = {
+  ok: boolean;
+  status: "valid" | "invalid" | "blocked";
+  executable: boolean;
+  checks: Array<{
+    code: string;
+    level: "error" | "warning" | "info";
+    message: string;
+    node_id?: string;
+    blocking: boolean;
+  }>;
+  resolved_execution: {
+    execution_mode: DraftExecutionMode;
+    compare_source_available: boolean;
+    rerun_from_run_id?: string;
+    rerun_from_model_node_id?: string;
+    rerun_from_op_node_id?: string;
+  };
+  validated_execution_mode?: DraftExecutionMode;
+  validated_draft_hash?: string;
+  validated_at: string;
+};
+
+export type DraftExecutionResult = {
+  ok: boolean;
+  run_id: string;
+  draft_id: string;
+  executed_draft_hash: string;
+  execution_mode: "rerun_child";
+  deduped?: boolean;
+  produced_lineage: {
+    rerun_from_run_id: string;
+    rerun_from_model_node_id: string;
+    rerun_from_op_node_id: string;
+  };
+  focus: {
+    status: "ready" | "pending_index";
+    run_id: string;
+    target_model_node_id?: string;
+    poll?: {
+      rerun_from_run_id: string;
+      rerun_from_model_node_id: string;
+      rerun_from_op_node_id: string;
+    };
+  };
+};
+
+export type PipelineDraftFromNodeRequest = {
+  source_run_id: string;
+  source_model_node_id: string;
+  source_op_node_id: string;
+  source_node_hash: string;
+  source_forest_node_key?: string;
+  source_context_fingerprint: string;
+};
+
+export type PipelineDraftPatchRequest = {
+  model_node_id: string;
+  base_draft_hash: string;
+  params: Record<string, unknown>;
+};
+
+export type PipelineDraftExecuteRequest = {
+  validated_draft_hash: string;
+  execution_mode: DraftExecutionMode;
+  idempotency_key?: string;
+};
+
+function draftUrl(projectRoot: string, path: string): string {
+  return apiUrl(`${path}?project_root=${encodeURIComponent(projectRoot)}`);
+}
+
+export async function createPipelineDraftFromNode(
+  projectRoot: string,
+  body: PipelineDraftFromNodeRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(draftUrl(projectRoot, "/pipeline-drafts/from-node"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+export async function getPipelineDraft(
+  projectRoot: string,
+  draftId: string,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(
+    draftUrl(projectRoot, `/pipeline-drafts/${encodeURIComponent(draftId)}`),
+  );
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+export async function patchPipelineDraftParams(
+  projectRoot: string,
+  draftId: string,
+  body: PipelineDraftPatchRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(
+    draftUrl(projectRoot, `/pipeline-drafts/${encodeURIComponent(draftId)}`),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+export async function validatePipelineDraft(
+  projectRoot: string,
+  draftId: string,
+  executionMode: DraftExecutionMode = "rerun_child",
+): Promise<DraftValidationResult> {
+  const response = await fetch(
+    draftUrl(projectRoot, `/pipeline-drafts/${encodeURIComponent(draftId)}/validate`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ execution_mode: executionMode }),
+    },
+  );
+  return readResponse<DraftValidationResult>(response);
+}
+
+export async function executePipelineDraft(
+  projectRoot: string,
+  draftId: string,
+  body: PipelineDraftExecuteRequest,
+): Promise<DraftExecutionResult> {
+  const response = await fetch(
+    draftUrl(projectRoot, `/pipeline-drafts/${encodeURIComponent(draftId)}/execute`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return readResponse<DraftExecutionResult>(response);
+}
+
 // ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──
 
 /** Fetch the family head-set (union DAG across the rerun forest). */

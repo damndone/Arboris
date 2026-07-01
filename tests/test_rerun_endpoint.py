@@ -85,6 +85,23 @@ def test_rerun_unknown_from_node_422(tmp_path: Path):
     assert resp.status_code == 422
 
 
+def test_direct_rerun_rejects_pipeline_draft_payload_fields(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    response = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={
+            "from_node": node_id,
+            "op_overrides": {},
+            "draft_id": "draft_abc123",
+            "validated_draft_hash": "hash",
+        },
+    )
+    assert response.status_code in {400, 422}
+
+
 def test_rerun_unknown_override_key_422(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_terminal_run(project.root)

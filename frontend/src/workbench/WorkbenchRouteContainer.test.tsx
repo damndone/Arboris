@@ -520,4 +520,37 @@ describe("WorkbenchRouteContainer", () => {
       ),
     );
   });
+
+  it("uses draft pending query params to poll and select the child run node", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet")
+      .mockResolvedValueOnce(forestResponse("hash_model"))
+      .mockResolvedValueOnce(forkedForestResponse());
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/?tab=lineage&pending_source_run_id=run_a&pending_source_model_node_id=model:ols_1&pending_source_op_node_id=model:ols_1",
+        ]}
+      >
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_child" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+        "Child OLS",
+      ),
+    );
+  });
 });
