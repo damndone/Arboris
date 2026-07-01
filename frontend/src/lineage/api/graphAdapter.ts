@@ -167,6 +167,7 @@ function adaptEdge(raw: LineageEdge): GraphViewEdge {
     source: raw.source_id,
     target: raw.target_id,
     op: raw.op || undefined,
+    params: raw.params,
     reversible: raw.reversible,
     inverseOp: raw.inverse_op,
   };
@@ -319,6 +320,10 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
     id: `${e.source}->${e.target}`,
     source: e.source,
     target: e.target,
+    // v1.6.5 — carry role op + params into the forest view model so the
+    // canvas renders variable roles (role lives on the edge).
+    op: e.op || undefined,
+    params: e.params ?? undefined,
   }));
   return {
     schemaVersion: backend.schema_version,

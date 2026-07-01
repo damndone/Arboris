@@ -28,6 +28,11 @@ function makeDraftResponse({
       created_at: "",
       updated_at: "",
       status: "draft",
+      created_from: {
+        source_type: "run",
+        source_run_id: "run_parent",
+        source_model_node_id: "model_parent",
+      },
       graph: {
         nodes: [
           {
@@ -299,4 +304,24 @@ test("keeps the draft open and surfaces execute errors", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent("VALIDATED_DRAFT_HASH_MISMATCH");
   expect(screen.getByText("Draft Graph")).toBeInTheDocument();
+});
+
+test("shows a back link to the source run lineage (P6)", async () => {
+  const navigate = vi.fn();
+  vi.mocked(useNavigate).mockReturnValue(navigate);
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(makeDraftResponse());
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_1?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  const back = await screen.findByRole("button", { name: /back to lineage/i });
+  fireEvent.click(back);
+  expect(navigate).toHaveBeenCalledWith(
+    "/runs/run_parent?project_root=%2Ftmp%2Fproject&tab=lineage",
+  );
 });

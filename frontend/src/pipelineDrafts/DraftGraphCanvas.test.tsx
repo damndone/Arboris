@@ -37,7 +37,7 @@ const draft: PipelineDraftV1 = {
   default_execution_mode: "rerun_child",
 };
 
-test("renders fixed InputNode to ModelNode graph", () => {
+test("renders fixed InputNode → ModelNode as node cards with a connector", () => {
   render(
     <DraftGraphCanvas
       draft={draft}
@@ -48,5 +48,11 @@ test("renders fixed InputNode to ModelNode graph", () => {
 
   expect(screen.getByText("Input Dataset")).toBeInTheDocument();
   expect(screen.getByText("Model")).toBeInTheDocument();
-  expect(screen.getByText("input_1 -> model_1")).toBeInTheDocument();
+  // model card surfaces the model_type + schema id
+  expect(screen.getByText("ols")).toBeInTheDocument();
+  // a visual connector between the two cards (replaces the raw "a -> b" text)
+  expect(screen.getByTestId("draft-edge")).toBeInTheDocument();
+  // selected input card reflects selection
+  const inputCard = screen.getByRole("button", { name: /Input Dataset/i });
+  expect(inputCard).toHaveAttribute("aria-pressed", "true");
 });

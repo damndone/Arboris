@@ -51,6 +51,18 @@
   --stage-viz:        oklch(0.66 0.04 320);
   --stage-report:     oklch(0.74 0.06 75);
 
+  /* v1.6.5 variable-role palette (canvas badges + role edges) */
+  --role-outcome:                  oklch(0.66 0.14 250);
+  --role-focal:                    oklch(0.72 0.16 150);
+  --role-treatment:                oklch(0.74 0.15 65);
+  --role-covariates:               oklch(0.66 0.02 280);
+  --role-explanatory-unspecified:  oklch(0.70 0.02 280);
+  --role-instruments:              oklch(0.66 0.18 310);
+  --role-exposure:                 oklch(0.74 0.10 220);
+  --role-unit:                     oklch(0.64 0.20 10);
+  --role-time:                     oklch(0.80 0.14 95);
+  --role-cluster:                  oklch(0.74 0.12 230);
+
   /* Trust status — adapter buckets (ok / review / caution) */
   --ok:               oklch(0.70 0.07 155);
   --review:           oklch(0.74 0.10 65);
@@ -120,6 +132,18 @@
   --stage-diag:       oklch(0.48 0.06 280);
   --stage-viz:        oklch(0.52 0.05 320);
   --stage-report:     oklch(0.55 0.08 75);
+
+  /* v1.6.5 variable-role palette (light) */
+  --role-outcome:                  oklch(0.52 0.16 250);
+  --role-focal:                    oklch(0.56 0.16 150);
+  --role-treatment:                oklch(0.60 0.15 65);
+  --role-covariates:               oklch(0.52 0.02 280);
+  --role-explanatory-unspecified:  oklch(0.58 0.02 280);
+  --role-instruments:              oklch(0.52 0.18 310);
+  --role-exposure:                 oklch(0.56 0.12 220);
+  --role-unit:                     oklch(0.54 0.20 10);
+  --role-time:                     oklch(0.62 0.15 95);
+  --role-cluster:                  oklch(0.56 0.13 230);
 
   --ok:               oklch(0.55 0.08 155);
   --review:           oklch(0.62 0.12 65);
@@ -312,6 +336,28 @@
   border-radius: 3px;
   background: transparent;
   border: 1px solid var(--separator);
+}
+
+/* v1.6.5 — variable-role badge + model roles tag (canvas) */
+.ln-graph-node__role-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--role-color, var(--label-tertiary));
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 6px;
+}
+.ln-graph-node__roles-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--label-tertiary);
+  margin-left: 6px;
 }
 .ln-graph-node__badge--review {
   color: var(--review);
@@ -818,4 +864,20 @@
   color: var(--label-tertiary);
   font-size: 11px;
   font-family: var(--font-mono);
+}
+
+/* v1.6.5 — expanded variable-cluster container (behind the variables) */
+.ln-var-container {
+  width: 100%;
+  height: 100%;
+  border: 1px dashed var(--separator);
+  border-radius: 12px;
+  background: var(--bg-card-2, rgba(120, 120, 128, 0.06));
+}
+.ln-var-container__header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--label-secondary);
+  padding: 6px 10px;
+  cursor: pointer;
 }

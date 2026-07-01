@@ -344,6 +344,9 @@ export interface RunExtraParams {
   csClusterVar?: string;
   honestDid?: boolean;
   didTreatmentPath?: string;
+  /** v1.6.5 — user-declared focal explanatory columns (role layer). Posted
+   *  comma-joined; the backend clears it for structural-focal families. */
+  focalX?: string[];
 }
 
 export async function runWorkflow(
@@ -384,6 +387,7 @@ export async function runWorkflow(
   if (extra?.csClusterVar) form.append("cs_cluster_var", extra.csClusterVar);
   if (extra?.honestDid) form.append("honest_did", "true");
   if (extra?.didTreatmentPath) form.append("did_treatment_path", extra.didTreatmentPath);
+  if (extra?.focalX?.length) form.append("focal_x", extra.focalX.join(","));
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);

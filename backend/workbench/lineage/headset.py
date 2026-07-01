@@ -138,10 +138,17 @@ def build_headset(
         for edge in graph.get("edges", {}).values():
             src = keymap.get(edge["source_id"])
             dst = keymap.get(edge["target_id"])
-            if src is None or dst is None or (src, dst) in edge_seen:
+            op = edge.get("op")
+            # v1.6.5: carry op + params into the forest projection so the
+            # canvas can render variable roles (role lives on the edge). Dedup
+            # on (src, dst, op) so a column holding two roles (e.g. Unit +
+            # Cluster) keeps both role edges instead of collapsing to one.
+            if src is None or dst is None or (src, dst, op) in edge_seen:
                 continue
-            edge_seen.add((src, dst))
-            edges.append({"source": src, "target": dst})
+            edge_seen.add((src, dst, op))
+            edges.append(
+                {"source": src, "target": dst, "op": op, "params": edge.get("params")}
+            )
 
         # Head = leaf node of this run's graph (not a source of any edge).
         run_edges = graph.get("edges", {}).values()

@@ -98,7 +98,7 @@ function mixedVariantGraph(): GraphResponse {
 }
 
 describe("GraphCanvas", () => {
-  it("renders a fold-back marker for expanded variable groups", async () => {
+  it("wraps an expanded variable group in a titled container (fold-back affordance)", async () => {
     render(
       <GraphCanvas
         model={model(graph())}
@@ -109,8 +109,11 @@ describe("GraphCanvas", () => {
       />,
     );
 
-    expect(await screen.findByText("▼ Variables (expanded)")).toBeInTheDocument();
-    expect(screen.getByText("Tap to fold back")).toBeInTheDocument();
+    // v1.6.5: the stray "▼ Variables (expanded)" marker node is replaced by a
+    // titled container box drawn behind the variables.
+    const box = await screen.findByTestId("var-container");
+    expect(box.textContent ?? "").toMatch(/Variables \(4\)/);
+    expect(screen.queryByText("▼ Variables (expanded)")).not.toBeInTheDocument();
   });
 
   it("keeps a sibling 'dropped' group folded when only the 'cleaned' group is expanded", async () => {
@@ -133,8 +136,9 @@ describe("GraphCanvas", () => {
     expect(await screen.findByText("x1 (cleaned)")).toBeInTheDocument();
     expect(screen.getByText("x4 (cleaned)")).toBeInTheDocument();
 
-    // Cleaned cluster shows a fold-back affordance.
-    expect(screen.getByText("▼ Variables (expanded)")).toBeInTheDocument();
+    // Cleaned cluster shows a fold-back affordance: a titled container box.
+    const containers = screen.getAllByTestId("var-container");
+    expect(containers.some((c) => /Variables \(4\)/.test(c.textContent ?? ""))).toBe(true);
 
     // Dropped sibling group stays folded as a summary node.
     expect(screen.getByText("Dropped variables (4)")).toBeInTheDocument();
@@ -755,5 +759,252 @@ describe("GraphCanvas", () => {
     );
     const afterSelection = stageNode.closest(".react-flow__node") as HTMLElement;
     expect(afterSelection.style.transform).toBe(initialTransform);
+  });
+});
+
+describe("GraphCanvas — v1.6.5 variable roles", () => {
+  function roleGraph(): GraphResponse {
+    const nodes: Record<string, LineageNode> = {
+      "stage:cleaned": node({
+        id: "stage:cleaned",
+        kind: "dataset_stage",
+        display_label: "Cleaned data",
+        summary: "Cleaned: 40 rows",
+      }),
+      "model:ols_1": node({
+        id: "model:ols_1",
+        kind: "model",
+        display_label: "ols_robust (primary)",
+        summary: "OLS",
+      }),
+      "var:wage:cleaned": node({
+        id: "var:wage:cleaned",
+        display_label: "wage (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+      "var:firm:cleaned": node({
+        id: "var:firm:cleaned",
+        display_label: "firm (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+    };
+    const mkEdge = (id: string, s: string, t: string, op: string): LineageEdge => ({
+      id,
+      source_id: s,
+      target_id: t,
+      op,
+      params: {},
+      reversible: false,
+      inverse_op: null,
+    });
+    const edges: Record<string, LineageEdge> = {
+      fit: mkEdge("fit", "stage:cleaned", "model:ols_1", "ols_robust.fit"),
+      out: mkEdge("out", "var:wage:cleaned", "model:ols_1", "enters_as_outcome"),
+      clu: mkEdge("clu", "var:firm:cleaned", "model:ols_1", "configures_cluster"),
+    };
+    return {
+      schema_version: 2,
+      run_id: "r1",
+      legacy: false,
+      stats: { node_count: 4, edge_count: 3, leaf_count: 1, has_dp_count: 0 },
+      nodes,
+      edges,
+      branches: {},
+    };
+  }
+
+  it("stamps role badges on variable nodes from their role edges", () => {
+    render(
+      <GraphCanvas
+        model={model(roleGraph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const badges = Array.from(
+      document.querySelectorAll('[data-testid="node-role-badge"]'),
+    );
+    const byRole = new Map(
+      badges.map((b) => [b.getAttribute("data-role"), b.textContent]),
+    );
+    expect(byRole.get("outcome")).toBe("Y");
+    expect(byRole.get("cluster")).toBe("C");
+  });
+});
+
+describe("GraphCanvas — v1.6.5 variable container", () => {
+  it("wraps an expanded variable cluster in a titled container, no stray marker", () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const box = document.querySelector('[data-testid="var-container"]');
+    expect(box).not.toBeNull();
+    expect(box?.textContent ?? "").toMatch(/Variables/);
+    expect(document.body.textContent ?? "").not.toMatch(/\(expanded\)/);
+  });
+});
+
+describe("GraphCanvas — v1.6.5 model roles tag", () => {
+  function tagGraph(opts: { roleEdges: boolean; unspecified: boolean }): GraphResponse {
+    const nodes: Record<string, LineageNode> = {
+      "stage:cleaned": node({
+        id: "stage:cleaned",
+        kind: "dataset_stage",
+        display_label: "Cleaned data",
+      }),
+      "model:ols_1": node({
+        id: "model:ols_1",
+        kind: "model",
+        display_label: "ols_robust (primary)",
+      }),
+      "var:wage:cleaned": node({
+        id: "var:wage:cleaned",
+        display_label: "wage (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+      "var:a:cleaned": node({
+        id: "var:a:cleaned",
+        display_label: "a (cleaned)",
+        parent_stage_id: "stage:cleaned",
+      }),
+    };
+    const mk = (id: string, s: string, t: string, op: string): LineageEdge => ({
+      id, source_id: s, target_id: t, op, params: {}, reversible: false, inverse_op: null,
+    });
+    const edges: Record<string, LineageEdge> = {
+      fit: mk("fit", "stage:cleaned", "model:ols_1", "ols_robust.fit"),
+    };
+    if (opts.roleEdges) {
+      edges.out = mk("out", "var:wage:cleaned", "model:ols_1", "enters_as_outcome");
+      edges.rhs = mk(
+        "rhs",
+        "var:a:cleaned",
+        "model:ols_1",
+        opts.unspecified ? "enters_as_explanatory_unspecified" : "enters_as_focal",
+      );
+    }
+    return {
+      schema_version: 2,
+      run_id: "r1",
+      legacy: false,
+      stats: { node_count: 4, edge_count: Object.keys(edges).length, leaf_count: 1, has_dp_count: 0 },
+      nodes,
+      edges,
+      branches: {},
+    };
+  }
+
+  function tagOf(): string | null {
+    const el = document.querySelector('[data-testid="node-roles-tag"]');
+    return el ? el.textContent : null;
+  }
+
+  it("tags the model node 'unspecified' when RHS is only the explanatory fallback", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: true, unspecified: true }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toMatch(/roles: unspecified/);
+  });
+
+  it("tags the model node 'legacy_unspecified' when the run has no role edges", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: false, unspecified: false }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toMatch(/roles: legacy_unspecified/);
+  });
+
+  it("shows no roles tag when a focal/covariate split is declared", () => {
+    render(
+      <GraphCanvas
+        model={model(tagGraph({ roleEdges: true, unspecified: false }))}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    expect(tagOf()).toBeNull();
+  });
+});
+
+describe("GraphCanvas — v1.6.5 forest (headset) role rendering", () => {
+  // Forest projection prefixes node ids with the content hash and carries the
+  // role op on the edge. This is the path the Graph tab actually renders
+  // (view=headset), so it must show role badges just like the single-run view.
+  function forestModel() {
+    const H = "abc123::";
+    const vnode = (id: string, kind: string, label: string) => ({
+      id: H + id,
+      nodeKey: H + id,
+      raw: null,
+      stage: (kind === "model" ? "model" : kind === "dataset_stage" ? "clean" : "transform") as never,
+      kind,
+      title: label,
+      parentStageId: kind === "variable" ? H + "stage:cleaned" : null,
+      trust: "ok" as const,
+      decisions: [],
+    });
+    const edge = (s: string, t: string, op: string) => ({
+      id: `${H}${s}->${H}${t}`,
+      source: H + s,
+      target: H + t,
+      op,
+    });
+    return {
+      schemaVersion: 3,
+      runId: "r1",
+      legacy: false,
+      nodes: [
+        vnode("stage:cleaned", "dataset_stage", "Cleaned data"),
+        vnode("model:ols_1", "model", "ols_robust (primary)"),
+        vnode("var:wage:cleaned", "variable", "wage (cleaned)"),
+        vnode("var:firm:cleaned", "variable", "firm (cleaned)"),
+      ],
+      edges: [
+        edge("stage:cleaned", "model:ols_1", "ols_robust.fit"),
+        edge("var:wage:cleaned", "model:ols_1", "enters_as_outcome"),
+        edge("var:firm:cleaned", "model:ols_1", "configures_cluster"),
+      ],
+      stats: { nodeCount: 4, edgeCount: 3, leafCount: 1, hasDpCount: 0 },
+    } as never;
+  }
+
+  it("renders role badges in the forest projection (hash-prefixed ids + edge op)", () => {
+    render(
+      <GraphCanvas
+        model={forestModel()}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+    const byRole = new Map(
+      Array.from(document.querySelectorAll('[data-testid="node-role-badge"]')).map(
+        (b) => [b.getAttribute("data-role"), b.textContent],
+      ),
+    );
+    expect(byRole.get("outcome")).toBe("Y");
+    expect(byRole.get("cluster")).toBe("C");
   });
 });

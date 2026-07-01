@@ -212,7 +212,7 @@ def test_patch_requires_base_hash_and_validate_returns_hash(tmp_path: Path) -> N
         json={
             "model_node_id": "model_1",
             "base_draft_hash": "stale",
-            "params": {"model_type": "ols", "covariance": "robust"},
+            "params": {"model_type": "ols", "covariance": "robust", "focal_x": []},
         },
     )
     assert stale.status_code == 409
@@ -222,7 +222,7 @@ def test_patch_requires_base_hash_and_validate_returns_hash(tmp_path: Path) -> N
         json={
             "model_node_id": "model_1",
             "base_draft_hash": create["draft_hash"],
-            "params": {"model_type": "ols", "covariance": "robust"},
+            "params": {"model_type": "ols", "covariance": "robust", "focal_x": []},
         },
     )
     assert ok.status_code == 200, ok.text

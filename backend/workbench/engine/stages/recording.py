@@ -156,6 +156,66 @@ class RecordingStage:
                 op="render_report",
             )
 
+            # -- v1.6.5 role layer: variables as role-bearing inputs to the model --
+            # Additive lineage decoration; it must NEVER fail a run that estimated
+            # fine, so the whole block degrades-not-fails (a genuine role conflict
+            # surfaces as a skipped decoration here, while derive_roles still fails
+            # loudly when called as a pure function / in tests).
+            try:
+                from ...lineage.role_layer import (
+                    RoleAssignment, canonicalize_focal_x, derive_roles,
+                )
+                from ...lineage.role_inputs_from_ctx import build_resolved_inputs
+
+                if "_focal_x" not in ctx.artifacts:
+                    focal_raw = ""
+                    try:
+                        from ...lineage.run_inputs import read_run_inputs
+                        focal_raw = (read_run_inputs(run_root).get("form") or {}).get("focal_x", "")
+                    except Exception:
+                        focal_raw = ""
+                    ctx.artifacts["_focal_x"] = canonicalize_focal_x(focal_raw, normalized_x)
+
+                assignments = derive_roles(build_resolved_inputs(ctx))
+                _dropped_cols = {entry["variable"] for entry in dropped_vars}
+                if _dropped_cols:
+                    assignments = [
+                        a if a.column not in _dropped_cols else RoleAssignment(
+                            column=a.column, role=a.role, source=a.source,
+                            estimator_family=a.estimator_family,
+                            estimator_key=a.estimator_key, dropped=True)
+                        for a in assignments
+                    ]
+
+                primary_model_node = f"model:{primary_model_id}"
+                # Record identity nodes for role columns the cleaned-stage block did
+                # not already record (the previously-invisible Unit / Time / Treatment
+                # / Instruments / Cluster). They attach to stage:cleaned via
+                # parent_stage_id, matching the existing variable-node convention.
+                for a in assignments:
+                    var_id = f"var:{a.column}:cleaned"
+                    if var_id not in _recorder._nodes:
+                        _recorder.record_variable(
+                            node_id=var_id, display_label=a.column,
+                            parent_stage_id="stage:cleaned", stage=Stage.TRANSFORM,
+                        )
+                for a in assignments:
+                    _recorder.record_edge(
+                        edge_id=f"e:role:{a.column}:{a.role.value}",
+                        source_id=f"var:{a.column}:cleaned",
+                        target_id=primary_model_node,
+                        op=a.edge_op,
+                        params={"role": a.role.value, "source": a.source,
+                                "estimator_family": a.estimator_family,
+                                "dropped": a.dropped},
+                    )
+            except Exception as _role_exc:  # noqa: BLE001 - decoration must not fail the run
+                import warnings as _w
+                _w.warn(
+                    f"v1.6.5 role layer skipped (degrade-not-fail): {_role_exc!r}",
+                    RuntimeWarning, stacklevel=2,
+                )
+
         ctx.primary_type = primary_type
         ctx.artifacts["_dropped_vars"] = dropped_vars
 

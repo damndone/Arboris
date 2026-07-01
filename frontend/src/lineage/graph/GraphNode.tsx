@@ -32,7 +32,23 @@
 
 import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
-import type { GraphViewNode, Stage, Trust } from "../api/graphViewTypes";
+import type { GraphViewNode, HeadSetNode, Stage, Trust } from "../api/graphViewTypes";
+import { ModelNodeBadge } from "../../workbench/ModelNodeBadge";
+import { roleAbbrev, roleColorVar, roleLabel, type Role } from "../roles";
+
+/** v1.6.5 (Problem 6) — when a node is a forest model node (carries a
+ *  content `nodeHash` and at least one owning run), expose the identity the
+ *  badge needs to disambiguate same-named reruns. Returns null otherwise. */
+function forestModelIdentity(
+  node: GraphViewNode,
+): { runId: string; nodeHash: string; role: "source" | "rerun" } | null {
+  const isModel = node.kind === "model" || node.stage === "model";
+  if (!isModel) return null;
+  const hs = node as Partial<HeadSetNode>;
+  if (!hs.nodeHash || !hs.runs || hs.runs.length === 0) return null;
+  const role = hs.rerunFrom || hs.runRerunFrom ? "rerun" : "source";
+  return { runId: hs.runs[0], nodeHash: hs.nodeHash, role };
+}
 
 // T8.5 + V1.5.2 P6: 5-level highlight model. Plan §8.
 //
@@ -73,6 +89,10 @@ export interface GraphNodeProps {
      *  top of (and stronger than) isSearchHit so ↑/↓ navigation is
      *  visible. Tier 3 / transient. */
     isSearchCursor?: boolean;
+    /** v1.6.5 — primary role for a variable node (drives badge + colour bar). */
+    role?: Role;
+    /** v1.6.5 — model-node roles tag: "unspecified" | "legacy_unspecified". */
+    rolesTag?: string;
   };
   // React Flow also passes its own `selected` for accessibility / focus
   // styles on the wrapper, but our internal outline is driven by
@@ -115,6 +135,8 @@ export function GraphNode({ data }: GraphNodeProps) {
     handleAxis = "horizontal",
     isSearchHit = false,
     isSearchCursor = false,
+    role,
+    rolesTag,
   } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
@@ -160,7 +182,7 @@ export function GraphNode({ data }: GraphNodeProps) {
       data-state={state}
       data-search-hit={isSearchHit ? "true" : undefined}
       data-search-cursor={isSearchCursor ? "true" : undefined}
-      style={{ ["--node-color" as string]: colorVar }}
+      style={{ ["--node-color" as string]: role ? roleColorVar(role) : colorVar }}
     >
       <Handle
         type="target"
@@ -172,6 +194,25 @@ export function GraphNode({ data }: GraphNodeProps) {
       <div className="ln-graph-node__body">
         <div className="ln-graph-node__row1">
           <span className="ln-graph-node__kind">{node.kind}</span>
+          {role && (
+            <span
+              className="ln-graph-node__role-badge"
+              data-testid="node-role-badge"
+              data-role={role}
+              title={roleLabel(role)}
+              style={{ ["--role-color" as string]: roleColorVar(role) }}
+            >
+              {roleAbbrev(role)}
+            </span>
+          )}
+          {rolesTag && (
+            <span
+              className="ln-graph-node__roles-tag"
+              data-testid="node-roles-tag"
+            >
+              roles: {rolesTag}
+            </span>
+          )}
           {badge && (
             <span
               className={`ln-graph-node__badge ln-graph-node__badge--${badge.variant}`}
@@ -182,6 +223,14 @@ export function GraphNode({ data }: GraphNodeProps) {
           )}
         </div>
         <div className="ln-graph-node__title">{node.title}</div>
+        {(() => {
+          const id = forestModelIdentity(node);
+          return id ? (
+            <div className="ln-graph-node__meta" data-testid="node-model-badge">
+              <ModelNodeBadge runId={id.runId} nodeHash={id.nodeHash} role={id.role} />
+            </div>
+          ) : null;
+        })()}
         {node.summary && (
           <div className="ln-graph-node__meta" data-testid="node-summary">
             {node.summary}

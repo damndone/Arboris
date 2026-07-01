@@ -78,7 +78,47 @@ from .lineage.rerun_provenance import (
     run_rerun_from_from_context,
 )
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
+from .lineage.role_layer import canonicalize_focal_x
 from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
+
+# Estimator families whose focal/treatment variable is structural (not user-declared
+# via focal_x). For these, persisted focal_x MUST be empty (spec §5).
+_STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
+
+
+def _parse_focal_x(raw: str, x_columns: list[str]) -> list[str]:
+    """Canonicalize the form's focal_x against the run's x columns."""
+    return canonicalize_focal_x(raw, x_columns)
+
+
+def _inject_focal_x_control(
+    editable_schema: list[dict[str, Any]],
+    form: dict[str, Any],
+    model_type: str,
+) -> list[dict[str, Any]]:
+    """v1.6.5 — add a `focal_x` multiselect to a model node's editable_schema so
+    the draft inspector can re-declare the focal explanatory variable(s).
+
+    Omitted for structural-focal families (IV/DID/CS/SA/dCDH), where
+    focal/treatment is structural — mirrors the run-POST clear (spec §5). The
+    options are the run's x columns; the value is the run's canonicalized
+    focal_x. No-op when there are no x columns or the control already exists."""
+    if model_type in _STRUCTURAL_FOCAL_FAMILIES:
+        return editable_schema
+    if any(item.get("key") == "focal_x" for item in editable_schema):
+        return editable_schema
+    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
+    if not x_columns:
+        return editable_schema
+    value = _parse_focal_x(form.get("focal_x", ""), x_columns)
+    control = {
+        "key": "focal_x",
+        "kind": "multiselect",
+        "label": "Focal explanatory variable(s)",
+        "options": list(x_columns),
+        "value": value,
+    }
+    return [*editable_schema, control]
 
 # A parent run must be in one of these (non-running) states to be rerun-from.
 _TERMINAL_RUN_STATUSES = {
@@ -166,16 +206,29 @@ def _submit_run(
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
     iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
 
+    # focal_x: canonicalize against x; clear for families whose focal/treatment is
+    # structural. Persist into run_inputs (the engine reads it back at recording).
+    # Only mutate the form when there is something to set/clear, so runs that never
+    # declare a focal keep byte-identical run_inputs (spec §5 backward compat).
+    focal_x = _parse_focal_x(form.get("focal_x", ""), x_columns)
+    if form.get("model_type", "auto") in _STRUCTURAL_FOCAL_FAMILIES:
+        focal_x = []
+    form_for_persist = form
+    if focal_x:
+        form_for_persist = {**form, "focal_x": ",".join(focal_x)}
+    elif form.get("focal_x"):
+        form_for_persist = {**form, "focal_x": ""}
+
     sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
     run = create_run(root, mode=form.get("mode", "auto"))
 
     write_run_inputs(
         run.root,
-        form=form,
+        form=form_for_persist,
         upload={"sha256": sha, "filename": upload_filename},
         rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
         override_hash=override_hash(op_overrides) if op_overrides else None,
-        dag_hash=dag_hash(sha, form),
+        dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
     )
 
@@ -247,6 +300,7 @@ async def run_endpoint(
     cs_cluster_var: str = Form(""),
     cs_anticipation: int = Form(0),
     honest_did: bool = Form(False),
+    focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
 ) -> dict[str, str]:
     root = Path(project_root)
     config = load_config(root / "config.yml")
@@ -276,6 +330,7 @@ async def run_endpoint(
             "cs_control_group": cs_control_group, "cs_est_method": cs_est_method,
             "cs_base_period": cs_base_period, "cs_cluster_var": cs_cluster_var,
             "cs_anticipation": str(cs_anticipation), "honest_did": str(honest_did).lower(),
+            "focal_x": focal_x,
         }
         started_at = datetime.now(timezone.utc).isoformat()
         try:
@@ -1072,7 +1127,9 @@ def create_pipeline_draft_from_node(
 
     now = utc_now()
     draft_id = new_draft_id()
-    editable_schema = _backfill_schema_values(contract.editable_schema, inputs.get("form") or {})
+    _draft_form = inputs.get("form") or {}
+    editable_schema = _backfill_schema_values(contract.editable_schema, _draft_form)
+    editable_schema = _inject_focal_x_control(editable_schema, _draft_form, contract.op_type)
     source_params = _source_params_from_schema(editable_schema)
     draft = {
         "draft_id": draft_id,
@@ -1271,6 +1328,15 @@ def execute_pipeline_draft(
             **inputs["form"],
             **{key: _encode_override(value) for key, value in op_overrides.items()},
         }
+        # v1.6.5: focal_x is a run-form field carrying a comma-joined column
+        # list, NOT a JSON-encoded override. _encode_override would emit
+        # ["x"], which the dispatch's comma-split parser cannot read — coerce
+        # it back to the form wire format so the role layer sees the picks.
+        if "focal_x" in op_overrides:
+            _focal = op_overrides["focal_x"]
+            merged_form["focal_x"] = (
+                ",".join(_focal) if isinstance(_focal, list) else str(_focal)
+            )
         run_level_rerun_from = run_rerun_from_from_context(
             request_id=f"draft:{draft_id}",
             owner_run_id=source["source_run_id"],

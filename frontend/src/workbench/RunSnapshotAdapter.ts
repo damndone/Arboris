@@ -21,6 +21,7 @@ import type {
   GraphViewNode,
   Stage,
 } from "../lineage/api/graphViewTypes";
+import { ROLE_OF_EDGE_OP, ROLE_GROUP_ORDER, type Role } from "../lineage/roles";
 
 /** Hard cap on graph walks. Mirrors `pathBuilder.MAX_HOPS` to ensure
  *  identical behaviour between Drawer chips and canvas overlays. */
@@ -234,4 +235,37 @@ function buildSearchIndex(nodes: GraphViewNode[]): SearchItem[] {
     }
   }
   return items;
+}
+
+// ---------------------------------------------------------------------------
+// V1.6.5 — Variable role grouping. Plan §8 / Phase D2.
+//
+// Buckets var->model role edges into ordered role groups for rendering.
+// Roles live on the *edge* (op + params), never on the node, so a single
+// column may appear under multiple roles (e.g. focal + cluster).
+// ---------------------------------------------------------------------------
+
+type RoleEdge = { source: string; target: string; op: string; params?: Record<string, unknown> };
+export type RoleGroup = { role: Role; columns: string[]; dropped: Set<string> };
+
+function columnOf(varNodeId: string): string {
+  // "var:x1:cleaned" -> "x1"
+  const m = /^var:(.+):cleaned$/.exec(varNodeId);
+  return m ? m[1] : varNodeId;
+}
+
+export function groupVariablesByRole(edges: RoleEdge[], modelNodeId: string): RoleGroup[] {
+  const byRole = new Map<Role, RoleGroup>();
+  for (const e of edges) {
+    if (e.target !== modelNodeId) continue;
+    const role = ROLE_OF_EDGE_OP[e.op];
+    if (!role) continue;
+    const g = byRole.get(role) ?? { role, columns: [], dropped: new Set<string>() };
+    const col = columnOf(e.source);
+    if (!g.columns.includes(col)) g.columns.push(col);
+    if (e.params?.dropped === true) g.dropped.add(col);
+    byRole.set(role, g);
+  }
+  const order = [...ROLE_GROUP_ORDER, "explanatory_unspecified" as Role];
+  return order.filter((r) => byRole.has(r)).map((r) => byRole.get(r)!);
 }

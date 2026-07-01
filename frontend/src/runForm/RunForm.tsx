@@ -19,6 +19,7 @@ import { IVControls, type IVRoleValue } from "./IVControls";
 import { DIDControls, type DIDRoleValue } from "./DIDControls";
 import { CSControls, type CSValue } from "./CSControls";
 import { DCDHControls, type DCDHValue } from "./DCDHControls";
+import { FocalSelect } from "./FocalSelect";
 
 type RequestState = "idle" | "working";
 
@@ -104,6 +105,9 @@ export function RunForm(props: RunFormProps) {
   const [y, setY] = useState("");
   const [x, setX] = useState("");
   const [xManuallySet, setXManuallySet] = useState(false);
+  // v1.6.5 — user-declared focal explanatory columns (role layer). Only
+  // meaningful for user-focal families; FocalSelect hides itself otherwise.
+  const [focal, setFocal] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewState, setPreviewState] = useState<
@@ -298,6 +302,13 @@ export function RunForm(props: RunFormProps) {
               : undefined,
           honestDid: usesCsParams ? csValue.honestDid : undefined,
           didTreatmentPath: isDcdh ? dcdhValue.treatmentPath : undefined,
+          // v1.6.5 role layer: declare focal only for user-focal families and
+          // only over the columns actually posted as x. Structural families
+          // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
+          focalX:
+            isIV || usesDidRoles || isDcdh
+              ? undefined
+              : focal.filter((c) => exogColumns.includes(c)),
         },
       );
       setLastRun(result);
@@ -575,6 +586,12 @@ export function RunForm(props: RunFormProps) {
               </ul>
             </details>
           )}
+          <FocalSelect
+            xColumns={xColumns}
+            focal={focal.filter((c) => xColumns.includes(c))}
+            onChange={setFocal}
+            family={modelType}
+          />
           <label>
             Data file (.csv, .xlsx, .xls)
             <input

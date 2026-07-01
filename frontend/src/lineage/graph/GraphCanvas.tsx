@@ -18,6 +18,8 @@ import type {
   Stage,
 } from "../api/graphViewTypes";
 import { foldVariableClusters, type GroupNode } from "../folding";
+import { rolesByVariable, primaryRole } from "./variableRoles";
+import { roleEdgeStyle, suppressAggregateEdges, isRoleOp } from "./roleEdges";
 
 // T8.4: 240ms hover delay before the tooltip mounts. Matches V1.4.1
 // NodeTooltip and the prototype (uiux/graph.jsx L228).
@@ -190,7 +192,19 @@ function CanvasLegend() {
   );
 }
 
-const nodeTypes = { lineageNode: GraphNode };
+// v1.6.5 — non-interactive container drawn BEHIND an expanded variable
+// cluster so the user sees the variables belong to one logical group. The
+// header is the fold-back affordance (click → onExpandGroup, routed by id in
+// onNodeClick). Sized by GraphCanvas to the members' bounding box.
+function VarContainerNode({ data }: { data: { label: string; gid: string } }) {
+  return (
+    <div className="ln-var-container" data-testid="var-container">
+      <div className="ln-var-container__header">{data.label}</div>
+    </div>
+  );
+}
+
+const nodeTypes = { lineageNode: GraphNode, varContainer: VarContainerNode };
 
 interface GraphCanvasProps {
   model: GraphViewModel;
@@ -280,25 +294,6 @@ function parseGroupId(
   };
 }
 
-function markerAsNode(
-  gid: string,
-  variantLabel: string,
-  parent: string,
-): GraphViewNode {
-  return {
-    id: gid,
-    nodeKey: gid,
-    raw: null,
-    stage: "unknown",
-    kind: "operation",
-    title: `▼ ${variantLabel} (expanded)`,
-    summary: "Tap to fold back",
-    parentStageId: parent,
-    trust: "ok",
-    decisions: [],
-  };
-}
-
 export function GraphCanvas({
   model,
   selectedNodeId,
@@ -346,6 +341,35 @@ export function GraphCanvas({
   const { seedNodes, rfEdges, memberToGroup } = useMemo(() => {
     const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
 
+    // v1.6.5: which role(s) each variable node holds for the primary model,
+    // derived from the role-bearing var→model edges.
+    const primaryModelId =
+      model.nodes.find((n) => n.kind === "model")?.id ?? "";
+    const varRoles = rolesByVariable(model.edges, primaryModelId);
+
+    // v1.6.5: model-node roles tag (spec §5 back-compat). `legacy_unspecified`
+    // = run predates the role layer (no role edges at all); `unspecified` =
+    // RHS has only the explanatory fallback (no declared focal/covariate split).
+    const anyRoleEdges = model.edges.some((e) => isRoleOp(e.op));
+    const rhsRoles = new Set(
+      [...varRoles.values()].flat().filter((r) =>
+        [
+          "focal",
+          "treatment",
+          "covariates",
+          "instruments",
+          "exposure",
+          "explanatory_unspecified",
+        ].includes(r),
+      ),
+    );
+    const modelTag = !anyRoleEdges
+      ? "legacy_unspecified"
+      : rhsRoles.size > 0 &&
+          [...rhsRoles].every((r) => r === "explanatory_unspecified")
+        ? "unspecified"
+        : undefined;
+
     const visible = new Set<string>(kept.map((n) => n.id));
     groups.forEach((g) => visible.add(g.id));
 
@@ -369,15 +393,24 @@ export function GraphCanvas({
       g.member_ids.forEach((m) => memberToGroup.set(m, g.id)),
     );
 
-    const realNodes: RFNode[] = kept.map((n) => ({
-      id: n.id,
-      type: "lineageNode",
-      position: { x: 0, y: 0 },
-      // T8.3: GraphNode consumes V1.5.0 GraphViewNode directly. Selection
-      // state is overlaid by the decoratedNodes useMemo, not here.
-      data: { node: n, state: "related" },
-      selected: false,
-    }));
+    const realNodes: RFNode[] = kept.map((n) => {
+      const roles = varRoles.get(n.id);
+      return {
+        id: n.id,
+        type: "lineageNode",
+        position: { x: 0, y: 0 },
+        // T8.3: GraphNode consumes V1.5.0 GraphViewNode directly. Selection
+        // state is overlaid by the decoratedNodes useMemo, not here.
+        // v1.6.5: variable nodes carry their primary role for badge/colour.
+        data: {
+          node: n,
+          state: "related",
+          ...(roles && roles.length ? { role: primaryRole(roles) } : {}),
+          ...(n.kind === "model" && modelTag ? { rolesTag: modelTag } : {}),
+        },
+        selected: false,
+      };
+    });
     const groupNodes: RFNode[] = groups.map((g) => ({
       id: g.id,
       type: "lineageNode",
@@ -385,28 +418,11 @@ export function GraphCanvas({
       data: { node: groupAsNode(g), state: "related" },
       selected: false,
     }));
-    const markerNodes: RFNode[] = expandedMarkers.map((m) => ({
-      id: m.gid,
-      type: "lineageNode",
-      position: { x: 0, y: 0 },
-      data: {
-        node: markerAsNode(m.gid, m.variantLabel, m.parent),
-        state: "related",
-      },
-      selected: false,
-    }));
-
     const candidateEdges: RFEdge[] = [];
-    for (const m of expandedMarkers) {
-      candidateEdges.push({
-        id: `${m.parent}->${m.gid}`,
-        source: m.parent,
-        target: m.gid,
-        animated: false,
-        style: { strokeDasharray: "4 4", opacity: 0.4 },
-      });
-    }
-    for (const e of model.edges) {
+    // v1.6.5: drop the legacy aggregate stage→model fit edge when role edges
+    // feed that model (P1: avoids a redundant parallel path), and style the
+    // role edges solid/dashed + coloured by role.
+    for (const e of suppressAggregateEdges(model.edges)) {
       const src = memberToGroup.get(e.source) ?? e.source;
       const tgt = memberToGroup.get(e.target) ?? e.target;
       if (src === tgt) continue;
@@ -416,6 +432,7 @@ export function GraphCanvas({
         source: src,
         target: tgt,
         animated: false,
+        ...(isRoleOp(e.op) ? { style: roleEdgeStyle(e.op!) } : {}),
       });
     }
     const seen = new Set<string>();
@@ -433,11 +450,52 @@ export function GraphCanvas({
     // useMemo and produces a fresh dagre snap.
     const rankdir: "TB" | "LR" = layout === "TB" ? "TB" : "LR";
     const layouted = layoutDagre(
-      [...realNodes, ...groupNodes, ...markerNodes],
+      [...realNodes, ...groupNodes],
       uniqEdges,
       rankdir,
     );
-    return { seedNodes: layouted, rfEdges: uniqEdges, memberToGroup };
+
+    // v1.6.5: for each expanded variable group, draw a titled container box
+    // behind its member variables (their dagre bounding box + padding). This
+    // replaces the old stray "(expanded)" marker node (P2/P3). The header is
+    // the fold-back affordance (routed by `container:` id in onNodeClick).
+    const PAD = 24;
+    const HEADER = 28;
+    const NODE_W = 240;
+    const NODE_H = 80;
+    const containerNodes: RFNode[] = [];
+    for (const m of expandedMarkers) {
+      const wantDropped = m.gid.startsWith("group:dropped-variables:");
+      const members = layouted.filter((rn) => {
+        const orig = nodeById.get(rn.id);
+        if (!orig || orig.kind !== "variable") return false;
+        if (orig.parentStageId !== m.parent) return false;
+        return rn.id.endsWith(":dropped") === wantDropped;
+      });
+      if (members.length === 0) continue;
+      const xs = members.map((n) => n.position.x);
+      const ys = members.map((n) => n.position.y);
+      const minX = Math.min(...xs) - PAD;
+      const minY = Math.min(...ys) - PAD - HEADER;
+      const maxX = Math.max(...xs) + NODE_W + PAD;
+      const maxY = Math.max(...ys) + NODE_H + PAD;
+      containerNodes.push({
+        id: `container:${m.gid}`,
+        type: "varContainer",
+        position: { x: minX, y: minY },
+        data: { label: `${m.variantLabel} (${members.length})`, gid: m.gid },
+        style: { width: maxX - minX, height: maxY - minY, zIndex: -1 },
+        selectable: false,
+        draggable: false,
+      });
+    }
+
+    // Containers first so React Flow paints them behind the variables.
+    return {
+      seedNodes: [...containerNodes, ...layouted],
+      rfEdges: uniqEdges,
+      memberToGroup,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, expandedGroups, nodeById, layout, layoutVersion]);
 
@@ -636,6 +694,8 @@ export function GraphCanvas({
         elementsSelectable={true}
         onNodeClick={(_, n) => {
           if (n.id.startsWith("group:")) onExpandGroup(n.id);
+          else if (n.id.startsWith("container:"))
+            onExpandGroup(n.id.slice("container:".length));
           else onSelect(n.id);
         }}
         onNodeContextMenu={(e, n) => {

@@ -50,6 +50,17 @@ export function ModelNodeInspector({
     value: params[control.key] ?? control.value,
   }));
 
+  // v1.6.5 (§6.5): changed-fields summary — which params differ from the
+  // source model, shown as `key: source → current` so the user sees exactly
+  // what this draft edits before validating/executing.
+  const fmt = (v: unknown): string =>
+    v === undefined || v === "" ? "∅" : Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
+  const changedFields = Array.from(
+    new Set([...Object.keys(node.source_params ?? {}), ...Object.keys(params)]),
+  )
+    .filter((key) => stableParams({ v: params[key] }) !== stableParams({ v: node.source_params?.[key] }))
+    .sort();
+
   return (
     <section aria-label="Model node inspector">
       <h2>ModelNode</h2>
@@ -64,6 +75,20 @@ export function ModelNodeInspector({
           setParams((prev) => ({ ...prev, [key]: value }));
         })}</div>
       ))}
+      <section aria-label="Changed fields" data-testid="changed-fields-summary">
+        <h3>Changed fields</h3>
+        {changedFields.length === 0 ? (
+          <p>No changes from source</p>
+        ) : (
+          <ul>
+            {changedFields.map((key) => (
+              <li key={key}>
+                {key}: {fmt(node.source_params?.[key])} → {fmt(params[key])}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <button type="button" onClick={() => setParams(node.source_params)}>
         Reset to source
       </button>

@@ -60,7 +60,11 @@ describe("controlFactory", () => {
     expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
-  it("only select + columns are day-1 enabled", () => {
-    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual(["columns", "select"]);
+  it("select + columns + multiselect are enabled (multiselect added v1.6.5)", () => {
+    expect([...ENABLED_CONTROL_KINDS].sort()).toEqual([
+      "columns",
+      "multiselect",
+      "select",
+    ]);
   });
 });

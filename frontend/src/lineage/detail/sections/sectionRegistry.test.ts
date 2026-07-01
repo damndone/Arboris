@@ -54,6 +54,7 @@ describe("sectionRegistry", () => {
       "askAi",
       "compareWithSource",
       "operation",
+      "roleGroups",
       "code",
       "lineage",
       "basic",
@@ -63,16 +64,17 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      10, 20, 25, 30, 40, 50, 60, 70,
+      10, 20, 25, 30, 35, 40, 50, 60, 70,
     ]);
   });
 
-  it(".filter(s => s.shouldRender(node)) on a plain node yields lineage/basic by default", () => {
+  it(".filter(s => s.shouldRender(node)) on a plain model node yields roleGroups/lineage/basic by default", () => {
     // ok trust + no decisions + no code + no editableSchema → lineage
-    // + basic render. Ask AI is feature-flagged off by default.
+    // + basic render. roleGroups renders for model nodes (v1.6.5). Ask AI
+    // is feature-flagged off by default.
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
-    expect(visible.map((s) => s.id)).toEqual(["lineage", "basic"]);
+    expect(visible.map((s) => s.id)).toEqual(["roleGroups", "lineage", "basic"]);
   });
 
   it("compareWithSource renders only for forest nodes with run ownership metadata", () => {
