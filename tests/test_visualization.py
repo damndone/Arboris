@@ -197,6 +197,25 @@ def test_did_event_study_plot(tmp_path: Path):
     assert (run.root / figures["event_study"]).exists()
 
 
+def test_event_study_accepts_estimate_key_and_numpy(tmp_path: Path):
+    # CS/SA/dCDH dynamic aggregations use "estimate" (not "coef") and may hold
+    # numpy arrays — the event-study plot must handle both.
+    run = _run(tmp_path)
+    event_study = {
+        "event_time": np.array([-2.0, -1.0, 0.0, 1.0, 2.0]),
+        "estimate": np.array([0.0, 0.0, 0.8, 0.9, 1.0]),
+        "se": np.array([0.1, 0.1, 0.1, 0.1, 0.1]),
+    }
+    frame = pd.DataFrame({"y": list(range(20)), "treat": [0, 1] * 10})
+    figures = create_figures(
+        frame, run.root, numeric_columns=["y"], time_column=None,
+        outcome_column="y", regressors=["treat"], model_type="cs_did",
+        did_event_study=event_study,
+    )
+    assert "event_study" in figures
+    assert (run.root / figures["event_study"]).exists()
+
+
 def test_create_figures_writes_png_artifacts(tmp_path: Path):
     # Continuous-scale data (>cat_max_levels distinct) so x/y classify as
     # continuous and produce a correlation heatmap.

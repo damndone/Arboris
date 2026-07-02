@@ -514,17 +514,29 @@ def _plot_iv_first_stage(frame, iv_endog, iv_instruments, figures_dir, run_root,
 
 
 def _plot_event_study(event_study: dict, figures_dir, run_root, figures) -> None:
-    event_time = event_study.get("event_time")
-    coef = event_study.get("coef")
-    se = event_study.get("se")
-    if not (isinstance(event_time, list) and isinstance(coef, list)):
+    # Accepts both the TWFE shape ({event_time, coef, se}) and the CS/SA/dCDH
+    # dynamic-aggregation shape ({event_time, estimate, se}); values may be
+    # python lists or numpy arrays.
+    raw_coef = event_study.get("coef")
+    if raw_coef is None:
+        raw_coef = event_study.get("estimate")
+    try:
+        event_time = list(np.asarray(event_study.get("event_time"), dtype=float))
+        coef = list(np.asarray(raw_coef, dtype=float))
+    except (TypeError, ValueError):
         return
     if len(event_time) == 0 or len(event_time) != len(coef):
         return
-    fig, ax = plt.subplots()
     errors = None
-    if isinstance(se, list) and len(se) == len(coef):
-        errors = [1.96 * float(s) for s in se]
+    se = event_study.get("se")
+    if se is not None:
+        try:
+            se_arr = np.asarray(se, dtype=float)
+            if len(se_arr) == len(coef):
+                errors = [1.96 * float(s) for s in se_arr]
+        except (TypeError, ValueError):
+            errors = None
+    fig, ax = plt.subplots()
     ax.errorbar(event_time, coef, yerr=errors, fmt="o-", capsize=3, color="#4c78a8")
     ax.axhline(0, color="#8a94a6", linewidth=1)
     ax.axvline(-0.5, color="#b279a2", linewidth=1, linestyle="--")

@@ -22,6 +22,7 @@
       "cleaned_dataset"
     ],
     "diagnostic_summary": [],
+    "event_study": [],
     "histograms": [],
     "kde_plots": [],
     "raw_data.csv": [],

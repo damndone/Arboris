@@ -189,6 +189,10 @@ class DiagnosticsStage:
                     cs_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     cs_artifact = {"available": False, "error": str(exc)}
+                # v1.6.6 V: event-study figure from the dynamic aggregation
+                # (event_time/estimate/se already computed analytically).
+                if isinstance(cs_result, dict):
+                    did_event_study = cs_result.get("aggregations", {}).get("dynamic")
                 cs_path = run_root / "cs_did.json"
                 write_json(cs_path, cs_artifact)
                 register_artifact(
@@ -210,6 +214,8 @@ class DiagnosticsStage:
                     sa_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     sa_artifact = {"available": False, "error": str(exc)}
+                if isinstance(sa_result, dict):
+                    did_event_study = sa_result.get("aggregations", {}).get("dynamic")
                 sa_path = run_root / "sa_did.json"
                 write_json(sa_path, sa_artifact)
                 register_artifact(
@@ -231,6 +237,8 @@ class DiagnosticsStage:
                     dcdh_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     dcdh_artifact = {"available": False, "error": str(exc)}
+                if isinstance(dcdh_result, dict):
+                    did_event_study = dcdh_result.get("event_study")
                 dcdh_path = run_root / "dcdh.json"
                 write_json(dcdh_path, dcdh_artifact)
                 register_artifact(
