@@ -8,12 +8,16 @@ import type { RunDetail } from "../../api";
 import { TableView } from "./TableView";
 
 const mockFetch = vi.hoisted(() => ({ current: null as unknown }));
+const fetchCalls = vi.hoisted(() => ({ current: [] as unknown[][] }));
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
   return {
     ...actual,
-    fetchRunDetail: () => Promise.resolve(mockFetch.current as RunDetail),
+    fetchRunDetail: (...args: unknown[]) => {
+      fetchCalls.current.push(args);
+      return Promise.resolve(mockFetch.current as RunDetail);
+    },
   };
 });
 
@@ -46,6 +50,15 @@ function renderTable(m: GraphViewModel = model()) {
 describe("TableView", () => {
   beforeEach(() => {
     mockFetch.current = null;
+    fetchCalls.current = [];
+  });
+
+  it("calls fetchRunDetail with (projectRoot, runId) in that order", async () => {
+    mockFetch.current = { model_results: [], artifact_counts: {} } as unknown as RunDetail;
+    renderTable(model("run-1"));
+    await waitFor(() => expect(fetchCalls.current.length).toBeGreaterThan(0));
+    // Signature is fetchRunDetail(projectRoot, runId) — guard against swapping.
+    expect(fetchCalls.current[0]).toEqual(["/tmp/demo", "run-1"]);
   });
 
   it("renders a coefficient table from model_results", async () => {

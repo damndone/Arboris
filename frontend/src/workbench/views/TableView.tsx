@@ -81,7 +81,7 @@ export function TableView() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchRunDetail(runId, projectRoot)
+    fetchRunDetail(projectRoot, runId)
       .then((d) => {
         if (!cancelled) setDetail(d);
       })
