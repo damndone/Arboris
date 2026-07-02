@@ -330,6 +330,7 @@ class DiagnosticsStage:
             numeric_columns=numeric_columns,
             time_column=time_candidates[0] if time_candidates else None,
             model_results=model_results,
+            outcome_column=normalized_y if normalized_y in cleaned.columns else None,
         )
         env.step("visualization", "complete", "Created diagnostic figures")
 

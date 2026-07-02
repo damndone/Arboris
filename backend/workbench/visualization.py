@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import matplotlib
@@ -7,10 +8,15 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from scipy import stats
 
 from .artifacts import register_artifact
+
+# Cap how many columns a grid figure shows, so a wide dataset can't produce a
+# gigantic unreadable (and slow) figure. The first N numeric columns are used.
+_MAX_GRID_COLUMNS = 12
 
 
 def create_figures(
@@ -20,12 +26,28 @@ def create_figures(
     numeric_columns: list[str],
     time_column: str | None,
     model_results: list[tuple[str, dict]] | None = None,
+    outcome_column: str | None = None,
 ) -> dict[str, str]:
     figures_dir = run_root / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
     figures: dict[str, str] = {}
 
     available_numeric = [column for column in numeric_columns if column in frame.columns]
+
+    # ── EDA distribution plots (v1.6.6 V) ───────────────────────────────
+    # These come straight off the numeric columns, so EVERY run — model or
+    # not — shows distribution/relationship figures in the Table view. They
+    # register as ordinary `figure` artifacts, so the Table's generic figure
+    # gallery picks them up automatically (and will pick up any future plot
+    # types added here, no frontend change needed).
+    _create_eda_figures(
+        frame,
+        figures_dir,
+        run_root,
+        available_numeric,
+        outcome_column,
+        figures,
+    )
     if len(available_numeric) >= 2:
         path = figures_dir / "correlation_heatmap.png"
         correlation = frame[available_numeric].corr(numeric_only=True)
@@ -107,6 +129,125 @@ def create_figures(
             figures["coef_plot"] = record.path
 
     return figures
+
+
+def _grid_dims(n: int) -> tuple[int, int]:
+    """Roughly-square (rows, cols) for an n-panel grid."""
+    cols = max(1, math.ceil(math.sqrt(n)))
+    rows = max(1, math.ceil(n / cols))
+    return rows, cols
+
+
+def _numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    return pd.to_numeric(frame[column], errors="coerce").dropna()
+
+
+def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, str]) -> None:
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+    record = register_artifact(run_root, artifact_id, path, "figure", "visualization", [])
+    figures[artifact_id] = record.path
+
+
+def _create_eda_figures(
+    frame: pd.DataFrame,
+    figures_dir: Path,
+    run_root: Path,
+    available_numeric: list[str],
+    outcome_column: str | None,
+    figures: dict[str, str],
+) -> None:
+    columns = available_numeric[:_MAX_GRID_COLUMNS]
+    if not columns:
+        return
+
+    # 1) Histograms — one panel per numeric column.
+    rows, cols = _grid_dims(len(columns))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3.2, rows * 2.6), squeeze=False)
+    drew = False
+    for i, column in enumerate(columns):
+        ax = axes[i // cols][i % cols]
+        data = _numeric_series(frame, column)
+        if len(data) > 0:
+            bins = min(30, max(5, int(len(data) ** 0.5)))
+            ax.hist(data, bins=bins, color="#4c78a8")
+            drew = True
+        ax.set_title(column, fontsize=9)
+    for j in range(len(columns), rows * cols):
+        axes[j // cols][j % cols].axis("off")
+    if drew:
+        _save(fig, figures_dir / "histograms.png", run_root, "histograms", figures)
+    else:
+        plt.close(fig)
+
+    # 2) KDE density — one panel per numeric column; constant/degenerate
+    #    columns are skipped (gaussian_kde needs positive variance).
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 3.2, rows * 2.6), squeeze=False)
+    plotted = 0
+    for i, column in enumerate(columns):
+        ax = axes[i // cols][i % cols]
+        ax.set_title(column, fontsize=9)
+        data = _numeric_series(frame, column)
+        try:
+            if len(data) >= 2 and float(data.std()) > 0:
+                kde = stats.gaussian_kde(data.to_numpy())
+                xs = np.linspace(float(data.min()), float(data.max()), 200)
+                ys = kde(xs)
+                ax.plot(xs, ys, color="#e45756")
+                ax.fill_between(xs, ys, alpha=0.3, color="#e45756")
+                plotted += 1
+        except Exception:
+            # Degenerate column — leave the panel empty rather than fail the run.
+            pass
+    for j in range(len(columns), rows * cols):
+        axes[j // cols][j % cols].axis("off")
+    if plotted > 0:
+        _save(fig, figures_dir / "kde_plots.png", run_root, "kde_plots", figures)
+    else:
+        plt.close(fig)
+
+    # 3) Boxplots — all numeric columns side by side in one figure.
+    box_pairs = [(c, _numeric_series(frame, c)) for c in columns]
+    box_pairs = [(c, s) for c, s in box_pairs if len(s) > 0]
+    if box_pairs:
+        fig, ax = plt.subplots(figsize=(max(6.0, len(box_pairs) * 0.9), 4.0))
+        ax.boxplot([s.to_numpy() for _, s in box_pairs])
+        ax.set_xticklabels([c for c, _ in box_pairs], rotation=45, ha="right")
+        _save(fig, figures_dir / "boxplots.png", run_root, "boxplots", figures)
+
+    # 4) Scatter — outcome vs each regressor when the outcome is known,
+    #    else the first two numeric columns.
+    targets: list[tuple[str, str]] = []
+    if outcome_column and outcome_column in frame.columns:
+        regressors = [c for c in columns if c != outcome_column]
+        targets = [(x, outcome_column) for x in regressors]
+    elif len(columns) >= 2:
+        targets = [(columns[0], columns[1])]
+    if targets:
+        rows, cols = _grid_dims(len(targets))
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 3.2, rows * 2.8), squeeze=False)
+        drew = False
+        for i, (xcol, ycol) in enumerate(targets):
+            ax = axes[i // cols][i % cols]
+            aligned = pd.concat(
+                [
+                    pd.to_numeric(frame[xcol], errors="coerce").rename("x"),
+                    pd.to_numeric(frame[ycol], errors="coerce").rename("y"),
+                ],
+                axis=1,
+            ).dropna()
+            if len(aligned) > 0:
+                ax.scatter(aligned["x"], aligned["y"], alpha=0.6, s=14, color="#54a24b")
+                drew = True
+            ax.set_xlabel(xcol, fontsize=8)
+            ax.set_ylabel(ycol, fontsize=8)
+        for j in range(len(targets), rows * cols):
+            axes[j // cols][j % cols].axis("off")
+        if drew:
+            _save(fig, figures_dir / "scatter_plots.png", run_root, "scatter_plots", figures)
+        else:
+            plt.close(fig)
 
 
 def _first_model_result(model_results: list[tuple[str, dict]]) -> dict | None:
