@@ -1,24 +1,36 @@
 // frontend/src/workbench/views/TableView.tsx
 //
 // v1.6.6 ② — Table result-preview. Switching from the Graph view to Table
-// shows a fast read-only preview of what the run PRODUCED: model coefficient
-// tables + a summary of emitted artifacts (figures/tables/…). It reuses the
-// existing run-detail API (fetchRunDetail) rather than the graph view model,
-// because coefficients/artifacts live on the run result, not on graph nodes.
+// shows a fast read-only preview of what the run PRODUCED:
+//   1. model coefficient tables (fetchRunDetail),
+//   2. a gallery of every generated figure rendered inline (fetchRunArtifacts
+//      + the /runs/{id}/artifacts/{artifact_id} file endpoint),
+//   3. download links for the remaining (non-figure) artifacts.
 //
-// Scope (spec §1②): coefficient tables + artifact summary. Non-goals: in-table
-// editing, figure thumbnails, variable-level DAG tabulation (future).
+// Non-goals: in-table editing, variable-level DAG tabulation (future). The
+// SET of figures shown is whatever the run's `visualization` step emitted —
+// widening that coverage (violin/pairplot/…) is a backend concern (roadmap
+// §3.5 V).
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLineage } from "../../lineage/LineageContext";
-import { fetchRunDetail } from "../../api";
-import type { ModelResult, RunDetail } from "../../api";
+import {
+  artifactDownloadUrl,
+  fetchRunArtifacts,
+  fetchRunDetail,
+} from "../../api";
+import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
-  // Trim to a readable precision without trailing-zero noise.
   return String(Number(n.toPrecision(4)));
+}
+
+/** "correlation_heatmap" → "Correlation heatmap" for captions/alt text. */
+function humanize(id: string): string {
+  const s = id.replace(/[_-]+/g, " ").trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function CoefficientTable({ model }: { model: ModelResult }) {
@@ -57,14 +69,53 @@ function CoefficientTable({ model }: { model: ModelResult }) {
   );
 }
 
+function FigureCard({
+  item,
+  projectRoot,
+  runId,
+}: {
+  item: ArtifactItem;
+  projectRoot: string;
+  runId: string;
+}) {
+  const label = humanize(item.artifact_id);
+  return (
+    <figure style={{ margin: 0 }}>
+      <img
+        src={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+        alt={`${item.artifact_id} figure`}
+        loading="lazy"
+        style={{
+          width: "100%",
+          height: "auto",
+          borderRadius: 6,
+          border: "1px solid var(--separator)",
+          background: "var(--surface, #fff)",
+        }}
+      />
+      <figcaption
+        style={{ fontSize: 12, color: "var(--label-secondary)", marginTop: 4 }}
+      >
+        {label}
+      </figcaption>
+    </figure>
+  );
+}
+
 const CONTAINER_STYLE: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   padding: 24,
-  gap: 16,
+  gap: 20,
   height: "100%",
   minHeight: 320,
   overflow: "auto",
+};
+
+const FIGURE_GRID: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+  gap: 16,
 };
 
 export function TableView() {
@@ -74,6 +125,7 @@ export function TableView() {
   const projectRoot = searchParams.get("project_root") ?? "";
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -81,9 +133,14 @@ export function TableView() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchRunDetail(projectRoot, runId)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
+    Promise.all([
+      fetchRunDetail(projectRoot, runId),
+      fetchRunArtifacts(projectRoot, runId),
+    ])
+      .then(([d, a]) => {
+        if (cancelled) return;
+        setDetail(d);
+        setArtifacts(a.groups.flatMap((g) => g.items));
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -97,10 +154,14 @@ export function TableView() {
   }, [runId, projectRoot]);
 
   const models = detail?.model_results ?? [];
-  const artifactCounts = Object.entries(detail?.artifact_counts ?? {}).filter(
-    ([, count]) => count > 0,
-  );
-  const isEmpty = !loading && !error && models.length === 0 && artifactCounts.length === 0;
+  const figures = artifacts.filter((a) => a.artifact_type === "figure");
+  const otherArtifacts = artifacts.filter((a) => a.artifact_type !== "figure");
+  const isEmpty =
+    !loading &&
+    !error &&
+    models.length === 0 &&
+    figures.length === 0 &&
+    otherArtifacts.length === 0;
 
   return (
     <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
@@ -125,13 +186,34 @@ export function TableView() {
         </section>
       )}
 
-      {!loading && !error && artifactCounts.length > 0 && (
+      {!loading && !error && figures.length > 0 && (
+        <section data-testid="table-view-figures">
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
+            Figures ({figures.length})
+          </h3>
+          <div style={FIGURE_GRID}>
+            {figures.map((f) => (
+              <FigureCard key={f.artifact_id} item={f} projectRoot={projectRoot} runId={runId} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!loading && !error && otherArtifacts.length > 0 && (
         <section data-testid="table-view-artifacts">
           <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Artifacts</h3>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--label-secondary)" }}>
-            {artifactCounts.map(([type, count]) => (
-              <li key={type}>
-                {type}: {count}
+            {otherArtifacts.map((a) => (
+              <li key={a.artifact_id} style={{ marginBottom: 2 }}>
+                <a
+                  href={artifactDownloadUrl(projectRoot, runId, a.artifact_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--tint, #0a84ff)" }}
+                >
+                  {a.artifact_id}
+                </a>{" "}
+                <span style={{ color: "var(--label-tertiary)" }}>· {a.artifact_type}</span>
               </li>
             ))}
           </ul>

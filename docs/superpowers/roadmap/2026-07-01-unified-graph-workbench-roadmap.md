@@ -67,6 +67,8 @@
 - **W. warning 体系完善**（承接 v1.6.6 ④ 只读徽章）:后端 `Trust`/`Contestability.review_status`/`Severity` 骨架已在;v1.6.6 只做**只读显示**。完善 = ①**手动挂旗/消旗**(接活 `Mark needs review`,写入 review_status `needed↔waived/passed`);②图上按严重度**着色/角标**;③自动 warning 的判定规则扩充(assumption_checks 覆盖更多估计器/清洗步)。需独立 brainstorm + spec。**候选 v1.6.6.x 或并入 v1.6.7。**
 - **C. 底部面板 VSCode 式控制台**:`bottomPanelRegistry` 的 Shell / Pending confirmations / Timeline 从 `PlaceholderPanel` 做成真面板(仅 Logs 现为真)。定位=右侧抽屉的信息补充 + 控制台(参考 VSCode 底部面板:问题/输出/终端/端口…)。需独立设计。**候选 v1.6.7+。**
 - **M. Pipeline ↔ graph 合并**:Pipeline 标签页最终融入主 lineage graph（图驱动、每节点就地编辑）。= v1.6.7 的核心（Draft 融入主图），非独立实现 Pipeline 视图。风险最高的架构跳，单独 spec + 充分 brainstorm。**= v1.6.7。**
+- **A. controlFactory 控件的前后端对齐**（2026-07-02 登记，用户拍板）:v1.6.6 ① 已把 radio/slider/text/textarea/toggle 做成可交互，但**后端 `engine/capabilities.py` 目前只发 `select`/`columns`(+ 注入的 focal_x `multiselect`)**,没有任何 contract 发那 5 种 kind → 前端控件当前无对象可交互(纯地基)。对齐 = 让后端 editable_schema 在合适参数上真正发 radio/slider/text/textarea/toggle(如 robust SE=toggle、alpha/anticipation=slider、报告标题=text、cluster 选择=radio),使这 5 个控件在界面点亮。**与 v1.6.7 图内编辑一起做最自然**(v1.6.7 引入更丰富的编辑 schema)。
+- **V. Table 视图图表画廊 + 后端可视化覆盖**（2026-07-02 登记，用户反馈 Table 太简陋）:v1.6.6 ② 的 Table 只有系数表 + artifact 计数;用户要看**生成的全部图**。分两层:①**前端画廊**(v1.6.6 本轮补:把 run 的 `figure` artifacts 用 `<img artifactDownloadUrl>` 全部渲染出来 —— 后端已有 `GET /runs/{id}/artifacts/{artifact_id}` 文件服务);②**后端可视化覆盖扩充**(backlog):当前 OLS run 只产 heatmap/residuals-fitted/Q-Q/coef_plot 4 图,用户想要 histogram/KDE/boxplot/violin/scatter/regplot/bubble/pairplot 等全套 → 是后端 viz 生成的覆盖面问题,需扩 `visualization` step 产图种类。
 
 ## 4. 依赖与顺序
 
