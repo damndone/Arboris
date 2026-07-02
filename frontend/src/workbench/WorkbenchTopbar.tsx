@@ -20,6 +20,7 @@ import {
   actionsForSurface,
   type ActionContext,
 } from "./registry/actionRegistry";
+import { pickRerunTargetKey } from "./rerunTarget";
 
 interface TabSpec {
   id: ViewMode;
@@ -37,13 +38,14 @@ export function WorkbenchTopbar() {
   const { model } = useLineage();
 
   // Topbar action slot (plan §15). Driven by actionRegistry filtered by
-  // surface="topbar". The action context needs a node; when no tab is
-  // selected we fall back to the first node so the placeholder tooltips
-  // (and, v1.6.6 ③, the live Rerun) still have a target. Rerun opens that
-  // node's detail → OperationSection → POST /runs/<id>/rerun.
+  // surface="topbar". These actions are analysis-level, so the context node
+  // is the primary MODEL node (its drawer hosts the editable rerun panel) —
+  // not whatever happens to be selected. v1.6.6 ③: this makes "Rerun" a
+  // meaningful "re-run this analysis" shortcut that opens the model's rerun
+  // panel from any view, instead of no-op'ing on the current selection.
+  const targetKey = pickRerunTargetKey(model, state.selectedKey);
   const ctxNode =
-    model.nodes.find((n) => n.nodeKey === state.selectedKey) ??
-    model.nodes[0];
+    model.nodes.find((n) => n.nodeKey === targetKey) ?? model.nodes[0];
   const actionCtx: ActionContext | null = ctxNode
     ? {
         node: ctxNode,
