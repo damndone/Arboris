@@ -82,14 +82,25 @@ describe("actionRegistry", () => {
     );
   });
 
-  it("topbar surface yields rerun + generateReport (both disabled in V1.5.2)", () => {
+  it("topbar surface yields rerun (live in v1.6.6) + generateReport (disabled)", () => {
     const topbarIds = actionsForSurface("topbar", ctx()).map((a) => a.id);
     expect(topbarIds).toEqual(["rerun", "generateReport"]);
-    for (const id of topbarIds) {
-      const entry = actionRegistry.find((a) => a.id === id)!;
-      expect(entry.disabled?.(ctx())).toMatchObject({
-        reason: expect.any(String),
-      });
+    // v1.6.6 ③: topbar Rerun is now live (routes to the node rerun flow).
+    const rerun = actionRegistry.find((a) => a.id === "rerun")!;
+    expect(rerun.disabled).toBeUndefined();
+    // Generate report stays disabled (AI-written report — v1.6.8).
+    const gen = actionRegistry.find((a) => a.id === "generateReport")!;
+    expect(gen.disabled?.(ctx())).toMatchObject({ reason: expect.any(String) });
+  });
+
+  it("no disabled reason references a stale/already-shipped version (honesty)", () => {
+    // v1.6.6 ③: dead-button reasons must point at real roadmap targets,
+    // not the long-shipped "V1.5.3" / "V2.0" placeholders.
+    for (const a of actionRegistry) {
+      const out = a.disabled?.(ctx());
+      if (out) {
+        expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0/);
+      }
     }
   });
 
@@ -118,6 +129,7 @@ describe("actionRegistry", () => {
       "focusUpstream",
       "pinUpstream",
       "rerunFromNode",
+      "rerun", // v1.6.6 ③: topbar Rerun wired to the node rerun flow
     ];
     for (const id of live) {
       const a = actionRegistry.find((x) => x.id === id)!;
@@ -181,6 +193,13 @@ describe("invoke handlers", () => {
     actionRegistry.find((a) => a.id === "focusUpstream")!.invoke(c);
     expect(d.pinUpstream).toHaveBeenCalledWith("n1");
     expect(d.focusUpstream).toHaveBeenCalledWith("n1");
+  });
+
+  it("topbar rerun opens the node detail (→ OperationSection → POST /runs/<id>/rerun)", () => {
+    const d = fakeDispatch();
+    const c = ctx({ dispatch: d });
+    actionRegistry.find((a) => a.id === "rerun")!.invoke(c);
+    expect(d.openDetail).toHaveBeenCalledWith("n1");
   });
 });
 

@@ -3,6 +3,8 @@
     "analysis_router": [
       "data_profile"
     ],
+    "boxplots": [],
+    "category_counts": [],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -10,7 +12,6 @@
       "raw_data.csv"
     ],
     "coef_plot": [],
-    "correlation_heatmap": [],
     "data_profile": [
       "cleaned_dataset"
     ],
@@ -18,6 +19,9 @@
     "diagnostics_poisson_1": [
       "cleaned_dataset"
     ],
+    "histograms": [],
+    "kde_plots": [],
+    "outcome_counts": [],
     "poisson_1": [
       "cleaned_dataset"
     ],

@@ -1,56 +1,231 @@
 // frontend/src/workbench/views/TableView.tsx
 //
-// V1.5.2 P3 — placeholder for the Table view (plan §3). V1.5.2 ships
-// it as a real `view=table` mode so the switcher contract is locked,
-// but no business functionality. Real implementation lands in V1.5.3+.
+// v1.6.6 ② — Table result-preview. Switching from the Graph view to Table
+// shows a fast read-only preview of what the run PRODUCED:
+//   1. model coefficient tables (fetchRunDetail),
+//   2. a gallery of every generated figure rendered inline (fetchRunArtifacts
+//      + the /runs/{id}/artifacts/{artifact_id} file endpoint),
+//   3. download links for the remaining (non-figure) artifacts.
 //
-// What this view WILL show eventually (per plan §3 + §10):
-//   - tabular layout of nodes, variables, models
-//   - same `selected / focus / search / action` contract as GraphView
-//   - bottom panel + drawer + topbar all keep working
-//
-// For P3 it's only a "coming soon" surface. Wired to the Workbench
-// state via `data-view` so tests can assert the switcher works.
+// Non-goals: in-table editing, variable-level DAG tabulation (future). The
+// SET of figures shown is whatever the run's `visualization` step emitted —
+// widening that coverage (violin/pairplot/…) is a backend concern (roadmap
+// §3.5 V).
 
-import { useWorkbench } from "../WorkbenchStateProvider";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useLineage } from "../../lineage/LineageContext";
+import {
+  artifactDownloadUrl,
+  fetchRunArtifacts,
+  fetchRunDetail,
+} from "../../api";
+import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
+
+function fmt(n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return String(Number(n.toPrecision(4)));
+}
+
+/** "correlation_heatmap" → "Correlation heatmap" for captions/alt text. */
+function humanize(id: string): string {
+  const s = id.replace(/[_-]+/g, " ").trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function CoefficientTable({ model }: { model: ModelResult }) {
+  const rows = Object.entries(model.coefficients ?? {});
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)", marginBottom: 4 }}>
+        {model.model_id}
+        {model.model_type ? ` · ${model.model_type}` : ""}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
+        {model.nobs !== undefined ? `n=${model.nobs}` : null}
+        {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
+      </div>
+      <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+        <thead>
+          <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
+            <th style={{ padding: "2px 8px" }}>term</th>
+            <th style={{ padding: "2px 8px" }}>estimate</th>
+            <th style={{ padding: "2px 8px" }}>std. error</th>
+            <th style={{ padding: "2px 8px" }}>p-value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([term, c]) => (
+            <tr key={term} style={{ borderTop: "1px solid var(--separator)" }}>
+              <td style={{ padding: "2px 8px", fontFamily: "var(--font-mono, monospace)" }}>{term}</td>
+              <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
+              <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
+              <td style={{ padding: "2px 8px" }}>{c.p_value_display ?? fmt(c.p_value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FigureCard({
+  item,
+  projectRoot,
+  runId,
+}: {
+  item: ArtifactItem;
+  projectRoot: string;
+  runId: string;
+}) {
+  const label = humanize(item.artifact_id);
+  return (
+    <figure style={{ margin: 0 }}>
+      <img
+        src={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+        alt={`${item.artifact_id} figure`}
+        loading="lazy"
+        style={{
+          width: "100%",
+          height: "auto",
+          borderRadius: 6,
+          border: "1px solid var(--separator)",
+          background: "var(--surface, #fff)",
+        }}
+      />
+      <figcaption
+        style={{ fontSize: 12, color: "var(--label-secondary)", marginTop: 4 }}
+      >
+        {label}
+      </figcaption>
+    </figure>
+  );
+}
+
+const CONTAINER_STYLE: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  padding: 24,
+  gap: 20,
+  height: "100%",
+  minHeight: 320,
+  overflow: "auto",
+};
+
+const FIGURE_GRID: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+  gap: 16,
+};
 
 export function TableView() {
-  const { state } = useWorkbench();
+  const { model } = useLineage();
+  const runId = model.runId;
+  const [searchParams] = useSearchParams();
+  const projectRoot = searchParams.get("project_root") ?? "";
+
+  const [detail, setDetail] = useState<RunDetail | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetchRunDetail(projectRoot, runId),
+      fetchRunArtifacts(projectRoot, runId),
+    ])
+      .then(([d, a]) => {
+        if (cancelled) return;
+        setDetail(d);
+        setArtifacts(a.groups.flatMap((g) => g.items));
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, projectRoot]);
+
+  const models = detail?.model_results ?? [];
+  const figures = artifacts.filter((a) => a.artifact_type === "figure");
+  const otherArtifacts = artifacts.filter((a) => a.artifact_type !== "figure");
+  const isEmpty =
+    !loading &&
+    !error &&
+    models.length === 0 &&
+    figures.length === 0 &&
+    otherArtifacts.length === 0;
+
   return (
-    <div
-      data-testid="view-table"
-      data-view="table"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 48,
-        gap: 12,
-        color: "var(--label-secondary)",
-        textAlign: "center",
-        height: "100%",
-        minHeight: 320,
-      }}
-    >
-      <div style={{ fontSize: 18, color: "var(--label)", fontWeight: 600 }}>
-        Table view — coming in V1.5.3
-      </div>
-      <div style={{ fontSize: 13, maxWidth: 420 }}>
-        A tabular projection of the run's nodes, variables, and models.
-        Selection, search, and node actions will work the same as the
-        Graph view.
-      </div>
-      {state.selectedKey && (
+    <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+      {loading && (
+        <div data-testid="table-view-loading" style={{ color: "var(--label-secondary)" }}>
+          Loading results…
+        </div>
+      )}
+
+      {error && (
+        <div data-testid="table-view-error" style={{ color: "var(--red, #c00)" }}>
+          Failed to load results: {error}
+        </div>
+      )}
+
+      {!loading && !error && models.length > 0 && (
+        <section data-testid="table-view-coefficients">
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Coefficients</h3>
+          {models.map((m) => (
+            <CoefficientTable key={m.model_id} model={m} />
+          ))}
+        </section>
+      )}
+
+      {!loading && !error && figures.length > 0 && (
+        <section data-testid="table-view-figures">
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
+            Figures ({figures.length})
+          </h3>
+          <div style={FIGURE_GRID}>
+            {figures.map((f) => (
+              <FigureCard key={f.artifact_id} item={f} projectRoot={projectRoot} runId={runId} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {!loading && !error && otherArtifacts.length > 0 && (
+        <section data-testid="table-view-artifacts">
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Artifacts</h3>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--label-secondary)" }}>
+            {otherArtifacts.map((a) => (
+              <li key={a.artifact_id} style={{ marginBottom: 2 }}>
+                <a
+                  href={artifactDownloadUrl(projectRoot, runId, a.artifact_id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--tint, #0a84ff)" }}
+                >
+                  {a.artifact_id}
+                </a>{" "}
+                <span style={{ color: "var(--label-tertiary)" }}>· {a.artifact_type}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {isEmpty && (
         <div
-          style={{
-            marginTop: 8,
-            fontSize: 12,
-            color: "var(--label-tertiary)",
-            fontFamily: "var(--font-mono, monospace)",
-          }}
+          data-testid="table-view-empty"
+          style={{ color: "var(--label-tertiary)", fontSize: 13 }}
         >
-          Selected: {state.selectedKey}
+          This run produced no model results or artifacts yet.
         </div>
       )}
     </div>

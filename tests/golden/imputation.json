@@ -3,6 +3,7 @@
     "analysis_router": [
       "data_profile"
     ],
+    "boxplots": [],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -18,12 +19,14 @@
     "diagnostics_ols_1": [
       "imputed_dataset"
     ],
-    "imputed_dataset": [
-      "cleaned_dataset"
-    ],
+    "histograms": [],
     "imputation_summary": [
       "cleaned_dataset"
     ],
+    "imputed_dataset": [
+      "cleaned_dataset"
+    ],
+    "kde_plots": [],
     "mice_decisions": [
       "cleaned_dataset"
     ],
@@ -38,6 +41,7 @@
     "report_html": [],
     "report_pdf": [],
     "residuals_fitted": [],
+    "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],

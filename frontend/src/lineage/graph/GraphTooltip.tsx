@@ -26,6 +26,7 @@ const TRUST_LABEL: Record<Trust, string> = {
   ok: "OK",
   review: "Review",
   caution: "Caution",
+  blocker: "Blocker", // v1.6.6 ④
 };
 
 function formatStatValue(v: unknown): string {
@@ -69,6 +70,12 @@ export function GraphTooltip({ node, x, y }: GraphTooltipProps) {
         <span className="ln-graph-tooltip__k">trust</span>
         <span className="ln-graph-tooltip__v">{TRUST_LABEL[node.trust]}</span>
       </div>
+      {node.trustReason && (
+        <div className="ln-graph-tooltip__row">
+          <span className="ln-graph-tooltip__k">why</span>
+          <span className="ln-graph-tooltip__v">{node.trustReason}</span>
+        </div>
+      )}
       <div className="ln-graph-tooltip__hint">Click to inspect</div>
     </div>
   );

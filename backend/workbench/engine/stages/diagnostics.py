@@ -92,6 +92,7 @@ class DiagnosticsStage:
         time_candidates = ctx.artifacts["_time_candidates"]
 
         env.step("diagnostics", "start", "Running regression diagnostics...")
+        did_event_study: dict | None = None  # v1.6.6 V: TWFE event-study figure
         diag_x = [v for v in normalized_x if v != exposure_col] if exposure_col else normalized_x
         exog = modeling_frame[diag_x] if diag_x else pd.DataFrame(index=modeling_frame.index)
         diagnostic_artifacts: dict[str, dict[str, Any]] = {}
@@ -163,6 +164,10 @@ class DiagnosticsStage:
                     )
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     did_diag = {"available": False, "error": str(exc)}
+                # v1.6.6 V: capture the TWFE event study for the event-study
+                # figure. {event_time, coef, se} — the shape create_figures wants.
+                if isinstance(did_diag, dict):
+                    did_event_study = did_diag.get("event_study")
                 did_diag_path = run_root / "did_diagnostics.json"
                 write_json(did_diag_path, did_diag)
                 register_artifact(
@@ -184,6 +189,10 @@ class DiagnosticsStage:
                     cs_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     cs_artifact = {"available": False, "error": str(exc)}
+                # v1.6.6 V: event-study figure from the dynamic aggregation
+                # (event_time/estimate/se already computed analytically).
+                if isinstance(cs_result, dict):
+                    did_event_study = cs_result.get("aggregations", {}).get("dynamic")
                 cs_path = run_root / "cs_did.json"
                 write_json(cs_path, cs_artifact)
                 register_artifact(
@@ -205,6 +214,8 @@ class DiagnosticsStage:
                     sa_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     sa_artifact = {"available": False, "error": str(exc)}
+                if isinstance(sa_result, dict):
+                    did_event_study = sa_result.get("aggregations", {}).get("dynamic")
                 sa_path = run_root / "sa_did.json"
                 write_json(sa_path, sa_artifact)
                 register_artifact(
@@ -226,6 +237,8 @@ class DiagnosticsStage:
                     dcdh_artifact.setdefault("available", True)
                 except Exception as exc:  # noqa: BLE001 - any failure degrades
                     dcdh_artifact = {"available": False, "error": str(exc)}
+                if isinstance(dcdh_result, dict):
+                    did_event_study = dcdh_result.get("event_study")
                 dcdh_path = run_root / "dcdh.json"
                 write_json(dcdh_path, dcdh_artifact)
                 register_artifact(
@@ -330,6 +343,14 @@ class DiagnosticsStage:
             numeric_columns=numeric_columns,
             time_column=time_candidates[0] if time_candidates else None,
             model_results=model_results,
+            outcome_column=normalized_y if normalized_y in cleaned.columns else None,
+            regressors=normalized_x,
+            model_type=model_type,
+            entity_column=ctx.artifacts.get("_entity_col") or None,
+            iv_endog=ctx.artifacts.get("_iv_endog") or None,
+            iv_instruments=ctx.artifacts.get("_iv_instruments") or None,
+            did_event_study=did_event_study,
+            exposure_column=exposure_col or None,
         )
         env.step("visualization", "complete", "Created diagnostic figures")
 

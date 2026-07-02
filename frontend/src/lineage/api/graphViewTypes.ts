@@ -21,7 +21,9 @@ export type Stage =
   | "report"
   | "unknown"; // adapter fallback when backend has no stage field
 
-export type Trust = "ok" | "review" | "caution";
+// v1.6.6 ④: `blocker` is its own strongest variant (backend Trust.BLOCKER)
+// — it used to collapse into `caution`, hiding hard-blocking problems.
+export type Trust = "ok" | "review" | "caution" | "blocker";
 
 // Full V1.4.1 backend enum preserved — no information loss.
 export type DecisionReviewStatus =

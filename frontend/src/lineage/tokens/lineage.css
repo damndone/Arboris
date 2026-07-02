@@ -63,10 +63,11 @@
   --role-time:                     oklch(0.80 0.14 95);
   --role-cluster:                  oklch(0.74 0.12 230);
 
-  /* Trust status — adapter buckets (ok / review / caution) */
+  /* Trust status — adapter buckets (ok / review / caution / blocker) */
   --ok:               oklch(0.70 0.07 155);
   --review:           oklch(0.74 0.10 65);
   --caution:          oklch(0.62 0.13 25);
+  --blocker:          oklch(0.52 0.20 25); /* v1.6.6 ④ — deeper, filled red */
 
   /* Typeface stacks */
   --font-serif:       "Iowan Old Style", "Source Serif Pro", "Charter", Georgia, "Songti SC", "Noto Serif CJK SC", serif;
@@ -148,6 +149,7 @@
   --ok:               oklch(0.55 0.08 155);
   --review:           oklch(0.62 0.12 65);
   --caution:          oklch(0.55 0.16 25);
+  --blocker:          oklch(0.48 0.22 25); /* v1.6.6 ④ — deeper, filled red */
 
   /* Light overrides for the T6 extras */
   --border-strong:    rgba(20, 18, 16, 0.22);
@@ -366,6 +368,13 @@
 .ln-graph-node__badge--caution {
   color: var(--caution);
   border-color: color-mix(in oklch, var(--caution) 35%, transparent);
+}
+/* v1.6.6 ④ — blocker is the strongest: filled (not outlined) so it reads
+   as a hard problem, visually above caution's outlined red. */
+.ln-graph-node__badge--blocker {
+  color: #fff;
+  background: var(--blocker);
+  border-color: var(--blocker);
 }
 
 /* Selected outline — editorial --ink stroke (plan T8.3 step 3, spec

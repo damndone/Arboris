@@ -9,11 +9,12 @@
 //   - shortcut (keyboard)
 //   - command-palette (future)
 //
-// Read-only actions (open / pin tab / copy / focus / pin upstream)
-// ship live. Mutating placeholders (ask AI / rerun / mark review)
-// register as `disabled` so their slots, ordering, and shortcuts are
-// reserved — V1.5.3+ flips the disabled function to return `false`
-// once the backends land.
+// Read-only actions (open / pin tab / copy / focus / pin upstream) plus
+// node/topbar rerun ship live. The remaining placeholders keep their slots
+// reserved with an HONEST `disabled` reason pointing at the real roadmap
+// target: askAiAboutNode + generateReport → v1.6.8, markNeedsReview →
+// warning-layer backlog (roadmap §3.5 W). v1.6.6 ③ wired topbar `rerun`
+// and refreshed these reasons (they used to lie about "V1.5.3"/"V2.0").
 
 import type { ReactNode } from "react";
 import type { GraphViewNode } from "../../lineage/api/graphViewTypes";
@@ -171,9 +172,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Ask AI about this node",
     surfaces: ["graph-context-menu", "drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "AI backend lands in V1.5.3" }),
+    disabled: () => ({ reason: "Per-node Ask AI (/llm/chat) lands in v1.6.8" }),
     invoke: () => {
-      /* placeholder — wired in V1.5.3 with /llm/chat */
+      /* placeholder — /llm/chat wiring is v1.6.8 (roadmap §3 v1.6.8) */
     },
   },
   {
@@ -192,26 +193,28 @@ export const actionRegistry: ActionEntry[] = [
     label: "Mark needs review",
     surfaces: ["drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Review workflow lands in V1.5.3" }),
+    // Manual review flagging (write review_status) is the warning layer —
+    // roadmap §3.5 backlog W. Automatic Trust/review is already shown
+    // read-only (v1.6.6 ④); the human toggle is deferred.
+    disabled: () => ({ reason: "Manual review flagging lands with the warning layer (backlog W)" }),
     invoke: () => {
-      /* placeholder — wired in V1.5.3 */
+      /* placeholder — manual flag toggle is backlog W (roadmap §3.5) */
     },
   },
-  // V1.5.2 P7 — topbar action slots (plan §15). Both ship disabled
-  // in V1.5.2 because real backends are V1.5.3+/V2.0. Registering
-  // them now reserves their slot + ordering so the topbar can show
-  // them as greyed buttons (with reason tooltips) instead of having
-  // a hardcoded list.
+  // Topbar action slots (plan §15). v1.6.6 ③: `rerun` is now live and
+  // routes to the same node rerun flow as `rerunFromNode` (open the node's
+  // detail → editable OperationSection → POST /runs/<id>/rerun, forking a
+  // child). `generateReport` stays an honest disabled placeholder until its
+  // AI backend lands in v1.6.8.
   {
     id: "rerun",
     order: 110,
     label: "Rerun",
     surfaces: ["topbar"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Full rerun backend lands in V1.5.3" }),
-    invoke: () => {
-      /* placeholder — wired in V1.5.3 with POST /runs/<id>/rerun */
-    },
+    // Live: opens the (selected/first) node's detail whose OperationSection
+    // submits POST /runs/<id>/rerun — same mechanism as rerunFromNode.
+    invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
   },
   {
     id: "generateReport",
@@ -219,9 +222,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Generate report",
     surfaces: ["topbar"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Report generation lands in V2.0" }),
+    disabled: () => ({ reason: "AI-written report generation lands in v1.6.8" }),
     invoke: () => {
-      /* placeholder — wired in V2.0 */
+      /* placeholder — report generation is v1.6.8 (roadmap §3 v1.6.8) */
     },
   },
 ];

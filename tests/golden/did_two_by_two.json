@@ -3,6 +3,7 @@
     "analysis_router": [
       "data_profile"
     ],
+    "boxplots": [],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -10,7 +11,6 @@
       "raw_data.csv"
     ],
     "coef_plot": [],
-    "correlation_heatmap": [],
     "data_profile": [
       "cleaned_dataset"
     ],
@@ -24,6 +24,9 @@
     "did_diagnostics": [
       "cleaned_dataset"
     ],
+    "event_study": [],
+    "histograms": [],
+    "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
     "report_pdf": [],

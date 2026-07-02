@@ -7,9 +7,9 @@
 //   - Renders via a REGISTRY lookup (`CONTROL_REGISTRY[kind]`), never a `switch (kind)`.
 //     Consumers (OperationSection) call `renderControl(...)` and stay kind-agnostic.
 //   - Every EditableControl kind is registered, so a new backend kind can't crash the UI.
-//   - `visible_when` is preserved on the descriptor (forward-compat) but NOT enforced day-1.
-//   - Day-1 only `select` + `columns` are functional (the data sources are in hand);
-//     the rest register structural placeholders (render, but read-only).
+//   - `visible_when` is preserved on the descriptor (forward-compat) but NOT enforced.
+//   - v1.6.6: ALL kinds are now interactive. `makePlaceholder` survives only as the
+//     defensive fallback for an unrecognised backend kind (so a new kind can't crash).
 
 import type { ReactElement } from "react";
 import type { EditableControl } from "../api/graphViewTypes";
@@ -34,12 +34,12 @@ export const CONTROL_KINDS: readonly ControlKind[] = [
   "toggle",
 ] as const;
 
-/** Kinds that are fully interactive day-1; others render read-only placeholders. */
-export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set([
-  "select",
-  "columns",
-  "multiselect",
-]);
+/** Kinds that are fully interactive. v1.6.6 promoted the remaining five
+ *  (radio/slider/text/textarea/toggle) from read-only placeholders, so every
+ *  kind is now interactive — the set equals CONTROL_KINDS. */
+export const ENABLED_CONTROL_KINDS: ReadonlySet<ControlKind> = new Set(
+  CONTROL_KINDS,
+);
 
 // ── option normalisation ───────────────────────────────────────
 interface NormOption {
@@ -119,7 +119,83 @@ function MultiselectControl(props: ControlProps): ReactElement {
   return CheckboxListControl(props, "control-multiselect");
 }
 
-// ── structural placeholders (registered, read-only until enabled) ──
+// ── v1.6.6 interactive controls (radio/toggle/slider/text/textarea) ──
+
+function RadioControl({ control, onChange }: ControlProps): ReactElement {
+  const options = normalizeOptions(control);
+  const current = String(control.value ?? "");
+  return (
+    <fieldset data-testid="control-radio" aria-label={control.label}>
+      {options.map((o) => (
+        <label key={o.value}>
+          <input
+            type="radio"
+            name={control.key}
+            aria-label={o.label}
+            checked={current === o.value}
+            onChange={() => onChange(control.key, o.value)}
+          />
+          {o.label}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
+function ToggleControl({ control, onChange }: ControlProps): ReactElement {
+  const checked = control.value === true;
+  return (
+    <input
+      type="checkbox"
+      role="checkbox"
+      data-testid="control-toggle"
+      aria-label={control.label}
+      checked={checked}
+      onChange={() => onChange(control.key, !checked)}
+    />
+  );
+}
+
+function SliderControl({ control, onChange }: ControlProps): ReactElement {
+  const value = control.value === undefined ? "" : String(control.value);
+  return (
+    <input
+      type="range"
+      data-testid="control-slider"
+      aria-label={control.label}
+      value={value}
+      min={control.min}
+      max={control.max}
+      step={control.step}
+      onChange={(e) => onChange(control.key, Number(e.target.value))}
+    />
+  );
+}
+
+function TextControl({ control, onChange }: ControlProps): ReactElement {
+  return (
+    <input
+      type="text"
+      data-testid="control-text"
+      aria-label={control.label}
+      value={String(control.value ?? "")}
+      onChange={(e) => onChange(control.key, e.target.value)}
+    />
+  );
+}
+
+function TextareaControl({ control, onChange }: ControlProps): ReactElement {
+  return (
+    <textarea
+      data-testid="control-textarea"
+      aria-label={control.label}
+      value={String(control.value ?? "")}
+      onChange={(e) => onChange(control.key, e.target.value)}
+    />
+  );
+}
+
+// ── structural placeholder (fallback only, for unknown backend kinds) ──
 
 function makePlaceholder(kind: ControlKind) {
   function Placeholder({ control }: ControlProps): ReactElement {
@@ -142,12 +218,12 @@ export const CONTROL_REGISTRY: Record<
 > = {
   select: SelectControl,
   columns: ColumnsControl,
-  radio: makePlaceholder("radio"),
+  radio: RadioControl,
   multiselect: MultiselectControl,
-  slider: makePlaceholder("slider"),
-  text: makePlaceholder("text"),
-  textarea: makePlaceholder("textarea"),
-  toggle: makePlaceholder("toggle"),
+  slider: SliderControl,
+  text: TextControl,
+  textarea: TextareaControl,
+  toggle: ToggleControl,
 };
 
 /** The single render entry point. Looks up the registry by kind — never switches. */
