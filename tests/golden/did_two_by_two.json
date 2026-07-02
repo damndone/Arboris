@@ -3,6 +3,7 @@
     "analysis_router": [
       "data_profile"
     ],
+    "boxplots": [],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -24,9 +25,12 @@
     "did_diagnostics": [
       "cleaned_dataset"
     ],
+    "histograms": [],
+    "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
     "report_pdf": [],
+    "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],
