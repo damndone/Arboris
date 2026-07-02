@@ -89,6 +89,22 @@ describe("GraphTooltip (T8.4)", () => {
     expect(screen.getByText("Caution")).toBeInTheDocument();
   });
 
+  it("shows the Blocker trust label (v1.6.6 ④)", () => {
+    render(<GraphTooltip node={vn({ trust: "blocker" })} x={0} y={0} />);
+    expect(screen.getByText("Blocker")).toBeInTheDocument();
+  });
+
+  it("surfaces trustReason when present (v1.6.6 ④)", () => {
+    render(
+      <GraphTooltip
+        node={vn({ trust: "blocker", trustReason: "singular design matrix" })}
+        x={0}
+        y={0}
+      />,
+    );
+    expect(screen.getByText("singular design matrix")).toBeInTheDocument();
+  });
+
   it("DoD: pixel position is independent of canvas zoom (portal to body)", () => {
     // The tooltip's left/top derive ONLY from the x/y props — by
     // portaling out of the React Flow viewport, no parent transform

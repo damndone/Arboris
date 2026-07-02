@@ -154,7 +154,11 @@ describe("NodeActionMenu", () => {
       const item = screen.getByText(label).closest("button");
       expect(item).not.toBeNull();
       expect(item).toBeDisabled();
-      expect(item?.getAttribute("title")).toMatch(/V1\.5\.3/i);
+      // v1.6.6 ③: reasons are honest now — non-empty, and must NOT cite the
+      // long-shipped V1.5.3/V2.0 placeholder versions.
+      const title = item?.getAttribute("title") ?? "";
+      expect(title.length).toBeGreaterThan(0);
+      expect(title).not.toMatch(/V1\.5\.3|V2\.0/i);
     },
   );
 

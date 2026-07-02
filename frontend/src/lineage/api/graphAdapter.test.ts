@@ -128,7 +128,7 @@ describe("graphAdapter", () => {
     ["ok", "ok"],
     ["warning", "review"],
     ["caution", "caution"],
-    ["blocker", "caution"],
+    ["blocker", "blocker"], // v1.6.6 ④: BLOCKER no longer collapses into caution
     ["nonsense", "review"], // unknown → fallback per §4.4
   ] as const)(
     "trust normalisation: %s → %s",

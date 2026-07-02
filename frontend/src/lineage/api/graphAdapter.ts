@@ -74,7 +74,8 @@ const UNKNOWN_TRUST_WARNED = new Set<string>();
 export function normalizeTrust(t: unknown): Trust {
   if (t === "ok") return "ok";
   if (t === "warning") return "review";
-  if (t === "caution" || t === "blocker") return "caution";
+  if (t === "caution") return "caution";
+  if (t === "blocker") return "blocker"; // v1.6.6 ④: keep BLOCKER distinct
   const key = String(t);
   if (!UNKNOWN_TRUST_WARNED.has(key)) {
     UNKNOWN_TRUST_WARNED.add(key);

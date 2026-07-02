@@ -20,7 +20,7 @@
 // satisfied by selected-outline + trust badge alone. Trust signal
 // lives in the row1 badge.
 //
-// Badge precedence: caution > review (trust=review OR any decision
+// Badge precedence: blocker > caution > review (trust=review OR any decision
 // reviewStatus ∈ {needed,failed}) > none. The decision-fallback
 // inherits V1.4.1 NodeCard behaviour so a trust=ok node with a
 // "needed" DP still flags for review — adapter's normalizeTrust does
@@ -121,6 +121,8 @@ interface BadgeDescriptor {
 
 function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
   const reviews = reviewCount(node);
+  // v1.6.6 ④: blocker is the strongest variant — checked before caution.
+  if (node.trust === "blocker") return { variant: "blocker", text: "Blocker" };
   if (node.trust === "caution") return { variant: "caution", text: "Caution" };
   // Review badge fires for either trust=review OR any decision needs review.
   if (node.trust === "review" || reviews > 0)
@@ -217,6 +219,8 @@ export function GraphNode({ data }: GraphNodeProps) {
             <span
               className={`ln-graph-node__badge ln-graph-node__badge--${badge.variant}`}
               data-testid="node-badge"
+              // v1.6.6 ④: surface the trust reason as a native tooltip.
+              title={node.trustReason || undefined}
             >
               {badge.text}
             </span>

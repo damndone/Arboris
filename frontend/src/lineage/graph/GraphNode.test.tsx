@@ -157,6 +157,22 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
     expect(badge.className).toContain("ln-graph-node__badge--caution");
   });
 
+  // v1.6.6 ④: BLOCKER is its own strongest variant, distinct from caution.
+  it("shows blocker badge when trust=blocker (highest priority)", () => {
+    mountNode(vn({ trust: "blocker", decisions: [vd("needed")] }));
+    const badge = screen.getByTestId("node-badge");
+    expect(badge).toHaveTextContent("Blocker");
+    expect(badge.className).toContain("ln-graph-node__badge--blocker");
+  });
+
+  it("surfaces trustReason as the badge tooltip (title attr)", () => {
+    mountNode(vn({ trust: "blocker", trustReason: "singular design matrix" }));
+    expect(screen.getByTestId("node-badge")).toHaveAttribute(
+      "title",
+      "singular design matrix",
+    );
+  });
+
   // REV-2: non-triggering decision states must not surface a badge when
   // trust=ok. Otherwise we'd over-flag nodes whose DPs are already cleared.
   const benign: DecisionReviewStatus[] = [
