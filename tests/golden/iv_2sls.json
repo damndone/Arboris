@@ -26,6 +26,7 @@
     "iv_diagnostics": [
       "cleaned_dataset"
     ],
+    "iv_first_stage": [],
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],

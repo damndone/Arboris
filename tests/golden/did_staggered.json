@@ -11,7 +11,6 @@
       "raw_data.csv"
     ],
     "coef_plot": [],
-    "correlation_heatmap": [],
     "data_profile": [
       "cleaned_dataset"
     ],
@@ -25,12 +24,12 @@
     "did_diagnostics": [
       "cleaned_dataset"
     ],
+    "event_study": [],
     "histograms": [],
     "kde_plots": [],
     "raw_data.csv": [],
     "report_html": [],
     "report_pdf": [],
-    "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],

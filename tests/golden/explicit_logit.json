@@ -4,6 +4,7 @@
       "data_profile"
     ],
     "boxplots": [],
+    "category_counts": [],
     "cleaned_dataset": [
       "raw_data.csv"
     ],
@@ -11,7 +12,6 @@
       "raw_data.csv"
     ],
     "coef_plot": [],
-    "correlation_heatmap": [],
     "data_profile": [
       "cleaned_dataset"
     ],
@@ -24,10 +24,10 @@
     "logit_1": [
       "cleaned_dataset"
     ],
+    "pred_prob_by_class": [],
     "raw_data.csv": [],
     "report_html": [],
     "report_pdf": [],
-    "scatter_plots": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],
