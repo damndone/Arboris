@@ -2,9 +2,10 @@
 //
 // V1.5.2 P3 — workbench top bar with view-mode switcher.
 //
-// V1.5.2 scope: only the view switcher tabs (Graph / Table / Pipeline).
-// Plan §15's `Rerun` and `Generate report` action slots are reserved
-// for P4 (NodeActionRegistry wiring); P3 keeps the topbar minimal.
+// View switcher tabs (Graph / Table / Pipeline) + the right-side action
+// slot (plan §15), driven by actionRegistry surface="topbar". v1.6.6 ③:
+// `Rerun` is live (routes to the node rerun flow); `Generate report` stays
+// an honest disabled placeholder (AI backend — v1.6.8).
 //
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
 // which goes through the provider's single-commit URL writer.
@@ -35,12 +36,11 @@ export function WorkbenchTopbar() {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
 
-  // V1.5.2 P7 — topbar action slot, plan §15. Driven by actionRegistry
-  // filtered by surface="topbar". The action context needs a node;
-  // when no tab is selected we fall back to the first node in the
-  // model so disabled placeholders still render their tooltips.
-  // Once Rerun lands in V1.5.3 with a real handler, it'll likely
-  // need a different context shape — handle that when it lands.
+  // Topbar action slot (plan §15). Driven by actionRegistry filtered by
+  // surface="topbar". The action context needs a node; when no tab is
+  // selected we fall back to the first node so the placeholder tooltips
+  // (and, v1.6.6 ③, the live Rerun) still have a target. Rerun opens that
+  // node's detail → OperationSection → POST /runs/<id>/rerun.
   const ctxNode =
     model.nodes.find((n) => n.nodeKey === state.selectedKey) ??
     model.nodes[0];
@@ -95,9 +95,8 @@ export function WorkbenchTopbar() {
           </ViewTabButton>
         ))}
       </div>
-      {/* Right-side action slot — V1.5.2 P7 plan §15. Driven by
-       *  actionRegistry surface="topbar". V1.5.2 only has disabled
-       *  Rerun + Generate report placeholders. */}
+      {/* Right-side action slot — plan §15. Driven by actionRegistry
+       *  surface="topbar": live Rerun + disabled Generate report (v1.6.8). */}
       <div
         data-testid="workbench-topbar-actions"
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}
