@@ -50,6 +50,7 @@ describe("sectionRegistry", () => {
 
   it("exposes the V1.6.3 section set with source compare near operation", () => {
     expect(sectionRegistry.map((s) => s.id)).toEqual([
+      "draftEditor",
       "trust",
       "askAi",
       "compareWithSource",
@@ -64,7 +65,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      10, 20, 25, 30, 35, 40, 50, 60, 70,
+      5, 10, 20, 25, 30, 35, 40, 50, 60, 70,
     ]);
   });
 

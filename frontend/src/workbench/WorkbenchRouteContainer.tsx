@@ -25,7 +25,7 @@
 // Table / Pipeline views compose into the same shell so the drawer +
 // rail + panel + search palette work identically across them.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
@@ -48,7 +48,18 @@ import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
-import type { RerunResponseV1 } from "../api";
+import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
+import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
+import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
+import {
+  validatePipelineDraft,
+  executePipelineDraft,
+  patchPipelineDraftParams,
+  deletePipelineDraft,
+  type RerunResponseV1,
+  type PipelineDraftResponse,
+  type PipelineDraftPatchRequest,
+} from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 
 type PendingFocusTarget = {
@@ -87,10 +98,15 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
+  const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
+  const [draftBusy, setDraftBusy] = useState(false);
 
   const model = useMemo(
-    () => (forest ? forestToGraphViewModel(forest, runId) : null),
-    [forest, runId],
+    () => {
+      const base = forest ? forestToGraphViewModel(forest, runId) : null;
+      return base ? mergeDraftsIntoModel(base, registry) : null;
+    },
+    [forest, runId, registry],
   );
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
@@ -159,28 +175,118 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     void refetch();
   };
 
+  const handleForkDraft = (created: PipelineDraftResponse) => {
+    dispatchDraft({
+      type: "put",
+      draftId: created.draft.draft_id,
+      draft: created.draft,
+      draftHash: created.draft_hash,
+    });
+  };
+
+  const handlePatchDraft = async (
+    draftId: string,
+    body: PipelineDraftPatchRequest,
+  ) => {
+    setDraftBusy(true);
+    try {
+      const res = await patchPipelineDraftParams(projectRoot, draftId, body);
+      dispatchDraft({ type: "patch", draftId, draft: res.draft, draftHash: res.draft_hash });
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
+  const handleValidateDraft = async (draftId: string) => {
+    setDraftBusy(true);
+    dispatchDraft({ type: "validating", draftId });
+    try {
+      const v = await validatePipelineDraft(projectRoot, draftId, "rerun_child");
+      dispatchDraft({
+        type: "validated",
+        draftId,
+        validation: v,
+        draftHash: v.validated_draft_hash ?? "",
+      });
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
+  const handleExecuteDraft = async (draftId: string) => {
+    const entry = registry.get(draftId);
+    if (!entry) return;
+    setDraftBusy(true);
+    dispatchDraft({ type: "executing", draftId });
+    try {
+      const result = await executePipelineDraft(projectRoot, draftId, {
+        validated_draft_hash: entry.validation?.validated_draft_hash ?? entry.draftHash,
+        execution_mode: "rerun_child",
+      });
+      setActiveRunId(result.focus.run_id);
+      setPendingFocusTarget({
+        runId: result.focus.run_id,
+        focus: {
+          forest_node_key: null,
+          op_node_id:
+            result.focus.poll?.rerun_from_op_node_id ??
+            result.produced_lineage.rerun_from_op_node_id,
+          node_hash: null,
+        },
+        attempts: 0,
+      });
+      await deletePipelineDraft(projectRoot, draftId);
+      dispatchDraft({ type: "remove", draftId });
+      void refetch();
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
+  const handleDiscardDraft = async (draftId: string) => {
+    setDraftBusy(true);
+    try {
+      await deletePipelineDraft(projectRoot, draftId);
+      dispatchDraft({ type: "remove", draftId });
+    } finally {
+      setDraftBusy(false);
+    }
+  };
+
   return (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >
         <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
-          <LineageBridge model={model}>
-            <WorkbenchShell
-              runId={runId}
-              projectRoot={projectRoot}
-              pendingFocusTarget={pendingFocusTarget}
-              onPendingFocusConsumed={() => setPendingFocusTarget(null)}
-              onPendingFocusRetry={() => {
-                setPendingFocusTarget((current) =>
-                  current === null
-                    ? null
-                    : { ...current, attempts: current.attempts + 1 },
-                );
-                void refetch();
-              }}
-            />
-          </LineageBridge>
+          <DraftActionsProvider
+            value={{
+              registry,
+              busy: draftBusy,
+              onForkDraft: handleForkDraft,
+              onPatch: handlePatchDraft,
+              onValidate: handleValidateDraft,
+              onExecute: handleExecuteDraft,
+              onDiscard: handleDiscardDraft,
+            }}
+          >
+            <LineageBridge model={model}>
+              <WorkbenchShell
+                runId={runId}
+                projectRoot={projectRoot}
+                pendingFocusTarget={pendingFocusTarget}
+                onPendingFocusConsumed={() => setPendingFocusTarget(null)}
+                onPendingFocusRetry={() => {
+                  setPendingFocusTarget((current) =>
+                    current === null
+                      ? null
+                      : { ...current, attempts: current.attempts + 1 },
+                  );
+                  void refetch();
+                }}
+              />
+            </LineageBridge>
+          </DraftActionsProvider>
         </WorkbenchStateProvider>
       </ForestContext.Provider>
     </RerunProvider>

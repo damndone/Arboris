@@ -33,6 +33,7 @@ import {
 } from "../../workbench/registry/actionRegistry";
 import { useWorkbenchOptional } from "../../workbench/WorkbenchStateProvider";
 import { useResolvedNodeOperationContext } from "../detail/NodeOperationContextProvider";
+import { useDraftActions } from "../drafts/DraftActionsContext";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
@@ -66,6 +67,7 @@ export function NodeActionMenu({
 }: NodeActionMenuProps) {
   const wb = useWorkbenchOptional();
   const resolvedContext = useResolvedNodeOperationContext();
+  const draftActions = useDraftActions();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<PopupCoords | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -155,7 +157,7 @@ export function NodeActionMenu({
       source_forest_node_key: context.selection.forest_node_key,
       source_context_fingerprint: context.context_fingerprint,
     });
-    onForkDraft?.(result);
+    (onForkDraft ?? draftActions?.onForkDraft)?.(result);
   }
 
   const closeAfter = (fn: () => void) => () => {
