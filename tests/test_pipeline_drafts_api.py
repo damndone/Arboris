@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from workbench.api import app
+from workbench.lineage.pipeline_drafts import PipelineDraftStore
 from workbench.lineage.node_write_validation import (
     NodeWriteOperationRequestV1,
     compute_context_fingerprint,
@@ -393,3 +394,55 @@ def test_execute_writes_snapshot_and_returns_deduped_on_retry(tmp_path: Path) ->
     assert second.status_code == 200
     assert second.json()["run_id"] == body["run_id"]
     assert second.json()["deduped"] is True
+
+
+def _make_draft(draft_id: str, status: str = "draft", model_type: str = "ols") -> dict:
+    return {
+        "draft_id": draft_id,
+        "schema_version": "pipeline_draft.v1",
+        "created_at": "2026-07-02T00:00:00Z",
+        "updated_at": "2026-07-02T00:00:00Z",
+        "status": status,
+        "created_from": {
+            "source_type": "run",
+            "source_run_id": "run_a",
+            "source_model_node_id": "model#0",
+            "source_op_node_id": "model#0",
+            "source_node_hash": "hash_a",
+            "source_context_fingerprint": "ctx_a",
+            "source_input_fingerprint": "in_a",
+        },
+        "graph": {
+            "nodes": [
+                {"node_type": "model", "node_id": "model#0", "model_type": model_type,
+                 "editable_schema": []},
+            ],
+            "edges": [],
+        },
+        "default_execution_mode": "rerun_child",
+    }
+
+
+def test_list_pipeline_drafts_endpoint(tmp_path: Path):
+    client = _client()
+    PipelineDraftStore(tmp_path).create(_make_draft("draft_aaaaaaaa"))
+    resp = client.get("/pipeline-drafts", params={"project_root": str(tmp_path)})
+    assert resp.status_code == 200, resp.text
+    assert [d["draft_id"] for d in resp.json()["drafts"]] == ["draft_aaaaaaaa"]
+
+
+def test_delete_pipeline_draft_endpoint(tmp_path: Path):
+    client = _client()
+    store = PipelineDraftStore(tmp_path)
+    store.create(_make_draft("draft_aaaaaaaa"))
+    resp = client.delete("/pipeline-drafts/draft_aaaaaaaa", params={"project_root": str(tmp_path)})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True, "draft_id": "draft_aaaaaaaa"}
+    assert not store._path("draft_aaaaaaaa").exists()
+
+
+def test_delete_missing_draft_is_ok(tmp_path: Path):
+    client = _client()
+    resp = client.delete("/pipeline-drafts/draft_missing0", params={"project_root": str(tmp_path)})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True

@@ -1191,6 +1191,15 @@ def create_pipeline_draft_from_node(
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
 
 
+@app.get("/pipeline-drafts")
+def list_pipeline_drafts(project_root: str) -> dict[str, Any]:
+    try:
+        drafts = _pipeline_draft_store(project_root).list()
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"drafts": drafts}
+
+
 @app.get("/pipeline-drafts/{draft_id}")
 def get_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
     try:
@@ -1216,6 +1225,15 @@ def patch_pipeline_draft(
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+@app.delete("/pipeline-drafts/{draft_id}")
+def delete_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+    try:
+        _pipeline_draft_store(project_root).delete(draft_id)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"ok": True, "draft_id": draft_id}
 
 
 @app.post("/pipeline-drafts/{draft_id}/validate")
