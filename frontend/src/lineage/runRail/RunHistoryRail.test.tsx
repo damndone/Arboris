@@ -134,6 +134,20 @@ describe("RunHistoryRail", () => {
     expect(decodeURIComponent(record.url!)).toContain("project_root=/tmp/p");
   });
 
+  it("preserves the current view when switching runs (stays on Table)", async () => {
+    fetchRunsMock.mockResolvedValue({
+      runs: [
+        { run_id: "r-a", status: "completed", mode: "auto", started_at: null, y: null, x: null },
+        { run_id: "r-b", status: "completed", mode: "auto", started_at: null, y: null, x: null },
+      ],
+    });
+    const record: { url?: string } = {};
+    harness(["/runs/r-a?project_root=/tmp/p&view=table"], record);
+    fireEvent.click(await screen.findByTestId("run-rail-row-r-b"));
+    await waitFor(() => expect(record.url).toContain("/runs/r-b"));
+    expect(record.url).toContain("view=table");
+  });
+
   it("renders 'No runs yet.' when the project has no runs", async () => {
     fetchRunsMock.mockResolvedValue({ runs: [] });
     harness(["/runs/r-x?project_root=/tmp/p"]);

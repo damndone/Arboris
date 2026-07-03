@@ -134,6 +134,16 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     };
   }, [projectRoot]);
 
+  // Reset the in-graph active head when the URL run changes (rail navigation to
+  // a different forest root). Without this, an active head set by a prior
+  // in-graph execute sticks and misleads views that follow the active head
+  // (e.g. the Table view would keep showing the executed run after the user
+  // navigates to a different run). Declared BEFORE the pending-focus effect so
+  // the deep-link pending path can still re-set activeRunId=runId afterward.
+  useEffect(() => {
+    setActiveRunId(null);
+  }, [runId]);
+
   const pendingSourceRunId = searchParams.get("pending_source_run_id");
   const pendingSourceModelNodeId = searchParams.get("pending_source_model_node_id");
   const pendingSourceOpNodeId = searchParams.get("pending_source_op_node_id");

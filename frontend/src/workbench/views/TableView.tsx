@@ -15,12 +15,20 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLineage } from "../../lineage/LineageContext";
+import { useForest } from "../ForestContext";
 import {
   artifactDownloadUrl,
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
 import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
+
+/** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
+ *  the unique tail, matching the run-rail's short label so the two line up. */
+function shortRunId(id: string): string {
+  const tail = id.split("_").pop() ?? id;
+  return tail.slice(0, 8);
+}
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -120,7 +128,11 @@ const FIGURE_GRID: React.CSSProperties = {
 
 export function TableView() {
   const { model } = useLineage();
-  const runId = model.runId;
+  const forest = useForest();
+  // Follow the active head (the run the graph is highlighting) so the table
+  // reflects a freshly forked/executed run and rail-selected runs — not just
+  // the URL run. Falls back to the URL run in legacy (no forest context).
+  const runId = forest?.activeRunId ?? model.runId;
   const [searchParams] = useSearchParams();
   const projectRoot = searchParams.get("project_root") ?? "";
 
@@ -165,6 +177,31 @@ export function TableView() {
 
   return (
     <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+      <header
+        data-testid="table-view-run-header"
+        title={runId}
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 8,
+          paddingBottom: 8,
+          borderBottom: "1px solid var(--separator)",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--label)" }}>
+          Results
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--font-mono, monospace)",
+            color: "var(--label-secondary)",
+          }}
+        >
+          run {shortRunId(runId)}
+        </span>
+      </header>
+
       {loading && (
         <div data-testid="table-view-loading" style={{ color: "var(--label-secondary)" }}>
           Loading results…

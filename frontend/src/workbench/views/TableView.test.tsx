@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LineageContext } from "../../lineage/LineageContext";
 import type { LineageContextValue } from "../../lineage/LineageContext";
+import { ForestContext } from "../ForestContext";
 import type { GraphViewModel } from "../../lineage/api/graphViewTypes";
 import type { ArtifactsResponse, RunDetail } from "../../api";
 import { TableView } from "./TableView";
@@ -151,5 +152,38 @@ describe("TableView", () => {
     renderTable();
     expect(screen.getByTestId("view-table").getAttribute("data-view")).toBe("table");
     await waitFor(() => expect(screen.getByTestId("table-view-empty")).toBeTruthy());
+  });
+
+  it("shows a run header with the (short) run id so results are attributable", async () => {
+    renderTable(model("20260703_010101_000000_deadbeef"));
+    const header = screen.getByTestId("table-view-run-header");
+    expect(header.textContent).toContain("deadbeef");
+    await waitFor(() => expect(screen.getByTestId("table-view-empty")).toBeTruthy());
+  });
+
+  it("follows the forest active head (not the URL run) for header + fetch", async () => {
+    const ctx: LineageContextValue = { model: model("url-run"), selectedKey: null, select: () => {} };
+    render(
+      <MemoryRouter initialEntries={["/runs/url-run?project_root=/tmp/demo"]}>
+        <ForestContext.Provider
+          value={{
+            forest: {} as never,
+            activeRunId: "20260703_020202_000000_ac71ve00",
+            setActiveRunId: () => {},
+          }}
+        >
+          <LineageContext.Provider value={ctx}>
+            <TableView />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+    // header + the data fetch both use the active head, not "url-run"
+    expect(screen.getByTestId("table-view-run-header").textContent).toContain("ac71ve00");
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(detailCalls.current[detailCalls.current.length - 1]).toEqual([
+      "/tmp/demo",
+      "20260703_020202_000000_ac71ve00",
+    ]);
   });
 });
