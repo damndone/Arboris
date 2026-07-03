@@ -40,11 +40,13 @@
 - execute 收敛进 `_submit_run`(与 `POST /runs` 同路):从三节点 payload 组装等价 form → 第一个 run 诞生 → 全链回填 Merkle 身份 → 与 rerun 产节点在森林中无差别。**不存在「创世图」与「血缘图」两种图。**
 - draft 链持久于项目级(v1.6.7 draft 持久化的延伸),reload 后完整 rehydrate,向导从断点继续。
 
-## 4. 后端改动(三块薄的 + 一个新端点)
+## 4. 后端改动(5 处;自审后从「三块薄的」修正为诚实清单)
 
-1. **`POST /uploads`(新)**:独立上传端点,复用现有 `upload_store.store_upload_bytes/resolve_upload`(内容寻址,v1.6.0 已有,当前仅在 run 提交内部使用)。返回 `{sha256, filename}`。文件自创世第一步即持久于服务端 → draft 链可完整 rehydrate。沿用 `max_single_file_gb` 上限检查。
-2. **`pipeline_drafts` 去掉 `from_node` 必填**:允许创世链;新增链式校验——Source 必有 upload、Table 必有 sheet(单 sheet 文件可默认)、Model 必有 x/y;链序 Source→Table→Model 不可乱。
-3. **execute 泛化**:创世链 execute 组装 form → `_submit_run`。`POST /runs` 契约不动(Submit 表单退役是前端的事)。
+1. **项目级 forest 端点(新,真工程量——自审 F1)**:现森林数据仅有 run-keyed 的 `GET /runs/{id}/graph?view=headset`,**0 run 的新项目无法渲染画布**,而空画布正是创世起点。新增 `GET /graph?project_root=`(项目级 headset 森林;0 run 时返回空森林 + 现存 draft 链)。run-keyed 端点保留,内部收敛同一构建路径。
+2. **`POST /uploads`(新,薄)**:独立上传端点,复用现有 `upload_store.store_upload_bytes/resolve_upload`(内容寻址,v1.6.0 已有,当前仅在 run 提交内部使用)。返回 `{sha256, filename}`。文件自创世第一步即持久于服务端 → draft 链可完整 rehydrate。沿用 `max_single_file_gb` 上限检查。
+3. **`pipeline_drafts` 允许创世链(自审 F3)**:`from_node` 改可选;`_validate_graph_shape` / `_validate_created_from_source_ref` 为 source/table 节点类型扩展。链式校验——Source 必有 upload、Table 必有 sheet(单 sheet 文件可默认)、Model 必有 x/y;链序 Source→Table→Model 不可乱。**validate 只做结构 + 引用校验;列级校验(x/y 是否存在于表中)不在 validate 做**——交给 execute 路径上 `_submit_run` 既有的 `_column_checks`,不重复造轮子。
+4. **execute 新增创世分支(自审 F2,非参数放宽)**:现 execute 深度耦合 `created_from`(读父 run 的 `run_inputs.form` 做 merge、`rerun_from` 需 owner/node_hash/context_fingerprint,且 `execution_mode="new_run"` 现为 409 `NEW_RUN_EXECUTION_NOT_ENABLED`)。创世 execute = 独立分支:从三 draft payload **合成完整 form**(mode/model_type/y/x/sheet_name/transpose/…)→ `_submit_run(rerun_reason="initial", 无 rerun_of/from_node)`,启用新 `execution_mode="genesis"`。复用既有 execution_lock + dedupe + slot 并发结构。`POST /runs` 契约不动。
+5. **discard 创世链时回收无引用 upload(自审 F6)**:整链 discard 若 upload_sha 无其他引用(无 run_inputs、无其他 draft 引用)则删除 blob;全量孤儿 GC 仍记欠账(与 v1.6.7 孤儿 draft GC 合并处理)。
 
 **明确不做**:后端项目注册表(无 project id 概念,Launcher 最近项目走前端 localStorage)。
 
@@ -53,17 +55,24 @@
 ### 路由
 
 ```
-/                      → Launcher(新首页)
-/p/:encodedRoot/graph  → 图工作台 = 项目的家(encodedRoot = URL 编码的 project_root)
-/runs/:id              → 重定向 /p/:encodedRoot/graph?focus=<run>(深链不断)
-Submit 表单            → 从导航摘除,保留为 ⌘K「快速 run」兜底(代码不删,下版本退役)
+/                  → Launcher(新首页)
+/p/:slug/graph     → 图工作台 = 项目的家。slug = base64url(project_root)——
+                     自审 F5:encodeURIComponent 会在路径段产生 %2F,
+                     vite/react-router 对其规范化行为不一致,是雷;base64url 无此问题
+/runs/:id          → 重定向 /p/:slug/graph?focus=<run>(从 ?project_root= query 取根;
+                     无 query 时回 Launcher)
+/runs(History 页) → 重定向 /p/:slug/graph(run rail 承接;无 query 回 Launcher)
+/submit(隐藏路由)→ 旧 Submit 表单的新挂载点,不进导航;⌘K「快速 run」导航至此。
+                     batch run(y_list)仅此处有——创世向导 v1 只做单 run
 ```
 
 ### 组件
 
-- **Launcher**:最近项目卡片(localStorage)+「新建项目」modal(父目录+名称两字段,`POST /projects` 现成)。stale 路径复用 v1.6.5 `PROJECT_NOT_FOUND` 友好空态。
+- **工作台容器解除 runId 依赖(自审 F1 的前端半)**:`WorkbenchRouteContainer`/`useForestData` 改为 project-keyed(消费新 `GET /graph?project_root=`),`runId` 降级为可选 focus 参数。0 run 时渲染空画布 +「＋ 新链路」空态引导。
+- **Launcher**:最近项目卡片(localStorage)+「新建项目」modal(父目录+名称两字段,`POST /projects` 现成)。stale 路径复用 v1.6.5 `PROJECT_NOT_FOUND` 友好空态(卡片标失效、可移除)。
 - **顶栏项目切换器**:`项目名 ▾` 下拉 = 最近项目 + 新建 modal;切换/新建不离开图。
-- **创世向导(右侧抽屉,复用 v1.6.7 drawer)**:步 1 选文件(客户端 SheetJS `previewFile` 解析 sheet/列——已验证现有逻辑本就在前端跑,零后端改动;同时 `POST /uploads`)→ 步 2 选 sheet/transpose → 步 3 x/y/角色/模型(复用 v1.6.6 controlFactory + capabilities,不新写表单)→ Run。**每完成一步,画布实时长出对应 draft 节点**(虚线);execute 成功后虚线变实线。
+- **创世向导(右侧抽屉,复用 v1.6.7 drawer)**:步 1 选文件(客户端 SheetJS `previewFile` 解析 sheet/列——已验证现有逻辑本就在前端跑,零后端改动;同时 `POST /uploads`)→ 步 2 选 sheet/transpose → 步 3 x/y/角色/模型 → Run。**每完成一步,画布实时长出对应 draft 节点**(虚线);execute 成功后虚线变实线。
+- **创世控件 schema 来源(自审 F4)**:现 `editable_schema` 由 serve 层从已有 run 标注,创世无 run 可标。定义:创世模型步的控件 = 全局 `GET /capabilities` × Source draft 携带的客户端列元数据,合成静态「创世 editable_schema」(per model_type 模板),复用 v1.6.6 controlFactory 渲染,不新写表单组件。
 
 ## 6. 数据流(创世全流程)
 
@@ -86,8 +95,9 @@ reload 任意步:draft 链自后端 rehydrate,向导断点续传。
 
 ## 8. 测试与验收
 
-- **BE**:genesis draft 三类型链式校验 / rehydrate / execute 收敛单测;**golden 23 全 0-drift**(execute 与 `_submit_run` 同路是硬保证)。
-- **FE**:Launcher、路由重定向、向导分步、画布 draft 生长 vitest;tsc 0。
+- **BE**:genesis draft 三类型链式校验 / rehydrate / execute 创世分支 / 项目级 forest 端点(0 run、多 run、含 draft 链)单测;**golden 23 全 0-drift**(execute 与 `_submit_run` 同路是硬保证)。
+- **FE**:Launcher、路由重定向(含无 query 回 Launcher)、slug 编解码、向导分步、空画布空态、画布 draft 生长 vitest;tsc 0。
+- **中文路径用例(自审 F10,gate UTF-8 教训)**:slug 编解码、localStorage recents、项目级 forest 端点均须覆盖含中文的 project_root。
 - **Gate**:BE + golden + FE + tsc 全绿,在 worktree 内跑(`LANG/LC_ALL=UTF-8`)。
 - **真机**:CDP smoke 走通创世全链(硬标准见 §1)。
 - **流程**:opus subagent 分派 + 两阶段对抗评审。
@@ -95,6 +105,12 @@ reload 任意步:draft 链自后端 rehydrate,向导断点续传。
 ## 9. 范围外(明确推迟)
 
 - 画布拖放建链(宿主升级,数据模型已就绪)
-- Submit 表单代码删除(本版仅摘除导航)
+- Submit 表单代码删除(本版仅摘除导航,`/submit` 隐藏路由保留)
+- batch run(y_list)图内化——留守 `/submit`,创世向导 v1 只做单 run
+- 全量孤儿 upload/draft GC(本版只做「discard 创世链回收无引用 upload」;与 v1.6.7 孤儿 draft GC 欠账合并)
 - 后端项目注册表 / 项目级设置页
 - v1.6.9:对比 / Ask AI / 报告(原 v1.6.8 内容)
+
+## 10. 自审记录(2026-07-03,交叉/反向/对抗三向)
+
+对照代码逐条验证后修正:F1 项目级 forest 端点缺失(最大隐藏工程量,原「三块薄的」不诚实)、F2 execute 创世分支非参数放宽、F3 validate 图形状扩展 + 列校验归 execute、F4 创世 editable_schema 来源、F5 路径段 %2F 雷改 base64url slug、F6 discard 回收 upload、F7 `/submit` 隐藏路由 + batch 留守、F8 `/runs` 重定向、F10 中文路径用例。F9 并发攻不动(execution_lock + dedupe + slot 既有结构覆盖创世)。已验证成立:draft 项目级持久化、upload_store 复用、SheetJS 前端解析、`POST /projects`。
