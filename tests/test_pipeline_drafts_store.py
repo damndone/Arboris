@@ -203,3 +203,75 @@ def test_validate_blocks_invalid_select_option() -> None:
 
     assert result["ok"] is False
     assert any(c["code"] == "INVALID_PARAM_OPTION" for c in result["checks"])
+
+
+def _make_draft(draft_id: str, status: str = "draft", model_type: str = "ols") -> dict:
+    return {
+        "draft_id": draft_id,
+        "schema_version": "pipeline_draft.v1",
+        "created_at": "2026-07-02T00:00:00Z",
+        "updated_at": "2026-07-02T00:00:00Z",
+        "status": status,
+        "created_from": {
+            "source_type": "run",
+            "source_run_id": "run_a",
+            "source_model_node_id": "model#0",
+            "source_op_node_id": "model#0",
+            "source_node_hash": "hash_a",
+            "source_context_fingerprint": "ctx_a",
+            "source_input_fingerprint": "in_a",
+        },
+        "graph": {
+            "nodes": [
+                {"node_type": "model", "node_id": "model#0", "model_type": model_type,
+                 "editable_schema": []},
+            ],
+            "edges": [],
+        },
+        "default_execution_mode": "rerun_child",
+    }
+
+
+def test_list_empty_returns_empty(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    assert store.list() == []
+
+
+def test_list_returns_summaries(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    store.create(_make_draft("draft_aaaaaaaa"))
+    store.create(_make_draft("draft_bbbbbbbb", model_type="logit"))
+    summaries = {s["draft_id"]: s for s in store.list()}
+    assert set(summaries) == {"draft_aaaaaaaa", "draft_bbbbbbbb"}
+    assert summaries["draft_bbbbbbbb"]["model_type"] == "logit"
+    assert summaries["draft_aaaaaaaa"]["status"] == "draft"
+    assert summaries["draft_aaaaaaaa"]["source_node_hash"] == "hash_a"
+    assert "draft_hash" in summaries["draft_aaaaaaaa"]
+
+
+def test_list_skips_corrupt_json(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    store.create(_make_draft("draft_aaaaaaaa"))
+    (store.drafts_dir / "draft_corrupt.json").write_text("{not json", encoding="utf-8")
+    ids = {s["draft_id"] for s in store.list()}
+    assert ids == {"draft_aaaaaaaa"}
+
+
+def test_delete_removes_json_and_dedupe(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    store.create(_make_draft("draft_aaaaaaaa"))
+    # a stray dedupe file for this draft must also go
+    dedupe = store.drafts_dir / "draft_aaaaaaaa.deadbeef.execution.json"
+    dedupe.write_text("{}", encoding="utf-8")
+    assert store._path("draft_aaaaaaaa").exists()
+
+    store.delete("draft_aaaaaaaa")
+
+    assert not store._path("draft_aaaaaaaa").exists()
+    assert not dedupe.exists()
+
+
+def test_delete_missing_is_idempotent(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    # must not raise
+    store.delete("draft_missing0")

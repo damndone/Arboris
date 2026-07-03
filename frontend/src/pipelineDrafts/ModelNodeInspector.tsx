@@ -25,11 +25,13 @@ export function ModelNodeInspector({
   draftHash,
   onSave,
   onDirtyChange,
+  disabled = false,
 }: {
   node: ModelNode;
   draftHash: string;
   onSave: (body: PipelineDraftPatchRequest) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  disabled?: boolean;
 }) {
   const [params, setParams] = useState<Record<string, unknown>>(node.params);
   const baseParamsKey = useMemo(() => stableParams(node.params), [node.params]);
@@ -94,6 +96,7 @@ export function ModelNodeInspector({
       </button>
       <button
         type="button"
+        disabled={disabled}
         onClick={() => {
           onSave({
             model_node_id: node.node_id,

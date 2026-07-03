@@ -44,7 +44,59 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
 
   return (
     <div className="dp-head">
+      {/* v1.6.7 — persistent action toolbar row: never shares a row with the
+          long id, so Actions + Close are always reachable. */}
       <div
+        data-testid="detail-header-toolbar"
+        style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}
+      >
+        {node.isDraft && node.lifecycleState && (
+          <span
+            data-testid="detail-header-state-chip"
+            data-state={node.lifecycleState}
+            style={{
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              fontWeight: 600,
+              padding: "2px 7px",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              color: "var(--label-secondary)",
+            }}
+          >
+            {node.lifecycleState}
+          </span>
+        )}
+        <span style={{ flex: 1 }} />
+        {onShowJson && (
+          <NodeActionMenu node={node} model={model} onShowJson={onShowJson} />
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            border: "none",
+            background: "var(--bg-elev)",
+            color: "var(--label-secondary)",
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* meta row: kind + id/resolver + owner + warnings, truncates instead of
+          pushing the toolbar. */}
+      <div
+        data-testid="detail-header-meta"
         className="dp-kind"
         style={{
           fontSize: 10,
@@ -56,6 +108,10 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
           display: "flex",
           alignItems: "center",
           gap: 8,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: "100%",
         }}
       >
         <span>{node.kind}</span>
@@ -69,6 +125,8 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
               color: "var(--label-secondary)",
               textTransform: "none",
               letterSpacing: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
             {displayRunId} · {node.nodeKey}
@@ -99,41 +157,6 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
             {warning}
           </span>
         ))}
-        <div
-          style={{
-            marginLeft: "auto",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          {onShowJson && (
-            <NodeActionMenu
-              node={node}
-              model={model}
-              onShowJson={onShowJson}
-            />
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              border: "none",
-              background: "var(--bg-elev)",
-              color: "var(--label-secondary)",
-              width: 24,
-              height: 24,
-              borderRadius: 6,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            ×
-          </button>
-        </div>
       </div>
       <h2
         id={DETAIL_HEADER_TITLE_ID}

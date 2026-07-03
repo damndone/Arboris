@@ -335,4 +335,22 @@ describe("GraphNode (T8.3 visual refresh + T8.5 tri-state)", () => {
       expect(node.getAttribute("data-search-cursor")).toBeNull();
     });
   });
+
+  describe("v1.6.7 draft lifecycle visual states (S2)", () => {
+    it("tags a draft node with its lifecycle state for styling", () => {
+      mountNode(vn({ isDraft: true, draftId: "d1", lifecycleState: "draft", title: "draft · ols" }));
+      const el = screen.getByTestId("graph-node-lifecycle");
+      expect(el).toHaveAttribute("data-lifecycle", "draft");
+    });
+
+    it("marks a pending draft node", () => {
+      mountNode(vn({ isDraft: true, draftId: "d1", lifecycleState: "pending", title: "draft · ols" }));
+      expect(screen.getByTestId("graph-node-lifecycle")).toHaveAttribute("data-lifecycle", "pending");
+    });
+
+    it("leaves a real (non-draft) node without the lifecycle testid", () => {
+      mountNode(vn());
+      expect(screen.queryByTestId("graph-node-lifecycle")).toBeNull();
+    });
+  });
 });

@@ -27,10 +27,13 @@ interface TabSpec {
   label: string;
 }
 
-const VIEW_TABS: TabSpec[] = [
+// v1.6.7 — Pipeline tab entry retired (the Pipeline view merges into the main
+// lineage graph via draft-in-graph). PipelineView + the "pipeline" ViewMode and
+// WorkbenchMain branch are kept as a URL deep-link fallback; only the clickable
+// tab is removed. Exported for testing.
+export const VIEW_TABS: TabSpec[] = [
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
-  { id: "pipeline", label: "Pipeline" },
 ];
 
 export function WorkbenchTopbar() {

@@ -82,11 +82,12 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
 
   const onPick = (r: RunSummary) => {
     if (!projectRoot) return;
-    navigate(
-      `/runs/${encodeURIComponent(r.run_id)}?project_root=${encodeURIComponent(
-        projectRoot,
-      )}&tab=lineage`,
-    );
+    // Preserve the current view (Graph/Table) so switching runs while on the
+    // Table doesn't kick the user back to the Graph view.
+    const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
+    const view = searchParams.get("view");
+    if (view) params.set("view", view);
+    navigate(`/runs/${encodeURIComponent(r.run_id)}?${params.toString()}`);
   };
 
   return (

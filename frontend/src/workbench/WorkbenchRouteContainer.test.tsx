@@ -234,12 +234,13 @@ function confirmOperationRerun() {
 }
 
 describe("WorkbenchRouteContainer", () => {
-  it("renders the topbar with three view tabs once data loads", async () => {
+  it("renders the topbar with two view tabs once data loads (Pipeline retired v1.6.7)", async () => {
     mountAt("/?tab=lineage");
     expect(await screen.findByTestId("workbench-topbar")).toBeInTheDocument();
     expect(screen.getByTestId("view-tab-graph")).toBeInTheDocument();
     expect(screen.getByTestId("view-tab-table")).toBeInTheDocument();
-    expect(screen.getByTestId("view-tab-pipeline")).toBeInTheDocument();
+    // v1.6.7: the Pipeline tab entry is retired (view merges into the graph).
+    expect(screen.queryByTestId("view-tab-pipeline")).toBeNull();
   });
 
   it("defaults to graph view (mounts GraphView)", async () => {
@@ -255,10 +256,10 @@ describe("WorkbenchRouteContainer", () => {
     expect(screen.queryByTestId("graph-workbench")).toBeNull();
   });
 
-  it("clicking the Pipeline tab swaps content and writes ?view=pipeline", async () => {
-    mountAt("/?tab=lineage");
-    const pipelineTab = await screen.findByTestId("view-tab-pipeline");
-    fireEvent.click(pipelineTab);
+  it("Pipeline view stays reachable via ?view=pipeline deep link (tab retired v1.6.7)", async () => {
+    // The clickable tab is gone, but the "pipeline" ViewMode + PipelineView are
+    // kept as a URL deep-link fallback (see WorkbenchTopbar VIEW_TABS comment).
+    mountAt("/?tab=lineage&view=pipeline");
     expect(await screen.findByTestId("view-pipeline")).toBeInTheDocument();
     expect(screen.queryByTestId("graph-workbench")).toBeNull();
   });
@@ -551,6 +552,26 @@ describe("WorkbenchRouteContainer", () => {
       expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
         "Child OLS",
       ),
+    );
+  });
+
+  it("fetches persisted drafts on mount to hydrate the forest", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue(
+      forestResponse("hash_model"),
+    );
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    render(
+      <MemoryRouter initialEntries={["/?tab=lineage"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(api.listPipelineDrafts).toHaveBeenCalledWith(expect.any(String)),
     );
   });
 });

@@ -1041,6 +1041,37 @@ export async function executePipelineDraft(
   return readResponse<DraftExecutionResult>(response);
 }
 
+export type PipelineDraftSummary = {
+  draft_id: string;
+  status: string;
+  model_type?: string | null;
+  source_run_id?: string | null;
+  source_model_node_id?: string | null;
+  source_op_node_id?: string | null;
+  source_node_hash?: string | null;
+  draft_hash: string;
+  updated_at?: string | null;
+};
+
+export async function listPipelineDrafts(
+  projectRoot: string,
+): Promise<PipelineDraftSummary[]> {
+  const response = await fetch(draftUrl(projectRoot, "/pipeline-drafts"));
+  const body = await readResponse<{ drafts: PipelineDraftSummary[] }>(response);
+  return body.drafts;
+}
+
+export async function deletePipelineDraft(
+  projectRoot: string,
+  draftId: string,
+): Promise<void> {
+  const response = await fetch(
+    draftUrl(projectRoot, `/pipeline-drafts/${encodeURIComponent(draftId)}`),
+    { method: "DELETE" },
+  );
+  await readResponse<{ ok: boolean }>(response);
+}
+
 // ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──
 
 /** Fetch the family head-set (union DAG across the rerun forest). */

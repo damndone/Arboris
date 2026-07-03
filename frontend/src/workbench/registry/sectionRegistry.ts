@@ -36,6 +36,7 @@ import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareW
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
+import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
 
@@ -62,6 +63,7 @@ function needsTrust(n: GraphViewNode): boolean {
 }
 
 export const sectionRegistry: SectionEntry[] = [
+  { id: "draftEditor", order: 5, shouldRender: (n) => Boolean(n.isDraft), Component: DraftEditorSlot },
   { id: "trust", order: 10, shouldRender: needsTrust, Component: TrustBanner },
   // Ask AI is explicitly feature-flagged for v1.6.2 so read-only advisory
   // UI cannot be exposed by default during release.
@@ -86,7 +88,7 @@ export const sectionRegistry: SectionEntry[] = [
   {
     id: "roleGroups",
     order: 35,
-    shouldRender: (n) => n.kind === "model" || n.stage === "model",
+    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
     Component: RoleGroupsSection,
   },
   {

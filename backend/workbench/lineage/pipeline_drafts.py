@@ -201,6 +201,61 @@ class PipelineDraftStore:
         PipelineDraftV1(**draft)
         return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
 
+    def list(self) -> list[dict[str, Any]]:
+        """Summaries of every draft json in the store dir (for reload hydrate).
+
+        Skips unreadable / schema-invalid files rather than raising, so one
+        corrupt draft never breaks the whole forest.
+        """
+        if not self.drafts_dir.is_dir():
+            return []
+        summaries: list[dict[str, Any]] = []
+        for path in sorted(self.drafts_dir.glob("*.json")):
+            if path.name.endswith(".execution.json"):
+                continue
+            try:
+                draft = json.loads(path.read_text(encoding="utf-8"))
+                PipelineDraftV1(**draft)
+            except Exception:
+                continue
+            created_from = draft.get("created_from") or {}
+            model_node = next(
+                (n for n in draft["graph"]["nodes"] if n.get("node_type") == "model"),
+                None,
+            )
+            summaries.append(
+                {
+                    "draft_id": draft["draft_id"],
+                    "status": draft.get("status", "draft"),
+                    "model_type": (model_node or {}).get("model_type"),
+                    "source_run_id": created_from.get("source_run_id"),
+                    "source_model_node_id": created_from.get("source_model_node_id"),
+                    "source_op_node_id": created_from.get("source_op_node_id"),
+                    "source_node_hash": created_from.get("source_node_hash"),
+                    "draft_hash": compute_executable_draft_hash(draft),
+                    "updated_at": draft.get("updated_at"),
+                }
+            )
+        return summaries
+
+    def delete(self, draft_id: str) -> None:
+        """Delete a draft json plus its execution/dedupe sidecar files.
+
+        Idempotent: deleting a non-existent draft is a no-op (safe under
+        concurrent discard). draft_id is validated to stay inside the store dir.
+        """
+        validate_draft_id(draft_id)
+        lock = self._lock_for(draft_id)
+        with lock:
+            path = self._path(draft_id)
+            if path.exists():
+                path.unlink()
+            for sidecar in self.drafts_dir.glob(f"{draft_id}.*.execution.json"):
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
+
     def update_params(
         self,
         draft_id: str,
