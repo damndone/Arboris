@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -64,6 +65,8 @@ from .lineage.op_contract import (
 from .lineage.pipeline_drafts import (
     DraftHashConflict,
     DraftLockedForExecution,
+    DraftNodeNotFound,
+    DraftNodePatchConflict,
     DraftNotFound,
     DraftValidationFailure,
     PipelineDraftStore,
@@ -1061,6 +1064,10 @@ def _pipeline_draft_store(project_root: str) -> PipelineDraftStore:
 def _draft_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, DraftNotFound):
         return HTTPException(status_code=404, detail="DRAFT_NOT_FOUND")
+    if isinstance(exc, DraftNodeNotFound):
+        return HTTPException(status_code=404, detail=f"DRAFT_NODE_NOT_FOUND: {exc}")
+    if isinstance(exc, DraftNodePatchConflict):
+        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, DraftHashConflict):
         return HTTPException(status_code=409, detail="DRAFT_HASH_CONFLICT")
     if isinstance(exc, DraftLockedForExecution):
@@ -1240,6 +1247,9 @@ def create_pipeline_draft_genesis(
     """
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
+    if not re.fullmatch(r"[0-9a-f]{64}", body.upload_sha256):
+        # Reject before touching the filesystem; do NOT reflect the raw value.
+        raise HTTPException(status_code=422, detail="UPLOAD_NOT_FOUND: invalid sha256")
     try:
         verify_upload(root, body.upload_sha256)
     except (OSError, ValueError) as exc:
@@ -1326,6 +1336,33 @@ def patch_pipeline_draft(
             base_draft_hash=body.base_draft_hash,
             params=body.params,
         )
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+class DraftNodePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, Any]
+    columns: list[str] | None = None
+
+
+@app.patch("/pipeline-drafts/{draft_id}/nodes/{node_id}")
+def patch_pipeline_draft_node(
+    draft_id: str,
+    node_id: str,
+    project_root: str,
+    body: DraftNodePatchRequest,
+) -> dict[str, Any]:
+    """v1.6.8 genesis wizard step: configure table_1 / model_1 in place.
+
+    Genesis-only (409 otherwise); the bound source node is immutable —
+    changing the file means discard the draft and restart genesis.
+    """
+    store = _pipeline_draft_store(project_root)
+    try:
+        stored = store.update_node_params(draft_id, node_id, body.params, columns=body.columns)
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}

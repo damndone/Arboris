@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,14 @@ class DraftPathError(PipelineDraftError):
 
 class DraftLockedForExecution(PipelineDraftError):
     code = "DRAFT_LOCKED_FOR_EXECUTION"
+
+
+class DraftNodeNotFound(PipelineDraftError):
+    code = "DRAFT_NODE_NOT_FOUND"
+
+
+class DraftNodePatchConflict(PipelineDraftError):
+    code = "DRAFT_NODE_PATCH_CONFLICT"
 
 
 class DraftValidationFailure(PipelineDraftError):
@@ -103,7 +111,9 @@ class PipelineDraftV1(BaseModel):
     created_at: str
     updated_at: str
     status: str = "draft"
-    created_from: CreatedFrom | GenesisCreatedFrom | None = None
+    created_from: (
+        Annotated[CreatedFrom | GenesisCreatedFrom, Field(discriminator="source_type")] | None
+    ) = None
     graph: dict[str, Any]
     default_execution_mode: Literal["rerun_child", "new_run", "genesis"] = "rerun_child"
 
@@ -301,6 +311,51 @@ class PipelineDraftStore:
         finally:
             lock.release()
 
+    # node_types the genesis wizard may edit; the bound source is immutable
+    # (changing the file = discard the draft and restart genesis).
+    _PATCHABLE: ClassVar[frozenset[str]] = frozenset({"table", "model"})
+
+    def update_node_params(
+        self,
+        draft_id: str,
+        node_id: str,
+        params: dict[str, Any],
+        *,
+        columns: list[str] | None = None,
+    ) -> StoredDraft:
+        """v1.6.8 genesis wizard step: merge params into one chain node.
+
+        Genesis-only by design — from-node drafts keep using update_params
+        (hash-guarded model-node edits).
+        """
+        lock = self._lock_for(draft_id)
+        if not lock.acquire(blocking=False):
+            raise DraftLockedForExecution("draft is locked for execution")
+        try:
+            stored = self.get(draft_id)
+            draft = stored.draft
+            if (draft.get("created_from") or {}).get("source_type") != "genesis":
+                raise DraftNodePatchConflict("NODE_PATCH_GENESIS_ONLY")
+            node = next(
+                (n for n in draft["graph"]["nodes"] if n.get("node_id") == node_id),
+                None,
+            )
+            if node is None:
+                raise DraftNodeNotFound(f"node {node_id}")
+            if node.get("node_type") not in self._PATCHABLE:
+                raise DraftNodePatchConflict("NODE_NOT_PATCHABLE")
+            node["params"] = {**node.get("params", {}), **params}
+            if columns is not None and node["node_type"] == "table":
+                node["columns"] = columns
+            node["status"] = "configured"
+            draft["updated_at"] = utc_now()
+            draft["status"] = "draft"  # any edit returns to draft state; must re-validate
+            PipelineDraftV1(**draft)
+            self._write_atomic(self._path(draft_id), draft)
+            return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+        finally:
+            lock.release()
+
     def execution_lock(self, draft_id: str) -> threading.Lock:
         return self._lock_for(draft_id)
 
@@ -377,6 +432,15 @@ def _validate_genesis_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
             check(
                 "GENESIS_CHAIN_SHAPE",
                 f"Genesis chain must be {_GENESIS_CHAIN}, got {types}.",
+            )
+        )
+        return checks
+    node_ids = [node.get("node_id") for node in nodes]
+    if len(set(node_ids)) != len(node_ids):
+        checks.append(
+            check(
+                "GENESIS_CHAIN_SHAPE",
+                f"Genesis chain node_ids must be distinct, got {node_ids}.",
             )
         )
         return checks
