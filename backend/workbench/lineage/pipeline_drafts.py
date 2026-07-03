@@ -90,15 +90,22 @@ class CreatedFrom(BaseModel):
     source_input_fingerprint: str
 
 
+class GenesisCreatedFrom(BaseModel):
+    """v1.6.8: parentless draft born from a standalone upload (no source run)."""
+
+    source_type: Literal["genesis"]
+    source_input_fingerprint: str
+
+
 class PipelineDraftV1(BaseModel):
     draft_id: str
     schema_version: Literal["pipeline_draft.v1"]
     created_at: str
     updated_at: str
     status: str = "draft"
-    created_from: CreatedFrom | None = None
+    created_from: CreatedFrom | GenesisCreatedFrom | None = None
     graph: dict[str, Any]
-    default_execution_mode: Literal["rerun_child", "new_run"] = "rerun_child"
+    default_execution_mode: Literal["rerun_child", "new_run", "genesis"] = "rerun_child"
 
 
 @dataclass(frozen=True)
@@ -353,7 +360,44 @@ def _nodes_by_type(draft: dict[str, Any], node_type: str) -> list[dict[str, Any]
     ]
 
 
+_GENESIS_CHAIN = ["input.upload", "table", "model"]
+
+
+def _validate_genesis_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    """v1.6.8 genesis drafts are a fixed parentless chain source -> table -> model.
+
+    Structural only: column/param checks belong to validate-for-execution /
+    execute (spec F3/F4), not to the graph shape.
+    """
+    checks: list[dict[str, Any]] = []
+    nodes = draft.get("graph", {}).get("nodes", [])
+    types = [node.get("node_type") for node in nodes]
+    if types != _GENESIS_CHAIN:
+        checks.append(
+            check(
+                "GENESIS_CHAIN_SHAPE",
+                f"Genesis chain must be {_GENESIS_CHAIN}, got {types}.",
+            )
+        )
+        return checks
+    edges = draft.get("graph", {}).get("edges", [])
+    want = [
+        {"from": nodes[0].get("node_id"), "to": nodes[1].get("node_id")},
+        {"from": nodes[1].get("node_id"), "to": nodes[2].get("node_id")},
+    ]
+    if edges != want:
+        checks.append(
+            check(
+                "GENESIS_CHAIN_EDGES",
+                "Genesis edges must chain source -> table -> model.",
+            )
+        )
+    return checks
+
+
 def _validate_graph_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    if (draft.get("created_from") or {}).get("source_type") == "genesis":
+        return _validate_genesis_shape(draft)
     checks: list[dict[str, Any]] = []
     inputs = _nodes_by_type(draft, "input.dataset")
     models = _nodes_by_type(draft, "model")

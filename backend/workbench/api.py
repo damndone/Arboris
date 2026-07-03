@@ -1214,6 +1214,87 @@ def create_pipeline_draft_from_node(
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
 
 
+class PipelineDraftGenesisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    upload_sha256: str
+    filename: str
+    sheet_names: list[str] = []
+    columns: list[str] = []  # client-side SheetJS-parsed column names
+
+
+@app.post("/pipeline-drafts/genesis")
+def create_pipeline_draft_genesis(
+    project_root: str,
+    body: PipelineDraftGenesisRequest,
+) -> dict[str, Any]:
+    """v1.6.8: parentless genesis draft chain (source -> table -> model).
+
+    Same store + lifecycle as from-node drafts; created_from.source_type
+    distinguishes the branch everywhere downstream (validate / execute).
+
+    Design note: the genesis model node is params-only, NO editable_schema —
+    the wizard reuses capabilities-driven RunForm controls (which don't need
+    editable_schema); validate stays structural; column checks belong to
+    execute (spec F3/F4).
+    """
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
+    root = Path(project_root)
+    try:
+        verify_upload(root, body.upload_sha256)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"UPLOAD_NOT_FOUND: {exc}") from exc
+
+    now = utc_now()
+    draft = {
+        "draft_id": new_draft_id(),
+        "schema_version": "pipeline_draft.v1",
+        "created_at": now,
+        "updated_at": now,
+        "status": "draft",
+        "created_from": {
+            "source_type": "genesis",
+            "source_input_fingerprint": body.upload_sha256,
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "source_1",
+                    "node_type": "input.upload",
+                    "upload": {"sha256": body.upload_sha256, "filename": body.filename},
+                    "sheet_names": body.sheet_names,
+                    "status": "bound",
+                },
+                {
+                    "node_id": "table_1",
+                    "node_type": "table",
+                    "params": {"sheet_name": None, "transpose": False},
+                    "columns": body.columns,
+                    "status": "pending",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": None,
+                    "params": {},
+                    "status": "pending",
+                },
+            ],
+            "edges": [
+                {"from": "source_1", "to": "table_1"},
+                {"from": "table_1", "to": "model_1"},
+            ],
+        },
+        "default_execution_mode": "genesis",
+    }
+    try:
+        stored = _pipeline_draft_store(project_root).create(draft)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
 @app.get("/pipeline-drafts")
 def list_pipeline_drafts(project_root: str) -> dict[str, Any]:
     try:
