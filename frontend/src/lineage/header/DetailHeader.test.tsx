@@ -190,4 +190,23 @@ describe("DetailHeader", () => {
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
     expect(screen.getByText("Rerun from here").closest("button")).toBeDisabled();
   });
+
+  it("keeps the action toolbar on its own row so a long id can't push it off (v1.6.7)", () => {
+    renderHeader(makeNode({ nodeKey: "n".repeat(120), kind: "model" }), vi.fn(), makeModel(), vi.fn());
+    const toolbar = screen.getByTestId("detail-header-toolbar");
+    expect(within(toolbar).getByRole("button", { name: "Close" })).toBeInTheDocument();
+    expect(within(toolbar).getByRole("button", { name: /node actions/i })).toBeInTheDocument();
+    const meta = screen.getByTestId("detail-header-meta");
+    expect(meta).toHaveStyle({ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+  });
+
+  it("shows a lifecycle state chip for a draft node (v1.6.7)", () => {
+    renderHeader(makeNode({ isDraft: true, lifecycleState: "pending" }), vi.fn(), makeModel(), vi.fn());
+    expect(screen.getByTestId("detail-header-state-chip")).toHaveAttribute("data-state", "pending");
+  });
+
+  it("shows no state chip for a non-draft node (v1.6.7)", () => {
+    renderHeader(makeNode(), vi.fn(), makeModel(), vi.fn());
+    expect(screen.queryByTestId("detail-header-state-chip")).toBeNull();
+  });
 });
