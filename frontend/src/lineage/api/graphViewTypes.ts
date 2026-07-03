@@ -86,6 +86,17 @@ export interface EditableControl {
   visible_when?: Record<string, unknown>; // forward-compat; preserved, not yet enforced
 }
 
+/** v1.6.7 — lifecycle of an in-graph draft node (draft-in-graph feature).
+ *  Undefined on real forest nodes. See spec §3. */
+export type LifecycleState =
+  | "draft"
+  | "validating"
+  | "valid"
+  | "invalid"
+  | "pending"
+  | "executed"
+  | "failed";
+
 export interface GraphViewNode {
   // ── identity (V1.5.0 populated) ──
   id: string; // backend stable id; serves React Flow node.id
@@ -109,6 +120,11 @@ export interface GraphViewNode {
 
   // ── timing (V1.5.0 populated where backend provides) ──
   createdAt?: string; // ← created_at
+
+  // ── v1.6.7 draft-in-graph (undefined for real forest nodes) ──
+  isDraft?: boolean;
+  lifecycleState?: LifecycleState;
+  draftId?: string;
 
   // ── forward-compat slots — V1.5.0 undefined ──
   runtimeMs?: number; // populate when backend exposes NodeExecution stats
