@@ -553,4 +553,24 @@ describe("WorkbenchRouteContainer", () => {
       ),
     );
   });
+
+  it("fetches persisted drafts on mount to hydrate the forest", async () => {
+    vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue(
+      forestResponse("hash_model"),
+    );
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    render(
+      <MemoryRouter initialEntries={["/?tab=lineage"]}>
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(api.listPipelineDrafts).toHaveBeenCalledWith(expect.any(String)),
+    );
+  });
 });

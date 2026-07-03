@@ -52,6 +52,7 @@ import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import {
+  listPipelineDrafts,
   validatePipelineDraft,
   executePipelineDraft,
   patchPipelineDraftParams,
@@ -112,6 +113,25 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
     [model],
   );
+
+  // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
+  // survive a page reload. Best-effort: never block the forest if it fails.
+  useEffect(() => {
+    let cancelled = false;
+    listPipelineDrafts(projectRoot)
+      .then((summaries) => {
+        if (cancelled) return;
+        const unexecuted = summaries.filter((s) => s.status !== "executed");
+        if (unexecuted.length)
+          dispatchDraft({ type: "hydrate", summaries: unexecuted });
+      })
+      .catch(() => {
+        /* drafts are best-effort; never block the forest */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot]);
 
   const pendingSourceRunId = searchParams.get("pending_source_run_id");
   const pendingSourceModelNodeId = searchParams.get("pending_source_model_node_id");
