@@ -21,12 +21,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
 import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
 import { createPipelineDraftFromNode } from "../../api";
+import type { PipelineDraftResponse } from "../../api";
 import {
   actionsForSurface,
   type ActionContext,
@@ -44,6 +44,10 @@ export interface NodeActionMenuProps {
    *  drawer-owned modal, not a node-scoped imperative. */
   onShowJson: () => void;
   projectRoot?: string;
+  /** v1.6.7: forking a draft keeps it IN the main forest — the parent
+   *  registers the created draft so it renders on the graph, instead of
+   *  navigating to the standalone /pipeline-drafts route. */
+  onForkDraft?: (created: PipelineDraftResponse) => void;
 }
 
 interface PopupCoords {
@@ -58,8 +62,8 @@ export function NodeActionMenu({
   model,
   onShowJson,
   projectRoot,
+  onForkDraft,
 }: NodeActionMenuProps) {
-  const navigate = useNavigate();
   const wb = useWorkbenchOptional();
   const resolvedContext = useResolvedNodeOperationContext();
   const [open, setOpen] = useState(false);
@@ -140,7 +144,7 @@ export function NodeActionMenu({
       resolvedContext.context.node_payload.editable_schema?.length,
   );
 
-  async function onOpenDraftGraph() {
+  async function onForkDraftHere() {
     if (!canOpenDraft || !resolvedContext?.ok) return;
     const context = resolvedContext.context;
     const result = await createPipelineDraftFromNode(effectiveProjectRoot, {
@@ -151,11 +155,7 @@ export function NodeActionMenu({
       source_forest_node_key: context.selection.forest_node_key,
       source_context_fingerprint: context.context_fingerprint,
     });
-    navigate(
-      `/pipeline-drafts/${result.draft.draft_id}?project_root=${encodeURIComponent(
-        effectiveProjectRoot,
-      )}`,
-    );
+    onForkDraft?.(result);
   }
 
   const closeAfter = (fn: () => void) => () => {
@@ -212,11 +212,11 @@ export function NodeActionMenu({
             testId="drawer-menu-item-choose-operation-owner"
           />
         )}
-        {canOpenDraft && (
+        {canOpenDraft && !node.isDraft && (
           <MenuItem
-            label="Open as Draft Graph"
-            onClick={closeAfter(onOpenDraftGraph)}
-            testId="drawer-menu-item-open-as-draft-graph"
+            label="Fork draft here"
+            onClick={closeAfter(onForkDraftHere)}
+            testId="drawer-menu-item-fork-draft-here"
           />
         )}
         {registryActions.map((action) => {

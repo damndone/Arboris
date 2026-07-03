@@ -302,8 +302,9 @@ describe("NodeActionMenu", () => {
     expect(btn.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("opens an eligible model node as a draft graph", async () => {
+  it("forks a draft in-graph (no navigation) via onForkDraft", async () => {
     const navigate = vi.fn();
+    const onForkDraft = vi.fn();
     const seed = makeOwnerResolutionSeedFixture();
     const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
     vi.mocked(useNavigate).mockReturnValue(navigate);
@@ -327,6 +328,7 @@ describe("NodeActionMenu", () => {
               model={seed.graphModel}
               onShowJson={vi.fn()}
               projectRoot="/tmp/project"
+              onForkDraft={onForkDraft}
             />
           </NodeOperationContextProvider>
         </ForestContext.Provider>
@@ -334,7 +336,7 @@ describe("NodeActionMenu", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /open as draft graph/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /fork draft here/i }));
 
     await waitFor(() =>
       expect(api.createPipelineDraftFromNode).toHaveBeenCalledWith(
@@ -346,9 +348,11 @@ describe("NodeActionMenu", () => {
       ),
     );
     await waitFor(() =>
-      expect(navigate).toHaveBeenCalledWith(
-        "/pipeline-drafts/draft_1?project_root=%2Ftmp%2Fproject",
-      ),
+      expect(onForkDraft).toHaveBeenCalledWith({
+        draft: { draft_id: "draft_1" },
+        draft_hash: "h1",
+      }),
     );
+    expect(navigate).not.toHaveBeenCalled();
   });
 });
