@@ -177,8 +177,9 @@ async def upload_dataset_endpoint(
     Files persist server-side from wizard step 1 so genesis draft chains
     fully rehydrate after reload (same store POST /runs uses internally).
     """
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
-    config = load_config(root / "config.yml")  # PROJECT_NOT_FOUND propagates as today
+    config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
     try:
         data = await _read_upload_bytes(file, max_upload_bytes)
