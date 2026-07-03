@@ -238,6 +238,24 @@ class PipelineDraftStore:
             )
         return summaries
 
+    def delete(self, draft_id: str) -> None:
+        """Delete a draft json plus its execution/dedupe sidecar files.
+
+        Idempotent: deleting a non-existent draft is a no-op (safe under
+        concurrent discard). draft_id is validated to stay inside the store dir.
+        """
+        validate_draft_id(draft_id)
+        lock = self._lock_for(draft_id)
+        with lock:
+            path = self._path(draft_id)
+            if path.exists():
+                path.unlink()
+            for sidecar in self.drafts_dir.glob(f"{draft_id}.*.execution.json"):
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
+
     def update_params(
         self,
         draft_id: str,

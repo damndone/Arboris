@@ -255,3 +255,23 @@ def test_list_skips_corrupt_json(tmp_path: Path):
     (store.drafts_dir / "draft_corrupt.json").write_text("{not json", encoding="utf-8")
     ids = {s["draft_id"] for s in store.list()}
     assert ids == {"draft_aaaaaaaa"}
+
+
+def test_delete_removes_json_and_dedupe(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    store.create(_make_draft("draft_aaaaaaaa"))
+    # a stray dedupe file for this draft must also go
+    dedupe = store.drafts_dir / "draft_aaaaaaaa.deadbeef.execution.json"
+    dedupe.write_text("{}", encoding="utf-8")
+    assert store._path("draft_aaaaaaaa").exists()
+
+    store.delete("draft_aaaaaaaa")
+
+    assert not store._path("draft_aaaaaaaa").exists()
+    assert not dedupe.exists()
+
+
+def test_delete_missing_is_idempotent(tmp_path: Path):
+    store = PipelineDraftStore(tmp_path)
+    # must not raise
+    store.delete("draft_missing0")
