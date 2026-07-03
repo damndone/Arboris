@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { DraftEditorSlot } from "./DraftEditorSlot";
 import { DraftActionsProvider, type DraftActionsValue } from "../../drafts/DraftActionsContext";
 import { emptyRegistry, draftReducer } from "../../drafts/draftRegistry";
@@ -26,7 +26,7 @@ function providerValue(over: Partial<DraftActionsValue> = {}): DraftActionsValue
     } as never,
   });
   return { registry, busy: false, onForkDraft: vi.fn(), onPatch: vi.fn(),
-    onValidate: vi.fn(), onExecute: vi.fn(), onDiscard: vi.fn(), ...over };
+    onValidate: vi.fn(), onExecute: vi.fn(), onDiscard: vi.fn(), onEnsureLoaded: vi.fn(), ...over };
 }
 
 describe("DraftEditorSlot", () => {
@@ -51,5 +51,30 @@ describe("DraftEditorSlot", () => {
       </DraftActionsProvider>,
     );
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("calls onEnsureLoaded when the selected draft entry has no loaded draft yet", async () => {
+    const onEnsureLoaded = vi.fn();
+    // hydrated entry: draft === null
+    const registry = draftReducer(emptyRegistry(), {
+      type: "hydrate",
+      summaries: [{ draft_id: "d1", status: "draft", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" }],
+    });
+    render(
+      <DraftActionsProvider value={providerValue({ registry, onEnsureLoaded })}>
+        <DraftEditorSlot node={draftNode()} />
+      </DraftActionsProvider>,
+    );
+    await waitFor(() => expect(onEnsureLoaded).toHaveBeenCalledWith("d1"));
+  });
+
+  it("does not call onEnsureLoaded when the draft is already loaded", () => {
+    const onEnsureLoaded = vi.fn();
+    render(
+      <DraftActionsProvider value={providerValue({ onEnsureLoaded })}>
+        <DraftEditorSlot node={draftNode()} />
+      </DraftActionsProvider>,
+    );
+    expect(onEnsureLoaded).not.toHaveBeenCalled();
   });
 });

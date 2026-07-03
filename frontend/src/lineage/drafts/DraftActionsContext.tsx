@@ -14,6 +14,7 @@ export interface DraftActionsValue {
   onValidate: (draftId: string) => void;
   onExecute: (draftId: string) => void;
   onDiscard: (draftId: string) => void;
+  onEnsureLoaded: (draftId: string) => void;
 }
 
 const DraftActionsContext = createContext<DraftActionsValue | null>(null);

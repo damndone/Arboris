@@ -53,6 +53,7 @@ import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import {
   listPipelineDrafts,
+  getPipelineDraft,
   validatePipelineDraft,
   executePipelineDraft,
   patchPipelineDraftParams,
@@ -273,6 +274,17 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     }
   };
 
+  const handleEnsureDraftLoaded = async (draftId: string) => {
+    const entry = registry.get(draftId);
+    if (!entry || entry.draft !== null) return;
+    try {
+      const res = await getPipelineDraft(projectRoot, draftId);
+      dispatchDraft({ type: "put", draftId, draft: res.draft, draftHash: res.draft_hash });
+    } catch {
+      /* best-effort; editor shows "Loading draft…" until retried */
+    }
+  };
+
   return (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
@@ -288,6 +300,7 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
               onValidate: handleValidateDraft,
               onExecute: handleExecuteDraft,
               onDiscard: handleDiscardDraft,
+              onEnsureLoaded: handleEnsureDraftLoaded,
             }}
           >
             <LineageBridge model={model}>
