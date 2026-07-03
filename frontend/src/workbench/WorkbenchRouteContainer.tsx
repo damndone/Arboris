@@ -213,6 +213,8 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     try {
       const res = await patchPipelineDraftParams(projectRoot, draftId, body);
       dispatchDraft({ type: "patch", draftId, draft: res.draft, draftHash: res.draft_hash });
+    } catch (e) {
+      console.error("draft patch failed", e);
     } finally {
       setDraftBusy(false);
     }
@@ -229,6 +231,9 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
         validation: v,
         draftHash: v.validated_draft_hash ?? "",
       });
+    } catch (e) {
+      dispatchDraft({ type: "revertToDraft", draftId });
+      console.error("draft validate failed", e);
     } finally {
       setDraftBusy(false);
     }
@@ -256,9 +261,17 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
         },
         attempts: 0,
       });
-      await deletePipelineDraft(projectRoot, draftId);
+      // Execute succeeded: remove the draft node regardless of cleanup outcome.
       dispatchDraft({ type: "remove", draftId });
       void refetch();
+      try {
+        await deletePipelineDraft(projectRoot, draftId);
+      } catch (cleanupErr) {
+        console.error("draft cleanup (delete) failed post-execute", cleanupErr);
+      }
+    } catch (e) {
+      dispatchDraft({ type: "failed", draftId });
+      console.error("draft execute failed", e);
     } finally {
       setDraftBusy(false);
     }
@@ -269,6 +282,8 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
     try {
       await deletePipelineDraft(projectRoot, draftId);
       dispatchDraft({ type: "remove", draftId });
+    } catch (e) {
+      console.error("draft discard failed", e);
     } finally {
       setDraftBusy(false);
     }

@@ -65,6 +65,11 @@ describe("DraftEditorSection", () => {
     expect(screen.getByRole("button", { name: /^execute$/i })).toBeEnabled();
   });
 
+  it("disables the Save button while busy", () => {
+    render(<DraftEditorSection entry={makeEntry()} onPatch={vi.fn()} onValidate={vi.fn()} onExecute={vi.fn()} onDiscard={vi.fn()} busy={true} />);
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled();
+  });
+
   it("calls onDiscard when Discard is clicked", () => {
     const onDiscard = vi.fn();
     render(<DraftEditorSection entry={makeEntry()} onPatch={vi.fn()} onValidate={vi.fn()} onExecute={vi.fn()} onDiscard={onDiscard} busy={false} />);

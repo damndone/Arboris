@@ -149,15 +149,19 @@ export function NodeActionMenu({
   async function onForkDraftHere() {
     if (!canOpenDraft || !resolvedContext?.ok) return;
     const context = resolvedContext.context;
-    const result = await createPipelineDraftFromNode(effectiveProjectRoot, {
-      source_run_id: context.operation_target.owner_run_id,
-      source_model_node_id: context.operation_target.op_node_id,
-      source_op_node_id: context.operation_target.op_node_id,
-      source_node_hash: context.operation_target.node_hash,
-      source_forest_node_key: context.selection.forest_node_key,
-      source_context_fingerprint: context.context_fingerprint,
-    });
-    (onForkDraft ?? draftActions?.onForkDraft)?.(result);
+    try {
+      const result = await createPipelineDraftFromNode(effectiveProjectRoot, {
+        source_run_id: context.operation_target.owner_run_id,
+        source_model_node_id: context.operation_target.op_node_id,
+        source_op_node_id: context.operation_target.op_node_id,
+        source_node_hash: context.operation_target.node_hash,
+        source_forest_node_key: context.selection.forest_node_key,
+        source_context_fingerprint: context.context_fingerprint,
+      });
+      (onForkDraft ?? draftActions?.onForkDraft)?.(result);
+    } catch (e) {
+      console.error("fork draft failed", e);
+    }
   }
 
   const closeAfter = (fn: () => void) => () => {

@@ -34,6 +34,7 @@ export type DraftAction =
   | { type: "validated"; draftId: string; validation: DraftValidationResult; draftHash: string }
   | { type: "executing"; draftId: string }
   | { type: "failed"; draftId: string }
+  | { type: "revertToDraft"; draftId: string }
   | { type: "remove"; draftId: string }
   | { type: "hydrate"; summaries: PipelineDraftSummary[] };
 
@@ -91,6 +92,11 @@ export function draftReducer(state: DraftRegistry, action: DraftAction): DraftRe
     case "failed": {
       const prev = next.get(action.draftId);
       if (prev) next.set(action.draftId, { ...prev, lifecycleState: "failed" });
+      return next;
+    }
+    case "revertToDraft": {
+      const prev = next.get(action.draftId);
+      if (prev) next.set(action.draftId, { ...prev, lifecycleState: "draft", validation: null });
       return next;
     }
     case "remove": {

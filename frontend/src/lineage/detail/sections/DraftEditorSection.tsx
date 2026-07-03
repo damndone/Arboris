@@ -32,6 +32,7 @@ export function DraftEditorSection({
           node={modelNode}
           draftHash={entry.draftHash}
           onSave={(body) => onPatch(entry.draftId, body)}
+          disabled={busy}
         />
       ) : (
         <p className="draft-editor__loading">Loading draft…</p>

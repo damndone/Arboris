@@ -54,6 +54,15 @@ describe("draftReducer", () => {
     expect(r.has("d1")).toBe(false);
   });
 
+  it("revertToDraft returns a stuck entry to editable draft state", () => {
+    let r = draftReducer(emptyRegistry(), { type: "put", draftId: "d1", draft: draft("d1"), draftHash: "h1" });
+    r = draftReducer(r, { type: "validating", draftId: "d1" });
+    r = draftReducer(r, { type: "revertToDraft", draftId: "d1" });
+    const e = r.get("d1") as DraftEntry;
+    expect(e.lifecycleState).toBe("draft");
+    expect(e.validation).toBeNull();
+  });
+
   it("hydrate loads summaries as draft entries", () => {
     const summaries: PipelineDraftSummary[] = [
       { draft_id: "d1", status: "draft", draft_hash: "h1", source_node_hash: "hash_a", source_op_node_id: "model#0" },
