@@ -167,6 +167,28 @@ def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
     return {"project_root": str(project.root)}
 
 
+@app.post("/uploads")
+async def upload_dataset_endpoint(
+    project_root: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    """v1.6.8 genesis: standalone content-addressable upload.
+
+    Files persist server-side from wizard step 1 so genesis draft chains
+    fully rehydrate after reload (same store POST /runs uses internally).
+    """
+    root = Path(project_root)
+    config = load_config(root / "config.yml")  # PROJECT_NOT_FOUND propagates as today
+    max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
+    try:
+        data = await _read_upload_bytes(file, max_upload_bytes)
+    finally:
+        await file.close()
+    filename = Path(file.filename or "upload.csv").name
+    sha = store_upload_bytes(root, data, filename=filename)
+    return {"sha256": sha, "filename": filename}
+
+
 async def _read_upload_bytes(file: UploadFile, max_bytes: int) -> bytes:
     """Read an upload fully into memory, enforcing the project size cap."""
     buf = bytearray()
