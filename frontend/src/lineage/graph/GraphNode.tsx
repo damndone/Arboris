@@ -119,6 +119,19 @@ interface BadgeDescriptor {
   text: string;
 }
 
+// v1.6.7 — draft lifecycle visual language (see spec §3). Keyed by
+// LifecycleState; real forest nodes have no lifecycleState so this map is
+// never consulted for them (their style/appearance stays byte-for-byte).
+const LIFECYCLE_STYLE: Record<string, { border: string; opacity: number; glow?: string }> = {
+  draft: { border: "2px dashed var(--label-tertiary)", opacity: 0.75 },
+  validating: { border: "2px dashed #c98a3a", opacity: 0.9 },
+  valid: { border: "2px solid #3a9ac9", opacity: 1 },
+  invalid: { border: "2px solid #b03a3a", opacity: 1 },
+  pending: { border: "2px solid #c9a03a", opacity: 1, glow: "0 0 14px rgba(201,160,58,.55)" },
+  executed: { border: "2px solid #1f6f43", opacity: 1 },
+  failed: { border: "2px solid #b03a3a", opacity: 1 },
+};
+
 function badgeFor(node: GraphViewNode): BadgeDescriptor | null {
   const reviews = reviewCount(node);
   // v1.6.6 ④: blocker is the strongest variant — checked before caution.
@@ -178,13 +191,25 @@ export function GraphNode({ data }: GraphNodeProps) {
       ]
         .filter(Boolean)
         .join(" ")}
-      data-testid="graph-node"
+      // v1.6.7: draft nodes get a distinct testid so tests/queries can
+      // target them; real forest nodes keep "graph-node" unchanged.
+      data-testid={node.isDraft ? "graph-node-lifecycle" : "graph-node"}
       data-stage={node.stage}
       data-trust={node.trust}
       data-state={state}
+      data-lifecycle={node.lifecycleState}
       data-search-hit={isSearchHit ? "true" : undefined}
       data-search-cursor={isSearchCursor ? "true" : undefined}
-      style={{ ["--node-color" as string]: role ? roleColorVar(role) : colorVar }}
+      style={{
+        ["--node-color" as string]: role ? roleColorVar(role) : colorVar,
+        ...(node.lifecycleState && LIFECYCLE_STYLE[node.lifecycleState]
+          ? {
+              border: LIFECYCLE_STYLE[node.lifecycleState].border,
+              opacity: LIFECYCLE_STYLE[node.lifecycleState].opacity,
+              boxShadow: LIFECYCLE_STYLE[node.lifecycleState].glow,
+            }
+          : {}),
+      }}
     >
       <Handle
         type="target"
