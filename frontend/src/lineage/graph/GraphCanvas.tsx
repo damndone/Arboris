@@ -558,6 +558,13 @@ export function GraphCanvas({
       selected: n.id === selectedNodeId,
       data: {
         ...n.data,
+        // v1.6.7: re-sync the node payload from the current model each render so
+        // mutable node data (e.g. a draft's lifecycleState draft→valid→pending)
+        // updates on-canvas. rfNodes is only re-seeded on node-id-set change (to
+        // preserve drag positions), so without this, data-only changes to an
+        // existing node id would never reach the canvas. Group/container nodes
+        // aren't in the model — fall back to their seeded data.node.
+        node: nodeById.get(n.id) ?? n.data.node,
         state: stateFor(n.id),
         handleAxis,
         isSearchHit: searchHitKeys?.has(n.id) ?? false,
@@ -575,6 +582,7 @@ export function GraphCanvas({
     model.edges,
     memberToGroup,
     handleAxis,
+    nodeById,
   ]);
 
   // Edge decoration: flow-animate the edges touching the selected node (and the focus
