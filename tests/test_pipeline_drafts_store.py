@@ -275,3 +275,18 @@ def test_delete_missing_is_idempotent(tmp_path: Path):
     store = PipelineDraftStore(tmp_path)
     # must not raise
     store.delete("draft_missing0")
+
+
+def test_store_locks_block_update_node_params_across_instances(tmp_path: Path) -> None:
+    """R1 (v1.6.8 T3 review): the shared execution lock also guards genesis node patches."""
+    store_a = PipelineDraftStore(tmp_path)
+    store_b = PipelineDraftStore(tmp_path)
+    store_a.create(_draft())
+
+    lock = store_a.execution_lock("draft_abc123")
+    lock.acquire()
+    try:
+        with pytest.raises(DraftLockedForExecution):
+            store_b.update_node_params("draft_abc123", "model_1", {"x": ["x2"]})
+    finally:
+        lock.release()

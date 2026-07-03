@@ -1048,7 +1048,7 @@ class PipelineDraftPatchRequest(BaseModel):
 
 
 class PipelineDraftValidateRequest(BaseModel):
-    execution_mode: Literal["rerun_child", "new_run"] | None = None
+    execution_mode: Literal["rerun_child", "new_run", "genesis"] | None = None
 
 
 class PipelineDraftExecuteRequest(BaseModel):
@@ -1067,7 +1067,7 @@ def _draft_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, DraftNodeNotFound):
         return HTTPException(status_code=404, detail=f"DRAFT_NODE_NOT_FOUND: {exc}")
     if isinstance(exc, DraftNodePatchConflict):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(status_code=409, detail=f"{DraftNodePatchConflict.code}: {exc}")
     if isinstance(exc, DraftHashConflict):
         return HTTPException(status_code=409, detail="DRAFT_HASH_CONFLICT")
     if isinstance(exc, DraftLockedForExecution):
@@ -1359,6 +1359,8 @@ def patch_pipeline_draft_node(
 
     Genesis-only (409 otherwise); the bound source node is immutable —
     changing the file means discard the draft and restart genesis.
+    `columns` applies to table nodes only and is silently dropped on a
+    model-node PATCH.
     """
     store = _pipeline_draft_store(project_root)
     try:

@@ -142,14 +142,14 @@ def test_validate_graph_shape_from_node_path_untouched():
 # --- Task 3: wizard step endpoint PATCH /pipeline-drafts/{id}/nodes/{node_id} ---
 
 
-def _genesis(root, **kw):
+def _genesis(root, sheet_names=None, **kw):
     up = _upload(root, **({"name": kw.pop("name")} if "name" in kw else {}))
     return client.post(
         f"/pipeline-drafts/genesis?project_root={root}",
         json={
             "upload_sha256": up["sha256"],
             "filename": up["filename"],
-            "sheet_names": [],
+            "sheet_names": sheet_names or [],
             "columns": ["y", "x"],
         },
     ).json()
@@ -192,6 +192,7 @@ def test_node_patch_rejects_nongenesis_source_node(tmp_path):
         json={"params": {"anything": 1}},
     )
     assert r.status_code == 409  # source immutable once bound (change file = discard & restart)
+    assert r.json()["detail"].startswith("DRAFT_NODE_PATCH_CONFLICT:")  # R5: class code prefix
 
 
 def test_node_patch_unknown_node_is_404(tmp_path):
@@ -296,3 +297,176 @@ def test_genesis_rejects_malformed_sha256(tmp_path):
     detail = r.json()["detail"]
     assert "UPLOAD_NOT_FOUND" in detail
     assert "passwd" not in detail  # no reflection / no file-system leakage
+
+
+# --- Task 4: genesis branch of validate_draft_for_execution ---
+
+
+def _configure_chain(root, did, model_params=None, table_params=None):
+    client.patch(
+        f"/pipeline-drafts/{did}/nodes/table_1?project_root={root}",
+        json={
+            "params": table_params or {"sheet_name": "", "transpose": False},
+            "columns": ["y", "x"],
+        },
+    )
+    client.patch(
+        f"/pipeline-drafts/{did}/nodes/model_1?project_root={root}",
+        json={"params": model_params or {"model_type": "ols", "y": "y", "x": ["x"]}},
+    )
+
+
+def _validate(root, did, body=None):
+    return client.post(
+        f"/pipeline-drafts/{did}/validate?project_root={root}",
+        json=body if body is not None else {"execution_mode": "genesis"},
+    )
+
+
+def test_validate_genesis_ok(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    r = _validate(root, did)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["executable"] is True
+    assert body["ok"] is True
+    assert body["status"] == "valid"
+    assert body["validated_execution_mode"] == "genesis"
+    assert body["resolved_execution"]["genesis"] is True
+    assert body["resolved_execution"]["execution_mode"] == "genesis"
+    # hash pins the draft content the way execute (Task 5) will check it
+    current = client.get(f"/pipeline-drafts/{did}?project_root={root}").json()
+    assert body["validated_draft_hash"] == current["draft_hash"]
+
+
+def test_validate_genesis_defaults_to_draft_mode(tmp_path):
+    """No execution_mode in body -> default_execution_mode ('genesis') is used."""
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    r = _validate(root, did, body={})
+    assert r.status_code == 200, r.text
+    assert r.json()["executable"] is True
+    assert r.json()["validated_execution_mode"] == "genesis"
+
+
+def test_validate_genesis_missing_xy_blocks(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did, model_params={"model_type": "ols"})  # no y/x
+    body = _validate(root, did).json()
+    assert body["executable"] is False
+    assert any(c["code"] == "GENESIS_MODEL_INCOMPLETE" for c in body["checks"])
+    assert "validated_draft_hash" not in body
+
+
+def test_validate_genesis_multisheet_requires_sheet_choice(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis(root, sheet_names=["A", "B"], name="d.xlsx")
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)  # empty sheet_name
+    body = _validate(root, did).json()
+    assert body["executable"] is False
+    assert any(c["code"] == "GENESIS_SHEET_REQUIRED" for c in body["checks"])
+    # choosing a sheet unblocks
+    _configure_chain(root, did, table_params={"sheet_name": "B", "transpose": False})
+    body2 = _validate(root, did).json()
+    assert body2["executable"] is True
+    assert not any(c["code"] == "GENESIS_SHEET_REQUIRED" for c in body2["checks"])
+
+
+def test_validate_genesis_wrong_mode_blocks(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    body = _validate(root, did, body={"execution_mode": "rerun_child"}).json()
+    assert body["executable"] is False
+    assert any(c["code"] == "GENESIS_MODE_REQUIRED" for c in body["checks"])
+    assert "validated_execution_mode" not in body
+
+
+def test_validate_genesis_unbound_source(tmp_path):
+    """Store-level: an upload binding without sha256 blocks with GENESIS_SOURCE_UNBOUND."""
+    from workbench.lineage.pipeline_drafts import (
+        DRAFT_SCHEMA_VERSION,
+        PipelineDraftStore,
+        validate_draft_for_execution,
+    )
+
+    draft = {
+        "draft_id": "draft_genesisunbound1",
+        "schema_version": DRAFT_SCHEMA_VERSION,
+        "created_at": "2026-07-03T00:00:00Z",
+        "updated_at": "2026-07-03T00:00:00Z",
+        "status": "draft",
+        "created_from": {
+            "source_type": "genesis",
+            "source_input_fingerprint": "0" * 64,
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "source_1",
+                    "node_type": "input.upload",
+                    "upload": {"filename": "d.csv"},  # sha256 missing
+                    "sheet_names": [],
+                    "status": "bound",
+                },
+                {
+                    "node_id": "table_1",
+                    "node_type": "table",
+                    "params": {"sheet_name": "", "transpose": False},
+                    "columns": ["y", "x"],
+                    "status": "configured",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": "ols",
+                    "params": {"model_type": "ols", "y": "y", "x": ["x"]},
+                    "status": "configured",
+                },
+            ],
+            "edges": [
+                {"from": "source_1", "to": "table_1"},
+                {"from": "table_1", "to": "model_1"},
+            ],
+        },
+        "default_execution_mode": "genesis",
+    }
+    store = PipelineDraftStore(tmp_path)
+    stored = store.create(draft)
+    result = validate_draft_for_execution(stored.draft, execution_mode="genesis")
+    assert result["executable"] is False
+    assert any(c["code"] == "GENESIS_SOURCE_UNBOUND" for c in result["checks"])
+
+
+def test_validate_genesis_has_no_from_node_noise(tmp_path):
+    """Genesis validate must NOT emit from-node checks (schema-hash / created_from / mode)."""
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    body = _validate(root, did).json()
+    codes = {c["code"] for c in body["checks"]}
+    assert "EDITABLE_SCHEMA_HASH_MISMATCH" not in codes
+    assert "INVALID_EXECUTION_MODE" not in codes
+    assert "CREATED_FROM_REQUIRED_FOR_RERUN_CHILD" not in codes
+
+
+def test_list_summary_shows_genesis_model_type(tmp_path):
+    """R2: configuring the model node mirrors model_type into the list summary."""
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    listed = client.get(f"/pipeline-drafts?project_root={root}").json()["drafts"]
+    mine = next(item for item in listed if item["draft_id"] == did)
+    assert mine["model_type"] == "ols"
