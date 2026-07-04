@@ -1072,6 +1072,86 @@ export async function deletePipelineDraft(
   await readResponse<{ ok: boolean }>(response);
 }
 
+// ── v1.6.8 — graph-native genesis (uploads / genesis draft / node patch / project forest) ──
+
+export type UploadResult = { sha256: string; filename: string };
+
+/** Upload a dataset file standalone (POST /uploads, multipart form).
+ *  Content-addressable: the server stores by sha256 so genesis draft chains
+ *  fully rehydrate after reload. */
+export async function uploadDataset(
+  projectRoot: string,
+  file: File,
+): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  const response = await fetch(apiUrl("/uploads"), {
+    method: "POST",
+    body: form,
+  });
+  return readResponse<UploadResult>(response);
+}
+
+export type PipelineDraftGenesisRequest = {
+  upload_sha256: string;
+  filename: string;
+  sheet_names: string[];
+  columns: string[];
+};
+
+/** Create a parentless genesis draft chain (source → table → model). */
+export async function createGenesisDraft(
+  projectRoot: string,
+  body: PipelineDraftGenesisRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(draftUrl(projectRoot, "/pipeline-drafts/genesis"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+export type DraftNodePatchRequest = {
+  params: Record<string, unknown>;
+  columns?: string[];
+};
+
+/** Configure one genesis draft node in place (PATCH .../nodes/{nodeId}).
+ *  `columns` applies to table nodes only. */
+export async function patchDraftNode(
+  projectRoot: string,
+  draftId: string,
+  nodeId: string,
+  body: DraftNodePatchRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(
+    draftUrl(
+      projectRoot,
+      `/pipeline-drafts/${encodeURIComponent(draftId)}/nodes/${encodeURIComponent(nodeId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+/** Fetch the project-level forest (GET /graph — union of all family
+ *  head-sets; empty forest for zero-run projects). Body shape is parity with
+ *  the per-run headset view, so it feeds the same adaptHeadSet. */
+export async function fetchProjectForest(
+  projectRoot: string,
+): Promise<HeadSetResponse> {
+  const response = await fetch(
+    apiUrl(`/graph?project_root=${encodeURIComponent(projectRoot)}`),
+  );
+  return readResponse<HeadSetResponse>(response);
+}
+
 // ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──
 
 /** Fetch the family head-set (union DAG across the rerun forest). */
