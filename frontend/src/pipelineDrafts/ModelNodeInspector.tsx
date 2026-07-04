@@ -46,7 +46,7 @@ export function ModelNodeInspector({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  const controls = node.editable_schema as EditableControl[];
+  const controls = (node.editable_schema ?? []) as EditableControl[];
   const controlsWithValues = controls.map((control) => ({
     ...control,
     value: params[control.key] ?? control.value,
@@ -91,7 +91,7 @@ export function ModelNodeInspector({
           </ul>
         )}
       </section>
-      <button type="button" onClick={() => setParams(node.source_params)}>
+      <button type="button" onClick={() => setParams(node.source_params ?? {})}>
         Reset to source
       </button>
       <button

@@ -850,7 +850,7 @@ export async function getRunGraph(
   return readResponse<GraphResponse>(response);
 }
 
-export type DraftExecutionMode = "rerun_child" | "new_run";
+export type DraftExecutionMode = "rerun_child" | "new_run" | "genesis";
 
 export type PipelineDraftNode =
   | {
@@ -870,14 +870,30 @@ export type PipelineDraftNode =
   | {
       node_id: string;
       node_type: "model";
-      model_family: string;
-      model_type: string;
-      schema_id: string;
-      editable_schema: unknown[];
-      editable_schema_hash: string;
-      source_ref: Record<string, string>;
-      source_params: Record<string, unknown>;
+      model_family?: string;
+      model_type?: string;
+      schema_id?: string;
+      editable_schema?: unknown[];
+      editable_schema_hash?: string;
+      source_ref?: Record<string, string>;
+      source_params?: Record<string, unknown>;
       params: Record<string, unknown>;
+      status?: "pending" | "configured" | "invalid";
+    }
+  | {
+      node_id: string;
+      node_type: "input.upload";
+      upload: { sha256: string; filename: string };
+      sheet_names: string[];
+      columns?: string[];
+      status: "bound" | "missing" | "invalid";
+    }
+  | {
+      node_id: string;
+      node_type: "table";
+      params: { sheet_name?: string; transpose?: boolean } & Record<string, unknown>;
+      columns: string[];
+      status: "pending" | "configured" | "invalid";
     };
 
 export type PipelineDraftV1 = {
@@ -911,8 +927,9 @@ export type DraftValidationResult = {
     blocking: boolean;
   }>;
   resolved_execution: {
-    execution_mode: DraftExecutionMode;
-    compare_source_available: boolean;
+    genesis?: boolean;
+    execution_mode?: DraftExecutionMode;
+    compare_source_available?: boolean;
     rerun_from_run_id?: string;
     rerun_from_model_node_id?: string;
     rerun_from_op_node_id?: string;
@@ -927,21 +944,25 @@ export type DraftExecutionResult = {
   run_id: string;
   draft_id: string;
   executed_draft_hash: string;
-  execution_mode: "rerun_child";
+  execution_mode: DraftExecutionMode;
   deduped?: boolean;
   produced_lineage: {
-    rerun_from_run_id: string;
-    rerun_from_model_node_id: string;
-    rerun_from_op_node_id: string;
+    genesis?: boolean;
+    execution_mode?: DraftExecutionMode;
+    rerun_from_run_id?: string;
+    rerun_from_model_node_id?: string;
+    rerun_from_op_node_id?: string;
   };
   focus: {
     status: "ready" | "pending_index";
     run_id: string;
     target_model_node_id?: string;
     poll?: {
-      rerun_from_run_id: string;
-      rerun_from_model_node_id: string;
-      rerun_from_op_node_id: string;
+      genesis?: boolean;
+      execution_mode?: DraftExecutionMode;
+      rerun_from_run_id?: string;
+      rerun_from_model_node_id?: string;
+      rerun_from_op_node_id?: string;
     };
   };
 };

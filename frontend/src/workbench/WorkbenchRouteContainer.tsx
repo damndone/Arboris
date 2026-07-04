@@ -51,6 +51,7 @@ import { RerunProvider } from "../lineage/detail/RerunContext";
 import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
+import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
 import {
   listPipelineDrafts,
   getRunGraphHeadSet,
@@ -62,6 +63,8 @@ import {
   type RerunResponseV1,
   type PipelineDraftResponse,
   type PipelineDraftPatchRequest,
+  type DraftExecutionResult,
+  type DraftValidationResult,
 } from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 
@@ -81,8 +84,16 @@ type LegacyFocusProbe = {
   legacy: boolean;
 };
 
+type PendingGenesisExecution = {
+  runId: string;
+  draftId: string;
+  attempts: number;
+};
+
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
+const PENDING_GENESIS_RETRY_LIMIT = 30;
+const PENDING_GENESIS_RETRY_DELAY_MS = 500;
 
 interface WorkbenchHomeProps {
   projectRoot: string;
@@ -123,6 +134,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     useState<PendingFocusTarget | null>(null);
   const [legacyFocusProbe, setLegacyFocusProbe] =
     useState<LegacyFocusProbe | null>(null);
+  const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
+  const [pendingGenesisExecution, setPendingGenesisExecution] =
+    useState<PendingGenesisExecution | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
@@ -179,10 +193,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
 
   const model = useMemo(
     () => {
-      // NOTE for T12: mergeDraftsIntoModel anchors drafts on an EXISTING
-      // forest node (node_hash / opNodeId); genesis drafts on an empty forest
-      // have no anchor and are skipped — T12's genesis-draft merge branch
-      // owns rendering parentless drafts on the empty canvas.
       const base = forest
         ? forestToGraphViewModel(forest, resolvedRunId ?? "")
         : null;
@@ -200,11 +210,29 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   useEffect(() => {
     let cancelled = false;
     listPipelineDrafts(projectRoot)
-      .then((summaries) => {
+      .then(async (summaries) => {
         if (cancelled) return;
         const unexecuted = summaries.filter((s) => s.status !== "executed");
-        if (unexecuted.length)
+        if (unexecuted.length) {
           dispatchDraft({ type: "hydrate", summaries: unexecuted });
+        }
+        const unanchored = unexecuted.filter(
+          (s) => !s.source_node_hash && !s.source_op_node_id,
+        );
+        if (unanchored.length === 0) return;
+        const loaded = await Promise.allSettled(
+          unanchored.map((s) => getPipelineDraft(projectRoot, s.draft_id)),
+        );
+        if (cancelled) return;
+        for (const res of loaded) {
+          if (res.status !== "fulfilled") continue;
+          dispatchDraft({
+            type: "put",
+            draftId: res.value.draft.draft_id,
+            draft: res.value.draft,
+            draftHash: res.value.draft_hash,
+          });
+        }
       })
       .catch(() => {
         /* drafts are best-effort; never block the forest */
@@ -255,6 +283,32 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     });
   }, [pendingQueryKey, pendingSourceOpNodeId, resolvedRunId]);
 
+  useEffect(() => {
+    if (!pendingGenesisExecution || !forest) return undefined;
+    const indexed = forest.heads.some(
+      (head) => head.runId === pendingGenesisExecution.runId,
+    );
+    if (indexed) {
+      setActiveRunId(pendingGenesisExecution.runId);
+      dispatchDraft({ type: "remove", draftId: pendingGenesisExecution.draftId });
+      setPendingGenesisExecution(null);
+      setGenesisWizardOpen(false);
+      return undefined;
+    }
+    if (pendingGenesisExecution.attempts >= PENDING_GENESIS_RETRY_LIMIT) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setPendingGenesisExecution((current) =>
+        current === null
+          ? null
+          : { ...current, attempts: current.attempts + 1 },
+      );
+      void refetch();
+    }, PENDING_GENESIS_RETRY_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [forest, pendingGenesisExecution, refetch]);
+
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
   }
@@ -279,21 +333,17 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   // Zero-head project (and no focus run) → empty canvas. familyCount>0 means
   // all known runs predate the lineage index, so the empty state must be
   // honest instead of claiming the project has no data.
-  if (!resolvedRunId) {
-    return (
-      <EmptyProjectCanvas
-        projectRoot={projectRoot}
-        legacyFamilyCount={forest.familyCount}
-        legacyRunCount={forest.familyRunCount}
-      />
-    );
-  }
+  const draftOnlyRunId =
+    model.nodes.find((node) => node.isDraft)?.draftId ?? null;
+  const shellRunId =
+    resolvedRunId ?? (draftOnlyRunId ? `draft:${draftOnlyRunId}` : null);
 
   const effectiveActiveRunId =
     activeRunId ??
     forest.heads.find((h) => h.runId === resolvedRunId)?.runId ??
     newestHeadRunId ??
-    resolvedRunId;
+    shellRunId ??
+    "";
 
   const handleRerun = (response: RerunResponseV1) => {
     const nextActiveRunId = response.new_active_head_id ?? response.run_id;
@@ -378,7 +428,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
           forest_node_key: null,
           op_node_id:
             result.focus.poll?.rerun_from_op_node_id ??
-            result.produced_lineage.rerun_from_op_node_id,
+            result.produced_lineage.rerun_from_op_node_id ??
+            entry.sourceOpNodeId ??
+            "",
           node_hash: null,
         },
         attempts: 0,
@@ -422,12 +474,91 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     }
   };
 
-  return (
+  const handleGenesisDraftUpdated = (response: PipelineDraftResponse) => {
+    dispatchDraft({
+      type: "put",
+      draftId: response.draft.draft_id,
+      draft: response.draft,
+      draftHash: response.draft_hash,
+    });
+  };
+
+  const handleGenesisDraftValidated = (
+    draftId: string,
+    validation: DraftValidationResult,
+  ) => {
+    const entry = registry.get(draftId);
+    dispatchDraft({
+      type: "validated",
+      draftId,
+      validation,
+      draftHash: validation.validated_draft_hash ?? entry?.draftHash ?? "",
+    });
+  };
+
+  const handleGenesisDraftExecuting = (draftId: string) => {
+    dispatchDraft({ type: "executing", draftId });
+  };
+
+  const handleGenesisDraftFailed = (draftId: string) => {
+    dispatchDraft({ type: "failed", draftId });
+  };
+
+  const handleGenesisDraftExecuted = (
+    result: DraftExecutionResult,
+    draftId: string,
+  ) => {
+    setActiveRunId(result.focus.run_id);
+    setPendingGenesisExecution({
+      runId: result.focus.run_id,
+      draftId,
+      attempts: 0,
+    });
+    void refetch();
+  };
+
+  const genesisWizardDrawer = genesisWizardOpen ? (
+    <aside
+      data-testid="genesis-wizard-drawer"
+      style={{
+        position: "absolute",
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: 460,
+        borderLeft: "1px solid var(--separator)",
+        padding: 22,
+        overflowY: "auto",
+        background: "var(--bg-canvas)",
+        boxShadow: "-12px 0 24px rgba(0, 0, 0, 0.22)",
+        zIndex: 10,
+      }}
+    >
+      <GenesisWizard
+        projectRoot={projectRoot}
+        onClose={() => setGenesisWizardOpen(false)}
+        onDraftUpdated={handleGenesisDraftUpdated}
+        onDraftValidated={handleGenesisDraftValidated}
+        onDraftExecuting={handleGenesisDraftExecuting}
+        onDraftFailed={handleGenesisDraftFailed}
+        onDraftExecuted={handleGenesisDraftExecuted}
+      />
+    </aside>
+  ) : null;
+
+  const body = !shellRunId ? (
+    <EmptyProjectCanvas
+      projectRoot={projectRoot}
+      legacyFamilyCount={forest.familyCount}
+      legacyRunCount={forest.familyRunCount}
+      onOpenWizard={() => setGenesisWizardOpen(true)}
+    />
+  ) : (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >
-        <WorkbenchStateProvider runId={resolvedRunId} validNodeKeys={validNodeKeys}>
+        <WorkbenchStateProvider runId={shellRunId} validNodeKeys={validNodeKeys}>
           <DraftActionsProvider
             value={{
               registry,
@@ -442,7 +573,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
           >
             <LineageBridge model={model}>
               <WorkbenchShell
-                runId={resolvedRunId}
+                runId={shellRunId}
                 projectRoot={projectRoot}
                 pendingFocusTarget={pendingFocusTarget}
                 onPendingFocusConsumed={() => setPendingFocusTarget(null)}
@@ -461,25 +592,32 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       </ForestContext.Provider>
     </RerunProvider>
   );
+
+  return (
+    <div style={{ position: "relative", height: "100%", minHeight: 0, overflow: "hidden" }}>
+      {body}
+      {genesisWizardDrawer}
+    </div>
+  );
 }
 
 /**
  * v1.6.8 T11 — the empty-canvas state for a zero-run project. Dark canvas
  * surface consistent with the workbench shell, a centered empty-state card
- * with the genesis CTA, and a stub side drawer that Task 12 replaces with
- * the real genesis wizard. The topbar row keeps the project switcher
- * reachable even before any run exists.
+ * with the genesis CTA. The topbar row keeps the project switcher reachable
+ * even before any run exists.
  */
 function EmptyProjectCanvas({
   projectRoot,
   legacyFamilyCount = 0,
   legacyRunCount = 0,
+  onOpenWizard,
 }: {
   projectRoot: string;
   legacyFamilyCount?: number;
   legacyRunCount?: number;
+  onOpenWizard: () => void;
 }) {
-  const [wizardOpen, setWizardOpen] = useState(false);
   const hasLegacyFamilies = legacyFamilyCount > 0;
   const legacyDisplayRunCount =
     legacyRunCount > 0 ? legacyRunCount : legacyFamilyCount;
@@ -556,7 +694,7 @@ function EmptyProjectCanvas({
             <button
               type="button"
               data-testid="genesis-cta"
-              onClick={() => setWizardOpen(true)}
+              onClick={onOpenWizard}
               style={{
                 padding: "8px 18px",
                 borderRadius: 8,
@@ -572,36 +710,6 @@ function EmptyProjectCanvas({
             </button>
           </div>
         </div>
-        {wizardOpen && (
-          <aside
-            data-testid="genesis-wizard-drawer"
-            style={{
-              width: 460,
-              borderLeft: "1px solid var(--separator)",
-              padding: 22,
-              overflowY: "auto",
-              background: "var(--bg-canvas)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <strong>新链路</strong>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => setWizardOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <p className="muted">创世向导(T12)</p>
-          </aside>
-        )}
       </div>
     </div>
   );

@@ -18,6 +18,16 @@ import * as api from "../api";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
 
+vi.mock("../capabilities/useCapabilities", () => ({
+  useCapabilities: () => ({
+    data: {
+      schema_version: 1,
+      model_types: [{ key: "auto", label: "Auto", group: "auto" }],
+      imputation_methods: [],
+    },
+  }),
+}));
+
 function fakeGraph(): GraphResponse {
   return {
     schema_version: 3,
@@ -641,6 +651,54 @@ describe("WorkbenchRouteContainer", () => {
       };
     }
 
+    function genesisDraftResponse(): api.PipelineDraftResponse {
+      return {
+        draft_hash: "h_genesis",
+        draft: {
+          draft_id: "genesis_d1",
+          schema_version: "pipeline_draft.v1",
+          created_at: "t",
+          updated_at: "t",
+          status: "draft",
+          created_from: {
+            source_type: "genesis",
+            source_input_fingerprint: "sha_abc",
+          },
+          graph: {
+            nodes: [
+              {
+                node_id: "source_1",
+                node_type: "input.upload",
+                upload: { sha256: "sha_abc", filename: "data.xlsx" },
+                sheet_names: ["Sheet1"],
+                columns: ["y", "x"],
+                status: "bound",
+              },
+              {
+                node_id: "table_1",
+                node_type: "table",
+                params: { sheet_name: "Sheet1", transpose: false },
+                columns: ["y", "x"],
+                status: "configured",
+              },
+              {
+                node_id: "model_1",
+                node_type: "model",
+                model_type: "ols",
+                params: { y: "y", x: ["x"] },
+                status: "configured",
+              },
+            ],
+            edges: [
+              { from: "source_1", to: "table_1" },
+              { from: "table_1", to: "model_1" },
+            ],
+          },
+          default_execution_mode: "genesis",
+        },
+      };
+    }
+
     function mountHome(focusRunId?: string) {
       return render(
         <MemoryRouter initialEntries={["/"]}>
@@ -666,13 +724,14 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.queryByTestId("workbench-route")).toBeNull();
     });
 
-    it("clicking the genesis CTA opens the stub wizard drawer (T12 placeholder)", async () => {
+    it("clicking the genesis CTA opens the genesis wizard drawer", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
       mountHome();
 
       fireEvent.click(await screen.findByTestId("genesis-cta"));
       expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
-      expect(screen.getByText("创世向导(T12)")).toBeInTheDocument();
+      expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
     });
 
     it("legacy deep links fall back to the legacy per-run workbench when the project forest omits the run", async () => {
@@ -701,6 +760,23 @@ describe("WorkbenchRouteContainer", () => {
         screen.getByText(/该项目的 2 个 run 早于血缘索引/),
       ).toBeInTheDocument();
       expect(screen.queryByText("这个项目还没有数据")).toBeNull();
+    });
+
+    it("zero-run projects with a genesis draft render the draft island on the canvas instead of the empty canvas", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
+        {
+          draft_id: "genesis_d1",
+          status: "draft",
+          draft_hash: "h_genesis",
+        },
+      ]);
+      vi.spyOn(api, "getPipelineDraft").mockResolvedValue(genesisDraftResponse());
+      mountHome();
+
+      expect(await screen.findByTestId("graph-workbench")).toBeInTheDocument();
+      expect(screen.queryByTestId("workbench-empty-canvas")).toBeNull();
+      expect(api.getPipelineDraft).toHaveBeenCalledWith("/proj", "genesis_d1");
     });
 
     it("with runs and NO focusRunId, the newest head (by created_at) is active", async () => {

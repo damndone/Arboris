@@ -167,10 +167,16 @@ export function DraftGraphRoute() {
                 if (result.focus.target_model_node_id) {
                   params.set("focus", result.focus.target_model_node_id);
                 }
-                if (result.focus.status === "pending_index" && result.focus.poll) {
-                  params.set("pending_source_run_id", result.focus.poll.rerun_from_run_id);
-                  params.set("pending_source_model_node_id", result.focus.poll.rerun_from_model_node_id);
-                  params.set("pending_source_op_node_id", result.focus.poll.rerun_from_op_node_id);
+                const poll = result.focus.poll;
+                if (
+                  result.focus.status === "pending_index" &&
+                  poll?.rerun_from_run_id &&
+                  poll.rerun_from_model_node_id &&
+                  poll.rerun_from_op_node_id
+                ) {
+                  params.set("pending_source_run_id", poll.rerun_from_run_id);
+                  params.set("pending_source_model_node_id", poll.rerun_from_model_node_id);
+                  params.set("pending_source_op_node_id", poll.rerun_from_op_node_id);
                 }
                 navigate(`/runs/${result.run_id}?${params.toString()}`);
               } catch (executeError) {
