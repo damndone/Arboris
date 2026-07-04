@@ -241,10 +241,16 @@ export interface HeadRaw {
   rerun_from?: RerunFromProvenance | null;
 }
 
+export interface HeadSetFamilyRaw {
+  family_root: string;
+  members: string[];
+}
+
 export interface HeadSetResponse {
   nodes: Record<string, HeadSetNodeRaw>;
   edges: HeadSetEdgeRaw[];
   heads: HeadRaw[];
+  families?: HeadSetFamilyRaw[];
   schema_version: number;
   legacy: boolean;
 }
@@ -285,6 +291,8 @@ export interface ForestViewModel {
   nodes: HeadSetNode[];
   edges: GraphViewEdge[];
   heads: Head[];
+  familyCount: number;
+  familyRunCount: number;
 }
 
 /** Legacy resolver for old rerun / display paths only.

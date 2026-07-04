@@ -53,6 +53,7 @@ import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import {
   listPipelineDrafts,
+  getRunGraphHeadSet,
   getPipelineDraft,
   validatePipelineDraft,
   executePipelineDraft,
@@ -74,6 +75,12 @@ type PendingFocusTarget = {
   attempts: number;
 };
 
+type LegacyFocusProbe = {
+  key: string;
+  loading: boolean;
+  legacy: boolean;
+};
+
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
@@ -87,10 +94,10 @@ interface WorkbenchHomeProps {
 /** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
  *  projectRoot alone; runId is only an optional focus hint. */
 export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
-  // v1.6.1 — the lineage graph IS the cross-run forest. Always render the forest; it
-  // falls back to the legacy per-run graph only for old runs that predate the lineage
-  // index (no node_index.json). No toggle: a run with no reruns is simply a linear
-  // forest, which is cleaner than the old per-run graph's variable folding.
+  // v1.6.8 — the project home renders the project forest. A run deep link is
+  // only a focus hint; if that run is absent from the project forest, probe the
+  // old run-keyed headset once so true legacy runs can still use the legacy
+  // per-run workbench.
   return <ForestWorkbench projectRoot={projectRoot} focusRunId={focusRunId} />;
 }
 
@@ -114,9 +121,15 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
+  const [legacyFocusProbe, setLegacyFocusProbe] =
+    useState<LegacyFocusProbe | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
+  const focusRunIsKnownHead = useMemo(
+    () => Boolean(focusRunId && forest?.heads.some((h) => h.runId === focusRunId)),
+    [forest, focusRunId],
+  );
 
   // The run the workbench treats as "the" run when no explicit focus exists:
   // newest head by created_at (the project forest unions families in run-id
@@ -128,7 +141,41 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
     )[0].runId;
   }, [forest]);
-  const resolvedRunId = focusRunId ?? newestHeadRunId;
+  const resolvedRunId =
+    focusRunId && focusRunIsKnownHead ? focusRunId : newestHeadRunId;
+
+  const legacyFocusProbeKey =
+    forest && !forest.legacy && focusRunId && !focusRunIsKnownHead
+      ? `${projectRoot}\u0000${focusRunId}`
+      : null;
+
+  useEffect(() => {
+    if (!legacyFocusProbeKey || !focusRunId) {
+      return undefined;
+    }
+    let cancelled = false;
+    setLegacyFocusProbe({ key: legacyFocusProbeKey, loading: true, legacy: false });
+    getRunGraphHeadSet(projectRoot, focusRunId)
+      .then((raw) => {
+        if (cancelled) return;
+        setLegacyFocusProbe({
+          key: legacyFocusProbeKey,
+          loading: false,
+          legacy: raw.legacy === true || !Array.isArray(raw.heads),
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLegacyFocusProbe({
+          key: legacyFocusProbeKey,
+          loading: false,
+          legacy: false,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusRunId, legacyFocusProbeKey, projectRoot]);
 
   const model = useMemo(
     () => {
@@ -213,16 +260,33 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   }
   if (loading || forest === null || model === null) return <Loading />;
   // Legacy target (no node identity) → fall back to the legacy per-run
-  // workbench. Only reachable with an explicit run focus: the PROJECT forest
-  // never degrades to the legacy shape (legacy runs are simply omitted), so
-  // the project home never lands here.
+  // workbench. Project forests normally omit legacy runs, but legacy-shaped
+  // forest fixtures and a positive deep-link probe both land here.
   if (forest.legacy && focusRunId) {
     return <LegacyGraphWorkbench projectRoot={projectRoot} runId={focusRunId} />;
   }
-  // Zero-run project (and no focus run) → the real empty canvas with the
-  // genesis CTA (replaces T9's bridge placeholder).
+  if (legacyFocusProbeKey) {
+    if (
+      legacyFocusProbe?.key !== legacyFocusProbeKey ||
+      legacyFocusProbe.loading
+    ) {
+      return <Loading />;
+    }
+    if (legacyFocusProbe.legacy && focusRunId) {
+      return <LegacyGraphWorkbench projectRoot={projectRoot} runId={focusRunId} />;
+    }
+  }
+  // Zero-head project (and no focus run) → empty canvas. familyCount>0 means
+  // all known runs predate the lineage index, so the empty state must be
+  // honest instead of claiming the project has no data.
   if (!resolvedRunId) {
-    return <EmptyProjectCanvas projectRoot={projectRoot} />;
+    return (
+      <EmptyProjectCanvas
+        projectRoot={projectRoot}
+        legacyFamilyCount={forest.familyCount}
+        legacyRunCount={forest.familyRunCount}
+      />
+    );
   }
 
   const effectiveActiveRunId =
@@ -406,8 +470,19 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
  * the real genesis wizard. The topbar row keeps the project switcher
  * reachable even before any run exists.
  */
-function EmptyProjectCanvas({ projectRoot }: { projectRoot: string }) {
+function EmptyProjectCanvas({
+  projectRoot,
+  legacyFamilyCount = 0,
+  legacyRunCount = 0,
+}: {
+  projectRoot: string;
+  legacyFamilyCount?: number;
+  legacyRunCount?: number;
+}) {
   const [wizardOpen, setWizardOpen] = useState(false);
+  const hasLegacyFamilies = legacyFamilyCount > 0;
+  const legacyDisplayRunCount =
+    legacyRunCount > 0 ? legacyRunCount : legacyFamilyCount;
   return (
     <div
       data-testid="workbench-empty-canvas"
@@ -420,7 +495,7 @@ function EmptyProjectCanvas({ projectRoot }: { projectRoot: string }) {
     >
       <div
         role="toolbar"
-        aria-label="Workbench views"
+        aria-label="项目工具栏"
         style={{
           display: "flex",
           alignItems: "center",
@@ -453,8 +528,21 @@ function EmptyProjectCanvas({ projectRoot }: { projectRoot: string }) {
             }}
           >
             <p style={{ margin: "0 0 6px", fontSize: 15, color: "var(--label)" }}>
-              这个项目还没有数据
+              {hasLegacyFamilies
+                ? `该项目的 ${legacyDisplayRunCount} 个 run 早于血缘索引，不能在图中显示`
+                : "这个项目还没有数据"}
             </p>
+            {hasLegacyFamilies && (
+              <p
+                style={{
+                  margin: "0 0 10px",
+                  fontSize: 12,
+                  color: "var(--label-secondary)",
+                }}
+              >
+                可通过 run 详情页（?tab=overview）查看旧结果。
+              </p>
+            )}
             <p
               className="mono"
               style={{

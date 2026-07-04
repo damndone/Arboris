@@ -76,6 +76,30 @@ describe("ProjectSwitcher (T11)", () => {
     expect(screen.queryByTestId("project-switcher-menu")).toBeNull();
   });
 
+  it("Escape closes the dropdown menu", () => {
+    touchRecent("/tmp/other");
+    renderSwitcher("/tmp/当前项目");
+
+    fireEvent.click(screen.getByTestId("project-switcher"));
+    expect(screen.getByTestId("project-switcher-menu")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByTestId("project-switcher-menu")).toBeNull();
+  });
+
+  it("outside mousedown closes the dropdown menu", () => {
+    touchRecent("/tmp/other");
+    renderSwitcher("/tmp/当前项目");
+
+    fireEvent.click(screen.getByTestId("project-switcher"));
+    expect(screen.getByTestId("project-switcher-menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByTestId("project-switcher-menu")).toBeNull();
+  });
+
   it("＋ 新建项目… opens the shared CreateProjectModal; create → navigate + recents", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,

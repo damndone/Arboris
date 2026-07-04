@@ -64,7 +64,26 @@ describe("useForestData (project-keyed, T11)", () => {
       nodes: [],
       edges: [],
       heads: [],
+      familyCount: 0,
+      familyRunCount: 0,
     });
+  });
+
+  it("preserves familyCount so all-legacy projects are not mistaken for zero-run projects", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ...emptyForestBody(),
+        families: [
+          { family_root: "legacy_run", members: ["legacy_run", "legacy_child"] },
+        ],
+      }),
+    );
+    const { result } = renderHook(() => useForestData("/tmp/legacy-only"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.forest?.heads).toEqual([]);
+    expect(result.current.forest?.familyCount).toBe(1);
+    expect(result.current.forest?.familyRunCount).toBe(2);
   });
 
   it("classifies a 404 as not_found (PROJECT_NOT_FOUND path)", async () => {

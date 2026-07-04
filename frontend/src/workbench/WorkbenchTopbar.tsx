@@ -10,7 +10,7 @@
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
 // which goes through the provider's single-commit URL writer.
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   useWorkbench,
@@ -53,9 +53,33 @@ function projectName(root: string): string {
  */
 export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
   const navigate = useNavigate();
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const recents = open ? listRecents() : [];
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("mousedown", onMouseDown, true);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("mousedown", onMouseDown, true);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
 
   function goToProject(root: string) {
     setOpen(false);
@@ -64,7 +88,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={rootRef} style={{ position: "relative" }}>
       <button
         type="button"
         data-testid="project-switcher"
@@ -190,7 +214,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
   );
 }
 
-export function WorkbenchTopbar({ projectRoot }: { projectRoot?: string }) {
+export function WorkbenchTopbar({ projectRoot }: { projectRoot: string }) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
 
@@ -238,7 +262,7 @@ export function WorkbenchTopbar({ projectRoot }: { projectRoot?: string }) {
         background: "var(--surface-elevated, transparent)",
       }}
     >
-      {projectRoot && <ProjectSwitcher projectRoot={projectRoot} />}
+      <ProjectSwitcher projectRoot={projectRoot} />
       <div
         role="tablist"
         aria-label="Workbench view mode"

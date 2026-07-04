@@ -279,6 +279,12 @@ function adaptHeadSetNodeWithRunProvenance(
  * entry, camelCases the heads, and synthesizes edge ids from source/target dedup keys.
  */
 export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
+  const familyCount = Array.isArray(backend.families)
+    ? backend.families.length
+    : 0;
+  const familyRunCount = Array.isArray(backend.families)
+    ? new Set(backend.families.flatMap((family) => family.members)).size
+    : 0;
   // Legacy / degraded target: the backend returns the OLD per-run graph shape
   // (legacy:true, NO `heads`, and `edges` is a dict-by-id — not the head-set's
   // edge array). Don't try to adapt it as a forest; return a legacy marker so the
@@ -290,6 +296,8 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
       nodes: [],
       edges: [],
       heads: [],
+      familyCount,
+      familyRunCount,
     };
   }
   const heads: Head[] = (backend.heads ?? []).map((h) => ({
@@ -332,6 +340,8 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
     nodes,
     edges,
     heads,
+    familyCount,
+    familyRunCount,
   };
 }
 

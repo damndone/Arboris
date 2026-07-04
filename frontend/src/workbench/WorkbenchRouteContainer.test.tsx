@@ -141,10 +141,14 @@ function forestResponse(focusKey = "hash_model"): HeadSetResponse {
 }
 
 function forkedForestResponse(): HeadSetResponse {
-  return {
+  const response: HeadSetResponse = {
     ...forestResponse("hash_model"),
     nodes: {
       ...forestResponse("hash_model").nodes,
+      hash_model: {
+        ...forestResponse("hash_model").nodes.hash_model,
+        runs: ["run_a", "run_null_created"],
+      },
       hash_child: {
         id: "model:ols_1",
         kind: "model",
@@ -178,7 +182,37 @@ function forkedForestResponse(): HeadSetResponse {
       { source: "hash_source", target: "hash_model" },
       { source: "hash_source", target: "hash_child" },
     ],
+    heads: [
+      {
+        run_id: "run_child",
+        head_node_hash: "hash_child",
+        from_node: "model:ols_1",
+        rerun_of: "run_a",
+        rerun_reason: "manual_override",
+        status: "completed",
+        created_at: "2026-06-27T00:01:00Z",
+      },
+      {
+        run_id: "run_null_created",
+        head_node_hash: "hash_model",
+        from_node: null,
+        rerun_of: null,
+        rerun_reason: null,
+        status: "completed",
+        created_at: null,
+      },
+      {
+        run_id: "run_a",
+        head_node_hash: "hash_model",
+        from_node: null,
+        rerun_of: null,
+        rerun_reason: null,
+        status: "completed",
+        created_at: "2026-06-27T00:00:00Z",
+      },
+    ],
   };
+  return response;
 }
 
 function forkedForestResponseWithProducedOp(): HeadSetResponse {
@@ -587,6 +621,26 @@ describe("WorkbenchRouteContainer", () => {
       };
     }
 
+    function allLegacyProjectBody(): HeadSetResponse {
+      return {
+        ...emptyForestBody(),
+        families: [
+          { family_root: "legacy_run", members: ["legacy_run", "legacy_child"] },
+        ],
+      };
+    }
+
+    function legacyGraph(runId = "legacy_run"): GraphResponse {
+      return {
+        ...fakeGraph(),
+        run_id: runId,
+        legacy: true,
+        nodes: {},
+        edges: {},
+        stats: { node_count: 0, edge_count: 0, leaf_count: 0, has_dp_count: 0 },
+      };
+    }
+
     function mountHome(focusRunId?: string) {
       return render(
         <MemoryRouter initialEntries={["/"]}>
@@ -621,13 +675,42 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByText("创世向导(T12)")).toBeInTheDocument();
     });
 
+    it("legacy deep links fall back to the legacy per-run workbench when the project forest omits the run", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(allLegacyProjectBody());
+      vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue({
+        legacy: true,
+        schema_version: 3,
+        nodes: {},
+        edges: {},
+      } as never);
+      vi.spyOn(api, "getRunGraph").mockResolvedValue(legacyGraph());
+      mountHome("legacy_run");
+
+      expect(await screen.findByTestId("legacy-banner")).toBeInTheDocument();
+      expect(api.getRunGraphHeadSet).toHaveBeenCalledWith("/proj", "legacy_run");
+      expect(api.getRunGraph).toHaveBeenCalledWith("/proj", "legacy_run");
+      expect(screen.queryByTestId("workbench-empty-canvas")).toBeNull();
+    });
+
+    it("all-legacy projects show an honest legacy empty state while keeping the genesis CTA", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(allLegacyProjectBody());
+      mountHome();
+
+      expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
+      expect(
+        screen.getByText(/该项目的 2 个 run 早于血缘索引/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("这个项目还没有数据")).toBeNull();
+    });
+
     it("with runs and NO focusRunId, the newest head (by created_at) is active", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(
         forkedForestResponse(),
       );
       mountHome();
 
-      // run_child (created 00:01) is newer than run_a (00:00).
+      // run_child (created 00:01) is newer, even though it is not the last
+      // head and another head has created_at=null.
       await waitFor(() =>
         expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
           "aria-pressed",
