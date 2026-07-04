@@ -11,7 +11,11 @@ export function listRecents(): RecentProject[] {
   try {
     const parsed = JSON.parse(localStorage.getItem(KEY) ?? "[]");
     return Array.isArray(parsed)
-      ? parsed.filter((r) => typeof r?.root === "string")
+      ? parsed.filter(
+          // T11 R3: validate BOTH fields — a corrupt lastOpened would leak
+          // into `上次打开 {lastOpened}` rendering as "undefined"/objects.
+          (r) => typeof r?.root === "string" && typeof r?.lastOpened === "string"
+        )
       : [];
   } catch {
     return [];

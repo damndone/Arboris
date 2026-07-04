@@ -175,4 +175,59 @@ describe("LauncherRoute", () => {
     expect(screen.getByText("最近项目将显示在这里。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
   });
+
+  // ── T11 ride-alongs (T10 review) ──
+
+  it("R1: a second click while a probe is in flight is ignored (single probe)", async () => {
+    touchRecent("/tmp/alpha");
+    let resolveProbe: (r: Response) => void = () => {};
+    const probe = new Promise<Response>((resolve) => {
+      resolveProbe = resolve;
+    });
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      () => probe
+    );
+    renderAt("/");
+
+    const card = screen.getByRole("button", { name: /alpha/ });
+    fireEvent.click(card);
+    fireEvent.click(card); // double-click: guarded, no second fetch
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveProbe(jsonResponse({ runs: [] }));
+    await screen.findByTestId("project-graph-route");
+  });
+
+  it("R4: reopening the create modal resets parent/name/error state", async () => {
+    installFetchRouter((url, init) => {
+      if (url.includes("/projects") && init?.method === "POST") {
+        return jsonResponse(
+          { error: { code: "X", message: "boom", details: {} } },
+          { status: 422 }
+        );
+      }
+      return jsonResponse({});
+    });
+    renderAt("/");
+
+    // First open: type a parent, trigger a failing create → inline error.
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+    fireEvent.change(screen.getByLabelText("parent folder"), {
+      target: { value: "/tmp" },
+    });
+    fireEvent.change(screen.getByLabelText("project name"), {
+      target: { value: "boom" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    // Close then reopen: fields and error are reset to pristine defaults.
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(screen.getByLabelText("parent folder")).toHaveValue("");
+    expect(screen.getByLabelText("project name")).toHaveValue("demo");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

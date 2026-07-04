@@ -13,7 +13,7 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
+import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
@@ -52,7 +52,7 @@ function mountAt(initialPath: string) {
   vi.spyOn(api, "getRunGraph").mockResolvedValue(fakeGraph());
   // The graph view always tries the cross-run forest first; a legacy head-set makes it
   // fall back to the per-run graph (these tests exercise the shell, not the forest).
-  vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue({ legacy: true } as never);
+  vi.spyOn(api, "fetchProjectForest").mockResolvedValue({ legacy: true } as never);
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
@@ -196,7 +196,7 @@ function forkedForestResponseWithProducedOp(): HeadSetResponse {
 }
 
 function mountForestAt(initialPath: string) {
-  vi.spyOn(api, "getRunGraphHeadSet")
+  vi.spyOn(api, "fetchProjectForest")
     .mockResolvedValueOnce(forestResponse("hash_model"))
     .mockResolvedValueOnce(forestResponse("hash_child"));
   vi.spyOn(api, "rerunFromNode").mockResolvedValue({
@@ -369,7 +369,7 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   it("selects the child run node by op node when the response focus key still names the parent", async () => {
-    vi.spyOn(api, "getRunGraphHeadSet")
+    vi.spyOn(api, "fetchProjectForest")
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forkedForestResponse());
     vi.spyOn(api, "rerunFromNode").mockResolvedValue({
@@ -417,7 +417,7 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   it("keeps polling and selects the child run node when context rerun returns focus null before the child is indexed", async () => {
-    vi.spyOn(api, "getRunGraphHeadSet")
+    vi.spyOn(api, "fetchProjectForest")
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forkedForestResponse());
@@ -448,7 +448,7 @@ describe("WorkbenchRouteContainer", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     confirmOperationRerun();
 
-    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(api.fetchProjectForest).toHaveBeenCalledTimes(3));
     await waitFor(() =>
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
         "aria-pressed",
@@ -463,7 +463,7 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   it("uses produced lineage pending_index to poll by rerun request id without guessing runs[0]", async () => {
-    vi.spyOn(api, "getRunGraphHeadSet")
+    vi.spyOn(api, "fetchProjectForest")
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forkedForestResponseWithProducedOp());
@@ -508,7 +508,7 @@ describe("WorkbenchRouteContainer", () => {
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
     confirmOperationRerun();
 
-    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(api.fetchProjectForest).toHaveBeenCalledTimes(3));
     await waitFor(() =>
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
         "aria-pressed",
@@ -523,7 +523,7 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   it("uses draft pending query params to poll and select the child run node", async () => {
-    vi.spyOn(api, "getRunGraphHeadSet")
+    vi.spyOn(api, "fetchProjectForest")
       .mockResolvedValueOnce(forestResponse("hash_model"))
       .mockResolvedValueOnce(forkedForestResponse());
     render(
@@ -541,7 +541,7 @@ describe("WorkbenchRouteContainer", () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(api.getRunGraphHeadSet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.fetchProjectForest).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
         "aria-pressed",
@@ -556,7 +556,7 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   it("fetches persisted drafts on mount to hydrate the forest", async () => {
-    vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue(
+    vi.spyOn(api, "fetchProjectForest").mockResolvedValue(
       forestResponse("hash_model"),
     );
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
@@ -573,5 +573,85 @@ describe("WorkbenchRouteContainer", () => {
     await waitFor(() =>
       expect(api.listPipelineDrafts).toHaveBeenCalledWith(expect.any(String)),
     );
+  });
+
+  // ── v1.6.8 T11 — project-keyed WorkbenchHome ──
+  describe("WorkbenchHome (project-keyed, T11)", () => {
+    function emptyForestBody(): HeadSetResponse {
+      return {
+        schema_version: 2,
+        legacy: false,
+        nodes: {},
+        edges: [],
+        heads: [],
+      };
+    }
+
+    function mountHome(focusRunId?: string) {
+      return render(
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <WorkbenchHome projectRoot="/proj" focusRunId={focusRunId} />
+              }
+            />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+
+    it("zero-run project renders the empty canvas with the genesis CTA", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      mountHome();
+
+      expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
+      expect(screen.getByText("这个项目还没有数据")).toBeInTheDocument();
+      // The empty canvas replaces the shell entirely.
+      expect(screen.queryByTestId("workbench-route")).toBeNull();
+    });
+
+    it("clicking the genesis CTA opens the stub wizard drawer (T12 placeholder)", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      mountHome();
+
+      fireEvent.click(await screen.findByTestId("genesis-cta"));
+      expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      expect(screen.getByText("创世向导(T12)")).toBeInTheDocument();
+    });
+
+    it("with runs and NO focusRunId, the newest head (by created_at) is active", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(
+        forkedForestResponse(),
+      );
+      mountHome();
+
+      // run_child (created 00:01) is newer than run_a (00:00).
+      await waitFor(() =>
+        expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        ),
+      );
+    });
+
+    it("an explicit focusRunId is honored over the newest head", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(
+        forkedForestResponse(),
+      );
+      mountHome("run_a");
+
+      await waitFor(() =>
+        expect(screen.getByTestId("forest-head-run_a")).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        ),
+      );
+      expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
   });
 });

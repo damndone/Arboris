@@ -34,6 +34,17 @@ export function CreateProjectModal({
   const [error, setError] = useState<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  // T11 R4: reset form state whenever the modal (re)opens — the topbar
+  // project switcher makes reopening common, and a stale error / half-typed
+  // parent from a previous attempt must not leak into the next one.
+  useEffect(() => {
+    if (!open) return;
+    setParent("");
+    setName("demo");
+    setError(null);
+    setBusy(false);
+  }, [open]);
+
   // Modal-scoped Escape listener — same pattern as RawJsonModal.
   useEffect(() => {
     if (!open) return undefined;

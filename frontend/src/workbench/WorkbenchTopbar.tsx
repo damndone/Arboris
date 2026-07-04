@@ -10,7 +10,8 @@
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
 // which goes through the provider's single-commit URL writer.
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   useWorkbench,
 } from "./WorkbenchStateProvider";
@@ -21,6 +22,9 @@ import {
   type ActionContext,
 } from "./registry/actionRegistry";
 import { pickRerunTargetKey } from "./rerunTarget";
+import { rootToSlug } from "./projectSlug";
+import { CreateProjectModal } from "../launcher/CreateProjectModal";
+import { listRecents, touchRecent } from "../launcher/recents";
 
 interface TabSpec {
   id: ViewMode;
@@ -36,7 +40,157 @@ export const VIEW_TABS: TabSpec[] = [
   { id: "table", label: "Table" },
 ];
 
-export function WorkbenchTopbar() {
+function projectName(root: string): string {
+  return root.split("/").filter(Boolean).pop() ?? root;
+}
+
+/**
+ * v1.6.8 T11 — topbar project switcher: 「项目名 ▾」 opens a dropdown of
+ * recent projects (current one marked) plus 「＋ 新建项目…」 which reuses the
+ * launcher's CreateProjectModal. Selecting / creating touches recents and
+ * navigates to the project's graph home. Popover conventions mirror
+ * ContextMenu.tsx (card background, 12px radius, separator ring).
+ */
+export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const recents = open ? listRecents() : [];
+
+  function goToProject(root: string) {
+    setOpen(false);
+    touchRecent(root);
+    navigate(`/p/${rootToSlug(root)}/graph`);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        data-testid="project-switcher"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={projectRoot}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 10px",
+          borderRadius: 6,
+          border: "1px solid var(--separator)",
+          background: "transparent",
+          color: "var(--label)",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 600,
+        }}
+      >
+        {projectName(projectRoot)}
+        <span aria-hidden="true" style={{ fontSize: 10 }}>
+          ▾
+        </span>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          data-testid="project-switcher-menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            left: 0,
+            background: "var(--bg-card-2)",
+            borderRadius: 12,
+            padding: 6,
+            minWidth: 260,
+            boxShadow:
+              "0 16px 40px rgba(0,0,0,0.75), 0 0 0 1px var(--separator)",
+            zIndex: 1000,
+          }}
+        >
+          {recents.map((recent) => {
+            const isCurrent = recent.root === projectRoot;
+            return (
+              <button
+                key={recent.root}
+                type="button"
+                role="menuitem"
+                aria-current={isCurrent ? "true" : undefined}
+                onClick={() => {
+                  if (isCurrent) {
+                    setOpen(false);
+                    return;
+                  }
+                  goToProject(recent.root);
+                }}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: 8,
+                  background: "transparent",
+                  border: 0,
+                  color: "var(--label)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  font: "inherit",
+                  fontSize: 13.5,
+                }}
+              >
+                <span>{projectName(recent.root)}</span>
+                {isCurrent && (
+                  <span
+                    style={{ color: "var(--label-tertiary)", fontSize: 12 }}
+                  >
+                    当前
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="project-switcher-new"
+            onClick={() => {
+              setOpen(false);
+              setModalOpen(true);
+            }}
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "9px 12px",
+              borderRadius: 8,
+              background: "transparent",
+              border: 0,
+              borderTop: recents.length > 0 ? "1px solid var(--separator)" : 0,
+              color: "var(--label)",
+              cursor: "pointer",
+              textAlign: "left",
+              font: "inherit",
+              fontSize: 13.5,
+            }}
+          >
+            ＋ 新建项目…
+          </button>
+        </div>
+      )}
+      <CreateProjectModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreated={(root) => {
+          setModalOpen(false);
+          goToProject(root);
+        }}
+      />
+    </div>
+  );
+}
+
+export function WorkbenchTopbar({ projectRoot }: { projectRoot?: string }) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
 
@@ -84,6 +238,7 @@ export function WorkbenchTopbar() {
         background: "var(--surface-elevated, transparent)",
       }}
     >
+      {projectRoot && <ProjectSwitcher projectRoot={projectRoot} />}
       <div
         role="tablist"
         aria-label="Workbench view mode"

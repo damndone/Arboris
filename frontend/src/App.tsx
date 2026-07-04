@@ -13,14 +13,13 @@ import {
 import {
   ApiError,
   createProject,
-  fetchRuns,
 } from "./api";
 import { RunForm } from "./runForm/RunForm";
 import { RunDetailRoute } from "./runDetail";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
 import { LauncherRoute } from "./launcher/LauncherRoute";
-import { WorkbenchRouteContainer } from "./workbench/WorkbenchRouteContainer";
+import { WorkbenchHome } from "./workbench/WorkbenchRouteContainer";
 import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
 import "./styles.css";
 
@@ -256,74 +255,18 @@ function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
   // ?run= is the run deep-link param. ?focus= belongs to the workbench URL
   // schema (NODE focus key, rewritten on every canvas interaction) — never
   // read it here.
+  //
+  // T11: the container is project-keyed now — it owns run resolution
+  // (newest head), the loading/error branches, and the zero-run empty
+  // canvas. The bridge only decodes the deep link.
   const runParam = searchParams.get("run") ?? "";
 
-  // T9 bridge: the workbench container still needs a runId until T11
-  // decouples it. Resolve one: ?run= wins; otherwise the newest run.
-  // Zero runs → placeholder (T11 replaces it with the real empty canvas).
-  const [resolvedRunId, setResolvedRunId] = useState<string | null>(
-    runParam || null
-  );
-  const [resolving, setResolving] = useState(!runParam);
-  const [zeroRuns, setZeroRuns] = useState(false);
-
-  useEffect(() => {
-    if (runParam) {
-      setResolvedRunId(runParam);
-      setResolving(false);
-      setZeroRuns(false);
-      return;
-    }
-    if (resolvedRunId) return; // already resolved once; canvas owns the URL now
-    let cancelled = false;
-    setResolving(true);
-    fetchRuns(projectRoot)
-      .then((res) => {
-        if (cancelled) return;
-        const runs = res?.runs ?? [];
-        if (runs.length === 0) {
-          setZeroRuns(true);
-          setResolvedRunId(null);
-          return;
-        }
-        const newest = [...runs].sort((a, b) =>
-          (b.started_at ?? "").localeCompare(a.started_at ?? "")
-        )[0];
-        setZeroRuns(false);
-        setResolvedRunId(newest.run_id);
-      })
-      .catch(() => {
-        if (!cancelled) setZeroRuns(true);
-      })
-      .finally(() => {
-        if (!cancelled) setResolving(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectRoot, runParam]);
-  if (resolving) {
-    return (
-      <section className="panel" data-testid="project-graph-route">
-        <p className="muted">Loading project…</p>
-      </section>
-    );
-  }
-  if (zeroRuns || !resolvedRunId) {
-    return (
-      <section className="panel" data-testid="project-graph-route">
-        <div className="panel-heading">
-          <h2>Graph workbench</h2>
-          <span className="mono">{projectRoot}</span>
-        </div>
-        <p className="muted">此项目还没有 run——图内创世向导将在这里开始。</p>
-      </section>
-    );
-  }
   return (
     <div data-testid="project-graph-route">
-      <WorkbenchRouteContainer projectRoot={projectRoot} runId={resolvedRunId} />
+      <WorkbenchHome
+        projectRoot={projectRoot}
+        focusRunId={runParam || undefined}
+      />
     </div>
   );
 }

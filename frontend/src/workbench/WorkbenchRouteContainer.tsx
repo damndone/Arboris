@@ -37,7 +37,7 @@ import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { LineageBridge } from "./LineageBridge";
-import { WorkbenchTopbar } from "./WorkbenchTopbar";
+import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
 import { ContextMenu } from "./ContextMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
@@ -77,25 +77,40 @@ type PendingFocusTarget = {
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
+interface WorkbenchHomeProps {
+  projectRoot: string;
+  /** Optional run deep link (?run=). Absent → newest head is the active run;
+   *  a zero-run project renders the empty canvas + genesis CTA instead. */
+  focusRunId?: string;
+}
+
+/** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
+ *  projectRoot alone; runId is only an optional focus hint. */
+export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
+  // v1.6.1 — the lineage graph IS the cross-run forest. Always render the forest; it
+  // falls back to the legacy per-run graph only for old runs that predate the lineage
+  // index (no node_index.json). No toggle: a run with no reruns is simply a linear
+  // forest, which is cleaner than the old per-run graph's variable folding.
+  return <ForestWorkbench projectRoot={projectRoot} focusRunId={focusRunId} />;
+}
+
 interface WorkbenchRouteContainerProps {
   projectRoot: string;
   runId: string;
 }
 
+/** Legacy per-run entry point (runDetail.tsx / LineageRouteContainer.tsx still
+ *  pass a required runId). Same component; runId becomes the focus hint. */
 export function WorkbenchRouteContainer({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
-  // v1.6.1 — the lineage graph IS the cross-run forest. Always render the forest; it
-  // falls back to the legacy per-run graph only for old runs that predate the lineage
-  // index (no node_index.json). No toggle: a run with no reruns is simply a linear
-  // forest, which is cleaner than the old per-run graph's variable folding.
-  return <ForestWorkbench projectRoot={projectRoot} runId={runId} />;
+  return <WorkbenchHome projectRoot={projectRoot} focusRunId={runId} />;
 }
 
-function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
+function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [searchParams] = useSearchParams();
-  const { forest, loading, error, refetch } = useForestData(projectRoot, runId);
+  const { forest, loading, error, refetch } = useForestData(projectRoot);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
@@ -103,12 +118,30 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
 
+  // The run the workbench treats as "the" run when no explicit focus exists:
+  // newest head by created_at (the project forest unions families in run-id
+  // order, so array position is NOT chronological across families).
+  const newestHeadRunId = useMemo(() => {
+    const heads = forest?.heads ?? [];
+    if (heads.length === 0) return undefined;
+    return [...heads].sort((a, b) =>
+      (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
+    )[0].runId;
+  }, [forest]);
+  const resolvedRunId = focusRunId ?? newestHeadRunId;
+
   const model = useMemo(
     () => {
-      const base = forest ? forestToGraphViewModel(forest, runId) : null;
+      // NOTE for T12: mergeDraftsIntoModel anchors drafts on an EXISTING
+      // forest node (node_hash / opNodeId); genesis drafts on an empty forest
+      // have no anchor and are skipped — T12's genesis-draft merge branch
+      // owns rendering parentless drafts on the empty canvas.
+      const base = forest
+        ? forestToGraphViewModel(forest, resolvedRunId ?? "")
+        : null;
       return base ? mergeDraftsIntoModel(base, registry) : null;
     },
-    [forest, runId, registry],
+    [forest, resolvedRunId, registry],
   );
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
@@ -142,23 +175,30 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
   // the deep-link pending path can still re-set activeRunId=runId afterward.
   useEffect(() => {
     setActiveRunId(null);
-  }, [runId]);
+  }, [focusRunId]);
 
+  // Deep-link pending focus (post-draft-execute navigation). Keyed on the
+  // RESOLVED run: the pending params always travel with an explicit ?run=
+  // (the execute flow navigates to the produced run), but guard on
+  // resolvedRunId anyway — with no resolvable run there is nothing to focus.
   const pendingSourceRunId = searchParams.get("pending_source_run_id");
   const pendingSourceModelNodeId = searchParams.get("pending_source_model_node_id");
   const pendingSourceOpNodeId = searchParams.get("pending_source_op_node_id");
   const pendingQueryKey =
-    pendingSourceRunId && pendingSourceModelNodeId && pendingSourceOpNodeId
-      ? `${runId}:${pendingSourceRunId}:${pendingSourceModelNodeId}:${pendingSourceOpNodeId}`
+    resolvedRunId &&
+    pendingSourceRunId &&
+    pendingSourceModelNodeId &&
+    pendingSourceOpNodeId
+      ? `${resolvedRunId}:${pendingSourceRunId}:${pendingSourceModelNodeId}:${pendingSourceOpNodeId}`
       : null;
 
   useEffect(() => {
-    if (!pendingQueryKey || !pendingSourceOpNodeId) return;
+    if (!pendingQueryKey || !pendingSourceOpNodeId || !resolvedRunId) return;
     if (initializedPendingQueryKey.current === pendingQueryKey) return;
     initializedPendingQueryKey.current = pendingQueryKey;
-    setActiveRunId(runId);
+    setActiveRunId(resolvedRunId);
     setPendingFocusTarget({
-      runId,
+      runId: resolvedRunId,
       focus: {
         forest_node_key: null,
         op_node_id: pendingSourceOpNodeId,
@@ -166,22 +206,30 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
       },
       attempts: 0,
     });
-  }, [pendingQueryKey, pendingSourceOpNodeId, runId]);
+  }, [pendingQueryKey, pendingSourceOpNodeId, resolvedRunId]);
 
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
   }
   if (loading || forest === null || model === null) return <Loading />;
-  // Legacy target (no node identity) → fall back to the legacy per-run workbench.
-  if (forest.legacy) {
-    return <LegacyGraphWorkbench projectRoot={projectRoot} runId={runId} />;
+  // Legacy target (no node identity) → fall back to the legacy per-run
+  // workbench. Only reachable with an explicit run focus: the PROJECT forest
+  // never degrades to the legacy shape (legacy runs are simply omitted), so
+  // the project home never lands here.
+  if (forest.legacy && focusRunId) {
+    return <LegacyGraphWorkbench projectRoot={projectRoot} runId={focusRunId} />;
+  }
+  // Zero-run project (and no focus run) → the real empty canvas with the
+  // genesis CTA (replaces T9's bridge placeholder).
+  if (!resolvedRunId) {
+    return <EmptyProjectCanvas projectRoot={projectRoot} />;
   }
 
   const effectiveActiveRunId =
     activeRunId ??
-    forest.heads.find((h) => h.runId === runId)?.runId ??
-    forest.heads[forest.heads.length - 1]?.runId ??
-    runId;
+    forest.heads.find((h) => h.runId === resolvedRunId)?.runId ??
+    newestHeadRunId ??
+    resolvedRunId;
 
   const handleRerun = (response: RerunResponseV1) => {
     const nextActiveRunId = response.new_active_head_id ?? response.run_id;
@@ -315,7 +363,7 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
       <ForestContext.Provider
         value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
       >
-        <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
+        <WorkbenchStateProvider runId={resolvedRunId} validNodeKeys={validNodeKeys}>
           <DraftActionsProvider
             value={{
               registry,
@@ -330,7 +378,7 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
           >
             <LineageBridge model={model}>
               <WorkbenchShell
-                runId={runId}
+                runId={resolvedRunId}
                 projectRoot={projectRoot}
                 pendingFocusTarget={pendingFocusTarget}
                 onPendingFocusConsumed={() => setPendingFocusTarget(null)}
@@ -348,6 +396,126 @@ function ForestWorkbench({ projectRoot, runId }: WorkbenchRouteContainerProps) {
         </WorkbenchStateProvider>
       </ForestContext.Provider>
     </RerunProvider>
+  );
+}
+
+/**
+ * v1.6.8 T11 — the empty-canvas state for a zero-run project. Dark canvas
+ * surface consistent with the workbench shell, a centered empty-state card
+ * with the genesis CTA, and a stub side drawer that Task 12 replaces with
+ * the real genesis wizard. The topbar row keeps the project switcher
+ * reachable even before any run exists.
+ */
+function EmptyProjectCanvas({ projectRoot }: { projectRoot: string }) {
+  const [wizardOpen, setWizardOpen] = useState(false);
+  return (
+    <div
+      data-testid="workbench-empty-canvas"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: 480,
+      }}
+    >
+      <div
+        role="toolbar"
+        aria-label="Workbench views"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          padding: "0 16px",
+          height: 40,
+          borderBottom: "1px solid var(--separator, #2e2e30)",
+          background: "var(--surface-elevated, transparent)",
+        }}
+      >
+        <ProjectSwitcher projectRoot={projectRoot} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--bg-canvas)",
+          }}
+        >
+          <div
+            style={{
+              textAlign: "center",
+              padding: "28px 36px",
+              borderRadius: 12,
+              background: "var(--bg-card-2)",
+              boxShadow: "0 0 0 1px var(--separator)",
+            }}
+          >
+            <p style={{ margin: "0 0 6px", fontSize: 15, color: "var(--label)" }}>
+              这个项目还没有数据
+            </p>
+            <p
+              className="mono"
+              style={{
+                margin: "0 0 16px",
+                fontSize: 12,
+                color: "var(--label-tertiary)",
+              }}
+            >
+              {projectRoot}
+            </p>
+            <button
+              type="button"
+              data-testid="genesis-cta"
+              onClick={() => setWizardOpen(true)}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 8,
+                border: 0,
+                background: "var(--tint, #0a84ff)",
+                color: "#fff",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ＋ 新链路
+            </button>
+          </div>
+        </div>
+        {wizardOpen && (
+          <aside
+            data-testid="genesis-wizard-drawer"
+            style={{
+              width: 460,
+              borderLeft: "1px solid var(--separator)",
+              padding: 22,
+              overflowY: "auto",
+              background: "var(--bg-canvas)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <strong>新链路</strong>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setWizardOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <p className="muted">创世向导(T12)</p>
+          </aside>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -494,7 +662,7 @@ function WorkbenchShell({
         minHeight: 0,
       }}
     >
-      <WorkbenchTopbar />
+      <WorkbenchTopbar projectRoot={projectRoot} />
       <div
         style={{
           display: "flex",

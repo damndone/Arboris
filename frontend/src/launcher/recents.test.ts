@@ -26,4 +26,15 @@ describe("recents", () => {
     localStorage.setItem("workbench.recentProjects.v1", "{not json");
     expect(listRecents()).toEqual([]);
   });
+  it("R3: drops entries whose lastOpened is not a string", () => {
+    localStorage.setItem(
+      "workbench.recentProjects.v1",
+      JSON.stringify([
+        { root: "/ok", lastOpened: "2026-07-04T00:00:00Z" },
+        { root: "/bad-missing" },
+        { root: "/bad-type", lastOpened: 42 },
+      ])
+    );
+    expect(listRecents().map((r) => r.root)).toEqual(["/ok"]);
+  });
 });

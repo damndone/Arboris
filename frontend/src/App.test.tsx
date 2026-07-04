@@ -1252,6 +1252,8 @@ test("/runs/:id redirects into the graph home and forwards focus", async () => {
 });
 
 test("/p/:slug/graph treats ?focus= as a NODE key, never a run id (C1)", async () => {
+  // T11: the container is project-keyed — it fetches the PROJECT forest
+  // (GET /graph?project_root=) and never resolves ?focus= as a run id.
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValue(jsonResponse({ runs: [makeRun("run-1")] }));
 
@@ -1263,8 +1265,8 @@ test("/p/:slug/graph treats ?focus= as a NODE key, never a run id (C1)", async (
   });
   await waitFor(() => {
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
-    // resolves the newest RUN (run-1); the node-focus param is not a run id
-    expect(urls.some((u) => u.includes("/runs/run-1/graph"))).toBe(true);
+    // fetches the project forest; the node-focus param is not a run id
+    expect(urls.some((u) => u.includes("/graph?project_root="))).toBe(true);
     expect(urls.some((u) => u.includes("/runs/abc123"))).toBe(false);
   });
 });
@@ -1296,9 +1298,20 @@ test("/p/:slug/graph with a malformed slug falls back to the launcher (F5)", asy
   expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
 });
 
-test("/p/:slug/graph on a zero-run project shows the genesis placeholder", async () => {
+test("/p/:slug/graph on a zero-run project shows the empty canvas with the genesis CTA (T11)", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValue(jsonResponse({ runs: [] }));
+  // T11: the container fetches the project forest; a zero-run project
+  // returns empty containers (Task 6 contract).
+  fetchMock.mockResolvedValue(
+    jsonResponse({
+      nodes: {},
+      edges: [],
+      heads: [],
+      families: [],
+      schema_version: 2,
+      legacy: false,
+    }),
+  );
 
   // slug for /tmp/p1 (unicode-safe base64url; see projectSlug.test.ts)
   const { rootToSlug } = await import("./workbench/projectSlug");
@@ -1307,7 +1320,8 @@ test("/p/:slug/graph on a zero-run project shows the genesis placeholder", async
   await waitFor(() => {
     expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  expect(screen.getByText(/此项目还没有 run/)).toBeInTheDocument();
+  expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
+  expect(screen.getByText("这个项目还没有数据")).toBeInTheDocument();
 });
 
 import { validatePanelPrediction } from "./App";

@@ -32,11 +32,17 @@ export function LauncherRoute() {
   }
 
   async function openRecent(root: string) {
+    // T11 R1: guard concurrent probes — a second click (same or another
+    // card) while one probe is in flight is ignored.
+    if (probingRoot) return;
     setProbingRoot(root);
     setProbeError(null);
+    // T11 R2: navigate AFTER the finally block, so goToProject (which
+    // unmounts this route) is not followed by a setState-after-unmount.
+    let probeOk = false;
     try {
       await fetchRuns(root);
-      goToProject(root);
+      probeOk = true;
     } catch (err) {
       if (err instanceof ApiError && err.code === "PROJECT_NOT_FOUND") {
         setStaleRoots((s) => ({ ...s, [root]: true }));
@@ -48,6 +54,7 @@ export function LauncherRoute() {
     } finally {
       setProbingRoot(null);
     }
+    if (probeOk) goToProject(root);
   }
 
   function onRemove(root: string) {
