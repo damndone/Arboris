@@ -18,5 +18,9 @@ export function slugToRoot(slug: string): string {
   const b64 = slug.replace(/-/g, "+").replace(/_/g, "/");
   const pad = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
   const bin = atob(pad);
-  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  // fatal: valid-base64-but-non-UTF8 input must throw, not decode to U+FFFD
+  // garbage that would then be treated as a real path.
+  return new TextDecoder("utf-8", { fatal: true }).decode(
+    Uint8Array.from(bin, (c) => c.charCodeAt(0))
+  );
 }

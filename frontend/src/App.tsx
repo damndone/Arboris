@@ -218,11 +218,15 @@ function LegacyRunRoute() {
   // feature goes dead. Everything else redirects into the graph home.
   if (searchParams.get("tab") === "overview") return <RunDetailRoute />;
   if (!root) return <Navigate to="/" replace />;
+  // Forward the run id as ?run= — NOT ?focus=, which the workbench URL
+  // schema owns as the NODE focus key (urlSchema.ts). Preserve all other
+  // params (e.g. ?view=table survives the v1.6.7 run-aware Table flow).
+  const forwarded = new URLSearchParams(searchParams);
+  forwarded.delete("project_root");
+  forwarded.delete("tab");
+  forwarded.set("run", runId ?? "");
   return (
-    <Navigate
-      replace
-      to={`/p/${rootToSlug(root)}/graph?focus=${encodeURIComponent(runId ?? "")}`}
-    />
+    <Navigate replace to={`/p/${rootToSlug(root)}/graph?${forwarded.toString()}`} />
   );
 }
 
@@ -234,8 +238,6 @@ function LegacyRunsListRedirect() {
 
 function ProjectGraphRoute() {
   const { slug } = useParams();
-  const [searchParams] = useSearchParams();
-  const focus = searchParams.get("focus") ?? "";
 
   let projectRoot = "";
   try {
@@ -243,24 +245,36 @@ function ProjectGraphRoute() {
   } catch {
     // malformed slug — fall through to the launcher redirect below
   }
+  if (!projectRoot) return <Navigate to="/" replace />;
+  // key by slug: switching /p/A/graph → /p/B/graph must remount the bridge,
+  // otherwise B's first frame renders with A's resolved run (stale fetch).
+  return <ProjectGraphBridge key={slug} projectRoot={projectRoot} />;
+}
+
+function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
+  const [searchParams] = useSearchParams();
+  // ?run= is the run deep-link param. ?focus= belongs to the workbench URL
+  // schema (NODE focus key, rewritten on every canvas interaction) — never
+  // read it here.
+  const runParam = searchParams.get("run") ?? "";
 
   // T9 bridge: the workbench container still needs a runId until T11
-  // decouples it. Resolve one: ?focus= wins; otherwise the newest run.
+  // decouples it. Resolve one: ?run= wins; otherwise the newest run.
   // Zero runs → placeholder (T11 replaces it with the real empty canvas).
   const [resolvedRunId, setResolvedRunId] = useState<string | null>(
-    focus || null
+    runParam || null
   );
-  const [resolving, setResolving] = useState(!focus);
+  const [resolving, setResolving] = useState(!runParam);
   const [zeroRuns, setZeroRuns] = useState(false);
 
   useEffect(() => {
-    if (focus) {
-      setResolvedRunId(focus);
+    if (runParam) {
+      setResolvedRunId(runParam);
       setResolving(false);
       setZeroRuns(false);
       return;
     }
-    if (!projectRoot) return;
+    if (resolvedRunId) return; // already resolved once; canvas owns the URL now
     let cancelled = false;
     setResolving(true);
     fetchRuns(projectRoot)
@@ -275,6 +289,7 @@ function ProjectGraphRoute() {
         const newest = [...runs].sort((a, b) =>
           (b.started_at ?? "").localeCompare(a.started_at ?? "")
         )[0];
+        setZeroRuns(false);
         setResolvedRunId(newest.run_id);
       })
       .catch(() => {
@@ -286,9 +301,8 @@ function ProjectGraphRoute() {
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, focus]);
-
-  if (!projectRoot) return <Navigate to="/" replace />;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectRoot, runParam]);
   if (resolving) {
     return (
       <section className="panel" data-testid="project-graph-route">
@@ -345,7 +359,7 @@ function AppShell() {
   // into shell state (and localStorage) so the topbar and other consumers
   // agree with the URL.
   useEffect(() => {
-    const match = location.pathname.match(/^\/p\/([^/]+)\/graph$/);
+    const match = location.pathname.match(/^\/p\/([^/]+)\/graph\/?$/);
     if (!match) return;
     try {
       const fromSlug = slugToRoot(match[1]);
@@ -381,7 +395,7 @@ function AppShell() {
   );
 
   const isLauncherActive = location.pathname === "/";
-  const isWorkbenchActive = /^\/p\/[^/]+\/graph$/.test(location.pathname);
+  const isWorkbenchActive = /^\/p\/[^/]+\/graph\/?$/.test(location.pathname);
   // V1.5.0.1 HF2 scoped the dark shell to /runs/:id?tab=lineage so the
   // light Overview tab stayed readable. v1.6.8: /runs/:id is now a
   // redirect and the workbench home is /p/:slug/graph — the dark canvas

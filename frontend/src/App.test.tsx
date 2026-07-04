@@ -1251,6 +1251,39 @@ test("/runs/:id redirects into the graph home and forwards focus", async () => {
   });
 });
 
+test("/p/:slug/graph treats ?focus= as a NODE key, never a run id (C1)", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(jsonResponse({ runs: [makeRun("run-1")] }));
+
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/p1")}/graph?focus=abc123::node_7`);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    // resolves the newest RUN (run-1); the node-focus param is not a run id
+    expect(urls.some((u) => u.includes("/runs/run-1/graph"))).toBe(true);
+    expect(urls.some((u) => u.includes("/runs/abc123"))).toBe(false);
+  });
+});
+
+test("/runs/:id redirect forwards the run id as ?run= and keeps other params (I2)", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(jsonResponse({}));
+
+  renderAt("/runs/run-abc?project_root=/tmp/p1&view=table");
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/runs/run-abc/graph"))).toBe(true);
+  });
+});
+
 test("/runs/:id without project_root falls back to the launcher", async () => {
   renderAt("/runs/run-abc");
 
