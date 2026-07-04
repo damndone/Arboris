@@ -1,4 +1,8 @@
 """v1.6.8 Task 2: POST /pipeline-drafts/genesis — parentless genesis draft chain."""
+import json
+import time
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from workbench.api import app
@@ -459,6 +463,245 @@ def test_validate_genesis_has_no_from_node_noise(tmp_path):
     assert "EDITABLE_SCHEMA_HASH_MISMATCH" not in codes
     assert "INVALID_EXECUTION_MODE" not in codes
     assert "CREATED_FROM_REQUIRED_FOR_RERUN_CHILD" not in codes
+
+
+# --- Task 5: genesis branch of POST /pipeline-drafts/{draft_id}/execute ---
+
+
+def _wait_terminal(root, run_id, tries=100):
+    terminal = {"completed", "failed", "cancelled", "interrupted", "partial"}
+    body = {}
+    for _ in range(tries):
+        body = client.get(f"/runs/{run_id}", params={"project_root": root}).json()
+        if body.get("status") in terminal:
+            return str(body["status"])
+        time.sleep(0.1)
+    return str(body.get("status"))
+
+
+def _upload_rich(root):
+    """Upload with enough rows for the OLS engine to actually run."""
+    rows = "\n".join(f"{1 + 2 * i},{i}" for i in range(35))
+    return client.post(
+        "/uploads",
+        data={"project_root": root},
+        files={"file": ("d.csv", ("y,x\n" + rows + "\n").encode(), "text/csv")},
+    ).json()
+
+
+def _genesis_rich(root):
+    up = _upload_rich(root)
+    return client.post(
+        f"/pipeline-drafts/genesis?project_root={root}",
+        json={
+            "upload_sha256": up["sha256"],
+            "filename": up["filename"],
+            "sheet_names": [],
+            "columns": ["y", "x"],
+        },
+    ).json()
+
+
+def test_execute_genesis_produces_first_run(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": v["validated_draft_hash"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    run_id = body["run_id"]
+    assert body["ok"] is True
+    assert body["execution_mode"] == "genesis"
+    assert body["produced_lineage"] == {"genesis": True}
+    detail = client.get(f"/runs/{run_id}", params={"project_root": root}).json()
+    assert detail["run_id"] == run_id
+    inputs = json.loads(
+        (Path(root) / "runs" / run_id / "run_inputs.json").read_text(encoding="utf-8")
+    )
+    assert not inputs.get("rerun_of")
+    assert inputs.get("rerun_reason") == "initial"
+    assert not inputs.get("from_node")
+    assert inputs["form"]["y"] == "y" and inputs["form"]["x"] == "x"
+    _wait_terminal(root, run_id)
+
+
+def test_execute_genesis_idempotent(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    body = {
+        "execution_mode": "genesis",
+        "validated_draft_hash": v["validated_draft_hash"],
+        "idempotency_key": "k1",
+    }
+    r1 = client.post(f"/pipeline-drafts/{did}/execute?project_root={root}", json=body).json()
+    _wait_terminal(root, r1["run_id"])
+    r2 = client.post(f"/pipeline-drafts/{did}/execute?project_root={root}", json=body).json()
+    assert r2["deduped"] is True and r2["run_id"] == r1["run_id"]
+    assert r2["execution_mode"] == "genesis"
+
+
+def test_execute_genesis_wrong_mode_409(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    current = client.get(f"/pipeline-drafts/{did}?project_root={root}").json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "rerun_child",
+            "validated_draft_hash": current["draft_hash"],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "GENESIS_MODE_REQUIRED"
+    assert not list((Path(root) / "runs").glob("*/executed_pipeline_draft.json"))
+
+
+def test_execute_genesis_mode_on_from_node_draft_409(tmp_path):
+    """A non-genesis draft may not execute with execution_mode='genesis'."""
+    from workbench.lineage.pipeline_drafts import (
+        DRAFT_SCHEMA_VERSION,
+        PipelineDraftStore,
+        schema_hash,
+    )
+
+    editable_schema = [{"key": "x", "kind": "columns", "label": "X"}]
+    draft = {
+        "draft_id": "draft_fromnode2",
+        "schema_version": DRAFT_SCHEMA_VERSION,
+        "created_at": "2026-07-03T00:00:00Z",
+        "updated_at": "2026-07-03T00:00:00Z",
+        "status": "draft",
+        "created_from": {
+            "source_type": "run",
+            "source_run_id": "run_source",
+            "source_model_node_id": "model_node",
+            "source_op_node_id": "model_op",
+            "source_node_hash": "h_source",
+            "source_context_fingerprint": "ctx_source",
+            "source_input_fingerprint": "input_source",
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "input_1",
+                    "node_type": "input.dataset",
+                    "source_type": "run_input",
+                    "run_input_id": "run_source",
+                    "schema_fingerprint": "schema_1",
+                    "input_fingerprint": "input_source",
+                    "columns_summary": [{"name": "y"}, {"name": "x1"}],
+                    "status": "bound",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": "ols",
+                    "schema_id": "ols@v1",
+                    "editable_schema": editable_schema,
+                    "editable_schema_hash": schema_hash(editable_schema),
+                    "source_ref": {
+                        "source_run_id": "run_source",
+                        "source_model_node_id": "model_node",
+                        "source_op_node_id": "model_op",
+                        "source_node_hash": "h_source",
+                        "source_context_fingerprint": "ctx_source",
+                    },
+                    "source_params": {"x": ["x1"]},
+                    "params": {"x": ["x1"]},
+                },
+            ],
+            "edges": [{"from": "input_1", "to": "model_1"}],
+        },
+        "default_execution_mode": "rerun_child",
+    }
+    stored = PipelineDraftStore(tmp_path).create(draft)
+    r = client.post(
+        f"/pipeline-drafts/{draft['draft_id']}/execute?project_root={tmp_path}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": stored.draft_hash,
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "GENESIS_ONLY_FOR_GENESIS_DRAFTS"
+
+
+def test_execute_genesis_stale_hash_409(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    old_hash = v["validated_draft_hash"]
+    # draft changes after validate -> the validated hash is stale
+    client.patch(
+        f"/pipeline-drafts/{did}/nodes/model_1?project_root={root}",
+        json={"params": {"model_type": "ols", "y": "x", "x": ["y"]}},
+    )
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={"execution_mode": "genesis", "validated_draft_hash": old_hash},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "VALIDATED_DRAFT_HASH_MISMATCH"
+    assert not list((Path(root) / "runs").glob("*/executed_pipeline_draft.json"))
+
+
+def test_execute_genesis_unvalidatable_chain_409(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did, model_params={"model_type": "ols"})  # no y/x
+    v = _validate(root, did).json()
+    assert v["executable"] is False
+    current = client.get(f"/pipeline-drafts/{did}?project_root={root}").json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": current["draft_hash"],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "VALIDATION_REQUIRED"
+    assert not list((Path(root) / "runs").glob("*/executed_pipeline_draft.json"))
+
+
+def test_execute_genesis_writes_snapshot(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": v["validated_draft_hash"],
+        },
+    ).json()
+    snap_path = Path(root) / "runs" / r["run_id"] / "executed_pipeline_draft.json"
+    assert snap_path.is_file()
+    snap = json.loads(snap_path.read_text(encoding="utf-8"))
+    assert snap["source_draft_id"] == did
+    assert snap["executed_draft_hash"] == r["executed_draft_hash"]
+    assert snap["execution_request"]["execution_mode"] == "genesis"
+    assert snap["draft"]["created_from"]["source_type"] == "genesis"
+    _wait_terminal(root, r["run_id"])
 
 
 def test_list_summary_shows_genesis_model_type(tmp_path):
