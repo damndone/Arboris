@@ -437,7 +437,11 @@ def test_delete_pipeline_draft_endpoint(tmp_path: Path):
     store.create(_make_draft("draft_aaaaaaaa"))
     resp = client.delete("/pipeline-drafts/draft_aaaaaaaa", params={"project_root": str(tmp_path)})
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"ok": True, "draft_id": "draft_aaaaaaaa"}
+    assert resp.json() == {
+        "ok": True,
+        "draft_id": "draft_aaaaaaaa",
+        "upload_reclaimed": False,  # v1.6.8 F6: non-genesis draft -> no blob GC
+    }
     assert not store._path("draft_aaaaaaaa").exists()
 
 

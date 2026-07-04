@@ -84,7 +84,12 @@ from .lineage.rerun_provenance import (
 )
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
 from .lineage.role_layer import canonicalize_focal_x
-from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
+from .lineage.upload_store import (
+    delete_upload_if_unreferenced,
+    resolve_upload,
+    store_upload_bytes,
+    verify_upload,
+)
 
 # Estimator families whose focal/treatment variable is structural (not user-declared
 # via focal_x). For these, persisted focal_x MUST be empty (spec §5).
@@ -1384,11 +1389,41 @@ def patch_pipeline_draft_node(
 
 @app.delete("/pipeline-drafts/{draft_id}")
 def delete_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+    store = _pipeline_draft_store(project_root)
+    # v1.6.8 F6: extract the genesis upload sha BEFORE deleting, defensively —
+    # a corrupt/missing draft must still be discardable (just without blob GC).
+    genesis_sha: str | None = None
     try:
-        _pipeline_draft_store(project_root).delete(draft_id)
+        draft = store.get(draft_id).draft
+        if (draft.get("created_from") or {}).get("source_type") == "genesis":
+            source = next(
+                (
+                    n
+                    for n in (draft.get("graph") or {}).get("nodes") or []
+                    if n.get("node_id") == "source_1"
+                ),
+                None,
+            )
+            sha = ((source or {}).get("upload") or {}).get("sha256")
+            if isinstance(sha, str) and sha:
+                genesis_sha = sha
+    except Exception:
+        genesis_sha = None
+    try:
+        store.delete(draft_id)
     except Exception as exc:
         raise _draft_http_error(exc) from exc
-    return {"ok": True, "draft_id": draft_id}
+    # GC AFTER delete so the discarded draft's own file no longer counts as a
+    # reference. GC failure must never fail the discard.
+    upload_reclaimed = False
+    if genesis_sha is not None:
+        try:
+            upload_reclaimed = delete_upload_if_unreferenced(
+                Path(project_root), genesis_sha
+            )
+        except Exception:
+            upload_reclaimed = False
+    return {"ok": True, "draft_id": draft_id, "upload_reclaimed": upload_reclaimed}
 
 
 @app.post("/pipeline-drafts/{draft_id}/validate")

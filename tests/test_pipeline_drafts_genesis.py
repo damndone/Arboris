@@ -719,6 +719,159 @@ def test_execute_genesis_writes_snapshot(tmp_path):
     _wait_terminal(root, r["run_id"])
 
 
+# --- Task 7 (F6): reclaim unreferenced upload on genesis draft discard ---
+
+
+def _blob_path(root, sha):
+    # resolve_upload raises UploadBlobMissing when absent, so tests check the
+    # content-addressed path directly (layout: <root>/data/uploads/<sha256>).
+    return Path(root) / "data" / "uploads" / sha
+
+
+def _genesis_sha(d):
+    return next(
+        n for n in d["draft"]["graph"]["nodes"] if n["node_id"] == "source_1"
+    )["upload"]["sha256"]
+
+
+def test_discard_genesis_reclaims_unreferenced_upload(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis(root)
+    did = d["draft"]["draft_id"]
+    sha = _genesis_sha(d)
+    assert _blob_path(root, sha).is_file()
+    r = client.delete(f"/pipeline-drafts/{did}?project_root={root}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["draft_id"] == did
+    assert body["upload_reclaimed"] is True
+    assert not _blob_path(root, sha).exists()
+
+
+def test_discard_keeps_upload_referenced_by_run(tmp_path):
+    """After a genesis chain EXECUTES, run_inputs.json references the sha —
+    discarding the draft must NOT reclaim the blob."""
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    sha = _genesis_sha(d)
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": v["validated_draft_hash"],
+        },
+    ).json()
+    _wait_terminal(root, r["run_id"])
+    dr = client.delete(f"/pipeline-drafts/{did}?project_root={root}")
+    assert dr.status_code == 200
+    assert dr.json()["upload_reclaimed"] is False
+    assert _blob_path(root, sha).is_file()
+
+
+def test_discard_keeps_upload_referenced_by_other_draft(tmp_path):
+    """Two genesis drafts over the same bytes share one blob (content-addressed).
+    Discarding one keeps the blob; discarding the last reclaims it."""
+    root = _mkproject(tmp_path)
+    d1 = _genesis(root)
+    d2 = _genesis(root)  # same default bytes -> same sha, dedup'd store
+    sha = _genesis_sha(d1)
+    assert _genesis_sha(d2) == sha
+    r1 = client.delete(
+        f"/pipeline-drafts/{d1['draft']['draft_id']}?project_root={root}"
+    )
+    assert r1.status_code == 200
+    assert r1.json()["upload_reclaimed"] is False
+    assert _blob_path(root, sha).is_file()
+    r2 = client.delete(
+        f"/pipeline-drafts/{d2['draft']['draft_id']}?project_root={root}"
+    )
+    assert r2.status_code == 200
+    assert r2.json()["upload_reclaimed"] is True
+    assert not _blob_path(root, sha).exists()
+
+
+def test_discard_from_node_draft_never_touches_blobs(tmp_path):
+    """Regression: discarding a FROM-NODE draft performs no blob GC at all —
+    an unrelated blob in the store must survive."""
+    from workbench.lineage.pipeline_drafts import (
+        DRAFT_SCHEMA_VERSION,
+        PipelineDraftStore,
+        schema_hash,
+    )
+
+    root = _mkproject(tmp_path)
+    up = _upload(root)  # unrelated blob sitting in the store
+    sha = up["sha256"]
+    assert _blob_path(root, sha).is_file()
+
+    editable_schema = [{"key": "x", "kind": "columns", "label": "X"}]
+    draft = {
+        "draft_id": "draft_fromnode7",
+        "schema_version": DRAFT_SCHEMA_VERSION,
+        "created_at": "2026-07-03T00:00:00Z",
+        "updated_at": "2026-07-03T00:00:00Z",
+        "status": "draft",
+        "created_from": {
+            "source_type": "run",
+            "source_run_id": "run_source",
+            "source_model_node_id": "model_node",
+            "source_op_node_id": "model_op",
+            "source_node_hash": "h_source",
+            "source_context_fingerprint": "ctx_source",
+            "source_input_fingerprint": "input_source",
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "input_1",
+                    "node_type": "input.dataset",
+                    "source_type": "run_input",
+                    "run_input_id": "run_source",
+                    "schema_fingerprint": "schema_1",
+                    "input_fingerprint": "input_source",
+                    "columns_summary": [{"name": "y"}, {"name": "x1"}],
+                    "status": "bound",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": "ols",
+                    "schema_id": "ols@v1",
+                    "editable_schema": editable_schema,
+                    "editable_schema_hash": schema_hash(editable_schema),
+                    "source_ref": {
+                        "source_run_id": "run_source",
+                        "source_model_node_id": "model_node",
+                        "source_op_node_id": "model_op",
+                        "source_node_hash": "h_source",
+                        "source_context_fingerprint": "ctx_source",
+                    },
+                    "source_params": {"x": ["x1"]},
+                    "params": {"x": ["x1"]},
+                },
+            ],
+            "edges": [{"from": "input_1", "to": "model_1"}],
+        },
+        "default_execution_mode": "rerun_child",
+    }
+    PipelineDraftStore(Path(root)).create(draft)
+    r = client.delete(f"/pipeline-drafts/draft_fromnode7?project_root={root}")
+    assert r.status_code == 200
+    assert r.json()["upload_reclaimed"] is False
+    assert _blob_path(root, sha).is_file()
+
+
+def test_delete_upload_if_unreferenced_missing_blob_is_noop(tmp_path):
+    """Unit: no references and no blob -> False, no crash."""
+    from workbench.lineage.upload_store import delete_upload_if_unreferenced
+
+    assert delete_upload_if_unreferenced(tmp_path, "0" * 64) is False
+
+
 def test_list_summary_shows_genesis_model_type(tmp_path):
     """R2: configuring the model node mirrors model_type into the list summary."""
     root = _mkproject(tmp_path)
