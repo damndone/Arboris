@@ -129,6 +129,19 @@ def test_validate_graph_shape_rejects_duplicate_node_ids():
     assert "GENESIS_CHAIN_SHAPE" in codes
 
 
+def test_validate_graph_shape_rejects_non_canonical_node_ids():
+    """R2: execute resolves the chain by source_1/table_1/model_1 — the
+    validator must enforce those exact ids, not just distinct types."""
+    draft = _genesis_draft_dict()
+    draft["graph"]["nodes"][1]["node_id"] = "tbl_custom"
+    draft["graph"]["edges"] = [
+        {"from": "source_1", "to": "tbl_custom"},
+        {"from": "tbl_custom", "to": "model_1"},
+    ]
+    codes = [c["code"] for c in _validate_graph_shape(draft)]
+    assert "GENESIS_CHAIN_SHAPE" in codes
+
+
 def test_validate_graph_shape_from_node_path_untouched():
     draft = {
         "created_from": {"source_type": "run"},
@@ -476,7 +489,9 @@ def _wait_terminal(root, run_id, tries=100):
         if body.get("status") in terminal:
             return str(body["status"])
         time.sleep(0.1)
-    return str(body.get("status"))
+    raise AssertionError(
+        f"run {run_id} not terminal after {tries} tries, last status={body.get('status')!r}"
+    )
 
 
 def _upload_rich(root):

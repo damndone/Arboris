@@ -422,6 +422,7 @@ def _nodes_by_type(draft: dict[str, Any], node_type: str) -> list[dict[str, Any]
 
 
 _GENESIS_CHAIN = ["input.upload", "table", "model"]
+_GENESIS_NODE_IDS = ["source_1", "table_1", "model_1"]
 
 
 def _validate_genesis_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
@@ -442,11 +443,13 @@ def _validate_genesis_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
         )
         return checks
     node_ids = [node.get("node_id") for node in nodes]
-    if len(set(node_ids)) != len(node_ids):
+    if node_ids != _GENESIS_NODE_IDS:
+        # Canonical ids are load-bearing: execute (T5) resolves the chain by
+        # these exact ids, so the validator must enforce them, not just types.
         checks.append(
             check(
                 "GENESIS_CHAIN_SHAPE",
-                f"Genesis chain node_ids must be distinct, got {node_ids}.",
+                f"Genesis chain node_ids must be {_GENESIS_NODE_IDS}, got {node_ids}.",
             )
         )
         return checks

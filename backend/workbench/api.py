@@ -45,6 +45,7 @@ from .lineage.family import scan_family
 from .lineage.hashing import dag_hash, override_hash
 from .lineage.headset import build_headset
 from .lineage.node_index import NODE_INDEX_FILENAME
+from .lineage.project_forest import build_project_forest
 from .lineage.node_write_validation import (
     AcceptedContext,
     NodeWriteOperationRequestV1,
@@ -70,6 +71,7 @@ from .lineage.pipeline_drafts import (
     DraftNotFound,
     DraftValidationFailure,
     PipelineDraftStore,
+    StoredDraft,
     compute_executable_draft_hash,
     new_draft_id,
     schema_hash,
@@ -972,6 +974,16 @@ def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
         _annotate_editable_node(node, manifest)
 
 
+@app.get("/graph")
+def get_project_graph(project_root: str) -> dict[str, Any]:
+    """v1.6.8 F1 — project-keyed forest (union of all family head-sets).
+
+    A zero-run project returns an EMPTY forest so the canvas can render as the
+    genesis starting point. Same body shape as the per-run headset view."""
+    runs_root = _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND
+    return build_project_forest(runs_root, annotate=_annotate_editable_node)
+
+
 @app.get("/runs/{run_id}/graph")
 def get_run_graph(run_id: str, project_root: str, view: str | None = None):
     runs_root = _resolve_project_runs_dir(project_root)
@@ -1396,7 +1408,7 @@ def _execute_genesis_draft(
     draft_id: str,
     root: Path,
     store: PipelineDraftStore,
-    first: Any,
+    first: StoredDraft,
     body: PipelineDraftExecuteRequest,
 ) -> dict[str, Any]:
     """v1.6.8 genesis execute: parentless draft chain -> FIRST run of a project.
