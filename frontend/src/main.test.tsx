@@ -51,11 +51,12 @@ test("browser entrypoint honors direct /runs/:runId URLs", async () => {
     await import("./main");
   });
 
+  // v1.6.8 route inversion: /runs/:id (without tab=overview) redirects into
+  // the project graph home; the Workbench tab reflects the active route.
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: /run detail/i })).toBeInTheDocument();
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  expect(screen.getByText("run-direct")).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "History" })).toHaveAttribute(
+  expect(screen.getByRole("tab", { name: "Workbench" })).toHaveAttribute(
     "aria-selected",
     "true",
   );

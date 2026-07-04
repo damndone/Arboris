@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Navigate,
   Outlet,
   Route,
   Routes,
   useLocation,
   useNavigate,
   useOutletContext,
+  useParams,
   useSearchParams,
 } from "react-router-dom";
 import {
   ApiError,
   createProject,
   fetchRuns,
-  type RunSummary,
 } from "./api";
-import { RunHistoryPanel } from "./runHistory";
-import { RunDetailRoute } from "./runDetail";
 import { RunForm } from "./runForm/RunForm";
+import { RunDetailRoute } from "./runDetail";
 import { ThemeProvider, ThemeToggle } from "./theme";
 import { DraftGraphRoute } from "./pipelineDrafts/DraftGraphRoute";
+import { LauncherRoute } from "./launcher/LauncherRoute";
+import { WorkbenchRouteContainer } from "./workbench/WorkbenchRouteContainer";
+import { rootToSlug, slugToRoot } from "./workbench/projectSlug";
 import "./styles.css";
 
 type RequestState = "idle" | "working";
@@ -200,83 +203,114 @@ function SubmitRoute() {
   );
 }
 
-// --- RunHistoryRoute ---
+// --- v1.6.8 route inversion: legacy redirects + project graph home ---
+// The graph is the home; /runs* deep links keep working via redirects
+// (spec F8), and the workbench mounts at /p/:slug/graph where slug is a
+// base64url-encoded project_root (spec F5 — no %2F in path segments).
 
-function RunHistoryRoute() {
-  const { projectRoot, setError } = useAppContext();
-  const navigate = useNavigate();
-  const [runs, setRuns] = useState<RunSummary[] | null>(null);
-  const [projectMissing, setProjectMissing] = useState(false);
+function LegacyRunRoute() {
+  const { runId } = useParams();
+  const [searchParams] = useSearchParams();
+  const root = searchParams.get("project_root");
+  // v1.6.8: Overview (artifacts / report iframe / full coefficient tables)
+  // has no workbench equivalent yet — keep it reachable at the explicit
+  // ?tab=overview deep link (same off-nav philosophy as /submit) so no
+  // feature goes dead. Everything else redirects into the graph home.
+  if (searchParams.get("tab") === "overview") return <RunDetailRoute />;
+  if (!root) return <Navigate to="/" replace />;
+  return (
+    <Navigate
+      replace
+      to={`/p/${rootToSlug(root)}/graph?focus=${encodeURIComponent(runId ?? "")}`}
+    />
+  );
+}
+
+function LegacyRunsListRedirect() {
+  const [searchParams] = useSearchParams();
+  const root = searchParams.get("project_root");
+  return <Navigate replace to={root ? `/p/${rootToSlug(root)}/graph` : "/"} />;
+}
+
+function ProjectGraphRoute() {
+  const { slug } = useParams();
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus") ?? "";
+
+  let projectRoot = "";
+  try {
+    projectRoot = slugToRoot(slug ?? "");
+  } catch {
+    // malformed slug — fall through to the launcher redirect below
+  }
+
+  // T9 bridge: the workbench container still needs a runId until T11
+  // decouples it. Resolve one: ?focus= wins; otherwise the newest run.
+  // Zero runs → placeholder (T11 replaces it with the real empty canvas).
+  const [resolvedRunId, setResolvedRunId] = useState<string | null>(
+    focus || null
+  );
+  const [resolving, setResolving] = useState(!focus);
+  const [zeroRuns, setZeroRuns] = useState(false);
 
   useEffect(() => {
-    setError(null);
-  }, [setError]);
-
-  useEffect(() => {
-    if (!projectRoot) {
-      setRuns(null);
+    if (focus) {
+      setResolvedRunId(focus);
+      setResolving(false);
+      setZeroRuns(false);
       return;
     }
+    if (!projectRoot) return;
     let cancelled = false;
-    setRuns(null);
-    setProjectMissing(false);
+    setResolving(true);
     fetchRuns(projectRoot)
       .then((res) => {
-        if (!cancelled) setRuns(res.runs);
-      })
-      .catch((error) => {
         if (cancelled) return;
-        // v1.6.5: a non-existent project_root (e.g. a stale localStorage
-        // `lastProjectRoot`) is not an error worth a red banner — show a
-        // friendly empty state in the History panel instead.
-        if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
-          setProjectMissing(true);
+        const runs = res?.runs ?? [];
+        if (runs.length === 0) {
+          setZeroRuns(true);
+          setResolvedRunId(null);
           return;
         }
-        const message =
-          error instanceof ApiError
-            ? `[${error.code ?? `HTTP ${error.status}`}] ${error.message}`
-            : error instanceof Error
-              ? error.message
-              : "Failed to load runs";
-        setError(message);
+        const newest = [...runs].sort((a, b) =>
+          (b.started_at ?? "").localeCompare(a.started_at ?? "")
+        )[0];
+        setResolvedRunId(newest.run_id);
+      })
+      .catch(() => {
+        if (!cancelled) setZeroRuns(true);
+      })
+      .finally(() => {
+        if (!cancelled) setResolving(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, setError]);
+  }, [projectRoot, focus]);
 
-  if (!projectRoot) {
+  if (!projectRoot) return <Navigate to="/" replace />;
+  if (resolving) {
     return (
-      <section className="panel">
-        <p className="muted">Select a project first.</p>
+      <section className="panel" data-testid="project-graph-route">
+        <p className="muted">Loading project…</p>
       </section>
     );
   }
-
-  // V1.5.0.1 HF3: clicking a run row navigates to /runs/:id?tab=overview
-  // instead of inline-rendering RunResultView below the list. This
-  // unifies the entry path with the post-run flow (HF1's "Open Lineage"
-  // button also lands on /runs/:id), and it lets the user reach the
-  // Lineage tab — which the inline-render pattern did not.
+  if (zeroRuns || !resolvedRunId) {
+    return (
+      <section className="panel" data-testid="project-graph-route">
+        <div className="panel-heading">
+          <h2>Graph workbench</h2>
+          <span className="mono">{projectRoot}</span>
+        </div>
+        <p className="muted">此项目还没有 run——图内创世向导将在这里开始。</p>
+      </section>
+    );
+  }
   return (
-    <section className="panel" aria-labelledby="history-heading">
-      <div className="panel-heading">
-        <h2 id="history-heading">Run history</h2>
-        <span>{projectRoot}</span>
-      </div>
-      <RunHistoryPanel
-        runs={runs}
-        projectMissing={projectMissing}
-        onSelect={(runId) => {
-          const params = new URLSearchParams({
-            project_root: projectRoot,
-            tab: "overview",
-          });
-          navigate(`/runs/${runId}?${params.toString()}`);
-        }}
-      />
-    </section>
+    <div data-testid="project-graph-route">
+      <WorkbenchRouteContainer projectRoot={projectRoot} runId={resolvedRunId} />
+    </div>
   );
 }
 
@@ -307,6 +341,27 @@ function AppShell() {
     }
   }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // v1.6.8: on /p/:slug/graph the slug IS the project identity — sync it
+  // into shell state (and localStorage) so the topbar and other consumers
+  // agree with the URL.
+  useEffect(() => {
+    const match = location.pathname.match(/^\/p\/([^/]+)\/graph$/);
+    if (!match) return;
+    try {
+      const fromSlug = slugToRoot(match[1]);
+      if (fromSlug && fromSlug !== projectRoot) {
+        setProjectRootState(fromSlug);
+        try {
+          localStorage.setItem("lastProjectRoot", fromSlug);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // malformed slug — ProjectGraphRoute redirects to the launcher
+    }
+  }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const setProjectRoot = useCallback((root: string) => {
     setProjectRootState(root);
     try {
@@ -325,23 +380,13 @@ function AppShell() {
     [projectRoot, setProjectRoot, setError, activity]
   );
 
-  const historyUrl = projectRoot
-    ? `/runs?project_root=${encodeURIComponent(projectRoot)}`
-    : "/runs";
-
-  const isSubmitActive = location.pathname === "/";
-  const isHistoryActive = location.pathname.startsWith("/runs");
-  // V1.5.0.1 HF2: dark shell is scoped to /runs/:id?tab=lineage,
-  // not the whole run-detail route. The V1.5.0 P1 implementation
-  // applied dark chrome to the entire /runs/:id route, which left
-  // the Overview tab — using V1.4 light .panel/.result-panel styles
-  // — with white text on white backgrounds (functionally unreadable).
-  // Scoping to the lineage tab means Overview returns to its native
-  // V1.4 light styling while Lineage retains the V1.5.0 dark
-  // editorial surface. Submit (/) and History (/runs) remain light.
-  const tabParam = searchParams.get("tab") ?? "overview";
-  const isLineageDarkScope =
-    /^\/runs\/[^/?#]+$/.test(location.pathname) && tabParam === "lineage";
+  const isLauncherActive = location.pathname === "/";
+  const isWorkbenchActive = /^\/p\/[^/]+\/graph$/.test(location.pathname);
+  // V1.5.0.1 HF2 scoped the dark shell to /runs/:id?tab=lineage so the
+  // light Overview tab stayed readable. v1.6.8: /runs/:id is now a
+  // redirect and the workbench home is /p/:slug/graph — the dark canvas
+  // scope moves there. Launcher (/) and /submit remain light.
+  const isLineageDarkScope = isWorkbenchActive;
 
   return (
     <main
@@ -368,22 +413,22 @@ function AppShell() {
         <button
           type="button"
           role="tab"
-          aria-selected={isSubmitActive}
+          aria-selected={isLauncherActive}
           onClick={() => navigate("/")}
         >
-          Submit
+          Home
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={isHistoryActive}
+          aria-selected={isWorkbenchActive}
           disabled={!projectRoot}
           onClick={() => {
-            navigate(historyUrl);
+            navigate(`/p/${rootToSlug(projectRoot)}/graph`);
             setErrorMessage(null);
           }}
         >
-          History
+          Workbench
         </button>
       </nav>
 
@@ -402,9 +447,11 @@ export default function App() {
     <ThemeProvider>
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<SubmitRoute />} />
-          <Route path="runs" element={<RunHistoryRoute />} />
-          <Route path="runs/:runId" element={<RunDetailRoute />} />
+          <Route index element={<LauncherRoute />} />
+          <Route path="submit" element={<SubmitRoute />} />
+          <Route path="p/:slug/graph" element={<ProjectGraphRoute />} />
+          <Route path="runs" element={<LegacyRunsListRedirect />} />
+          <Route path="runs/:runId" element={<LegacyRunRoute />} />
           <Route path="pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
         </Route>
       </Routes>
