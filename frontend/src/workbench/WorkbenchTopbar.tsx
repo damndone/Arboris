@@ -214,7 +214,13 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
   );
 }
 
-export function WorkbenchTopbar({ projectRoot }: { projectRoot: string }) {
+export function WorkbenchTopbar({
+  projectRoot,
+  extraActions = null,
+}: {
+  projectRoot: string;
+  extraActions?: ReactNode;
+}) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
 
@@ -285,6 +291,7 @@ export function WorkbenchTopbar({ projectRoot }: { projectRoot: string }) {
         data-testid="workbench-topbar-actions"
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}
       >
+        {extraActions}
         {topbarActions.map((action) => {
           const disabled = action.disabled?.(actionCtx!);
           return (

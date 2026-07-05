@@ -126,7 +126,7 @@ const FIGURE_GRID: React.CSSProperties = {
   gap: 16,
 };
 
-export function TableView() {
+export function TableView({ projectRoot: projectRootProp }: { projectRoot?: string }) {
   const { model } = useLineage();
   const forest = useForest();
   // Follow the active head (the run the graph is highlighting) so the table
@@ -134,7 +134,7 @@ export function TableView() {
   // the URL run. Falls back to the URL run in legacy (no forest context).
   const runId = forest?.activeRunId ?? model.runId;
   const [searchParams] = useSearchParams();
-  const projectRoot = searchParams.get("project_root") ?? "";
+  const projectRoot = projectRootProp ?? searchParams.get("project_root") ?? "";
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);

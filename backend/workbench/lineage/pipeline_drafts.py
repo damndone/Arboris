@@ -393,6 +393,33 @@ class PipelineDraftStore:
             {"run_id": run_id, "executed_draft_hash": executed_draft_hash},
         )
 
+    def record_execution_locked(
+        self,
+        draft_id: str,
+        *,
+        run_id: str,
+        executed_draft_hash: str,
+    ) -> StoredDraft:
+        """Mark a draft submitted for execution while caller holds its lock.
+
+        Execute paths already run under execution_lock(draft_id), and the
+        before-dispatch callback fires inside that critical section. Re-acquiring
+        the same lock here would deadlock; this method is intentionally lockless.
+        """
+        stored = self.get(draft_id)
+        if stored.draft_hash != executed_draft_hash:
+            raise DraftHashConflict("executed_draft_hash does not match current draft")
+        draft = stored.draft
+        now = utc_now()
+        draft["status"] = "executed"
+        draft["executed_at"] = now
+        draft["executed_run_id"] = run_id
+        draft["executed_draft_hash"] = executed_draft_hash
+        draft["updated_at"] = now
+        PipelineDraftV1(**draft)
+        self._write_atomic(self._path(draft_id), draft)
+        return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+
 
 def check(
     code: str,

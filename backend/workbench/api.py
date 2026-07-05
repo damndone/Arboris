@@ -1568,6 +1568,11 @@ def _execute_genesis_draft(
                 run_id=new_run_id,
                 executed_draft_hash=executed_hash,
             )
+            store.record_execution_locked(
+                draft_id,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
 
         events = get_event_manager()
         if not events.try_acquire_slot():
@@ -1751,6 +1756,11 @@ def execute_pipeline_draft(
             store.record_dedupe(
                 draft_id,
                 dedupe_key,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
+            store.record_execution_locked(
+                draft_id,
                 run_id=new_run_id,
                 executed_draft_hash=executed_hash,
             )

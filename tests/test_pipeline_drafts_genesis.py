@@ -566,6 +566,26 @@ def test_execute_genesis_idempotent(tmp_path):
     assert r2["execution_mode"] == "genesis"
 
 
+def test_execute_genesis_marks_draft_executed_for_reload_hydration(tmp_path):
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(root, did)
+    v = _validate(root, did).json()
+    r = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": v["validated_draft_hash"],
+        },
+    ).json()
+    _wait_terminal(root, r["run_id"])
+
+    summaries = client.get(f"/pipeline-drafts?project_root={root}").json()["drafts"]
+    summary = next(item for item in summaries if item["draft_id"] == did)
+    assert summary["status"] == "executed"
+
+
 def test_execute_genesis_wrong_mode_409(tmp_path):
     root = _mkproject(tmp_path)
     d = _genesis_rich(root)

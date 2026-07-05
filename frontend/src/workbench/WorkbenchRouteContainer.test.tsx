@@ -779,6 +779,25 @@ describe("WorkbenchRouteContainer", () => {
       expect(api.getPipelineDraft).toHaveBeenCalledWith("/proj", "genesis_d1");
     });
 
+    it("draft-only genesis reload exposes a topbar resume entry back into the wizard", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
+        {
+          draft_id: "genesis_d1",
+          status: "draft",
+          draft_hash: "h_genesis",
+        },
+      ]);
+      vi.spyOn(api, "getPipelineDraft").mockResolvedValue(genesisDraftResponse());
+      mountHome();
+
+      expect(await screen.findByTestId("graph-workbench")).toBeInTheDocument();
+      fireEvent.click(await screen.findByTestId("genesis-resume-cta"));
+
+      expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      expect(await screen.findByTestId("genesis-resume")).toBeInTheDocument();
+    });
+
     it("with runs and NO focusRunId, the newest head (by created_at) is active", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(
         forkedForestResponse(),

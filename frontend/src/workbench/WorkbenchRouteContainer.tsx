@@ -575,6 +575,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
               <WorkbenchShell
                 runId={shellRunId}
                 projectRoot={projectRoot}
+                onResumeGenesisDraft={
+                  draftOnlyRunId ? () => setGenesisWizardOpen(true) : undefined
+                }
                 pendingFocusTarget={pendingFocusTarget}
                 onPendingFocusConsumed={() => setPendingFocusTarget(null)}
                 onPendingFocusRetry={() => {
@@ -773,12 +776,14 @@ function isHeadSetNode(node: GraphViewNode): node is HeadSetNode {
 function WorkbenchShell({
   runId,
   projectRoot,
+  onResumeGenesisDraft,
   pendingFocusTarget = null,
   onPendingFocusConsumed,
   onPendingFocusRetry,
 }: {
   runId: string;
   projectRoot: string;
+  onResumeGenesisDraft?: () => void;
   pendingFocusTarget?: PendingFocusTarget | null;
   onPendingFocusConsumed?: () => void;
   onPendingFocusRetry?: () => void;
@@ -858,7 +863,29 @@ function WorkbenchShell({
         minHeight: 0,
       }}
     >
-      <WorkbenchTopbar projectRoot={projectRoot} />
+      <WorkbenchTopbar
+        projectRoot={projectRoot}
+        extraActions={
+          onResumeGenesisDraft ? (
+            <button
+              type="button"
+              data-testid="genesis-resume-cta"
+              onClick={onResumeGenesisDraft}
+              style={{
+                padding: "4px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--separator)",
+                background: "var(--tint-bg, rgba(10,132,255,0.12))",
+                color: "var(--tint, #0a84ff)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              继续新链路
+            </button>
+          ) : null
+        }
+      />
       <div
         style={{
           display: "flex",
@@ -868,7 +895,7 @@ function WorkbenchShell({
         }}
       >
         <RunHistoryRail />
-        <WorkbenchMain />
+        <WorkbenchMain projectRoot={projectRoot} />
         {selectedNode !== null && (
           <DetailDrawer
             node={selectedNode}
