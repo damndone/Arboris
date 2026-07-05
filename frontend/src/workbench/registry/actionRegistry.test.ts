@@ -88,7 +88,7 @@ describe("actionRegistry", () => {
     // v1.6.6 ③: topbar Rerun is now live (routes to the node rerun flow).
     const rerun = actionRegistry.find((a) => a.id === "rerun")!;
     expect(rerun.disabled).toBeUndefined();
-    // Generate report stays disabled (AI-written report — v1.6.8).
+    // Generate report stays disabled (AI-written report — v1.6.9).
     const gen = actionRegistry.find((a) => a.id === "generateReport")!;
     expect(gen.disabled?.(ctx())).toMatchObject({ reason: expect.any(String) });
   });
@@ -98,8 +98,12 @@ describe("actionRegistry", () => {
     // not the long-shipped "V1.5.3" / "V2.0" placeholders.
     for (const a of actionRegistry) {
       const out = a.disabled?.(ctx());
-      if (out) {
-        expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0/);
+      if (out) expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0/);
+      if (a.id === "askAiAboutNode" || a.id === "generateReport") {
+        expect(out).toBeTruthy();
+        if (!out) continue;
+        expect(out.reason).not.toContain("v1.6.8");
+        expect(out.reason).toContain("v1.6.9");
       }
     }
   });

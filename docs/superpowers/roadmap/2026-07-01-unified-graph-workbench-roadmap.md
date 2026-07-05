@@ -5,6 +5,7 @@
 > 不再在 History-Lineage-Graph、独立 Draft Graph、Pipeline 标签页之间跳。
 > 对齐 v1.6.4 spec §3「unified Graph Workbench」+ handoff Vision 2（每个节点可编辑→rerun、节点 AskAI、引用报告）。
 > **策略（用户拍板）**：先清技术债 + 打磨，再逐步把散落的操作融进主图。
+> **2026-07-03 改签**：v1.6.8 插队为 Graph-native Genesis（从 Launcher 到第一个 run 全程在图内完成）。原 v1.6.8「任选对比 / 节点 Ask AI / 引用报告」顺延为 v1.6.9。
 
 ---
 
@@ -22,11 +23,11 @@
 | 看节点/角色 | ✅ 主 forest 图 + 角色徽章（v1.6.5）+ 详情抽屉 | 基本够 |
 | 编辑参数 | ⚠️ 抽屉 OperationSection 可改、或跳**独立 Draft Graph** | 编辑分散两处;`controlFactory` 只有 select/columns/multiselect 可用,radio/slider/text/textarea/toggle 只读 |
 | rerun | ⚠️「Rerun from here」活（走抽屉→OperationSection→POST rerun） | 顶栏「Rerun」是死按钮;draft→execute 要跳出主图 |
-| draft/pending 可视 | ❌ draft 在独立视图;主图只显示 executed | executed/draft/pending 没在一张图 |
+| draft/pending 可视 | ⚠️ v1.6.7/v1.6.8 已把 draft 链放进主图(含 0-run 创世岛);pending/failed 态仍待补强 | 执行中/失败态、拖放建链、全量 GC 仍未完成 |
 | 对比 | ⚠️ compareWithSource（child vs source）已有 | 不能在图上任选两节点/两 run 对比 |
 | 问 AI | ❌「Ask AI」死按钮;抽屉 AskAI feature-flag 关、未接 `/llm/chat` | 无真 LLM |
 | 出报告 | ❌ 顶栏「Generate report」死按钮 | 无图内引用报告 |
-| 辅助视图 | ❌ Table / Pipeline 标签页 = 占位符;底部 Shell/Pending/Timeline 占位 | 死界面制造困惑 |
+| 辅助视图 | ⚠️ Table 已做成结果预览;Pipeline 与底部 Shell/Pending/Timeline 仍是占位 | 剩余死界面仍需逐步做实 |
 
 ## 3. 收敛路径（版本切分）
 
@@ -37,7 +38,7 @@
 **本轮交付(4 项核心):**
 - **① 补齐可编辑控件**:`controlFactory` 的 radio / slider / text / textarea / toggle 从 `makePlaceholder` 只读占位 → 可交互(让抽屉/草稿里任意 `editable_schema` 参数都能改,不受控件类型限制)。这是 v1.6.7 图内编辑的地基。
 - **② Table 结果预览视图**:`TableView` 从 stub 做成"从 graph 切过去预览本 run 产出的 artifacts/figures/表格/系数"。边界清晰、现在就能做(run 已产出这些)。
-- **③ 死按钮诚实化(不删)**:保留顶栏 Rerun / Generate report、节点 Mark needs review、Ask AI 全部占位;把过时的"lands in V1.5.3/V2.0"文案改成真实 roadmap 目标;**顶栏 Rerun 接上真回滚后端**(走已有 `POST /runs/<id>/rerun`,回到父/历史节点)。Generate report(v1.6.8 接 AI)、Mark needs review(见 ④)、Ask AI(v1.6.8)保持诚实 disabled。
+- **③ 死按钮诚实化(不删)**:保留顶栏 Rerun / Generate report、节点 Mark needs review、Ask AI 全部占位;把过时的"lands in V1.5.3/V2.0"文案改成真实 roadmap 目标;**顶栏 Rerun 接上真回滚后端**(走已有 `POST /runs/<id>/rerun`,回到父/历史节点)。Generate report / Ask AI 顺延 v1.6.9,在此之前保持诚实 disabled;Mark needs review 见 ④。
 - **④ Trust/review 徽章(只读)**:后端已算好的 warning 骨架(`graph_model.Trust` OK/CAUTION/WARNING/BLOCKER + `Contestability.review_status` + `Severity`)在**前端从未显示**;本轮把它作为**只读**节点徽章/抽屉提示 surface 出来(自动 warning 的可见化,不做手动挂旗/消旗)。
 - 交付判据:抽屉里任何 `editable_schema` 参数都能真正编辑;Table 切换能看结果;无过时/说谎文案;顶栏 Rerun 真回滚;节点显示后端已算的 Trust/review 状态(只读)。
 
@@ -51,7 +52,15 @@
 - 交付判据：不打开新路由，就能在一个 model 节点上完成"改 covariance → validate → execute → 看到新 child 节点"。
 - 复用：v1.6.4 的 draft store / validate / execute / hash-gate / snapshot 契约**原样复用**（后端不用重写，只换前端入口）。
 
-### v1.6.8 — 图内对比 + 节点 AI + 引用报告（**handoff Vision 2**）
+### v1.6.8 — Graph-native Genesis（**从零建图**）
+把「建项目 → 选数据集 → 选表 → 配变量 → 第一个 run」搬进项目图工作台，补齐 unified graph 的入口前提。
+- `/` 改为 Launcher，`/p/:slug/graph` 成为项目的家；`/submit` 保留为隐藏兜底，不进主导航。
+- 新增项目级 forest 端点与 0-run 空森林；graph 不再必须以 runId 为钥匙。
+- 创世 = 无父 `source -> table -> model` draft 链：上传、选表、配模型、validate、execute 都走同一 draft 生命周期。
+- execute 收敛进 `_submit_run(rerun_reason="initial")`，第一个 run 产出的实线节点与 rerun 节点在森林里无差别。
+- 交付判据：全新用户从 Launcher 到第一个 run 出结果，全程不见旧 Submit 表单；刷新后森林和 draft 续传都成立。
+
+### v1.6.9 — 图内对比 + 节点 AI + 引用报告（**handoff Vision 2，原 v1.6.8**）
 - **任选对比**：图上选两个节点/两个 run 直接 compare（compareWithSource 升级为通用双节点 diff）;
 - **节点 Ask AI**：把死按钮接上真 `/llm/chat`（携带节点 lineage 上下文 packet）;
 - **引用报告**：从图上勾选节点 → 生成带 cite-chip（引用具体节点/系数）的报告，替代顶栏死的「Generate report」。
@@ -75,15 +84,17 @@
 ```
 v1.6.6 (清债+图内编辑基础)
    └─> v1.6.7 (draft 融入主图)   ← 依赖 v1.6.6 的可编辑控件
-          └─> v1.6.8 (对比/AI/报告)
-                 └─> v1.7 Agent Harness
+          └─> v1.6.8 (Graph-native Genesis)
+                 └─> v1.6.9 (对比/AI/报告)
+                        └─> v1.7 Agent Harness
 统计方法线：任意穿插，不阻塞。
 ```
 
 - v1.6.7 是**架构收敛的关键跳**，风险最高（改主 GraphCanvas 交互 + 状态机），建议单独 spec + 充分 brainstorm。
 - v1.6.6 先行可为 v1.6.7 铺好"图内编辑"的控件基础，降低 v1.6.7 风险。
+- v1.6.8 先补「从零建图」入口；没有第一条链路，v1.6.9 的对比 / Ask AI / 报告没有完整项目图可依附。
 
 ## 5. 开放问题（拍板记录）
 1. ~~v1.6.6 的占位视图：实现还是移除？~~ → **已决（2026-07-02）:一律保留、逐步做实,不移除。** v1.6.6 只做实 Table(结果预览);Pipeline 标签页→v1.6.7 合并入图;底部面板→backlog C。
-2. draft/pending 节点在主图的视觉语言（虚线？角标？分层？）需要设计。→ **v1.6.7 spec 处理**（本轮 ④ 只做 Trust/review 的只读徽章,不含 draft/pending 态)。
-3. Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。→ **已决:不排 v1.6.6,留 v1.6.8**;本轮 Ask AI 保持诚实 disabled 占位。
+2. ~~draft/pending 节点在主图的视觉语言（虚线？角标？分层？）需要设计。~~ → **已由 v1.6.7/v1.6.8 承接**：draft 节点进入主图，创世 draft 链可在 0-run 项目中独立成岛。
+3. Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。→ **已决:不排 v1.6.6/v1.6.8,留 v1.6.9**;Ask AI 在此之前保持诚实 disabled 占位。

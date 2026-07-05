@@ -5,7 +5,7 @@
 // View switcher tabs (Graph / Table / Pipeline) + the right-side action
 // slot (plan §15), driven by actionRegistry surface="topbar". v1.6.6 ③:
 // `Rerun` is live (routes to the node rerun flow); `Generate report` stays
-// an honest disabled placeholder (AI backend — v1.6.8).
+// an honest disabled placeholder (AI backend — v1.6.9 after roadmap re-sign).
 //
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
 // which goes through the provider's single-commit URL writer.
@@ -286,7 +286,7 @@ export function WorkbenchTopbar({
         ))}
       </div>
       {/* Right-side action slot — plan §15. Driven by actionRegistry
-       *  surface="topbar": live Rerun + disabled Generate report (v1.6.8). */}
+       *  surface="topbar": live Rerun + disabled Generate report (v1.6.9). */}
       <div
         data-testid="workbench-topbar-actions"
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}

@@ -172,9 +172,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Ask AI about this node",
     surfaces: ["graph-context-menu", "drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Per-node Ask AI (/llm/chat) lands in v1.6.8" }),
+    disabled: () => ({ reason: "Per-node Ask AI (/llm/chat) lands in v1.6.9" }),
     invoke: () => {
-      /* placeholder — /llm/chat wiring is v1.6.8 (roadmap §3 v1.6.8) */
+      /* placeholder — /llm/chat wiring is v1.6.9 (roadmap §3 v1.6.9) */
     },
   },
   {
@@ -205,7 +205,7 @@ export const actionRegistry: ActionEntry[] = [
   // routes to the same node rerun flow as `rerunFromNode` (open the node's
   // detail → editable OperationSection → POST /runs/<id>/rerun, forking a
   // child). `generateReport` stays an honest disabled placeholder until its
-  // AI backend lands in v1.6.8.
+  // AI backend lands in v1.6.9.
   {
     id: "rerun",
     order: 110,
@@ -222,9 +222,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Generate report",
     surfaces: ["topbar"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "AI-written report generation lands in v1.6.8" }),
+    disabled: () => ({ reason: "AI-written report generation lands in v1.6.9" }),
     invoke: () => {
-      /* placeholder — report generation is v1.6.8 (roadmap §3 v1.6.8) */
+      /* placeholder — report generation is v1.6.9 (roadmap §3 v1.6.9) */
     },
   },
 ];
