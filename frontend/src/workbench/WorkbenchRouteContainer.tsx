@@ -880,7 +880,7 @@ function WorkbenchShell({
       <BottomPanel runId={runId} projectRoot={projectRoot} />
       <ContextMenu />
       <SearchPalette />
-      <CommandPalette />
+      <CommandPalette projectRoot={projectRoot} />
       <RawJsonModal
         open={rawJsonOpen}
         onClose={() => setRawJsonOpen(false)}

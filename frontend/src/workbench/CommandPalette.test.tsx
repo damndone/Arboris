@@ -4,7 +4,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { CommandPalette } from "./CommandPalette";
@@ -42,7 +42,15 @@ function model(): GraphViewModel {
   };
 }
 
-function mount(selectedKey: string | null) {
+let lastLocation = "";
+function CaptureLocation() {
+  const location = useLocation();
+  lastLocation = `${location.pathname}${location.search}`;
+  return null;
+}
+
+function mount(selectedKey: string | null, projectRoot: string | null = null) {
+  lastLocation = "";
   const ctx: LineageContextValue = {
     model: model(),
     selectedKey,
@@ -57,7 +65,8 @@ function mount(selectedKey: string | null) {
           element={
             <WorkbenchStateProvider runId="r1">
               <LineageContext.Provider value={ctx}>
-                <CommandPalette />
+                <CommandPalette projectRoot={projectRoot} />
+                <CaptureLocation />
               </LineageContext.Provider>
             </WorkbenchStateProvider>
           }
@@ -175,6 +184,15 @@ describe("CommandPalette (F7)", () => {
     expect(
       screen.queryByTestId("command-palette-item-copyNodeId"),
     ).toBeNull();
+  });
+
+  it("quick-run legacy command navigates to /submit with project_root", () => {
+    mount(null, "/tmp/demo project");
+    act(() => cmdShiftP());
+    const quickRun = screen.getByTestId("command-palette-item-quick-run-legacy");
+    expect(quickRun).toHaveTextContent("快速 run(旧表单)");
+    fireEvent.click(quickRun);
+    expect(lastLocation).toBe("/submit?project_root=%2Ftmp%2Fdemo+project");
   });
 
   it("ArrowDown moves the cursor", () => {
