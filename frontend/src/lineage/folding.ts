@@ -12,6 +12,8 @@ export interface GroupNode {
   display_label: string;
   parentStageId: string;
   member_ids: string[];
+  members: GraphViewNode[];
+  expanded: boolean;
   /** Discriminator: 'cleaned' (kept) vs 'dropped'. Drives group title prefix. */
   variant: "cleaned" | "dropped";
 }
@@ -60,17 +62,15 @@ export function foldVariableClusters(
       continue;
     }
     const id = `group:${variant === "cleaned" ? "variables" : "dropped-variables"}:${parent}`;
-    if (expanded.has(id)) {
-      kept.push(...bucket);
-    } else {
-      groups.push({
-        id,
-        display_label: `${variant === "cleaned" ? "Variables" : "Dropped variables"} (${bucket.length})`,
-        parentStageId: parent,
-        member_ids: bucket.map((n) => n.id),
-        variant,
-      });
-    }
+    groups.push({
+      id,
+      display_label: `${variant === "cleaned" ? "Variables" : "Dropped variables"} (${bucket.length})`,
+      parentStageId: parent,
+      member_ids: bucket.map((n) => n.id),
+      members: bucket,
+      expanded: expanded.has(id),
+      variant,
+    });
   }
   return { kept, groups };
 }

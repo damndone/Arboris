@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -38,6 +38,14 @@ class DraftPathError(PipelineDraftError):
 
 class DraftLockedForExecution(PipelineDraftError):
     code = "DRAFT_LOCKED_FOR_EXECUTION"
+
+
+class DraftNodeNotFound(PipelineDraftError):
+    code = "DRAFT_NODE_NOT_FOUND"
+
+
+class DraftNodePatchConflict(PipelineDraftError):
+    code = "DRAFT_NODE_PATCH_CONFLICT"
 
 
 class DraftValidationFailure(PipelineDraftError):
@@ -90,15 +98,24 @@ class CreatedFrom(BaseModel):
     source_input_fingerprint: str
 
 
+class GenesisCreatedFrom(BaseModel):
+    """v1.6.8: parentless draft born from a standalone upload (no source run)."""
+
+    source_type: Literal["genesis"]
+    source_input_fingerprint: str
+
+
 class PipelineDraftV1(BaseModel):
     draft_id: str
     schema_version: Literal["pipeline_draft.v1"]
     created_at: str
     updated_at: str
     status: str = "draft"
-    created_from: CreatedFrom | None = None
+    created_from: (
+        Annotated[CreatedFrom | GenesisCreatedFrom, Field(discriminator="source_type")] | None
+    ) = None
     graph: dict[str, Any]
-    default_execution_mode: Literal["rerun_child", "new_run"] = "rerun_child"
+    default_execution_mode: Literal["rerun_child", "new_run", "genesis"] = "rerun_child"
 
 
 @dataclass(frozen=True)
@@ -294,6 +311,57 @@ class PipelineDraftStore:
         finally:
             lock.release()
 
+    # node_types the genesis wizard may edit; the bound source is immutable
+    # (changing the file = discard the draft and restart genesis).
+    _PATCHABLE: ClassVar[frozenset[str]] = frozenset({"table", "model"})
+
+    def update_node_params(
+        self,
+        draft_id: str,
+        node_id: str,
+        params: dict[str, Any],
+        *,
+        columns: list[str] | None = None,
+    ) -> StoredDraft:
+        """v1.6.8 genesis wizard step: merge params into one chain node.
+
+        Genesis-only by design — from-node drafts keep using update_params
+        (hash-guarded model-node edits).
+
+        Merge-only contract: keys cannot be removed by omission; send an
+        explicit null/empty value to unset a param.
+        """
+        lock = self._lock_for(draft_id)
+        if not lock.acquire(blocking=False):
+            raise DraftLockedForExecution("draft is locked for execution")
+        try:
+            stored = self.get(draft_id)
+            draft = stored.draft
+            if (draft.get("created_from") or {}).get("source_type") != "genesis":
+                raise DraftNodePatchConflict("NODE_PATCH_GENESIS_ONLY")
+            node = next(
+                (n for n in draft["graph"]["nodes"] if n.get("node_id") == node_id),
+                None,
+            )
+            if node is None:
+                raise DraftNodeNotFound(f"node {node_id}")
+            if node.get("node_type") not in self._PATCHABLE:
+                raise DraftNodePatchConflict("NODE_NOT_PATCHABLE")
+            node["params"] = {**node.get("params", {}), **params}
+            if node["node_type"] == "model" and "model_type" in params:
+                # Mirror into the top-level field so list() summaries show it.
+                node["model_type"] = params["model_type"]
+            if columns is not None and node["node_type"] == "table":
+                node["columns"] = columns
+            node["status"] = "configured"
+            draft["updated_at"] = utc_now()
+            draft["status"] = "draft"  # any edit returns to draft state; must re-validate
+            PipelineDraftV1(**draft)
+            self._write_atomic(self._path(draft_id), draft)
+            return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+        finally:
+            lock.release()
+
     def execution_lock(self, draft_id: str) -> threading.Lock:
         return self._lock_for(draft_id)
 
@@ -325,6 +393,33 @@ class PipelineDraftStore:
             {"run_id": run_id, "executed_draft_hash": executed_draft_hash},
         )
 
+    def record_execution_locked(
+        self,
+        draft_id: str,
+        *,
+        run_id: str,
+        executed_draft_hash: str,
+    ) -> StoredDraft:
+        """Mark a draft submitted for execution while caller holds its lock.
+
+        Execute paths already run under execution_lock(draft_id), and the
+        before-dispatch callback fires inside that critical section. Re-acquiring
+        the same lock here would deadlock; this method is intentionally lockless.
+        """
+        stored = self.get(draft_id)
+        if stored.draft_hash != executed_draft_hash:
+            raise DraftHashConflict("executed_draft_hash does not match current draft")
+        draft = stored.draft
+        now = utc_now()
+        draft["status"] = "executed"
+        draft["executed_at"] = now
+        draft["executed_run_id"] = run_id
+        draft["executed_draft_hash"] = executed_draft_hash
+        draft["updated_at"] = now
+        PipelineDraftV1(**draft)
+        self._write_atomic(self._path(draft_id), draft)
+        return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+
 
 def check(
     code: str,
@@ -353,7 +448,56 @@ def _nodes_by_type(draft: dict[str, Any], node_type: str) -> list[dict[str, Any]
     ]
 
 
+_GENESIS_CHAIN = ["input.upload", "table", "model"]
+_GENESIS_NODE_IDS = ["source_1", "table_1", "model_1"]
+
+
+def _validate_genesis_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    """v1.6.8 genesis drafts are a fixed parentless chain source -> table -> model.
+
+    Structural only: column/param checks belong to validate-for-execution /
+    execute (spec F3/F4), not to the graph shape.
+    """
+    checks: list[dict[str, Any]] = []
+    nodes = draft.get("graph", {}).get("nodes", [])
+    types = [node.get("node_type") for node in nodes]
+    if types != _GENESIS_CHAIN:
+        checks.append(
+            check(
+                "GENESIS_CHAIN_SHAPE",
+                f"Genesis chain must be {_GENESIS_CHAIN}, got {types}.",
+            )
+        )
+        return checks
+    node_ids = [node.get("node_id") for node in nodes]
+    if node_ids != _GENESIS_NODE_IDS:
+        # Canonical ids are load-bearing: execute (T5) resolves the chain by
+        # these exact ids, so the validator must enforce them, not just types.
+        checks.append(
+            check(
+                "GENESIS_CHAIN_SHAPE",
+                f"Genesis chain node_ids must be {_GENESIS_NODE_IDS}, got {node_ids}.",
+            )
+        )
+        return checks
+    edges = draft.get("graph", {}).get("edges", [])
+    want = [
+        {"from": nodes[0].get("node_id"), "to": nodes[1].get("node_id")},
+        {"from": nodes[1].get("node_id"), "to": nodes[2].get("node_id")},
+    ]
+    if edges != want:
+        checks.append(
+            check(
+                "GENESIS_CHAIN_EDGES",
+                "Genesis edges must chain source -> table -> model.",
+            )
+        )
+    return checks
+
+
 def _validate_graph_shape(draft: dict[str, Any]) -> list[dict[str, Any]]:
+    if (draft.get("created_from") or {}).get("source_type") == "genesis":
+        return _validate_genesis_shape(draft)
     checks: list[dict[str, Any]] = []
     inputs = _nodes_by_type(draft, "input.dataset")
     models = _nodes_by_type(draft, "model")
@@ -577,11 +721,112 @@ def _resolved_execution(
     return out
 
 
+def _validate_genesis_for_execution(
+    draft: dict[str, Any],
+    *,
+    execution_mode: str | None,
+) -> dict[str, Any]:
+    """v1.6.8 genesis validate: STRUCTURAL + REFERENCE checks only (spec F3).
+
+    Column-level checks (y/x actually present in the parsed table) belong to
+    execute's _submit_run -> orchestrator _column_checks; this function must
+    never read or parse the upload bytes.
+    """
+    mode = execution_mode or draft.get("default_execution_mode", "genesis")
+    checks: list[dict[str, Any]] = []
+
+    try:
+        PipelineDraftV1(**draft)
+    except Exception as exc:
+        checks.append(check("INVALID_PIPELINE_DRAFT", str(exc)))
+
+    checks.extend(_validate_genesis_shape(draft))
+
+    if mode != "genesis":
+        checks.append(
+            check(
+                "GENESIS_MODE_REQUIRED",
+                f"Genesis drafts execute only with execution_mode 'genesis', got {mode!r}.",
+            )
+        )
+
+    nodes = {
+        node.get("node_id"): node for node in draft.get("graph", {}).get("nodes", [])
+    }
+    source = nodes.get("source_1") or {}
+    table = nodes.get("table_1") or {}
+    model = nodes.get("model_1") or {}
+
+    if not (source.get("upload") or {}).get("sha256"):
+        checks.append(
+            check(
+                "GENESIS_SOURCE_UNBOUND",
+                "Genesis source node must be bound to an upload (sha256).",
+                node_id="source_1",
+            )
+        )
+    if len(source.get("sheet_names") or []) > 1 and not (table.get("params") or {}).get(
+        "sheet_name"
+    ):
+        checks.append(
+            check(
+                "GENESIS_SHEET_REQUIRED",
+                "Multi-sheet upload requires table params.sheet_name.",
+                node_id="table_1",
+            )
+        )
+    model_params = model.get("params") or {}
+    model_type = model_params.get("model_type") or model.get("model_type")
+    missing = [
+        key
+        for key, value in (
+            ("model_type", model_type),
+            ("y", model_params.get("y")),
+            ("x", model_params.get("x")),
+        )
+        if not value
+    ]
+    if missing:
+        checks.append(
+            check(
+                "GENESIS_MODEL_INCOMPLETE",
+                f"Genesis model node is missing {missing} (configure the wizard model step).",
+                node_id="model_1",
+            )
+        )
+
+    blocking = [item for item in checks if item.get("blocking", True)]
+    executable = not blocking and mode == "genesis"
+    status = "valid" if executable else "invalid"
+
+    result: dict[str, Any] = {
+        "ok": executable,
+        "status": status,
+        "executable": executable,
+        "checks": checks,
+        "resolved_execution": {
+            "execution_mode": str(mode),
+            "compare_source_available": False,
+            "genesis": True,
+        },
+        "validated_at": utc_now(),
+    }
+    if executable:
+        result["validated_execution_mode"] = mode
+        result["validated_draft_hash"] = compute_executable_draft_hash(draft)
+    return result
+
+
 def validate_draft_for_execution(
     draft: dict[str, Any],
     *,
-    execution_mode: Literal["rerun_child", "new_run"] | None = None,
+    execution_mode: Literal["rerun_child", "new_run", "genesis"] | None = None,
 ) -> dict[str, Any]:
+    # v1.6.8 genesis drafts branch BEFORE any from-node semantics: no
+    # editable_schema, no created_from source_ref, no rerun_child mode.
+    if (draft.get("created_from") or {}).get("source_type") == "genesis":
+        return _validate_genesis_for_execution(draft, execution_mode=execution_mode)
+
     mode = execution_mode or draft.get("default_execution_mode", "rerun_child")
     checks: list[dict[str, Any]] = []
 

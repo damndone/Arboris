@@ -39,16 +39,23 @@ function model(runId = "run-1"): GraphViewModel {
   };
 }
 
-function renderTable(m: GraphViewModel = model()) {
+function renderTable(
+  m: GraphViewModel = model(),
+  options: { initialPath?: string; projectRoot?: string } = {},
+) {
   const ctx: LineageContextValue = {
     model: m,
     selectedKey: null,
     select: () => {},
   };
   return render(
-    <MemoryRouter initialEntries={["/runs/run-1?project_root=/tmp/demo"]}>
+    <MemoryRouter
+      initialEntries={[
+        options.initialPath ?? "/runs/run-1?project_root=/tmp/demo",
+      ]}
+    >
       <LineageContext.Provider value={ctx}>
-        <TableView />
+        <TableView projectRoot={options.projectRoot} />
       </LineageContext.Provider>
     </MemoryRouter>,
   );
@@ -71,6 +78,16 @@ describe("TableView", () => {
     // Both signatures are (projectRoot, runId) — guard against swapping.
     expect(detailCalls.current[0]).toEqual(["/tmp/demo", "run-1"]);
     expect(artifactCalls.current[0]).toEqual(["/tmp/demo", "run-1"]);
+  });
+
+  it("uses the shell projectRoot prop when the slug route has no project_root query", async () => {
+    renderTable(model("run-slug"), {
+      initialPath: "/p/encoded/graph?view=table",
+      projectRoot: "/tmp/from-slug",
+    });
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(detailCalls.current[0]).toEqual(["/tmp/from-slug", "run-slug"]);
+    expect(artifactCalls.current[0]).toEqual(["/tmp/from-slug", "run-slug"]);
   });
 
   it("renders a coefficient table from model_results", async () => {

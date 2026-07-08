@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLineage } from "../../lineage/LineageContext";
 import { useForest } from "../ForestContext";
+import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   artifactDownloadUrl,
   fetchRunArtifacts,
@@ -116,7 +117,7 @@ const CONTAINER_STYLE: React.CSSProperties = {
   padding: 24,
   gap: 20,
   height: "100%",
-  minHeight: 320,
+  minHeight: 0,
   overflow: "auto",
 };
 
@@ -126,7 +127,7 @@ const FIGURE_GRID: React.CSSProperties = {
   gap: 16,
 };
 
-export function TableView() {
+export function TableView({ projectRoot: projectRootProp }: { projectRoot?: string }) {
   const { model } = useLineage();
   const forest = useForest();
   // Follow the active head (the run the graph is highlighting) so the table
@@ -134,7 +135,8 @@ export function TableView() {
   // the URL run. Falls back to the URL run in legacy (no forest context).
   const runId = forest?.activeRunId ?? model.runId;
   const [searchParams] = useSearchParams();
-  const projectRoot = searchParams.get("project_root") ?? "";
+  const contextProjectRoot = useProjectRootOptional();
+  const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root") ?? "";
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);

@@ -34,6 +34,7 @@ import {
 import { useWorkbenchOptional } from "../../workbench/WorkbenchStateProvider";
 import { useResolvedNodeOperationContext } from "../detail/NodeOperationContextProvider";
 import { useDraftActions } from "../drafts/DraftActionsContext";
+import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
 import "../tokens/lineage.css";
 
 export interface NodeActionMenuProps {
@@ -68,6 +69,7 @@ export function NodeActionMenu({
   const wb = useWorkbenchOptional();
   const resolvedContext = useResolvedNodeOperationContext();
   const draftActions = useDraftActions();
+  const contextProjectRoot = useProjectRootOptional();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<PopupCoords | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -139,7 +141,10 @@ export function NodeActionMenu({
     ? resolvedContext.context.capabilities
     : null;
   const effectiveProjectRoot =
-    projectRoot ?? new URLSearchParams(window.location.search).get("project_root") ?? "";
+    projectRoot ??
+    contextProjectRoot ??
+    new URLSearchParams(window.location.search).get("project_root") ??
+    "";
   const canOpenDraft = Boolean(
     resolvedContext?.ok &&
       effectiveProjectRoot &&

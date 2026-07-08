@@ -23,12 +23,19 @@ interface DetailHeaderProps {
   onClose: () => void;
   /** When set, the header renders NodeActionMenu and forwards "View Raw JSON". */
   onShowJson?: () => void;
+  /** Explicit project root for slug routes that no longer carry ?project_root=. */
+  projectRoot?: string;
 }
 
 /** Element id consumed by `<aside aria-labelledby=...>` in DetailDrawer. */
 export const DETAIL_HEADER_TITLE_ID = "detail-drawer-title";
 
-export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
+export function DetailHeader({
+  node,
+  onClose,
+  onShowJson,
+  projectRoot,
+}: DetailHeaderProps) {
   const { model } = useLineage();
   // In the forest, `model.runId` is the URL run, not the run that owns the selected
   // node. Attribute the node to the run a rerun would fork from (active head if it
@@ -70,7 +77,12 @@ export function DetailHeader({ node, onClose, onShowJson }: DetailHeaderProps) {
         )}
         <span style={{ flex: 1 }} />
         {onShowJson && (
-          <NodeActionMenu node={node} model={model} onShowJson={onShowJson} />
+          <NodeActionMenu
+            node={node}
+            model={model}
+            onShowJson={onShowJson}
+            projectRoot={projectRoot}
+          />
         )}
         <button
           type="button"

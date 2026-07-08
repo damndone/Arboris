@@ -55,6 +55,7 @@ describe("sectionRegistry", () => {
       "askAi",
       "compareWithSource",
       "operation",
+      "estimatedEquation",
       "roleGroups",
       "code",
       "lineage",
@@ -65,7 +66,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      5, 10, 20, 25, 30, 35, 40, 50, 60, 70,
+      5, 10, 20, 25, 30, 34, 35, 40, 50, 60, 70,
     ]);
   });
 
@@ -75,7 +76,12 @@ describe("sectionRegistry", () => {
     // is feature-flagged off by default.
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
-    expect(visible.map((s) => s.id)).toEqual(["roleGroups", "lineage", "basic"]);
+    expect(visible.map((s) => s.id)).toEqual([
+      "estimatedEquation",
+      "roleGroups",
+      "lineage",
+      "basic",
+    ]);
   });
 
   it("compareWithSource renders only for forest nodes with run ownership metadata", () => {

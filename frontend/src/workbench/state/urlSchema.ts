@@ -11,7 +11,6 @@
 //   view        ∈ {graph, table, pipeline}        default "graph"
 //   q           string                            default ""        (omitted from URL when empty)
 //   panel       ∈ {logs, shell, pending, timeline} default "logs"
-//   panelOpen   ∈ {"0","1"}                       default "0"       (omitted from URL when 0)
 //   focus       string                            default null
 //   pinned      ∈ {"0","1"}                       default "0"       (omitted from URL when 0)
 //
@@ -35,7 +34,7 @@ const PANEL_IDS: readonly BottomPanelId[] = [
 export interface WorkbenchUrlSlice {
   view: ViewMode;
   searchQuery: string;
-  bottomPanel: { id: BottomPanelId; open: boolean };
+  bottomPanel: BottomPanelId;
   focusKey: string | null;
   pinned: boolean;
 }
@@ -43,7 +42,7 @@ export interface WorkbenchUrlSlice {
 export const defaultUrlSlice: WorkbenchUrlSlice = {
   view: "graph",
   searchQuery: "",
-  bottomPanel: { id: "logs", open: false },
+  bottomPanel: "logs",
   focusKey: null,
   pinned: false,
 };
@@ -64,7 +63,6 @@ export function parseWorkbenchUrl(
   const view = pickEnum(params.get("view"), VIEW_MODES, "graph");
   const searchQuery = params.get("q") ?? "";
   const panelId = pickEnum(params.get("panel"), PANEL_IDS, "logs");
-  const panelOpen = params.get("panelOpen") === "1";
 
   let focusKey: string | null = params.get("focus");
   if (focusKey === "") focusKey = null;
@@ -81,7 +79,7 @@ export function parseWorkbenchUrl(
   return {
     view,
     searchQuery,
-    bottomPanel: { id: panelId, open: panelOpen },
+    bottomPanel: panelId,
     focusKey,
     pinned,
   };
@@ -107,20 +105,13 @@ export function writeWorkbenchUrl(
   if (slice.searchQuery === "") out.delete("q");
   else out.set("q", slice.searchQuery);
 
-  // panel + panelOpen: panel always set when open=1 OR id ≠ "logs";
-  // omit both when default (logs / closed).
-  if (slice.bottomPanel.open) {
-    out.set("panel", slice.bottomPanel.id);
-    out.set("panelOpen", "1");
-  } else if (slice.bottomPanel.id !== "logs") {
-    // Closed but on a non-default tab — preserve id so reopening
-    // restores the user's last selection.
-    out.set("panel", slice.bottomPanel.id);
-    out.delete("panelOpen");
+  // panel: default logs omitted; legacy panelOpen is always stripped.
+  if (slice.bottomPanel !== "logs") {
+    out.set("panel", slice.bottomPanel);
   } else {
     out.delete("panel");
-    out.delete("panelOpen");
   }
+  out.delete("panelOpen");
 
   // focus / pinned
   if (slice.focusKey === null) {

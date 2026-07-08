@@ -21,4 +21,16 @@ describe("groupVariablesByRole", () => {
     const groups = groupVariablesByRole(edges, "model:ols_1");
     expect(groups.some((g) => g.role === "explanatory_unspecified")).toBe(true);
   });
+
+  it("strips forest node-hash prefixes so drawer roles show variable names, not hashes", () => {
+    // v1.6.8 regression: in the cross-run forest, edge endpoints are keyed
+    // "<node_hash>::<op_node_id>". columnOf must still recover "x1".
+    const hash = "a".repeat(64);
+    const edges = [
+      { source: `${hash}::var:y:cleaned`, target: `${hash}::model:ols_1`, op: "enters_as_outcome", params: {} },
+      { source: `${hash}::var:x1:cleaned`, target: `${hash}::model:ols_1`, op: "enters_as_explanatory_unspecified", params: {} },
+    ];
+    const groups = groupVariablesByRole(edges, `${hash}::model:ols_1`);
+    expect(groups.map((g) => g.columns)).toEqual([["y"], ["x1"]]);
+  });
 });

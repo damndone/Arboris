@@ -85,6 +85,39 @@ def test_api_creates_project_and_runs_upload(tmp_path: Path):
     time.sleep(0.2)
 
 
+def test_create_project_invalid_parent_returns_structured_422(tmp_path: Path):
+    parent_file = tmp_path / "not-a-directory"
+    parent_file.write_text("not a directory", encoding="utf-8")
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/projects",
+        json={"parent": str(parent_file), "name": "demo"},
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "INVALID_PATH"
+    assert "parent" in payload["error"]["details"]
+
+
+def test_create_project_rejects_dot_names(tmp_path: Path):
+    client = TestClient(app, raise_server_exceptions=False)
+
+    for name in (".", ".."):
+        response = client.post(
+            "/projects",
+            json={"parent": str(tmp_path), "name": name},
+        )
+        assert response.status_code == 422
+        payload = response.json()
+        assert payload["error"]["code"] == "INVALID_PATH"
+        assert payload["error"]["details"]["field"] == "name"
+    # The rejected attempts must not scaffold project files at or above parent.
+    assert not (tmp_path / "project.yaml").exists()
+    assert not (tmp_path.parent / "project.yaml").exists()
+
+
 def test_api_rejects_oversized_upload_and_slot_released(
     tmp_path: Path,
 ):

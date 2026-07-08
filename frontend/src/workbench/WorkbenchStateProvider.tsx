@@ -12,7 +12,7 @@
 // State partition (mirrors plan §6):
 //
 //   Tier 1 (URL):
-//     view, tabs, active, q, panel, panelOpen, focus, pinned
+//     view, tabs, active, q, panel, focus, pinned
 //   Tier 2 (sessionStorage):
 //     hosted in dedicated useSessionByRunId hooks at the call site
 //     (viewport, expandedGroups, splitter, layout). NOT in this
@@ -27,6 +27,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -71,7 +72,7 @@ export interface WorkbenchState {
   focusKey: string | null;
   pinned: boolean;
   searchQuery: string;
-  bottomPanel: { id: BottomPanelId; open: boolean };
+  bottomPanel: BottomPanelId;
   /** Set when an openTab evicted an existing tab (LRU overflow). Cleared
    *  on the next non-overflow dispatch. */
   lastEvictedTabId: string | null;
@@ -101,8 +102,7 @@ export interface WorkbenchDispatch {
   closeTab(tabId: string): void;
   // View / panel / search ────────────────────────────────────────
   setView(view: ViewMode): void;
-  setBottomPanel(panel: { id: BottomPanelId; open: boolean }): void;
-  togglePanel(): void;
+  setBottomPanel(panel: BottomPanelId): void;
   clearSearch(): void;
   // Tier 3 (memory) ──────────────────────────────────────────────
   setHover(nodeKey: string | null): void;
@@ -238,6 +238,11 @@ export function WorkbenchStateProvider({
     [setParams],
   );
 
+  useEffect(() => {
+    if (!paramsRef.current.has("panelOpen")) return;
+    commit({ slice: urlRef.current });
+  }, [commit]);
+
   // Derived
   const activeTab =
     tabsSlice.tabs.find((t) => t.id === tabsSlice.activeTabId) ?? null;
@@ -363,21 +368,11 @@ export function WorkbenchStateProvider({
   );
 
   const setBottomPanel = useCallback(
-    (panel: { id: BottomPanelId; open: boolean }) => {
+    (panel: BottomPanelId) => {
       commit({ slice: { ...urlRef.current, bottomPanel: panel } });
     },
     [commit],
   );
-
-  const togglePanel = useCallback(() => {
-    const u = urlRef.current;
-    commit({
-      slice: {
-        ...u,
-        bottomPanel: { ...u.bottomPanel, open: !u.bottomPanel.open },
-      },
-    });
-  }, [commit]);
 
   const clearSearch = useCallback(() => {
     commit({ slice: { ...urlRef.current, searchQuery: "" } });
@@ -430,7 +425,6 @@ export function WorkbenchStateProvider({
         closeTab,
         setView,
         setBottomPanel,
-        togglePanel,
         clearSearch,
         setHover,
         setSearchCursor,
@@ -457,7 +451,6 @@ export function WorkbenchStateProvider({
       closeTab,
       setView,
       setBottomPanel,
-      togglePanel,
       clearSearch,
       setHover,
       setSearchCursor,

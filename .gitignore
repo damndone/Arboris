@@ -19,3 +19,6 @@ frontend/dist/
 # harnesses out of the repo. Reusable browser-smoke instructions
 # live in docs/, not in tool config files.
 .claude/
+
+# runtime matplotlib cache (not part of the repo)
+.matplotlib/

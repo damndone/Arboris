@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { GraphCanvas, waitingReviewsCount } from "./GraphCanvas";
 import { adaptRunGraph } from "../api/graphAdapter";
@@ -97,7 +98,158 @@ function mixedVariantGraph(): GraphResponse {
   };
 }
 
+function StatefulVariableGraph() {
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  return (
+    <GraphCanvas
+      model={model(graph())}
+      selectedNodeId={null}
+      expandedGroups={expandedGroups}
+      onSelect={vi.fn()}
+      onExpandGroup={(gid) =>
+        setExpandedGroups((current) => {
+          const next = new Set(current);
+          if (next.has(gid)) next.delete(gid);
+          else next.add(gid);
+          return next;
+        })
+      }
+    />
+  );
+}
+
 describe("GraphCanvas", () => {
+  it("clicking a folded variable group requests expansion", async () => {
+    const onExpandGroup = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={onExpandGroup}
+      />,
+    );
+
+    const toggle = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-testid="graph-node"][role="button"][aria-label="Variables (4)"]',
+      );
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(toggle);
+
+    expect(onExpandGroup).toHaveBeenCalledWith("group:variables:stage:cleaned");
+  });
+
+  it("clicking an expanded variable panel header requests folding back", async () => {
+    const onExpandGroup = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={onExpandGroup}
+      />,
+    );
+
+    const toggle = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-testid="var-container-toggle"][aria-label="Collapse Variables (4)"]',
+      );
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(toggle);
+
+    expect(onExpandGroup).toHaveBeenCalledWith("group:variables:stage:cleaned");
+  });
+
+  it("clicking a variable chip selects that variable without folding the group", async () => {
+    const onSelect = vi.fn();
+    const onExpandGroup = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={onSelect}
+        onExpandGroup={onExpandGroup}
+      />,
+    );
+
+    const chip = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-testid="var-chip-var:x1:cleaned"]',
+      );
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(chip);
+
+    expect(onSelect).toHaveBeenCalledWith("var:x1:cleaned");
+    expect(onExpandGroup).not.toHaveBeenCalled();
+    expect(screen.getByTestId("var-container")).toBeInTheDocument();
+  });
+
+  it("maps selected variable members back to the visible variable panel", async () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId="var:x1:cleaned"
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    const box = await screen.findByTestId("var-container");
+    expect(box).toHaveAttribute("data-state", "selected");
+    expect(screen.getByTestId("var-chip-var:x1:cleaned")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    expect(screen.getByTestId("var-chip-var:x2:cleaned")).not.toHaveAttribute(
+      "data-selected",
+    );
+  });
+
+  it("expanded variable panels expose React Flow handles so grouped edges stay attached", async () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    const box = await screen.findByTestId("var-container");
+    expect(box.querySelector(".react-flow__handle-left")).not.toBeNull();
+    expect(box.querySelector(".react-flow__handle-right")).not.toBeNull();
+  });
+
+  it("re-seeds React Flow when a variable group toggles between folded and expanded node types", async () => {
+    render(<StatefulVariableGraph />);
+
+    const toggle = await waitFor(() => {
+      const el = document.querySelector(
+        '[data-testid="graph-node"][role="button"][aria-label="Variables (4)"]',
+      );
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(toggle);
+
+    expect(await screen.findByTestId("var-container")).toHaveAttribute(
+      "aria-label",
+      "Variables (4)",
+    );
+  });
+
   it("wraps an expanded variable group in a titled container (fold-back affordance)", async () => {
     render(
       <GraphCanvas
@@ -114,6 +266,24 @@ describe("GraphCanvas", () => {
     const box = await screen.findByTestId("var-container");
     expect(box.textContent ?? "").toMatch(/Variables \(4\)/);
     expect(screen.queryByText("▼ Variables (expanded)")).not.toBeInTheDocument();
+  });
+
+  it("renders an expanded variable group as a contained variable panel with readable names", async () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set(["group:variables:stage:cleaned"])}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    const panel = await screen.findByTestId("var-group-panel");
+    expect(panel).toHaveTextContent("Variables (4)");
+    expect(panel).toHaveTextContent("x1 (cleaned)");
+    expect(panel).toHaveTextContent("x4 (cleaned)");
+    expect(screen.queryByText("X?")).toBeNull();
   });
 
   it("keeps a sibling 'dropped' group folded when only the 'cleaned' group is expanded", async () => {

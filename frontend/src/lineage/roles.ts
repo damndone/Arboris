@@ -50,7 +50,7 @@ const ABBREV: Record<Role, string> = {
   focal: "X",
   treatment: "D",
   covariates: "Z",
-  explanatory_unspecified: "X?",
+  explanatory_unspecified: "X",
   instruments: "IV",
   exposure: "off",
   unit: "U",

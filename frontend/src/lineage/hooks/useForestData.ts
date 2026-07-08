@@ -1,13 +1,16 @@
 // frontend/src/lineage/hooks/useForestData.ts
 //
 // v1.6.1 (2C.6) — fetch + adapt the cross-run head-set forest.
+// v1.6.8 T11 — project-keyed: fetches GET /graph?project_root= (union of ALL
+// family head-sets; empty containers for zero-run projects) instead of the
+// per-run headset endpoint. The body shape is parity with the per-run view
+// (Task 6 hard requirement), so adaptHeadSet consumes it unchanged — the
+// project-only `families` key is additive and ignored by the adapter.
 //
-// Mirrors useGraphData's load/error/refetch contract but targets
-// GET /runs/{id}/graph?view=headset → ForestViewModel. Used by ForestWorkbench
-// when the forest gate is on; the legacy useGraphData path is untouched.
+// Mirrors useGraphData's load/error/refetch contract.
 
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, getRunGraphHeadSet } from "../../api";
+import { ApiError, fetchProjectForest } from "../../api";
 import { adaptHeadSet } from "../api/graphAdapter";
 import type { ForestViewModel } from "../api/graphViewTypes";
 import type { GraphError } from "./useGraphData";
@@ -28,10 +31,7 @@ function classifyError(e: unknown): GraphError {
   return { kind: "network", detail: String(e) };
 }
 
-export function useForestData(
-  projectRoot: string,
-  runId: string,
-): UseForestDataResult {
+export function useForestData(projectRoot: string): UseForestDataResult {
   const [forest, setForest] = useState<ForestViewModel | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<GraphError | null>(null);
@@ -43,7 +43,7 @@ export function useForestData(
     setError(null);
     setForest(null);
 
-    getRunGraphHeadSet(projectRoot, runId)
+    fetchProjectForest(projectRoot)
       .then((raw) => adaptHeadSet(raw))
       .then((f) => {
         if (cancelled) return;
@@ -59,7 +59,7 @@ export function useForestData(
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, runId, tick]);
+  }, [projectRoot, tick]);
 
   const refetch = useCallback(() => setTick((t) => t + 1), []);
 

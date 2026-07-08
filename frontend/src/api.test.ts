@@ -18,6 +18,10 @@ import {
   getPipelineDraft,
   patchPipelineDraftParams,
   validatePipelineDraft,
+  uploadDataset,
+  createGenesisDraft,
+  patchDraftNode,
+  fetchProjectForest,
 } from "./api";
 import * as XLSX from "xlsx";
 
@@ -764,6 +768,112 @@ test("getRunGraph throws ApiError on 404", async () => {
     jsonResponse({ detail: "Run not found" }, 404),
   );
   await expect(getRunGraph("/proj", "missing")).rejects.toBeInstanceOf(ApiError);
+});
+
+// ── v1.6.8 — genesis clients (uploads / genesis draft / node patch / project forest) ──
+
+describe("genesis api clients", () => {
+  test("uploadDataset posts FormData with project_root and file, returns sha", async () => {
+    let sentUrl = "";
+    let sent: FormData | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        sentUrl = url;
+        sent = init.body as FormData;
+        return jsonResponse({ sha256: "a".repeat(64), filename: "d.csv" });
+      }),
+    );
+    const file = new File(["y,x\n1,2"], "d.csv", { type: "text/csv" });
+    const result = await uploadDataset("/tmp/项目", file);
+    expect(sentUrl).toBe("/api/uploads");
+    expect(sent!.get("project_root")).toBe("/tmp/项目");
+    expect(sent!.get("file")).toBe(file);
+    expect(result).toEqual({ sha256: "a".repeat(64), filename: "d.csv" });
+  });
+
+  test("createGenesisDraft posts genesis payload with project_root query", async () => {
+    let sentUrl = "";
+    let sentBody: unknown = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        sentUrl = url;
+        sentBody = JSON.parse(init.body as string);
+        return jsonResponse({ draft: { draft_id: "draft_g1" }, draft_hash: "h1" });
+      }),
+    );
+    const result = await createGenesisDraft("/tmp/demo", {
+      upload_sha256: "b".repeat(64),
+      filename: "d.csv",
+      sheet_names: [],
+      columns: ["y", "x"],
+    });
+    expect(sentUrl).toBe("/api/pipeline-drafts/genesis?project_root=%2Ftmp%2Fdemo");
+    expect(sentBody).toEqual({
+      upload_sha256: "b".repeat(64),
+      filename: "d.csv",
+      sheet_names: [],
+      columns: ["y", "x"],
+    });
+    expect(result.draft_hash).toBe("h1");
+    expect(result.draft.draft_id).toBe("draft_g1");
+  });
+
+  test("patchDraftNode PATCHes node params (+optional columns)", async () => {
+    let sentUrl = "";
+    let sentMethod: string | undefined;
+    let sentBody: unknown = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        sentUrl = url;
+        sentMethod = init.method;
+        sentBody = JSON.parse(init.body as string);
+        return jsonResponse({ draft: { draft_id: "draft_g1" }, draft_hash: "h2" });
+      }),
+    );
+    const result = await patchDraftNode("/tmp/demo", "draft_g1", "table_1", {
+      params: { sheet_name: "Sheet2" },
+      columns: ["y", "x"],
+    });
+    expect(sentUrl).toBe(
+      "/api/pipeline-drafts/draft_g1/nodes/table_1?project_root=%2Ftmp%2Fdemo",
+    );
+    expect(sentMethod).toBe("PATCH");
+    expect(sentBody).toEqual({ params: { sheet_name: "Sheet2" }, columns: ["y", "x"] });
+    expect(result.draft_hash).toBe("h2");
+  });
+
+  test("fetchProjectForest GETs /graph with project_root query", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      jsonResponse({
+        schema_version: 2,
+        nodes: {},
+        edges: [],
+        heads: [],
+        families: [],
+      }),
+    );
+    const result = await fetchProjectForest("/tmp/demo");
+    expect(fetch).toHaveBeenCalledWith("/api/graph?project_root=%2Ftmp%2Fdemo");
+    expect(result.schema_version).toBe(2);
+  });
+
+  test("genesis clients surface non-OK responses as ApiError", async () => {
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse(
+        { error: { code: "PROJECT_NOT_FOUND", message: "Project not found" } },
+        404,
+      ),
+    );
+    await expect(fetchProjectForest("/nope")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      code: "PROJECT_NOT_FOUND",
+      message: "Project not found",
+    });
+  });
 });
 
 describe("runWorkflow panel+prediction params", () => {

@@ -850,7 +850,7 @@ export async function getRunGraph(
   return readResponse<GraphResponse>(response);
 }
 
-export type DraftExecutionMode = "rerun_child" | "new_run";
+export type DraftExecutionMode = "rerun_child" | "new_run" | "genesis";
 
 export type PipelineDraftNode =
   | {
@@ -870,14 +870,30 @@ export type PipelineDraftNode =
   | {
       node_id: string;
       node_type: "model";
-      model_family: string;
-      model_type: string;
-      schema_id: string;
-      editable_schema: unknown[];
-      editable_schema_hash: string;
-      source_ref: Record<string, string>;
-      source_params: Record<string, unknown>;
+      model_family?: string;
+      model_type?: string;
+      schema_id?: string;
+      editable_schema?: unknown[];
+      editable_schema_hash?: string;
+      source_ref?: Record<string, string>;
+      source_params?: Record<string, unknown>;
       params: Record<string, unknown>;
+      status?: "pending" | "configured" | "invalid";
+    }
+  | {
+      node_id: string;
+      node_type: "input.upload";
+      upload: { sha256: string; filename: string };
+      sheet_names: string[];
+      columns?: string[];
+      status: "bound" | "missing" | "invalid";
+    }
+  | {
+      node_id: string;
+      node_type: "table";
+      params: { sheet_name?: string; transpose?: boolean } & Record<string, unknown>;
+      columns: string[];
+      status: "pending" | "configured" | "invalid";
     };
 
 export type PipelineDraftV1 = {
@@ -911,8 +927,9 @@ export type DraftValidationResult = {
     blocking: boolean;
   }>;
   resolved_execution: {
-    execution_mode: DraftExecutionMode;
-    compare_source_available: boolean;
+    genesis?: boolean;
+    execution_mode?: DraftExecutionMode;
+    compare_source_available?: boolean;
     rerun_from_run_id?: string;
     rerun_from_model_node_id?: string;
     rerun_from_op_node_id?: string;
@@ -927,21 +944,25 @@ export type DraftExecutionResult = {
   run_id: string;
   draft_id: string;
   executed_draft_hash: string;
-  execution_mode: "rerun_child";
+  execution_mode: DraftExecutionMode;
   deduped?: boolean;
   produced_lineage: {
-    rerun_from_run_id: string;
-    rerun_from_model_node_id: string;
-    rerun_from_op_node_id: string;
+    genesis?: boolean;
+    execution_mode?: DraftExecutionMode;
+    rerun_from_run_id?: string;
+    rerun_from_model_node_id?: string;
+    rerun_from_op_node_id?: string;
   };
   focus: {
     status: "ready" | "pending_index";
     run_id: string;
     target_model_node_id?: string;
     poll?: {
-      rerun_from_run_id: string;
-      rerun_from_model_node_id: string;
-      rerun_from_op_node_id: string;
+      genesis?: boolean;
+      execution_mode?: DraftExecutionMode;
+      rerun_from_run_id?: string;
+      rerun_from_model_node_id?: string;
+      rerun_from_op_node_id?: string;
     };
   };
 };
@@ -1070,6 +1091,86 @@ export async function deletePipelineDraft(
     { method: "DELETE" },
   );
   await readResponse<{ ok: boolean }>(response);
+}
+
+// ── v1.6.8 — graph-native genesis (uploads / genesis draft / node patch / project forest) ──
+
+export type UploadResult = { sha256: string; filename: string };
+
+/** Upload a dataset file standalone (POST /uploads, multipart form).
+ *  Content-addressable: the server stores by sha256 so genesis draft chains
+ *  fully rehydrate after reload. */
+export async function uploadDataset(
+  projectRoot: string,
+  file: File,
+): Promise<UploadResult> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  const response = await fetch(apiUrl("/uploads"), {
+    method: "POST",
+    body: form,
+  });
+  return readResponse<UploadResult>(response);
+}
+
+export type PipelineDraftGenesisRequest = {
+  upload_sha256: string;
+  filename: string;
+  sheet_names: string[];
+  columns: string[];
+};
+
+/** Create a parentless genesis draft chain (source → table → model). */
+export async function createGenesisDraft(
+  projectRoot: string,
+  body: PipelineDraftGenesisRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(draftUrl(projectRoot, "/pipeline-drafts/genesis"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+export type DraftNodePatchRequest = {
+  params: Record<string, unknown>;
+  columns?: string[];
+};
+
+/** Configure one genesis draft node in place (PATCH .../nodes/{nodeId}).
+ *  `columns` applies to table nodes only. */
+export async function patchDraftNode(
+  projectRoot: string,
+  draftId: string,
+  nodeId: string,
+  body: DraftNodePatchRequest,
+): Promise<PipelineDraftResponse> {
+  const response = await fetch(
+    draftUrl(
+      projectRoot,
+      `/pipeline-drafts/${encodeURIComponent(draftId)}/nodes/${encodeURIComponent(nodeId)}`,
+    ),
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return readResponse<PipelineDraftResponse>(response);
+}
+
+/** Fetch the project-level forest (GET /graph — union of all family
+ *  head-sets; empty forest for zero-run projects). Body shape is parity with
+ *  the per-run headset view, so it feeds the same adaptHeadSet. */
+export async function fetchProjectForest(
+  projectRoot: string,
+): Promise<HeadSetResponse> {
+  const response = await fetch(
+    apiUrl(`/graph?project_root=${encodeURIComponent(projectRoot)}`),
+  );
+  return readResponse<HeadSetResponse>(response);
 }
 
 // ── v1.6.1 — head-set (cross-run forest) graph + node rerun ──

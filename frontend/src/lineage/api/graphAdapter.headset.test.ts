@@ -73,6 +73,21 @@ describe("adaptHeadSet", () => {
     expect(b.rerunOf).toBe("run_a");
   });
 
+  it("carries project family count when the project forest response includes families", () => {
+    const backend = {
+      ...fixture(),
+      families: [
+        { family_root: "run_a", members: ["run_a", "run_b"] },
+        { family_root: "run_c", members: ["run_b", "run_c"] },
+      ],
+    };
+
+    const vm = adaptHeadSet(backend);
+
+    expect(vm.familyCount).toBe(2);
+    expect(vm.familyRunCount).toBe(3);
+  });
+
   it("carries head-level rerun_from without attaching it to an unrelated source node", () => {
     const backend = fixture();
     backend.heads = backend.heads.map((head) =>

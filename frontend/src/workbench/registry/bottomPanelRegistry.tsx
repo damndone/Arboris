@@ -4,8 +4,8 @@
 //
 // V1.5.2 ships Logs live; Shell / Pending / Timeline appear in the
 // tab strip as `disabled` so users see the slots are coming. URL
-// `?panel=<id>&panelOpen=1` activates whichever is current — disabled
-// panels render the PlaceholderPanel body explaining the deferral.
+// `?panel=<id>` activates whichever is current — disabled panels render
+// the PlaceholderPanel body explaining the deferral.
 
 import type { FC } from "react";
 import type { RegistryEntry } from "./registryTypes";

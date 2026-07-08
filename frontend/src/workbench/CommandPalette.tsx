@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import { useLineage } from "../lineage/LineageContext";
 import { useWorkbench } from "./WorkbenchStateProvider";
 import {
@@ -27,10 +28,26 @@ import {
   type ActionEntry,
 } from "./registry/actionRegistry";
 import { isEditableTarget } from "./keyboard";
+import { useProjectRootOptional } from "./ProjectRootContext";
 
-export function CommandPalette() {
+export interface CommandPaletteProps {
+  projectRoot?: string | null;
+}
+
+type PaletteItem = {
+  id: string;
+  label: string;
+  shortcut?: string;
+  disabled: false | { reason: string };
+  invoke: () => void;
+};
+
+export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
   const { model, selectedKey } = useLineage();
   const { state, dispatch } = useWorkbench();
+  const contextProjectRoot = useProjectRootOptional();
+  const effectiveProjectRoot = projectRoot ?? contextProjectRoot;
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -61,9 +78,37 @@ export function CommandPalette() {
     };
   }, [node, model, state, dispatch]);
 
-  const actions = useMemo<ActionEntry[]>(
+  const nodeActions = useMemo<ActionEntry[]>(
     () => (ctx === null ? [] : actionsForSurface("command-palette", ctx)),
     [ctx],
+  );
+  const quickRunAction = useMemo<PaletteItem>(
+    () => ({
+      id: "quick-run-legacy",
+      label: "快速 run(旧表单)",
+      disabled: effectiveProjectRoot ? false : { reason: "Project root required" },
+      invoke: () => {
+        if (!effectiveProjectRoot) return;
+        const params = new URLSearchParams({ project_root: effectiveProjectRoot });
+        navigate(`/submit?${params.toString()}`);
+      },
+    }),
+    [navigate, effectiveProjectRoot],
+  );
+  const actions = useMemo<PaletteItem[]>(
+    () => [
+      ...nodeActions.map((action) => ({
+        id: action.id,
+        label: action.label,
+        shortcut: action.shortcut,
+        disabled: ctx ? (action.disabled?.(ctx) ?? false) : false,
+        invoke: () => {
+          if (ctx) action.invoke(ctx);
+        },
+      })),
+      quickRunAction,
+    ],
+    [ctx, nodeActions, quickRunAction],
   );
 
   // Keep cursor in range as the list changes.
@@ -103,13 +148,12 @@ export function CommandPalette() {
   }, [open]);
 
   const invokeAction = useCallback(
-    (action: ActionEntry) => {
-      if (ctx === null) return;
-      if (action.disabled?.(ctx)) return;
-      action.invoke(ctx);
+    (action: PaletteItem) => {
+      if (action.disabled) return;
+      action.invoke();
       setOpen(false);
     },
-    [ctx],
+    [],
   );
 
   const onPanelKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -192,7 +236,7 @@ export function CommandPalette() {
               Select a node first — commands act on the selected node.
             </div>
           )}
-          {node !== null && actions.length === 0 && (
+          {node !== null && nodeActions.length === 0 && (
             <div
               style={{
                 padding: 16,
@@ -204,7 +248,7 @@ export function CommandPalette() {
             </div>
           )}
           {actions.map((action, i) => {
-            const disabled = ctx ? action.disabled?.(ctx) : false;
+            const disabled = action.disabled;
             return (
               <button
                 key={action.id}

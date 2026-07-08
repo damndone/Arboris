@@ -3,7 +3,7 @@
 // V1.5.2 P4 — shared empty-state body for Shell / Pending / Timeline.
 // Each disabled panel registers with `disabled: () => ({reason})` so
 // it appears in the tab strip greyed out — but if the user URL-forces
-// `?panel=shell&panelOpen=1`, the panel body still renders. That body
+// `?panel=shell`, the panel body still renders. That body
 // is this placeholder, which makes the deferral copy explicit.
 
 interface PlaceholderPanelProps {

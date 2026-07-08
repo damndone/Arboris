@@ -30,6 +30,7 @@
 // separately to track spec/prototype vocabulary — see lineage.css).
 // ────────────────────────────────────────────────────────────────────
 
+import type { KeyboardEvent, MouseEvent } from "react";
 import { Handle, Position } from "reactflow";
 import "../tokens/lineage.css";
 import type { GraphViewNode, HeadSetNode, Stage, Trust } from "../api/graphViewTypes";
@@ -93,6 +94,9 @@ export interface GraphNodeProps {
     role?: Role;
     /** v1.6.5 — model-node roles tag: "unspecified" | "legacy_unspecified". */
     rolesTag?: string;
+    /** v1.6.8 — folded variable groups toggle from inside the custom node. */
+    groupId?: string;
+    onToggleGroup?: (groupId: string) => void;
   };
   // React Flow also passes its own `selected` for accessibility / focus
   // styles on the wrapper, but our internal outline is driven by
@@ -152,6 +156,8 @@ export function GraphNode({ data }: GraphNodeProps) {
     isSearchCursor = false,
     role,
     rolesTag,
+    groupId,
+    onToggleGroup,
   } = data;
   const badge = badgeFor(node);
   const colorVar = stageColorVar(node.stage);
@@ -177,9 +183,31 @@ export function GraphNode({ data }: GraphNodeProps) {
     minWidth: 1,
     minHeight: 1,
   };
+  const canToggleGroup = Boolean(groupId && onToggleGroup);
+  const toggleGroup = () => {
+    if (!groupId || !onToggleGroup) return;
+    onToggleGroup(groupId);
+  };
+  const onToggleClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (!canToggleGroup) return;
+    event.stopPropagation();
+    toggleGroup();
+  };
+  const onToggleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!canToggleGroup) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleGroup();
+  };
 
   return (
     <div
+      role={canToggleGroup ? "button" : undefined}
+      tabIndex={canToggleGroup ? 0 : undefined}
+      aria-label={canToggleGroup ? node.title : undefined}
+      onClick={onToggleClick}
+      onKeyDown={onToggleKeyDown}
       className={[
         "ln-graph-node",
         isSelected && "ln-graph-node--selected",

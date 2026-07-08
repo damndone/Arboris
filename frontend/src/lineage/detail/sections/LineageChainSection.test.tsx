@@ -143,6 +143,8 @@ function makeOwnerPathFixture(activeRunId: string = "run_c"): {
         createdAt: "2026-06-27T00:01:00Z",
       },
     ],
+    familyCount: 1,
+    familyRunCount: 2,
   };
   return {
     forest,

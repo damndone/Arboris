@@ -126,7 +126,7 @@ function makeXlsxFile(): File {
 }
 
 test("renders workbench panels and disables run when invalid", () => {
-  renderAt("/");
+  renderAt("/submit");
 
   expect(
     screen.getByRole("heading", { name: "Local Econometrics Workbench" })
@@ -146,7 +146,7 @@ test("renders workbench panels and disables run when invalid", () => {
 });
 
 test("selecting an XLSX file previews rows and applies suggested variables", async () => {
-  renderAt("/");
+  renderAt("/submit");
 
   fireEvent.change(screen.getByLabelText("data file"), {
     target: { files: [makeXlsxFile()] },
@@ -169,7 +169,7 @@ test("createProject success populates project_root", async () => {
     jsonResponse({ project_root: "/tmp/demo" })
   );
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
 
   expect(screen.getByText("/tmp/demo")).toBeInTheDocument();
@@ -254,7 +254,7 @@ test("runWorkflow polls until terminal then stays on Submit with Open Lineage bu
     return jsonResponse({});
   });
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
@@ -266,10 +266,9 @@ test("runWorkflow polls until terminal then stays on Submit with Open Lineage bu
       screen.getByRole("button", { name: /Open Lineage/ }),
     ).toBeInTheDocument();
   });
-  // Submit tab still active, NOT Lineage.
-  expect(
-    screen.getByRole("tab", { name: "Submit" }),
-  ).toHaveAttribute("aria-selected", "true");
+  // v1.6.8: the form lives at /submit (off-nav); neither shell tab is
+  // selected there — assert we did NOT navigate away from the form.
+  expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
 });
 
 test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () => {
@@ -296,7 +295,7 @@ test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () =>
     return jsonResponse({});
   });
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
@@ -308,11 +307,10 @@ test("Open Lineage button navigates to /runs/:id?tab=lineage [HF1]", async () =>
   );
   fireEvent.click(openBtn);
 
-  // After the explicit click, the Lineage tab is selected.
+  // v1.6.8 route inversion: Open Lineage lands on /runs/:id?tab=lineage,
+  // which now redirects into the project graph home (/p/:slug/graph?focus=).
   await waitFor(() => {
-    expect(
-      screen.getByRole("tab", { name: "Lineage" }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
 });
 
@@ -361,7 +359,7 @@ test("V1.5.1 T1.3 — Submit shows live step progress from SSE step_start", asyn
     return jsonResponse({});
   });
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
@@ -422,7 +420,7 @@ test("HTTP 413 surfaces FastAPI string detail in error panel", async () => {
     )
   );
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
   fillRunForm();
   fireEvent.click(screen.getByRole("button", { name: "Run workflow" }));
@@ -449,7 +447,7 @@ test("HTTP 422 with validation array detail joins location + msg", async () => {
     )
   );
 
-  renderAt("/");
+  renderAt("/submit");
   fireEvent.change(screen.getByLabelText("parent folder"), {
     target: { value: "/tmp" }
   });
@@ -464,38 +462,23 @@ test("HTTP 422 with validation array detail joins location + msg", async () => {
   expect(alert).toHaveTextContent("parent: field required");
 });
 
-test("history tab fetches and lists runs for the current project", async () => {
+test("Workbench tab navigates into the project graph home", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
   fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [
-        makeRun("run-2", { status: "completed" }),
-        makeRun("run-1", { status: "blocked" }),
-      ],
-    })
-  );
+  fetchMock.mockResolvedValue(jsonResponse({ runs: [] }));
 
-  renderAt("/");
+  renderAt("/submit");
   await fillProject();
 
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Workbench" }));
 
   await waitFor(() => {
-    expect(screen.getByText("run-1")).toBeInTheDocument();
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  expect(screen.getByText("run-2")).toBeInTheDocument();
-  expect(screen.getByText("Blocked")).toBeInTheDocument();
 });
 
 test("clicking a history row loads run detail with errors", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1", { status: "blocked" })],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -519,12 +502,7 @@ test("clicking a history row loads run detail with errors", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(
@@ -541,12 +519,6 @@ test("clicking a history row loads run detail with errors", async () => {
 
 test("run detail renders info issues as system notes instead of errors", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1")],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -570,12 +542,7 @@ test("run detail renders info issues as system notes instead of errors", async (
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText("CATEGORICAL_CANDIDATE")).toBeInTheDocument();
@@ -586,12 +553,6 @@ test("run detail renders info issues as system notes instead of errors", async (
 
 test("run detail normalizes stale categorical candidate when model dummy-coded it", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1")],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -624,12 +585,7 @@ test("run detail normalizes stale categorical candidate when model dummy-coded i
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText("CATEGORICAL_AUTO_DUMMY_CODED")).toBeInTheDocument();
@@ -640,12 +596,6 @@ test("run detail normalizes stale categorical candidate when model dummy-coded i
 
 test("run detail renders warning issues separately from blockers", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1")],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -669,12 +619,7 @@ test("run detail renders warning issues separately from blockers", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText("TREATMENT_PROXY_CORRELATION")).toBeInTheDocument();
@@ -683,44 +628,8 @@ test("run detail renders warning issues separately from blockers", async () => {
   expect(screen.getByText("Warnings")).toBeInTheDocument();
 });
 
-test("history tab shows a friendly empty state (not a red error) for PROJECT_NOT_FOUND", async () => {
-  // v1.6.5: a non-existent project_root (e.g. stale localStorage) is no longer
-  // a red "Request error" banner — History renders a friendly empty state.
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse(
-      {
-        error: {
-          code: "PROJECT_NOT_FOUND",
-          message: "Project not found",
-          details: {},
-        },
-      },
-      { status: 404 }
-    )
-  );
-
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-
-  await waitFor(() => {
-    expect(screen.getByTestId("history-project-missing")).toBeInTheDocument();
-  });
-  expect(screen.getByTestId("history-project-missing")).toHaveTextContent(/project/i);
-  // no red error banner for this case
-  expect(screen.queryByRole("alert")).toBeNull();
-});
-
 test("run detail shows artifact list with download links", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1")],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -753,11 +662,7 @@ test("run detail shows artifact list with download links", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => screen.getByRole("heading", { name: /artifacts/i }));
 
@@ -770,10 +675,6 @@ test("run detail shows artifact list with download links", async () => {
 
 test("view report toggles iframe with report URL", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [makeRun("run-1")] })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -806,11 +707,7 @@ test("view report toggles iframe with report URL", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => screen.getByRole("button", { name: /view report/i }));
   fireEvent.click(screen.getByRole("button", { name: /view report/i }));
@@ -823,10 +720,6 @@ test("view report toggles iframe with report URL", async () => {
 
 test("report iframe has sandbox attribute restricting scripts", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [makeRun("run-1")] })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -859,11 +752,7 @@ test("report iframe has sandbox attribute restricting scripts", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => screen.getByRole("button", { name: /view report/i }));
   fireEvent.click(screen.getByRole("button", { name: /view report/i }));
@@ -875,12 +764,6 @@ test("report iframe has sandbox attribute restricting scripts", async () => {
 test("artifact fetch error shows retry button; retry succeeds", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
 
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({
-      runs: [makeRun("run-1")],
-    })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -897,11 +780,7 @@ test("artifact fetch error shows retry button; retry succeeds", async () => {
 
   fetchMock.mockRejectedValueOnce(new Error("Network failure"));
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText(/failed to load artifacts/i)).toBeInTheDocument();
@@ -937,19 +816,15 @@ test("artifact fetch error shows retry button; retry succeeds", async () => {
 
 // --- New tests for V1.2.1 ---
 
-test("direct URL access to history via MemoryRouter initialEntries renders runs", async () => {
+test("/runs deep link redirects into the project graph home (F8)", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [makeRun("run-direct")] })
-  );
+  fetchMock.mockResolvedValue(jsonResponse({ runs: [] }));
 
   renderAt("/runs?project_root=/tmp");
 
   await waitFor(() => {
-    expect(screen.getByRole("heading", { name: /run history/i })).toBeInTheDocument();
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
-  expect(screen.getByText("run-direct")).toBeInTheDocument();
-  expect(screen.getByText("Completed")).toBeInTheDocument();
 });
 
 test("direct URL access to run detail keeps shareable result route", async () => {
@@ -977,7 +852,7 @@ test("direct URL access to run detail keeps shareable result route", async () =>
   );
   fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
 
-  renderAt("/runs/run-direct?project_root=/tmp/demo");
+  renderAt("/runs/run-direct?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: /run detail/i })).toBeInTheDocument();
@@ -1017,7 +892,7 @@ test("run detail coefficient table uses p-value display text when available", as
   );
   fetchMock.mockResolvedValueOnce(jsonResponse({ groups: [] }));
 
-  renderAt("/runs/run-direct?project_root=/tmp/demo");
+  renderAt("/runs/run-direct?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByRole("heading", { name: /coefficients/i })).toBeInTheDocument();
@@ -1026,69 +901,13 @@ test("run detail coefficient table uses p-value display text when available", as
   expect(document.body).not.toHaveTextContent("0.0000");
 });
 
-test("history pagination bar renders Page X of Y, Previous disabled on first page", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  // 30 runs → PAGE_SIZE=25 → 2 pages
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: makeRuns(30) })
-  );
-
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-
-  await waitFor(() => {
-    expect(screen.getByText("run-1")).toBeInTheDocument();
-  });
-
-  const pagination = screen.getByLabelText("run history pagination");
-  expect(within(pagination).getByText("Page 1 of 2")).toBeInTheDocument();
-  expect(within(pagination).getByRole("button", { name: "Previous" })).toBeDisabled();
-  expect(within(pagination).getByRole("button", { name: "Next" })).toBeEnabled();
-
-  // Navigate to page 2
-  fireEvent.click(within(pagination).getByRole("button", { name: "Next" }));
-
-  await waitFor(() => {
-    expect(within(pagination).getByText("Page 2 of 2")).toBeInTheDocument();
-  });
-  expect(within(pagination).getByRole("button", { name: "Previous" })).toBeEnabled();
-  expect(within(pagination).getByRole("button", { name: "Next" })).toBeDisabled();
-
-  // run-26 should be on page 2
-  expect(screen.getByText("run-26")).toBeInTheDocument();
-  // run-1 should NOT be on page 2
-  expect(screen.queryByText("run-1")).not.toBeInTheDocument();
-});
-
-test("empty run list does not render pagination bar", async () => {
-  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [] })
-  );
-
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-
-  await waitFor(() => {
-    expect(screen.getByText(/no runs in this project yet/i)).toBeInTheDocument();
-  });
-
-  expect(
-    screen.queryByLabelText("run history pagination")
-  ).not.toBeInTheDocument();
-});
-
-test("/runs route with missing project_root shows prompt", () => {
+test("/runs route with missing project_root falls back to the launcher", async () => {
   renderAt("/runs");
 
-  expect(screen.getByText(/select a project first/i)).toBeInTheDocument();
-  expect(
-    screen.queryByLabelText("run history")
-  ).not.toBeInTheDocument();
+  await waitFor(() => {
+    // launcher-specific affordance (the shell h1 also matches /workbench/i)
+    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  });
 });
 
 test("running run progress includes statistical tests step", async () => {
@@ -1116,7 +935,7 @@ test("running run progress includes statistical tests step", async () => {
     }),
   } as Response);
 
-  renderAt("/runs/running-1?project_root=/tmp/demo");
+  renderAt("/runs/running-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByLabelText("run progress")).toBeInTheDocument();
@@ -1127,7 +946,7 @@ test("running run progress includes statistical tests step", async () => {
 // --- V1.2.5 model type selector tests ---
 
 test("model type selector renders options from capabilities", () => {
-  renderAt("/");
+  renderAt("/submit");
 
   const selector = screen.getByLabelText("model type");
   expect(selector).toBeInTheDocument();
@@ -1147,7 +966,7 @@ test("model type selector renders options from capabilities", () => {
 });
 
 test("model type defaults to Auto and can be changed to logit", async () => {
-  renderAt("/");
+  renderAt("/submit");
 
   const selector = screen.getByLabelText("model type") as HTMLSelectElement;
   expect(selector.value).toBe("auto");
@@ -1160,10 +979,6 @@ test("model type defaults to Auto and can be changed to logit", async () => {
 
 test("report is disabled when artifact manifest is missing in preview", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [makeRun("run-1")] })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -1189,11 +1004,7 @@ test("report is disabled when artifact manifest is missing in preview", async ()
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText("Report")).toBeInTheDocument();
@@ -1206,10 +1017,6 @@ test("report is disabled when artifact manifest is missing in preview", async ()
 
 test("run detail coefficient risk shows reference level column", async () => {
   const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
-  fetchMock.mockResolvedValueOnce(jsonResponse({ project_root: "/tmp/demo" }));
-  fetchMock.mockResolvedValueOnce(
-    jsonResponse({ runs: [makeRun("run-1")] })
-  );
   fetchMock.mockResolvedValueOnce(
     jsonResponse({
       run_id: "run-1",
@@ -1279,11 +1086,7 @@ test("run detail coefficient risk shows reference level column", async () => {
     })
   );
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   await waitFor(() => {
     expect(screen.getByText("Coefficient risk")).toBeInTheDocument();
@@ -1352,12 +1155,7 @@ test("HF3: clicking a history row navigates to /runs/:id with tab=overview", asy
     return Promise.resolve(jsonResponse({}));
   });
 
-  renderAt("/");
-  await fillProject();
-  fireEvent.click(screen.getByRole("tab", { name: "History" }));
-  await waitFor(() => screen.getByText("run-1"));
-
-  fireEvent.click(screen.getByText("run-1"));
+  renderAt("/runs/run-1?project_root=/tmp/demo&tab=overview");
 
   // RunDetailRoute is mounted — Overview tab is active (matches
   // tab=overview from the URL) and Lineage tab is reachable.
@@ -1403,7 +1201,7 @@ test("HF4: lastRun persisted in sessionStorage survives SubmitRoute remount", as
     return Promise.resolve(jsonResponse({}));
   });
 
-  renderAt("/");
+  renderAt("/submit");
 
   // Without HF4, lastRun starts as null and Open Lineage doesn't render.
   // With HF4, the seeded value is restored and the button appears.
@@ -1420,6 +1218,110 @@ test("HF2: /runs/:id?tab=lineage DOES apply lineage dark shell", () => {
   const shell = document.querySelector("main.workbench-shell");
   expect(shell).not.toBeNull();
   expect(shell?.classList.contains("workbench-shell--lineage")).toBe(true);
+});
+
+// --- v1.6.8 route inversion (T9) ---
+
+test("/ renders the launcher, not the submit form", async () => {
+  renderAt("/");
+
+  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("parent folder")).not.toBeInTheDocument();
+});
+
+test("/submit still mounts the legacy form (hidden route, F7)", () => {
+  renderAt("/submit");
+
+  expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
+});
+
+test("/runs/:id redirects into the graph home and forwards focus", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(jsonResponse({}));
+
+  renderAt("/runs/run-abc?project_root=/tmp/p1");
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  // focus propagates: the workbench fetches the focused run's graph
+  await waitFor(() => {
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/runs/run-abc/graph"))).toBe(true);
+  });
+});
+
+test("/p/:slug/graph treats ?focus= as a NODE key, never a run id (C1)", async () => {
+  // T11: the container is project-keyed — it fetches the PROJECT forest
+  // (GET /graph?project_root=) and never resolves ?focus= as a run id.
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(jsonResponse({ runs: [makeRun("run-1")] }));
+
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/p1")}/graph?focus=abc123::node_7`);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    // fetches the project forest; the node-focus param is not a run id
+    expect(urls.some((u) => u.includes("/graph?project_root="))).toBe(true);
+    expect(urls.some((u) => u.includes("/runs/abc123"))).toBe(false);
+  });
+});
+
+test("/runs/:id redirect forwards the run id as ?run= and keeps other params (I2)", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockResolvedValue(jsonResponse({}));
+
+  renderAt("/runs/run-abc?project_root=/tmp/p1&view=table");
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  await waitFor(() => {
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/runs/run-abc/graph"))).toBe(true);
+  });
+});
+
+test("/runs/:id without project_root falls back to the launcher", async () => {
+  renderAt("/runs/run-abc");
+
+  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+});
+
+test("/p/:slug/graph with a malformed slug falls back to the launcher (F5)", async () => {
+  renderAt("/p/!!!not-base64!!!/graph");
+
+  expect(await screen.findByRole("button", { name: "新建项目" })).toBeInTheDocument();
+});
+
+test("/p/:slug/graph on a zero-run project shows the empty canvas with the genesis CTA (T11)", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  // T11: the container fetches the project forest; a zero-run project
+  // returns empty containers (Task 6 contract).
+  fetchMock.mockResolvedValue(
+    jsonResponse({
+      nodes: {},
+      edges: [],
+      heads: [],
+      families: [],
+      schema_version: 2,
+      legacy: false,
+    }),
+  );
+
+  // slug for /tmp/p1 (unicode-safe base64url; see projectSlug.test.ts)
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/p1")}/graph`);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
+  });
+  expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
+  expect(screen.getByText("这个项目还没有数据")).toBeInTheDocument();
 });
 
 import { validatePanelPrediction } from "./App";

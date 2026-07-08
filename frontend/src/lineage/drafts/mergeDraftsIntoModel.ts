@@ -5,6 +5,7 @@
 
 import type { GraphViewModel, GraphViewNode, HeadSetNode } from "../api/graphViewTypes";
 import type { DraftEntry, DraftRegistry } from "./draftRegistry";
+import type { PipelineDraftNode } from "../../api";
 
 function resolveAnchor(
   model: GraphViewModel,
@@ -42,6 +43,68 @@ function draftNode(entry: DraftEntry, anchor: GraphViewNode): GraphViewNode {
   };
 }
 
+function isGenesisDraft(entry: DraftEntry): boolean {
+  return entry.draft?.created_from?.source_type === "genesis";
+}
+
+function genesisNodeStage(node: PipelineDraftNode): GraphViewNode["stage"] {
+  if (node.node_type === "input.upload") return "source";
+  if (node.node_type === "table") return "transform";
+  if (node.node_type === "model") return "model";
+  return "source";
+}
+
+function genesisNodeTitle(node: PipelineDraftNode): string {
+  if (node.node_type === "input.upload") {
+    return `draft · ${node.upload.filename}`;
+  }
+  if (node.node_type === "table") {
+    const sheet = typeof node.params.sheet_name === "string" ? node.params.sheet_name : "table";
+    return `draft · ${sheet}`;
+  }
+  if (node.node_type === "model") {
+    return node.model_type ? `draft · ${node.model_type}` : "draft · model";
+  }
+  return "draft";
+}
+
+function genesisDraftNode(entry: DraftEntry, node: PipelineDraftNode): GraphViewNode {
+  const key = `draft:${entry.draftId}:${node.node_id}`;
+  return {
+    id: key,
+    nodeKey: key,
+    raw: node,
+    stage: genesisNodeStage(node),
+    kind: node.node_type === "input.upload" ? "dataset" : node.node_type,
+    title: genesisNodeTitle(node),
+    parentStageId: null,
+    trust: "ok",
+    decisions: [],
+    isDraft: true,
+    draftId: entry.draftId,
+    lifecycleState: entry.lifecycleState,
+  };
+}
+
+function mergeGenesisDraft(
+  entry: DraftEntry,
+  addNodes: GraphViewNode[],
+  addEdges: GraphViewModel["edges"],
+) {
+  const draft = entry.draft;
+  if (!draft) return;
+  const nodeIds = new Set(draft.graph.nodes.map((node) => node.node_id));
+  for (const node of draft.graph.nodes) {
+    addNodes.push(genesisDraftNode(entry, node));
+  }
+  for (const edge of draft.graph.edges) {
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) continue;
+    const source = `draft:${entry.draftId}:${edge.from}`;
+    const target = `draft:${entry.draftId}:${edge.to}`;
+    addEdges.push({ id: `${source}->${target}`, source, target });
+  }
+}
+
 export function mergeDraftsIntoModel(
   model: GraphViewModel,
   registry: DraftRegistry,
@@ -50,6 +113,10 @@ export function mergeDraftsIntoModel(
   const addNodes: GraphViewNode[] = [];
   const addEdges: GraphViewModel["edges"] = [];
   for (const entry of registry.values()) {
+    if (isGenesisDraft(entry)) {
+      mergeGenesisDraft(entry, addNodes, addEdges);
+      continue;
+    }
     const anchor = resolveAnchor(model, entry);
     if (!anchor) continue; // source not visible → degrade
     const node = draftNode(entry, anchor);

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -44,6 +45,7 @@ from .lineage.family import scan_family
 from .lineage.hashing import dag_hash, override_hash
 from .lineage.headset import build_headset
 from .lineage.node_index import NODE_INDEX_FILENAME
+from .lineage.project_forest import build_project_forest
 from .lineage.node_write_validation import (
     AcceptedContext,
     NodeWriteOperationRequestV1,
@@ -64,9 +66,12 @@ from .lineage.op_contract import (
 from .lineage.pipeline_drafts import (
     DraftHashConflict,
     DraftLockedForExecution,
+    DraftNodeNotFound,
+    DraftNodePatchConflict,
     DraftNotFound,
     DraftValidationFailure,
     PipelineDraftStore,
+    StoredDraft,
     compute_executable_draft_hash,
     new_draft_id,
     schema_hash,
@@ -79,7 +84,12 @@ from .lineage.rerun_provenance import (
 )
 from .lineage.run_inputs import read_run_inputs, write_run_inputs
 from .lineage.role_layer import canonicalize_focal_x
-from .lineage.upload_store import resolve_upload, store_upload_bytes, verify_upload
+from .lineage.upload_store import (
+    delete_upload_if_unreferenced,
+    resolve_upload,
+    store_upload_bytes,
+    verify_upload,
+)
 
 # Estimator families whose focal/treatment variable is structural (not user-declared
 # via focal_x). For these, persisted focal_x MUST be empty (spec §5).
@@ -163,8 +173,80 @@ def capabilities_endpoint() -> dict:
 
 @app.post("/projects")
 def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
-    project = create_project(Path(request.parent), request.name)
+    parent_raw = request.parent.strip()
+    name = request.name.strip()
+    if not parent_raw:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project parent path is required.",
+            details={"field": "parent"},
+        )
+    if not name:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name is required.",
+            details={"field": "name"},
+        )
+    if "/" in name or "\\" in name:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name must not contain path separators.",
+            details={"field": "name"},
+        )
+    if name in {".", ".."}:
+        # `parent / ".."` escapes the parent: create_project mkdirs with
+        # exist_ok=True and writes project.yaml/config.yml unconditionally,
+        # so it would scaffold project files into an arbitrary existing dir.
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name must be a real directory name.",
+            details={"field": "name"},
+        )
+    parent = Path(parent_raw).expanduser()
+    if not parent.is_absolute():
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project parent path must be absolute.",
+            details={"field": "parent", "parent": parent_raw},
+        )
+    try:
+        project = create_project(parent, name)
+    except OSError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Cannot create project at parent path.",
+            details={"parent": str(parent), "reason": str(exc)},
+        ) from exc
     return {"project_root": str(project.root)}
+
+
+@app.post("/uploads")
+async def upload_dataset_endpoint(
+    project_root: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    """v1.6.8 genesis: standalone content-addressable upload.
+
+    Files persist server-side from wizard step 1 so genesis draft chains
+    fully rehydrate after reload (same store POST /runs uses internally).
+    """
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
+    root = Path(project_root)
+    config = load_config(root / "config.yml")
+    max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
+    try:
+        data = await _read_upload_bytes(file, max_upload_bytes)
+    finally:
+        await file.close()
+    filename = Path(file.filename or "upload.csv").name
+    sha = store_upload_bytes(root, data, filename=filename)
+    return {"sha256": sha, "filename": filename}
 
 
 async def _read_upload_bytes(file: UploadFile, max_bytes: int) -> bytes:
@@ -946,6 +1028,16 @@ def _annotate_editable_nodes(body: dict, manifest: dict) -> None:
         _annotate_editable_node(node, manifest)
 
 
+@app.get("/graph")
+def get_project_graph(project_root: str) -> dict[str, Any]:
+    """v1.6.8 F1 — project-keyed forest (union of all family head-sets).
+
+    A zero-run project returns an EMPTY forest so the canvas can render as the
+    genesis starting point. Same body shape as the per-run headset view."""
+    runs_root = _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND
+    return build_project_forest(runs_root, annotate=_annotate_editable_node)
+
+
 @app.get("/runs/{run_id}/graph")
 def get_run_graph(run_id: str, project_root: str, view: str | None = None):
     runs_root = _resolve_project_runs_dir(project_root)
@@ -1022,12 +1114,12 @@ class PipelineDraftPatchRequest(BaseModel):
 
 
 class PipelineDraftValidateRequest(BaseModel):
-    execution_mode: Literal["rerun_child", "new_run"] | None = None
+    execution_mode: Literal["rerun_child", "new_run", "genesis"] | None = None
 
 
 class PipelineDraftExecuteRequest(BaseModel):
     validated_draft_hash: str
-    execution_mode: Literal["rerun_child", "new_run"]
+    execution_mode: Literal["rerun_child", "new_run", "genesis"]
     idempotency_key: str | None = None
 
 
@@ -1038,6 +1130,10 @@ def _pipeline_draft_store(project_root: str) -> PipelineDraftStore:
 def _draft_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, DraftNotFound):
         return HTTPException(status_code=404, detail="DRAFT_NOT_FOUND")
+    if isinstance(exc, DraftNodeNotFound):
+        return HTTPException(status_code=404, detail=f"DRAFT_NODE_NOT_FOUND: {exc}")
+    if isinstance(exc, DraftNodePatchConflict):
+        return HTTPException(status_code=409, detail=f"{DraftNodePatchConflict.code}: {exc}")
     if isinstance(exc, DraftHashConflict):
         return HTTPException(status_code=409, detail="DRAFT_HASH_CONFLICT")
     if isinstance(exc, DraftLockedForExecution):
@@ -1191,6 +1287,90 @@ def create_pipeline_draft_from_node(
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
 
 
+class PipelineDraftGenesisRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    upload_sha256: str
+    filename: str
+    sheet_names: list[str] = []
+    columns: list[str] = []  # client-side SheetJS-parsed column names
+
+
+@app.post("/pipeline-drafts/genesis")
+def create_pipeline_draft_genesis(
+    project_root: str,
+    body: PipelineDraftGenesisRequest,
+) -> dict[str, Any]:
+    """v1.6.8: parentless genesis draft chain (source -> table -> model).
+
+    Same store + lifecycle as from-node drafts; created_from.source_type
+    distinguishes the branch everywhere downstream (validate / execute).
+
+    Design note: the genesis model node is params-only, NO editable_schema —
+    the wizard reuses capabilities-driven RunForm controls (which don't need
+    editable_schema); validate stays structural; column checks belong to
+    execute (spec F3/F4).
+    """
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
+    root = Path(project_root)
+    if not re.fullmatch(r"[0-9a-f]{64}", body.upload_sha256):
+        # Reject before touching the filesystem; do NOT reflect the raw value.
+        raise HTTPException(status_code=422, detail="UPLOAD_NOT_FOUND: invalid sha256")
+    try:
+        verify_upload(root, body.upload_sha256)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"UPLOAD_NOT_FOUND: {exc}") from exc
+
+    now = utc_now()
+    draft = {
+        "draft_id": new_draft_id(),
+        "schema_version": "pipeline_draft.v1",
+        "created_at": now,
+        "updated_at": now,
+        "status": "draft",
+        "created_from": {
+            "source_type": "genesis",
+            "source_input_fingerprint": body.upload_sha256,
+        },
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": "source_1",
+                    "node_type": "input.upload",
+                    "upload": {"sha256": body.upload_sha256, "filename": body.filename},
+                    "sheet_names": body.sheet_names,
+                    "status": "bound",
+                },
+                {
+                    "node_id": "table_1",
+                    "node_type": "table",
+                    "params": {"sheet_name": None, "transpose": False},
+                    "columns": body.columns,
+                    "status": "pending",
+                },
+                {
+                    "node_id": "model_1",
+                    "node_type": "model",
+                    "model_family": "regression",
+                    "model_type": None,
+                    "params": {},
+                    "status": "pending",
+                },
+            ],
+            "edges": [
+                {"from": "source_1", "to": "table_1"},
+                {"from": "table_1", "to": "model_1"},
+            ],
+        },
+        "default_execution_mode": "genesis",
+    }
+    try:
+        stored = _pipeline_draft_store(project_root).create(draft)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
 @app.get("/pipeline-drafts")
 def list_pipeline_drafts(project_root: str) -> dict[str, Any]:
     try:
@@ -1227,13 +1407,72 @@ def patch_pipeline_draft(
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
 
 
-@app.delete("/pipeline-drafts/{draft_id}")
-def delete_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+class DraftNodePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    params: dict[str, Any]
+    columns: list[str] | None = None
+
+
+@app.patch("/pipeline-drafts/{draft_id}/nodes/{node_id}")
+def patch_pipeline_draft_node(
+    draft_id: str,
+    node_id: str,
+    project_root: str,
+    body: DraftNodePatchRequest,
+) -> dict[str, Any]:
+    """v1.6.8 genesis wizard step: configure table_1 / model_1 in place.
+
+    Genesis-only (409 otherwise); the bound source node is immutable —
+    changing the file means discard the draft and restart genesis.
+    `columns` applies to table nodes only and is silently dropped on a
+    model-node PATCH.
+    """
+    store = _pipeline_draft_store(project_root)
     try:
-        _pipeline_draft_store(project_root).delete(draft_id)
+        stored = store.update_node_params(draft_id, node_id, body.params, columns=body.columns)
     except Exception as exc:
         raise _draft_http_error(exc) from exc
-    return {"ok": True, "draft_id": draft_id}
+    return {"draft": stored.draft, "draft_hash": stored.draft_hash}
+
+
+@app.delete("/pipeline-drafts/{draft_id}")
+def delete_pipeline_draft(draft_id: str, project_root: str) -> dict[str, Any]:
+    store = _pipeline_draft_store(project_root)
+    # v1.6.8 F6: extract the genesis upload sha BEFORE deleting, defensively —
+    # a corrupt/missing draft must still be discardable (just without blob GC).
+    genesis_sha: str | None = None
+    try:
+        draft = store.get(draft_id).draft
+        if (draft.get("created_from") or {}).get("source_type") == "genesis":
+            source = next(
+                (
+                    n
+                    for n in (draft.get("graph") or {}).get("nodes") or []
+                    if n.get("node_id") == "source_1"
+                ),
+                None,
+            )
+            sha = ((source or {}).get("upload") or {}).get("sha256")
+            if isinstance(sha, str) and sha:
+                genesis_sha = sha
+    except Exception:
+        genesis_sha = None
+    try:
+        store.delete(draft_id)
+    except Exception as exc:
+        raise _draft_http_error(exc) from exc
+    # GC AFTER delete so the discarded draft's own file no longer counts as a
+    # reference. GC failure must never fail the discard.
+    upload_reclaimed = False
+    if genesis_sha is not None:
+        try:
+            upload_reclaimed = delete_upload_if_unreferenced(
+                Path(project_root), genesis_sha
+            )
+        except Exception:
+            upload_reclaimed = False
+    return {"ok": True, "draft_id": draft_id, "upload_reclaimed": upload_reclaimed}
 
 
 @app.post("/pipeline-drafts/{draft_id}/validate")
@@ -1247,6 +1486,173 @@ def validate_pipeline_draft(
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return validate_draft_for_execution(stored.draft, execution_mode=body.execution_mode)
+
+
+def _execute_genesis_draft(
+    draft_id: str,
+    root: Path,
+    store: PipelineDraftStore,
+    first: StoredDraft,
+    body: PipelineDraftExecuteRequest,
+) -> dict[str, Any]:
+    """v1.6.8 genesis execute: parentless draft chain -> FIRST run of a project.
+
+    PARALLEL implementation to the from-node branch (same skeleton: hash check
+    outside lock -> dedupe -> execution_lock -> re-check + re-validate -> submit),
+    but genesis is NOT a rerun: no parent run_inputs to merge, no rerun_of /
+    from_node / op_overrides / rerun_from — the full form is synthesized from the
+    draft chain and dispatched via _submit_run(rerun_reason='initial')."""
+    if first.draft_hash != body.validated_draft_hash:
+        raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
+
+    dedupe_key = (
+        body.idempotency_key
+        or f"{draft_id}:{body.validated_draft_hash}:{body.execution_mode}"
+    )
+    existing = store.get_dedupe(draft_id, dedupe_key)
+    if existing is not None:
+        validation = validate_draft_for_execution(first.draft, execution_mode="genesis")
+        return {
+            "ok": True,
+            "run_id": existing.run_id,
+            "draft_id": draft_id,
+            "executed_draft_hash": existing.executed_draft_hash,
+            "execution_mode": "genesis",
+            "deduped": True,
+            "produced_lineage": validation["resolved_execution"],
+            "focus": {
+                "status": "pending_index",
+                "run_id": existing.run_id,
+                "poll": validation["resolved_execution"],
+            },
+        }
+
+    with store.execution_lock(draft_id):
+        current = store.get(draft_id)
+        if current.draft_hash != body.validated_draft_hash:
+            raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
+
+        validation = validate_draft_for_execution(current.draft, execution_mode="genesis")
+        if not validation.get("executable"):
+            raise HTTPException(status_code=409, detail="VALIDATION_REQUIRED")
+        if validation.get("validated_execution_mode") != "genesis":
+            raise HTTPException(status_code=409, detail="VALIDATION_REQUIRED")
+
+        existing = store.get_dedupe(draft_id, dedupe_key)
+        if existing is not None:
+            return {
+                "ok": True,
+                "run_id": existing.run_id,
+                "draft_id": draft_id,
+                "executed_draft_hash": existing.executed_draft_hash,
+                "execution_mode": "genesis",
+                "deduped": True,
+                "produced_lineage": validation["resolved_execution"],
+                "focus": {
+                    "status": "pending_index",
+                    "run_id": existing.run_id,
+                    "poll": validation["resolved_execution"],
+                },
+            }
+
+        draft = current.draft
+        # --- genesis: synthesize the full form (no parent run to merge) ---
+        nodes = {n["node_id"]: n for n in draft["graph"]["nodes"]}
+        sha = nodes["source_1"]["upload"]["sha256"]
+        filename = nodes["source_1"]["upload"].get("filename") or "upload.csv"
+        try:
+            upload_bytes = verify_upload(root, sha).read_bytes()
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                status_code=422, detail=f"GENESIS_UPLOAD_UNUSABLE: {exc}"
+            ) from exc
+
+        tp = nodes["table_1"].get("params") or {}
+        mp = dict(nodes["model_1"].get("params") or {})
+        x_val = mp.pop("x", "")
+        focal = mp.pop("focal_x", "")
+        merged_form = {
+            "mode": "auto",
+            "model_type": str(mp.pop("model_type", "") or "auto"),
+            "y": str(mp.pop("y", "")),
+            # x / focal_x wire format is a comma-joined column list (the
+            # dispatch comma-splits; see the v1.6.5 note in the from-node branch)
+            "x": ",".join(x_val) if isinstance(x_val, list) else str(x_val),
+            "sheet_name": str(tp.get("sheet_name") or ""),
+            "transpose": "true" if tp.get("transpose") else "false",
+            "focal_x": ",".join(focal) if isinstance(focal, list) else str(focal),
+            # remaining model params share POST /runs' form field names — pass through:
+            **{
+                k: (json.dumps(v) if isinstance(v, (list, dict)) else str(v))
+                for k, v in mp.items()
+            },
+        }
+
+        executed_hash = compute_executable_draft_hash(draft)
+
+        def _record_snapshot_before_dispatch(new_run_id: str) -> None:
+            run_dir = root / "runs" / new_run_id
+            (run_dir / "executed_pipeline_draft.json").write_text(
+                json.dumps(
+                    {
+                        "executed_at": utc_now(),
+                        "source_draft_id": draft_id,
+                        "executed_draft_hash": executed_hash,
+                        "execution_request": {
+                            "execution_mode": "genesis",
+                            "validated_draft_hash": body.validated_draft_hash,
+                        },
+                        "draft": draft,
+                    },
+                    sort_keys=True,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            store.record_dedupe(
+                draft_id,
+                dedupe_key,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
+            store.record_execution_locked(
+                draft_id,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
+
+        events = get_event_manager()
+        if not events.try_acquire_slot():
+            raise HTTPException(status_code=429, detail="A run is already in progress.")
+        try:
+            result = _submit_run(
+                root,
+                form=merged_form,
+                upload_bytes=upload_bytes,
+                upload_filename=filename,
+                started_at=datetime.now(timezone.utc).isoformat(),
+                rerun_reason="initial",
+                before_dispatch=_record_snapshot_before_dispatch,
+            )
+        except Exception:
+            events.release_slot(None)
+            raise
+
+        return {
+            "ok": True,
+            "run_id": result["run_id"],
+            "draft_id": draft_id,
+            "executed_draft_hash": executed_hash,
+            "execution_mode": "genesis",
+            "produced_lineage": {"genesis": True},
+            "focus": {
+                "status": "pending_index",
+                "run_id": result["run_id"],
+                "poll": {"genesis": True},
+            },
+        }
 
 
 @app.post("/pipeline-drafts/{draft_id}/execute")
@@ -1264,6 +1670,17 @@ def execute_pipeline_draft(
         first = store.get(draft_id)
     except Exception as exc:
         raise _draft_http_error(exc) from exc
+
+    # v1.6.8 genesis drafts dispatch to a PARALLEL branch before any from-node
+    # semantics (hash check included, so the cross-mode guard always wins).
+    is_genesis = (first.draft.get("created_from") or {}).get("source_type") == "genesis"
+    if is_genesis and body.execution_mode != "genesis":
+        raise HTTPException(status_code=409, detail="GENESIS_MODE_REQUIRED")
+    if not is_genesis and body.execution_mode == "genesis":
+        raise HTTPException(status_code=409, detail="GENESIS_ONLY_FOR_GENESIS_DRAFTS")
+    if is_genesis:
+        return _execute_genesis_draft(draft_id, root, store, first, body)
+
     if first.draft_hash != body.validated_draft_hash:
         raise HTTPException(status_code=409, detail="VALIDATED_DRAFT_HASH_MISMATCH")
 
@@ -1388,6 +1805,11 @@ def execute_pipeline_draft(
             store.record_dedupe(
                 draft_id,
                 dedupe_key,
+                run_id=new_run_id,
+                executed_draft_hash=executed_hash,
+            )
+            store.record_execution_locked(
+                draft_id,
                 run_id=new_run_id,
                 executed_draft_hash=executed_hash,
             )

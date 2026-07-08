@@ -418,6 +418,8 @@ export function makeOwnerResolutionSeedFixture(): {
     nodes: [source, shared, report],
     edges,
     heads,
+    familyCount: 1,
+    familyRunCount: 2,
   };
   const graphModel: GraphViewModel = {
     schemaVersion: 2,

@@ -249,9 +249,13 @@ type RoleEdge = { source: string; target: string; op: string; params?: Record<st
 export type RoleGroup = { role: Role; columns: string[]; dropped: Set<string> };
 
 function columnOf(varNodeId: string): string {
-  // "var:x1:cleaned" -> "x1"
-  const m = /^var:(.+):cleaned$/.exec(varNodeId);
-  return m ? m[1] : varNodeId;
+  // "var:x1:cleaned" -> "x1". Forest node keys prefix the per-run op id with
+  // the producing node hash ("<hash>::var:x1:cleaned") — strip that first, or
+  // the drawer's FORMULA / role groups render raw hashes instead of names.
+  const sep = varNodeId.lastIndexOf("::");
+  const bare = sep === -1 ? varNodeId : varNodeId.slice(sep + 2);
+  const m = /^var:(.+):(?:cleaned|dropped)$/.exec(bare);
+  return m ? m[1] : bare;
 }
 
 export function groupVariablesByRole(edges: RoleEdge[], modelNodeId: string): RoleGroup[] {

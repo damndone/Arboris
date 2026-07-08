@@ -12,7 +12,7 @@ import { GraphView } from "./views/GraphView";
 import { TableView } from "./views/TableView";
 import { PipelineView } from "./views/PipelineView";
 
-export function WorkbenchMain() {
+export function WorkbenchMain({ projectRoot }: { projectRoot: string }) {
   const { state } = useWorkbench();
   return (
     <div
@@ -21,12 +21,14 @@ export function WorkbenchMain() {
       style={{
         flex: 1,
         minHeight: 0,
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
+        overflow: "hidden",
       }}
     >
       {state.view === "graph" && <GraphView />}
-      {state.view === "table" && <TableView />}
+      {state.view === "table" && <TableView projectRoot={projectRoot} />}
       {state.view === "pipeline" && <PipelineView />}
     </div>
   );

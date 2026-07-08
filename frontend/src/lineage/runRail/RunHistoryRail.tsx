@@ -18,6 +18,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useMemo } from "react";
 import { useRunHistory } from "./useRunHistory";
 import type { RunSummary } from "../../api";
+import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
 
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return "—";
@@ -66,7 +67,8 @@ export interface RunHistoryRailProps {
 export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailProps = {}): JSX.Element {
   const { runId: activeRunId } = useParams<{ runId: string }>();
   const [searchParams] = useSearchParams();
-  const projectRoot = projectRootProp ?? searchParams.get("project_root");
+  const contextProjectRoot = useProjectRootOptional();
+  const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root");
   const navigate = useNavigate();
   const { runs, loading, error } = useRunHistory(projectRoot);
 

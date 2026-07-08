@@ -4,10 +4,11 @@
 //
 // Separates the model specification into reader-friendly blocks instead of
 // one flat RHS string:
-//   - Formula:        outcome ~ focal + covariates   (or ~ explanatory when
-//                     focal is empty). NEVER concatenates instruments or the
-//                     exposure offset into the RHS — those identify / offset,
-//                     they are not regressors.
+//   - Model spec:     outcome ~ focal + covariates   (or ~ explanatory when
+//                     focal is empty). This is a RHS specification, not an
+//                     estimated equation with coefficients / intercept. NEVER
+//                     concatenates instruments or the exposure offset into the
+//                     RHS — those identify / offset, they are not regressors.
 //   - Identification: instruments (only when present)
 //   - Offset:         exposure (only when present)
 //   - Inference:      unit / time / cluster (only when present)
@@ -87,7 +88,7 @@ export function ModelSpecBlocks({ spec }: { spec: ModelSpec }) {
 
   return (
     <div data-testid="model-spec-blocks">
-      <Block label="Formula">
+      <Block label="Model specification">
         <div>{formula}</div>
         {meta && (
           <div style={{ marginTop: 4, fontSize: 11, color: "var(--label-tertiary)" }}>

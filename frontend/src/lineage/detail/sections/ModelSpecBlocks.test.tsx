@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { ModelSpecBlocks } from "./ModelSpecBlocks";
 
-it("splits formula / identification / offset / inference blocks", () => {
+it("labels the RHS-only expression as model specification, not an estimated formula", () => {
   render(
     <ModelSpecBlocks
       spec={{
@@ -12,6 +12,8 @@ it("splits formula / identification / offset / inference blocks", () => {
     />,
   );
   expect(screen.getByText("wage ~ schooling + age")).toBeInTheDocument();
+  expect(screen.getByText("Model specification")).toBeInTheDocument();
+  expect(screen.queryByText("Formula")).not.toBeInTheDocument();
   expect(screen.getByText(/Identification/)).toBeInTheDocument();
   expect(screen.queryByText(/qob/)).not.toBeNull();
 });
