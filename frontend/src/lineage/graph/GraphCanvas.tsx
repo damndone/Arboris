@@ -390,6 +390,22 @@ export function GraphCanvas({
   // "Horizontal" or "Vertical" click forces a fresh dagre snap.
   const [layoutLocal, setLayoutLocal] = useState<LayoutMode>(DEFAULT_LAYOUT);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  // The seedNodes useMemo bakes callbacks into node data but deliberately
+  // omits them from its deps (they must not force a re-layout). Route them
+  // through refs so the baked callbacks can never go stale if a caller
+  // passes an unstable closure.
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const onExpandGroupRef = useRef(onExpandGroup);
+  onExpandGroupRef.current = onExpandGroup;
+  const selectMember = useCallback(
+    (nodeId: string) => onSelectRef.current(nodeId),
+    [],
+  );
+  const toggleGroup = useCallback(
+    (groupId: string) => onExpandGroupRef.current(groupId),
+    [],
+  );
   const layout = layoutProp ?? layoutLocal;
   const handleLayout = useCallback(
     (mode: LayoutMode) => {
@@ -481,7 +497,7 @@ export function GraphCanvas({
           node: groupAsNode(g),
           state: "related",
           groupId: g.id,
-          onToggleGroup: onExpandGroup,
+          onToggleGroup: toggleGroup,
         },
         selected: false,
       }));
@@ -494,8 +510,8 @@ export function GraphCanvas({
         data: {
           label: g.display_label,
           gid: g.id,
-          onSelectMember: onSelect,
-          onToggleGroup: onExpandGroup,
+          onSelectMember: selectMember,
+          onToggleGroup: toggleGroup,
           members: g.members.map((member) => {
             const roles = varRoles.get(member.id);
             return {
@@ -512,30 +528,47 @@ export function GraphCanvas({
           height: Math.min(460, 72 + Math.ceil(g.members.length / 2) * 54),
         },
       }));
-    const candidateEdges: RFEdge[] = [];
     // v1.6.5: drop the legacy aggregate stage→model fit edge when role edges
     // feed that model (P1: avoids a redundant parallel path), and style the
     // role edges solid/dashed + coloured by role.
+    //
+    // v1.6.8: edges whose endpoints fold into the same visible pair merge into
+    // one edge. Role styling is only honest when EVERY merged edge carries the
+    // same role op — a variable group usually aggregates several roles, and
+    // colouring the merged edge by whichever member came first would lie.
+    const mergedEdges = new Map<
+      string,
+      { source: string; target: string; ops: Set<string | null> }
+    >();
     for (const e of suppressAggregateEdges(model.edges)) {
       const src = memberToGroup.get(e.source) ?? e.source;
       const tgt = memberToGroup.get(e.target) ?? e.target;
       if (src === tgt) continue;
       if (!visible.has(src) || !visible.has(tgt)) continue;
-      candidateEdges.push({
-        id: `${src}->${tgt}`,
-        source: src,
-        target: tgt,
-        animated: false,
-        ...(isRoleOp(e.op) ? { style: roleEdgeStyle(e.op!) } : {}),
-      });
+      const key = `${src}|${tgt}`;
+      const entry = mergedEdges.get(key);
+      if (entry) entry.ops.add(e.op ?? null);
+      else
+        mergedEdges.set(key, {
+          source: src,
+          target: tgt,
+          ops: new Set([e.op ?? null]),
+        });
     }
-    const seen = new Set<string>();
-    const uniqEdges = candidateEdges.filter((e) => {
-      const key = `${e.source}|${e.target}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    const uniqEdges: RFEdge[] = [...mergedEdges.values()].map(
+      ({ source, target, ops }) => {
+        const onlyOp = ops.size === 1 ? [...ops][0] : null;
+        return {
+          id: `${source}->${target}`,
+          source,
+          target,
+          animated: false,
+          ...(onlyOp !== null && isRoleOp(onlyOp)
+            ? { style: roleEdgeStyle(onlyOp) }
+            : {}),
+        };
+      },
+    );
 
     // V1.5.1 T4' — rankdir derives from layout mode. "free" still seeds
     // with LR dagre so first paint is sensible; once seeded, HF5's

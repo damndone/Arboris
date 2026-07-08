@@ -196,6 +196,16 @@ def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
             message="Project name must not contain path separators.",
             details={"field": "name"},
         )
+    if name in {".", ".."}:
+        # `parent / ".."` escapes the parent: create_project mkdirs with
+        # exist_ok=True and writes project.yaml/config.yml unconditionally,
+        # so it would scaffold project files into an arbitrary existing dir.
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name must be a real directory name.",
+            details={"field": "name"},
+        )
     parent = Path(parent_raw).expanduser()
     if not parent.is_absolute():
         raise WorkbenchAPIError(

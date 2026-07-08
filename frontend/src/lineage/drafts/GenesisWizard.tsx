@@ -81,6 +81,15 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function firstNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
 export function GenesisWizard({
   projectRoot,
   onClose,
@@ -200,13 +209,104 @@ export function GenesisWizard({
     setTranspose(Boolean(tableParams.transpose));
     setTableConfigured(table?.status === "configured");
     setModelConfigured(model?.status === "configured");
-    setModelType((current) => firstString(modelParams.model_type) || model?.model_type || current);
+    const savedType = firstString(modelParams.model_type) || model?.model_type || "";
+    setModelType((current) => savedType || current);
     const nextY = firstString(modelParams.y);
     if (nextY) setY(nextY);
     const modelX = stringList(modelParams.x);
-    if (modelX.length > 0) setX(modelX.join(", "));
     const modelFocal = stringList(modelParams.focal_x);
     if (modelFocal.length > 0) setFocal(modelFocal);
+
+    // B2 (2026-07-08): saved model params must round-trip into the FULL form
+    // state, not just y/x/focal. Otherwise resuming a structural draft
+    // (IV/DID/CS/SA/dCDH/panel/prediction) and pressing "保存模型配置" rebuilds
+    // params from pristine role state and silently strips the saved roles.
+    // Convention (matches the y/x guards above): restore only what is present;
+    // never reset absent fields, because adoptDraft also runs after table-only
+    // patches while the user is still mid-edit.
+    const savedCovariance = firstString(modelParams.covariance);
+    if (savedCovariance) setCovariance(savedCovariance);
+    const savedImputation = firstString(modelParams.imputation);
+    if (savedImputation) {
+      try {
+        const parsed: unknown = JSON.parse(savedImputation);
+        const method =
+          parsed && typeof parsed === "object"
+            ? firstString((parsed as Record<string, unknown>).method)
+            : "";
+        if (method) setImputationMethod(method);
+      } catch {
+        /* malformed imputation payload — leave the control untouched */
+      }
+    }
+    const savedEntity = firstString(modelParams.entity_col);
+    const savedTime = firstString(modelParams.time_col);
+    const ivEndog = stringList(modelParams.iv_endog);
+    const ivInstruments = stringList(modelParams.iv_instruments);
+    if (ivEndog.length > 0 || ivInstruments.length > 0) {
+      setIvRole({ endog: ivEndog, instruments: ivInstruments });
+    }
+    // The saved `x` is the exog remainder; the IV picker UI expects endog and
+    // instruments back inside X so their role chips render.
+    const uiX =
+      savedType === "iv_2sls"
+        ? [
+            ...modelX,
+            ...ivEndog.filter((col) => !modelX.includes(col)),
+            ...ivInstruments.filter((col) => !modelX.includes(col)),
+          ]
+        : modelX;
+    if (uiX.length > 0) setX(uiX.join(", "));
+    if (savedType === "did" || savedType === "cs_did" || savedType === "sa_did") {
+      setDidRole((current) => ({
+        mode:
+          (firstString(modelParams.did_mode) as DIDRoleValue["mode"]) ||
+          current.mode,
+        entity: savedEntity || current.entity,
+        time: savedTime || current.time,
+        cohort: firstString(modelParams.did_cohort_col) || current.cohort,
+        treat: firstString(modelParams.did_treat_col) || current.treat,
+        post: firstString(modelParams.did_post_col) || current.post,
+        status: firstString(modelParams.did_status_col) || current.status,
+      }));
+    } else if (savedType === "dcdh") {
+      setDcdhValue((current) => ({
+        entity: savedEntity || current.entity,
+        time: savedTime || current.time,
+        treatmentPath:
+          firstString(modelParams.did_treatment_path) || current.treatmentPath,
+        clusterVar: firstString(modelParams.cs_cluster_var) || current.clusterVar,
+      }));
+    } else {
+      if (savedEntity) setEntityCol(savedEntity);
+      if (savedTime) setTimeCol(savedTime);
+    }
+    if (savedType === "cs_did" || savedType === "sa_did") {
+      setCsValue((current) => ({
+        controlGroup:
+          (firstString(modelParams.cs_control_group) as CSValue["controlGroup"]) ||
+          current.controlGroup,
+        estMethod:
+          (firstString(modelParams.cs_est_method) as CSValue["estMethod"]) ||
+          current.estMethod,
+        basePeriod:
+          (firstString(modelParams.cs_base_period) as CSValue["basePeriod"]) ||
+          current.basePeriod,
+        anticipation:
+          firstNumber(modelParams.cs_anticipation) ?? current.anticipation,
+        clusterVar: firstString(modelParams.cs_cluster_var) || current.clusterVar,
+        honestDid: modelParams.honest_did === true ? true : current.honestDid,
+      }));
+    }
+    const savedPredictionType = firstString(modelParams.prediction_model_type);
+    if (savedPredictionType) {
+      setPredictionEnabled(true);
+      setPredictionModelType(savedPredictionType);
+      const savedFolds = firstNumber(modelParams.prediction_cv_folds);
+      if (savedFolds !== null) setPredictionCvFolds(savedFolds);
+      const savedSampling = firstString(modelParams.prediction_sampling_method);
+      if (savedSampling) setPredictionSampling(savedSampling);
+    }
     if (notify) onDraftUpdated?.(response);
   }
 

@@ -325,6 +325,74 @@ describe("GenesisWizard", () => {
     );
   });
 
+  it("resuming a structural draft round-trips saved params so re-save does not strip them", async () => {
+    // B2 regression (2026-07-08): adoptDraft used to restore only
+    // y/x/focal/model_type. Resuming an IV draft and pressing 保存模型配置 then
+    // rebuilt params from pristine role state, silently deleting
+    // iv_endog/iv_instruments from the saved draft.
+    const base = draftResponse("h1", "configured", "configured");
+    const ivDraft: api.PipelineDraftResponse = {
+      ...base,
+      draft: {
+        ...base.draft,
+        graph: {
+          ...base.draft.graph,
+          nodes: base.draft.graph.nodes.map((node) =>
+            node.node_type === "input.upload" || node.node_type === "table"
+              ? { ...node, columns: ["wage", "age", "educ", "distance_college"] }
+              : node.node_type === "model"
+                ? {
+                    ...node,
+                    model_type: "iv_2sls",
+                    params: {
+                      model_type: "iv_2sls",
+                      y: "wage",
+                      x: ["age"],
+                      covariance: "robust",
+                      iv_endog: ["educ"],
+                      iv_instruments: ["distance_college"],
+                    },
+                  }
+                : node,
+          ),
+        },
+      },
+    };
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
+      { draft_id: "draft_g1", status: "draft", draft_hash: "h1" },
+    ]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(ivDraft);
+    const patchSpy = vi.spyOn(api, "patchDraftNode").mockResolvedValue(ivDraft);
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "继续" }),
+    );
+    // The IV role picker must show the saved assignment (endog/instrument
+    // restored, and those columns folded back into the UI X list).
+    await waitFor(() =>
+      expect(screen.getByLabelText("role-educ")).toHaveValue("endog"),
+    );
+    expect(screen.getByLabelText("role-distance_college")).toHaveValue(
+      "instrument",
+    );
+
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+    await waitFor(() =>
+      expect(patchSpy).toHaveBeenCalledWith("/proj", "draft_g1", "model_1", {
+        params: {
+          model_type: "iv_2sls",
+          y: "wage",
+          x: ["age"],
+          covariance: "robust",
+          iv_endog: ["educ"],
+          iv_instruments: ["distance_college"],
+        },
+      }),
+    );
+  });
+
   it("patches covariance for ordinary regression genesis models", async () => {
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
     vi.spyOn(api, "previewFile").mockResolvedValue(preview());

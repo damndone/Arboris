@@ -128,7 +128,7 @@ export function WorkbenchRouteContainer({
 }
 
 function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
@@ -139,7 +139,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [pendingGenesisExecution, setPendingGenesisExecution] =
     useState<PendingGenesisExecution | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
-  const initializedGenesisQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
   const focusRunIsKnownHead = useMemo(
@@ -160,13 +159,16 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const resolvedRunId =
     focusRunId && focusRunIsKnownHead ? focusRunId : newestHeadRunId;
 
+  // `?genesis=1` is a one-shot handoff instruction from project creation, not
+  // state: open the wizard, then strip the param so reloads and unrelated
+  // query updates don't reopen a wizard the user already closed.
   useEffect(() => {
     if (searchParams.get("genesis") !== "1") return;
-    const key = `${projectRoot}\u0000${searchParams.toString()}`;
-    if (initializedGenesisQueryKey.current === key) return;
-    initializedGenesisQueryKey.current = key;
     setGenesisWizardOpen(true);
-  }, [projectRoot, searchParams]);
+    const next = new URLSearchParams(searchParams);
+    next.delete("genesis");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const legacyFocusProbeKey =
     forest && !forest.legacy && focusRunId && !focusRunIsKnownHead

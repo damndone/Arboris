@@ -11,7 +11,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
@@ -760,6 +760,42 @@ describe("WorkbenchRouteContainer", () => {
 
       expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
       expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
+    });
+
+    it("consumes ?genesis=1 after opening so a closed wizard does not reopen", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+      let currentSearch: string | null = null;
+      function LocationProbe() {
+        currentSearch = useLocation().search;
+        return null;
+      }
+      render(
+        <MemoryRouter initialEntries={["/p/slug/graph?genesis=1"]}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <LocationProbe />
+                  <WorkbenchHome projectRoot="/proj" />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      // The handoff param is one-shot: it must leave the URL once consumed, so
+      // reload-style remounts and unrelated query updates cannot reopen a
+      // wizard the user closed.
+      await waitFor(() => expect(currentSearch).not.toContain("genesis"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() =>
+        expect(screen.queryByTestId("genesis-wizard-drawer")).toBeNull(),
+      );
     });
 
     it("legacy deep links fall back to the legacy per-run workbench when the project forest omits the run", async () => {
