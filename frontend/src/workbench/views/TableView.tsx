@@ -117,7 +117,7 @@ const CONTAINER_STYLE: React.CSSProperties = {
   padding: 24,
   gap: 20,
   height: "100%",
-  minHeight: 320,
+  minHeight: 0,
   overflow: "auto",
 };
 

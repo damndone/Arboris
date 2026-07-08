@@ -77,6 +77,16 @@ function mountAt(initialPath: string) {
   );
 }
 
+function dispatchPointerDrag(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  clientY: number,
+) {
+  const event = new MouseEvent(type, { bubbles: true, clientY });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  fireEvent(target, event);
+}
+
 function forestResponse(focusKey = "hash_model"): HeadSetResponse {
   return {
     schema_version: 2,
@@ -386,6 +396,43 @@ describe("WorkbenchRouteContainer", () => {
       await screen.findByTestId("view-table");
       expect(screen.getByTestId("run-rail")).toBeInTheDocument();
       expect(screen.getByTestId("bottom-panel")).toBeInTheDocument();
+    });
+
+    it("scopes BottomPanel to the center workbench column instead of spanning the side panels", async () => {
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      await screen.findByTestId("detail-drawer");
+
+      const centerColumn = screen.getByTestId("workbench-center-column");
+      expect(centerColumn).toContainElement(screen.getByTestId("workbench-main"));
+      expect(centerColumn).toContainElement(screen.getByTestId("bottom-panel"));
+      expect(centerColumn).not.toContainElement(screen.getByTestId("run-rail"));
+      expect(centerColumn).not.toContainElement(screen.getByTestId("detail-drawer"));
+    });
+
+    it("ignores legacy panelOpen and keeps the BottomPanel expanded", async () => {
+      mountAt("/?tab=lineage&panel=logs&panelOpen=0");
+      await screen.findByTestId("graph-workbench");
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("panel-tab-logs"));
+
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
+    });
+
+    it("persists BottomPanel height when pointer-dragging the top splitter", async () => {
+      mountAt("/?tab=lineage");
+      await screen.findByTestId("graph-workbench");
+      const panel = screen.getByTestId("bottom-panel");
+      const splitter = screen.getByTestId("bottom-panel-resizer");
+
+      dispatchPointerDrag(splitter, "pointerdown", 500);
+      dispatchPointerDrag(splitter, "pointermove", 420);
+      dispatchPointerDrag(splitter, "pointerup", 420);
+
+      expect(panel).toHaveStyle({ height: "320px" });
+      expect(sessionStorage.getItem("workbench:bottomPanelHeight:r1")).toBe("320");
     });
 
     it("passes the project root into RunHistoryRail on slug routes without project_root query", async () => {

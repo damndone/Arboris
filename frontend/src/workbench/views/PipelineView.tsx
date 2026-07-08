@@ -23,7 +23,8 @@ export function PipelineView() {
         color: "var(--label-secondary)",
         textAlign: "center",
         height: "100%",
-        minHeight: 320,
+        minHeight: 0,
+        overflow: "auto",
       }}
     >
       <div style={{ fontSize: 18, color: "var(--label)", fontWeight: 600 }}>

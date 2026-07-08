@@ -10,7 +10,7 @@
 // Probe captures the current `state` and `dispatch` into a ref so each
 // `act(() => ref.current.dispatch.foo())` can be followed by ref reads.
 
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   MemoryRouter,
@@ -73,7 +73,7 @@ describe("WorkbenchStateProvider — initial parsing", () => {
     expect(state().focusKey).toBeNull();
     expect(state().pinned).toBe(false);
     expect(state().searchQuery).toBe("");
-    expect(state().bottomPanel).toEqual({ id: "logs", open: false });
+    expect(state().bottomPanel).toBe("logs");
   });
 
   it("hydrates tabs/active/view/focus/pinned/q/panel from URL", () => {
@@ -87,7 +87,16 @@ describe("WorkbenchStateProvider — initial parsing", () => {
     expect(state().focusKey).toBe("n1");
     expect(state().pinned).toBe(true);
     expect(state().searchQuery).toBe("income");
-    expect(state().bottomPanel).toEqual({ id: "shell", open: true });
+    expect(state().bottomPanel).toBe("shell");
+  });
+
+  it("normalizes legacy panelOpen out of the URL without changing the panel tab", async () => {
+    renderAt("/?panel=shell&panelOpen=1");
+    expect(state().bottomPanel).toBe("shell");
+    await waitFor(() =>
+      expect(new URLSearchParams(ref.current!.search).get("panelOpen")).toBeNull(),
+    );
+    expect(new URLSearchParams(ref.current!.search).get("panel")).toBe("shell");
   });
 
   it("drops focus when validNodeKeys excludes it (plan §7 last row)", () => {
@@ -256,22 +265,18 @@ describe("View / panel / search dispatch", () => {
     expect(new URLSearchParams(ref.current!.search).get("view")).toBe("table");
   });
 
-  it("togglePanel flips panelOpen", () => {
+  it("does not expose the old togglePanel collapse action", () => {
     renderAt("/");
-    expect(state().bottomPanel.open).toBe(false);
-    act(() => dispatch().togglePanel());
-    expect(state().bottomPanel.open).toBe(true);
-    expect(new URLSearchParams(ref.current!.search).get("panelOpen")).toBe(
-      "1",
-    );
+    expect("togglePanel" in dispatch()).toBe(false);
   });
 
   it("setBottomPanel switches active panel id", () => {
     renderAt("/");
-    act(() =>
-      dispatch().setBottomPanel({ id: "shell", open: true }),
-    );
-    expect(state().bottomPanel).toEqual({ id: "shell", open: true });
+    act(() => dispatch().setBottomPanel("shell"));
+    expect(state().bottomPanel).toBe("shell");
+    const params = new URLSearchParams(ref.current!.search);
+    expect(params.get("panel")).toBe("shell");
+    expect(params.get("panelOpen")).toBeNull();
   });
 
   it("clearSearch removes q and resets searchCursor + searchCursorKey", () => {

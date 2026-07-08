@@ -389,7 +389,9 @@ function AppShell() {
         </button>
       </nav>
 
-      <Outlet context={context} />
+      <div className="workbench-outlet">
+        <Outlet context={context} />
+      </div>
     </main>
   );
 }

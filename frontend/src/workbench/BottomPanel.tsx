@@ -2,14 +2,11 @@
 //
 // V1.5.2 P4 — bottom panel host. Plan §12.
 //
-// Tab strip + body. Active tab follows `state.bottomPanel.id`; open/
-// close follows `state.bottomPanel.open` (URL-backed). Splitter
-// height persists per-runId in sessionStorage (Tier 2).
-//
-// V1.5.2 doesn't implement an actual draggable splitter; height is a
-// fixed 240px to keep the surface honest. A real drag handle lands
-// in V1.5.3 alongside the Shell panel that needs the vertical room.
+// Tab strip + body. Active tab follows `state.bottomPanel.id`. The panel
+// stays mounted in the bottom slot; the splitter height persists per-runId
+// in sessionStorage (Tier 2).
 
+import { useCallback, useRef, type PointerEvent } from "react";
 import { useWorkbench } from "./WorkbenchStateProvider";
 import {
   bottomPanelRegistry,
@@ -23,30 +20,125 @@ interface BottomPanelProps {
   projectRoot: string;
 }
 
+const MIN_PANEL_HEIGHT = 160;
+const DEFAULT_PANEL_HEIGHT = 240;
+const MAX_PANEL_HEIGHT = 520;
+
+function clampHeight(height: number): number {
+  if (!Number.isFinite(height)) return DEFAULT_PANEL_HEIGHT;
+  return Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Math.round(height)));
+}
+
+function usePointerResize({
+  height,
+  setHeight,
+  clampHeight: clamp,
+}: {
+  height: number;
+  setHeight: (next: number) => void;
+  clampHeight: (height: number) => number;
+}) {
+  const dragStart = useRef<{ y: number; height: number; pointerId: number } | null>(
+    null,
+  );
+
+  const commitHeight = useCallback(
+    (nextHeight: number) => {
+      setHeight(clamp(nextHeight));
+    },
+    [clamp, setHeight],
+  );
+
+  const onPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      dragStart.current = {
+        y: event.clientY,
+        height: clamp(height),
+        pointerId: event.pointerId,
+      };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    [clamp, height],
+  );
+
+  const onPointerMove = useCallback(
+    (event: PointerEvent<HTMLDivElement>) => {
+      const start = dragStart.current;
+      if (!start || start.pointerId !== event.pointerId) return;
+      commitHeight(start.height + start.y - event.clientY);
+    },
+    [commitHeight],
+  );
+
+  const onPointerEnd = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragStart.current = null;
+  }, []);
+
+  return { commitHeight, onPointerDown, onPointerMove, onPointerEnd };
+}
+
 export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
   const { state, dispatch } = useWorkbench();
-  // V1.5.2 fixed 240px; height is Tier 2 so a future drag handle can
-  // wire in here without changing the URL contract.
-  const [height] = useSessionByRunId<number>(runId, "bottomPanelHeight", 240);
+  const [height, setHeight] = useSessionByRunId<number>(
+    runId,
+    "bottomPanelHeight",
+    DEFAULT_PANEL_HEIGHT,
+  );
+  const resize = usePointerResize({
+    height,
+    setHeight,
+    clampHeight,
+  });
 
   const ctx: BottomPanelContext = { runId, projectRoot };
-  const current = panelById(state.bottomPanel.id);
+  const current = panelById(state.bottomPanel);
   const Body = current?.Component ?? null;
 
   return (
     <div
       data-testid="bottom-panel"
-      data-open={state.bottomPanel.open ? "true" : "false"}
+      data-open="true"
       style={{
         borderTop: "1px solid var(--separator, #2e2e30)",
         background: "var(--surface-elevated, transparent)",
         display: "flex",
         flexDirection: "column",
         flex: "0 0 auto",
-        height: state.bottomPanel.open ? height : 32,
-        minHeight: 32,
+        height: clampHeight(height),
+        minHeight: MIN_PANEL_HEIGHT,
       }}
     >
+      <div
+        role="separator"
+        aria-label="Resize bottom panel"
+        aria-orientation="horizontal"
+        data-testid="bottom-panel-resizer"
+        tabIndex={0}
+        onPointerDown={resize.onPointerDown}
+        onPointerMove={resize.onPointerMove}
+        onPointerUp={resize.onPointerEnd}
+        onPointerCancel={resize.onPointerEnd}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            resize.commitHeight(height + 24);
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            resize.commitHeight(height - 24);
+          }
+        }}
+        style={{
+          height: 8,
+          marginTop: -4,
+          cursor: "ns-resize",
+          flex: "0 0 auto",
+          touchAction: "none",
+        }}
+      />
       <div
         role="tablist"
         aria-label="Bottom panels"
@@ -56,9 +148,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
           alignItems: "stretch",
           gap: 0,
           height: 32,
-          borderBottom: state.bottomPanel.open
-            ? "1px solid var(--separator, #2e2e30)"
-            : "0",
+          borderBottom: "1px solid var(--separator, #2e2e30)",
           padding: "0 4px",
           flex: "0 0 auto",
         }}
@@ -67,8 +157,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
           .filter((p) => p.shouldRender(ctx))
           .sort((a, b) => a.order - b.order)
           .map((panel) => {
-            const isActive =
-              panel.id === state.bottomPanel.id && state.bottomPanel.open;
+            const isActive = panel.id === state.bottomPanel;
             const disabled = panel.disabled?.(ctx);
             return (
               <button
@@ -80,14 +169,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
                 data-disabled={disabled ? "true" : undefined}
                 title={disabled ? disabled.reason : undefined}
                 onClick={() => {
-                  // Tab click semantics:
-                  //   - clicking a different tab: switch + open
-                  //   - clicking the active tab: toggle open/closed
-                  if (panel.id === state.bottomPanel.id) {
-                    dispatch.togglePanel();
-                  } else {
-                    dispatch.setBottomPanel({ id: panel.id, open: true });
-                  }
+                  dispatch.setBottomPanel(panel.id);
                 }}
                 style={{
                   padding: "0 12px",
@@ -112,29 +194,17 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
             );
           })}
         <div style={{ flex: 1 }} />
-        {state.bottomPanel.open && (
-          <button
-            type="button"
-            data-testid="bottom-panel-close"
-            onClick={() => dispatch.togglePanel()}
-            aria-label="Close panel"
-            style={{
-              padding: "0 10px",
-              border: 0,
-              background: "transparent",
-              color: "var(--label-tertiary)",
-              cursor: "pointer",
-              fontSize: 14,
-            }}
-          >
-            ×
-          </button>
-        )}
       </div>
-      {state.bottomPanel.open && Body && (
+      {Body && (
         <div
           data-testid="bottom-panel-body"
-          style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            overflow: "auto",
+          }}
         >
           <Body {...ctx} />
         </div>

@@ -677,7 +677,7 @@ function EmptyProjectCanvas({
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        minHeight: 480,
+        minHeight: 0,
       }}
     >
       <div
@@ -907,6 +907,7 @@ function WorkbenchShell({
         flexDirection: "column",
         height: "100%",
         minHeight: 0,
+        overflow: "hidden",
       }}
     >
       <WorkbenchTopbar
@@ -933,15 +934,30 @@ function WorkbenchShell({
         }
       />
       <div
+        data-testid="workbench-main-row"
         style={{
           display: "flex",
           flexDirection: "row",
           flex: 1,
           minHeight: 0,
+          overflow: "hidden",
         }}
       >
         <RunHistoryRail projectRoot={projectRoot} />
-        <WorkbenchMain projectRoot={projectRoot} />
+        <div
+          data-testid="workbench-center-column"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+            minWidth: 0,
+            overflow: "hidden",
+          }}
+        >
+          <WorkbenchMain projectRoot={projectRoot} />
+          <BottomPanel runId={runId} projectRoot={projectRoot} />
+        </div>
         {selectedNode !== null && (
           <DetailDrawer
             node={selectedNode}
@@ -951,7 +967,6 @@ function WorkbenchShell({
           />
         )}
       </div>
-      <BottomPanel runId={runId} projectRoot={projectRoot} />
       <ContextMenu />
       <SearchPalette />
       <CommandPalette projectRoot={projectRoot} />

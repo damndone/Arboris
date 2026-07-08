@@ -66,6 +66,10 @@ button:disabled {
   padding: 20px 18px 36px;
 }
 
+.workbench-outlet {
+  min-height: 0;
+}
+
 .workbench-header {
   align-items: center;
   border-bottom: 1px solid var(--border-strong);
@@ -557,15 +561,34 @@ dd {
  * --label etc. The modifier class is a no-op selector; we keep the
  * full-width + top-padding declarations that aren't theme-related. */
 .workbench-shell--lineage {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   width: 100%;
   max-width: none;
   padding: 16px 24px 0;
+  overflow: hidden;
 }
 .workbench-shell--lineage .workbench-header {
   border-bottom: 1px solid var(--separator);
+  flex: 0 0 auto;
   padding-bottom: 12px;
   margin-bottom: 10px;
+}
+.workbench-shell--lineage .tabs {
+  flex: 0 0 auto;
+}
+.workbench-shell--lineage .workbench-outlet {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.workbench-shell--lineage .workbench-outlet > * {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .runs-table {

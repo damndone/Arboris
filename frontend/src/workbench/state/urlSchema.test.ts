@@ -42,13 +42,13 @@ describe("parseWorkbenchUrl", () => {
     expect(parseWorkbenchUrl(p("q=income")).searchQuery).toBe("income");
   });
 
-  it("parses panel + panelOpen", () => {
+  it("parses panel id and ignores legacy panelOpen", () => {
     const s = parseWorkbenchUrl(p("panel=shell&panelOpen=1"));
-    expect(s.bottomPanel).toEqual({ id: "shell", open: true });
+    expect(s.bottomPanel).toBe("shell");
   });
 
   it("ignores unknown panel ids", () => {
-    expect(parseWorkbenchUrl(p("panel=bogus")).bottomPanel.id).toBe("logs");
+    expect(parseWorkbenchUrl(p("panel=bogus")).bottomPanel).toBe("logs");
   });
 
   it("parses focus + pinned together", () => {
@@ -112,14 +112,21 @@ describe("writeWorkbenchUrl", () => {
     expect(out.get("view")).toBe("table");
   });
 
-  it("writes panel id when panel is non-default even if closed", () => {
-    // Closing a non-default panel still records the user's last choice
-    // so re-opening goes back to the same tab.
+  it("writes panel id when panel is non-default and strips legacy panelOpen", () => {
     const out = writeWorkbenchUrl(new URLSearchParams(), {
       ...defaultUrlSlice,
-      bottomPanel: { id: "shell", open: false },
+      bottomPanel: "shell",
     });
     expect(out.get("panel")).toBe("shell");
+    expect(out.get("panelOpen")).toBeNull();
+  });
+
+  it("strips stale legacy panelOpen even when preserving unrelated params", () => {
+    const out = writeWorkbenchUrl(
+      p("project_root=/foo&panelOpen=1"),
+      defaultUrlSlice,
+    );
+    expect(out.get("project_root")).toBe("/foo");
     expect(out.get("panelOpen")).toBeNull();
   });
 
@@ -138,18 +145,11 @@ describe("round-trip (parse → write → parse)", () => {
   const cases: Array<[string, WorkbenchUrlSlice]> = [
     ["all defaults", defaultUrlSlice],
     [
-      "graph + open logs panel",
-      {
-        ...defaultUrlSlice,
-        bottomPanel: { id: "logs", open: true },
-      },
-    ],
-    [
       "table view + focus pinned + search",
       {
         view: "table",
         searchQuery: "income",
-        bottomPanel: { id: "shell", open: true },
+        bottomPanel: "shell",
         focusKey: "n42",
         pinned: true,
       },
@@ -159,7 +159,7 @@ describe("round-trip (parse → write → parse)", () => {
       {
         view: "pipeline",
         searchQuery: "",
-        bottomPanel: { id: "logs", open: false },
+        bottomPanel: "logs",
         focusKey: "n9",
         pinned: false,
       },
