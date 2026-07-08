@@ -387,6 +387,25 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("run-rail")).toBeInTheDocument();
       expect(screen.getByTestId("bottom-panel")).toBeInTheDocument();
     });
+
+    it("passes the project root into RunHistoryRail on slug routes without project_root query", async () => {
+      vi.spyOn(api, "fetchRuns").mockResolvedValue({
+        runs: [
+          {
+            run_id: "20260705_095444_558248_221f751e",
+            status: "completed",
+            started_at: "2026-07-05T09:54:44Z",
+            finished_at: "2026-07-05T09:55:10Z",
+            model_type: "ols_robust",
+          } as never,
+        ],
+      });
+      mountAt("/p/slug/graph?view=table");
+
+      expect(await screen.findByTestId("run-rail-row-20260705_095444_558248_221f751e")).toBeInTheDocument();
+      expect(api.fetchRuns).toHaveBeenCalledWith("/proj");
+      expect(screen.queryByText("No runs yet.")).toBeNull();
+    });
   });
 
   it("switches active head and selects focus after context-driven rerun success", async () => {
@@ -699,9 +718,9 @@ describe("WorkbenchRouteContainer", () => {
       };
     }
 
-    function mountHome(focusRunId?: string) {
+    function mountHome(focusRunId?: string, initialEntry = "/") {
       return render(
-        <MemoryRouter initialEntries={["/"]}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route
               path="*"
@@ -731,6 +750,15 @@ describe("WorkbenchRouteContainer", () => {
 
       fireEvent.click(await screen.findByTestId("genesis-cta"));
       expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
+      expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
+    });
+
+    it("opens the genesis wizard automatically for newly created project handoff URLs", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+      mountHome(undefined, "/p/slug/graph?genesis=1");
+
+      expect(await screen.findByTestId("genesis-wizard-drawer")).toBeInTheDocument();
       expect(screen.getByTestId("genesis-wizard")).toBeInTheDocument();
     });
 

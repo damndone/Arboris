@@ -28,6 +28,7 @@ import {
   type ActionEntry,
 } from "./registry/actionRegistry";
 import { isEditableTarget } from "./keyboard";
+import { useProjectRootOptional } from "./ProjectRootContext";
 
 export interface CommandPaletteProps {
   projectRoot?: string | null;
@@ -44,6 +45,8 @@ type PaletteItem = {
 export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
   const { model, selectedKey } = useLineage();
   const { state, dispatch } = useWorkbench();
+  const contextProjectRoot = useProjectRootOptional();
+  const effectiveProjectRoot = projectRoot ?? contextProjectRoot;
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -83,14 +86,14 @@ export function CommandPalette({ projectRoot = null }: CommandPaletteProps) {
     () => ({
       id: "quick-run-legacy",
       label: "快速 run(旧表单)",
-      disabled: projectRoot ? false : { reason: "Project root required" },
+      disabled: effectiveProjectRoot ? false : { reason: "Project root required" },
       invoke: () => {
-        if (!projectRoot) return;
-        const params = new URLSearchParams({ project_root: projectRoot });
+        if (!effectiveProjectRoot) return;
+        const params = new URLSearchParams({ project_root: effectiveProjectRoot });
         navigate(`/submit?${params.toString()}`);
       },
     }),
-    [navigate, projectRoot],
+    [navigate, effectiveProjectRoot],
   );
   const actions = useMemo<PaletteItem[]>(
     () => [

@@ -44,6 +44,7 @@ import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
+import { ProjectRootProvider } from "./ProjectRootContext";
 import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
@@ -138,6 +139,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [pendingGenesisExecution, setPendingGenesisExecution] =
     useState<PendingGenesisExecution | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
+  const initializedGenesisQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
   const focusRunIsKnownHead = useMemo(
@@ -157,6 +159,14 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   }, [forest]);
   const resolvedRunId =
     focusRunId && focusRunIsKnownHead ? focusRunId : newestHeadRunId;
+
+  useEffect(() => {
+    if (searchParams.get("genesis") !== "1") return;
+    const key = `${projectRoot}\u0000${searchParams.toString()}`;
+    if (initializedGenesisQueryKey.current === key) return;
+    initializedGenesisQueryKey.current = key;
+    setGenesisWizardOpen(true);
+  }, [projectRoot, searchParams]);
 
   const legacyFocusProbeKey =
     forest && !forest.legacy && focusRunId && !focusRunIsKnownHead
@@ -598,8 +608,10 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
 
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0, overflow: "hidden" }}>
-      {body}
-      {genesisWizardDrawer}
+      <ProjectRootProvider projectRoot={projectRoot}>
+        {body}
+        {genesisWizardDrawer}
+      </ProjectRootProvider>
     </div>
   );
 }
@@ -894,11 +906,12 @@ function WorkbenchShell({
           minHeight: 0,
         }}
       >
-        <RunHistoryRail />
+        <RunHistoryRail projectRoot={projectRoot} />
         <WorkbenchMain projectRoot={projectRoot} />
         {selectedNode !== null && (
           <DetailDrawer
             node={selectedNode}
+            projectRoot={projectRoot}
             onClose={() => select(null)}
             onShowJson={() => setRawJsonOpen(true)}
           />

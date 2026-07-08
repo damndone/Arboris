@@ -81,10 +81,11 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
     };
   }, [open]);
 
-  function goToProject(root: string) {
+  function goToProject(root: string, opts: { openGenesis?: boolean } = {}) {
     setOpen(false);
     touchRecent(root);
-    navigate(`/p/${rootToSlug(root)}/graph`);
+    const suffix = opts.openGenesis ? "?genesis=1" : "";
+    navigate(`/p/${rootToSlug(root)}/graph${suffix}`);
   }
 
   return (
@@ -207,7 +208,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
         onClose={() => setModalOpen(false)}
         onCreated={(root) => {
           setModalOpen(false);
-          goToProject(root);
+          goToProject(root, { openGenesis: true });
         }}
       />
     </div>

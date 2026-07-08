@@ -144,6 +144,28 @@ describe("LauncherRoute", () => {
     expect(create).toBeDisabled();
   });
 
+  it("create modal keeps Browse as a guarded helper without synthesizing fake absolute paths", async () => {
+    renderAt("/");
+    fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
+
+    expect(screen.getByRole("button", { name: "Browse" })).toBeInTheDocument();
+    const folder = screen.getByLabelText("folder picker");
+    const picked = new File(["x"], "data.csv", { type: "text/csv" }) as File & {
+      webkitRelativePath?: string;
+    };
+    Object.defineProperty(picked, "webkitRelativePath", {
+      value: "picked-project/data.csv",
+    });
+    fireEvent.change(folder, { target: { files: [picked] } });
+
+    expect(screen.getByLabelText("parent folder")).toHaveValue("");
+    expect(screen.getByLabelText("project name")).toHaveValue("picked-project");
+    expect(
+      await screen.findByText(/不能获得后端可访问的绝对父目录/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
+  });
+
   it("stale recent: PROJECT_NOT_FOUND marks the card 失效 with 移除, no navigation", async () => {
     touchRecent("/gone/project");
     installFetchRouter((url) => {

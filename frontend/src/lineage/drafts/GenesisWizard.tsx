@@ -21,6 +21,12 @@ import { ImputationControls } from "../../runForm/ImputationControls";
 import { PanelControls } from "../../runForm/PanelControls";
 import { PredictionControls } from "../../runForm/PredictionControls";
 import { FocalSelect } from "../../runForm/FocalSelect";
+import { IVControls, type IVRoleValue } from "../../runForm/IVControls";
+import { DIDControls, type DIDRoleValue } from "../../runForm/DIDControls";
+import { CSControls, type CSValue } from "../../runForm/CSControls";
+import { DCDHControls, type DCDHValue } from "../../runForm/DCDHControls";
+import { ColumnRolePicker } from "../../runForm/ColumnRolePicker";
+import { CovarianceSelect, covarianceDefault } from "../../runForm/CovarianceSelect";
 
 type BusyState =
   | "resume"
@@ -102,6 +108,33 @@ export function GenesisWizard({
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  const [ivRole, setIvRole] = useState<IVRoleValue>({
+    endog: [],
+    instruments: [],
+  });
+  const [didRole, setDidRole] = useState<DIDRoleValue>({
+    mode: "cohort",
+    entity: "",
+    time: "",
+    cohort: "",
+    treat: "",
+    post: "",
+    status: "",
+  });
+  const [csValue, setCsValue] = useState<CSValue>({
+    controlGroup: "never",
+    estMethod: "dr",
+    basePeriod: "varying",
+    anticipation: 0,
+    clusterVar: "",
+    honestDid: false,
+  });
+  const [dcdhValue, setDcdhValue] = useState<DCDHValue>({
+    entity: "",
+    time: "",
+    treatmentPath: "",
+    clusterVar: "",
+  });
   const [predictionEnabled, setPredictionEnabled] = useState(false);
   const [predictionModelType, setPredictionModelType] = useState("");
   const [predictionCvFolds, setPredictionCvFolds] = useState(5);
@@ -245,30 +278,116 @@ export function GenesisWizard({
   }
 
   function modelParams(): Record<string, unknown> {
+    const isIV = modelType === "iv_2sls";
+    const isDID = modelType === "did";
+    const isCsDid = modelType === "cs_did";
+    const isSaDid = modelType === "sa_did";
+    const isDcdh = modelType === "dcdh";
+    const usesCsParams = isCsDid || isSaDid;
+    const usesDidRoles = isDID || isCsDid || isSaDid;
+    const didRoleCols = usesDidRoles
+      ? [
+          didRole.entity,
+          didRole.time,
+          didRole.cohort,
+          didRole.treat,
+          didRole.post,
+          didRole.status,
+        ].filter((col) => col !== "")
+      : [];
+    const dcdhRoleCols = isDcdh
+      ? [dcdhValue.entity, dcdhValue.time, dcdhValue.treatmentPath].filter(
+          (col) => col !== "",
+        )
+      : [];
+    const exogColumns = isIV
+      ? xColumns.filter(
+          (col) =>
+            !ivRole.endog.includes(col) && !ivRole.instruments.includes(col),
+        )
+      : usesDidRoles
+        ? xColumns.filter((col) => !didRoleCols.includes(col))
+        : isDcdh
+          ? xColumns.filter((col) => !dcdhRoleCols.includes(col))
+          : xColumns;
+    const defaultCovariance = covariance || covarianceDefault(capabilities);
     const params: Record<string, unknown> = {
       model_type: modelType,
       y: y.trim(),
-      x: xColumns,
+      x: exogColumns,
     };
     if (imputationMethod) params.imputation = JSON.stringify({ method: imputationMethod });
+    if (!isDID && !usesCsParams && !isDcdh && defaultCovariance) {
+      params.covariance = defaultCovariance;
+    }
     if (modelType === "panel_ols") {
       if (entityCol) params.entity_col = entityCol;
       if (timeCol) params.time_col = timeCol;
-      if (covariance) params.covariance = covariance;
+    }
+    if (isIV) {
+      if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
+      if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
+    }
+    if (usesDidRoles) {
+      if (didRole.entity) params.entity_col = didRole.entity;
+      if (didRole.time) params.time_col = didRole.time;
+      params.did_mode = didRole.mode;
+      if (didRole.cohort) params.did_cohort_col = didRole.cohort;
+      if (didRole.treat) params.did_treat_col = didRole.treat;
+      if (didRole.post) params.did_post_col = didRole.post;
+      if (didRole.status) params.did_status_col = didRole.status;
+    }
+    if (usesCsParams) {
+      params.cs_control_group = csValue.controlGroup;
+      params.cs_est_method = csValue.estMethod;
+      params.cs_base_period = csValue.basePeriod;
+      params.cs_anticipation = csValue.anticipation;
+      if (csValue.clusterVar) params.cs_cluster_var = csValue.clusterVar;
+      if (csValue.honestDid) params.honest_did = true;
+    }
+    if (isDcdh) {
+      if (dcdhValue.entity) params.entity_col = dcdhValue.entity;
+      if (dcdhValue.time) params.time_col = dcdhValue.time;
+      if (dcdhValue.treatmentPath) params.did_treatment_path = dcdhValue.treatmentPath;
+      if (dcdhValue.clusterVar) params.cs_cluster_var = dcdhValue.clusterVar;
     }
     if (predictionEnabled) {
       if (predictionModelType) params.prediction_model_type = predictionModelType;
       params.prediction_cv_folds = predictionCvFolds;
       if (predictionSampling) params.prediction_sampling_method = predictionSampling;
     }
-    if (focal.length > 0) params.focal_x = focal.filter((col) => xColumns.includes(col));
+    if (!isIV && !usesDidRoles && !isDcdh && focal.length > 0) {
+      params.focal_x = focal.filter((col) => exogColumns.includes(col));
+    }
     return params;
+  }
+
+  function setXSelection(column: string, checked: boolean) {
+    const current = xColumns;
+    if (checked) {
+      if (!current.includes(column)) setX([...current, column].join(", "));
+      return;
+    }
+    setX(current.filter((col) => col !== column).join(", "));
+    setFocal((items) => items.filter((col) => col !== column));
+    setIvRole((role) => ({
+      endog: role.endog.filter((col) => col !== column),
+      instruments: role.instruments.filter((col) => col !== column),
+    }));
   }
 
   async function saveModel() {
     if (!draft) return;
     if (!y.trim() || xColumns.length === 0) {
       setError("请选择 y，并至少选择一个 x。");
+      return;
+    }
+    if (modelType === "panel_ols" && entityCol && timeCol && entityCol === timeCol) {
+      setError("个体列与时间列不能是同一列 (entity == time)。");
+      return;
+    }
+    if (predictionEnabled && !predictionModelType) {
+      setError("已开启预测，请选择算法 (algorithm)。");
       return;
     }
     setBusy("model");
@@ -442,6 +561,46 @@ export function GenesisWizard({
               onCovariance={setCovariance}
             />
           )}
+          {modelType === "iv_2sls" && (
+            <div className="ios-group">
+              <p className="ios-hint">
+                把控制变量、内生变量、工具变量都加入 X，再在下方为每个变量指派角色。
+              </p>
+              <IVControls
+                columns={xColumns}
+                value={ivRole}
+                onChange={setIvRole}
+              />
+              <CovarianceSelect
+                capabilities={capabilities}
+                value={covariance}
+                onChange={setCovariance}
+              />
+            </div>
+          )}
+          {(modelType === "did" ||
+            modelType === "cs_did" ||
+            modelType === "sa_did") && (
+            <DIDControls
+              columns={columnNames}
+              value={didRole}
+              onChange={setDidRole}
+            />
+          )}
+          {(modelType === "cs_did" || modelType === "sa_did") && (
+            <CSControls
+              value={csValue}
+              columns={columnNames}
+              onChange={setCsValue}
+            />
+          )}
+          {modelType === "dcdh" && (
+            <DCDHControls
+              value={dcdhValue}
+              columns={columnNames}
+              onChange={setDcdhValue}
+            />
+          )}
           <PredictionControls
             capabilities={capabilities}
             enabled={predictionEnabled}
@@ -453,6 +612,18 @@ export function GenesisWizard({
             onCvFolds={setPredictionCvFolds}
             onSampling={setPredictionSampling}
           />
+          {modelType !== "panel_ols" &&
+            modelType !== "iv_2sls" &&
+            modelType !== "did" &&
+            modelType !== "cs_did" &&
+            modelType !== "sa_did" &&
+            modelType !== "dcdh" && (
+              <CovarianceSelect
+                capabilities={capabilities}
+                value={covariance}
+                onChange={setCovariance}
+              />
+            )}
           <label className="ios-field">
             <span>Dependent variable (y)</span>
             <select
@@ -483,6 +654,16 @@ export function GenesisWizard({
             onChange={setFocal}
             family={modelType}
           />
+          {preview && (
+            <ColumnRolePicker
+              columns={preview.columns}
+              excludedColumns={preview.excludedColumns}
+              y={y}
+              xColumns={xColumns}
+              onY={setY}
+              onX={setXSelection}
+            />
+          )}
           <button
             type="button"
             data-testid="genesis-save-model"

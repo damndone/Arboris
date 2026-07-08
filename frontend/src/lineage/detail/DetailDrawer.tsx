@@ -27,6 +27,8 @@ interface DetailDrawerProps {
   /** Optional explicit node; falls back to LineageContext's selectedKey. */
   node?: GraphViewNode;
   onClose: () => void;
+  /** Explicit project root for actions that create drafts from slug routes. */
+  projectRoot?: string;
   /**
    * Forwarded to DetailHeader. When set, the header mounts NodeActionMenu
    * and uses this callback for the "View Raw JSON" item. Wired by
@@ -38,6 +40,7 @@ interface DetailDrawerProps {
 export function DetailDrawer({
   node: nodeProp,
   onClose,
+  projectRoot,
   onShowJson,
 }: DetailDrawerProps) {
   const {
@@ -91,7 +94,12 @@ export function DetailDrawer({
         />
       )}
       <NodeOperationContextProvider node={resolved}>
-        <DetailHeader node={resolved} onClose={onClose} onShowJson={onShowJson} />
+        <DetailHeader
+          node={resolved}
+          onClose={onClose}
+          onShowJson={onShowJson}
+          projectRoot={projectRoot}
+        />
         {visibleSections.map((s) => (
           <s.Component key={s.id} node={resolved} />
         ))}

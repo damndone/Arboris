@@ -19,6 +19,7 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import * as api from "../../api";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { ForestContext } from "../../workbench/ForestContext";
+import { ProjectRootProvider } from "../../workbench/ProjectRootContext";
 import { NodeOperationContextProvider } from "../detail/NodeOperationContextProvider";
 import { makeOwnerResolutionSeedFixture } from "../api/nodeOperationContext";
 import type {
@@ -354,5 +355,36 @@ describe("NodeActionMenu", () => {
       }),
     );
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("uses ProjectRootProvider on slug routes when no projectRoot prop or query exists", async () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+
+    render(
+      <MemoryRouter initialEntries={["/p/slug/graph"]}>
+        <ProjectRootProvider projectRoot="/tmp/from-context">
+          <ForestContext.Provider
+            value={{
+              forest: seed.forest,
+              activeRunId: "run_a",
+              setActiveRunId: vi.fn(),
+            }}
+          >
+            <NodeOperationContextProvider node={selected}>
+              <NodeActionMenu
+                node={selected}
+                model={seed.graphModel}
+                onShowJson={vi.fn()}
+              />
+            </NodeOperationContextProvider>
+          </ForestContext.Provider>
+        </ProjectRootProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+
+    expect(screen.getByRole("menuitem", { name: /fork draft here/i })).toBeInTheDocument();
   });
 });

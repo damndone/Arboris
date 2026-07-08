@@ -13,7 +13,7 @@ import { rootToSlug } from "./projectSlug";
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
+  return <div data-testid="location">{location.pathname}{location.search}</div>;
 }
 
 function renderSwitcher(projectRoot = "/tmp/当前项目") {
@@ -100,7 +100,7 @@ describe("ProjectSwitcher (T11)", () => {
     expect(screen.queryByTestId("project-switcher-menu")).toBeNull();
   });
 
-  it("＋ 新建项目… opens the shared CreateProjectModal; create → navigate + recents", async () => {
+  it("＋ 新建项目… creates a project and hands off directly to genesis upload", async () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       status: 200,
@@ -122,7 +122,7 @@ describe("ProjectSwitcher (T11)", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(
-        `/p/${rootToSlug("/tmp/fresh")}/graph`,
+        `/p/${rootToSlug("/tmp/fresh")}/graph?genesis=1`,
       ),
     );
     expect(listRecents()[0].root).toBe("/tmp/fresh");

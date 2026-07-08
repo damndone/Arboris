@@ -173,7 +173,46 @@ def capabilities_endpoint() -> dict:
 
 @app.post("/projects")
 def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
-    project = create_project(Path(request.parent), request.name)
+    parent_raw = request.parent.strip()
+    name = request.name.strip()
+    if not parent_raw:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project parent path is required.",
+            details={"field": "parent"},
+        )
+    if not name:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name is required.",
+            details={"field": "name"},
+        )
+    if "/" in name or "\\" in name:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project name must not contain path separators.",
+            details={"field": "name"},
+        )
+    parent = Path(parent_raw).expanduser()
+    if not parent.is_absolute():
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Project parent path must be absolute.",
+            details={"field": "parent", "parent": parent_raw},
+        )
+    try:
+        project = create_project(parent, name)
+    except OSError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=ERROR_INVALID_PATH,
+            message="Cannot create project at parent path.",
+            details={"parent": str(parent), "reason": str(exc)},
+        ) from exc
     return {"project_root": str(project.root)}
 
 

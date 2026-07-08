@@ -26,9 +26,10 @@ export function LauncherRoute() {
   const [probeError, setProbeError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  function goToProject(root: string) {
+  function goToProject(root: string, opts: { openGenesis?: boolean } = {}) {
     touchRecent(root);
-    navigate(`/p/${rootToSlug(root)}/graph`);
+    const suffix = opts.openGenesis ? "?genesis=1" : "";
+    navigate(`/p/${rootToSlug(root)}/graph${suffix}`);
   }
 
   async function openRecent(root: string) {
@@ -141,7 +142,7 @@ export function LauncherRoute() {
         onClose={() => setModalOpen(false)}
         onCreated={(projectRoot) => {
           setModalOpen(false);
-          goToProject(projectRoot);
+          goToProject(projectRoot, { openGenesis: true });
         }}
       />
     </section>

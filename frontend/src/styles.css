@@ -272,6 +272,33 @@ button:focus-visible {
   align-self: end;
 }
 
+.create-project-modal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.create-project-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.create-project-form label {
+  min-width: 0;
+}
+
+.create-project-form__submit {
+  justify-self: start;
+}
+
+@media (max-width: 560px) {
+  .create-project-form__submit {
+    justify-self: stretch;
+  }
+}
+
 .visually-hidden {
   border: 0;
   clip: rect(0 0 0 0);

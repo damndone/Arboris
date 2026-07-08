@@ -160,6 +160,45 @@ describe("DetailHeader", () => {
     expect(headerScope.queryByText(/owner.*run_a/i)).not.toBeInTheDocument();
   });
 
+  it("passes projectRoot through the drawer so fork draft is reachable on slug routes", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find(
+      (n) => n.nodeKey === seed.sharedNodeKey,
+    )!;
+    render(
+      <MemoryRouter>
+        <ForestContext.Provider
+          value={{
+            forest: seed.forest,
+            activeRunId: seed.activeHeadRunId,
+            setActiveRunId: vi.fn(),
+          }}
+        >
+          <LineageContext.Provider
+            value={{
+              model: seed.graphModel,
+              selectedKey: selected.nodeKey,
+              select: vi.fn(),
+            }}
+          >
+            <DetailDrawer
+              node={selected}
+              projectRoot="/tmp/project-from-slug"
+              onClose={vi.fn()}
+              onShowJson={vi.fn()}
+            />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+
+    expect(
+      screen.getByRole("menuitem", { name: /fork draft here/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows resolver failure instead of fabricated owner for ambiguous context", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const selected = seed.forest.nodes.find(

@@ -66,7 +66,7 @@ describe("foldVariableClusters", () => {
     expect(labels).toEqual(["Dropped variables (4)", "Variables (4)"]);
   });
 
-  it("expanded group ids stay unfolded", () => {
+  it("expanded group ids return a contained expanded group with members", () => {
     const nodes = [
       v("a", "cleaned", "stage:cleaned"),
       v("b", "cleaned", "stage:cleaned"),
@@ -75,8 +75,11 @@ describe("foldVariableClusters", () => {
     ];
     const expanded = new Set(["group:variables:stage:cleaned"]);
     const { kept, groups } = foldVariableClusters(nodes, expanded);
-    expect(kept.length).toBe(4);
-    expect(groups.length).toBe(0);
+    expect(kept.length).toBe(0);
+    expect(groups.length).toBe(1);
+    expect(groups[0].id).toBe("group:variables:stage:cleaned");
+    expect(groups[0].expanded).toBe(true);
+    expect(groups[0].members.map((n) => n.id)).toEqual(nodes.map((n) => n.id));
   });
 
   it("nodes whose kind ≠ 'variable' fall through to kept untouched", () => {

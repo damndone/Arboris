@@ -1,11 +1,11 @@
 // v1.6.8 T10 — create-project modal.
 //
 // Exported separately so Task 11's topbar project switcher can reuse it.
-// The parent/name validation rules and the Browse folder-picker handling are
-// moved verbatim from the legacy SubmitRoute (App.tsx) — parent required;
-// name required + no path separators; webkitdirectory Browse derives the
-// parent from webkitRelativePath. Errors render inline in the modal (not the
-// global banner). Dialog pattern mirrors lineage/modals/RawJsonModal.tsx:
+// The parent/name validation rules are moved from the legacy SubmitRoute
+// (App.tsx) — parent required; name required + no path separators. Browser
+// folder pickers cannot expose a trustworthy absolute server path, so project
+// creation uses an explicit parent path field. Errors render inline in the
+// modal (not the global banner). Dialog pattern mirrors lineage/modals/RawJsonModal.tsx:
 // controlled open/onClose, Escape (capture + stopImmediatePropagation),
 // backdrop click closes.
 
@@ -32,7 +32,8 @@ export function CreateProjectModal({
   const [name, setName] = useState("demo");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [browseWarning, setBrowseWarning] = useState<string | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   // T11 R4: reset form state whenever the modal (re)opens — the topbar
   // project switcher makes reopening common, and a stale error / half-typed
@@ -42,6 +43,7 @@ export function CreateProjectModal({
     setParent("");
     setName("demo");
     setError(null);
+    setBrowseWarning(null);
     setBusy(false);
   }, [open]);
 
@@ -89,13 +91,16 @@ export function CreateProjectModal({
     }
   }
 
-  // Folder-picker handling — verbatim from SubmitRoute.
   function onFolderFiles(files: FileList | null) {
     const first = files?.[0] as (File & { webkitRelativePath?: string }) | undefined;
     const relativePath = first?.webkitRelativePath;
-    if (!relativePath) return;
-    const rootName = relativePath.split("/")[0];
-    if (rootName) setParent(parent ? parent : `/${rootName}`);
+    const folderName = relativePath?.split("/").filter(Boolean)[0];
+    if (folderName && (name.trim() === "" || name === "demo")) {
+      setName(folderName);
+    }
+    setBrowseWarning(
+      "Browse 只能读取浏览器提供的相对文件夹名，不能获得后端可访问的绝对父目录。请确认或手动输入 Parent folder 后再创建。",
+    );
   }
 
   return (
@@ -118,9 +123,8 @@ export function CreateProjectModal({
       }}
     >
       <section
-        className="panel"
+        className="panel create-project-modal"
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 480, maxWidth: "90vw" }}
       >
         <div className="panel-heading">
           <h2 id={CREATE_PROJECT_TITLE_ID}>新建项目</h2>
@@ -133,7 +137,10 @@ export function CreateProjectModal({
             ×
           </button>
         </div>
-        <div className="control-grid">
+        <p className="field-hint" style={{ margin: "0 0 12px" }}>
+          输入后端可访问的绝对父目录；浏览器不能可靠返回本机绝对路径。创建后会进入数据上传步骤。
+        </p>
+        <div className="create-project-form">
           <label>
             Parent folder
             <input
@@ -179,12 +186,22 @@ export function CreateProjectModal({
               <span className="field-error">{projectErrors.name}</span>
             )}
           </label>
-          <button type="button" disabled={!canCreate} onClick={onCreateProject}>
+          <button
+            className="create-project-form__submit"
+            type="button"
+            disabled={!canCreate}
+            onClick={onCreateProject}
+          >
             {busy ? "Creating…" : "Create project"}
           </button>
           {error && (
             <p className="field-error" role="alert">
               {error}
+            </p>
+          )}
+          {browseWarning && (
+            <p className="field-hint" role="status">
+              {browseWarning}
             </p>
           )}
         </div>

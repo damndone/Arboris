@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useLineage } from "../../lineage/LineageContext";
 import { useForest } from "../ForestContext";
+import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   artifactDownloadUrl,
   fetchRunArtifacts,
@@ -134,7 +135,8 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
   // the URL run. Falls back to the URL run in legacy (no forest context).
   const runId = forest?.activeRunId ?? model.runId;
   const [searchParams] = useSearchParams();
-  const projectRoot = projectRootProp ?? searchParams.get("project_root") ?? "";
+  const contextProjectRoot = useProjectRootOptional();
+  const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root") ?? "";
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);

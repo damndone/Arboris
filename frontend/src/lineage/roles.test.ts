@@ -39,6 +39,6 @@ describe("role canvas helpers", () => {
     expect(roleAbbrev("treatment")).toBe("D");
     expect(roleAbbrev("covariates")).toBe("Z");
     expect(roleAbbrev("instruments")).toBe("IV");
-    expect(roleAbbrev("explanatory_unspecified")).toBe("X?");
+    expect(roleAbbrev("explanatory_unspecified")).toBe("X");
   });
 });
