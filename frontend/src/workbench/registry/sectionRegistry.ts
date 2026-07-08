@@ -35,6 +35,7 @@ import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
+import { EstimatedEquationSection } from "../../lineage/detail/sections/EstimatedEquationSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { isAskAIEnabled } from "../featureFlags";
@@ -84,6 +85,14 @@ export const sectionRegistry: SectionEntry[] = [
     order: 30,
     shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0,
     Component: OperationSection,
+  },
+  {
+    // v1.6.8 — fitted equation from the owner run's coefficients; sits right
+    // above the specification so estimate vs spec read as a pair.
+    id: "estimatedEquation",
+    order: 34,
+    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
+    Component: EstimatedEquationSection,
   },
   {
     id: "roleGroups",
