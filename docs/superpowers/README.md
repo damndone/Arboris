@@ -9,7 +9,7 @@
 |---|---|---|---|
 | `handoff/` | "在某版本怎么起手"的快照 | 一次性，下一份出来即作废 | **只留最新一份 live**，旧的移 `archive/handoff/` |
 | `followups/` | 某版本评审记下的债 | 逐项到解决为止 | **只保留最新版本那份**当 live 滚动 backlog，见下 |
-| `roadmap/` | 长期产品/技术方向 | 长活 | 就地更新，不归档 |
+| `roadmap/` | 长期产品/技术方向（含 `architecture-debt.md` 架构债台账） | 长活 | 就地更新，不归档 |
 | `archive/` | 已冻结的历史 handoff / followups / 复盘 | immutable | 只读留痕，不再维护 |
 
 ## followups = 单一滚动 backlog（核心约定）
