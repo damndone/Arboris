@@ -157,6 +157,18 @@ def test_api_rejects_oversized_upload_and_slot_released(
         )
     assert rr2.status_code == 200
     assert rr2.json()["status"] == "running"
+    # Drain rr2 so its background thread releases the process-global run slot
+    # before the next slot-acquiring test — otherwise the leftover run 429s the
+    # next test under a combined `-k` selection (full gate stays green because
+    # intervening tests give the run time to finish).
+    run_id2 = rr2.json()["run_id"]
+    import time
+    for _ in range(120):
+        detail = client.get(f"/runs/{run_id2}", params={"project_root": proot2})
+        if detail.json()["status"] in ("completed", "blocked", "failed"):
+            break
+        time.sleep(0.5)
+    time.sleep(0.2)
 
 
 def test_list_runs_returns_summary_for_completed_run(completed_run):
