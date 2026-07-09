@@ -89,6 +89,15 @@ type LegacyFocusProbe = {
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
 
+// A draft-execute focus that never recorded a produced op node id degrades to
+// "no target": the pending-focus effect then simply finds nothing and gives up
+// after its budget instead of crashing — the run still activated + indexed.
+const EMPTY_FOCUS: PendingFocusTarget["focus"] = {
+  forest_node_key: null,
+  op_node_id: "",
+  node_hash: null,
+};
+
 interface WorkbenchHomeProps {
   projectRoot: string;
   /** Optional run deep link (?run=). Absent → newest head is the active run;
@@ -131,6 +140,16 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
   const [pendingGenesisRun, setPendingGenesisRun] =
     useState<PendingRun | null>(null);
+  // v1.6.9 B1 — draft-execute rides the same index-wait layer as genesis. The
+  // produced run is a background async job (a long run indexes minutes later),
+  // so the draft node must stay on the canvas until the run actually indexes
+  // rather than vanishing the instant the execute POST returns. The focus
+  // target is captured at execute time (the forest has no produced node yet)
+  // and consumed by onIndexed once the run appears.
+  const [pendingRerunRun, setPendingRerunRun] = useState<PendingRun | null>(
+    null,
+  );
+  const pendingRerunFocus = useRef<PendingFocusTarget["focus"] | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
@@ -312,6 +331,37 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     setPending: setPendingGenesisRun,
   });
 
+  // v1.6.9 B1 — draft-execute index-wait. onIndexed activates the produced run,
+  // NOW (not at POST time) sets the pending focus, removes the draft node, and
+  // best-effort deletes the persisted draft. onFailed marks the draft failed so
+  // a terminal-failed run shows on the canvas instead of vanishing silently.
+  usePendingRun({
+    pending: pendingRerunRun,
+    projectRoot,
+    forest,
+    refetch: () => void refetch(),
+    onIndexed: (runId) => {
+      setActiveRunId(runId);
+      setPendingFocusTarget({
+        runId,
+        focus: pendingRerunFocus.current ?? EMPTY_FOCUS,
+        attempts: 0,
+      });
+      if (pendingRerunRun) {
+        const draftId = pendingRerunRun.draftId;
+        dispatchDraft({ type: "remove", draftId });
+        void deletePipelineDraft(projectRoot, draftId).catch((e) =>
+          console.error("draft cleanup (delete) failed post-execute", e),
+        );
+      }
+      setPendingRerunRun(null);
+    },
+    onFailed: (draftId) => {
+      dispatchDraft({ type: "failed", draftId });
+    },
+    setPending: setPendingRerunRun,
+  });
+
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
   }
@@ -424,28 +474,26 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         validated_draft_hash: entry.validation?.validated_draft_hash ?? entry.draftHash,
         execution_mode: "rerun_child",
       });
-      setActiveRunId(result.focus.run_id);
-      setPendingFocusTarget({
-        runId: result.focus.run_id,
-        focus: {
-          forest_node_key: null,
-          op_node_id:
-            result.focus.poll?.rerun_from_op_node_id ??
-            result.produced_lineage.rerun_from_op_node_id ??
-            entry.sourceOpNodeId ??
-            "",
-          node_hash: null,
-        },
-        attempts: 0,
-      });
-      // Execute succeeded: remove the draft node regardless of cleanup outcome.
-      dispatchDraft({ type: "remove", draftId });
-      void refetch();
-      try {
-        await deletePipelineDraft(projectRoot, draftId);
-      } catch (cleanupErr) {
-        console.error("draft cleanup (delete) failed post-execute", cleanupErr);
-      }
+      // v1.6.9 B1 — the produced run is a background async job; it is NOT in the
+      // forest yet (a long run indexes minutes later). So keep the draft node on
+      // the canvas in its "executing" (pending) state — the `executing` dispatch
+      // above already set it — and hand off to the index-wait layer. Capture the
+      // focus target now (the forest has no produced node to focus yet) for
+      // onIndexed to consume. Everything the old success branch did inline —
+      // activate the run, set pending focus, remove the draft, delete the
+      // persisted draft — moves to onIndexed, gated on the run actually
+      // indexing. The old immediate `void refetch()` is dropped: usePendingRun
+      // owns refetching (it refetches every poll tick until the run indexes).
+      pendingRerunFocus.current = {
+        forest_node_key: null,
+        op_node_id:
+          result.focus.poll?.rerun_from_op_node_id ??
+          result.produced_lineage.rerun_from_op_node_id ??
+          entry.sourceOpNodeId ??
+          "",
+        node_hash: null,
+      };
+      setPendingRerunRun({ runId: result.focus.run_id, draftId, attempts: 0 });
     } catch (e) {
       dispatchDraft({ type: "failed", draftId });
       console.error("draft execute failed", e);
