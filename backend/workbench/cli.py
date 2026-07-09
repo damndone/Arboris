@@ -129,6 +129,27 @@ def run(
     mode: str = typer.Option("auto", "--mode"),
     model_type: str = typer.Option("auto", "--model-type"),
     imputation: str = typer.Option("", "--imputation"),
+    entity_col: str = typer.Option("", "--entity-col"),
+    time_col: str = typer.Option("", "--time-col"),
+    covariance: str = typer.Option("", "--covariance"),
+    iv_endog: list[str] = typer.Option(
+        [], "--iv-endog", help="Endogenous regressor. Repeat for multiple."
+    ),
+    iv_instruments: list[str] = typer.Option(
+        [], "--iv-instruments", help="Instrument column. Repeat for multiple."
+    ),
+    did_mode: str = typer.Option("", "--did-mode"),
+    did_cohort_col: str = typer.Option("", "--did-cohort-col"),
+    did_treat_col: str = typer.Option("", "--did-treat-col"),
+    did_post_col: str = typer.Option("", "--did-post-col"),
+    did_status_col: str = typer.Option("", "--did-status-col"),
+    did_treatment_path: str = typer.Option("", "--did-treatment-path"),
+    cs_control_group: str = typer.Option("", "--cs-control-group"),
+    cs_est_method: str = typer.Option("", "--cs-est-method"),
+    cs_base_period: str = typer.Option("", "--cs-base-period"),
+    cs_cluster_var: str = typer.Option("", "--cs-cluster-var"),
+    cs_anticipation: int = typer.Option(0, "--cs-anticipation"),
+    honest_did: bool = typer.Option(False, "--honest-did"),
 ) -> None:
     from .orchestrator import parse_imputation_request, run_workflow
 
@@ -140,6 +161,27 @@ def run(
         x=x,
         model_type=model_type,
         imputation=parse_imputation_request(imputation),
+        entity_col=entity_col,
+        time_col=time_col,
+        covariance=covariance,
+        # Orchestrator gates the IV path on a plain falsy check
+        # (`iv_endog or []`), so an empty list is equivalent to None —
+        # default invocations never enter the IV path. Mirror the API
+        # layer, which passes lists straight through.
+        iv_endog=list(iv_endog),
+        iv_instruments=list(iv_instruments),
+        did_mode=did_mode,
+        did_cohort_col=did_cohort_col,
+        did_treat_col=did_treat_col,
+        did_post_col=did_post_col,
+        did_status_col=did_status_col,
+        did_treatment_path=did_treatment_path,
+        cs_control_group=cs_control_group,
+        cs_est_method=cs_est_method,
+        cs_base_period=cs_base_period,
+        cs_cluster_var=cs_cluster_var,
+        cs_anticipation=cs_anticipation,
+        honest_did=honest_did,
     )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing
