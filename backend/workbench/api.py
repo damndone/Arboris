@@ -384,6 +384,7 @@ async def run_endpoint(
     honest_did: bool = Form(False),
     focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
 ) -> dict[str, str]:
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
@@ -442,6 +443,7 @@ async def batch_run_endpoint(
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
 ) -> dict:
+    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     if sheet_name or transpose == "true":
         raise HTTPException(
             status_code=400,

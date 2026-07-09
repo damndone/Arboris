@@ -946,3 +946,33 @@ def test_post_runs_file_persisted_in_run_dir(tmp_path: Path):
     detail = client.get(f"/runs/{run_id}", params={"project_root": str(proot)})
     lineage = detail.json().get("lineage", [])
     assert any("_uploads" in l.get("source", "") for l in lineage)
+
+
+def test_runs_rejects_missing_project_with_404(tmp_path: Path):
+    client = TestClient(app)
+    data = tmp_path / "data.csv"
+    data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
+    missing = tmp_path / "does_not_exist"
+    with data.open("rb") as handle:
+        resp = client.post(
+            "/runs",
+            data={"project_root": str(missing), "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "PROJECT_NOT_FOUND"
+
+
+def test_batch_runs_rejects_missing_project_with_404(tmp_path: Path):
+    client = TestClient(app)
+    data = tmp_path / "data.csv"
+    data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
+    missing = tmp_path / "does_not_exist"
+    with data.open("rb") as handle:
+        resp = client.post(
+            "/runs/batch",
+            data={"project_root": str(missing), "mode": "auto", "y_list": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "PROJECT_NOT_FOUND"
