@@ -10,25 +10,16 @@
 // Mirrors useGraphData's load/error/refetch contract.
 
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, fetchProjectForest } from "../../api";
+import { fetchProjectForest } from "../../api";
 import { adaptHeadSet } from "../api/graphAdapter";
 import type { ForestViewModel } from "../api/graphViewTypes";
-import type { GraphError } from "./useGraphData";
+import { classifyError, type GraphError } from "./useGraphData";
 
 export interface UseForestDataResult {
   forest: ForestViewModel | null;
   loading: boolean;
   error: GraphError | null;
   refetch: () => void;
-}
-
-function classifyError(e: unknown): GraphError {
-  if (e instanceof ApiError) {
-    if (e.status === 404) return { kind: "not_found", detail: e.message };
-    if (e.status === 422) return { kind: "corrupt", detail: e.message };
-    return { kind: "network", detail: e.message };
-  }
-  return { kind: "network", detail: String(e) };
 }
 
 export function useForestData(projectRoot: string): UseForestDataResult {
