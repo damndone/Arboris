@@ -22,3 +22,22 @@ frontend/dist/
 
 # runtime matplotlib cache (not part of the repo)
 .matplotlib/
+
+# Vite dependency pre-bundle cache. Regenerated on dev server start,
+# never read at runtime — same rationale as frontend/dist/ above.
+.vite/
+
+# CI template kept local, NOT activated. Rationale: solo dev on a private
+# repo (metered Actions minutes) who already runs the full gate locally before
+# every version. The workflow also triggers on push to every branch, which
+# would burn the monthly budget fast. Before enabling: `git rm` this ignore
+# line and tighten triggers to main-only (push:[main] + pull_request:[main]).
+.github/
+
+# Local-only design-prototype reference (root-level handoff/ + uiux/): the
+# original UI mockups, screenshots, and handoff/QA notes. Kept on disk as a
+# reference but deliberately out of the repo (~4M of prototype scratch). The
+# leading slash anchors to the repo root so the TRACKED docs/superpowers/handoff/
+# tree is unaffected.
+/handoff/
+/uiux/
