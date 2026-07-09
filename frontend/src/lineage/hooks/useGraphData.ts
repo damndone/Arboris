@@ -10,7 +10,8 @@
 // Error model (plan §8 T5.1):
 //   - 404                              → { kind: "not_found" }
 //   - 422                              → { kind: "corrupt" }
-//   - fetch rejection / non-HTTP error → { kind: "network" }
+//   - genuine fetch rejection / 5xx    → { kind: "network" }
+//   - exception thrown in adaptRunGraph → { kind: "adapter_error" }
 //   - UnsupportedGraphSchemaError      → { kind: "unsupported_schema", schemaVersion }
 
 import { useCallback, useEffect, useState } from "react";
@@ -25,6 +26,7 @@ export type GraphError =
   | { kind: "not_found"; detail?: string }
   | { kind: "corrupt"; detail?: string }
   | { kind: "network"; detail?: string }
+  | { kind: "adapter_error"; detail?: string }
   | { kind: "unsupported_schema"; schemaVersion: number; detail?: string };
 
 export interface UseGraphDataResult {
@@ -34,7 +36,7 @@ export interface UseGraphDataResult {
   refetch: () => void;
 }
 
-function classifyError(e: unknown): GraphError {
+export function classifyError(e: unknown): GraphError {
   if (e instanceof UnsupportedGraphSchemaError) {
     return { kind: "unsupported_schema", schemaVersion: e.schemaVersion };
   }
@@ -43,7 +45,14 @@ function classifyError(e: unknown): GraphError {
     if (e.status === 422) return { kind: "corrupt", detail: e.message };
     return { kind: "network", detail: e.message };
   }
-  return { kind: "network", detail: String(e) };
+  // A genuine fetch rejection is a TypeError whose message mentions "fetch".
+  // Anything else reaching here is an exception thrown INSIDE adaptRunGraph
+  // (TypeError/RangeError on malformed data) — a real adapter bug, not the
+  // network. Mislabeling it "network" hid adapter bugs behind a JS stack.
+  if (e instanceof TypeError && /fetch/i.test(e.message)) {
+    return { kind: "network", detail: e.message };
+  }
+  return { kind: "adapter_error", detail: String(e) };
 }
 
 export function useGraphData(
