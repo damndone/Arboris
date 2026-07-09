@@ -238,6 +238,37 @@ describe("usePendingRun", () => {
     expect(refetch).not.toHaveBeenCalled();
   });
 
+  it("poll timer survives re-renders with fresh callback instances", async () => {
+    // Regression pin: the container passes onIndexed/onFailed/refetch as fresh
+    // inline arrows each render. If those sat in the effect deps, every
+    // re-render would tear down and restart the 1000ms timer — renders faster
+    // than 1s would starve the poll forever and strand the draft silently.
+    (fetchRunDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "running",
+    });
+    const forest = forestWith([]);
+    const pending = { runId: "r1", draftId: "d1", attempts: 0 };
+    const makeProps = () => ({
+      pending,
+      projectRoot: "/p",
+      forest,
+      refetch: vi.fn(),
+      onIndexed: vi.fn(),
+      onFailed: vi.fn(),
+      setPending: vi.fn(),
+    });
+    const { rerender } = renderHook(
+      (props: ReturnType<typeof makeProps>) => usePendingRun(props),
+      { initialProps: makeProps() },
+    );
+    // Re-render every 200ms with NEW callback instances for >2s total.
+    for (let i = 0; i < 12; i++) {
+      await vi.advanceTimersByTimeAsync(200);
+      rerender(makeProps());
+    }
+    expect(fetchRunDetail).toHaveBeenCalled();
+  });
+
   it("cancels the timer on unmount (no poll fires)", async () => {
     (fetchRunDetail as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "running",

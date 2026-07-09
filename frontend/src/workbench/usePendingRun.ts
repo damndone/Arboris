@@ -21,11 +21,17 @@
 // long the run itself takes.
 //
 // The pending state lives in the CALLER (like the original genesis state); the
-// hook only reads it and requests updates via setPending. onIndexed/onFailed
-// callbacks are re-created each render — pass plain inline arrows; do NOT
-// memoize them in a way that captures a stale pending value.
+// hook only reads it and requests updates via setPending.
+//
+// Callback stability: onIndexed/onFailed/refetch/setPending are latest-ref'd
+// INSIDE the hook, so callers may pass plain inline arrows safely. The polling
+// effect re-runs ONLY when forest/pending/projectRoot change — matching the
+// original inline effect's deps — so fresh callback instances on every render
+// neither restart the 1000ms timer (which would starve the poll under fast
+// re-renders) nor go stale (the effect body calls through refs updated each
+// render).
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { fetchRunDetail } from "../api";
 
 const PENDING_RUN_RETRY_LIMIT = 30;
@@ -60,11 +66,24 @@ export function usePendingRun({
     updater: (current: PendingRun | null) => PendingRun | null,
   ) => void;
 }): void {
+  // Latest-ref the callbacks so the effect depends only on forest/pending/
+  // projectRoot (the original inline effect's semantics; refetch there was
+  // useCallback-stable). Without this, inline-arrow callers would tear down
+  // and restart the poll timer on every render.
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+  const onIndexedRef = useRef(onIndexed);
+  onIndexedRef.current = onIndexed;
+  const onFailedRef = useRef(onFailed);
+  onFailedRef.current = onFailed;
+  const setPendingRef = useRef(setPending);
+  setPendingRef.current = setPending;
+
   useEffect(() => {
     if (!pending || !forest) return undefined;
     const { runId, draftId, attempts } = pending;
     if (forest.heads.some((h) => h.runId === runId)) {
-      onIndexed(runId);
+      onIndexedRef.current(runId);
       return undefined;
     }
     // The retry budget only covers the gap between the run reaching a terminal
@@ -76,7 +95,7 @@ export function usePendingRun({
       console.warn(
         `run ${runId} reached a terminal state but never appeared in the forest index; giving up polling`,
       );
-      setPending(() => null);
+      setPendingRef.current(() => null);
       return undefined;
     }
     let cancelled = false;
@@ -88,8 +107,8 @@ export function usePendingRun({
         if (detail.status === "failed" || detail.status === "blocked") {
           // Terminal failure: the run will never be indexed. Surface it on the
           // draft node instead of polling forever / vanishing silently.
-          onFailed(draftId);
-          setPending(() => null);
+          onFailedRef.current(draftId);
+          setPendingRef.current(() => null);
           return;
         }
         burnAttempt = detail.status !== "running";
@@ -97,7 +116,7 @@ export function usePendingRun({
         /* transient status-poll failure — spend an attempt and retry */
       }
       if (cancelled) return;
-      setPending((current) =>
+      setPendingRef.current((current) =>
         current === null || current.runId !== runId
           ? current
           : {
@@ -105,11 +124,11 @@ export function usePendingRun({
               attempts: burnAttempt ? current.attempts + 1 : current.attempts,
             },
       );
-      refetch();
+      refetchRef.current();
     }, PENDING_RUN_RETRY_DELAY_MS);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [forest, pending, projectRoot, refetch, onIndexed, onFailed, setPending]);
+  }, [forest, pending, projectRoot]);
 }
