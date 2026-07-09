@@ -129,27 +129,82 @@ def run(
     mode: str = typer.Option("auto", "--mode"),
     model_type: str = typer.Option("auto", "--model-type"),
     imputation: str = typer.Option("", "--imputation"),
-    entity_col: str = typer.Option("", "--entity-col"),
-    time_col: str = typer.Option("", "--time-col"),
-    covariance: str = typer.Option("", "--covariance"),
+    entity_col: str = typer.Option(
+        "", "--entity-col", help="Panel entity (unit id) column."
+    ),
+    time_col: str = typer.Option(
+        "", "--time-col", help="Panel time-period column."
+    ),
+    covariance: str = typer.Option(
+        "", "--covariance",
+        help="Covariance estimator: robust | clustered | unadjusted. Default: robust.",
+    ),
     iv_endog: list[str] = typer.Option(
         [], "--iv-endog", help="Endogenous regressor. Repeat for multiple."
     ),
     iv_instruments: list[str] = typer.Option(
         [], "--iv-instruments", help="Instrument column. Repeat for multiple."
     ),
-    did_mode: str = typer.Option("", "--did-mode"),
-    did_cohort_col: str = typer.Option("", "--did-cohort-col"),
-    did_treat_col: str = typer.Option("", "--did-treat-col"),
-    did_post_col: str = typer.Option("", "--did-post-col"),
-    did_status_col: str = typer.Option("", "--did-status-col"),
-    did_treatment_path: str = typer.Option("", "--did-treatment-path"),
-    cs_control_group: str = typer.Option("", "--cs-control-group"),
-    cs_est_method: str = typer.Option("", "--cs-est-method"),
-    cs_base_period: str = typer.Option("", "--cs-base-period"),
-    cs_cluster_var: str = typer.Option("", "--cs-cluster-var"),
-    cs_anticipation: int = typer.Option(0, "--cs-anticipation"),
-    honest_did: bool = typer.Option(False, "--honest-did"),
+    did_mode: str = typer.Option(
+        "", "--did-mode",
+        help="DID design: cohort | two_by_two | status. Default: cohort.",
+    ),
+    did_cohort_col: str = typer.Option(
+        "", "--did-cohort-col",
+        help="Cohort (first-treatment period) column; required for mode 'cohort'.",
+    ),
+    did_treat_col: str = typer.Option(
+        "", "--did-treat-col",
+        help="Treated-group dummy column; required for mode 'two_by_two'.",
+    ),
+    did_post_col: str = typer.Option(
+        "", "--did-post-col",
+        help="Post-period dummy column; required for mode 'two_by_two'.",
+    ),
+    did_status_col: str = typer.Option(
+        "", "--did-status-col",
+        help="Per-period treatment-status column; required for mode 'status'.",
+    ),
+    did_treatment_path: str = typer.Option(
+        "", "--did-treatment-path",
+        help="Treatment-path column for dCDH (non-absorbing/switching treatment).",
+    ),
+    cs_control_group: str = typer.Option(
+        "", "--cs-control-group",
+        help="Callaway-Sant'Anna control group: never | not_yet. Default: never.",
+    ),
+    cs_est_method: str = typer.Option(
+        "", "--cs-est-method",
+        help="Callaway-Sant'Anna estimation method: dr | reg | ipw. Default: dr.",
+    ),
+    cs_base_period: str = typer.Option(
+        "", "--cs-base-period",
+        help="Callaway-Sant'Anna base period: varying | universal. Default: varying.",
+    ),
+    cs_cluster_var: str = typer.Option(
+        "", "--cs-cluster-var",
+        help="Cluster column for Callaway-Sant'Anna inference.",
+    ),
+    cs_anticipation: int = typer.Option(
+        0, "--cs-anticipation",
+        help="Anticipation periods for Callaway-Sant'Anna. Default: 0.",
+    ),
+    honest_did: bool = typer.Option(
+        False, "--honest-did",
+        help="Run Rambachan-Roth honest-DID sensitivity analysis (slow, opt-in).",
+    ),
+    prediction_model_type: str = typer.Option(
+        "", "--prediction-model-type",
+        help="Prediction model: prediction_lasso | prediction_ridge | prediction_random_forest.",
+    ),
+    prediction_cv_folds: int = typer.Option(
+        0, "--prediction-cv-folds",
+        help="Cross-validation folds for the prediction model. 0 = engine default.",
+    ),
+    prediction_sampling_method: str = typer.Option(
+        "", "--prediction-sampling-method",
+        help="Class-imbalance resampling: smote | oversample | undersample.",
+    ),
 ) -> None:
     from .orchestrator import parse_imputation_request, run_workflow
 
@@ -182,6 +237,9 @@ def run(
         cs_cluster_var=cs_cluster_var,
         cs_anticipation=cs_anticipation,
         honest_did=honest_did,
+        prediction_model_type=prediction_model_type,
+        prediction_cv_folds=prediction_cv_folds,
+        prediction_sampling_method=prediction_sampling_method,
     )
     run_id = result["run_id"]
     # stdout: machine-readable run_id only — preserves the long-standing

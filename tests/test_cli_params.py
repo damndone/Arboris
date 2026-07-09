@@ -78,9 +78,21 @@ def test_cli_passes_cs_and_honest_params(tmp_path: Path, monkeypatch):
     assert captured["honest_did"] is True
 
 
+def test_cli_passes_prediction_params(tmp_path: Path, monkeypatch):
+    captured = _invoke(
+        monkeypatch, tmp_path,
+        ["--prediction-model-type", "prediction_lasso",
+         "--prediction-cv-folds", "5",
+         "--prediction-sampling-method", "smote"],
+    )
+    assert captured["prediction_model_type"] == "prediction_lasso"
+    assert captured["prediction_cv_folds"] == 5
+    assert captured["prediction_sampling_method"] == "smote"
+
+
 def test_cli_defaults_pin_back_compat(tmp_path: Path, monkeypatch):
     """No new flags → engine defaults, so old invocations don't accidentally
-    enter panel/IV/DID paths."""
+    enter panel/IV/DID/prediction paths."""
     captured = _invoke(monkeypatch, tmp_path, [])
     assert captured["entity_col"] == ""
     assert captured["time_col"] == ""
@@ -91,3 +103,6 @@ def test_cli_defaults_pin_back_compat(tmp_path: Path, monkeypatch):
     assert captured["did_cohort_col"] == ""
     assert captured["cs_anticipation"] == 0
     assert captured["honest_did"] is False
+    assert captured["prediction_model_type"] == ""
+    assert captured["prediction_cv_folds"] == 0
+    assert captured["prediction_sampling_method"] == ""
