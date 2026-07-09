@@ -55,7 +55,6 @@ import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
 import {
   listPipelineDrafts,
-  fetchRunDetail,
   getRunGraphHeadSet,
   getPipelineDraft,
   validatePipelineDraft,
@@ -69,6 +68,7 @@ import {
   type DraftValidationResult,
 } from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
+import { usePendingRun, type PendingRun } from "./usePendingRun";
 
 type PendingFocusTarget = {
   runId: string;
@@ -86,19 +86,8 @@ type LegacyFocusProbe = {
   legacy: boolean;
 };
 
-type PendingGenesisExecution = {
-  runId: string;
-  draftId: string;
-  attempts: number;
-};
-
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
-// The limit only bounds post-terminal index catch-up (attempts are not burned
-// while /runs reports the run still running), so 30 × 1s = a 30s indexing
-// budget after the run finishes — independent of how long the run itself takes.
-const PENDING_GENESIS_RETRY_LIMIT = 30;
-const PENDING_GENESIS_RETRY_DELAY_MS = 1000;
 
 interface WorkbenchHomeProps {
   projectRoot: string;
@@ -140,8 +129,8 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [legacyFocusProbe, setLegacyFocusProbe] =
     useState<LegacyFocusProbe | null>(null);
   const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
-  const [pendingGenesisExecution, setPendingGenesisExecution] =
-    useState<PendingGenesisExecution | null>(null);
+  const [pendingGenesisRun, setPendingGenesisRun] =
+    useState<PendingRun | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
@@ -299,59 +288,29 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     });
   }, [pendingQueryKey, pendingSourceOpNodeId, resolvedRunId]);
 
-  useEffect(() => {
-    if (!pendingGenesisExecution || !forest) return undefined;
-    const { runId, draftId, attempts } = pendingGenesisExecution;
-    const indexed = forest.heads.some((head) => head.runId === runId);
-    if (indexed) {
+  // v1.6.9 B1 — genesis rides the shared index-wait layer. onIndexed reproduces
+  // the original inline behavior EXACTLY: activate the produced run, remove the
+  // draft node, clear pending, and close the wizard. onFailed marks the draft
+  // failed (the hook clears pending itself). The draftId travels in pending, so
+  // these inline arrows read the fresh value from pendingGenesisRun each render.
+  usePendingRun({
+    pending: pendingGenesisRun,
+    projectRoot,
+    forest,
+    refetch: () => void refetch(),
+    onIndexed: (runId) => {
       setActiveRunId(runId);
-      dispatchDraft({ type: "remove", draftId });
-      setPendingGenesisExecution(null);
-      setGenesisWizardOpen(false);
-      return undefined;
-    }
-    // The retry budget only covers the gap between the run reaching a terminal
-    // state and the forest index catching up. A genesis run itself can take
-    // minutes (e.g. honest-DID), so while /runs still reports it running we
-    // poll without burning attempts — otherwise every slow run used to exhaust
-    // the budget in 15s and silently strand the draft on the canvas.
-    if (attempts >= PENDING_GENESIS_RETRY_LIMIT) {
-      console.warn(
-        `genesis run ${runId} reached a terminal state but never appeared in the forest index; giving up polling`,
-      );
-      setPendingGenesisExecution(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      let burnAttempt = true;
-      try {
-        const detail = await fetchRunDetail(projectRoot, runId);
-        if (cancelled) return;
-        if (detail.status === "failed" || detail.status === "blocked") {
-          // Terminal failure: the run will never be indexed. Surface it on the
-          // draft node instead of polling forever / vanishing silently.
-          dispatchDraft({ type: "failed", draftId });
-          setPendingGenesisExecution(null);
-          return;
-        }
-        burnAttempt = detail.status !== "running";
-      } catch {
-        /* transient status-poll failure — spend an attempt and retry */
+      if (pendingGenesisRun) {
+        dispatchDraft({ type: "remove", draftId: pendingGenesisRun.draftId });
       }
-      if (cancelled) return;
-      setPendingGenesisExecution((current) =>
-        current === null || current.runId !== runId
-          ? current
-          : { ...current, attempts: burnAttempt ? current.attempts + 1 : current.attempts },
-      );
-      void refetch();
-    }, PENDING_GENESIS_RETRY_DELAY_MS);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [forest, pendingGenesisExecution, projectRoot, refetch]);
+      setPendingGenesisRun(null);
+      setGenesisWizardOpen(false);
+    },
+    onFailed: (draftId) => {
+      dispatchDraft({ type: "failed", draftId });
+    },
+    setPending: setPendingGenesisRun,
+  });
 
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
@@ -553,7 +512,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     draftId: string,
   ) => {
     setActiveRunId(result.focus.run_id);
-    setPendingGenesisExecution({
+    setPendingGenesisRun({
       runId: result.focus.run_id,
       draftId,
       attempts: 0,
