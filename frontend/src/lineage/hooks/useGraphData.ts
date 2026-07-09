@@ -45,11 +45,13 @@ export function classifyError(e: unknown): GraphError {
     if (e.status === 422) return { kind: "corrupt", detail: e.message };
     return { kind: "network", detail: e.message };
   }
-  // A genuine fetch rejection is a TypeError whose message mentions "fetch".
+  // A genuine fetch rejection is a TypeError whose message matches the
+  // browser's network-failure wording: Chrome "Failed to fetch", Firefox
+  // "NetworkError when attempting to fetch resource", Safari "Load failed".
   // Anything else reaching here is an exception thrown INSIDE adaptRunGraph
   // (TypeError/RangeError on malformed data) — a real adapter bug, not the
   // network. Mislabeling it "network" hid adapter bugs behind a JS stack.
-  if (e instanceof TypeError && /fetch/i.test(e.message)) {
+  if (e instanceof TypeError && /fetch|load failed/i.test(e.message)) {
     return { kind: "network", detail: e.message };
   }
   return { kind: "adapter_error", detail: String(e) };

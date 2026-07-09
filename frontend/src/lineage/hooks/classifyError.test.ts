@@ -8,6 +8,12 @@ describe("classifyError", () => {
     expect(classifyError(new TypeError("Failed to fetch")).kind).toBe("network");
   });
 
+  it('classifies Safari\'s "Load failed" fetch rejection as network', () => {
+    // Safari rejects a genuinely-offline fetch with TypeError("Load failed")
+    // — no "fetch" substring, unlike Chrome/Firefox.
+    expect(classifyError(new TypeError("Load failed")).kind).toBe("network");
+  });
+
   it("classifies an adapter TypeError (not a fetch) as adapter_error", () => {
     expect(
       classifyError(new TypeError("Cannot read properties of undefined")).kind,
