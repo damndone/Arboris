@@ -53,19 +53,13 @@ import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
+import { useDraftActions } from "./useDraftActions";
 import {
-  listPipelineDrafts,
   getRunGraphHeadSet,
-  getPipelineDraft,
-  validatePipelineDraft,
   executePipelineDraft,
-  patchPipelineDraftParams,
   deletePipelineDraft,
   type RerunResponseV1,
-  type PipelineDraftResponse,
-  type PipelineDraftPatchRequest,
   type DraftExecutionResult,
-  type DraftValidationResult,
 } from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
@@ -229,42 +223,16 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     [model],
   );
 
-  // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
-  // survive a page reload. Best-effort: never block the forest if it fails.
-  useEffect(() => {
-    let cancelled = false;
-    listPipelineDrafts(projectRoot)
-      .then(async (summaries) => {
-        if (cancelled) return;
-        const unexecuted = summaries.filter((s) => s.status !== "executed");
-        if (unexecuted.length) {
-          dispatchDraft({ type: "hydrate", summaries: unexecuted });
-        }
-        const unanchored = unexecuted.filter(
-          (s) => !s.source_node_hash && !s.source_op_node_id,
-        );
-        if (unanchored.length === 0) return;
-        const loaded = await Promise.allSettled(
-          unanchored.map((s) => getPipelineDraft(projectRoot, s.draft_id)),
-        );
-        if (cancelled) return;
-        for (const res of loaded) {
-          if (res.status !== "fulfilled") continue;
-          dispatchDraft({
-            type: "put",
-            draftId: res.value.draft.draft_id,
-            draft: res.value.draft,
-            draftHash: res.value.draft_hash,
-          });
-        }
-      })
-      .catch(() => {
-        /* drafts are best-effort; never block the forest */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRoot]);
+  // v1.6.9 B1-3 — draft fork/patch/validate/discard/ensure-loaded + genesis
+  // pure dispatches + the mount-time hydration effect live in the hook (spec
+  // §4.4 cohesion cluster). Registry + busy state stay here so handleExecuteDraft
+  // (which owns container-level pending-run state) reads them directly.
+  const draftActions = useDraftActions({
+    projectRoot,
+    registry,
+    dispatchDraft,
+    setDraftBusy,
+  });
 
   // Reset the in-graph active head when the URL run changes (rail navigation to
   // a different forest root). Without this, an active head set by a prior
@@ -421,49 +389,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     void refetch();
   };
 
-  const handleForkDraft = (created: PipelineDraftResponse) => {
-    dispatchDraft({
-      type: "put",
-      draftId: created.draft.draft_id,
-      draft: created.draft,
-      draftHash: created.draft_hash,
-    });
-  };
-
-  const handlePatchDraft = async (
-    draftId: string,
-    body: PipelineDraftPatchRequest,
-  ) => {
-    setDraftBusy(true);
-    try {
-      const res = await patchPipelineDraftParams(projectRoot, draftId, body);
-      dispatchDraft({ type: "patch", draftId, draft: res.draft, draftHash: res.draft_hash });
-    } catch (e) {
-      console.error("draft patch failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
-  const handleValidateDraft = async (draftId: string) => {
-    setDraftBusy(true);
-    dispatchDraft({ type: "validating", draftId });
-    try {
-      const v = await validatePipelineDraft(projectRoot, draftId, "rerun_child");
-      dispatchDraft({
-        type: "validated",
-        draftId,
-        validation: v,
-        draftHash: v.validated_draft_hash ?? "",
-      });
-    } catch (e) {
-      dispatchDraft({ type: "revertToDraft", draftId });
-      console.error("draft validate failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
   const handleExecuteDraft = async (draftId: string) => {
     const entry = registry.get(draftId);
     if (!entry) return;
@@ -502,59 +427,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     }
   };
 
-  const handleDiscardDraft = async (draftId: string) => {
-    setDraftBusy(true);
-    try {
-      await deletePipelineDraft(projectRoot, draftId);
-      dispatchDraft({ type: "remove", draftId });
-    } catch (e) {
-      console.error("draft discard failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
-  const handleEnsureDraftLoaded = async (draftId: string) => {
-    const entry = registry.get(draftId);
-    if (!entry || entry.draft !== null) return;
-    try {
-      const res = await getPipelineDraft(projectRoot, draftId);
-      dispatchDraft({ type: "put", draftId, draft: res.draft, draftHash: res.draft_hash });
-    } catch {
-      /* best-effort; editor shows "Loading draft…" until retried */
-    }
-  };
-
-  const handleGenesisDraftUpdated = (response: PipelineDraftResponse) => {
-    dispatchDraft({
-      type: "put",
-      draftId: response.draft.draft_id,
-      draft: response.draft,
-      draftHash: response.draft_hash,
-    });
-  };
-
-  const handleGenesisDraftValidated = (
-    draftId: string,
-    validation: DraftValidationResult,
-  ) => {
-    const entry = registry.get(draftId);
-    dispatchDraft({
-      type: "validated",
-      draftId,
-      validation,
-      draftHash: validation.validated_draft_hash ?? entry?.draftHash ?? "",
-    });
-  };
-
-  const handleGenesisDraftExecuting = (draftId: string) => {
-    dispatchDraft({ type: "executing", draftId });
-  };
-
-  const handleGenesisDraftFailed = (draftId: string) => {
-    dispatchDraft({ type: "failed", draftId });
-  };
-
   const handleGenesisDraftExecuted = (
     result: DraftExecutionResult,
     draftId: string,
@@ -588,10 +460,10 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       <GenesisWizard
         projectRoot={projectRoot}
         onClose={() => setGenesisWizardOpen(false)}
-        onDraftUpdated={handleGenesisDraftUpdated}
-        onDraftValidated={handleGenesisDraftValidated}
-        onDraftExecuting={handleGenesisDraftExecuting}
-        onDraftFailed={handleGenesisDraftFailed}
+        onDraftUpdated={draftActions.onGenesisDraftUpdated}
+        onDraftValidated={draftActions.onGenesisDraftValidated}
+        onDraftExecuting={draftActions.onGenesisDraftExecuting}
+        onDraftFailed={draftActions.onGenesisDraftFailed}
         onDraftExecuted={handleGenesisDraftExecuted}
       />
     </aside>
@@ -614,12 +486,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
             value={{
               registry,
               busy: draftBusy,
-              onForkDraft: handleForkDraft,
-              onPatch: handlePatchDraft,
-              onValidate: handleValidateDraft,
+              onForkDraft: draftActions.onForkDraft,
+              onPatch: draftActions.onPatch,
+              onValidate: draftActions.onValidate,
               onExecute: handleExecuteDraft,
-              onDiscard: handleDiscardDraft,
-              onEnsureLoaded: handleEnsureDraftLoaded,
+              onDiscard: draftActions.onDiscard,
+              onEnsureLoaded: draftActions.onEnsureLoaded,
             }}
           >
             <LineageBridge model={model}>
