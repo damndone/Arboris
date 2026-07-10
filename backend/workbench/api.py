@@ -24,7 +24,6 @@ from .config import load_config
 from .engine.capabilities import build_capabilities
 from .graph_store import GraphDeserializationError, GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
-from .term_parser import parse_term, is_q_quoted_dummy
 from .domain import GuardrailIssue, Severity
 from .events import get_event_manager
 from .orchestrator import (
@@ -50,6 +49,12 @@ from .repository.run_repository import (
     _resolve_project_runs_dir,
     _resolve_run_root,
     _summarize_manifest,
+)
+from .services.results_service import (
+    _auto_dummy_coded_issue,
+    _dummy_coded_columns,
+    _model_results,
+    _normalize_issue_stream,
 )
 from . import flags
 from .lineage.family import scan_family
@@ -644,80 +649,6 @@ def _mark_interrupted_if_dead(run_root: Path, manifest: dict) -> str | None:
 
 def _sse_frame(event: dict) -> str:
     return f"event: {event['event']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-
-def _model_results(run_root: Path) -> list[dict]:
-    model_dir = run_root / "model_results"
-    if not model_dir.is_dir():
-        return []
-    results: list[dict] = []
-    for path in sorted(model_dir.glob("*.json")):
-        data = read_json(path)
-        if isinstance(data, dict) and isinstance(data.get("coefficients"), dict):
-            results.append(data)
-    return results
-
-
-def _normalize_issue_stream(errors: dict, model_results: list[dict]) -> dict:
-    """Align legacy/stored issues with the final model preprocessing state."""
-    issues = errors.get("issues", [])
-    if not isinstance(issues, list):
-        return {"issues": []}
-    dummy_coded = _dummy_coded_columns(model_results)
-    if not dummy_coded:
-        return {"issues": issues}
-
-    normalized: list[dict] = []
-    emitted_auto: set[str] = set()
-    for issue in issues:
-        if not isinstance(issue, dict):
-            normalized.append(issue)
-            continue
-        evidence = issue.get("evidence", {})
-        column = evidence.get("column") if isinstance(evidence, dict) else None
-        if issue.get("code") == "CATEGORICAL_CANDIDATE" and column in dummy_coded:
-            if column not in emitted_auto:
-                normalized.append(_auto_dummy_coded_issue(column))
-                emitted_auto.add(column)
-            continue
-        normalized.append(issue)
-
-    existing_auto = {
-        issue.get("evidence", {}).get("column")
-        for issue in normalized
-        if isinstance(issue, dict)
-        and issue.get("code") == "CATEGORICAL_AUTO_DUMMY_CODED"
-        and isinstance(issue.get("evidence"), dict)
-    }
-    for column in sorted(dummy_coded - existing_auto - emitted_auto):
-        normalized.append(_auto_dummy_coded_issue(column))
-    return {"issues": normalized}
-
-
-def _dummy_coded_columns(model_results: list[dict]) -> set[str]:
-    columns: set[str] = set()
-    for result in model_results:
-        coefficients = result.get("coefficients", {})
-        if not isinstance(coefficients, dict):
-            continue
-        for term in coefficients:
-            if not isinstance(term, str):
-                continue
-            if is_q_quoted_dummy(term):
-                columns.add(parse_term(term).source_id)
-    return columns
-
-
-def _auto_dummy_coded_issue(column: str) -> dict:
-    return GuardrailIssue(
-        Severity.INFO,
-        "CATEGORICAL_AUTO_DUMMY_CODED",
-        f"Column '{column}' was detected as categorical and automatically dummy-coded.",
-        evidence={"column": column, "preprocessing": "dummy_coded"},
-        affected_stage="data_cleaning",
-        variables=[column],
-        template_key="categorical_auto_dummy",
-    ).to_dict()
 
 
 @app.get("/runs")
