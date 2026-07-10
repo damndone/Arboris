@@ -30,6 +30,9 @@ def _wait_terminal(client: TestClient, project_root: str, run_id: str, tries: in
 
 
 def _create_completed_run(client: TestClient, tmp_path: Path) -> tuple[str, str]:
+    # POST /runs now requires a valid project root (v1.6.9 PROJECT_NOT_FOUND
+    # symmetry); create_project guarantees runs/ at birth, so mirror that here.
+    (tmp_path / "runs").mkdir(parents=True, exist_ok=True)
     csv = tmp_path / "input.csv"
     rows = "\n".join(f"{1 + 2 * i},{i},{i + 1}" for i in range(35))
     csv.write_text("y,x1,x2\n" + rows + "\n", encoding="utf-8")
