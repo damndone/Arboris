@@ -60,9 +60,16 @@
 - execute 收敛进 `_submit_run(rerun_reason="initial")`，第一个 run 产出的实线节点与 rerun 节点在森林里无差别。
 - 交付判据：全新用户从 Launcher 到第一个 run 出结果，全程不见旧 Submit 表单；刷新后森林和 draft 续传都成立。
 
-### v1.6.9 — 图内对比 + 节点 AI + 引用报告（**handoff Vision 2，原 v1.6.8**）
+### v1.6.9 — 前置债清理（Preflight Debt Cleanup）✅ SHIPPED 2026-07-10（tag `v1.6.9` = merge `531963d`）
+> **改签**：原计划的「对比/AI/报告」评估后让路给一版清债——先把挡在主线前的工程债清掉，再做实质功能。主线顺延 v1.6.10。
+- draft-execute 长 run 窗口修复（`usePendingRun` 索引等待层，draft 不再"消失"）+ RUNS rail 即时刷新;
+- D3 CLI 参数补全（22 参，与 `run_workflow` 零缺口）;`POST /runs`/`batch` 项目根校验对称;
+- 删 dead RunHistory、REV-3 `classifyError`、429/useCapabilities/global.fetch 测试卫生;`WorkbenchRouteContainer` 987→859(抽 `usePendingRun`/`useDraftHandlers`);
+- 详见 `docs/superpowers/followups/v1.6.9-followups.md`（含本版新增留痕 §4.1b，最高优先 = P1 auto-draft 不可编辑）。
+
+### v1.6.10 — 图内对比 + 节点 AI + 引用报告（**handoff Vision 2，北极星实质步**）
 - **任选对比**：图上选两个节点/两个 run 直接 compare（compareWithSource 升级为通用双节点 diff）;
-- **节点 Ask AI**：把死按钮接上真 `/llm/chat`（携带节点 lineage 上下文 packet）;
+- **节点 Ask AI**：把死按钮接上真 `/llm/chat`（携带节点 lineage 上下文 packet）;**先决 = §5 开放问题 #3 的模型选型**;
 - **引用报告**：从图上勾选节点 → 生成带 cite-chip（引用具体节点/系数）的报告，替代顶栏死的「Generate report」。
 
 ### v1.7+ — Agent Harness（更远，可选）
@@ -85,9 +92,11 @@
 v1.6.6 (清债+图内编辑基础)
    └─> v1.6.7 (draft 融入主图)   ← 依赖 v1.6.6 的可编辑控件
           └─> v1.6.8 (Graph-native Genesis)
-                 └─> v1.6.9 (对比/AI/报告)
-                        └─> v1.7 Agent Harness
+                 └─> v1.6.9 (前置债清理 ✅)  ← 清掉挡在主线前的工程债
+                        └─> v1.6.10 (对比/AI/报告)  ← 北极星实质步
+                               └─> v1.7 Agent Harness
 统计方法线：任意穿插，不阻塞。
+（可选穿插：v1.6.9.1 修 P1 auto-draft;架构债 D1 api.py 拆分 / D6 codegen 各占一版）
 ```
 
 - v1.6.7 是**架构收敛的关键跳**，风险最高（改主 GraphCanvas 交互 + 状态机），建议单独 spec + 充分 brainstorm。
