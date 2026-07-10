@@ -28,6 +28,28 @@ vi.mock("../capabilities/useCapabilities", () => ({
   }),
 }));
 
+// v1.6.9 B1-4 — wrap the REAL RunHistoryRail with a probe that records the
+// RailRefreshContext token it receives. All existing tests keep seeing the real
+// rail (same testids/rows); the index-wait test reads railTokenProbe to assert
+// the container bumps the token when a pending run indexes.
+const { railTokenProbe } = vi.hoisted(() => ({
+  railTokenProbe: { tokens: [] as number[] },
+}));
+vi.mock("../lineage/runRail/RunHistoryRail", async () => {
+  const actual = await vi.importActual<
+    typeof import("../lineage/runRail/RunHistoryRail")
+  >("../lineage/runRail/RunHistoryRail");
+  const React = await import("react");
+  const { useRailRefreshToken } = await import("./RailRefreshContext");
+  return {
+    ...actual,
+    RunHistoryRail: (props: Record<string, unknown>) => {
+      railTokenProbe.tokens.push(useRailRefreshToken());
+      return React.createElement(actual.RunHistoryRail, props);
+    },
+  };
+});
+
 function fakeGraph(): GraphResponse {
   return {
     schema_version: 3,
@@ -1214,6 +1236,39 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
       "Child OLS",
     );
     expect(deleteSpy).toHaveBeenCalledWith("/proj", "d1");
+  });
+
+  it("bumps the rail-refresh token so the RUNS rail re-fetches when the executed run indexes", async () => {
+    // v1.6.9 B1-4 — the container must signal the RUNS rail to refresh the moment
+    // a pending run indexes (else the rail lags up to its 30s poll). A fetch-count
+    // assertion is unusable here: useForestData.refetch() flips loading→true on
+    // every poll, so the container flashes <Loading/> and remounts the whole shell
+    // (rail included), meaning the rail already re-fetches /runs on every poll
+    // regardless of this wiring. So we assert the container's own responsibility
+    // directly — the RailRefreshContext token it hands the rail must increment on
+    // index. RunHistoryRail is mocked (top of file) to the real component plus a
+    // token probe; without the wiring the token stays 0 and this fails.
+    railTokenProbe.tokens.length = 0;
+    let forestBody: () => HeadSetResponse = soloForest;
+    let status = "running";
+    await mountAndExecute({
+      forestBody: () => forestBody(),
+      runDetail: () => ({ status }),
+    });
+
+    await flush();
+    const tokenBeforeIndex = Math.max(0, ...railTokenProbe.tokens);
+    expect(tokenBeforeIndex).toBe(0);
+
+    // The run finishes and the forest index catches up → onIndexed → token bump.
+    forestBody = forkedForestResponse;
+    status = "completed";
+    await flush(1000); // poll → refetch → forest now has run_child → onIndexed
+    await flush(200);
+    await flush(200);
+
+    const tokenAfterIndex = Math.max(0, ...railTokenProbe.tokens);
+    expect(tokenAfterIndex).toBeGreaterThan(tokenBeforeIndex);
   });
 
   it("marks the draft failed when the run terminally fails", async () => {

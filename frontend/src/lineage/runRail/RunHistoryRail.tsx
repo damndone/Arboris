@@ -15,10 +15,11 @@
  * already on a run page so a giant "Loading…" splash would be silly.
  */
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useRunHistory } from "./useRunHistory";
 import type { RunSummary } from "../../api";
 import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
+import { useRailRefreshToken } from "../../workbench/RailRefreshContext";
 
 function formatRelativeTime(iso: string | null): string {
   if (!iso) return "—";
@@ -70,7 +71,24 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const contextProjectRoot = useProjectRootOptional();
   const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root");
   const navigate = useNavigate();
-  const { runs, loading, error } = useRunHistory(projectRoot);
+  const { runs, loading, error, refresh } = useRunHistory(projectRoot);
+
+  // v1.6.9 B1-4 — refresh the moment a pending run (genesis / draft-execute)
+  // indexes, instead of waiting out the 30s poll. ForestWorkbench bumps the
+  // RailRefreshContext token in its onIndexed callbacks; each change past the
+  // initial mount value triggers an immediate re-fetch. The first-render skip
+  // keeps mount behavior identical to today (no double fetch), and providerless
+  // paths (LegacyGraphWorkbench, standalone routes) hold the default token 0
+  // forever — the effect never fires there, so the rail behaves exactly as before.
+  const railRefreshToken = useRailRefreshToken();
+  const firstTokenRef = useRef(true);
+  useEffect(() => {
+    if (firstTokenRef.current) {
+      firstTokenRef.current = false;
+      return;
+    }
+    refresh();
+  }, [railRefreshToken, refresh]);
 
   const sorted = useMemo(() => {
     // Newest first — backend already does this, but defend against

@@ -45,6 +45,7 @@ import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
 import { ProjectRootProvider } from "./ProjectRootContext";
+import { RailRefreshContext } from "./RailRefreshContext";
 import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
@@ -147,6 +148,10 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
+  // v1.6.9 B1-4 — monotonic token handed to the RUNS rail via RailRefreshContext.
+  // Bumped in the pending-run onIndexed callbacks so the rail re-fetches /runs the
+  // instant a genesis / draft-execute run indexes, rather than lagging its 30s poll.
+  const [railRefreshToken, setRailRefreshToken] = useState(0);
   const focusRunIsKnownHead = useMemo(
     () => Boolean(focusRunId && forest?.heads.some((h) => h.runId === focusRunId)),
     [forest, focusRunId],
@@ -292,6 +297,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       }
       setPendingGenesisRun(null);
       setGenesisWizardOpen(false);
+      setRailRefreshToken((t) => t + 1);
     },
     onFailed: (draftId) => {
       dispatchDraft({ type: "failed", draftId });
@@ -323,6 +329,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         );
       }
       setPendingRerunRun(null);
+      setRailRefreshToken((t) => t + 1);
     },
     onFailed: (draftId) => {
       dispatchDraft({ type: "failed", draftId });
@@ -522,7 +529,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0, overflow: "hidden" }}>
       <ProjectRootProvider projectRoot={projectRoot}>
-        {body}
+        <RailRefreshContext.Provider value={railRefreshToken}>
+          {body}
+        </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
     </div>
