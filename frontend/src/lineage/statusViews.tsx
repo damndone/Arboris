@@ -20,6 +20,7 @@ const ERROR_TITLE: Record<GraphError["kind"], string> = {
   not_found: "Run not found",
   corrupt: "Lineage data is corrupt",
   network: "Could not load lineage",
+  adapter_error: "Could not render this graph",
   unsupported_schema: "Unsupported graph schema version",
 };
 

@@ -45,6 +45,7 @@ import { BottomPanel } from "./BottomPanel";
 import { SearchPalette } from "./SearchPalette";
 import { CommandPalette } from "./CommandPalette";
 import { ProjectRootProvider } from "./ProjectRootContext";
+import { RailRefreshContext } from "./RailRefreshContext";
 import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
@@ -53,22 +54,16 @@ import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
+import { useDraftHandlers } from "./useDraftHandlers";
 import {
-  listPipelineDrafts,
-  fetchRunDetail,
   getRunGraphHeadSet,
-  getPipelineDraft,
-  validatePipelineDraft,
   executePipelineDraft,
-  patchPipelineDraftParams,
   deletePipelineDraft,
   type RerunResponseV1,
-  type PipelineDraftResponse,
-  type PipelineDraftPatchRequest,
   type DraftExecutionResult,
-  type DraftValidationResult,
 } from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
+import { usePendingRun, type PendingRun } from "./usePendingRun";
 
 type PendingFocusTarget = {
   runId: string;
@@ -86,19 +81,17 @@ type LegacyFocusProbe = {
   legacy: boolean;
 };
 
-type PendingGenesisExecution = {
-  runId: string;
-  draftId: string;
-  attempts: number;
-};
-
 const PENDING_FOCUS_RETRY_LIMIT = 20;
 const PENDING_FOCUS_RETRY_DELAY_MS = 200;
-// The limit only bounds post-terminal index catch-up (attempts are not burned
-// while /runs reports the run still running), so 30 × 1s = a 30s indexing
-// budget after the run finishes — independent of how long the run itself takes.
-const PENDING_GENESIS_RETRY_LIMIT = 30;
-const PENDING_GENESIS_RETRY_DELAY_MS = 1000;
+
+// A draft-execute focus that never recorded a produced op node id degrades to
+// "no target": the pending-focus effect then simply finds nothing and gives up
+// after its budget instead of crashing — the run still activated + indexed.
+const EMPTY_FOCUS: PendingFocusTarget["focus"] = {
+  forest_node_key: null,
+  op_node_id: "",
+  node_hash: null,
+};
 
 interface WorkbenchHomeProps {
   projectRoot: string;
@@ -140,11 +133,25 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [legacyFocusProbe, setLegacyFocusProbe] =
     useState<LegacyFocusProbe | null>(null);
   const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
-  const [pendingGenesisExecution, setPendingGenesisExecution] =
-    useState<PendingGenesisExecution | null>(null);
+  const [pendingGenesisRun, setPendingGenesisRun] =
+    useState<PendingRun | null>(null);
+  // v1.6.9 B1 — draft-execute rides the same index-wait layer as genesis. The
+  // produced run is a background async job (a long run indexes minutes later),
+  // so the draft node must stay on the canvas until the run actually indexes
+  // rather than vanishing the instant the execute POST returns. The focus
+  // target is captured at execute time (the forest has no produced node yet)
+  // and consumed by onIndexed once the run appears.
+  const [pendingRerunRun, setPendingRerunRun] = useState<PendingRun | null>(
+    null,
+  );
+  const pendingRerunFocus = useRef<PendingFocusTarget["focus"] | null>(null);
   const initializedPendingQueryKey = useRef<string | null>(null);
   const [registry, dispatchDraft] = useReducer(draftReducer, undefined, emptyRegistry);
   const [draftBusy, setDraftBusy] = useState(false);
+  // v1.6.9 B1-4 — monotonic token handed to the RUNS rail via RailRefreshContext.
+  // Bumped in the pending-run onIndexed callbacks so the rail re-fetches /runs the
+  // instant a genesis / draft-execute run indexes, rather than lagging its 30s poll.
+  const [railRefreshToken, setRailRefreshToken] = useState(0);
   const focusRunIsKnownHead = useMemo(
     () => Boolean(focusRunId && forest?.heads.some((h) => h.runId === focusRunId)),
     [forest, focusRunId],
@@ -221,42 +228,16 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     [model],
   );
 
-  // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
-  // survive a page reload. Best-effort: never block the forest if it fails.
-  useEffect(() => {
-    let cancelled = false;
-    listPipelineDrafts(projectRoot)
-      .then(async (summaries) => {
-        if (cancelled) return;
-        const unexecuted = summaries.filter((s) => s.status !== "executed");
-        if (unexecuted.length) {
-          dispatchDraft({ type: "hydrate", summaries: unexecuted });
-        }
-        const unanchored = unexecuted.filter(
-          (s) => !s.source_node_hash && !s.source_op_node_id,
-        );
-        if (unanchored.length === 0) return;
-        const loaded = await Promise.allSettled(
-          unanchored.map((s) => getPipelineDraft(projectRoot, s.draft_id)),
-        );
-        if (cancelled) return;
-        for (const res of loaded) {
-          if (res.status !== "fulfilled") continue;
-          dispatchDraft({
-            type: "put",
-            draftId: res.value.draft.draft_id,
-            draft: res.value.draft,
-            draftHash: res.value.draft_hash,
-          });
-        }
-      })
-      .catch(() => {
-        /* drafts are best-effort; never block the forest */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRoot]);
+  // v1.6.9 B1-3 — draft fork/patch/validate/discard/ensure-loaded + genesis
+  // pure dispatches + the mount-time hydration effect live in the hook (spec
+  // §4.4 cohesion cluster). Registry + busy state stay here so handleExecuteDraft
+  // (which owns container-level pending-run state) reads them directly.
+  const draftHandlers = useDraftHandlers({
+    projectRoot,
+    registry,
+    dispatchDraft,
+    setDraftBusy,
+  });
 
   // Reset the in-graph active head when the URL run changes (rail navigation to
   // a different forest root). Without this, an active head set by a prior
@@ -299,59 +280,62 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     });
   }, [pendingQueryKey, pendingSourceOpNodeId, resolvedRunId]);
 
-  useEffect(() => {
-    if (!pendingGenesisExecution || !forest) return undefined;
-    const { runId, draftId, attempts } = pendingGenesisExecution;
-    const indexed = forest.heads.some((head) => head.runId === runId);
-    if (indexed) {
+  // v1.6.9 B1 — genesis rides the shared index-wait layer. onIndexed reproduces
+  // the original inline behavior EXACTLY: activate the produced run, remove the
+  // draft node, clear pending, and close the wizard. onFailed marks the draft
+  // failed (the hook clears pending itself). The draftId travels in pending, so
+  // these inline arrows read the fresh value from pendingGenesisRun each render.
+  usePendingRun({
+    pending: pendingGenesisRun,
+    projectRoot,
+    forest,
+    refetch: () => void refetch(),
+    onIndexed: (runId) => {
       setActiveRunId(runId);
-      dispatchDraft({ type: "remove", draftId });
-      setPendingGenesisExecution(null);
-      setGenesisWizardOpen(false);
-      return undefined;
-    }
-    // The retry budget only covers the gap between the run reaching a terminal
-    // state and the forest index catching up. A genesis run itself can take
-    // minutes (e.g. honest-DID), so while /runs still reports it running we
-    // poll without burning attempts — otherwise every slow run used to exhaust
-    // the budget in 15s and silently strand the draft on the canvas.
-    if (attempts >= PENDING_GENESIS_RETRY_LIMIT) {
-      console.warn(
-        `genesis run ${runId} reached a terminal state but never appeared in the forest index; giving up polling`,
-      );
-      setPendingGenesisExecution(null);
-      return undefined;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      let burnAttempt = true;
-      try {
-        const detail = await fetchRunDetail(projectRoot, runId);
-        if (cancelled) return;
-        if (detail.status === "failed" || detail.status === "blocked") {
-          // Terminal failure: the run will never be indexed. Surface it on the
-          // draft node instead of polling forever / vanishing silently.
-          dispatchDraft({ type: "failed", draftId });
-          setPendingGenesisExecution(null);
-          return;
-        }
-        burnAttempt = detail.status !== "running";
-      } catch {
-        /* transient status-poll failure — spend an attempt and retry */
+      if (pendingGenesisRun) {
+        dispatchDraft({ type: "remove", draftId: pendingGenesisRun.draftId });
       }
-      if (cancelled) return;
-      setPendingGenesisExecution((current) =>
-        current === null || current.runId !== runId
-          ? current
-          : { ...current, attempts: burnAttempt ? current.attempts + 1 : current.attempts },
-      );
-      void refetch();
-    }, PENDING_GENESIS_RETRY_DELAY_MS);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [forest, pendingGenesisExecution, projectRoot, refetch]);
+      setPendingGenesisRun(null);
+      setGenesisWizardOpen(false);
+      setRailRefreshToken((t) => t + 1);
+    },
+    onFailed: (draftId) => {
+      dispatchDraft({ type: "failed", draftId });
+    },
+    setPending: setPendingGenesisRun,
+  });
+
+  // v1.6.9 B1 — draft-execute index-wait. onIndexed activates the produced run,
+  // NOW (not at POST time) sets the pending focus, removes the draft node, and
+  // best-effort deletes the persisted draft. onFailed marks the draft failed so
+  // a terminal-failed run shows on the canvas instead of vanishing silently.
+  usePendingRun({
+    pending: pendingRerunRun,
+    projectRoot,
+    forest,
+    refetch: () => void refetch(),
+    onIndexed: (runId) => {
+      setActiveRunId(runId);
+      setPendingFocusTarget({
+        runId,
+        focus: pendingRerunFocus.current ?? EMPTY_FOCUS,
+        attempts: 0,
+      });
+      if (pendingRerunRun) {
+        const draftId = pendingRerunRun.draftId;
+        dispatchDraft({ type: "remove", draftId });
+        void deletePipelineDraft(projectRoot, draftId).catch((e) =>
+          console.error("draft cleanup (delete) failed post-execute", e),
+        );
+      }
+      setPendingRerunRun(null);
+      setRailRefreshToken((t) => t + 1);
+    },
+    onFailed: (draftId) => {
+      dispatchDraft({ type: "failed", draftId });
+    },
+    setPending: setPendingRerunRun,
+  });
 
   if (error !== null && forest === null) {
     return <ErrorBanner error={error} onRetry={refetch} />;
@@ -412,49 +396,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     void refetch();
   };
 
-  const handleForkDraft = (created: PipelineDraftResponse) => {
-    dispatchDraft({
-      type: "put",
-      draftId: created.draft.draft_id,
-      draft: created.draft,
-      draftHash: created.draft_hash,
-    });
-  };
-
-  const handlePatchDraft = async (
-    draftId: string,
-    body: PipelineDraftPatchRequest,
-  ) => {
-    setDraftBusy(true);
-    try {
-      const res = await patchPipelineDraftParams(projectRoot, draftId, body);
-      dispatchDraft({ type: "patch", draftId, draft: res.draft, draftHash: res.draft_hash });
-    } catch (e) {
-      console.error("draft patch failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
-  const handleValidateDraft = async (draftId: string) => {
-    setDraftBusy(true);
-    dispatchDraft({ type: "validating", draftId });
-    try {
-      const v = await validatePipelineDraft(projectRoot, draftId, "rerun_child");
-      dispatchDraft({
-        type: "validated",
-        draftId,
-        validation: v,
-        draftHash: v.validated_draft_hash ?? "",
-      });
-    } catch (e) {
-      dispatchDraft({ type: "revertToDraft", draftId });
-      console.error("draft validate failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
   const handleExecuteDraft = async (draftId: string) => {
     const entry = registry.get(draftId);
     if (!entry) return;
@@ -465,28 +406,26 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         validated_draft_hash: entry.validation?.validated_draft_hash ?? entry.draftHash,
         execution_mode: "rerun_child",
       });
-      setActiveRunId(result.focus.run_id);
-      setPendingFocusTarget({
-        runId: result.focus.run_id,
-        focus: {
-          forest_node_key: null,
-          op_node_id:
-            result.focus.poll?.rerun_from_op_node_id ??
-            result.produced_lineage.rerun_from_op_node_id ??
-            entry.sourceOpNodeId ??
-            "",
-          node_hash: null,
-        },
-        attempts: 0,
-      });
-      // Execute succeeded: remove the draft node regardless of cleanup outcome.
-      dispatchDraft({ type: "remove", draftId });
-      void refetch();
-      try {
-        await deletePipelineDraft(projectRoot, draftId);
-      } catch (cleanupErr) {
-        console.error("draft cleanup (delete) failed post-execute", cleanupErr);
-      }
+      // v1.6.9 B1 — the produced run is a background async job; it is NOT in the
+      // forest yet (a long run indexes minutes later). So keep the draft node on
+      // the canvas in its "executing" (pending) state — the `executing` dispatch
+      // above already set it — and hand off to the index-wait layer. Capture the
+      // focus target now (the forest has no produced node to focus yet) for
+      // onIndexed to consume. Everything the old success branch did inline —
+      // activate the run, set pending focus, remove the draft, delete the
+      // persisted draft — moves to onIndexed, gated on the run actually
+      // indexing. The old immediate `void refetch()` is dropped: usePendingRun
+      // owns refetching (it refetches every poll tick until the run indexes).
+      pendingRerunFocus.current = {
+        forest_node_key: null,
+        op_node_id:
+          result.focus.poll?.rerun_from_op_node_id ??
+          result.produced_lineage.rerun_from_op_node_id ??
+          entry.sourceOpNodeId ??
+          "",
+        node_hash: null,
+      };
+      setPendingRerunRun({ runId: result.focus.run_id, draftId, attempts: 0 });
     } catch (e) {
       dispatchDraft({ type: "failed", draftId });
       console.error("draft execute failed", e);
@@ -495,65 +434,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     }
   };
 
-  const handleDiscardDraft = async (draftId: string) => {
-    setDraftBusy(true);
-    try {
-      await deletePipelineDraft(projectRoot, draftId);
-      dispatchDraft({ type: "remove", draftId });
-    } catch (e) {
-      console.error("draft discard failed", e);
-    } finally {
-      setDraftBusy(false);
-    }
-  };
-
-  const handleEnsureDraftLoaded = async (draftId: string) => {
-    const entry = registry.get(draftId);
-    if (!entry || entry.draft !== null) return;
-    try {
-      const res = await getPipelineDraft(projectRoot, draftId);
-      dispatchDraft({ type: "put", draftId, draft: res.draft, draftHash: res.draft_hash });
-    } catch {
-      /* best-effort; editor shows "Loading draft…" until retried */
-    }
-  };
-
-  const handleGenesisDraftUpdated = (response: PipelineDraftResponse) => {
-    dispatchDraft({
-      type: "put",
-      draftId: response.draft.draft_id,
-      draft: response.draft,
-      draftHash: response.draft_hash,
-    });
-  };
-
-  const handleGenesisDraftValidated = (
-    draftId: string,
-    validation: DraftValidationResult,
-  ) => {
-    const entry = registry.get(draftId);
-    dispatchDraft({
-      type: "validated",
-      draftId,
-      validation,
-      draftHash: validation.validated_draft_hash ?? entry?.draftHash ?? "",
-    });
-  };
-
-  const handleGenesisDraftExecuting = (draftId: string) => {
-    dispatchDraft({ type: "executing", draftId });
-  };
-
-  const handleGenesisDraftFailed = (draftId: string) => {
-    dispatchDraft({ type: "failed", draftId });
-  };
-
   const handleGenesisDraftExecuted = (
     result: DraftExecutionResult,
     draftId: string,
   ) => {
     setActiveRunId(result.focus.run_id);
-    setPendingGenesisExecution({
+    setPendingGenesisRun({
       runId: result.focus.run_id,
       draftId,
       attempts: 0,
@@ -581,10 +467,10 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       <GenesisWizard
         projectRoot={projectRoot}
         onClose={() => setGenesisWizardOpen(false)}
-        onDraftUpdated={handleGenesisDraftUpdated}
-        onDraftValidated={handleGenesisDraftValidated}
-        onDraftExecuting={handleGenesisDraftExecuting}
-        onDraftFailed={handleGenesisDraftFailed}
+        onDraftUpdated={draftHandlers.onGenesisDraftUpdated}
+        onDraftValidated={draftHandlers.onGenesisDraftValidated}
+        onDraftExecuting={draftHandlers.onGenesisDraftExecuting}
+        onDraftFailed={draftHandlers.onGenesisDraftFailed}
         onDraftExecuted={handleGenesisDraftExecuted}
       />
     </aside>
@@ -607,12 +493,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
             value={{
               registry,
               busy: draftBusy,
-              onForkDraft: handleForkDraft,
-              onPatch: handlePatchDraft,
-              onValidate: handleValidateDraft,
+              onForkDraft: draftHandlers.onForkDraft,
+              onPatch: draftHandlers.onPatch,
+              onValidate: draftHandlers.onValidate,
               onExecute: handleExecuteDraft,
-              onDiscard: handleDiscardDraft,
-              onEnsureLoaded: handleEnsureDraftLoaded,
+              onDiscard: draftHandlers.onDiscard,
+              onEnsureLoaded: draftHandlers.onEnsureLoaded,
             }}
           >
             <LineageBridge model={model}>
@@ -643,7 +529,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   return (
     <div style={{ position: "relative", height: "100%", minHeight: 0, overflow: "hidden" }}>
       <ProjectRootProvider projectRoot={projectRoot}>
-        {body}
+        <RailRefreshContext.Provider value={railRefreshToken}>
+          {body}
+        </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
     </div>

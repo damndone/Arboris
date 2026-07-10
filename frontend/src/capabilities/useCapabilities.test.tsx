@@ -3,13 +3,17 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { useCapabilities } from "./useCapabilities";
 import sample from "../../../tests/contracts/capabilities.sample.json";
 
+let fetchMock: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn());
+  fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -22,19 +26,19 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
 
 describe("useCapabilities", () => {
   it("fetches /capabilities and returns the payload", async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(jsonResponse(sample));
+    fetchMock.mockResolvedValueOnce(jsonResponse(sample));
 
     const { result } = renderHook(() => useCapabilities());
 
     await waitFor(() => expect(result.current.data).toBeDefined());
-    expect(globalThis.fetch).toHaveBeenCalledWith("/api/capabilities");
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities");
     expect(result.current.data?.model_types.find((entry) => entry.key === "probit")).toBeDefined();
     expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
   });
 
   it("exposes an error when /capabilities fails", async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    fetchMock.mockResolvedValueOnce(
       jsonResponse({ detail: "nope" }, false, 500),
     );
 

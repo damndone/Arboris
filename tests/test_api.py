@@ -157,6 +157,18 @@ def test_api_rejects_oversized_upload_and_slot_released(
         )
     assert rr2.status_code == 200
     assert rr2.json()["status"] == "running"
+    # Drain rr2 so its background thread releases the process-global run slot
+    # before the next slot-acquiring test — otherwise the leftover run 429s the
+    # next test under a combined `-k` selection (full gate stays green because
+    # intervening tests give the run time to finish).
+    run_id2 = rr2.json()["run_id"]
+    import time
+    for _ in range(120):
+        detail = client.get(f"/runs/{run_id2}", params={"project_root": proot2})
+        if detail.json()["status"] in ("completed", "blocked", "failed"):
+            break
+        time.sleep(0.5)
+    time.sleep(0.2)
 
 
 def test_list_runs_returns_summary_for_completed_run(completed_run):
@@ -934,3 +946,33 @@ def test_post_runs_file_persisted_in_run_dir(tmp_path: Path):
     detail = client.get(f"/runs/{run_id}", params={"project_root": str(proot)})
     lineage = detail.json().get("lineage", [])
     assert any("_uploads" in l.get("source", "") for l in lineage)
+
+
+def test_runs_rejects_missing_project_with_404(tmp_path: Path):
+    client = TestClient(app)
+    data = tmp_path / "data.csv"
+    data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
+    missing = tmp_path / "does_not_exist"
+    with data.open("rb") as handle:
+        resp = client.post(
+            "/runs",
+            data={"project_root": str(missing), "mode": "auto", "y": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "PROJECT_NOT_FOUND"
+
+
+def test_batch_runs_rejects_missing_project_with_404(tmp_path: Path):
+    client = TestClient(app)
+    data = tmp_path / "data.csv"
+    data.write_text("y,x\n1,2\n3,4\n", encoding="utf-8")
+    missing = tmp_path / "does_not_exist"
+    with data.open("rb") as handle:
+        resp = client.post(
+            "/runs/batch",
+            data={"project_root": str(missing), "mode": "auto", "y_list": "y", "x": "x"},
+            files={"file": ("data.csv", handle, "text/csv")},
+        )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "PROJECT_NOT_FOUND"

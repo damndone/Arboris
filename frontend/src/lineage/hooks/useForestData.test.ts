@@ -18,14 +18,20 @@ function jsonResponse(body: unknown, init: FetchInit = {}): Response {
   } as unknown as Response;
 }
 
-const fetchMock = vi.fn<typeof fetch>();
+let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
-  global.fetch = fetchMock as unknown as typeof fetch;
+  fetchMock = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
-  fetchMock.mockReset();
+  // Restore only fetch — vi.unstubAllGlobals() would also wipe the
+  // ResizeObserver stub installed once in vitest.setup.ts (needed by React Flow).
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 function emptyForestBody() {
@@ -97,5 +103,24 @@ describe("useForestData (project-keyed, T11)", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error?.kind).toBe("not_found");
     expect(result.current.forest).toBeNull();
+  });
+
+  it("classifies a non-fetch TypeError (adapter bug) as adapter_error, not network (REV-3)", async () => {
+    // An exception thrown inside adaptHeadSet on malformed data reaches the
+    // same .catch as fetch rejections — it must NOT masquerade as network.
+    fetchMock.mockRejectedValue(
+      new TypeError("Cannot read properties of undefined (reading 'map')"),
+    );
+    const { result } = renderHook(() => useForestData("/tmp/adapter-bug"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error?.kind).toBe("adapter_error");
+    expect(result.current.forest).toBeNull();
+  });
+
+  it("keeps a genuine fetch rejection classified as network", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const { result } = renderHook(() => useForestData("/tmp/offline"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error?.kind).toBe("network");
   });
 });

@@ -10,9 +10,9 @@
 //   - selecting `table` / `pipeline` swaps WorkbenchMain content
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
 import type { GraphResponse } from "../lineage/types";
@@ -27,6 +27,28 @@ vi.mock("../capabilities/useCapabilities", () => ({
     },
   }),
 }));
+
+// v1.6.9 B1-4 — wrap the REAL RunHistoryRail with a probe that records the
+// RailRefreshContext token it receives. All existing tests keep seeing the real
+// rail (same testids/rows); the index-wait test reads railTokenProbe to assert
+// the container bumps the token when a pending run indexes.
+const { railTokenProbe } = vi.hoisted(() => ({
+  railTokenProbe: { tokens: [] as number[] },
+}));
+vi.mock("../lineage/runRail/RunHistoryRail", async () => {
+  const actual = await vi.importActual<
+    typeof import("../lineage/runRail/RunHistoryRail")
+  >("../lineage/runRail/RunHistoryRail");
+  const React = await import("react");
+  const { useRailRefreshToken } = await import("./RailRefreshContext");
+  return {
+    ...actual,
+    RunHistoryRail: (props: Record<string, unknown>) => {
+      railTokenProbe.tokens.push(useRailRefreshToken());
+      return React.createElement(actual.RunHistoryRail, props);
+    },
+  };
+});
 
 function fakeGraph(): GraphResponse {
   return {
@@ -942,5 +964,325 @@ describe("WorkbenchRouteContainer", () => {
         "false",
       );
     });
+  });
+});
+
+// ── v1.6.9 B1 — draft-execute rides the index-wait layer ──
+//
+// The bug: handleExecuteDraft used to remove the draft node + give up focus
+// within a 4s budget the moment the execute POST returned. But the produced
+// run is a background async job — a long run (honest-DID ~157s) is nowhere in
+// the forest for minutes, so the draft vanished instantly and the user saw
+// "nothing happened". The fix routes draft-execute through usePendingRun: the
+// draft node STAYS on the canvas in "executing" state until the run actually
+// indexes (then remove + focus + delete) or terminally fails (then mark
+// failed). These tests drive the real drawer → Validate → Execute flow and
+// then poll under fake timers, exactly as a long run behaves.
+describe("draft execute — index-wait (v1.6.9 B1)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // A forest with ONE completed head (run_a) and NO child run — the produced
+  // run is not yet indexed. Fresh object each call so a refetch changes the
+  // forest reference (mirrors the live refetch loop).
+  function soloForest(): HeadSetResponse {
+    return {
+      schema_version: 2,
+      legacy: false,
+      nodes: {
+        hash_source: {
+          id: "source:upload",
+          kind: "dataset",
+          display_label: "Source",
+          stage: "source",
+          summary: null,
+          trust: "ok",
+          trust_reason: null,
+          parent_stage_id: null,
+          decision_points: [],
+          node_hash: "hash_source",
+          producing_stage: "source",
+          cas_ref: null,
+          runs: ["run_a"],
+        },
+        hash_model: {
+          id: "model:ols_1",
+          kind: "model",
+          display_label: "Original OLS",
+          stage: "model",
+          summary: null,
+          trust: "ok",
+          trust_reason: null,
+          parent_stage_id: null,
+          decision_points: [],
+          node_hash: "hash_model",
+          producing_stage: "model",
+          cas_ref: null,
+          runs: ["run_a"],
+          editable: true,
+          op_type: "ols",
+          schema_id: "ols@v1",
+          editable_schema_source: "run_inputs",
+          editable_schema: [
+            {
+              kind: "select",
+              key: "covariance",
+              label: "Covariance",
+              options: ["clustered", "robust"],
+              value: "clustered",
+            },
+          ],
+        },
+      },
+      edges: [{ source: "hash_source", target: "hash_model" }],
+      heads: [
+        {
+          run_id: "run_a",
+          head_node_hash: "hash_model",
+          from_node: null,
+          rerun_of: null,
+          rerun_reason: null,
+          status: "completed",
+          created_at: "2026-06-27T00:00:00Z",
+        },
+      ],
+    };
+  }
+
+  function draftSummary(): api.PipelineDraftSummary {
+    return {
+      draft_id: "d1",
+      status: "draft",
+      draft_hash: "h1",
+      source_run_id: "run_a",
+      source_model_node_id: "model:ols_1",
+      source_op_node_id: "model:ols_1",
+      source_node_hash: "hash_model",
+      model_type: "ols",
+    };
+  }
+
+  function draftGet(): api.PipelineDraftResponse {
+    return {
+      draft_hash: "h1",
+      draft: {
+        draft_id: "d1",
+        schema_version: "pipeline_draft.v1",
+        created_at: "t",
+        updated_at: "t",
+        status: "draft",
+        created_from: {
+          source_type: "node",
+          source_node_hash: "hash_model",
+          source_op_node_id: "model:ols_1",
+        },
+        graph: {
+          nodes: [
+            {
+              node_id: "model_1",
+              node_type: "model",
+              model_type: "ols",
+              params: { y: "y", x: ["x"] },
+              status: "configured",
+            },
+          ],
+          edges: [],
+        },
+        default_execution_mode: "rerun_child",
+      },
+    } as never;
+  }
+
+  function validResult(): api.DraftValidationResult {
+    return {
+      ok: true,
+      status: "valid",
+      executable: true,
+      checks: [],
+      resolved_execution: { execution_mode: "rerun_child" },
+      validated_execution_mode: "rerun_child",
+      validated_draft_hash: "h1v",
+      validated_at: "t",
+    };
+  }
+
+  function execResult(): api.DraftExecutionResult {
+    return {
+      ok: true,
+      run_id: "run_child",
+      draft_id: "d1",
+      executed_draft_hash: "h1v",
+      execution_mode: "rerun_child",
+      produced_lineage: {
+        execution_mode: "rerun_child",
+        rerun_from_op_node_id: "model:ols_1",
+      },
+      focus: {
+        status: "pending_index",
+        run_id: "run_child",
+        poll: { rerun_from_op_node_id: "model:ols_1" },
+      },
+    };
+  }
+
+  async function flush(ms = 0) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  // Mount with the draft node pre-selected (its drawer open) and drive the real
+  // drawer Validate → Execute buttons. Returns the api spies the tests assert on.
+  async function mountAndExecute(opts: {
+    forestBody: () => HeadSetResponse;
+    runDetail: () => { status: string };
+  }) {
+    const forestSpy = vi
+      .spyOn(api, "fetchProjectForest")
+      .mockImplementation(async () => opts.forestBody());
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummary()]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(draftGet());
+    vi.spyOn(api, "validatePipelineDraft").mockResolvedValue(validResult());
+    const executeSpy = vi
+      .spyOn(api, "executePipelineDraft")
+      .mockResolvedValue(execResult());
+    const deleteSpy = vi
+      .spyOn(api, "deletePipelineDraft")
+      .mockResolvedValue({ ok: true } as never);
+    vi.spyOn(api, "fetchRunDetail").mockImplementation(
+      async () => opts.runDetail() as never,
+    );
+
+    render(
+      <MemoryRouter
+        initialEntries={["/?tab=lineage&tabs=draft:d1&active=draft:d1"]}
+      >
+        <Routes>
+          <Route
+            path="*"
+            element={<WorkbenchRouteContainer projectRoot="/proj" runId="run_a" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // Flush the forest load + draft hydrate so the draft node mounts and its
+    // drawer (pre-selected via the URL tab) renders.
+    await flush();
+    await flush();
+
+    const draftNode = screen.getByTestId("graph-node-lifecycle");
+    expect(draftNode).toBeInTheDocument();
+
+    // Validate → Execute (Execute is gated on the draft being valid).
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Execute" }));
+    await flush();
+
+    return { forestSpy, executeSpy, deleteSpy };
+  }
+
+  it("keeps the draft node visible while the executed run is still running", async () => {
+    const { deleteSpy } = await mountAndExecute({
+      forestBody: soloForest, // never contains run_child
+      runDetail: () => ({ status: "running" }),
+    });
+
+    // Poll well past the OLD 4s / 20×200ms focus budget.
+    for (let i = 0; i < 6; i++) await flush(1000);
+
+    const draftNode = screen.getByTestId("graph-node-lifecycle");
+    expect(draftNode).toBeInTheDocument();
+    // Executing, NOT removed and NOT failed.
+    expect(draftNode).toHaveAttribute("data-lifecycle", "pending");
+    expect(deleteSpy).not.toHaveBeenCalled();
+    // The run never indexed → no child head became active.
+    expect(screen.queryByTestId("forest-head-run_child")).toBeNull();
+  });
+
+  it("removes the draft and focuses once the run indexes", async () => {
+    let forestBody: () => HeadSetResponse = soloForest;
+    let status = "running";
+    const { deleteSpy } = await mountAndExecute({
+      forestBody: () => forestBody(),
+      runDetail: () => ({ status }),
+    });
+
+    // A couple of running polls: the draft is still there.
+    await flush(1000);
+    expect(screen.getByTestId("graph-node-lifecycle")).toBeInTheDocument();
+
+    // The run finishes and the forest index catches up.
+    forestBody = forkedForestResponse; // now includes run_child / "Child OLS"
+    status = "completed";
+    await flush(1000); // poll → refetch → forest now has run_child → onIndexed
+    // Extra flushes: onIndexed removes the draft + sets the pending focus, then
+    // the WorkbenchShell pending-focus effect resolves + selects the produced
+    // node. (waitFor is unusable here — fake timers never advance its poller.)
+    await flush(200);
+    await flush(200);
+
+    // Draft node gone, produced run focused, best-effort cleanup fired.
+    expect(screen.queryByTestId("graph-node-lifecycle")).toBeNull();
+    expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
+      "Child OLS",
+    );
+    expect(deleteSpy).toHaveBeenCalledWith("/proj", "d1");
+  });
+
+  it("bumps the rail-refresh token so the RUNS rail re-fetches when the executed run indexes", async () => {
+    // v1.6.9 B1-4 — the container must signal the RUNS rail to refresh the moment
+    // a pending run indexes (else the rail lags up to its 30s poll). A fetch-count
+    // assertion is unusable here: useForestData.refetch() flips loading→true on
+    // every poll, so the container flashes <Loading/> and remounts the whole shell
+    // (rail included), meaning the rail already re-fetches /runs on every poll
+    // regardless of this wiring. So we assert the container's own responsibility
+    // directly — the RailRefreshContext token it hands the rail must increment on
+    // index. RunHistoryRail is mocked (top of file) to the real component plus a
+    // token probe; without the wiring the token stays 0 and this fails.
+    railTokenProbe.tokens.length = 0;
+    let forestBody: () => HeadSetResponse = soloForest;
+    let status = "running";
+    await mountAndExecute({
+      forestBody: () => forestBody(),
+      runDetail: () => ({ status }),
+    });
+
+    await flush();
+    const tokenBeforeIndex = Math.max(0, ...railTokenProbe.tokens);
+    expect(tokenBeforeIndex).toBe(0);
+
+    // The run finishes and the forest index catches up → onIndexed → token bump.
+    forestBody = forkedForestResponse;
+    status = "completed";
+    await flush(1000); // poll → refetch → forest now has run_child → onIndexed
+    await flush(200);
+    await flush(200);
+
+    const tokenAfterIndex = Math.max(0, ...railTokenProbe.tokens);
+    expect(tokenAfterIndex).toBeGreaterThan(tokenBeforeIndex);
+  });
+
+  it("marks the draft failed when the run terminally fails", async () => {
+    const { deleteSpy } = await mountAndExecute({
+      forestBody: soloForest,
+      runDetail: () => ({ status: "failed" }),
+    });
+
+    await flush(1000); // poll → fetchRunDetail failed → onFailed
+
+    const draftNode = screen.getByTestId("graph-node-lifecycle");
+    // Marked failed on the canvas — NOT silently removed.
+    expect(draftNode).toBeInTheDocument();
+    expect(draftNode).toHaveAttribute("data-lifecycle", "failed");
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

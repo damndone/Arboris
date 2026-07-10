@@ -16,6 +16,7 @@ vi.mock("../../api", async () => {
 });
 
 import { RunHistoryRail } from "./RunHistoryRail";
+import { RailRefreshContext } from "../../workbench/RailRefreshContext";
 
 function LocationSpy({ recordTo }: { recordTo: { url?: string } }) {
   const loc = useLocation();
@@ -152,5 +153,28 @@ describe("RunHistoryRail", () => {
     fetchRunsMock.mockResolvedValue({ runs: [] });
     harness(["/runs/r-x?project_root=/tmp/p"]);
     await waitFor(() => expect(screen.getByText("No runs yet.")).toBeInTheDocument());
+  });
+
+  it("re-fetches /runs immediately when the RailRefreshContext token bumps", async () => {
+    // v1.6.9 B1-4 — a pending run indexing bumps the rail-refresh token; the
+    // rail must re-fetch /runs right away (not wait out the 30s poll).
+    fetchRunsMock.mockResolvedValue({ runs: [] });
+    const tree = (token: number) => (
+      <MemoryRouter initialEntries={["/runs/r-a?project_root=/tmp/p"]}>
+        <RailRefreshContext.Provider value={token}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunHistoryRail />} />
+          </Routes>
+        </RailRefreshContext.Provider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(tree(0));
+    // The mount fetch — token=0 must NOT add an extra fetch on top of it.
+    await waitFor(() => expect(fetchRunsMock).toHaveBeenCalledTimes(1));
+
+    // Bump the token: same URL (no remount), only the provider value changes.
+    // No timers advanced — the re-fetch is driven by the token, not the poll.
+    rerender(tree(1));
+    await waitFor(() => expect(fetchRunsMock).toHaveBeenCalledTimes(2));
   });
 });

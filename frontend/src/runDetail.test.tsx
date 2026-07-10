@@ -26,14 +26,20 @@ function jsonResponse(body: unknown, init: FetchInit = {}): Response {
   } as unknown as Response;
 }
 
-const fetchMock = vi.fn<typeof fetch>();
+let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
-  global.fetch = fetchMock as unknown as typeof fetch;
+  fetchMock = vi.fn<typeof fetch>();
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
-  fetchMock.mockReset();
+  // Restore only fetch — vi.unstubAllGlobals() would also wipe the
+  // ResizeObserver stub installed once in vitest.setup.ts (needed by React Flow).
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 function v3GraphResponse() {
