@@ -1,4 +1,4 @@
-// frontend/src/workbench/useDraftActions.ts
+// frontend/src/workbench/useDraftHandlers.ts
 //
 // v1.6.9 B1-3 — cohesion cluster extracted from WorkbenchRouteContainer's
 // ForestWorkbench (spec §4.4). Owns the draft fork / patch / validate / discard /
@@ -30,7 +30,7 @@ import {
 } from "../api";
 import type { DraftAction, DraftRegistry } from "../lineage/drafts/draftRegistry";
 
-export interface UseDraftActionsParams {
+export interface UseDraftHandlersParams {
   projectRoot: string;
   registry: DraftRegistry;
   dispatchDraft: (action: DraftAction) => void;
@@ -52,12 +52,12 @@ export interface DraftActionHandlers {
   onGenesisDraftFailed: (draftId: string) => void;
 }
 
-export function useDraftActions({
+export function useDraftHandlers({
   projectRoot,
   registry,
   dispatchDraft,
   setDraftBusy,
-}: UseDraftActionsParams): DraftActionHandlers {
+}: UseDraftHandlersParams): DraftActionHandlers {
   // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
   // survive a page reload. Best-effort: never block the forest if it fails.
   useEffect(() => {

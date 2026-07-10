@@ -53,7 +53,7 @@ import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
 import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
-import { useDraftActions } from "./useDraftActions";
+import { useDraftHandlers } from "./useDraftHandlers";
 import {
   getRunGraphHeadSet,
   executePipelineDraft,
@@ -227,7 +227,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   // pure dispatches + the mount-time hydration effect live in the hook (spec
   // §4.4 cohesion cluster). Registry + busy state stay here so handleExecuteDraft
   // (which owns container-level pending-run state) reads them directly.
-  const draftActions = useDraftActions({
+  const draftHandlers = useDraftHandlers({
     projectRoot,
     registry,
     dispatchDraft,
@@ -460,10 +460,10 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       <GenesisWizard
         projectRoot={projectRoot}
         onClose={() => setGenesisWizardOpen(false)}
-        onDraftUpdated={draftActions.onGenesisDraftUpdated}
-        onDraftValidated={draftActions.onGenesisDraftValidated}
-        onDraftExecuting={draftActions.onGenesisDraftExecuting}
-        onDraftFailed={draftActions.onGenesisDraftFailed}
+        onDraftUpdated={draftHandlers.onGenesisDraftUpdated}
+        onDraftValidated={draftHandlers.onGenesisDraftValidated}
+        onDraftExecuting={draftHandlers.onGenesisDraftExecuting}
+        onDraftFailed={draftHandlers.onGenesisDraftFailed}
         onDraftExecuted={handleGenesisDraftExecuted}
       />
     </aside>
@@ -486,12 +486,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
             value={{
               registry,
               busy: draftBusy,
-              onForkDraft: draftActions.onForkDraft,
-              onPatch: draftActions.onPatch,
-              onValidate: draftActions.onValidate,
+              onForkDraft: draftHandlers.onForkDraft,
+              onPatch: draftHandlers.onPatch,
+              onValidate: draftHandlers.onValidate,
               onExecute: handleExecuteDraft,
-              onDiscard: draftActions.onDiscard,
-              onEnsureLoaded: draftActions.onEnsureLoaded,
+              onDiscard: draftHandlers.onDiscard,
+              onEnsureLoaded: draftHandlers.onEnsureLoaded,
             }}
           >
             <LineageBridge model={model}>

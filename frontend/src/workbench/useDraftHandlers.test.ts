@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
-import { useDraftActions } from "./useDraftActions";
+import { useDraftHandlers } from "./useDraftHandlers";
 import type { DraftAction, DraftEntry, DraftRegistry } from "../lineage/drafts/draftRegistry";
 import type {
   DraftValidationResult,
@@ -60,7 +60,7 @@ function setup(registry: DraftRegistry = new Map()) {
   const dispatchDraft = vi.fn<(a: DraftAction) => void>();
   const setDraftBusy = vi.fn<(b: boolean) => void>();
   const view = renderHook(() =>
-    useDraftActions({
+    useDraftHandlers({
       projectRoot: "/p",
       registry,
       dispatchDraft,
@@ -77,7 +77,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.clearAllMocks());
 
-describe("useDraftActions", () => {
+describe("useDraftHandlers", () => {
   describe("onForkDraft", () => {
     it("dispatches put with the created draft + hash", () => {
       const { result, dispatchDraft } = setup();
