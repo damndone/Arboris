@@ -13,7 +13,7 @@
 | 大文件 api.ts | 1002 行 | **1346 行**（44 手写 type + 客户端 + 错误类） | 成立，已恶化 |
 | 大文件 App.test.tsx | 1454 行 | 1360 行 | 成立 |
 | 全局 CSS styles.css | 864 行 | **1053 行** | 成立，已恶化 |
-| CLI 参数 | x / model-type | `--x --model-type --mode --imputation`（4 个） | 成立 |
+| CLI 参数 | x / model-type | ~~4 个~~ → 已补齐 panel/IV/DID/CS/prediction 全参数 | **✅ 已清 v1.6.9** |
 | lineage 规模 | "过度设计" | 后端 19 文件/2787 行 + 前端 60 文件 | 存在，但见 D5 反驳 |
 | OpenAPI codegen | 无 | 确认无 codegen 工具，44 手写 type | 成立 |
 
@@ -37,11 +37,15 @@
 - **方向**：`GLM_FAMILIES = {"logit": smf.logit, ...}` + 一个参数化 `run_glm_family(family, ...)`，保留各自的收敛报错文案；DID 家族维持独立。
 - **代价**：中。golden/invariant 测试（23）能钉住数值不漂移，重构风险可控。
 
-## D3. CLI 是 API 的阉割版（中，ROI 高）
+## D3. CLI 是 API 的阉割版 —— ✅ 已清（v1.6.9）
 
-- **事实**：引擎里 DID/CS/SA/dCDH/IV/Panel 全实现了，但 CLI 只有 `--x --model-type --mode --imputation`——**entity/time/treatment/endog/iv 一个都传不进**。等于引擎完整、入口残疾。
-- **方向**：把 `_submit_run` 已经解析的那套 form 参数在 CLI 上对齐（复用后端同一套 parse），或让 CLI 直接构造 form dict 走 `_submit_run`。
-- **代价**：小-中，ROI 高——纯加参数 + 透传，不动引擎。适合当某个版本的顺手清债。
+- **状态**：**已解决**。v1.6.9 补齐（`a914309` panel/IV/DID/CS + `4d7759e` prediction/option 文档化）。
+- **现状核实（2026-07-10）**：`cli.py` 已暴露 `--entity-col --time-col --covariance
+  --iv-endog --iv-instruments --did-mode/--did-cohort-col/--did-treat-col/--did-post-col/
+  --did-status-col/--did-treatment-path --cs-control-group/--cs-est-method/--cs-base-period/
+  --cs-cluster-var/--cs-anticipation --honest-did --prediction-model-type/--prediction-cv-folds/
+  --prediction-sampling-method` 等——DID/CS/SA/dCDH/IV/Panel/prediction 参数均可从 CLI 传入。
+- **原债**（留痕）：曾只有 `--x --model-type --mode --imputation`，引擎完整而入口残疾。
 
 ## D4. 前端全局 CSS 1053 行（低，非紧急）
 
@@ -66,8 +70,8 @@
 
 ## 建议优先级
 
-1. **D1 api.py 拆分**（最高，且还在涨）——但要先有契约测试护栏。与前端 `WorkbenchRouteContainer` 拆分成对推进，立"不许再往大文件加"的规矩。
-2. **D3 CLI 补参数**（ROI 最高，代价小）——适合任何版本顺手清。
+1. **D1 api.py 拆分**（最高，且还在涨）——但要先有契约测试护栏。与前端 `WorkbenchRouteContainer` 拆分成对推进，立"不许再往大文件加"的规矩。**→ 正在做：v1.6.10（见 `specs/2026-07-10-v1.6.10-api-py-decomposition-design.md`）。**
+2. ~~**D3 CLI 补参数**~~ —— ✅ 已清（v1.6.9，`a914309`+`4d7759e`）。
 3. **D6 OpenAPI codegen**（防漂移，中代价）——接入后两端类型一劳永逸。
 4. **D2 GLM 家族收敛**（中，golden 护栏使风险可控）。
 5. **D5 lineage 复查**（不是债，是每版一次的"抽象是否挣钱"复盘，用户拍板）。
