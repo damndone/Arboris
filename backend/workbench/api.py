@@ -6,7 +6,7 @@ import queue
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -24,17 +24,9 @@ from .config import load_config
 from .engine.capabilities import build_capabilities
 from .graph_store import GraphDeserializationError, GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
-from .domain import GuardrailIssue, Severity
 from .events import get_event_manager
-from .orchestrator import (
-    _lineage,
-    _run_workflow,
-    _write_manifest,
-    parse_imputation_request,
-    run_batch_y_workflow,
-    run_workflow,
-)
-from .projects import create_project, create_run
+from .orchestrator import run_batch_y_workflow
+from .projects import create_project
 from .repository.run_repository import (
     _artifact_counts,
     _detect_failed_stage,
@@ -55,6 +47,16 @@ from .services.results_service import (
     _dummy_coded_columns,
     _model_results,
     _normalize_issue_stream,
+)
+from .services.run_service import (
+    _STRUCTURAL_FOCAL_FAMILIES,
+    _mark_interrupted_if_dead,
+    _parse_focal_x,
+    _parse_json_str_array,
+    _read_upload_bytes,
+    _sse_frame,
+    _submit_run,
+    _write_upload,
 )
 from . import flags
 from .lineage.family import scan_family
@@ -98,24 +100,12 @@ from .lineage.rerun_provenance import (
     pending_produced_lineage,
     run_rerun_from_from_context,
 )
-from .lineage.run_inputs import read_run_inputs, write_run_inputs
-from .lineage.role_layer import canonicalize_focal_x
+from .lineage.run_inputs import read_run_inputs
 from .lineage.upload_store import (
     delete_upload_if_unreferenced,
-    resolve_upload,
     store_upload_bytes,
     verify_upload,
 )
-
-# Estimator families whose focal/treatment variable is structural (not user-declared
-# via focal_x). For these, persisted focal_x MUST be empty (spec §5).
-_STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
-
-
-def _parse_focal_x(raw: str, x_columns: list[str]) -> list[str]:
-    """Canonicalize the form's focal_x against the run's x columns."""
-    return canonicalize_focal_x(raw, x_columns)
-
 
 def _inject_focal_x_control(
     editable_schema: list[dict[str, Any]],
@@ -154,27 +144,7 @@ _TERMINAL_RUN_STATUSES = {
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
 
-UPLOAD_CHUNK_BYTES = 1024 * 1024
 BYTES_PER_GB = 1024**3
-
-
-def _safe_int(value: str) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _parse_json_str_array(raw: str, label: str) -> list[str]:
-    if not raw.strip():
-        return []
-    try:
-        parsed = json.loads(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"Invalid {label} JSON: {exc}")
-    if not isinstance(parsed, list) or not all(isinstance(c, str) for c in parsed):
-        raise HTTPException(status_code=422, detail=f"{label} must be a JSON array of column-name strings.")
-    return parsed
 
 
 class ProjectRequest(BaseModel):
@@ -263,108 +233,6 @@ async def upload_dataset_endpoint(
     filename = Path(file.filename or "upload.csv").name
     sha = store_upload_bytes(root, data, filename=filename)
     return {"sha256": sha, "filename": filename}
-
-
-async def _read_upload_bytes(file: UploadFile, max_bytes: int) -> bytes:
-    """Read an upload fully into memory, enforcing the project size cap."""
-    buf = bytearray()
-    while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-        buf.extend(chunk)
-        if len(buf) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail="Uploaded file exceeds project size limit.",
-            )
-    return bytes(buf)
-
-
-def _submit_run(
-    root: Path,
-    *,
-    form: dict[str, str],
-    upload_bytes: bytes,
-    upload_filename: str,
-    started_at: str,
-    rerun_of: str | None = None,
-    from_node: str | None = None,
-    rerun_reason: str = "initial",
-    op_overrides: dict | None = None,
-    rerun_from: dict[str, Any] | None = None,
-    before_dispatch: Callable[[str], None] | None = None,
-) -> dict[str, str]:
-    """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
-
-    Stores the upload content-addressably, writes run_inputs.json, materializes the
-    blob into the run dir for the engine (which reads a path), and dispatches the full
-    pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
-    can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
-    raises without leaving a junk run behind."""
-    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
-    imputation_request = parse_imputation_request(form.get("imputation", ""))
-    iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
-    iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
-
-    # focal_x: canonicalize against x; clear for families whose focal/treatment is
-    # structural. Persist into run_inputs (the engine reads it back at recording).
-    # Only mutate the form when there is something to set/clear, so runs that never
-    # declare a focal keep byte-identical run_inputs (spec §5 backward compat).
-    focal_x = _parse_focal_x(form.get("focal_x", ""), x_columns)
-    if form.get("model_type", "auto") in _STRUCTURAL_FOCAL_FAMILIES:
-        focal_x = []
-    form_for_persist = form
-    if focal_x:
-        form_for_persist = {**form, "focal_x": ",".join(focal_x)}
-    elif form.get("focal_x"):
-        form_for_persist = {**form, "focal_x": ""}
-
-    sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
-    run = create_run(root, mode=form.get("mode", "auto"))
-
-    write_run_inputs(
-        run.root,
-        form=form_for_persist,
-        upload={"sha256": sha, "filename": upload_filename},
-        rerun_of=rerun_of, from_node=from_node, rerun_reason=rerun_reason,
-        override_hash=override_hash(op_overrides) if op_overrides else None,
-        dag_hash=dag_hash(sha, form_for_persist),
-        rerun_from=rerun_from,
-    )
-
-    uploads_dir = run.root / "_uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    saved_path = uploads_dir / Path(upload_filename or "upload.csv").name
-    saved_path.write_bytes(resolve_upload(root, sha).read_bytes())
-
-    _write_manifest(
-        run.root, run.run_id, form.get("mode", "auto"), "running",
-        _lineage([saved_path]), started_at=started_at,
-        y=form.get("y", ""), x=x_columns,
-        requested_model_type=form.get("model_type", "auto"),
-        rerun_of=rerun_of,
-    )
-    if before_dispatch is not None:
-        before_dispatch(run.run_id)
-
-    events = get_event_manager()
-    events.register_run(run.run_id)
-    events.mark_active(run.run_id)
-    events.executor.submit(
-        _bg_run, run.root, run.run_id, saved_path,
-        form.get("mode", "auto"), form.get("y", ""), x_columns, started_at,
-        form.get("model_type", "auto"),
-        (form.get("sheet_name") or None), form.get("transpose") == "true",
-        imputation_request,
-        form.get("entity_col", ""), form.get("time_col", ""), form.get("covariance", ""),
-        form.get("prediction_model_type", ""), _safe_int(form.get("prediction_cv_folds", "0")),
-        form.get("prediction_sampling_method", ""),
-        iv_endog_list, iv_instruments_list,
-        form.get("did_mode", ""), form.get("did_cohort_col", ""), form.get("did_treat_col", ""),
-        form.get("did_post_col", ""), form.get("did_status_col", ""), form.get("did_treatment_path", ""),
-        form.get("cs_control_group", ""), form.get("cs_est_method", ""), form.get("cs_base_period", ""),
-        form.get("cs_cluster_var", ""), _safe_int(str(form.get("cs_anticipation", "0"))),
-        str(form.get("honest_did", "false")).lower() == "true",
-    )
-    return {"run_id": run.run_id, "status": "running"}
 
 
 @app.post("/runs")
@@ -505,150 +373,6 @@ async def batch_run_endpoint(
     finally:
         events.release_slot(None)
         await file.close()
-
-
-async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
-    written = 0
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("wb") as handle:
-        while chunk := await file.read(UPLOAD_CHUNK_BYTES):
-            written += len(chunk)
-            if written > max_bytes:
-                raise HTTPException(
-                    status_code=413,
-                    detail="Uploaded file exceeds project size limit.",
-                )
-            handle.write(chunk)
-
-
-def _bg_run(
-    run_root: Path,
-    run_id: str,
-    saved_path: Path,
-    mode: str,
-    y: str,
-    x_columns: list[str],
-    started_at: str,
-    model_type: str = "auto",
-    sheet_name: str | None = None,
-    transpose: bool = False,
-    imputation: dict | None = None,
-    entity_col: str = "",
-    time_col: str = "",
-    covariance: str = "",
-    prediction_model_type: str = "",
-    prediction_cv_folds: int = 0,
-    prediction_sampling_method: str = "",
-    iv_endog: list[str] | None = None,
-    iv_instruments: list[str] | None = None,
-    did_mode: str = "",
-    did_cohort_col: str = "",
-    did_treat_col: str = "",
-    did_post_col: str = "",
-    did_status_col: str = "",
-    did_treatment_path: str = "",
-    cs_control_group: str = "",
-    cs_est_method: str = "",
-    cs_base_period: str = "",
-    cs_cluster_var: str = "",
-    cs_anticipation: int = 0,
-    honest_did: bool = False,
-) -> None:
-    events = get_event_manager()
-    config = load_config(_resolve_project_root(run_root) / "config.yml")
-
-    def _on_step(step: str, status: str, message: str) -> None:
-        if status == "blocked":
-            event_name = "step_blocked"
-        elif status in ("start", "complete"):
-            event_name = f"step_{status}"
-        else:
-            event_name = f"step_{status}"
-        events.emit(run_id, {
-            "event": event_name,
-            "step": step,
-            "message": message,
-            "status": status if status not in ("start", "complete") else None,
-        })
-
-    try:
-        result = _run_workflow(
-            run_root, run_id, [saved_path],
-            mode, y, x_columns, config, started_at,
-            on_step=_on_step,
-            model_type=model_type,
-            sheet_name=sheet_name,
-            transpose=transpose,
-            imputation=imputation,
-            entity_col=entity_col,
-            time_col=time_col,
-            covariance=covariance,
-            prediction_model_type=prediction_model_type,
-            prediction_cv_folds=prediction_cv_folds,
-            prediction_sampling_method=prediction_sampling_method,
-            iv_endog=iv_endog,
-            iv_instruments=iv_instruments,
-            did_mode=did_mode,
-            did_cohort_col=did_cohort_col,
-            did_treat_col=did_treat_col,
-            did_post_col=did_post_col,
-            did_status_col=did_status_col,
-            did_treatment_path=did_treatment_path,
-            cs_control_group=cs_control_group,
-            cs_est_method=cs_est_method,
-            cs_base_period=cs_base_period,
-            cs_cluster_var=cs_cluster_var,
-            cs_anticipation=cs_anticipation,
-            honest_did=honest_did,
-        )
-        status = result["status"]
-        events.emit_terminal(run_id, status, f"Workflow {status}")
-    except Exception as exc:
-        _write_manifest(
-            run_root, run_id, mode, "failed",
-            _lineage([saved_path]),
-            started_at=started_at, y=y, x=x_columns,
-            requested_model_type=model_type,
-        )
-        write_json(run_root / "errors.json", {
-            "issues": [GuardrailIssue(
-                Severity.BLOCKER, "WORKFLOW_FAILED",
-                str(exc), {},
-            ).to_dict()],
-        })
-        events.emit_terminal(run_id, "failed", f"Workflow failed: {exc}")
-    finally:
-        events.release_slot(run_id)
-
-
-def _mark_interrupted_if_dead(run_root: Path, manifest: dict) -> str | None:
-    run_id = manifest.get("run_id")
-    if manifest.get("status") != "running":
-        return None
-    events = get_event_manager()
-    if events.is_active(run_id):
-        return None
-    issue = GuardrailIssue(
-        Severity.BLOCKER, "WORKFLOW_INTERRUPTED",
-        "Workflow interrupted because the server process stopped before completion.",
-        {},
-    )
-    write_json(run_root / "errors.json", {"issues": [issue.to_dict()]})
-    _write_manifest(
-        run_root, run_id,
-        manifest.get("mode", "auto"), "interrupted",
-        manifest.get("lineage", []),
-        started_at=manifest.get("started_at"),
-        y=manifest.get("y"),
-        x=manifest.get("x") or [],
-        requested_model_type=manifest.get("requested_model_type"),
-    )
-    manifest["status"] = "interrupted"
-    return "interrupted"
-
-
-def _sse_frame(event: dict) -> str:
-    return f"event: {event['event']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 @app.get("/runs")

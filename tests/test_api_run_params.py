@@ -21,10 +21,10 @@ def test_run_endpoint_forwards_new_params(tmp_path):
         "/projects", json={"parent": str(tmp_path), "name": "demo"}
     ).json()["project_root"]
 
-    # Patch _run_workflow (the symbol _bg_run actually calls). Names bind there,
-    # so a positional swap in executor.submit(_bg_run, ...) is caught.
+    # Patch _run_workflow in run_service (the module where _bg_run now lives and
+    # binds the name), so a positional swap in executor.submit(_bg_run, ...) is caught.
     with patch(
-        "workbench.api._run_workflow",
+        "workbench.services.run_service._run_workflow",
         return_value={"run_id": "r", "status": "succeeded"},
     ) as m:
         resp = client.post("/runs", data={
@@ -56,10 +56,10 @@ def test_run_endpoint_forwards_cs_params(tmp_path):
         "/projects", json={"parent": str(tmp_path), "name": "demo"}
     ).json()["project_root"]
 
-    # Patch _run_workflow (the symbol _bg_run actually calls). Names bind there,
-    # so a positional swap in executor.submit(_bg_run, ...) is caught.
+    # Patch _run_workflow in run_service (the module where _bg_run now lives and
+    # binds the name), so a positional swap in executor.submit(_bg_run, ...) is caught.
     with patch(
-        "workbench.api._run_workflow",
+        "workbench.services.run_service._run_workflow",
         return_value={"run_id": "r", "status": "succeeded"},
     ) as m:
         resp = client.post("/runs", data={
@@ -137,7 +137,7 @@ def test_run_endpoint_accepts_valid_iv_endog(tmp_path):
     ).json()["project_root"]
 
     with patch(
-        "workbench.api._run_workflow",
+        "workbench.services.run_service._run_workflow",
         return_value={"run_id": "r", "status": "succeeded"},
     ) as m:
         resp = client.post("/runs", data={
