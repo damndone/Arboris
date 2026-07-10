@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -17,16 +17,15 @@ from .api_errors import (
     ERROR_INVALID_PATH,
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
-    register_error_handlers,
 )
+from .app import app
+from .http._deps import BYTES_PER_GB
 from .artifacts import read_json, write_json
 from .config import load_config
-from .engine.capabilities import build_capabilities
 from .graph_store import GraphDeserializationError, GraphStore, graph_to_json
 from .diagnostic_preview import build_diagnostic_summary_preview
 from .events import get_event_manager
 from .orchestrator import run_batch_y_workflow
-from .projects import create_project
 from .repository.run_repository import (
     _artifact_counts,
     _detect_failed_stage,
@@ -103,7 +102,6 @@ from .lineage.rerun_provenance import (
 from .lineage.run_inputs import read_run_inputs
 from .lineage.upload_store import (
     delete_upload_if_unreferenced,
-    store_upload_bytes,
     verify_upload,
 )
 
@@ -140,100 +138,6 @@ def _inject_focal_x_control(
 _TERMINAL_RUN_STATUSES = {
     "completed", "failed", "cancelled", "interrupted", "partial", "blocked",
 }
-
-app = FastAPI(title="Local Econometrics Workbench")
-register_error_handlers(app)
-
-BYTES_PER_GB = 1024**3
-
-
-class ProjectRequest(BaseModel):
-    parent: str
-    name: str
-
-
-@app.get("/capabilities")
-def capabilities_endpoint() -> dict:
-    return build_capabilities()
-
-
-@app.post("/projects")
-def create_project_endpoint(request: ProjectRequest) -> dict[str, str]:
-    parent_raw = request.parent.strip()
-    name = request.name.strip()
-    if not parent_raw:
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Project parent path is required.",
-            details={"field": "parent"},
-        )
-    if not name:
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Project name is required.",
-            details={"field": "name"},
-        )
-    if "/" in name or "\\" in name:
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Project name must not contain path separators.",
-            details={"field": "name"},
-        )
-    if name in {".", ".."}:
-        # `parent / ".."` escapes the parent: create_project mkdirs with
-        # exist_ok=True and writes project.yaml/config.yml unconditionally,
-        # so it would scaffold project files into an arbitrary existing dir.
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Project name must be a real directory name.",
-            details={"field": "name"},
-        )
-    parent = Path(parent_raw).expanduser()
-    if not parent.is_absolute():
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Project parent path must be absolute.",
-            details={"field": "parent", "parent": parent_raw},
-        )
-    try:
-        project = create_project(parent, name)
-    except OSError as exc:
-        raise WorkbenchAPIError(
-            status_code=422,
-            code=ERROR_INVALID_PATH,
-            message="Cannot create project at parent path.",
-            details={"parent": str(parent), "reason": str(exc)},
-        ) from exc
-    return {"project_root": str(project.root)}
-
-
-@app.post("/uploads")
-async def upload_dataset_endpoint(
-    project_root: str = Form(...),
-    file: UploadFile = File(...),
-) -> dict[str, str]:
-    """v1.6.8 genesis: standalone content-addressable upload.
-
-    Files persist server-side from wizard step 1 so genesis draft chains
-    fully rehydrate after reload (same store POST /runs uses internally).
-    """
-    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
-    root = Path(project_root)
-    config = load_config(root / "config.yml")
-    max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
-    try:
-        data = await _read_upload_bytes(file, max_upload_bytes)
-    finally:
-        await file.close()
-    filename = Path(file.filename or "upload.csv").name
-    sha = store_upload_bytes(root, data, filename=filename)
-    return {"sha256": sha, "filename": filename}
-
 
 @app.post("/runs")
 async def run_endpoint(
