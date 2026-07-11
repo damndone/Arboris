@@ -633,6 +633,15 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
     controls = _editable_controls(model)
     allowed = set(controls)
+    params = model.get("params", {})
+    # P1 (v1.6.10): the inherited source values came from a real executed run and
+    # are trusted as-is. A param whose value is byte-identical to its source value
+    # is NOT re-validated against the (possibly narrower) editable_schema options —
+    # otherwise a draft forked from an auto-mode run (params["model_type"] == "auto",
+    # which is absent from the concrete-family options) would be entirely
+    # un-editable, since a full-params PATCH always re-sends the unchanged "auto".
+    # Only params the user actually CHANGED get option/type validation.
+    source_params = model.get("source_params") or {}
     expected_schema_hash = schema_hash(model.get("editable_schema", []))
     if model.get("editable_schema_hash") != expected_schema_hash:
         checks.append(
@@ -642,7 +651,7 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
                 node_id=model.get("node_id"),
             )
         )
-    for key in model.get("params", {}):
+    for key in params:
         if key not in allowed:
             checks.append(
                 check(
@@ -652,10 +661,12 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
                 )
             )
             continue
+        if key in source_params and params.get(key) == source_params.get(key):
+            continue  # unchanged inherited value — trusted, skip re-validation
         checks.extend(
             _validate_control_value(
                 key,
-                model.get("params", {}).get(key),
+                params.get(key),
                 controls[key],
                 node_id=model.get("node_id"),
             )

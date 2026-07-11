@@ -717,9 +717,9 @@ def test_post_runs_returns_immediately_running(tmp_path: Path):
         blocker.wait()
         return {"run_id": "x", "status": "completed"}
 
-    import workbench.api as api_mod
+    import workbench.services.run_service as run_svc
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(api_mod, "_run_workflow", _slow_run)
+    monkeypatch.setattr(run_svc, "_run_workflow", _slow_run)
 
     try:
         with data.open("rb") as handle:
@@ -755,9 +755,9 @@ def test_post_runs_429_when_busy(tmp_path: Path):
         blocker.wait()
         return {"run_id": "x", "status": "completed"}
 
-    import workbench.api as api_mod
+    import workbench.services.run_service as run_svc
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(api_mod, "_run_workflow", _slow_run)
+    monkeypatch.setattr(run_svc, "_run_workflow", _slow_run)
 
     try:
         with data.open("rb") as handle:

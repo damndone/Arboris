@@ -205,6 +205,67 @@ def test_validate_blocks_invalid_select_option() -> None:
     assert any(c["code"] == "INVALID_PARAM_OPTION" for c in result["checks"])
 
 
+def test_validate_skips_unchanged_inherited_param_outside_options() -> None:
+    """P1 (v1.6.10): a param whose value is byte-identical to the inherited
+    source value is trusted as-is — it came from a real executed run — even when
+    that value is not in the (possibly narrower) editable_schema options. Fixes
+    auto-mode drafts (model_type='auto' ∉ concrete-family options) being
+    completely un-editable: editing ONLY covariance must succeed."""
+    draft = _draft()
+    schema = [
+        {"key": "model_type", "kind": "select", "label": "Model",
+         "options": ["ols", "logit"]},  # inherited "auto" is deliberately absent
+        {"key": "covariance", "kind": "select", "label": "Covariance",
+         "options": ["robust", "clustered"]},
+    ]
+    draft["graph"]["nodes"][1]["editable_schema"] = schema
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = schema_hash(schema)
+    draft["graph"]["nodes"][1]["source_params"] = {"model_type": "auto", "covariance": "robust"}
+    # user changed ONLY covariance; model_type stays the inherited "auto"
+    draft["graph"]["nodes"][1]["params"] = {"model_type": "auto", "covariance": "clustered"}
+
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+
+    assert result["ok"] is True, result["checks"]
+
+
+def test_validate_allows_changing_inherited_param_to_valid_option() -> None:
+    """Changing an inherited out-of-options value to a valid in-options value
+    passes (the skip is not required, normal validation accepts it)."""
+    draft = _draft()
+    schema = [
+        {"key": "model_type", "kind": "select", "label": "Model",
+         "options": ["ols", "logit"]},
+    ]
+    draft["graph"]["nodes"][1]["editable_schema"] = schema
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = schema_hash(schema)
+    draft["graph"]["nodes"][1]["source_params"] = {"model_type": "auto"}
+    draft["graph"]["nodes"][1]["params"] = {"model_type": "logit"}
+
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+
+    assert result["ok"] is True, result["checks"]
+
+
+def test_validate_still_blocks_changed_param_outside_options() -> None:
+    """The skip applies ONLY to unchanged inherited values — a param the user
+    actually edits to an out-of-options value is still rejected."""
+    draft = _draft()
+    schema = [
+        {"key": "model_type", "kind": "select", "label": "Model",
+         "options": ["ols", "logit"]},
+    ]
+    draft["graph"]["nodes"][1]["editable_schema"] = schema
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = schema_hash(schema)
+    draft["graph"]["nodes"][1]["source_params"] = {"model_type": "auto"}
+    draft["graph"]["nodes"][1]["params"] = {"model_type": "bogus"}  # user changed to invalid
+
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+
+    assert result["ok"] is False
+    assert any(c["code"] == "INVALID_PARAM_OPTION" for c in result["checks"])
+
+
 def _make_draft(draft_id: str, status: str = "draft", model_type: str = "ols") -> dict:
     return {
         "draft_id": draft_id,
