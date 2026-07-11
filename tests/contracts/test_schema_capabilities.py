@@ -105,6 +105,7 @@ SCHEMA: dict = {
                     "key": {"type": "string", "minLength": 1},
                     "label": {"type": "string", "minLength": 1},
                     "description": {"type": "string"},
+                    "default": {"type": "boolean"},
                 },
                 "additionalProperties": False,
             },

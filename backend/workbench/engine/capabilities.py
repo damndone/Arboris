@@ -116,10 +116,16 @@ SAMPLING_UI = [
 ]
 
 COVARIANCE_UI = [
-    {"key": "robust", "label": "Robust (default)"},
+    {"key": "robust", "label": "Robust (default)", "default": True},
     {"key": "clustered", "label": "Clustered"},
     {"key": "unadjusted", "label": "Unadjusted"},
 ]
+
+# U3 (v1.6.11): the default covariance is declared explicitly on the option, so
+# reordering COVARIANCE_UI can never silently change the default standard error.
+# This single value drives both the exposed `default` flag and the model param's
+# `value` below; the frontend reads the flagged option (never `options[0]`).
+_COVARIANCE_DEFAULT = next(o["key"] for o in COVARIANCE_UI if o.get("default"))
 
 # v1.6.0 — per-op editable schemas (mirror the FE EditableControl). Structural only:
 # key (POST /runs form-param name), kind, options, required, role, value. NO business
@@ -127,7 +133,7 @@ COVARIANCE_UI = [
 _COMMON_MODEL_PARAMS = [
     {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
     {"key": "covariance", "kind": "select", "label": "Covariance", "required": False,
-     "options": [o["key"] for o in COVARIANCE_UI], "value": "robust"},
+     "options": [o["key"] for o in COVARIANCE_UI], "value": _COVARIANCE_DEFAULT},
 ]
 
 _MODEL_PARAMS: dict[str, list[dict]] = {

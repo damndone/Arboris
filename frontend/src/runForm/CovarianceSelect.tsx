@@ -1,7 +1,10 @@
 import type { Capabilities } from "../capabilities/types";
 
 export function covarianceDefault(capabilities: Capabilities | null | undefined): string {
-  return capabilities?.covariance_options?.[0]?.key ?? "";
+  // U3: read the option the backend flags as default. Fall back to the first
+  // option only if none is flagged (defensive) — never assume ordering.
+  const options = capabilities?.covariance_options ?? [];
+  return (options.find((option) => option.default)?.key ?? options[0]?.key) ?? "";
 }
 
 export function CovarianceSelect({
