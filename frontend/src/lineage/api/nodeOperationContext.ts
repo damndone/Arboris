@@ -307,7 +307,10 @@ export function resolveNodeOperationContext(
           ai_visibility: "metadata_only" as const,
         })),
         editable_schema: node.editableSchema ?? null,
-        params: {},
+        // v1.6.11 B-2 — real parameter values live in editable_schema[].value
+        // (backend value-backfill from run_inputs.form). Deriving params here
+        // gives Ask AI packets and node comparisons actual values instead of {}.
+        params: paramsFromSchema(node.editableSchema),
         metrics: node.stats,
       },
       capabilities: resolveCapabilities(node, candidate_run_refs.length),
@@ -472,6 +475,23 @@ function stableFingerprintInput(input: {
     shared_by_run_ids: [...input.shared_by_run_ids].sort(),
     owner_head_created_at: input.owner_head_created_at,
   });
+}
+
+/** v1.6.11 B-2 — flatten editable_schema's backfilled values into a params
+ *  record. Entries without a meaningful value are skipped, so nodes with no
+ *  schema (dataset/report) keep the old `{}` shape. */
+function paramsFromSchema(
+  schema: HeadSetNode["editableSchema"],
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  for (const control of schema ?? []) {
+    const key = control.key;
+    if (!key || control.value === undefined || control.value === null || control.value === "") {
+      continue;
+    }
+    params[key] = control.value;
+  }
+  return params;
 }
 
 function buildUpstreamPath(

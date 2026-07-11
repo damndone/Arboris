@@ -132,15 +132,20 @@ export function upstreamPathSection(
   if (stableValue(oldPath) === stableValue(newPath)) {
     return emptySection("No upstream path changes detected.");
   }
+  // Equality is judged on keys (identity), but the rendered values are the
+  // human labels — a diff of bare hash::id keys is unreadable in the drawer.
+  const labelPath = (ctx: NodeOperationContextV1) =>
+    ctx.lineage_context.upstream_path.map((node) => node.label || node.key).join(" → ");
   return {
     changed: true,
     total_changed: 1,
     items: [
       {
         field_id: "upstream_path",
+        label: "Upstream path",
         change_type: "changed",
-        old_value: oldPath,
-        new_value: newPath,
+        old_value: labelPath(left),
+        new_value: labelPath(right),
       },
     ],
     summary: "Upstream path changed.",

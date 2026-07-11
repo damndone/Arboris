@@ -36,6 +36,7 @@ import { RawJsonModal } from "../lineage/modals/RawJsonModal";
 import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
+import { CompareProvider } from "../lineage/compare/CompareContext";
 import { LineageBridge } from "./LineageBridge";
 import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
@@ -502,6 +503,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
             }}
           >
             <LineageBridge model={model}>
+              <CompareProvider>
               <WorkbenchShell
                 runId={shellRunId}
                 projectRoot={projectRoot}
@@ -519,6 +521,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
                   void refetch();
                 }}
               />
+              </CompareProvider>
             </LineageBridge>
           </DraftActionsProvider>
         </WorkbenchStateProvider>
