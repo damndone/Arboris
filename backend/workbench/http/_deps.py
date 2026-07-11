@@ -3,6 +3,12 @@ from __future__ import annotations
 
 BYTES_PER_GB = 1024**3
 
+# A parent run must be in one of these (non-running) states to be rerun-from.
+# Shared by the pipeline-draft (from-node) and rerun routes.
+_TERMINAL_RUN_STATUSES = {
+    "completed", "failed", "cancelled", "interrupted", "partial", "blocked",
+}
+
 
 def _backfill_schema_values(editable_schema: list, form: dict) -> list:
     """2B.4: overlay the run's real form values onto editable_schema[i].value (by key).
