@@ -31,8 +31,8 @@
   `repository/run_repository.py`（纯 fs 读）。依赖单向 `http → services → repository → 领域层`,无回环。
 - **护栏**：纯搬迁零行为漂移,阶段间过 gate（BE 1363 / golden 23 0-drift / FE 953 / tsc 0）,
   opus Reviewer AST 比对 70 函数 69 字节相同、SHIP 无 blocker,真机 uvicorn smoke 过。
-- **剩余**：`http/drafts_routes.py` 819 行仍 > 500（含两个重编排 handler）→ 见 followups **N1**
-  （执行编排下沉 `services/draft_service.py`）。其余模块均 <400。
+- **彻底收口（v1.6.10.1，N1）**：draft 执行编排下沉 `services/draft_service.py`（392），
+  `drafts_routes` 819→485。**所有拆分文件均 <500**，无残留胖 handler。
 - **原债**（留痕）：曾 2206 行,23 路由 + 39 私有辅助糊在一起,每加端点就往里叠。规矩已立:
   **新端点 = 新 router + service,不许再往 facade/大文件加**。
 
