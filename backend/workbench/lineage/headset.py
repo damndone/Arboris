@@ -46,6 +46,49 @@ def _read_manifest(runs_dir: Path, run_id: str) -> dict:
         return {}
 
 
+# v1.6.11 A2 — dataset-aware Ask AI context. Serve-time decoration only (graph.json
+# untouched, same philosophy as editable_schema): dataset nodes get an `artifacts`
+# list with a compact schema/profile preview so the LLM can actually describe the
+# data (rows/cols, dtypes, missingness) instead of disclosing an empty packet.
+_PROFILE_CORRELATION_MAX_COLS = 12
+
+
+def _dataset_artifacts(runs_dir: Path, run_id: str, node_id: str) -> list[dict] | None:
+    if node_id == "stage:raw":
+        try:
+            profile = read_json(runs_dir / run_id / "staged" / "data_profile.json")
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        preview: dict[str, Any] = {
+            "row_count": profile.get("row_count"),
+            "column_count": profile.get("column_count"),
+            "columns": profile.get("columns"),
+        }
+        columns = profile.get("columns") or {}
+        if len(columns) <= _PROFILE_CORRELATION_MAX_COLS and profile.get("correlations"):
+            preview["correlations"] = profile["correlations"]
+        return [{
+            "name": "data_profile.json",
+            "mime": "application/json",
+            "summary": {
+                "row_count": profile.get("row_count"),
+                "column_count": profile.get("column_count"),
+            },
+            "preview": preview,
+        }]
+    if node_id == "stage:cleaned":
+        try:
+            actions = read_json(runs_dir / run_id / "processed" / "cleaning_actions.json")
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        return [{
+            "name": "cleaning_actions.json",
+            "mime": "application/json",
+            "preview": actions,
+        }]
+    return None
+
+
 def _node_key(node_id: str, node_index: dict[str, dict]) -> str:
     """Cross-run dedup key. Two nodes merge iff they are the SAME node_id with the SAME
     node_hash — so the shared prefix (raw/cleaned/variables) collapses across reruns, a
@@ -126,6 +169,9 @@ def build_headset(
                 view["producing_stage"] = entry.get("producing_stage")
                 view["cas_ref"] = entry.get("cas_ref")
                 view["runs"] = [run_id]
+                dataset_artifacts = _dataset_artifacts(runs_dir, run_id, nid)
+                if dataset_artifacts:
+                    view["artifacts"] = dataset_artifacts
                 if annotate is not None:
                     try:
                         annotate(view, manifest, form)

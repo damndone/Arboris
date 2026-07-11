@@ -124,3 +124,35 @@ def test_project_forest_skips_non_run_clutter(tmp_path):
     r = client.get(f"/graph?project_root={root}")
     assert r.status_code == 200
     assert r.json()["nodes"] == {} and r.json()["heads"] == []
+
+
+def test_forest_dataset_nodes_carry_profile_artifacts(tmp_path):
+    # v1.6.11 A2 — serve-time dataset decoration: the raw node exposes a compact
+    # data_profile preview (rows/cols/dtypes/missingness) and the cleaned node its
+    # cleaning actions, so Ask AI can describe the dataset instead of disclosing
+    # an empty packet. graph.json on disk stays undecorated.
+    root = _mkproject(tmp_path)
+    run_id = _execute_genesis_run(root)
+    body = client.get("/graph", params={"project_root": root}).json()
+
+    raw_nodes = [n for k, n in body["nodes"].items() if k.endswith("::stage:raw") or k == "stage:raw"]
+    assert raw_nodes, f"no raw node in forest keys: {list(body['nodes'])[:8]}"
+    artifacts = raw_nodes[0].get("artifacts")
+    assert artifacts and artifacts[0]["name"] == "data_profile.json"
+    preview = artifacts[0]["preview"]
+    assert preview["row_count"] > 0
+    assert preview["column_count"] > 0
+    assert isinstance(preview["columns"], dict)
+    first_col = next(iter(preview["columns"].values()))
+    assert "missing_rate" in first_col and "dtype" in first_col
+
+    cleaned = [n for k, n in body["nodes"].items() if k.endswith("::stage:cleaned")]
+    assert cleaned and cleaned[0].get("artifacts"), "cleaned node missing artifacts"
+    assert cleaned[0]["artifacts"][0]["name"] == "cleaning_actions.json"
+
+    # decorate-only: on-disk graph.json has no artifacts field
+    graph = json.loads(
+        (Path(root) / "runs" / run_id / "graph.json").read_text()
+    )
+    assert all("artifacts" not in n or n["artifacts"] is None
+               for n in graph["nodes"].values())

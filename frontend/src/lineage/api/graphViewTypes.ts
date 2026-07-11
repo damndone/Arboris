@@ -211,6 +211,8 @@ export interface HeadSetNodeRaw {
   producing_stage: string | null;
   cas_ref: CasRef | null;
   runs: string[];
+  /** v1.6.11 A2 — serve-time dataset decoration (schema/profile preview for Ask AI). */
+  artifacts?: Array<ArtifactRef & { summary?: unknown; preview?: unknown }>;
   editable?: boolean;
   op_type?: string;
   schema_id?: string;
