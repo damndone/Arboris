@@ -27,9 +27,19 @@ def _entry(node_hash: str, producing_stage: str, payload: str) -> dict:
     }
 
 
-def build_node_index(node_hashes: dict, *, normalized_y, normalized_x, model_results) -> dict:
+def build_node_index(
+    node_hashes: dict, *, normalized_y, normalized_x, model_results,
+    upload_hash: str = "", raw_payload: str = "_uploads",
+) -> dict:
     """Map the graph node_ids RecordingStage records to their stage-output node_hash."""
     idx: dict[str, dict] = {}
+
+    # v1.6.11: stage:raw was the one graph node without an identity hash, which
+    # left Ask AI permanently disabled on raw dataset nodes (missing_node_hash).
+    # The Merkle chain root (content hash of the upload) is its natural identity;
+    # same upload across runs dedups to one forest node, which is semantically right.
+    if upload_hash:
+        idx["stage:raw"] = _entry(upload_hash, "ingestion", raw_payload)
 
     clean_h = node_hashes.get("cleaning")
     if clean_h:
@@ -52,9 +62,23 @@ def build_node_index(node_hashes: dict, *, normalized_y, normalized_x, model_res
     return idx
 
 
-def write_node_index(run_root: Path, node_hashes: dict, *, normalized_y, normalized_x, model_results) -> None:
+def write_node_index(
+    run_root: Path, node_hashes: dict, *, normalized_y, normalized_x, model_results,
+    upload_hash: str = "",
+) -> None:
     idx = build_node_index(
         node_hashes, normalized_y=normalized_y,
         normalized_x=normalized_x, model_results=model_results,
+        upload_hash=upload_hash, raw_payload=_raw_payload(run_root),
     )
     write_json(run_root / NODE_INDEX_FILENAME, idx)
+
+
+def _raw_payload(run_root: Path) -> str:
+    """Run-relative path of the first uploaded file (cas_ref is informational)."""
+    uploads = run_root / "_uploads"
+    try:
+        first = next(p for p in sorted(uploads.iterdir()) if p.is_file())
+        return f"_uploads/{first.name}"
+    except (OSError, StopIteration):
+        return "_uploads"

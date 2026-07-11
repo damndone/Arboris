@@ -229,6 +229,7 @@ class RecordingStage:
                 run_root, _node_hashes,
                 normalized_y=normalized_y, normalized_x=normalized_x,
                 model_results=model_results,
+                upload_hash=ctx.artifacts.get("_upload_hash", ""),
             )
 
         return ctx

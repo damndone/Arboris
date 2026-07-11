@@ -89,6 +89,9 @@ def run_pipeline_traced(pipeline, ctx, env, *, form: dict, config: dict, force_f
         }
         _prev = chain[name]["node_hash"]
     ctx.artifacts["_node_hashes"] = {n: c["node_hash"] for n, c in chain.items()}
+    # v1.6.11: the chain root IS the raw node's identity — expose it so
+    # node_index can stamp stage:raw (Ask AI on raw dataset nodes needs a hash).
+    ctx.artifacts["_upload_hash"] = upload_hash
 
     trace: list[dict[str, Any]] = []
 

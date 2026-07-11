@@ -62,3 +62,31 @@ def test_node_index_always_written(tmp_path):
     graph = json.loads((run_root / "graph.json").read_text())
     for node in graph["nodes"].values():
         assert "node_hash" not in node  # graph.json unchanged (decorate-only)
+
+
+def test_node_index_includes_stage_raw_with_upload_hash(tmp_path):
+    # v1.6.11: stage:raw carries the Merkle chain root (the upload's content
+    # hash). Without it the raw dataset node had no identity, which left Ask AI
+    # permanently disabled on raw nodes (missing_node_hash).
+    project = create_project(tmp_path, "demo")
+    run_root = _run(project.root, FIX / "forest_min.csv")
+    idx = json.loads((run_root / "node_index.json").read_text())
+    assert "stage:raw" in idx
+    entry = idx["stage:raw"]
+    assert len(entry["node_hash"]) == 64  # sha256 of the uploaded bytes
+    assert entry["producing_stage"] == "ingestion"
+    assert entry["cas_ref"]["artifact"].startswith("_uploads")
+    # raw identity = chain root; cleaned is a distinct downstream hash
+    assert idx["stage:cleaned"]["node_hash"] != entry["node_hash"]
+
+
+def test_build_node_index_without_upload_hash_omits_stage_raw():
+    # Legacy callers (no upload hash) keep the old shape — no phantom raw entry.
+    from workbench.lineage.node_index import build_node_index
+
+    idx = build_node_index(
+        {"cleaning": "c" * 64}, normalized_y="y", normalized_x=["x1"],
+        model_results=[], upload_hash="",
+    )
+    assert "stage:raw" not in idx
+    assert "stage:cleaned" in idx
