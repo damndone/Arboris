@@ -14,8 +14,10 @@ from fastapi import FastAPI
 
 from .api_errors import register_error_handlers
 from .http.projects_routes import router as projects_router
+from .http.runs_routes import router as runs_router
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
 
 app.include_router(projects_router)
+app.include_router(runs_router)
