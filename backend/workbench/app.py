@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from .api_errors import register_error_handlers
 from .http.drafts_routes import router as drafts_router
 from .http.graph_routes import router as graph_router
+from .http.llm_routes import router as llm_router
 from .http.projects_routes import router as projects_router
 from .http.rerun_routes import router as rerun_router
 from .http.runs_routes import router as runs_router
@@ -27,3 +28,4 @@ app.include_router(runs_router)
 app.include_router(graph_router)
 app.include_router(drafts_router)
 app.include_router(rerun_router)
+app.include_router(llm_router)
