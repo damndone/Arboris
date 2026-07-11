@@ -714,7 +714,7 @@ def execute_pipeline_draft(
         op_overrides = {
             key: value
             for key, value in model["params"].items()
-            if model.get("source_params", {}).get(key) != value
+            if (model.get("source_params") or {}).get(key) != value
         }
 
         def _encode_override(value: object) -> str:

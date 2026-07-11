@@ -260,6 +260,70 @@ def test_patch_rejects_params_outside_editable_schema_options(tmp_path: Path) ->
     assert "INVALID_PARAM_OPTION" in response.json()["detail"]
 
 
+def test_patch_auto_mode_draft_edits_without_touching_model_type(tmp_path: Path) -> None:
+    """P1 (v1.6.10): a draft forked from an auto-mode run carries
+    params.model_type='auto', which is absent from the editable_schema's
+    concrete-family options. A full-params PATCH that leaves model_type as the
+    inherited 'auto' (e.g. editing only covariance) must succeed — it used to
+    422 with INVALID_PARAM_OPTION on the untouched 'auto', making EVERY draft
+    forked from an auto-mode run un-editable."""
+    client = _client()
+    (tmp_path / "runs").mkdir(parents=True, exist_ok=True)
+    csv = tmp_path / "input.csv"
+    rows = "\n".join(f"{1 + 2 * i},{i},{i + 1}" for i in range(35))
+    csv.write_text("y,x1,x2\n" + rows + "\n", encoding="utf-8")
+    with csv.open("rb") as fh:
+        resp = client.post(
+            "/runs",
+            data={"project_root": str(tmp_path), "mode": "auto",
+                  "model_type": "auto", "y": "y", "x": "x1"},
+            files={"file": ("input.csv", fh, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    run_id = resp.json()["run_id"]
+    _wait_terminal(client, str(tmp_path), run_id)
+    project_root = str(tmp_path)
+
+    create = _create_draft_from_first_model_node(client, project_root, run_id)
+    draft_id = create["draft"]["draft_id"]
+    model = next(n for n in create["draft"]["graph"]["nodes"] if n["node_type"] == "model")
+    # P1 precondition: the inherited model_type is the auto sentinel, and it is
+    # NOT among the model_type control's options.
+    assert model["params"].get("model_type") == "auto"
+    controls = {c["key"]: c for c in model["editable_schema"]}
+    mt_opts = [o.get("value") if isinstance(o, dict) else o
+               for o in controls.get("model_type", {}).get("options", [])]
+    assert "auto" not in mt_opts
+
+    # Edit a real, in-options covariance value; leave model_type as inherited 'auto'.
+    cov = controls.get("covariance", {})
+    cov_opts = [o.get("value") if isinstance(o, dict) else o for o in cov.get("options", [])]
+    new_cov = next((o for o in cov_opts if o != model["params"].get("covariance")),
+                   model["params"].get("covariance"))
+    ok = client.patch(
+        f"/pipeline-drafts/{draft_id}",
+        params={"project_root": project_root},
+        json={
+            "model_node_id": "model_1",
+            "base_draft_hash": create["draft_hash"],
+            "params": {**model["params"], "covariance": new_cov},
+        },
+    )
+    assert ok.status_code == 200, ok.text
+
+    # Guard: actually CHANGING model_type to a bogus family is still rejected.
+    bad = client.patch(
+        f"/pipeline-drafts/{draft_id}",
+        params={"project_root": project_root},
+        json={
+            "model_node_id": "model_1",
+            "base_draft_hash": ok.json()["draft_hash"],
+            "params": {**model["params"], "model_type": "bogus_family"},
+        },
+    )
+    assert bad.status_code == 422
+
+
 def test_validate_does_not_create_run_or_snapshot(tmp_path: Path) -> None:
     client = _client()
     run_id, project_root = _create_completed_run(client, tmp_path)
