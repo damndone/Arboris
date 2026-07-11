@@ -22,13 +22,19 @@
 
 ---
 
-## D1. api.py 是万能垃圾桶（**最高优先**）
+## D1. api.py 是万能垃圾桶 —— ✅ 已清（v1.6.10）
 
-- **事实**：2204 行，一个文件同时管：路由定义、请求解析、文件上传、后台任务调度（`_bg_run` + executor）、SSE 推送、结果汇总（`_model_results`/`_normalize_issue_stream`）、错误归一化、项目创建。23 个路由 + 39 个私有辅助函数。
-- **判定**：真债，且是最该动的。分层不清导致每个新端点都往这里叠。
-- **方向**：拆 controller（路由 + 请求/响应 schema）/ service（`_submit_run`、genesis execute、rerun 编排）/ repository（run 目录、model_results、artifacts 读写）。可先抽最独立的两块：**后台任务调度 + SSE**（events 已有雏形）、**结果汇总层**（`_model_results`/issue 归一化）。
-- **注意**：与版本 backlog 的「`WorkbenchRouteContainer` 拆分」是前后端对称的同一种病（承重容器摊大饼）。两个一起立规矩：**新端点/新视图不许直接往大文件加，先看有没有对应 service/hook**。
-- **代价**：大。必须先有端点级契约测试护栏（现有 `tests/test_api.py` 34 + 契约测试），再拆。
+- **状态**：**已解决**。v1.6.10 拆分（spec `specs/2026-07-10-v1.6.10-api-py-decomposition-design.md`）。
+  api.py **2206 → 32 行 backward-compat facade**（`from .app import app` + re-export 测试用的 8 个私有符号）。
+- **落地形状**：`app.py`（FastAPI 实例 + include_router×5）· `http/`（5 个 APIRouter 簇:projects/runs/
+  graph/drafts/rerun + `_deps.py` 共享）· `services/`（run_service:`_submit_run`/`_bg_run`/SSE;results_service）·
+  `repository/run_repository.py`（纯 fs 读）。依赖单向 `http → services → repository → 领域层`,无回环。
+- **护栏**：纯搬迁零行为漂移,阶段间过 gate（BE 1363 / golden 23 0-drift / FE 953 / tsc 0）,
+  opus Reviewer AST 比对 70 函数 69 字节相同、SHIP 无 blocker,真机 uvicorn smoke 过。
+- **剩余**：`http/drafts_routes.py` 819 行仍 > 500（含两个重编排 handler）→ 见 followups **N1**
+  （执行编排下沉 `services/draft_service.py`）。其余模块均 <400。
+- **原债**（留痕）：曾 2206 行,23 路由 + 39 私有辅助糊在一起,每加端点就往里叠。规矩已立:
+  **新端点 = 新 router + service,不许再往 facade/大文件加**。
 
 ## D2. GLM 家族 runner 该收敛成策略 + 注册表（中）
 
@@ -70,7 +76,7 @@
 
 ## 建议优先级
 
-1. **D1 api.py 拆分**（最高，且还在涨）——但要先有契约测试护栏。与前端 `WorkbenchRouteContainer` 拆分成对推进，立"不许再往大文件加"的规矩。**→ 正在做：v1.6.10（见 `specs/2026-07-10-v1.6.10-api-py-decomposition-design.md`）。**
+1. ~~**D1 api.py 拆分**~~ —— ✅ 已清（v1.6.10,2206→32 facade + http/services/repository 分层;见上 D1 节）。剩 `drafts_routes` 819>500 → followups N1。
 2. ~~**D3 CLI 补参数**~~ —— ✅ 已清（v1.6.9，`a914309`+`4d7759e`）。
 3. **D6 OpenAPI codegen**（防漂移，中代价）——接入后两端类型一劳永逸。
 4. **D2 GLM 家族收敛**（中，golden 护栏使风险可控）。
