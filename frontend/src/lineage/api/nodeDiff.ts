@@ -6,6 +6,7 @@
 // compute a diff.
 
 import type { NodeOperationContextV1 } from "./nodeOperationContext";
+import { formatUpstreamPath } from "./pathFormat";
 
 export interface CompareSection<T> {
   changed: boolean;
@@ -134,8 +135,14 @@ export function upstreamPathSection(
   }
   // Equality is judged on keys (identity), but the rendered values are the
   // human labels — a diff of bare hash::id keys is unreadable in the drawer.
+  // DAG-aware: parallel same-depth nodes group as "(a + b)" not "a → b".
   const labelPath = (ctx: NodeOperationContextV1) =>
-    ctx.lineage_context.upstream_path.map((node) => node.label || node.key).join(" → ");
+    formatUpstreamPath(
+      ctx.lineage_context.upstream_path.map((node) => ({
+        label: node.label || node.key,
+        depth: node.depth,
+      })),
+    );
   return {
     changed: true,
     total_changed: 1,

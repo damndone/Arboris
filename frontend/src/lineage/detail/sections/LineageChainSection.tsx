@@ -18,12 +18,15 @@ import { buildRunSnapshot } from "../../../workbench/RunSnapshotAdapter";
 import { useWorkbenchOptional } from "../../../workbench/WorkbenchStateProvider";
 import { buildBranchPath } from "../../pathBuilder";
 import type { GraphViewNode } from "../../api/graphViewTypes";
+import { formatUpstreamPath, separatorAfter } from "../../api/pathFormat";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 
 interface ChainItem {
   nodeKey: string;
   title: string;
   summary?: string;
+  /** v1.6.11 — same depth = parallel branch (rendered "+" not "→"). */
+  depth?: number;
 }
 
 export function LineageChainSection({ node }: { node: GraphViewNode }) {
@@ -41,6 +44,7 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
         nodeKey: pathNode.key,
         title: pathNode.label,
         summary: pathNode.label,
+        depth: pathNode.depth,
       }))
     : resolvedContext
       ? []
@@ -56,7 +60,9 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
   // lineagePathTo's pure node-id chain.
   const copyTarget = hasUpstream
     ? contextChain
-      ? contextChain.map((pathNode) => pathNode.title).join(" → ")
+      ? formatUpstreamPath(
+          contextChain.map((pathNode) => ({ label: pathNode.title, depth: pathNode.depth })),
+        )
       : buildBranchPath(model, node.id)
     : "";
 
@@ -161,9 +167,12 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
               {i < chain.length - 1 && (
                 <span
                   aria-hidden
+                  data-testid={`lineage-sep-${i}`}
                   style={{ color: "var(--label-tertiary)", fontSize: 11 }}
                 >
-                  →
+                  {/* v1.6.11 — "+" between parallel siblings (same depth),
+                   *  "→" only for real dependency steps. */}
+                  {separatorAfter(chain, i)}
                 </span>
               )}
             </div>

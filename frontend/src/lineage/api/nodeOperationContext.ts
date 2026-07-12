@@ -104,6 +104,10 @@ export interface NodeOperationContextV1 {
       label: string;
       kind: string;
       stage: string;
+      /** v1.6.11 — longest distance from a root. Equal depth = parallel
+       *  branches (e.g. variable nodes fanning out of the cleaned dataset);
+       *  renderers must not draw "→" between same-depth nodes. */
+      depth?: number;
     }>;
     downstream_hint?: { has_downstream: boolean; downstream_count?: number };
     active_head_path_contains_node: boolean;
@@ -528,11 +532,27 @@ function buildUpstreamPath(
   };
 
   visit(selectedNodeKey);
+
+  // v1.6.11 — depth = longest distance from a root. Nodes sharing a depth are
+  // PARALLEL (e.g. the per-variable nodes fanning out of the cleaned dataset);
+  // rendering the flat topological order as one "→" chain misrepresented them
+  // as sequential (user report 2026-07-12).
+  const depthByKey = new Map<string, number>();
+  const depthOf = (key: string): number => {
+    const known = depthByKey.get(key);
+    if (known !== undefined) return known;
+    depthByKey.set(key, 0); // cycle guard (DAG invariant should hold anyway)
+    const parents = (incomingByTarget.get(key) ?? []).map((edge) => depthOf(edge.source));
+    const depth = parents.length === 0 ? 0 : Math.max(...parents) + 1;
+    depthByKey.set(key, depth);
+    return depth;
+  };
   return ordered.map((node) => ({
     key: node.nodeKey,
     label: node.title,
     kind: node.kind,
     stage: node.stage,
+    depth: depthOf(node.nodeKey),
   }));
 }
 

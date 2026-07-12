@@ -31,7 +31,7 @@ export function WorkbenchMain({ projectRoot }: { projectRoot: string }) {
       {state.view === "graph" && <GraphView />}
       {state.view === "table" && <TableView projectRoot={projectRoot} />}
       {state.view === "pipeline" && <PipelineView />}
-      {state.view === "report" && <ReportView />}
+      {state.view === "report" && <ReportView projectRoot={projectRoot} />}
     </div>
   );
 }
