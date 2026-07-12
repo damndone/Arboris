@@ -78,7 +78,7 @@ describe("WorkbenchStateProvider — initial parsing", () => {
 
   it("hydrates tabs/active/view/focus/pinned/q/panel from URL", () => {
     renderAt(
-      "/?view=table&tabs=n1,n2&active=n2&focus=n1&pinned=1&q=income&panel=shell&panelOpen=1",
+      "/?view=table&tabs=n1,n2&active=n2&focus=n1&pinned=1&q=income&panel=ai&panelOpen=1",
     );
     expect(state().view).toBe("table");
     expect(state().tabs.map((t) => t.id)).toEqual(["n1", "n2"]);
@@ -87,16 +87,16 @@ describe("WorkbenchStateProvider — initial parsing", () => {
     expect(state().focusKey).toBe("n1");
     expect(state().pinned).toBe(true);
     expect(state().searchQuery).toBe("income");
-    expect(state().bottomPanel).toBe("shell");
+    expect(state().bottomPanel).toBe("ai");
   });
 
   it("normalizes legacy panelOpen out of the URL without changing the panel tab", async () => {
-    renderAt("/?panel=shell&panelOpen=1");
-    expect(state().bottomPanel).toBe("shell");
+    renderAt("/?panel=ai&panelOpen=1");
+    expect(state().bottomPanel).toBe("ai");
     await waitFor(() =>
       expect(new URLSearchParams(ref.current!.search).get("panelOpen")).toBeNull(),
     );
-    expect(new URLSearchParams(ref.current!.search).get("panel")).toBe("shell");
+    expect(new URLSearchParams(ref.current!.search).get("panel")).toBe("ai");
   });
 
   it("drops focus when validNodeKeys excludes it (plan §7 last row)", () => {
@@ -272,10 +272,10 @@ describe("View / panel / search dispatch", () => {
 
   it("setBottomPanel switches active panel id", () => {
     renderAt("/");
-    act(() => dispatch().setBottomPanel("shell"));
-    expect(state().bottomPanel).toBe("shell");
+    act(() => dispatch().setBottomPanel("ai"));
+    expect(state().bottomPanel).toBe("ai");
     const params = new URLSearchParams(ref.current!.search);
-    expect(params.get("panel")).toBe("shell");
+    expect(params.get("panel")).toBe("ai");
     expect(params.get("panelOpen")).toBeNull();
   });
 

@@ -2,6 +2,14 @@
 //
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { isAskAIEnabled } from "../../../workbench/featureFlags";
+import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
+import {
+  appendAiActivity,
+  askAiHistoryForNode,
+  makeActivityId,
+  type AskAiActivityRecord,
+} from "../../../aiActivity/aiActivityLog";
+import { renderMarkdown } from "../../../report/markdown";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
@@ -28,15 +36,36 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // v1.6.12 (V6): per-node Q&A history — regenerating no longer erases the
+  // previous answer; every exchange lands in the typed AI activity log.
+  const projectRoot = useProjectRootOptional();
+  const nodeKey = packet?.selection.forest_node_key ?? null;
+  const [history, setHistory] = useState<AskAiActivityRecord[]>([]);
 
   useEffect(() => {
     requestVersionRef.current += 1;
     setAnswer(null);
     setError(null);
     setIsSubmitting(false);
-  }, [contextIdentity]);
+    setHistory(
+      projectRoot && nodeKey ? askAiHistoryForNode(projectRoot, nodeKey) : [],
+    );
+  }, [contextIdentity, projectRoot, nodeKey]);
 
   if (!askAIEnabled) return null;
+
+  function logExchange(record: Omit<AskAiActivityRecord, "id" | "at" | "kind" | "node_key" | "node_label">) {
+    if (!projectRoot || !nodeKey) return;
+    appendAiActivity(projectRoot, {
+      kind: "ask_ai",
+      id: makeActivityId(),
+      at: new Date().toISOString(),
+      node_key: nodeKey,
+      node_label: node.title,
+      ...record,
+    });
+    setHistory(askAiHistoryForNode(projectRoot, nodeKey));
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -57,6 +86,13 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
         return;
       }
       setAnswer(response.text);
+      logExchange({
+        question,
+        status: "answered",
+        model: response.model,
+        context_fingerprint: packet.context_fingerprint,
+        answer: response.text,
+      });
     } catch (err) {
       if (
         latestContextIdentityRef.current !== requestIdentity ||
@@ -64,7 +100,14 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
       ) {
         return;
       }
-      setError(err instanceof Error ? err.message : "Ask AI failed");
+      const message = err instanceof Error ? err.message : "Ask AI failed";
+      setError(message);
+      logExchange({
+        question,
+        status: "error",
+        context_fingerprint: packet.context_fingerprint,
+        error: message,
+      });
     } finally {
       if (
         latestContextIdentityRef.current === requestIdentity &&
@@ -190,15 +233,69 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               padding: "6px 12px",
               borderRadius: 6,
               border: "1px solid var(--separator)",
-              whiteSpace: "pre-wrap",
               wordBreak: "break-word",
               color: "var(--label-primary)",
             }}
           >
-            {answer}
+            {renderMarkdown(answer)}
           </div>
         )}
+        <AskAiHistory history={history} latestShownInline={answer !== null} />
       </div>
     </section>
+  );
+}
+
+/** Per-node Q&A history (V6). Read-only audit view — newest first; the most
+ *  recent exchange is skipped while it is already shown inline above. */
+function AskAiHistory({
+  history,
+  latestShownInline,
+}: {
+  history: AskAiActivityRecord[];
+  latestShownInline: boolean;
+}) {
+  const entries = latestShownInline ? history.slice(1) : history;
+  if (history.length === 0) {
+    return (
+      <div style={{ color: "var(--label-tertiary)", fontSize: 11 }}>
+        Past questions on this node will be kept here.
+      </div>
+    );
+  }
+  if (entries.length === 0) return null;
+  return (
+    <details data-testid="ask-ai-history" style={{ marginTop: 4 }}>
+      <summary style={{ cursor: "pointer", fontSize: 11 }}>
+        History ({entries.length})
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+        {entries.map((record) => (
+          <div
+            key={record.id}
+            data-testid="ask-ai-history-entry"
+            style={{
+              border: "1px solid var(--separator)",
+              borderRadius: 6,
+              padding: "6px 10px",
+            }}
+          >
+            <div style={{ color: "var(--label-tertiary)", fontSize: 10.5 }}>
+              {new Date(record.at).toLocaleString()}
+              {record.model ? ` · ${record.model}` : ""}
+              {record.status === "error" ? " · failed" : ""}
+            </div>
+            <div style={{ fontWeight: 600, margin: "3px 0" }}>{record.question}</div>
+            {record.status === "answered" ? (
+              <div style={{ color: "var(--label-primary)" }}>
+                {renderMarkdown(record.answer ?? "")}
+              </div>
+            ) : (
+              <div style={{ color: "var(--danger, #b00020)" }}>{record.error}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
