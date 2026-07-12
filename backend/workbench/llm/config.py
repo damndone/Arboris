@@ -6,6 +6,7 @@ lets a running server pick up key changes without restart.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from .provider_store import (
     ProviderRecord,
@@ -14,6 +15,32 @@ from .provider_store import (
 )
 
 DEFAULT_TIMEOUT_S = 60.0
+
+
+def validate_provider_url(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = urlparse(value)
+        parsed.port  # Force validation of malformed/out-of-range ports.
+    except ValueError as exc:
+        raise ValueError(
+            f"{field_name} must be an absolute http or https URL"
+        ) from exc
+    if (
+        any(character.isspace() for character in value)
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or "?" in value
+        or "#" in value
+    ):
+        raise ValueError(f"{field_name} must be an absolute http or https URL")
+    return value.rstrip("/")
 
 
 @dataclass(frozen=True)
@@ -29,7 +56,7 @@ class LLMConfig:
     supports_1m: bool = False
 
     def is_configured(self) -> bool:
-        return bool(self.base_url and self.api_key and self.model)
+        return all(value.strip() for value in (self.base_url, self.api_key, self.model))
 
 
 def load_llm_config() -> LLMConfig:
@@ -43,7 +70,9 @@ def load_llm_config() -> LLMConfig:
         None,
     )
     if provider is not None:
-        return _config_from_provider(provider, source="local")
+        local_config = _config_from_provider(provider, source="local")
+        if local_config.is_configured():
+            return local_config
 
     provider = environment_provider_from_env()
     if provider is not None:
@@ -53,12 +82,19 @@ def load_llm_config() -> LLMConfig:
 
 
 def _config_from_provider(provider: ProviderRecord, *, source: str) -> LLMConfig:
+    try:
+        validate_provider_url(provider.base_url, "base_url")
+    except ValueError:
+        base_url = ""
+    else:
+        base_url = provider.base_url
+
     model_record = next(
         (model for model in provider.models if model.request_model == provider.model),
         None,
     )
     return LLMConfig(
-        base_url=provider.base_url,
+        base_url=base_url,
         api_key=provider.api_key,
         model=provider.model,
         timeout_s=provider.timeout_s,
