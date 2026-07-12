@@ -40,6 +40,8 @@ def _provider_payload(**overrides) -> dict:
     payload = {
         "id": "deepseek",
         "name": "DeepSeek",
+        "icon": "deepseek-mark",
+        "notes": "Primary research provider",
         "website_url": "https://platform.deepseek.com",
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
@@ -68,6 +70,8 @@ def test_create_and_list_return_only_public_provider_data(api, store_path):
     created = _create(api)
 
     assert created["id"] == "deepseek"
+    assert created["icon"] == "deepseek-mark"
+    assert created["notes"] == "Primary research provider"
     assert created["key_present"] is True
     assert "api_key" not in created
     assert API_KEY not in json.dumps(created)
@@ -82,6 +86,31 @@ def test_create_and_list_return_only_public_provider_data(api, store_path):
 
     stored = load_provider_store(store_path)
     assert stored.providers[0].api_key == API_KEY
+    assert stored.providers[0].icon == "deepseek-mark"
+    assert stored.providers[0].notes == "Primary research provider"
+
+
+def test_update_preserves_and_can_replace_management_metadata(api, store_path):
+    _create(api)
+
+    preserved = api.put(
+        "/llm/providers/deepseek",
+        json={"name": "DeepSeek Updated"},
+    )
+    assert preserved.status_code == 200, preserved.text
+    assert preserved.json()["icon"] == "deepseek-mark"
+    assert preserved.json()["notes"] == "Primary research provider"
+
+    replaced = api.put(
+        "/llm/providers/deepseek",
+        json={"icon": "new-mark", "notes": "Updated context"},
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["icon"] == "new-mark"
+    assert replaced.json()["notes"] == "Updated context"
+    stored = load_provider_store(store_path).providers[0]
+    assert stored.icon == "new-mark"
+    assert stored.notes == "Updated context"
 
 
 def test_public_urls_redact_legacy_userinfo_and_query(api, store_path, monkeypatch):
@@ -982,6 +1011,8 @@ def test_refresh_models_uses_get_models_and_returns_public_provider(
     ]
     assert "api_key" not in response.json()
     assert API_KEY not in response.text
+    assert response.json()["icon"] == "deepseek-mark"
+    assert response.json()["notes"] == "Primary research provider"
     assert [model.request_model for model in load_provider_store(store_path).providers[0].models] == [
         "deepseek-chat",
         "deepseek-reasoner",

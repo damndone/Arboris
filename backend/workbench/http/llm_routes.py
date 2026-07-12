@@ -216,6 +216,8 @@ class ProviderUpsertRequest(BaseModel):
 
     id: str | None = Field(default=None, min_length=1)
     name: str | None = Field(default=None, min_length=1)
+    icon: str | None = None
+    notes: str | None = None
     website_url: str | None = None
     base_url: str | None = None
     model: str | None = Field(default=None, min_length=1)
@@ -341,6 +343,8 @@ def _to_provider_record(
         return ProviderRecord(
             id=request.id,
             name=request.name,
+            icon=request.icon or "",
+            notes=request.notes or "",
             website_url=request.website_url or "",
             base_url=request.base_url,
             model=request.model,
@@ -368,6 +372,8 @@ def _to_provider_record(
     return ProviderRecord(
         id=existing.id,
         name=request.name if request.name is not None else existing.name,
+        icon=request.icon if request.icon is not None else existing.icon,
+        notes=request.notes if request.notes is not None else existing.notes,
         website_url=(
             request.website_url if request.website_url is not None else existing.website_url
         ),
@@ -608,6 +614,8 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
         refreshed = ProviderRecord(
             id=current_provider.id,
             name=current_provider.name,
+            icon=current_provider.icon,
+            notes=current_provider.notes,
             website_url=current_provider.website_url,
             base_url=current_provider.base_url,
             model=current_provider.model,

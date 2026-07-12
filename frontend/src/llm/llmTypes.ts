@@ -8,6 +8,8 @@ export interface LlmModel {
 export interface LlmProvider {
   id: string;
   name: string;
+  icon: string;
+  notes: string;
   website_url: string | null;
   base_url: string | null;
   model: string;
@@ -37,6 +39,8 @@ export interface LlmConfigInfo {
 export interface ProviderUpsertInput {
   id?: string;
   name?: string;
+  icon?: string;
+  notes?: string;
   website_url?: string | null;
   base_url?: string;
   model?: string;

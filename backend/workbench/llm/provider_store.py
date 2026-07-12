@@ -63,6 +63,8 @@ class ProviderRecord:
     timeout_s: float = DEFAULT_TIMEOUT_S
     models: list[ModelRecord] = field(default_factory=list)
     website_url: str = ""
+    icon: str = ""
+    notes: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "models", list(self.models))
@@ -71,6 +73,8 @@ class ProviderRecord:
         return {
             "id": self.id,
             "name": self.name,
+            "icon": self.icon,
+            "notes": self.notes,
             "website_url": self.website_url,
             "base_url": self.base_url,
             "model": self.model,
@@ -220,6 +224,8 @@ def provider_public_dict(provider: ProviderRecord) -> dict[str, Any]:
     return {
         "id": provider.id,
         "name": provider.name,
+        "icon": provider.icon,
+        "notes": provider.notes,
         "website_url": provider.website_url,
         "base_url": provider.base_url,
         "model": provider.model,
@@ -267,6 +273,8 @@ def _provider_from_dict(raw: Any) -> ProviderRecord:
     return ProviderRecord(
         id=_required_nonblank_string(raw, "id"),
         name=_required_nonblank_string(raw, "name"),
+        icon=_optional_string(raw, "icon"),
+        notes=_optional_string(raw, "notes"),
         website_url=_optional_string(raw, "website_url"),
         base_url=_required_string(raw, "base_url"),
         model=_required_string(raw, "model"),

@@ -36,6 +36,8 @@ def test_store_round_trips_active_provider_and_keeps_key_internal(tmp_path, monk
     provider = ProviderRecord(
         id="deepseek",
         name="DeepSeek",
+        icon="deepseek-mark",
+        notes="Primary research provider",
         base_url="https://api.deepseek.com",
         model="deepseek-chat",
         api_key="secret-key",
@@ -48,8 +50,13 @@ def test_store_round_trips_active_provider_and_keeps_key_internal(tmp_path, monk
 
     assert loaded.active_provider_id == "deepseek"
     assert loaded.providers[0].api_key == "secret-key"
-    assert provider_public_dict(loaded.providers[0])["key_present"] is True
-    assert "api_key" not in provider_public_dict(loaded.providers[0])
+    assert loaded.providers[0].icon == "deepseek-mark"
+    assert loaded.providers[0].notes == "Primary research provider"
+    public = provider_public_dict(loaded.providers[0])
+    assert public["icon"] == "deepseek-mark"
+    assert public["notes"] == "Primary research provider"
+    assert public["key_present"] is True
+    assert "api_key" not in public
 
 
 def test_store_writes_private_file_and_handles_corrupt_file(tmp_path, monkeypatch):
