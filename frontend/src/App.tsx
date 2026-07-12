@@ -371,7 +371,9 @@ function AppShell() {
           type="button"
           role="tab"
           aria-selected={isLauncherActive}
-          onClick={() => navigate("/")}
+          // v1.6.12 (V10): bare `/` now redirects into the last project, so
+          // the Home tab declares explicit intent via ?home=1.
+          onClick={() => navigate("/?home=1")}
         >
           Home
         </button>

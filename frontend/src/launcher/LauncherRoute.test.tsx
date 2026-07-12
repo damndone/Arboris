@@ -58,10 +58,28 @@ afterEach(() => {
 });
 
 describe("LauncherRoute", () => {
+  // v1.6.12 (V10): bare `/` jumps straight into the last project; `?home=1`
+  // is the explicit way back to the launcher (the Home tab sends it).
+  it("V10: bare / with a recent redirects into its graph home", async () => {
+    touchRecent("/tmp/alpha");
+    installFetchRouter((url) => {
+      if (url.includes("/runs")) return jsonResponse({ runs: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    renderAt("/");
+    expect(await screen.findByTestId("project-graph-route")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建项目" })).not.toBeInTheDocument();
+  });
+
+  it("V10: bare / with NO recents still shows the launcher (no dead end)", () => {
+    renderAt("/");
+    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  });
+
   it("renders recent projects as cards (name + full root)", () => {
     touchRecent("/Users/me/项目规划/示例");
     touchRecent("/tmp/alpha");
-    renderAt("/");
+    renderAt("/?home=1");
 
     // Most-recent first; project name = last path segment, full root visible.
     expect(screen.getByText("alpha")).toBeInTheDocument();
@@ -76,7 +94,7 @@ describe("LauncherRoute", () => {
       if (url.includes("/runs")) return jsonResponse({ runs: [] });
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/");
+    renderAt("/?home=1");
 
     fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
 
@@ -93,7 +111,7 @@ describe("LauncherRoute", () => {
       if (url.includes("/runs")) return jsonResponse({ runs: [] });
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/");
+    renderAt("/?home=1");
 
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -118,7 +136,7 @@ describe("LauncherRoute", () => {
   });
 
   it("create modal validation: empty parent or bad name disables Create", () => {
-    renderAt("/");
+    renderAt("/?home=1");
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
     // Empty parent → disabled.
@@ -145,7 +163,7 @@ describe("LauncherRoute", () => {
   });
 
   it("create modal keeps Browse as a guarded helper without synthesizing fake absolute paths", async () => {
-    renderAt("/");
+    renderAt("/?home=1");
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
     expect(screen.getByRole("button", { name: "Browse" })).toBeInTheDocument();
@@ -177,7 +195,7 @@ describe("LauncherRoute", () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/");
+    renderAt("/?home=1");
 
     fireEvent.click(screen.getByRole("button", { name: /project/ }));
 
@@ -193,7 +211,7 @@ describe("LauncherRoute", () => {
 
   it("corrupt localStorage → empty state with a hint", () => {
     localStorage.setItem("workbench.recentProjects.v1", "{not json");
-    renderAt("/");
+    renderAt("/?home=1");
     expect(screen.getByText("最近项目将显示在这里。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
   });
@@ -209,7 +227,7 @@ describe("LauncherRoute", () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => probe
     );
-    renderAt("/");
+    renderAt("/?home=1");
 
     const card = screen.getByRole("button", { name: /alpha/ });
     fireEvent.click(card);
@@ -231,7 +249,7 @@ describe("LauncherRoute", () => {
       }
       return jsonResponse({});
     });
-    renderAt("/");
+    renderAt("/?home=1");
 
     // First open: type a parent, trigger a failing create → inline error.
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));

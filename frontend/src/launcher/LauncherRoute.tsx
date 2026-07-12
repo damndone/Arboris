@@ -7,7 +7,7 @@
 // into a dead graph.
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError, fetchRuns } from "../api";
 import { rootToSlug } from "../workbench/projectSlug";
 import { CreateProjectModal } from "./CreateProjectModal";
@@ -20,7 +20,17 @@ function projectName(root: string): string {
 
 export function LauncherRoute() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [recents, setRecents] = useState<RecentProject[]>(() => listRecents());
+
+  // v1.6.12 (V10, 方案已批): `/` jumps straight into the last project — the
+  // launcher's recents/new-project duties live in the topbar ProjectSwitcher.
+  // `?home=1` is the explicit way in (the Home tab sends it), so there is no
+  // dead end; fresh users (no recents) still land on the launcher.
+  const lastProject = recents[0];
+  if (searchParams.get("home") !== "1" && lastProject) {
+    return <Navigate replace to={`/p/${rootToSlug(lastProject.root)}/graph`} />;
+  }
   const [staleRoots, setStaleRoots] = useState<Record<string, boolean>>({});
   const [probingRoot, setProbingRoot] = useState<string | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);

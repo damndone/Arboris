@@ -231,3 +231,36 @@ class TestReportMode:
             "workbench_node_context_v1",
             "workbench_report_v1",
         ]
+
+
+class TestLlmConfigEndpoint:
+    """v1.6.12 T5 (A4) — GET /llm/config: read-only provider visibility."""
+
+    def test_configured_env_reports_provider_without_key(
+        self, api: TestClient, configured_env
+    ):
+        r = api.get("/llm/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["configured"] is True
+        assert body["base_url"] == "https://llm.example.com"
+        assert body["model"] == "deepseek-chat"
+        assert body["key_present"] is True
+        # the key never leaves the server — not even masked or by prefix
+        assert API_KEY not in r.text
+        assert "api_key" not in body
+
+    def test_unconfigured_env_reports_missing(
+        self, api: TestClient, monkeypatch: pytest.MonkeyPatch
+    ):
+        for name in (
+            "WORKBENCH_LLM_BASE_URL",
+            "WORKBENCH_LLM_API_KEY",
+            "WORKBENCH_LLM_MODEL",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        body = api.get("/llm/config").json()
+        assert body["configured"] is False
+        assert body["base_url"] is None
+        assert body["model"] is None
+        assert body["key_present"] is False

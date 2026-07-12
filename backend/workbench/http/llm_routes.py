@@ -67,6 +67,22 @@ _SYSTEM_PROMPT_HEADER = (
 )
 
 
+# v1.6.12 T5 (A4) — read-only provider visibility. Returns WHICH provider and
+# model /llm/chat will use and whether a key is present — never the key itself
+# (not even masked; no prefix, no length). Key management stays in the env
+# file by design.
+@router.get("/llm/config")
+def llm_config() -> dict[str, Any]:
+    config = load_llm_config()
+    return {
+        "configured": config.is_configured(),
+        "base_url": config.base_url or None,
+        "model": config.model or None,
+        "key_present": bool(config.api_key),
+        "timeout_s": config.timeout_s,
+    }
+
+
 class AskAIChatRequest(BaseModel):
     mode: str
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)

@@ -10,15 +10,25 @@ import { AskAISection } from "./AskAISection";
 
 vi.mock("./askAiClient", () => ({
   askAiForNode: vi.fn(),
+  fetchLlmConfig: vi.fn().mockResolvedValue({
+    configured: true,
+    base_url: "https://llm.example.com",
+    model: "deepseek-v4-flash",
+    key_present: true,
+  }),
 }));
 
-function renderAskAISection(activeRunId: string) {
+function renderAskAISection(
+  activeRunId: string,
+  mutateNode?: (node: ReturnType<typeof makeOwnerResolutionSeedFixture>["forest"]["nodes"][number]) => void,
+) {
   const seed = makeOwnerResolutionSeedFixture();
   const selected = seed.forest.nodes.find(
     (node) => node.nodeKey === seed.sharedNodeKey,
   );
   if (!selected) throw new Error("missing selected node fixture");
   const selectedNode = selected;
+  mutateNode?.(selectedNode);
 
   function tree(nextActiveRunId: string) {
     return (
@@ -195,5 +205,35 @@ describe("AskAISection", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Ask AI failed (501)");
     });
     expect(screen.getByTestId("ask-ai-context-preview")).toBeInTheDocument();
+  });
+
+  it("renders per-artifact Explain buttons that fire a focused question (A3)", async () => {
+    vi.mocked(askAiForNode).mockResolvedValueOnce({ text: "profile explained" });
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId, (node) => {
+      node.artifacts = [{ name: "data_profile.json" }] as never;
+    });
+
+    fireEvent.click(screen.getByTestId("ask-ai-explain-data_profile.json"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ask-ai-answer")).toHaveTextContent(
+        "profile explained",
+      );
+    });
+    const calls = vi.mocked(askAiForNode).mock.calls;
+    expect(calls[calls.length - 1][1]).toContain('"data_profile.json"');
+  });
+
+  it("shows the read-only LLM provider badge with the configured model (A4)", async () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
+    // read-only surface: no input to change the key, key never displayed
+    expect(screen.getByTestId("llm-provider-badge").textContent).not.toContain("sk-");
   });
 });

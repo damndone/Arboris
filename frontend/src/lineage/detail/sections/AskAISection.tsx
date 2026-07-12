@@ -13,7 +13,7 @@ import { renderMarkdown } from "../../../report/markdown";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { ResolverFailureState } from "../ResolverFailureState";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
-import { askAiForNode } from "./askAiClient";
+import { askAiForNode, fetchLlmConfig, type LlmConfigInfo } from "./askAiClient";
 import { buildAskAIContextPacket } from "./askAiContextPacket";
 
 const DEFAULT_QUESTION = "Explain this node and its risks.";
@@ -69,6 +69,11 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await ask(question);
+  }
+
+  async function ask(questionText: string) {
+    const question = questionText;
     const requestIdentity = contextIdentity;
     if (!packet || !requestIdentity || question.trim() === "") return;
     const requestVersion = requestVersionRef.current + 1;
@@ -126,9 +131,15 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     >
       <div
         className="ln-section-label"
-        style={{ marginBottom: 6, display: "flex", alignItems: "center" }}
+        style={{
+          marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
       >
         <span>Ask AI</span>
+        <LlmProviderBadge />
       </div>
       <div
         style={{
@@ -168,6 +179,49 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               </details>
             )}
           </>
+        )}
+        {packet && (node.artifacts ?? []).length > 0 && (
+          <div
+            data-testid="ask-ai-artifacts"
+            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+          >
+            <span style={{ color: "var(--label-tertiary)", fontSize: 11 }}>
+              Attached artifacts (in the AI's context):
+            </span>
+            {(node.artifacts ?? []).map((artifact) => (
+              <div
+                key={artifact.name}
+                style={{ display: "flex", alignItems: "center", gap: 8 }}
+              >
+                <code style={{ fontSize: 11 }}>{artifact.name}</code>
+                {/* v1.6.12 T4 (A3) — one-click focused explanation. The
+                 * artifact's preview already travels in the packet; the
+                 * focused question makes the model explain THAT artifact. */}
+                <button
+                  type="button"
+                  data-testid={`ask-ai-explain-${artifact.name}`}
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    const q = `Explain the artifact "${artifact.name}" from this node's context: what does it contain, what does it tell us about the data, and what should I watch out for?`;
+                    setQuestion(q);
+                    void ask(q);
+                  }}
+                  style={{
+                    padding: "1px 8px",
+                    minHeight: 0,
+                    borderRadius: 999,
+                    border: "1px solid var(--separator)",
+                    background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+                    color: "var(--label)",
+                    fontSize: 10.5,
+                    cursor: isSubmitting ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Explain
+                </button>
+              </div>
+            ))}
+          </div>
         )}
         <form
           onSubmit={handleSubmit}
@@ -243,6 +297,46 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
         <AskAiHistory history={history} latestShownInline={answer !== null} />
       </div>
     </section>
+  );
+}
+
+/** v1.6.12 T5 (A4) — read-only LLM provider badge: which model answers, or a
+ *  pointer to the env file when unconfigured. Key changes stay outside the UI. */
+function LlmProviderBadge() {
+  const [config, setConfig] = useState<LlmConfigInfo | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchLlmConfig()
+      .then((info) => {
+        if (!cancelled) setConfig(info);
+      })
+      .catch(() => {
+        /* endpoint unreachable — badge simply stays hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!config) return null;
+  if (!config.configured) {
+    return (
+      <span
+        data-testid="llm-provider-badge"
+        title="Set WORKBENCH_LLM_BASE_URL / _API_KEY / _MODEL in ~/.config/econometrics-workbench/llm.env (see .env.example), then restart the backend."
+        style={{ fontSize: 10.5, color: "var(--diff-removed, #b35900)", fontWeight: 500 }}
+      >
+        LLM not configured
+      </span>
+    );
+  }
+  return (
+    <span
+      data-testid="llm-provider-badge"
+      title={`Provider ${config.base_url ?? ""} · key ${config.key_present ? "present" : "missing"} — configured via env file, read-only here`}
+      style={{ fontSize: 10.5, color: "var(--label-tertiary)", fontWeight: 400 }}
+    >
+      {config.model}
+    </span>
   );
 }
 
