@@ -13,6 +13,13 @@ from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.llm import client as llm_client
+from workbench.llm.config import load_llm_config
+from workbench.llm.provider_store import (
+    ModelRecord,
+    ProviderRecord,
+    ProviderStore,
+    save_provider_store,
+)
 
 API_KEY = "sk-test-secret-key"
 
@@ -235,6 +242,63 @@ class TestReportMode:
 
 class TestLlmConfigEndpoint:
     """v1.6.12 T5 (A4) — GET /llm/config: read-only provider visibility."""
+
+    def test_active_local_provider_overrides_environment(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "llm-providers.json"))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        provider = ProviderRecord(
+            id="local-provider",
+            name="Local Provider",
+            base_url="https://local.example.com/",
+            model="local-model",
+            api_key="local-secret",
+            timeout_s=12.5,
+            models=[
+                ModelRecord("Other", "other-model", 32_000, False),
+                ModelRecord("Local", "local-model", 1_000_000, True),
+            ],
+        )
+        save_provider_store(
+            ProviderStore(active_provider_id="local-provider", providers=[provider])
+        )
+
+        config = load_llm_config()
+
+        assert config.base_url == "https://local.example.com/"
+        assert config.api_key == "local-secret"
+        assert config.model == "local-model"
+        assert config.timeout_s == 12.5
+        assert config.provider_id == "local-provider"
+        assert config.provider_name == "Local Provider"
+        assert config.source == "local"
+        assert config.context_window_tokens == 1_000_000
+        assert config.supports_1m is True
+
+    def test_missing_local_storage_preserves_environment_fallback(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "missing.json"))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+        monkeypatch.setenv("WORKBENCH_LLM_TIMEOUT_S", "not-a-number")
+
+        config = load_llm_config()
+
+        assert config.base_url == "https://env.example.com"
+        assert config.api_key == "env-secret"
+        assert config.model == "env-model"
+        assert config.timeout_s == 60.0
+        assert config.provider_id == "environment"
+        assert config.provider_name == "Environment"
+        assert config.source == "environment"
+        assert config.context_window_tokens is None
+        assert config.supports_1m is False
 
     def test_configured_env_reports_provider_without_key(
         self, api: TestClient, configured_env
