@@ -106,4 +106,4 @@ v1.6.6 (清债+图内编辑基础)
 ## 5. 开放问题（拍板记录）
 1. ~~v1.6.6 的占位视图：实现还是移除？~~ → **已决（2026-07-02）:一律保留、逐步做实,不移除。** v1.6.6 只做实 Table(结果预览);Pipeline 标签页→v1.6.7 合并入图;底部面板→backlog C。
 2. ~~draft/pending 节点在主图的视觉语言（虚线？角标？分层？）需要设计。~~ → **已由 v1.6.7/v1.6.8 承接**：draft 节点进入主图，创世 draft 链可在 0-run 项目中独立成岛。
-3. Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。→ **已决:不排 v1.6.6/v1.6.8,留 v1.6.9**;Ask AI 在此之前保持诚实 disabled 占位。
+3. ~~Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。~~ → **已决（2026-07-11，用户拍板）：多厂商兼容，不绑定单一模型。** 线协议统一走 OpenAI-compatible Chat Completions（DeepSeek/GLM/Moonshot/Qwen/OpenAI 原生支持，Anthropic 有兼容端点）；后端单 adapter、零新厂商 SDK 依赖（复用 httpx）；配置驱动切换：`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三个环境变量。**测试用 DeepSeek key**（`api.deepseek.com` + `deepseek-chat`）跑真机 smoke；单测一律 mock HTTP 层（gate 离线可跑、不烧 key）。归 v1.6.11 实施。

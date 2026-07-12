@@ -12,9 +12,10 @@
 // Read-only actions (open / pin tab / copy / focus / pin upstream) plus
 // node/topbar rerun ship live. The remaining placeholders keep their slots
 // reserved with an HONEST `disabled` reason pointing at the real roadmap
-// target: askAiAboutNode + generateReport → v1.6.8, markNeedsReview →
-// warning-layer backlog (roadmap §3.5 W). v1.6.6 ③ wired topbar `rerun`
-// and refreshed these reasons (they used to lie about "V1.5.3"/"V2.0").
+// v1.6.11: askAiAboutNode (slice A, opens the drawer's Ask AI section) and
+// generateReport (slice C, switches to the Report view) are LIVE. The only
+// remaining placeholder is markNeedsReview → warning-layer backlog
+// (roadmap §3.5 W). v1.6.6 ③ wired topbar `rerun` and made reasons honest.
 
 import type { ReactNode } from "react";
 import type { GraphViewNode } from "../../lineage/api/graphViewTypes";
@@ -42,6 +43,9 @@ export interface ActionDispatch {
   pinUpstream(nodeKey: string): void;
   /** Set focus without pinning — focus follows tab switches. */
   focusUpstream(nodeKey: string): void;
+  /** v1.6.11 slice C — switch the main view (e.g. Generate report → "report").
+   *  Optional: surfaces built before v1.6.11 may not provide it. */
+  setView?(view: "graph" | "table" | "pipeline" | "report"): void;
 }
 
 /** F6: structured keybinding, matched against a KeyboardEvent. Kept
@@ -172,10 +176,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Ask AI about this node",
     surfaces: ["graph-context-menu", "drawer-header-menu", "command-palette"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "Per-node Ask AI (/llm/chat) lands in v1.6.9" }),
-    invoke: () => {
-      /* placeholder — /llm/chat wiring is v1.6.9 (roadmap §3 v1.6.9) */
-    },
+    // v1.6.11 slice A/C: /llm/chat is live — open the node's drawer, whose
+    // Ask AI section carries the question box (flag VITE_WORKBENCH_ASK_AI).
+    invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
   },
   {
     id: "rerunFromNode",
@@ -222,10 +225,9 @@ export const actionRegistry: ActionEntry[] = [
     label: "Generate report",
     surfaces: ["topbar"],
     shouldRender: () => true,
-    disabled: () => ({ reason: "AI-written report generation lands in v1.6.9" }),
-    invoke: () => {
-      /* placeholder — report generation is v1.6.9 (roadmap §3 v1.6.9) */
-    },
+    // v1.6.11 slice C: live — switches to the Report view (fact table +
+    // cite-chip generation for the active run's lineage).
+    invoke: (ctx) => ctx.dispatch.setView?.("report"),
   },
 ];
 

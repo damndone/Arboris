@@ -20,7 +20,8 @@
 // reads URL params disjoint from the lineage tab params, so the two
 // stay consistent.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useCompareOptional } from "../../lineage/compare/CompareContext";
 import { GraphCanvas } from "../../lineage/graph/GraphCanvas";
 import { useLayoutMode } from "../../lineage/graph/useLayoutMode";
 import { useLineage } from "../../lineage/LineageContext";
@@ -111,6 +112,23 @@ export function GraphView() {
   const effectiveSelectedKey =
     selectedKey !== null && nodeIndex.has(selectedKey) ? selectedKey : null;
 
+  // v1.6.11 B-2 — compare pick mode: while picking, the next node click is the
+  // comparison target (selection unchanged). Esc cancels.
+  const compare = useCompareOptional();
+  const picking = compare?.pickingFromKey ?? null;
+  const handleSelect = (nodeKey: string) => {
+    if (compare?.handleCanvasSelect(nodeKey)) return;
+    select(nodeKey);
+  };
+  useEffect(() => {
+    if (picking === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") compare?.cancelPick();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [picking, compare]);
+
   const handleExpandGroup = (gid: string) => {
     setExpandedGroups((s) => {
       const next = new Set(s);
@@ -153,12 +171,42 @@ export function GraphView() {
           onPickHead={onPickHead}
         />
       )}
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        {picking !== null && (
+          <div
+            data-testid="compare-pick-banner"
+            role="status"
+            style={{
+              position: "absolute",
+              top: 10,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 8,
+              padding: "6px 14px",
+              borderRadius: 999,
+              fontSize: 12,
+              background: "var(--fill-secondary, rgba(0,0,0,0.75))",
+              color: "var(--label-primary, #fff)",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
+            <span>
+              Compare mode — click the node to compare with{" "}
+              <strong>{nodeIndex.get(picking)?.title ?? picking}</strong>
+            </span>
+            <button type="button" onClick={() => compare?.cancelPick()}>
+              Cancel (Esc)
+            </button>
+          </div>
+        )}
         <GraphCanvas
           model={model}
           selectedNodeId={effectiveSelectedKey}
           expandedGroups={expandedGroups}
-          onSelect={select}
+          onSelect={handleSelect}
           onExpandGroup={handleExpandGroup}
           layout={layout}
           onLayoutChange={setLayout}

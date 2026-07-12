@@ -33,6 +33,7 @@ import { BasicInfoSection } from "../../lineage/detail/sections/BasicInfoSection
 import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
+import { CompareNodesSection } from "../../lineage/compare/CompareNodesSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
 import { EstimatedEquationSection } from "../../lineage/detail/sections/EstimatedEquationSection";
@@ -79,6 +80,13 @@ export const sectionRegistry: SectionEntry[] = [
     order: 25,
     shouldRender: (n) => "runs" in n,
     Component: CompareWithSourceSection,
+  },
+  {
+    // v1.6.11 B-2 — arbitrary two-node comparison (pick the partner on the canvas).
+    id: "compareNodes",
+    order: 26,
+    shouldRender: (n) => "runs" in n && !n.isDraft,
+    Component: CompareNodesSection,
   },
   {
     id: "operation",

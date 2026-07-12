@@ -104,6 +104,10 @@ export interface NodeOperationContextV1 {
       label: string;
       kind: string;
       stage: string;
+      /** v1.6.11 — longest distance from a root. Equal depth = parallel
+       *  branches (e.g. variable nodes fanning out of the cleaned dataset);
+       *  renderers must not draw "→" between same-depth nodes. */
+      depth?: number;
     }>;
     downstream_hint?: { has_downstream: boolean; downstream_count?: number };
     active_head_path_contains_node: boolean;
@@ -307,7 +311,10 @@ export function resolveNodeOperationContext(
           ai_visibility: "metadata_only" as const,
         })),
         editable_schema: node.editableSchema ?? null,
-        params: {},
+        // v1.6.11 B-2 — real parameter values live in editable_schema[].value
+        // (backend value-backfill from run_inputs.form). Deriving params here
+        // gives Ask AI packets and node comparisons actual values instead of {}.
+        params: paramsFromSchema(node.editableSchema),
         metrics: node.stats,
       },
       capabilities: resolveCapabilities(node, candidate_run_refs.length),
@@ -474,6 +481,23 @@ function stableFingerprintInput(input: {
   });
 }
 
+/** v1.6.11 B-2 — flatten editable_schema's backfilled values into a params
+ *  record. Entries without a meaningful value are skipped, so nodes with no
+ *  schema (dataset/report) keep the old `{}` shape. */
+function paramsFromSchema(
+  schema: HeadSetNode["editableSchema"],
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
+  for (const control of schema ?? []) {
+    const key = control.key;
+    if (!key || control.value === undefined || control.value === null || control.value === "") {
+      continue;
+    }
+    params[key] = control.value;
+  }
+  return params;
+}
+
 function buildUpstreamPath(
   forest: ForestViewModel,
   selectedNodeKey: string,
@@ -508,11 +532,27 @@ function buildUpstreamPath(
   };
 
   visit(selectedNodeKey);
+
+  // v1.6.11 — depth = longest distance from a root. Nodes sharing a depth are
+  // PARALLEL (e.g. the per-variable nodes fanning out of the cleaned dataset);
+  // rendering the flat topological order as one "→" chain misrepresented them
+  // as sequential (user report 2026-07-12).
+  const depthByKey = new Map<string, number>();
+  const depthOf = (key: string): number => {
+    const known = depthByKey.get(key);
+    if (known !== undefined) return known;
+    depthByKey.set(key, 0); // cycle guard (DAG invariant should hold anyway)
+    const parents = (incomingByTarget.get(key) ?? []).map((edge) => depthOf(edge.source));
+    const depth = parents.length === 0 ? 0 : Math.max(...parents) + 1;
+    depthByKey.set(key, depth);
+    return depth;
+  };
   return ordered.map((node) => ({
     key: node.nodeKey,
     label: node.title,
     kind: node.kind,
     stage: node.stage,
+    depth: depthOf(node.nodeKey),
   }));
 }
 

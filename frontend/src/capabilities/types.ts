@@ -40,6 +40,9 @@ export interface SamplingMethodEntry {
 export interface CovarianceOption {
   key: string;
   label: string;
+  /** U3: backend marks the default option explicitly; consumers must read this
+   *  flag rather than assuming `options[0]` (reordering must not change SE). */
+  default?: boolean;
 }
 
 export interface Capabilities {

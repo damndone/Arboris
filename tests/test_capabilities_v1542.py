@@ -16,6 +16,24 @@ def test_manifest_exposes_new_groups():
     assert {"robust", "clustered"} <= ckeys
 
 
+def test_covariance_default_is_explicitly_flagged():
+    # U3 (v1.6.11): exactly one covariance option carries default=True, so
+    # reordering COVARIANCE_UI can never silently change the default standard
+    # error (the frontend reads this flag, never options[0]).
+    caps = build_capabilities()
+    defaults = [c["key"] for c in caps["covariance_options"] if c.get("default")]
+    assert defaults == ["robust"]
+
+
+def test_covariance_default_single_sources_the_model_param_value():
+    # The exposed default flag and the model param's `value` derive from one
+    # source (_COVARIANCE_DEFAULT), so they cannot drift apart.
+    from workbench.engine.capabilities import _COMMON_MODEL_PARAMS, _COVARIANCE_DEFAULT
+
+    cov = next(p for p in _COMMON_MODEL_PARAMS if p["key"] == "covariance")
+    assert cov["value"] == _COVARIANCE_DEFAULT == "robust"
+
+
 def test_manifest_entries_have_labels():
     caps = build_capabilities()
     for group in ("prediction_models", "sampling_methods", "covariance_options"):

@@ -38,6 +38,7 @@ interface TabSpec {
 export const VIEW_TABS: TabSpec[] = [
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
+  { id: "report", label: "Report" },
 ];
 
 function projectName(root: string): string {
@@ -247,6 +248,8 @@ export function WorkbenchTopbar({
           pinUpstream: dispatch.pinFocus,
           // F1: focus-only (see ContextMenu) — don't move selection.
           focusUpstream: dispatch.setFocusOnly,
+          // v1.6.11 slice C — Generate report switches the main view.
+          setView: dispatch.setView,
         },
       }
     : null;

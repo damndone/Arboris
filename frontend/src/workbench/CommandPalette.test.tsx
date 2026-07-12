@@ -139,9 +139,11 @@ describe("CommandPalette (F7)", () => {
   });
 
   it("disabled commands render greyed and cannot be invoked", () => {
+    // v1.6.11: askAiAboutNode went live; markNeedsReview is the remaining
+    // disabled placeholder (warning-layer backlog W).
     mount("alpha");
     act(() => cmdShiftP());
-    const ai = screen.getByTestId("command-palette-item-askAiAboutNode");
+    const ai = screen.getByTestId("command-palette-item-markNeedsReview");
     expect(ai).toHaveAttribute("data-disabled", "true");
     expect(ai).toBeDisabled();
     fireEvent.click(ai);
@@ -164,10 +166,10 @@ describe("CommandPalette (F7)", () => {
     for (let i = 0; i < 12; i++) {
       const cur = panel.querySelector('[data-active="true"]');
       active = cur?.getAttribute("data-testid") ?? null;
-      if (active === "command-palette-item-askAiAboutNode") break;
+      if (active === "command-palette-item-markNeedsReview") break;
       act(() => fireEvent.keyDown(panel, { key: "ArrowDown" }));
     }
-    expect(active).toBe("command-palette-item-askAiAboutNode");
+    expect(active).toBe("command-palette-item-markNeedsReview");
     act(() => fireEvent.keyDown(panel, { key: "Enter" }));
     // No side effect, palette stays open (disabled action didn't run).
     expect(screen.getByTestId("command-palette")).toBeInTheDocument();

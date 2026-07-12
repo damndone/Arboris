@@ -185,6 +185,23 @@ describe("adaptHeadSet", () => {
     expect(childReport.runRerunFrom).toBeUndefined();
   });
 
+  it("carries model stats decoration through (C-2)", () => {
+    const backend = fixture();
+    backend.nodes.M1.stats = {
+      n_observations: 60,
+      r_squared: 0.86,
+      coefficients: [{ variable: "education", estimate: 0.55 }],
+    };
+    const vm = adaptHeadSet(backend);
+    const m1 = vm.nodes.find((n) => n.nodeHash === "M1")!;
+    expect(m1.stats?.r_squared).toBe(0.86);
+    expect(m1.stats?.coefficients).toEqual([
+      { variable: "education", estimate: 0.55 },
+    ]);
+    const m2 = vm.nodes.find((n) => n.nodeHash === "M2")!;
+    expect(m2.stats).toBeUndefined();
+  });
+
   it("carries the backfilled editable schema value through", () => {
     const vm = adaptHeadSet(fixture());
     const m2 = vm.nodes.find((n) => n.nodeHash === "M2")!;

@@ -23,6 +23,16 @@ frontend/dist/
 # runtime matplotlib cache (not part of the repo)
 .matplotlib/
 
+# Local secrets: LLM provider base-url/key/model for /llm/chat (v1.6.11 Ask AI).
+# The key must NEVER enter git history — a committed API key is the most common
+# leak. Track .env.example (placeholders only) as the documented template; keep
+# every real .env variant out. .env is loaded into the environment at launch via
+# `set -a; source .env; set +a` (no python-dotenv dependency — config.py reads
+# os.environ only).
+.env
+.env.*
+!.env.example
+
 # Vite dependency pre-bundle cache. Regenerated on dev server start,
 # never read at runtime — same rationale as frontend/dist/ above.
 .vite/

@@ -54,6 +54,7 @@ describe("sectionRegistry", () => {
       "trust",
       "askAi",
       "compareWithSource",
+      "compareNodes",
       "operation",
       "estimatedEquation",
       "roleGroups",
@@ -66,7 +67,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      5, 10, 20, 25, 30, 34, 35, 40, 50, 60, 70,
+      5, 10, 20, 25, 26, 30, 34, 35, 40, 50, 60, 70,
     ]);
   });
 
