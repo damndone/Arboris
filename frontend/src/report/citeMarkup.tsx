@@ -65,7 +65,11 @@ export function CiteChip({
         borderRadius: 999,
         fontSize: 11,
         border: "1px solid var(--separator)",
-        background: "var(--fill-tertiary, rgba(0,0,0,0.05))",
+        background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+        // global `button` paints WHITE text; chips must use the label color.
+        color: "var(--label)",
+        minHeight: 0,
+        fontWeight: 500,
         cursor: onJump ? "pointer" : "default",
       }}
     >

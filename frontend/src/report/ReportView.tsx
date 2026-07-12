@@ -274,6 +274,11 @@ function FactTablePreview({
                       cursor: "pointer",
                       textDecoration: "underline",
                       fontSize: 12,
+                      // global `button` is tint-bg + WHITE text; a link-style
+                      // button must restore a readable label color.
+                      color: "var(--tint)",
+                      minHeight: 0,
+                      fontWeight: 400,
                     }}
                   >
                     {fact.node_label}
@@ -303,7 +308,20 @@ function HistoryList({
   onOpen: (record: ReportRecord) => void;
   onDelete: (record: ReportRecord) => void;
 }) {
-  if (history.length === 0) return null;
+  // Always render the section (empty state included) — an invisible feature
+  // is an undiscoverable feature (user report 2026-07-12).
+  if (history.length === 0) {
+    return (
+      <div data-testid="report-history-empty" style={{ marginTop: 24 }}>
+        <div className="ln-section-label" style={{ marginBottom: 6 }}>
+          Report history
+        </div>
+        <div style={{ fontSize: 12, color: "var(--label-tertiary)" }}>
+          No reports yet — every generated report is saved here (survives reload).
+        </div>
+      </div>
+    );
+  }
   return (
     <div data-testid="report-history" style={{ marginTop: 24 }}>
       <div className="ln-section-label" style={{ marginBottom: 6 }}>
@@ -326,6 +344,9 @@ function HistoryList({
                 textDecoration: "underline",
                 fontSize: 12,
                 fontWeight: record.id === currentId ? 600 : 400,
+                // global `button` paints WHITE text — restore a readable color.
+                color: "var(--tint)",
+                minHeight: 0,
               }}
             >
               {record.generatedAt}
