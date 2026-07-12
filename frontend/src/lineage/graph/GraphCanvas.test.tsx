@@ -453,6 +453,24 @@ describe("GraphCanvas", () => {
       expect(screen.getByTestId("toolbar-layout-tb")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fit")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fullscreen")).toBeEnabled();
+      // v1.6.12 (V8): one-click reset back to the automatic arrangement.
+      expect(screen.getByTestId("toolbar-reset")).toBeEnabled();
+    });
+
+    it("Reset keeps the current layout mode and stays clickable (V8)", () => {
+      renderCanvas();
+      fireEvent.click(screen.getByTestId("toolbar-reset"));
+      // mode unchanged (still Free) — reset re-seeds, it does not switch mode
+      expect(screen.getByTestId("toolbar-layout-free")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      fireEvent.click(screen.getByTestId("toolbar-layout-lr"));
+      fireEvent.click(screen.getByTestId("toolbar-reset"));
+      expect(screen.getByTestId("toolbar-layout-lr")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     });
 
     it("defaults to Free layout (Free button aria-pressed=true)", () => {
