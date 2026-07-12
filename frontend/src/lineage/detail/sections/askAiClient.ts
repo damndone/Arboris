@@ -1,5 +1,7 @@
 import { apiUrl } from "../../../api";
 import type { AskAIContextPacket } from "./askAiContextPacket";
+export { fetchLlmConfig } from "../../../llm/llmApi";
+export type { LlmConfigInfo } from "../../../llm/llmTypes";
 
 export interface AskAIResponse {
   text: string;
@@ -25,22 +27,6 @@ export async function askAiForNode(
     throw new Error(await extractErrorMessage(response));
   }
   return response.json() as Promise<AskAIResponse>;
-}
-
-// v1.6.12 T5 (A4) — read-only provider info. The backend never sends the key
-// (only key_present); the panel shows which model answers and where to
-// configure it, key management stays in the env file.
-export interface LlmConfigInfo {
-  configured: boolean;
-  base_url: string | null;
-  model: string | null;
-  key_present: boolean;
-}
-
-export async function fetchLlmConfig(): Promise<LlmConfigInfo> {
-  const response = await fetch(apiUrl("/llm/config"));
-  if (!response.ok) throw new Error(`LLM config unavailable (${response.status})`);
-  return response.json() as Promise<LlmConfigInfo>;
 }
 
 async function extractErrorMessage(response: Response): Promise<string> {
