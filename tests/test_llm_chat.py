@@ -189,3 +189,45 @@ class TestRequestValidation:
         del body["packet"]
         response = api.post("/llm/chat", json=body)
         assert response.status_code == 422
+
+
+class TestReportMode:
+    def _report_body(self) -> dict:
+        return {
+            "mode": "workbench_report_v1",
+            "question": "写一份实证报告",
+            "packet": {
+                "report_scope": {"run_id": "run1", "node_count": 3},
+                "fact_table": [
+                    {"id": "c1", "node_key": "k1", "label": "R²", "value": 0.86},
+                    {"id": "c2", "node_key": "k2", "label": "covariance", "value": "HC1"},
+                ],
+            },
+            "response_guardrails": {"advisory_text_only": True},
+        }
+
+    def test_report_mode_accepted(self, api: TestClient, configured_env, monkeypatch):
+        _install_upstream(monkeypatch, lambda request: _ok_upstream("# Report [[c:c1]]"))
+        response = api.post("/llm/chat", json=self._report_body())
+        assert response.status_code == 200
+        assert response.json()["text"].startswith("# Report")
+
+    def test_report_prompt_carries_cite_rule_and_fact_table(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(monkeypatch, lambda request: _ok_upstream())
+        api.post("/llm/chat", json=self._report_body())
+        system_prompt = json.loads(seen[0].content)["messages"][0]["content"]
+        assert "[[c:ID]]" in system_prompt
+        assert "fact_table" in system_prompt
+        assert "\"c1\"" in system_prompt and "0.86" in system_prompt
+        # the node-context header must NOT leak into report mode
+        assert "node assistant" not in system_prompt
+
+    def test_unknown_mode_lists_both_supported(self, api: TestClient, configured_env):
+        response = api.post("/llm/chat", json={**self._report_body(), "mode": "bogus"})
+        assert response.status_code == 422
+        assert response.json()["error"]["details"]["supported_modes"] == [
+            "workbench_node_context_v1",
+            "workbench_report_v1",
+        ]

@@ -20,9 +20,9 @@
 
 import type { BottomPanelId } from "../registry/bottomPanelRegistry";
 
-export type ViewMode = "graph" | "table" | "pipeline";
+export type ViewMode = "graph" | "table" | "pipeline" | "report";
 
-const VIEW_MODES: readonly ViewMode[] = ["graph", "table", "pipeline"];
+const VIEW_MODES: readonly ViewMode[] = ["graph", "table", "pipeline", "report"];
 const PANEL_IDS: readonly BottomPanelId[] = [
   "logs",
   "shell",

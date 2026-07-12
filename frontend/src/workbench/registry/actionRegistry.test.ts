@@ -82,28 +82,26 @@ describe("actionRegistry", () => {
     );
   });
 
-  it("topbar surface yields rerun (live in v1.6.6) + generateReport (disabled)", () => {
+  it("topbar surface yields rerun (live in v1.6.6) + generateReport (live in v1.6.11)", () => {
     const topbarIds = actionsForSurface("topbar", ctx()).map((a) => a.id);
     expect(topbarIds).toEqual(["rerun", "generateReport"]);
     // v1.6.6 ③: topbar Rerun is now live (routes to the node rerun flow).
     const rerun = actionRegistry.find((a) => a.id === "rerun")!;
     expect(rerun.disabled).toBeUndefined();
-    // Generate report stays disabled (AI-written report — v1.6.9).
+    // v1.6.11 slice C: Generate report is live — switches to the Report view.
     const gen = actionRegistry.find((a) => a.id === "generateReport")!;
-    expect(gen.disabled?.(ctx())).toMatchObject({ reason: expect.any(String) });
+    expect(gen.disabled).toBeUndefined();
   });
 
   it("no disabled reason references a stale/already-shipped version (honesty)", () => {
     // v1.6.6 ③: dead-button reasons must point at real roadmap targets,
-    // not the long-shipped "V1.5.3" / "V2.0" placeholders.
+    // not the long-shipped "V1.5.3" / "V2.0" placeholders. v1.6.11: the Ask AI
+    // and Generate report placeholders are gone entirely (both live).
     for (const a of actionRegistry) {
       const out = a.disabled?.(ctx());
-      if (out) expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0/);
+      if (out) expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0|v1\.6\.9/);
       if (a.id === "askAiAboutNode" || a.id === "generateReport") {
-        expect(out).toBeTruthy();
-        if (!out) continue;
-        expect(out.reason).not.toContain("v1.6.8");
-        expect(out.reason).toContain("v1.6.9");
+        expect(out).toBeUndefined();
       }
     }
   });
@@ -115,7 +113,8 @@ describe("actionRegistry", () => {
 
   it("disabled placeholders return a reason", () => {
     // v1.6.1 (2C.3): rerunFromNode is now live (forks a sibling run).
-    const disabled = ["askAiAboutNode", "markNeedsReview"];
+    // v1.6.11: askAiAboutNode went live too — only markNeedsReview remains.
+    const disabled = ["markNeedsReview"];
     for (const id of disabled) {
       const a = actionRegistry.find((x) => x.id === id)!;
       const out = a.disabled?.(ctx());
@@ -134,6 +133,8 @@ describe("actionRegistry", () => {
       "pinUpstream",
       "rerunFromNode",
       "rerun", // v1.6.6 ③: topbar Rerun wired to the node rerun flow
+      "askAiAboutNode", // v1.6.11 slice A: opens the drawer's Ask AI section
+      "generateReport", // v1.6.11 slice C: switches to the Report view
     ];
     for (const id of live) {
       const a = actionRegistry.find((x) => x.id === id)!;

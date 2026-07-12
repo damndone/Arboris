@@ -145,7 +145,7 @@ describe("NodeActionMenu", () => {
   });
 
   it.each([
-    ["Ask AI about this node"],
+    // v1.6.11 slice A: "Ask AI about this node" went live (opens the drawer).
     ["Mark needs review"],
   ] as const)(
     'disabled placeholder "%s" renders greyed-out with a reason tooltip (plan §11)',

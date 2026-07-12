@@ -26,7 +26,30 @@ from ..llm import (
 router = APIRouter()
 
 SUPPORTED_MODE = "workbench_node_context_v1"
+REPORT_MODE = "workbench_report_v1"
 MAX_QUESTION_CHARS = 4_000
+
+# v1.6.11 slice C — cite-chip report generation. The packet carries a
+# deterministic fact_table built client-side from the lineage contexts; the
+# model may only reference numbers through [[c:ID]] markers, and the client
+# renders every marker from ITS OWN table (never from model output), so a
+# hallucinated number cannot become a chip.
+_REPORT_PROMPT_HEADER = (
+    "You are the report writer of a local econometrics workbench. The JSON "
+    "packet below contains a fact_table: the ONLY numbers you may use. Each "
+    "fact has an id.\n"
+    "Hard rules (non-negotiable):\n"
+    "- Write a structured empirical report in Markdown with these sections: "
+    "Title (# heading), Data, Methods, Results, Limitations.\n"
+    "- Every number, parameter value or decision you mention MUST come from "
+    "the fact_table and MUST be immediately followed by its citation marker "
+    "in the exact form [[c:ID]] (e.g. 'R² of 0.86 [[c:c12]]').\n"
+    "- Never invent, round differently, or combine numbers not present in "
+    "the fact_table. If something is missing, name the gap in Limitations "
+    "instead of guessing.\n"
+    "- Advisory text only: no executable actions, no code, no backend payloads.\n"
+    "- Write in the language of the user's instruction."
+)
 
 _SYSTEM_PROMPT_HEADER = (
     "You are the node assistant of a local econometrics workbench. The user "
@@ -53,12 +76,12 @@ class AskAIChatRequest(BaseModel):
 
 @router.post("/llm/chat")
 def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
-    if request.mode != SUPPORTED_MODE:
+    if request.mode not in (SUPPORTED_MODE, REPORT_MODE):
         raise WorkbenchAPIError(
             status_code=422,
             code="LLM_CHAT_UNSUPPORTED_MODE",
             message=f"Unsupported mode: {request.mode!r}",
-            details={"supported_modes": [SUPPORTED_MODE]},
+            details={"supported_modes": [SUPPORTED_MODE, REPORT_MODE]},
         )
     if request.question.strip() == "":
         raise WorkbenchAPIError(
@@ -94,7 +117,8 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
 
 
 def _build_system_prompt(request: AskAIChatRequest) -> str:
-    sections = [_SYSTEM_PROMPT_HEADER]
+    header = _REPORT_PROMPT_HEADER if request.mode == REPORT_MODE else _SYSTEM_PROMPT_HEADER
+    sections = [header]
     guardrails = request.response_guardrails or request.packet.get("response_guardrails")
     if guardrails:
         sections.append(
