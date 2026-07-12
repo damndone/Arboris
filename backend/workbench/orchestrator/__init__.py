@@ -85,7 +85,6 @@ from ..statistical_tests import (
 )
 from ..validation import has_blockers, validate_profile
 from ..variable_roles import infer_variable_roles
-from ..visualization import create_figures
 from ._column_checks import (
     _CATEGORICAL_NAME_PATTERNS,
     _SUSPICIOUS_NAME_PATTERNS,
@@ -133,6 +132,19 @@ from ._reliability_checks import (
     _diagnostic_family,
     _select_valid_exposure_col,
 )
+
+
+def create_figures(*args: Any, **kwargs: Any) -> dict[str, str]:
+    """Load plotting only when a run reaches diagnostics.
+
+    Read-only routes such as the project graph must not initialize Matplotlib
+    during application import. Keeping this wrapper in the orchestrator
+    namespace preserves the existing diagnostics-stage and test seam.
+    """
+    from ..visualization import create_figures as _create_figures
+
+    return _create_figures(*args, **kwargs)
+
 
 # ============================================================
 # AUTO-DETECTION (computed from data, dataset-agnostic):
