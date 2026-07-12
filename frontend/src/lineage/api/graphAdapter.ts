@@ -264,6 +264,8 @@ function adaptHeadSetNodeWithRunProvenance(
     runs: raw.runs ?? [],
     // v1.6.11 A2 — dataset schema/profile preview flows into the Ask AI packet.
     artifacts: raw.artifacts,
+    // v1.6.11 C-2 — model fit metrics + coefficients flow into the fact table.
+    stats: raw.stats,
     editable: raw.editable,
     opType: raw.op_type,
     schemaId: raw.schema_id,

@@ -54,7 +54,8 @@ export function buildFactTable(
         value,
       });
     }
-    for (const [key, value] of Object.entries(context.node_payload.metrics ?? {})) {
+    const metrics = context.node_payload.metrics ?? {};
+    for (const [key, value] of Object.entries(metrics)) {
       if (value === null || value === undefined) continue;
       if (typeof value === "object") continue; // scalars only — keep facts atomic
       facts.push({
@@ -65,6 +66,44 @@ export function buildFactTable(
         label: key,
         value,
       });
+    }
+    // v1.6.11 C-2 — model coefficient rows (serve-time decoration) expand into
+    // atomic per-term facts so the report can cite estimates and p-values.
+    const coefficientRows = Array.isArray(metrics.coefficients)
+      ? metrics.coefficients
+      : [];
+    for (const row of coefficientRows) {
+      if (!row || typeof row !== "object") continue;
+      const { variable, estimate, std_error, p_value } = row as Record<string, unknown>;
+      if (typeof variable !== "string" || typeof estimate !== "number") continue;
+      facts.push({
+        id: nextId(),
+        node_key: node.nodeKey,
+        node_label: nodeLabel,
+        field: `coef:${variable}`,
+        label: `coefficient (${variable})`,
+        value: estimate,
+      });
+      if (typeof std_error === "number") {
+        facts.push({
+          id: nextId(),
+          node_key: node.nodeKey,
+          node_label: nodeLabel,
+          field: `coef_se:${variable}`,
+          label: `std. error (${variable})`,
+          value: std_error,
+        });
+      }
+      if (typeof p_value === "number") {
+        facts.push({
+          id: nextId(),
+          node_key: node.nodeKey,
+          node_label: nodeLabel,
+          field: `coef_p:${variable}`,
+          label: `p-value (${variable})`,
+          value: p_value,
+        });
+      }
     }
     for (const decision of context.node_payload.decisions) {
       facts.push({

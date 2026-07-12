@@ -34,6 +34,40 @@ describe("buildFactTable", () => {
     expect(fingerprints.length).toBeGreaterThan(0);
   });
 
+  it("expands model coefficient rows into per-term estimate/se/p facts (C-2)", () => {
+    const seed = fixtureWithValues();
+    const model = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+    model.stats = {
+      r_squared: 0.86,
+      coefficients: [
+        {
+          variable: "education",
+          estimate: 0.5527,
+          std_error: 0.081,
+          p_value: 0.0001,
+          significance_label: "significant at the 1% level",
+        },
+        { variable: "exper", estimate: 0.021 }, // no se/p → only estimate fact
+        { variable: "broken" }, // no estimate → skipped entirely
+      ],
+    } as never;
+    const { facts } = buildFactTable(seed.forest, "run_c");
+    const byField = new Map(facts.map((f) => [f.field, f]));
+
+    expect(byField.get("coef:education")?.value).toBe(0.5527);
+    expect(byField.get("coef:education")?.label).toBe("coefficient (education)");
+    expect(byField.get("coef_se:education")?.value).toBe(0.081);
+    expect(byField.get("coef_p:education")?.value).toBe(0.0001);
+    expect(byField.get("coef:exper")?.value).toBe(0.021);
+    expect(byField.get("coef_se:exper")).toBeUndefined();
+    expect(byField.get("coef:broken")).toBeUndefined();
+    // the raw coefficients array itself never becomes a (non-atomic) fact
+    expect(byField.get("metric:coefficients")).toBeUndefined();
+    // scalar metrics still flow alongside
+    expect(byField.get("metric:r_squared")?.value).toBe(0.86);
+    expect(byField.get("coef:education")?.node_key).toBe(seed.sharedNodeKey);
+  });
+
   it("bare fixture yields only the fixture's own schema facts, scoped to the run", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const { facts, scope } = buildFactTable(seed.forest, "run_a");

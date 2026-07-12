@@ -89,6 +89,49 @@ def _dataset_artifacts(runs_dir: Path, run_id: str, node_id: str) -> list[dict] 
     return None
 
 
+# v1.6.11 C-2 — model-aware fact table / Ask AI context. Same serve-time
+# decoration discipline: the model node gets a `stats` dict (fit metrics +
+# n_observations + compact coefficient rows) read from diagnostic_summary.json,
+# so the report fact table can cite R²/coefficients instead of an empty node.
+_COEFFICIENT_ROW_KEYS = (
+    "variable",
+    "display_name",
+    "estimate",
+    "std_error",
+    "p_value",
+    "significance_label",
+)
+
+
+def _model_stats(runs_dir: Path, run_id: str, node_id: str) -> dict[str, Any] | None:
+    if not node_id.startswith("model:"):
+        return None
+    try:
+        summary = read_json(runs_dir / run_id / "diagnostic_summary.json")
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+    stats: dict[str, Any] = {}
+    identity = summary.get("model_identity") or {}
+    n_obs = identity.get("n_observations")
+    if isinstance(n_obs, (int, float)) and n_obs:
+        stats["n_observations"] = n_obs
+    quality = summary.get("model_quality") or {}
+    metrics = quality.get("metrics")
+    if isinstance(metrics, dict):
+        stats.update(
+            {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
+        )
+    rows = (summary.get("coefficients_summary") or {}).get("rows")
+    coefficients = []
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("estimate") is None:
+            continue
+        coefficients.append({k: row.get(k) for k in _COEFFICIENT_ROW_KEYS})
+    if coefficients:
+        stats["coefficients"] = coefficients
+    return stats or None
+
+
 def _node_key(node_id: str, node_index: dict[str, dict]) -> str:
     """Cross-run dedup key. Two nodes merge iff they are the SAME node_id with the SAME
     node_hash — so the shared prefix (raw/cleaned/variables) collapses across reruns, a
@@ -172,6 +215,9 @@ def build_headset(
                 dataset_artifacts = _dataset_artifacts(runs_dir, run_id, nid)
                 if dataset_artifacts:
                     view["artifacts"] = dataset_artifacts
+                model_stats = _model_stats(runs_dir, run_id, nid)
+                if model_stats:
+                    view["stats"] = model_stats
                 if annotate is not None:
                     try:
                         annotate(view, manifest, form)

@@ -213,6 +213,9 @@ export interface HeadSetNodeRaw {
   runs: string[];
   /** v1.6.11 A2 — serve-time dataset decoration (schema/profile preview for Ask AI). */
   artifacts?: Array<ArtifactRef & { summary?: unknown; preview?: unknown }>;
+  /** v1.6.11 C-2 — serve-time model decoration: fit metrics + n_observations +
+   *  compact coefficient rows from diagnostic_summary.json (fact-table source). */
+  stats?: Record<string, unknown>;
   editable?: boolean;
   op_type?: string;
   schema_id?: string;

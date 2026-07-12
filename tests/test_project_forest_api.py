@@ -156,3 +156,45 @@ def test_forest_dataset_nodes_carry_profile_artifacts(tmp_path):
     )
     assert all("artifacts" not in n or n["artifacts"] is None
                for n in graph["nodes"].values())
+
+
+def test_forest_model_node_carries_stats(tmp_path):
+    # v1.6.11 C-2 — serve-time model decoration: the model node exposes fit
+    # metrics + n_observations + compact coefficient rows read from
+    # diagnostic_summary.json, so the report fact table can cite R²/coefficients.
+    # graph.json on disk stays undecorated.
+    root = _mkproject(tmp_path)
+    run_id = _execute_genesis_run(root)
+    body = client.get("/graph", params={"project_root": root}).json()
+
+    model_nodes = [
+        n for n in body["nodes"].values() if n["id"].startswith("model:")
+    ]
+    assert model_nodes, f"no model node in forest: {list(body['nodes'])[:8]}"
+    stats = model_nodes[0].get("stats")
+    assert stats, "model node missing stats decoration"
+    assert stats["n_observations"] > 0
+    coefficients = stats.get("coefficients")
+    assert coefficients, "model stats missing coefficient rows"
+    first = coefficients[0]
+    assert first["variable"] and isinstance(first["estimate"], (int, float))
+    assert "p_value" in first and "significance_label" in first
+    # Fit metrics from model_quality flow through as scalars.
+    summary = json.loads(
+        (Path(root) / "runs" / run_id / "diagnostic_summary.json").read_text()
+    )
+    for key, val in summary["model_quality"]["metrics"].items():
+        if isinstance(val, (int, float)):
+            assert stats[key] == val
+
+    # Non-model nodes stay undecorated; on-disk graph.json has no stats field.
+    assert all(
+        "stats" not in n
+        for n in body["nodes"].values()
+        if not n["id"].startswith("model:")
+    )
+    graph = json.loads(
+        (Path(root) / "runs" / run_id / "graph.json").read_text()
+    )
+    assert all("stats" not in n or n["stats"] is None
+               for n in graph["nodes"].values())
