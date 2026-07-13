@@ -29,6 +29,7 @@ describe("parseWorkbenchUrl", () => {
   });
 
   it("parses view enum", () => {
+    expect(parseWorkbenchUrl(p("view=home")).view).toBe("home");
     expect(parseWorkbenchUrl(p("view=table")).view).toBe("table");
     expect(parseWorkbenchUrl(p("view=pipeline")).view).toBe("pipeline");
   });
@@ -161,6 +162,16 @@ describe("round-trip (parse → write → parse)", () => {
         searchQuery: "",
         bottomPanel: "logs",
         focusKey: "n9",
+        pinned: false,
+      },
+    ],
+    [
+      "home view round-trips",
+      {
+        view: "home",
+        searchQuery: "",
+        bottomPanel: "logs",
+        focusKey: null,
         pinned: false,
       },
     ],

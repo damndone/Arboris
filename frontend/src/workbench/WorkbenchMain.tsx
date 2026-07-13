@@ -12,8 +12,17 @@ import { GraphView } from "./views/GraphView";
 import { TableView } from "./views/TableView";
 import { PipelineView } from "./views/PipelineView";
 import { ReportView } from "../report/ReportView";
+import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 
-export function WorkbenchMain({ projectRoot }: { projectRoot: string }) {
+export function WorkbenchMain({
+  projectRoot,
+  onOpenSettings,
+  onOpenProject,
+}: {
+  projectRoot: string;
+  onOpenSettings?: () => void;
+  onOpenProject?: (root: string) => void;
+}) {
   const { state } = useWorkbench();
   return (
     <div
@@ -28,6 +37,13 @@ export function WorkbenchMain({ projectRoot }: { projectRoot: string }) {
         overflow: "hidden",
       }}
     >
+      {state.view === "home" && (
+        <WorkbenchHomeView
+          projectRoot={projectRoot}
+          onOpenSettings={onOpenSettings}
+          onOpenProject={onOpenProject}
+        />
+      )}
       {state.view === "graph" && <GraphView />}
       {state.view === "table" && <TableView projectRoot={projectRoot} />}
       {state.view === "pipeline" && <PipelineView />}
