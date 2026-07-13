@@ -5,10 +5,12 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 
 import App from "../App";
 import { listRecents, touchRecent } from "./recents";
+import { RecentProjectsPanel } from "./RecentProjectsPanel";
+import { rootToSlug } from "../workbench/projectSlug";
 
 type FetchInit = { status?: number; ok?: boolean };
 
@@ -39,6 +41,29 @@ function renderAt(path = "/") {
   );
 }
 
+function RecentPanelHarness() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <>
+      <RecentProjectsPanel
+        onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
+      />
+      {location.pathname.startsWith("/p/") && (
+        <div data-testid="project-graph-route" />
+      )}
+    </>
+  );
+}
+
+function renderPanel() {
+  return render(
+    <MemoryRouter initialEntries={["/"]}>
+      <RecentPanelHarness />
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
   try {
@@ -58,10 +83,38 @@ afterEach(() => {
 });
 
 describe("LauncherRoute", () => {
+  // v1.6.12 (V10): bare `/` jumps straight into the last project; `?home=1`
+  // aliases the Workbench Home view for that same project.
+  it("V10: bare / with a recent redirects into its graph home", async () => {
+    touchRecent("/tmp/alpha");
+    installFetchRouter((url) => {
+      if (url.includes("/runs")) return jsonResponse({ runs: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    renderAt("/");
+    expect(await screen.findByTestId("project-graph-route")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "新建项目" })).not.toBeInTheDocument();
+  });
+
+  it("V10: bare / with NO recents still shows the launcher (no dead end)", () => {
+    renderAt("/");
+    expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+  });
+
+  it("V10: ?home=1 aliases the latest project Workbench Home", async () => {
+    touchRecent("/tmp/alpha");
+    installFetchRouter((url) => {
+      if (url.includes("/runs")) return jsonResponse({ runs: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    renderAt("/?home=1");
+    expect(await screen.findByTestId("project-graph-route")).toBeInTheDocument();
+  });
+
   it("renders recent projects as cards (name + full root)", () => {
     touchRecent("/Users/me/项目规划/示例");
     touchRecent("/tmp/alpha");
-    renderAt("/");
+    renderPanel();
 
     // Most-recent first; project name = last path segment, full root visible.
     expect(screen.getByText("alpha")).toBeInTheDocument();
@@ -76,7 +129,7 @@ describe("LauncherRoute", () => {
       if (url.includes("/runs")) return jsonResponse({ runs: [] });
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/");
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
 
@@ -177,7 +230,7 @@ describe("LauncherRoute", () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/");
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /project/ }));
 
@@ -209,7 +262,7 @@ describe("LauncherRoute", () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => probe
     );
-    renderAt("/");
+    renderPanel();
 
     const card = screen.getByRole("button", { name: /alpha/ });
     fireEvent.click(card);

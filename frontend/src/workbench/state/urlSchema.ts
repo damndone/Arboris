@@ -10,7 +10,7 @@
 //
 //   view        ∈ {graph, table, pipeline}        default "graph"
 //   q           string                            default ""        (omitted from URL when empty)
-//   panel       ∈ {logs, shell, pending, timeline} default "logs"
+//   panel       ∈ {logs, ai} default "logs"
 //   focus       string                            default null
 //   pinned      ∈ {"0","1"}                       default "0"       (omitted from URL when 0)
 //
@@ -20,15 +20,18 @@
 
 import type { BottomPanelId } from "../registry/bottomPanelRegistry";
 
-export type ViewMode = "graph" | "table" | "pipeline" | "report";
+export type ViewMode = "home" | "graph" | "table" | "pipeline" | "report";
 
-const VIEW_MODES: readonly ViewMode[] = ["graph", "table", "pipeline", "report"];
-const PANEL_IDS: readonly BottomPanelId[] = [
-  "logs",
-  "shell",
-  "pending",
-  "timeline",
+const VIEW_MODES: readonly ViewMode[] = [
+  "home",
+  "graph",
+  "table",
+  "pipeline",
+  "report",
 ];
+// v1.6.12: shell/pending/timeline placeholder panels removed; legacy URLs
+// carrying them fall back to the "logs" default via pickEnum.
+const PANEL_IDS: readonly BottomPanelId[] = ["logs", "ai"];
 
 /** Parsed Tier 1 URL state. */
 export interface WorkbenchUrlSlice {

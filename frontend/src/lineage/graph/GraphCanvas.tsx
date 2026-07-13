@@ -133,6 +133,22 @@ function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
         >
           Fit
         </button>
+        {/* v1.6.12 (V8) — one-click recovery after nodes get dragged into a
+         * mess: re-trigger the current layout mode (bumps layoutVersion →
+         * fresh dagre snap, discarding drag offsets), then fit the view. */}
+        <button
+          type="button"
+          onClick={() => {
+            onLayout(layout);
+            requestAnimationFrame(() =>
+              fitView({ padding: 0.2, duration: 200 }),
+            );
+          }}
+          data-testid="toolbar-reset"
+          title="Reset layout — snap all nodes back to the automatic arrangement"
+        >
+          Reset
+        </button>
         <button
           type="button"
           onClick={onFullscreen}

@@ -12,6 +12,8 @@ import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import { buildFactTable, type CitableFact } from "./factTable";
 import { DEFAULT_REPORT_INSTRUCTION, generateReport } from "./reportClient";
 import { CiteChip, parseCiteSegments } from "./citeMarkup";
+import { renderMarkdown } from "./markdown";
+import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
 import {
   deleteReportRecord,
   loadReportHistory,
@@ -86,6 +88,17 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
       };
       setCurrent(record);
       setHistory(saveReportRecord(historyRoot, record));
+      appendAiActivity(historyRoot, {
+        kind: "report_generate",
+        id: makeActivityId(),
+        at: record.generatedAt,
+        run_id: table.scope.run_id,
+        instruction,
+        model: response.model,
+        fact_count: includedFacts.length,
+        excluded_count: excludedIds.size,
+        report_record_id: record.id,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Report generation failed");
     } finally {
@@ -192,19 +205,22 @@ function ReportBody({
   factsById: Map<string, CitableFact>;
   onJump: (nodeKey: string) => void;
 }) {
-  const segments = parseCiteSegments(text);
-  return (
-    <div
-      data-testid="report-body"
-      style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", maxWidth: 860 }}
-    >
-      {segments.map((segment, index) =>
+  // v1.6.12 (V5): markdown blocks; [[c:ID]] markers become chips inside every
+  // plain-text leaf via the renderTextSpan seam (bold/list content included).
+  const renderCiteSpan = (span: string, key: string) => (
+    <span key={key}>
+      {parseCiteSegments(span).map((segment, index) =>
         segment.type === "text" ? (
           <span key={index}>{segment.text}</span>
         ) : (
           <CiteChip key={index} id={segment.id} fact={factsById.get(segment.id)} onJump={onJump} />
         ),
       )}
+    </span>
+  );
+  return (
+    <div data-testid="report-body" style={{ fontSize: 13, maxWidth: 860 }}>
+      {renderMarkdown(text, renderCiteSpan)}
     </div>
   );
 }

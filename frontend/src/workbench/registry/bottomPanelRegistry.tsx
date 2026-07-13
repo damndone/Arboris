@@ -1,18 +1,20 @@
 // frontend/src/workbench/registry/bottomPanelRegistry.ts
 //
-// V1.5.2 P4 — BottomPanelRegistry, populated. Plan §12.
+// V1.5.2 P4 — BottomPanelRegistry. Plan §12.
 //
-// V1.5.2 ships Logs live; Shell / Pending / Timeline appear in the
-// tab strip as `disabled` so users see the slots are coming. URL
-// `?panel=<id>` activates whichever is current — disabled panels render
-// the PlaceholderPanel body explaining the deferral.
+// v1.6.12 (V3 + dead-button honesty): the three "lands in V1.5.3" placeholder
+// tabs (Shell / Pending / Timeline) sat disabled for seven minor versions —
+// stale promises, removed. In their place ships a REAL panel: AI activity,
+// the typed AI interaction log (first consumer of the operation-record
+// contract that v1.7's agent loop extends). Shell/decision-review return with
+// v1.7 when they have an implementation behind them.
 
 import type { FC } from "react";
 import type { RegistryEntry } from "./registryTypes";
 import { LogsPanel } from "../panels/LogsPanel";
-import { PlaceholderPanel } from "../panels/PlaceholderPanel";
+import { AiActivityPanel } from "../panels/AiActivityPanel";
 
-export type BottomPanelId = "logs" | "shell" | "pending" | "timeline";
+export type BottomPanelId = "logs" | "ai";
 
 export interface BottomPanelContext {
   runId: string;
@@ -35,48 +37,11 @@ export const bottomPanelRegistry: BottomPanelEntry[] = [
     shouldRender: () => true,
   },
   {
-    id: "shell",
+    id: "ai",
     order: 20,
-    label: "Shell",
-    Component: () => (
-      <PlaceholderPanel
-        title="Shell"
-        comingIn="V1.5.3"
-        description="Run editable ops + rerun-from-here will surface their stdout/stderr in this panel."
-      />
-    ),
+    label: "AI activity",
+    Component: AiActivityPanel,
     shouldRender: () => true,
-    disabled: () => ({ reason: "Shell sandbox lands in V1.5.3" }),
-  },
-  {
-    id: "pending",
-    order: 30,
-    label: "Pending confirmations",
-    Component: () => (
-      <PlaceholderPanel
-        title="Pending"
-        comingIn="V1.5.3"
-        description="Decisions that need user review will list here for batch confirmation."
-      />
-    ),
-    shouldRender: () => true,
-    disabled: () => ({
-      reason: "Decision-review workflow lands in V1.5.3",
-    }),
-  },
-  {
-    id: "timeline",
-    order: 40,
-    label: "Timeline",
-    Component: () => (
-      <PlaceholderPanel
-        title="Timeline"
-        comingIn="V1.5.3"
-        description="Chronological replay of stage executions + decision evaluations."
-      />
-    ),
-    shouldRender: () => true,
-    disabled: () => ({ reason: "Timeline view lands in V1.5.3" }),
   },
 ];
 

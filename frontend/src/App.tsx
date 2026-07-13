@@ -371,7 +371,13 @@ function AppShell() {
           type="button"
           role="tab"
           aria-selected={isLauncherActive}
-          onClick={() => navigate("/")}
+          onClick={() => {
+            if (isWorkbenchActive && projectRoot) {
+              navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
+            } else {
+              navigate("/");
+            }
+          }}
         >
           Home
         </button>

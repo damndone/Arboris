@@ -26,11 +26,12 @@ import {
 } from "./registry/actionRegistry";
 import { isEditableTarget } from "./keyboard";
 
-export function useGlobalShortcuts(): void {
+export function useGlobalShortcuts({ enabled = true }: { enabled?: boolean } = {}): void {
   const { model, selectedKey } = useLineage();
   const { state, dispatch } = useWorkbench();
 
   useEffect(() => {
+    if (!enabled) return undefined;
     const onKey = (e: KeyboardEvent) => {
       // F4 rule: don't hijack keys while editing text.
       if (isEditableTarget(document.activeElement)) return;
@@ -61,5 +62,5 @@ export function useGlobalShortcuts(): void {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [model, selectedKey, state, dispatch]);
+  }, [model, selectedKey, state, dispatch, enabled]);
 }

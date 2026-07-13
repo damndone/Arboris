@@ -29,6 +29,7 @@ describe("parseWorkbenchUrl", () => {
   });
 
   it("parses view enum", () => {
+    expect(parseWorkbenchUrl(p("view=home")).view).toBe("home");
     expect(parseWorkbenchUrl(p("view=table")).view).toBe("table");
     expect(parseWorkbenchUrl(p("view=pipeline")).view).toBe("pipeline");
   });
@@ -43,8 +44,8 @@ describe("parseWorkbenchUrl", () => {
   });
 
   it("parses panel id and ignores legacy panelOpen", () => {
-    const s = parseWorkbenchUrl(p("panel=shell&panelOpen=1"));
-    expect(s.bottomPanel).toBe("shell");
+    const s = parseWorkbenchUrl(p("panel=ai&panelOpen=1"));
+    expect(s.bottomPanel).toBe("ai");
   });
 
   it("ignores unknown panel ids", () => {
@@ -115,9 +116,9 @@ describe("writeWorkbenchUrl", () => {
   it("writes panel id when panel is non-default and strips legacy panelOpen", () => {
     const out = writeWorkbenchUrl(new URLSearchParams(), {
       ...defaultUrlSlice,
-      bottomPanel: "shell",
+      bottomPanel: "ai",
     });
-    expect(out.get("panel")).toBe("shell");
+    expect(out.get("panel")).toBe("ai");
     expect(out.get("panelOpen")).toBeNull();
   });
 
@@ -149,7 +150,7 @@ describe("round-trip (parse → write → parse)", () => {
       {
         view: "table",
         searchQuery: "income",
-        bottomPanel: "shell",
+        bottomPanel: "ai",
         focusKey: "n42",
         pinned: true,
       },
@@ -161,6 +162,16 @@ describe("round-trip (parse → write → parse)", () => {
         searchQuery: "",
         bottomPanel: "logs",
         focusKey: "n9",
+        pinned: false,
+      },
+    ],
+    [
+      "home view round-trips",
+      {
+        view: "home",
+        searchQuery: "",
+        bottomPanel: "logs",
+        focusKey: null,
         pinned: false,
       },
     ],

@@ -1,5 +1,7 @@
 import { apiUrl } from "../../../api";
 import type { AskAIContextPacket } from "./askAiContextPacket";
+export { fetchLlmConfig } from "../../../llm/llmApi";
+export type { LlmConfigInfo } from "../../../llm/llmTypes";
 
 export interface AskAIResponse {
   text: string;

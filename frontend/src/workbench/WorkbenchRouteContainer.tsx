@@ -26,7 +26,7 @@
 // rail + panel + search palette work identically across them.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
@@ -36,10 +36,13 @@ import { RawJsonModal } from "../lineage/modals/RawJsonModal";
 import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
+import { useWorkbench } from "./WorkbenchStateProvider";
+import { rootToSlug } from "./projectSlug";
 import { CompareProvider } from "../lineage/compare/CompareContext";
 import { LineageBridge } from "./LineageBridge";
 import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
+import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 import { ContextMenu } from "./ContextMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
@@ -51,6 +54,7 @@ import { useForestData } from "../lineage/hooks/useForestData";
 import { forestToGraphViewModel } from "./forestModel";
 import { ForestContext } from "./ForestContext";
 import { RerunProvider } from "../lineage/detail/RerunContext";
+import { LlmProviderManager } from "../llm/LlmProviderManager";
 import { draftReducer, emptyRegistry } from "../lineage/drafts/draftRegistry";
 import { mergeDraftsIntoModel } from "../lineage/drafts/mergeDraftsIntoModel";
 import { DraftActionsProvider } from "../lineage/drafts/DraftActionsContext";
@@ -477,7 +481,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     </aside>
   ) : null;
 
-  const body = !shellRunId ? (
+  const body = !shellRunId && searchParams.get("view") === "home" ? (
+    <HomeOnlyShell projectRoot={projectRoot} />
+  ) : !shellRunId ? (
     <EmptyProjectCanvas
       projectRoot={projectRoot}
       legacyFamilyCount={forest.familyCount}
@@ -537,6 +543,54 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
+    </div>
+  );
+}
+
+function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
+  const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  return (
+    <div
+      data-testid="workbench-home-shell"
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+    >
+      <div
+        role="toolbar"
+        aria-label="项目工具栏"
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator, #2e2e30)" }}
+      >
+        <ProjectSwitcher projectRoot={projectRoot} />
+        <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Home</span>
+        <button
+          type="button"
+          data-testid="workbench-home-graph"
+          onClick={() => navigate(window.location.pathname)}
+          style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
+        >
+          Graph
+        </button>
+        <button
+          type="button"
+          data-testid="workbench-home-shell-settings"
+          onClick={() => setSettingsOpen(true)}
+          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
+        >
+          Settings
+        </button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {settingsOpen ? (
+          <LlmProviderManager onBack={() => setSettingsOpen(false)} />
+        ) : (
+          <WorkbenchHomeView
+            projectRoot={projectRoot}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -726,6 +780,9 @@ function WorkbenchShell({
   onPendingFocusRetry?: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
+  const { state } = useWorkbench();
+  const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
 
   // Selected-node lookup with the V1.5.0 cross-run leak guard
@@ -784,11 +841,12 @@ function WorkbenchShell({
     onCmdK: () => {
       /* SearchPalette owns its own ⌘K listener (V1.5.2 P7) */
     },
+    enabled: state.view !== "home" && !settingsOpen,
   });
 
   // F6: global action-registry shortcut dispatcher (e.g. ⌘⇧C copy id).
   // Reuses F4's editable-target guard; acts on the selected node.
-  useGlobalShortcuts();
+  useGlobalShortcuts({ enabled: state.view !== "home" && !settingsOpen });
 
   return (
     <div
@@ -803,6 +861,7 @@ function WorkbenchShell({
     >
       <WorkbenchTopbar
         projectRoot={projectRoot}
+        onOpenSettings={() => setSettingsOpen(true)}
         extraActions={
           onResumeGenesisDraft ? (
             <button
@@ -834,7 +893,7 @@ function WorkbenchShell({
           overflow: "hidden",
         }}
       >
-        <RunHistoryRail projectRoot={projectRoot} />
+        {state.view !== "home" && <RunHistoryRail projectRoot={projectRoot} />}
         <div
           data-testid="workbench-center-column"
           style={{
@@ -846,10 +905,22 @@ function WorkbenchShell({
             overflow: "hidden",
           }}
         >
-          <WorkbenchMain projectRoot={projectRoot} />
-          <BottomPanel runId={runId} projectRoot={projectRoot} />
+          {settingsOpen ? (
+            <LlmProviderManager onBack={() => setSettingsOpen(false)} />
+          ) : (
+            <WorkbenchMain
+              projectRoot={projectRoot}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenProject={(root) => {
+                navigate(`/p/${rootToSlug(root)}/graph`);
+              }}
+            />
+          )}
+          {!settingsOpen && state.view !== "home" && (
+            <BottomPanel runId={runId} projectRoot={projectRoot} />
+          )}
         </div>
-        {selectedNode !== null && (
+        {!settingsOpen && state.view !== "home" && selectedNode !== null && (
           <DetailDrawer
             node={selectedNode}
             projectRoot={projectRoot}
@@ -858,14 +929,16 @@ function WorkbenchShell({
           />
         )}
       </div>
-      <ContextMenu />
-      <SearchPalette />
-      <CommandPalette projectRoot={projectRoot} />
-      <RawJsonModal
-        open={rawJsonOpen}
-        onClose={() => setRawJsonOpen(false)}
-        node={selectedNode}
-      />
+      {!settingsOpen && state.view !== "home" && <ContextMenu />}
+      {!settingsOpen && state.view !== "home" && <SearchPalette />}
+      {!settingsOpen && state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
+      {!settingsOpen && state.view !== "home" && (
+        <RawJsonModal
+          open={rawJsonOpen}
+          onClose={() => setRawJsonOpen(false)}
+          node={selectedNode}
+        />
+      )}
     </div>
   );
 }

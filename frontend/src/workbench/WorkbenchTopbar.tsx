@@ -36,6 +36,7 @@ interface TabSpec {
 // WorkbenchMain branch are kept as a URL deep-link fallback; only the clickable
 // tab is removed. Exported for testing.
 export const VIEW_TABS: TabSpec[] = [
+  { id: "home", label: "Home" },
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
   { id: "report", label: "Report" },
@@ -219,9 +220,11 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
 export function WorkbenchTopbar({
   projectRoot,
   extraActions = null,
+  onOpenSettings,
 }: {
   projectRoot: string;
   extraActions?: ReactNode;
+  onOpenSettings?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
@@ -296,6 +299,24 @@ export function WorkbenchTopbar({
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}
       >
         {extraActions}
+        {onOpenSettings && (
+          <button
+            type="button"
+            data-testid="workbench-topbar-settings"
+            onClick={onOpenSettings}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              background: "transparent",
+              color: "var(--label)",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            Settings
+          </button>
+        )}
         {topbarActions.map((action) => {
           const disabled = action.disabled?.(actionCtx!);
           return (
