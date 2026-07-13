@@ -7,8 +7,23 @@ from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.projects import create_project
+from workbench.http._deps import _backfill_schema_values
 
 client = TestClient(app)
+
+
+def test_backfill_x_columns_into_editable_schema():
+    schema = [{"key": "x", "kind": "columns", "label": "Regressors (X)"}]
+    result = _backfill_schema_values(schema, {"x": "x1, x2"})
+    assert result == [
+        {
+            "key": "x",
+            "kind": "columns",
+            "label": "Regressors (X)",
+            "value": ["x1", "x2"],
+            "options": ["x1", "x2"],
+        }
+    ]
 
 
 def _csv() -> bytes:

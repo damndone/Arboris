@@ -71,13 +71,14 @@ describe("sectionRegistry", () => {
     ]);
   });
 
-  it(".filter(s => s.shouldRender(node)) on a plain model node yields roleGroups/lineage/basic by default", () => {
+  it(".filter(s => s.shouldRender(node)) on a plain model node includes Ask AI by default", () => {
     // ok trust + no decisions + no code + no editableSchema → lineage
     // + basic render. roleGroups renders for model nodes (v1.6.5). Ask AI
-    // is feature-flagged off by default.
+    // is available by default; deployments can explicitly opt out.
     const plain = node();
     const visible = sectionRegistry.filter((s) => s.shouldRender(plain));
     expect(visible.map((s) => s.id)).toEqual([
+      "askAi",
       "estimatedEquation",
       "roleGroups",
       "lineage",
@@ -163,19 +164,19 @@ describe("sectionRegistry", () => {
   });
 
   describe("V1.5.2 P5 placeholders", () => {
-    it("askAi is hidden by default", () => {
-      const visible = sectionRegistry
-        .filter((s) => s.shouldRender(node()))
-        .map((s) => s.id);
-      expect(visible).not.toContain("askAi");
-    });
-
-    it("askAi renders only when VITE_WORKBENCH_ASK_AI is enabled", () => {
-      vi.stubEnv("VITE_WORKBENCH_ASK_AI", "1");
+    it("askAi is enabled by default", () => {
       const visible = sectionRegistry
         .filter((s) => s.shouldRender(node()))
         .map((s) => s.id);
       expect(visible).toContain("askAi");
+    });
+
+    it("askAi can be explicitly disabled", () => {
+      vi.stubEnv("VITE_WORKBENCH_ASK_AI", "0");
+      const visible = sectionRegistry
+        .filter((s) => s.shouldRender(node()))
+        .map((s) => s.id);
+      expect(visible).not.toContain("askAi");
     });
 
     it("operation renders only when editableSchema is non-empty", () => {

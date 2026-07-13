@@ -26,7 +26,7 @@
 // rail + panel + search palette work identically across them.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
@@ -137,6 +137,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     useState<PendingFocusTarget | null>(null);
   const [legacyFocusProbe, setLegacyFocusProbe] =
     useState<LegacyFocusProbe | null>(null);
+  const [focusIndexPollAttempts, setFocusIndexPollAttempts] = useState(0);
   const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
   const [pendingGenesisRun, setPendingGenesisRun] =
     useState<PendingRun | null>(null);
@@ -161,6 +162,28 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     () => Boolean(focusRunId && forest?.heads.some((h) => h.runId === focusRunId)),
     [forest, focusRunId],
   );
+
+  // A run can be terminal before the project forest scanner has written its
+  // head-set entry. Keep a focused deep link alive through that short window
+  // instead of making the user refresh the page manually.
+  useEffect(() => {
+    if (!focusRunId || !forest || focusRunIsKnownHead) {
+      if (focusIndexPollAttempts !== 0) setFocusIndexPollAttempts(0);
+      return undefined;
+    }
+    if (focusIndexPollAttempts >= 30) return undefined;
+    const timer = window.setTimeout(() => {
+      setFocusIndexPollAttempts((attempts) => attempts + 1);
+      void refetch();
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [
+    focusIndexPollAttempts,
+    focusRunId,
+    focusRunIsKnownHead,
+    forest,
+    refetch,
+  ]);
 
   // The run the workbench treats as "the" run when no explicit focus exists:
   // newest head by created_at (the project forest unions families in run-id
@@ -558,7 +581,7 @@ function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
     >
       <div
         role="toolbar"
-        aria-label="项目工具栏"
+        aria-label="Project toolbar"
         style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator, #2e2e30)" }}
       >
         <ProjectSwitcher projectRoot={projectRoot} />
@@ -627,7 +650,7 @@ function EmptyProjectCanvas({
     >
       <div
         role="toolbar"
-        aria-label="项目工具栏"
+        aria-label="Project toolbar"
         style={{
           display: "flex",
           alignItems: "center",
@@ -661,8 +684,8 @@ function EmptyProjectCanvas({
           >
             <p style={{ margin: "0 0 6px", fontSize: 15, color: "var(--label)" }}>
               {hasLegacyFamilies
-                ? `该项目的 ${legacyDisplayRunCount} 个 run 早于血缘索引，不能在图中显示`
-                : "这个项目还没有数据"}
+                ? `This project has ${legacyDisplayRunCount} run${legacyDisplayRunCount === 1 ? "" : "s"} from before lineage indexing; they cannot be shown in the graph.`
+                : "This project has no data yet."}
             </p>
             {hasLegacyFamilies && (
               <p
@@ -672,7 +695,7 @@ function EmptyProjectCanvas({
                   color: "var(--label-secondary)",
                 }}
               >
-                可通过 run 详情页（?tab=overview）查看旧结果。
+                Open the run details page (?tab=overview) to view legacy results.
               </p>
             )}
             <p
@@ -700,7 +723,7 @@ function EmptyProjectCanvas({
                 cursor: "pointer",
               }}
             >
-              ＋ 新链路
+              ＋ New analysis
             </button>
           </div>
         </div>
@@ -781,9 +804,14 @@ function WorkbenchShell({
 }) {
   const { model, selectedKey, select } = useLineage();
   const { state } = useWorkbench();
+  const location = useLocation();
   const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
+
+  useEffect(() => {
+    setSettingsOpen(false);
+  }, [location.pathname, location.search]);
 
   // Selected-node lookup with the V1.5.0 cross-run leak guard
   // (see V1.5.0 GraphWorkbench REV-3 #3). selectedKey may point at a
@@ -862,6 +890,7 @@ function WorkbenchShell({
       <WorkbenchTopbar
         projectRoot={projectRoot}
         onOpenSettings={() => setSettingsOpen(true)}
+        onViewChange={() => setSettingsOpen(false)}
         extraActions={
           onResumeGenesisDraft ? (
             <button
@@ -878,7 +907,7 @@ function WorkbenchShell({
                 fontSize: 12,
               }}
             >
-              继续新链路
+              Resume new analysis
             </button>
           ) : null
         }

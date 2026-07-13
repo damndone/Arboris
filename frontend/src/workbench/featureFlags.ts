@@ -14,5 +14,8 @@ export function isAskAIEnabled(): boolean {
     typeof process === "undefined"
       ? undefined
       : process.env.VITE_WORKBENCH_ASK_AI;
-  return isEnabled(viteValue ?? testValue);
+  const configuredValue = viteValue ?? testValue;
+  // Ask AI is a product surface, not an opt-in experiment. Keep an explicit
+  // false/0 switch for deployments that do not want to expose it.
+  return configuredValue === undefined ? true : isEnabled(configuredValue);
 }

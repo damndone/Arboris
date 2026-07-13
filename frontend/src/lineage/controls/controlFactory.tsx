@@ -93,14 +93,53 @@ function CheckboxListControl(
     onChange(control.key, next);
   };
   return (
-    <fieldset data-testid={testid} aria-label={control.label}>
+    <fieldset
+      data-testid={testid}
+      aria-label={control.label}
+      style={{
+        border: 0,
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: "6px 10px",
+        margin: 0,
+        maxHeight: 180,
+        minWidth: 0,
+        overflowY: "auto",
+        padding: 0,
+      }}
+    >
       {options.map((o) => (
-        <label key={o.value}>
+        <label
+          key={o.value}
+          title={o.label}
+          style={{
+            alignItems: "center",
+            color: "var(--label-secondary)",
+            display: "flex",
+            fontSize: 11,
+            fontWeight: 500,
+            gap: 6,
+            lineHeight: "18px",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
           <input
             type="checkbox"
             aria-label={o.label}
             checked={selected.includes(o.value)}
             onChange={() => toggle(o.value)}
+            style={{
+              accentColor: "var(--tint)",
+              flex: "0 0 auto",
+              height: 14,
+              margin: 0,
+              minHeight: 0,
+              padding: 0,
+              width: 14,
+            }}
           />
           {o.label}
         </label>

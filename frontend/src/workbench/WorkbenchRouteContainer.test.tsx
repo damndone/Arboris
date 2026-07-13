@@ -28,6 +28,14 @@ vi.mock("../capabilities/useCapabilities", () => ({
   }),
 }));
 
+vi.mock("../llm/LlmProviderManager", () => ({
+  LlmProviderManager: () => (
+    <div data-testid="llm-provider-manager">
+      <div data-testid="llm-provider-editor">Add provider</div>
+    </div>
+  ),
+}));
+
 // v1.6.9 B1-4 — wrap the REAL RunHistoryRail with a probe that records the
 // RailRefreshContext token it receives. All existing tests keep seeing the real
 // rail (same testids/rows); the index-wait test reads railTokenProbe to assert
@@ -310,6 +318,21 @@ function confirmOperationRerun() {
 }
 
 describe("WorkbenchRouteContainer", () => {
+  it("leaving settings through any view tab restores the selected workbench view", async () => {
+    mountAt("/?tab=lineage");
+    await screen.findByTestId("graph-workbench");
+
+    fireEvent.click(screen.getByTestId("workbench-topbar-settings"));
+    expect(screen.getByTestId("llm-provider-editor")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("view-tab-graph"));
+    expect(screen.queryByTestId("llm-provider-editor")).toBeNull();
+    expect(screen.getByTestId("workbench-main")).toHaveAttribute(
+      "data-view",
+      "graph",
+    );
+  });
+
   it("renders the topbar with two view tabs once data loads (Pipeline retired v1.6.7)", async () => {
     mountAt("/?tab=lineage");
     expect(await screen.findByTestId("workbench-topbar")).toBeInTheDocument();
@@ -807,7 +830,7 @@ describe("WorkbenchRouteContainer", () => {
       mountHome();
 
       expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
-      expect(screen.getByText("这个项目还没有数据")).toBeInTheDocument();
+      expect(screen.getByText("This project has no data yet.")).toBeInTheDocument();
       // The empty canvas replaces the shell entirely.
       expect(screen.queryByTestId("workbench-route")).toBeNull();
     });
@@ -890,9 +913,9 @@ describe("WorkbenchRouteContainer", () => {
 
       expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
       expect(
-        screen.getByText(/该项目的 2 个 run 早于血缘索引/),
+        screen.getByText(/This project has 2 runs from before lineage indexing/),
       ).toBeInTheDocument();
-      expect(screen.queryByText("这个项目还没有数据")).toBeNull();
+      expect(screen.queryByText("This project has no data yet.")).toBeNull();
     });
 
     it("zero-run projects with a genesis draft render the draft island on the canvas instead of the empty canvas", async () => {
@@ -962,6 +985,52 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("forest-head-run_child")).toHaveAttribute(
         "aria-pressed",
         "false",
+      );
+    });
+
+    it("polls the project forest until a just-completed focused run is indexed", async () => {
+      const initial = forestResponse();
+      initial.heads = [initial.heads[0]];
+      initial.nodes.hash_model = {
+        ...initial.nodes.hash_model,
+        runs: ["run_a"],
+      };
+      const indexed: HeadSetResponse = {
+        ...initial,
+        nodes: {
+          ...initial.nodes,
+          hash_model: {
+            ...initial.nodes.hash_model,
+            runs: ["run_a", "run_target"],
+          },
+        },
+        heads: [
+          ...initial.heads,
+          {
+            ...initial.heads[0],
+            run_id: "run_target",
+            created_at: "2026-06-27T00:02:00Z",
+          },
+        ],
+      };
+      vi.spyOn(api, "fetchProjectForest")
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValue(indexed);
+      vi.spyOn(api, "getRunGraphHeadSet").mockResolvedValue({
+        legacy: false,
+        heads: [],
+      } as never);
+      mountHome("run_target");
+
+      await waitFor(
+        () => {
+          expect(api.fetchProjectForest).toHaveBeenCalledTimes(2);
+          expect(screen.getByTestId("forest-head-run_target")).toHaveAttribute(
+            "aria-pressed",
+            "true",
+          );
+        },
+        { timeout: 3000 },
       );
     });
   });

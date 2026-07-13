@@ -129,6 +129,25 @@ function renderWithRerun(node: GraphViewNode, submitRerun = vi.fn().mockResolved
 }
 
 describe("OperationSection (editable)", () => {
+  it("explains that the current X list can be reduced before rerunning", () => {
+    const node = modelNode();
+    node.editableSchema = [
+      ...node.editableSchema!,
+      {
+        kind: "columns",
+        key: "x",
+        label: "Regressors (X)",
+        options: ["x1", "x2"],
+        value: ["x1", "x2"],
+      },
+    ];
+    renderWithRerun(node);
+
+    expect(screen.getByTestId("operation-x-hint")).toHaveTextContent(
+      "Uncheck a regressor to remove it from the next rerun",
+    );
+  });
+
   it("seeds controls from the backfilled editable_schema value", () => {
     renderWithRerun(modelNode());
     const select = screen.getByRole("combobox") as HTMLSelectElement;

@@ -88,7 +88,13 @@ def validate_manual_patch(
                 opt.get("value") if isinstance(opt, dict) else opt
                 for opt in field_schema["options"]
             ]
-            if change.new_value not in allowed:
+            if field_schema.get("kind") in {"columns", "multiselect"} and isinstance(
+                change.new_value, list
+            ):
+                valid = all(item in allowed for item in change.new_value)
+            else:
+                valid = change.new_value in allowed
+            if not valid:
                 raise ManualPatchValidationError("INVALID_FIELD_VALUE")
         overrides[change.field_id] = change.new_value
 

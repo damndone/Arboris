@@ -19,7 +19,13 @@ function errorMessage(error: unknown): string {
 }
 
 const shellStyle: React.CSSProperties = {
-  minHeight: "100vh",
+  flex: "1 1 0",
+  height: "100%",
+  maxHeight: "100%",
+  minHeight: 0,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  WebkitOverflowScrolling: "touch",
   width: "100%",
   boxSizing: "border-box",
   padding: "28px clamp(20px, 5vw, 72px)",

@@ -20,6 +20,11 @@ def _csv() -> bytes:
     return ("y,x\n" + rows + "\n").encode()
 
 
+def _csv_with_two_x() -> bytes:
+    rows = "\n".join(f"{1 + 2 * i},{i},{i * 3}" for i in range(35))
+    return ("y,x1,x2\n" + rows + "\n").encode()
+
+
 def _wait_terminal(project_root: Path, run_id: str, tries: int = 100) -> str:
     terminal = {"completed", "failed", "cancelled", "interrupted", "partial"}
     for _ in range(tries):
@@ -36,6 +41,18 @@ def _create_terminal_run(project_root: Path) -> str:
         data={"project_root": str(project_root), "mode": "auto",
               "model_type": "ols", "y": "y", "x": "x"},
         files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")},
+    )
+    run_id = resp.json()["run_id"]
+    _wait_terminal(project_root, run_id)
+    return run_id
+
+
+def _create_two_x_terminal_run(project_root: Path) -> str:
+    resp = client.post(
+        "/runs",
+        data={"project_root": str(project_root), "mode": "auto",
+              "model_type": "ols", "y": "y", "x": "x1,x2"},
+        files={"file": ("d.csv", io.BytesIO(_csv_with_two_x()), "text/csv")},
     )
     run_id = resp.json()["run_id"]
     _wait_terminal(project_root, run_id)
@@ -134,6 +151,24 @@ def test_rerun_creates_child_with_rerun_of(tmp_path: Path):
     assert inputs["override_hash"] is not None
     parent_inputs = json.loads((project.root / "runs" / parent / "run_inputs.json").read_text())
     assert inputs["upload"]["sha256"] == parent_inputs["upload"]["sha256"]
+
+
+def test_rerun_with_reduced_x_list_preserves_form_wire_format(tmp_path: Path):
+    project = create_project(tmp_path, "demo")
+    parent = _create_two_x_terminal_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+
+    resp = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={"from_node": node_id, "op_overrides": {"x": ["x1"]}},
+    )
+
+    assert resp.status_code == 200
+    child = resp.json()["run_id"]
+    inputs = json.loads((project.root / "runs" / child / "run_inputs.json").read_text())
+    assert inputs["form"]["x"] == "x1"
+    assert _wait_terminal(project.root, child) == "completed"
 
 
 def test_context_driven_rerun_uses_owner_run_not_url_run(tmp_path: Path):

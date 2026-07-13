@@ -97,6 +97,17 @@ async def _write_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
             handle.write(chunk)
 
 
+def encode_form_override(key: str, value: object) -> str:
+    """Encode an operation override using the run form's wire format.
+
+    Column selectors are submitted as comma-separated form fields, while other
+    list/dict overrides use JSON so the engine's typed parsers can consume them.
+    """
+    if key in {"x", "focal_x"} and isinstance(value, list):
+        return ",".join(str(item) for item in value)
+    return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
+
+
 def _submit_run(
     root: Path,
     *,

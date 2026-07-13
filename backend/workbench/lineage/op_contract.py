@@ -130,9 +130,12 @@ def validate_overrides(contract: OperationContract, op_overrides: dict) -> None:
             )
         spec = by_key[key]
         options = spec.get("options")
-        if options and value not in [
-            o if not isinstance(o, dict) else o.get("value") for o in options
-        ]:
+        allowed = [o if not isinstance(o, dict) else o.get("value") for o in options or []]
+        if options and spec.get("kind") in {"columns", "multiselect"} and isinstance(value, list):
+            valid = all(item in allowed for item in value)
+        else:
+            valid = value in allowed if options else True
+        if not valid:
             raise OpOverrideError(
                 f"Value {value!r} not allowed for {key!r}; options={options}"
             )

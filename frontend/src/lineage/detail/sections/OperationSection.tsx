@@ -153,6 +153,21 @@ function EditableOperation({
         >
           Rerun source with changes
         </div>
+        {schema.some((control) => control.key === "x") && (
+          <div
+            data-testid="operation-x-hint"
+            style={{ color: "var(--label-secondary)", fontSize: 11 }}
+          >
+            Uncheck a regressor to remove it from the next rerun. To add a new
+            column, return to the analysis setup or draft.
+          </div>
+        )}
+        <div
+          data-testid="operation-rerun-explanation"
+          style={{ color: "var(--label-tertiary)", fontSize: 11 }}
+        >
+          The current run stays unchanged. Confirming creates a new child run.
+        </div>
         {schema.map((control) => (
           <label
             key={control.key}

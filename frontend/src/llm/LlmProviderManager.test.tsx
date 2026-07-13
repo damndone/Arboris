@@ -73,6 +73,12 @@ describe("LlmProviderManager", () => {
 
     const manager = await screen.findByTestId("llm-provider-manager");
     expect(manager).toHaveAttribute("role", "dialog");
+    expect(manager).toHaveStyle({
+      height: "100%",
+      flex: "1 1 0",
+      maxHeight: "100%",
+      overflowY: "auto",
+    });
     expect(manager).toHaveTextContent("LLM Providers");
     expect(screen.getByTestId("llm-provider-list")).toBeInTheDocument();
     expect(screen.getByTestId("llm-provider-active-deepseek")).toHaveTextContent("Active");

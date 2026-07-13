@@ -41,6 +41,20 @@ describe("controlFactory", () => {
     expect(onChange).toHaveBeenCalledWith("x", ["age", "income"]);
   });
 
+  it("renders a compact scrollable checkbox grid", () => {
+    const control: EditableControl = {
+      kind: "columns", key: "x", label: "Covariates",
+      options: ["age", "income", "region", "sales"], value: ["age"],
+    };
+    render(<>{renderControl(control, vi.fn())}</>);
+    const list = screen.getByTestId("control-columns");
+    expect(list).toHaveStyle("display: grid; max-height: 180px; overflow-y: auto;");
+    expect(list.style.gridTemplateColumns).toContain("repeat(2");
+    expect(screen.getByLabelText("income")).toHaveStyle(
+      "width: 14px; height: 14px; min-height: 0;",
+    );
+  });
+
   it("renders every kind with an identifiable control element", () => {
     for (const kind of CONTROL_KINDS) {
       const control = { kind, key: `k_${kind}`, label: kind } as EditableControl;

@@ -26,7 +26,7 @@ from ..lineage.rerun_provenance import run_rerun_from_from_context
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..repository.run_repository import _resolve_run_root
-from .run_service import _submit_run
+from .run_service import _submit_run, encode_form_override
 
 
 def execute_genesis_draft(
@@ -290,22 +290,10 @@ def execute_rerun_child_draft(
             if (model.get("source_params") or {}).get(key) != value
         }
 
-        def _encode_override(value: object) -> str:
-            return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
-
         merged_form = {
             **inputs["form"],
-            **{key: _encode_override(value) for key, value in op_overrides.items()},
+            **{key: encode_form_override(key, value) for key, value in op_overrides.items()},
         }
-        # v1.6.5: focal_x is a run-form field carrying a comma-joined column
-        # list, NOT a JSON-encoded override. _encode_override would emit
-        # ["x"], which the dispatch's comma-split parser cannot read — coerce
-        # it back to the form wire format so the role layer sees the picks.
-        if "focal_x" in op_overrides:
-            _focal = op_overrides["focal_x"]
-            merged_form["focal_x"] = (
-                ",".join(_focal) if isinstance(_focal, list) else str(_focal)
-            )
         run_level_rerun_from = run_rerun_from_from_context(
             request_id=f"draft:{draft_id}",
             owner_run_id=source["source_run_id"],

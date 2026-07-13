@@ -24,6 +24,7 @@ test("with exactly one imputation method renders a checkbox", () => {
   const onChange = vi.fn();
   render(<ImputationControls capabilities={caps_one} value={null} onChange={onChange} />);
   expect(screen.getByRole("checkbox", { name: /mice/i })).toBeInTheDocument();
+  expect(screen.getByText(/MICE estimates plausible numeric values/i)).toBeInTheDocument();
 });
 
 test("with two+ methods renders a select", () => {

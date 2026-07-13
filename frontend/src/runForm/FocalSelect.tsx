@@ -36,11 +36,11 @@ export function FocalSelect({ xColumns, focal, onChange, family }: FocalSelectPr
   };
 
   return (
-    <fieldset
+    <details
       data-testid="focal-select"
       style={{ border: 0, padding: 0, margin: 0 }}
     >
-      <legend
+      <summary
         style={{
           fontSize: 11,
           color: "var(--label-secondary)",
@@ -48,8 +48,12 @@ export function FocalSelect({ xColumns, focal, onChange, family }: FocalSelectPr
           padding: 0,
         }}
       >
-        Focal explanatory variable(s) — optional
-      </legend>
+        Optional: choose focal explanatory variable(s)
+      </summary>
+      <p className="field-hint" style={{ margin: "4px 0 6px" }}>
+        Focal variables are the coefficients you care about most; leave this
+        closed when all regressors have the same status.
+      </p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {xColumns.map((col) => (
           <label
@@ -66,6 +70,6 @@ export function FocalSelect({ xColumns, focal, onChange, family }: FocalSelectPr
           </label>
         ))}
       </div>
-    </fieldset>
+    </details>
   );
 }
