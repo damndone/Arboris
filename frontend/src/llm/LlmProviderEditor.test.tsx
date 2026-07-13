@@ -66,6 +66,12 @@ describe("LlmProviderEditor", () => {
     render(<LlmProviderEditor provider={provider} onSaved={vi.fn()} onBack={vi.fn()} />);
 
     expect(screen.getByTestId("llm-provider-editor")).toHaveAttribute("role", "dialog");
+    expect(screen.getByTestId("llm-provider-editor")).toHaveStyle({
+      height: "100%",
+      flex: "1 1 0",
+      maxHeight: "100%",
+      overflowY: "auto",
+    });
     expect(screen.getByRole("button", { name: /back/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();

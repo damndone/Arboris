@@ -229,6 +229,26 @@ def test_validate_skips_unchanged_inherited_param_outside_options() -> None:
     assert result["ok"] is True, result["checks"]
 
 
+def test_validate_allows_omitting_an_unchanged_inherited_param() -> None:
+    """A full draft patch may omit a source control to keep its inherited value."""
+    draft = _draft()
+    schema = [
+        {"key": "x", "kind": "columns", "label": "X"},
+        {"key": "covariance", "kind": "select", "label": "Covariance"},
+    ]
+    draft["graph"]["nodes"][1]["editable_schema"] = schema
+    draft["graph"]["nodes"][1]["editable_schema_hash"] = schema_hash(schema)
+    draft["graph"]["nodes"][1]["source_params"] = {
+        "x": ["x1"],
+        "covariance": "robust",
+    }
+    draft["graph"]["nodes"][1]["params"] = {"covariance": "robust"}
+
+    result = validate_draft_for_execution(draft, execution_mode="rerun_child")
+
+    assert result["ok"] is True, result["checks"]
+
+
 def test_validate_allows_changing_inherited_param_to_valid_option() -> None:
     """Changing an inherited out-of-options value to a valid in-options value
     passes (the skip is not required, normal validation accepts it)."""

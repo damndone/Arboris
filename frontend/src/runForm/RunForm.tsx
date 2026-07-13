@@ -531,6 +531,12 @@ export function RunForm(props: RunFormProps) {
               Transpose (swap rows/columns)
             </label>
           )}
+          {file && (
+            <span className="field-hint">
+              Use this when rows are variables and columns are observations;
+              leave it off for the usual one-row-per-observation layout.
+            </span>
+          )}
           <label>
             Dependent variable (y)
             <input

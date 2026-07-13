@@ -28,3 +28,12 @@ def test_iv_params_declare_roles_structurally():
     assert {"model_type", "iv_endog", "iv_instruments", "covariance"} <= keys
     endog = next(p for p in iv["params"] if p["key"] == "iv_endog")
     assert endog["required"] is True and endog["role"] == "endog"
+
+
+def test_model_params_expose_regressors_for_rerun_editing():
+    caps = build_capabilities()
+    ols = next(e for e in caps["model_types"] if e["key"] == "ols")
+    regressors = next(p for p in ols["params"] if p["key"] == "x")
+    assert regressors["kind"] == "columns"
+    assert regressors["required"] is True
+    assert regressors["role"] == "x"

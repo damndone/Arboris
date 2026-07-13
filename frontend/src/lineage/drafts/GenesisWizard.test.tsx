@@ -172,6 +172,8 @@ describe("GenesisWizard", () => {
     expect(onDraftUpdated).toHaveBeenCalledWith(draftResponse("h1"));
     expect(screen.getByLabelText("dependent variable")).toHaveValue("y");
     expect(screen.getByLabelText("independent variables")).toHaveValue("x");
+    expect(screen.getByText(/Treat rows as variables and columns as observations/i)).toBeInTheDocument();
+    expect(screen.getByText(/Use the column cards below to add or remove x variables/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("genesis-save-table"));
     await waitFor(() =>

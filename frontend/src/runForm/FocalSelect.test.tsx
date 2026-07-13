@@ -5,6 +5,7 @@ import { FocalSelect } from "./FocalSelect";
 it("lets the user mark a subset of x as focal", () => {
   const onChange = vi.fn();
   render(<FocalSelect xColumns={["education", "age"]} focal={[]} onChange={onChange} />);
+  expect(screen.getByText(/Optional: choose focal explanatory variable/i)).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText("education"));
   expect(onChange).toHaveBeenCalledWith(["education"]);
 });

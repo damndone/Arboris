@@ -15,7 +15,16 @@ def test_resolve_model_node_by_effective_model_type():
     assert contract is not None
     assert contract.op_type == "iv_2sls"
     assert contract.schema_id == "iv_2sls@v1"
-    assert {p["key"] for p in contract.editable_schema} >= {"iv_endog", "covariance"}
+    assert {p["key"] for p in contract.editable_schema} >= {"iv_endog", "covariance", "x"}
+
+
+def test_ols_contract_exposes_regressors():
+    contract = resolve_operation_contract(
+        stage="model", manifest={"model_routing": {"effective_model_type": "ols"}}
+    )
+    assert contract is not None
+    regressors = next(p for p in contract.editable_schema if p["key"] == "x")
+    assert regressors["kind"] == "columns"
 
 
 def test_resolve_uses_requested_model_type_when_effective_is_engine_id():

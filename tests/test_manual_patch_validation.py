@@ -61,6 +61,30 @@ def test_valid_patch_returns_overrides():
     assert result == {"covariance": "robust"}
 
 
+def test_columns_patch_accepts_a_reduced_regressor_list():
+    schema = _schema() + [
+        {
+            "key": "x",
+            "label": "Regressors (X)",
+            "kind": "columns",
+            "options": ["x1", "x2"],
+            "value": ["x1", "x2"],
+        }
+    ]
+    patch = _patch(
+        changes=[
+            {"field_id": "x", "old_value": ["x1", "x2"], "new_value": ["x1"]}
+        ]
+    )
+    result = validate_manual_patch(
+        patch=patch,
+        current_values={"x": ["x1", "x2"]},
+        editable_schema=schema,
+        editable_schema_version="schema:v1",
+    )
+    assert result == {"x": ["x1"]}
+
+
 def test_empty_patch_rejected():
     with pytest.raises(ManualPatchValidationError, match="EMPTY_PATCH"):
         validate_manual_patch(

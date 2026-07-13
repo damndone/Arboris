@@ -78,13 +78,20 @@ describe("AskAISection", () => {
     vi.unstubAllEnvs();
   });
 
-  it("is hidden by default when the Ask AI feature flag is off", () => {
+  it("is visible by default when no opt-out flag is configured", () => {
     vi.unstubAllEnvs();
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);
 
+    expect(screen.getByTestId("ask-ai-section")).toBeInTheDocument();
+  });
+
+  it("can be explicitly disabled for deployments without Ask AI", () => {
+    vi.stubEnv("VITE_WORKBENCH_ASK_AI", "0");
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+
     expect(screen.queryByTestId("ask-ai-section")).not.toBeInTheDocument();
-    expect(vi.mocked(askAiForNode)).not.toHaveBeenCalled();
   });
 
   it("renders the context summary beside the preview when context resolves", async () => {

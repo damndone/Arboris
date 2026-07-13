@@ -132,6 +132,7 @@ _COVARIANCE_DEFAULT = next(o["key"] for o in COVARIANCE_UI if o.get("default"))
 # rules (those stay in the pipeline). Only fields the backend genuinely consumes.
 _COMMON_MODEL_PARAMS = [
     {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
+    {"key": "x", "kind": "columns", "label": "Regressors (X)", "required": True, "role": "x"},
     {"key": "covariance", "kind": "select", "label": "Covariance", "required": False,
      "options": [o["key"] for o in COVARIANCE_UI], "value": _COVARIANCE_DEFAULT},
 ]

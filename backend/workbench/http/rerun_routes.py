@@ -21,7 +21,7 @@ from ..lineage.rerun_provenance import pending_produced_lineage, run_rerun_from_
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
 from ..repository.run_repository import _read_manifest, _resolve_project_runs_dir, _resolve_run_root
-from ..services.run_service import _submit_run
+from ..services.run_service import _submit_run, encode_form_override
 from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
 
 router = APIRouter()
@@ -169,14 +169,9 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             status_code=422, detail=f"Parent upload unusable: {exc}"
         ) from exc
 
-    # Form params are strings; JSON-encode list/dict overrides (e.g. iv_endog ["x"])
-    # so the pipeline's JSON-array parsers accept them. override_hash uses raw values.
-    def _encode_override(value: object) -> str:
-        return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
-
     merged_form = {
         **inputs["form"],
-        **{k: _encode_override(v) for k, v in body.op_overrides.items()},
+        **{k: encode_form_override(k, v) for k, v in body.op_overrides.items()},
     }
 
     manual_patch_result: dict[str, Any] | None = None
@@ -198,7 +193,7 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         merged_form = {
             **inputs["form"],
-            **{k: _encode_override(v) for k, v in patch_overrides.items()},
+            **{k: encode_form_override(k, v) for k, v in patch_overrides.items()},
         }
         effective_op_overrides = patch_overrides
         manual_patch_result = _manual_patch_idempotency_result(

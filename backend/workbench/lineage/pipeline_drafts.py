@@ -673,6 +673,10 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
         )
     for key in allowed:
         if key not in model.get("params", {}):
+            if key in source_params:
+                # A draft patch may omit an inherited source value; omission
+                # means keep the source run's parameter unchanged.
+                continue
             checks.append(
                 check(
                     "MISSING_EDITABLE_PARAM",

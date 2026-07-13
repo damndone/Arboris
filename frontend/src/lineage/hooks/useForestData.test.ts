@@ -3,7 +3,7 @@
 // v1.6.8 T11 — project-keyed forest hook: fetches GET /graph?project_root=
 // (NOT the per-run headset endpoint) and adapts the body; a zero-run project
 // yields an empty (non-legacy) ForestViewModel without crashing.
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useForestData } from "./useForestData";
 
@@ -73,6 +73,27 @@ describe("useForestData (project-keyed, T11)", () => {
       familyCount: 0,
       familyRunCount: 0,
     });
+  });
+
+  it("keeps the previous forest mounted during a background refetch", async () => {
+    let resolveSecond!: (response: Response) => void;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(emptyForestBody()))
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => { resolveSecond = resolve; }),
+      );
+
+    const { result } = renderHook(() => useForestData("/tmp/p1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const previousForest = result.current.forest;
+
+    act(() => result.current.refetch());
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.forest).toBe(previousForest);
+
+    resolveSecond(jsonResponse(emptyForestBody()));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("preserves familyCount so all-legacy projects are not mistaken for zero-run projects", async () => {

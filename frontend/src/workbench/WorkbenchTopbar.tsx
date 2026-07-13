@@ -34,9 +34,10 @@ interface TabSpec {
 // v1.6.7 — Pipeline tab entry retired (the Pipeline view merges into the main
 // lineage graph via draft-in-graph). PipelineView + the "pipeline" ViewMode and
 // WorkbenchMain branch are kept as a URL deep-link fallback; only the clickable
-// tab is removed. Exported for testing.
+// tab is removed. Project Home is owned by the outer Home/Workbench
+// navigation, so it is intentionally not duplicated in this inner switcher.
+// Exported for testing.
 export const VIEW_TABS: TabSpec[] = [
-  { id: "home", label: "Home" },
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
   { id: "report", label: "Report" },
@@ -172,7 +173,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
                   <span
                     style={{ color: "var(--label-tertiary)", fontSize: 12 }}
                   >
-                    当前
+                    Current
                   </span>
                 )}
               </button>
@@ -201,7 +202,7 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
               fontSize: 13.5,
             }}
           >
-            ＋ 新建项目…
+            ＋ New project…
           </button>
         </div>
       )}
@@ -221,10 +222,12 @@ export function WorkbenchTopbar({
   projectRoot,
   extraActions = null,
   onOpenSettings,
+  onViewChange,
 }: {
   projectRoot: string;
   extraActions?: ReactNode;
   onOpenSettings?: () => void;
+  onViewChange?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
   const { model } = useLineage();
@@ -285,7 +288,10 @@ export function WorkbenchTopbar({
           <ViewTabButton
             key={tab.id}
             active={state.view === tab.id}
-            onClick={() => dispatch.setView(tab.id)}
+            onClick={() => {
+              onViewChange?.();
+              dispatch.setView(tab.id);
+            }}
             testId={`view-tab-${tab.id}`}
           >
             {tab.label}

@@ -21,7 +21,13 @@ type FieldErrors = Partial<Record<"id" | "name" | "baseUrl" | "model", string>>;
 const providerIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const shellStyle: CSSProperties = {
-  minHeight: "100vh",
+  flex: "1 1 0",
+  height: "100%",
+  maxHeight: "100%",
+  minHeight: 0,
+  overflowY: "auto",
+  overscrollBehavior: "contain",
+  WebkitOverflowScrolling: "touch",
   width: "100%",
   boxSizing: "border-box",
   padding: "28px clamp(20px, 5vw, 72px)",

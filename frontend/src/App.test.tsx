@@ -1321,7 +1321,24 @@ test("/p/:slug/graph on a zero-run project shows the empty canvas with the genes
     expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
   expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
-  expect(screen.getByText("这个项目还没有数据")).toBeInTheDocument();
+  expect(screen.getByText("This project has no data yet.")).toBeInTheDocument();
+});
+
+test("project Home activates the Home tab instead of Workbench", async () => {
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/p1")}/graph?view=home`);
+
+  expect(screen.getByRole("tab", { name: "Home" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("tab", { name: "Workbench" })).toHaveAttribute(
+    "aria-selected",
+    "false",
+  );
+  expect(document.querySelector("main.workbench-shell")).toHaveClass(
+    "workbench-shell--lineage",
+  );
 });
 
 import { validatePanelPrediction } from "./App";

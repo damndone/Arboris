@@ -622,6 +622,10 @@ export function GenesisWizard({
               onChange={(event) => setTranspose(event.target.checked)}
             />
           </label>
+          <p className="ios-hint" style={{ marginTop: -4 }}>
+            Treat rows as variables and columns as observations. Use this when
+            the file is stored sideways; leave it off for the usual one-row-per-observation layout.
+          </p>
           <button
             type="button"
             data-testid="genesis-save-table"
@@ -748,6 +752,9 @@ export function GenesisWizard({
               placeholder="x1, x2"
             />
           </label>
+          <p className="ios-hint" style={{ marginTop: -4 }}>
+            Use the column cards below to add or remove x variables; the text field updates with your selection.
+          </p>
           <FocalSelect
             xColumns={xColumns}
             focal={focal}

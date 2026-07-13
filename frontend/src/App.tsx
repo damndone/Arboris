@@ -337,13 +337,15 @@ function AppShell() {
     [projectRoot, setProjectRoot, setError, activity]
   );
 
+  const isProjectGraphRoute = /^\/p\/[^/]+\/graph\/?$/.test(location.pathname);
   const isLauncherActive = location.pathname === "/";
-  const isWorkbenchActive = /^\/p\/[^/]+\/graph\/?$/.test(location.pathname);
-  // V1.5.0.1 HF2 scoped the dark shell to /runs/:id?tab=lineage so the
-  // light Overview tab stayed readable. v1.6.8: /runs/:id is now a
-  // redirect and the workbench home is /p/:slug/graph — the dark canvas
-  // scope moves there. Launcher (/) and /submit remain light.
-  const isLineageDarkScope = isWorkbenchActive;
+  const isProjectHomeActive =
+    isLauncherActive || (isProjectGraphRoute && searchParams.get("view") === "home");
+  const isWorkbenchActive = isProjectGraphRoute && !isProjectHomeActive;
+  // Every project graph view, including project Home, owns the full-height
+  // Workbench canvas. The outer Home/Workbench selection changes navigation
+  // state, not the layout contract of the project route.
+  const isLineageDarkScope = isProjectGraphRoute;
 
   return (
     <main
@@ -370,9 +372,9 @@ function AppShell() {
         <button
           type="button"
           role="tab"
-          aria-selected={isLauncherActive}
+          aria-selected={isProjectHomeActive}
           onClick={() => {
-            if (isWorkbenchActive && projectRoot) {
+            if (isProjectGraphRoute && projectRoot) {
               navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
             } else {
               navigate("/");

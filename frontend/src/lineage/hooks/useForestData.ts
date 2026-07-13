@@ -9,7 +9,7 @@
 //
 // Mirrors useGraphData's load/error/refetch contract.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchProjectForest } from "../../api";
 import { adaptHeadSet } from "../api/graphAdapter";
 import type { ForestViewModel } from "../api/graphViewTypes";
@@ -27,12 +27,22 @@ export function useForestData(projectRoot: string): UseForestDataResult {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<GraphError | null>(null);
   const [tick, setTick] = useState<number>(0);
+  const loadedProjectRootRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const projectChanged = loadedProjectRootRef.current !== projectRoot;
+    loadedProjectRootRef.current = projectRoot;
+    // A refresh after a run is indexed must keep the last known forest mounted.
+    // Clearing it causes the central canvas to disappear until the request
+    // completes, which is especially visible while the run rail is updating.
+    if (projectChanged) {
+      setLoading(true);
+      setForest(null);
+    } else {
+      setLoading(false);
+    }
     setError(null);
-    setForest(null);
 
     fetchProjectForest(projectRoot)
       .then((raw) => adaptHeadSet(raw))

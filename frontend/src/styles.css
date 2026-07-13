@@ -39,7 +39,7 @@ body {
 }
 
 button,
-input,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 select {
   font: inherit;
 }
@@ -243,13 +243,13 @@ select {
   width: 100%;
 }
 
-input[aria-invalid="true"],
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"])[aria-invalid="true"],
 select[aria-invalid="true"] {
   background: var(--field-invalid-bg);
   border-color: var(--red);
 }
 
-input:focus,
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
 select:focus,
 button:focus-visible {
   outline: 2px solid var(--focus-ring);
