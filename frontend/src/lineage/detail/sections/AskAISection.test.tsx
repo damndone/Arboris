@@ -5,7 +5,7 @@ import { ForestContext } from "../../../workbench/ForestContext";
 import { makeOwnerResolutionSeedFixture } from "../../api/nodeOperationContext";
 import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
 import type { AskAIResponse } from "./askAiClient";
-import { askAiForNode } from "./askAiClient";
+import { askAiForNode, fetchLlmConfig } from "./askAiClient";
 import { AskAISection } from "./AskAISection";
 
 vi.mock("./askAiClient", () => ({
@@ -15,6 +15,8 @@ vi.mock("./askAiClient", () => ({
     base_url: "https://llm.example.com",
     model: "deepseek-v4-flash",
     key_present: true,
+    context_window_tokens: 1_000_000,
+    supports_1m: true,
   }),
 }));
 
@@ -69,6 +71,7 @@ describe("AskAISection", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_WORKBENCH_ASK_AI", "1");
     vi.mocked(askAiForNode).mockReset();
+    vi.mocked(fetchLlmConfig).mockClear();
   });
 
   afterEach(() => {
@@ -84,7 +87,7 @@ describe("AskAISection", () => {
     expect(vi.mocked(askAiForNode)).not.toHaveBeenCalled();
   });
 
-  it("renders an enabled ask button and context preview JSON when context resolves", () => {
+  it("renders the context summary beside the preview when context resolves", async () => {
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);
 
@@ -96,6 +99,15 @@ describe("AskAISection", () => {
     expect(packet.packet_version).toBe("ask-ai-context/v1");
     expect(packet.packet_scope.scope_type).toBe("selected_node");
     expect(packet.context_visibility_notice.full_datasets_included).toBe(false);
+
+    const summary = screen.getByTestId("llm-context-summary");
+    expect(summary).not.toHaveAttribute("open");
+    expect(summary).toHaveTextContent("Packet version: ask-ai-context/v1");
+    expect(summary).toHaveTextContent("Preview budget: 8,000 characters");
+    await waitFor(() => {
+      expect(summary).toHaveTextContent("Model context capacity: 1,000,000 tokens");
+      expect(summary).toHaveTextContent("Supports 1M: Yes");
+    });
   });
 
   it("ignores stale responses after context switches to resolver failure", async () => {
@@ -176,22 +188,32 @@ describe("AskAISection", () => {
     expect(screen.queryByTestId("ask-ai-executable-action")).not.toBeInTheDocument();
   });
 
-  it("shows resolver failure and omits packet preview when context cannot resolve", () => {
+  it("shows resolver failure and omits packet preview when context cannot resolve", async () => {
     renderAskAISection("run_not_owner");
 
     expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
       "ambiguous_owner_run",
     );
     expect(screen.queryByTestId("ask-ai-context-preview")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
   });
 
-  it("does not call Ask AI when resolver fails", () => {
+  it("does not call Ask AI when resolver fails", async () => {
     renderAskAISection("run_not_owner");
 
     expect(screen.getByTestId("resolver-failure-state")).toHaveTextContent(
       "ambiguous_owner_run",
     );
     expect(vi.mocked(askAiForNode)).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
   });
 
   it("shows service errors as text and keeps the context preview visible", async () => {
@@ -235,5 +257,20 @@ describe("AskAISection", () => {
     });
     // read-only surface: no input to change the key, key never displayed
     expect(screen.getByTestId("llm-provider-badge").textContent).not.toContain("sk-");
+  });
+
+  it("fetches LLM config once when packet visibility rerenders", async () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const { rerenderWithActiveRunId } = renderAskAISection(seed.activeHeadRunId);
+
+    rerenderWithActiveRunId("run_not_owner");
+    rerenderWithActiveRunId(seed.activeHeadRunId);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("llm-provider-badge")).toHaveTextContent(
+        "deepseek-v4-flash",
+      );
+    });
+    expect(vi.mocked(fetchLlmConfig)).toHaveBeenCalledTimes(1);
   });
 });

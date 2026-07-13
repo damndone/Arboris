@@ -1,6 +1,7 @@
 // frontend/src/lineage/detail/sections/AskAISection.tsx
 //
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { LlmContextSummary } from "../../../llm/LlmContextSummary";
 import { isAskAIEnabled } from "../../../workbench/featureFlags";
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import {
@@ -21,10 +22,26 @@ const DEFAULT_QUESTION = "Explain this node and its risks.";
 export function AskAISection({ node }: { node: GraphViewNode }) {
   const askAIEnabled = isAskAIEnabled();
   const resolvedContext = useResolvedNodeOperationContext();
-  const packet =
-    askAIEnabled && resolvedContext?.ok === true
-      ? buildAskAIContextPacket(resolvedContext.context)
-      : null;
+  const packet = useMemo(
+    () =>
+      askAIEnabled && resolvedContext?.ok === true
+        ? buildAskAIContextPacket(resolvedContext.context)
+        : null,
+    [
+      askAIEnabled,
+      resolvedContext?.ok,
+      resolvedContext?.ok === true
+        ? resolvedContext.context.context_fingerprint
+        : null,
+      resolvedContext?.ok === true
+        ? resolvedContext.context.selection.forest_node_key
+        : null,
+    ],
+  );
+  const packetPreview = useMemo(
+    () => (packet ? JSON.stringify(packet, null, 2) : null),
+    [packet],
+  );
   const contextIdentity =
     packet === null
       ? null
@@ -36,6 +53,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
   // v1.6.12 (V6): per-node Q&A history — regenerating no longer erases the
   // previous answer; every exchange lands in the typed AI activity log.
   const projectRoot = useProjectRootOptional();
@@ -139,7 +157,9 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
         }}
       >
         <span>Ask AI</span>
-        <LlmProviderBadge />
+        <LlmProviderBadge
+          onConfig={packet ? setLlmConfig : undefined}
+        />
       </div>
       <div
         style={{
@@ -162,21 +182,28 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
               stage: <code>{node.stage}</code>) as its scope.
             </span>
             {packet && (
-              <details>
-                <summary>Context preview</summary>
-                <pre
-                  data-testid="ask-ai-context-preview"
-                  style={{
-                    margin: "8px 0 0",
-                    maxHeight: 280,
-                    overflow: "auto",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {JSON.stringify(packet, null, 2)}
-                </pre>
-              </details>
+              <>
+                <LlmContextSummary
+                  packet={packet}
+                  contextWindowTokens={llmConfig?.context_window_tokens}
+                  supports1m={llmConfig?.supports_1m}
+                />
+                <details>
+                  <summary>Context preview</summary>
+                  <pre
+                    data-testid="ask-ai-context-preview"
+                    style={{
+                      margin: "8px 0 0",
+                      maxHeight: 280,
+                      overflow: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {packetPreview}
+                  </pre>
+                </details>
+              </>
             )}
           </>
         )}
@@ -302,13 +329,27 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
 
 /** v1.6.12 T5 (A4) — read-only LLM provider badge: which model answers, or a
  *  pointer to the env file when unconfigured. Key changes stay outside the UI. */
-function LlmProviderBadge() {
+function LlmProviderBadge({
+  onConfig,
+}: {
+  onConfig?: (config: LlmConfigInfo) => void;
+}) {
   const [config, setConfig] = useState<LlmConfigInfo | null>(null);
+  const configRef = useRef<LlmConfigInfo | null>(null);
+  const onConfigRef = useRef(onConfig);
+  useEffect(() => {
+    onConfigRef.current = onConfig;
+    if (onConfig && configRef.current) onConfig(configRef.current);
+  }, [onConfig]);
   useEffect(() => {
     let cancelled = false;
     fetchLlmConfig()
       .then((info) => {
-        if (!cancelled) setConfig(info);
+        if (!cancelled) {
+          configRef.current = info;
+          setConfig(info);
+          onConfigRef.current?.(info);
+        }
       })
       .catch(() => {
         /* endpoint unreachable — badge simply stays hidden */
