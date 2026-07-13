@@ -5,10 +5,12 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 
 import App from "../App";
 import { listRecents, touchRecent } from "./recents";
+import { RecentProjectsPanel } from "./RecentProjectsPanel";
+import { rootToSlug } from "../workbench/projectSlug";
 
 type FetchInit = { status?: number; ok?: boolean };
 
@@ -39,6 +41,29 @@ function renderAt(path = "/") {
   );
 }
 
+function RecentPanelHarness() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <>
+      <RecentProjectsPanel
+        onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
+      />
+      {location.pathname.startsWith("/p/") && (
+        <div data-testid="project-graph-route" />
+      )}
+    </>
+  );
+}
+
+function renderPanel() {
+  return render(
+    <MemoryRouter initialEntries={["/"]}>
+      <RecentPanelHarness />
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
   try {
@@ -59,7 +84,7 @@ afterEach(() => {
 
 describe("LauncherRoute", () => {
   // v1.6.12 (V10): bare `/` jumps straight into the last project; `?home=1`
-  // is the explicit way back to the launcher (the Home tab sends it).
+  // aliases the Workbench Home view for that same project.
   it("V10: bare / with a recent redirects into its graph home", async () => {
     touchRecent("/tmp/alpha");
     installFetchRouter((url) => {
@@ -76,10 +101,20 @@ describe("LauncherRoute", () => {
     expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
   });
 
+  it("V10: ?home=1 aliases the latest project Workbench Home", async () => {
+    touchRecent("/tmp/alpha");
+    installFetchRouter((url) => {
+      if (url.includes("/runs")) return jsonResponse({ runs: [] });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    renderAt("/?home=1");
+    expect(await screen.findByTestId("project-graph-route")).toBeInTheDocument();
+  });
+
   it("renders recent projects as cards (name + full root)", () => {
     touchRecent("/Users/me/项目规划/示例");
     touchRecent("/tmp/alpha");
-    renderAt("/?home=1");
+    renderPanel();
 
     // Most-recent first; project name = last path segment, full root visible.
     expect(screen.getByText("alpha")).toBeInTheDocument();
@@ -94,7 +129,7 @@ describe("LauncherRoute", () => {
       if (url.includes("/runs")) return jsonResponse({ runs: [] });
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/?home=1");
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /alpha/ }));
 
@@ -111,7 +146,7 @@ describe("LauncherRoute", () => {
       if (url.includes("/runs")) return jsonResponse({ runs: [] });
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/?home=1");
+    renderAt("/");
 
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -136,7 +171,7 @@ describe("LauncherRoute", () => {
   });
 
   it("create modal validation: empty parent or bad name disables Create", () => {
-    renderAt("/?home=1");
+    renderAt("/");
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
     // Empty parent → disabled.
@@ -163,7 +198,7 @@ describe("LauncherRoute", () => {
   });
 
   it("create modal keeps Browse as a guarded helper without synthesizing fake absolute paths", async () => {
-    renderAt("/?home=1");
+    renderAt("/");
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
 
     expect(screen.getByRole("button", { name: "Browse" })).toBeInTheDocument();
@@ -195,7 +230,7 @@ describe("LauncherRoute", () => {
       }
       throw new Error(`unexpected fetch ${url}`);
     });
-    renderAt("/?home=1");
+    renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: /project/ }));
 
@@ -211,7 +246,7 @@ describe("LauncherRoute", () => {
 
   it("corrupt localStorage → empty state with a hint", () => {
     localStorage.setItem("workbench.recentProjects.v1", "{not json");
-    renderAt("/?home=1");
+    renderAt("/");
     expect(screen.getByText("最近项目将显示在这里。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
   });
@@ -227,7 +262,7 @@ describe("LauncherRoute", () => {
     (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       () => probe
     );
-    renderAt("/?home=1");
+    renderPanel();
 
     const card = screen.getByRole("button", { name: /alpha/ });
     fireEvent.click(card);
@@ -249,7 +284,7 @@ describe("LauncherRoute", () => {
       }
       return jsonResponse({});
     });
-    renderAt("/?home=1");
+    renderAt("/");
 
     // First open: type a parent, trigger a failing create → inline error.
     fireEvent.click(screen.getByRole("button", { name: "新建项目" }));

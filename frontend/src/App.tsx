@@ -371,9 +371,13 @@ function AppShell() {
           type="button"
           role="tab"
           aria-selected={isLauncherActive}
-          // v1.6.12 (V10): bare `/` now redirects into the last project, so
-          // the Home tab declares explicit intent via ?home=1.
-          onClick={() => navigate("/?home=1")}
+          onClick={() => {
+            if (isWorkbenchActive && projectRoot) {
+              navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
+            } else {
+              navigate("/");
+            }
+          }}
         >
           Home
         </button>
