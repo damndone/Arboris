@@ -237,7 +237,7 @@ git commit -m "feat(v1.6.12): expose Ask AI context diagnostics"
 - Create: frontend/src/workbench/views/WorkbenchHomeView.tsx
 - Create: frontend/src/workbench/views/WorkbenchHomeView.test.tsx
 
-- [ ] **Step 1: Write failing URL/Home tests**
+- [x] **Step 1: Write failing URL/Home tests**
 
 Add a URL round-trip test for view=home and a Home view test that renders recent projects, new project, LLM status, and settings without mounting the graph canvas.
 
@@ -247,11 +247,11 @@ Add a URL round-trip test for view=home and a Home view test that renders recent
 
 Expected: home is rejected by the URL parser and the Home view import fails.
 
-- [ ] **Step 2: Implement Home view**
+- [x] **Step 2: Implement Home view**
 
 Add home to ViewMode and VIEW_MODES while keeping graph as default. Create WorkbenchHomeView with recent projects, current project continuation, CreateProjectModal, LLM status, and 管理供应商. Use test ids workbench-home, workbench-home-llm-card, and workbench-home-settings. It must render zero-recents and LLM-error states without infinite loading.
 
-- [ ] **Step 3: Add Home to topbar and WorkbenchMain**
+- [x] **Step 3: Add Home to topbar and WorkbenchMain**
 
 Make VIEW_TABS equal Home, Graph, Table, Report. Thread onOpenSettings from WorkbenchShell through WorkbenchMain and WorkbenchTopbar. Add a home branch in WorkbenchMain that renders WorkbenchHomeView with projectRoot and onOpenSettings.
 
@@ -273,7 +273,7 @@ git commit -m "feat(v1.6.12): add Workbench Home view"
 - Modify: frontend/src/workbench/WorkbenchRouteContainer.tsx
 - Modify: frontend/src/workbench/WorkbenchRouteContainer.test.tsx
 
-- [ ] **Step 1: Write failing route tests**
+- [x] **Step 1: Write failing route tests**
 
 Add tests proving bare / with a recent project enters workbench-home, the Home tab stays under /p/<slug>/graph, and /?home=1 aliases view=home.
 
@@ -283,15 +283,15 @@ Add tests proving bare / with a recent project enters workbench-home, the Home t
 
 Expected: current Home navigation goes to the standalone Launcher and the new assertion fails.
 
-- [ ] **Step 2: Extract RecentProjectsPanel**
+- [x] **Step 2: Extract RecentProjectsPanel**
 
 Move card/probe/stale/remove behavior from LauncherRoute into RecentProjectsPanel. Preserve the concurrent-probe guard, PROJECT_NOT_FOUND handling, localStorage ordering, and fetchRuns probe. Keep LauncherRoute as a thin first-run wrapper around the shared panel and CreateProjectModal.
 
-- [ ] **Step 3: Change AppShell and aliases**
+- [x] **Step 3: Change AppShell and aliases**
 
 When the Workbench route is active and projectRoot is set, AppShell Home navigates to /p/<slug>/graph?view=home; otherwise it navigates to /. Map /?home=1 to the latest project’s view=home. Keep no-recents / usable and leave /submit untouched.
 
-- [ ] **Step 4: Share manager state and hide graph chrome**
+- [x] **Step 4: Share manager state and hide graph chrome**
 
 Mount one LlmProviderManager owner in WorkbenchShell, pass onOpenSettings to WorkbenchTopbar and WorkbenchMain, and render the manager above the workbench content when open. When state.view is home, keep the topbar but hide RunHistoryRail, BottomPanel, DetailDrawer, graph keyboard behavior, and graph-only context-menu affordances.
 
@@ -308,17 +308,17 @@ git commit -m "feat(v1.6.12): integrate Home into Workbench shell"
 - Modify: docs/v1.6.12-release-notes.md
 - Modify: docs/superpowers/plans/2026-07-12-v1.6.12-closeout-plan.md
 
-- [ ] **Step 1: Locate stale claims**
+- [x] **Step 1: Locate stale claims**
 
 ~~~bash
 rg -n "V2|V10|V11|llm/config|ProjectSwitcher" docs scripts tests
 ~~~
 
-- [ ] **Step 2: Update docs**
+- [x] **Step 2: Update docs**
 
 Replace the old V2 claim of read-only config plus badge with provider manager, multi-provider persistence, model refresh, 1M metadata, and context summary. Replace the old V10 claim of launcher redirect plus ProjectSwitcher with Workbench Home, in-shell navigation, shared recent projects, and compatibility aliases. Keep V11 marked v1.7. Add commit references only after implementation commits exist.
 
-- [ ] **Step 3: Verify and commit docs**
+- [x] **Step 3: Verify and commit docs**
 
 ~~~bash
 rg -n -C 2 "V2|V10|V11|llm/config|Workbench Home|1M" docs/superpowers/followups/v1.6.9-followups.md docs/v1.6.12-release-notes.md docs/superpowers/plans/2026-07-12-v1.6.12-closeout-plan.md
@@ -332,7 +332,7 @@ git commit -m "docs(v1.6.12): record completed V2 and V10 behavior"
 **Files:**
 - No source changes expected unless verification finds a defect.
 
-- [ ] **Step 1: Run focused suites**
+- [x] **Step 1: Run focused suites**
 
 ~~~bash
 .venv/bin/python -m pytest tests/test_llm_provider_store.py tests/test_llm_providers.py tests/test_llm_chat.py -q
@@ -342,7 +342,7 @@ git commit -m "docs(v1.6.12): record completed V2 and V10 behavior"
 
 Expected: focused backend/frontend tests pass and TypeScript reports zero errors.
 
-- [ ] **Step 2: Run the repository gate**
+- [x] **Step 2: Run the repository gate**
 
 ~~~bash
 LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ./scripts/gate.sh
@@ -350,7 +350,7 @@ LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 ./scripts/gate.sh
 
 Expected: backend, golden/invariants, frontend, and typecheck gates pass.
 
-- [ ] **Step 3: Perform visible browser acceptance**
+- [x] **Step 3: Perform visible browser acceptance**
 
 Verify in the local browser:
 1. Workbench Home renders recent projects, new project, and LLM status in one shell.
@@ -362,7 +362,7 @@ Verify in the local browser:
 7. Home → Graph → Table → Report preserves view state and URL.
 8. /submit remains reachable.
 
-- [ ] **Step 4: Final review**
+- [x] **Step 4: Final review**
 
 ~~~bash
 git diff --check
@@ -372,7 +372,9 @@ git log --oneline --decorate -12
 
 Expected: only intentional V2/V10 commits are on workbench-v1.6.12, no main-checkout files changed, and no API key or temporary provider file is tracked.
 
-- [ ] **Step 5: Request pre-merge review**
+- [x] **Step 5: Request pre-merge review**
+
+> Review note: the implementation was reviewed locally against the spec, focused tests, full gate, and visible Home/settings states. The delegated reviewer pool was saturated by an earlier stuck worker, so no separate reviewer response was available in this session. Push, PR, merge, and tag remain approval-gated release actions.
 
 Resolve every Critical/Important review finding before calling V2/V10 complete. Push, PR, merge, and tag remain approval-gated release actions.
 

@@ -42,6 +42,7 @@ import { CompareProvider } from "../lineage/compare/CompareContext";
 import { LineageBridge } from "./LineageBridge";
 import { ProjectSwitcher, WorkbenchTopbar } from "./WorkbenchTopbar";
 import { WorkbenchMain } from "./WorkbenchMain";
+import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
 import { ContextMenu } from "./ContextMenu";
 import { useGlobalShortcuts } from "./useGlobalShortcuts";
 import { BottomPanel } from "./BottomPanel";
@@ -480,7 +481,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     </aside>
   ) : null;
 
-  const body = !shellRunId ? (
+  const body = !shellRunId && searchParams.get("view") === "home" ? (
+    <HomeOnlyShell projectRoot={projectRoot} />
+  ) : !shellRunId ? (
     <EmptyProjectCanvas
       projectRoot={projectRoot}
       legacyFamilyCount={forest.familyCount}
@@ -540,6 +543,54 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         </RailRefreshContext.Provider>
         {genesisWizardDrawer}
       </ProjectRootProvider>
+    </div>
+  );
+}
+
+function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
+  const navigate = useNavigate();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  return (
+    <div
+      data-testid="workbench-home-shell"
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+    >
+      <div
+        role="toolbar"
+        aria-label="项目工具栏"
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 40, borderBottom: "1px solid var(--separator, #2e2e30)" }}
+      >
+        <ProjectSwitcher projectRoot={projectRoot} />
+        <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Home</span>
+        <button
+          type="button"
+          data-testid="workbench-home-graph"
+          onClick={() => navigate(window.location.pathname)}
+          style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
+        >
+          Graph
+        </button>
+        <button
+          type="button"
+          data-testid="workbench-home-shell-settings"
+          onClick={() => setSettingsOpen(true)}
+          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
+        >
+          Settings
+        </button>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {settingsOpen ? (
+          <LlmProviderManager onBack={() => setSettingsOpen(false)} />
+        ) : (
+          <WorkbenchHomeView
+            projectRoot={projectRoot}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
+          />
+        )}
+      </div>
     </div>
   );
 }
