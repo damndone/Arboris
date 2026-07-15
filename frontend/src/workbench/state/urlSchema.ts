@@ -10,7 +10,7 @@
 //
 //   view        ∈ {graph, table, pipeline}        default "graph"
 //   q           string                            default ""        (omitted from URL when empty)
-//   panel       ∈ {logs, ai} default "logs"
+//   panel       ∈ {agent, logs, ai} default "logs"
 //   focus       string                            default null
 //   pinned      ∈ {"0","1"}                       default "0"       (omitted from URL when 0)
 //
@@ -31,7 +31,7 @@ const VIEW_MODES: readonly ViewMode[] = [
 ];
 // v1.6.12: shell/pending/timeline placeholder panels removed; legacy URLs
 // carrying them fall back to the "logs" default via pickEnum.
-const PANEL_IDS: readonly BottomPanelId[] = ["logs", "ai"];
+const PANEL_IDS: readonly BottomPanelId[] = ["agent", "logs", "ai"];
 
 /** Parsed Tier 1 URL state. */
 export interface WorkbenchUrlSlice {
@@ -40,6 +40,9 @@ export interface WorkbenchUrlSlice {
   bottomPanel: BottomPanelId;
   focusKey: string | null;
   pinned: boolean;
+  agentSessionId?: string;
+  agentEntryId?: string;
+  operationRecordId?: string;
 }
 
 export const defaultUrlSlice: WorkbenchUrlSlice = {
@@ -79,13 +82,21 @@ export function parseWorkbenchUrl(
   // never write `?pinned=1` without a `?focus=…` companion.
   if (focusKey === null) pinned = false;
 
-  return {
+  const agentSessionId = params.get("agent_session") || undefined;
+  const agentEntryId = params.get("agent_entry") || undefined;
+  const operationRecordId = params.get("operation") || undefined;
+
+  const slice: WorkbenchUrlSlice = {
     view,
     searchQuery,
     bottomPanel: panelId,
     focusKey,
     pinned,
   };
+  if (agentSessionId) slice.agentSessionId = agentSessionId;
+  if (agentEntryId) slice.agentEntryId = agentEntryId;
+  if (operationRecordId) slice.operationRecordId = operationRecordId;
+  return slice;
 }
 
 /**
@@ -125,6 +136,13 @@ export function writeWorkbenchUrl(
     if (slice.pinned) out.set("pinned", "1");
     else out.delete("pinned");
   }
+
+  if (slice.agentSessionId) out.set("agent_session", slice.agentSessionId);
+  else out.delete("agent_session");
+  if (slice.agentEntryId) out.set("agent_entry", slice.agentEntryId);
+  else out.delete("agent_entry");
+  if (slice.operationRecordId) out.set("operation", slice.operationRecordId);
+  else out.delete("operation");
 
   return out;
 }
