@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import platform
 import resource
+import signal
 import shutil
 import subprocess
 import sys
@@ -131,6 +132,25 @@ def _apply_rlimits(limits: SandboxLimits):
     return _preexec
 
 
+def _read_capped_output(path: Path, limit: int) -> str:
+    """Read at most ``limit`` bytes from one child output stream."""
+
+    with path.open("rb") as handle:
+        raw = handle.read(limit)
+    return raw.decode("utf-8", errors="replace")
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    """Stop the sandbox process and descendants created by the transform."""
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        process.kill()
+
+
 def run_python_sandboxed(
     script_path: Path,
     *,
@@ -167,28 +187,43 @@ def run_python_sandboxed(
                 argv += ["--bind", str(path.resolve()), str(path.resolve())]
             argv += ["--proc", "/proc", sys.executable, "-I", str(script_path)]
 
+        stdout_path = home / "stdout.bin"
+        stderr_path = home / "stderr.bin"
         started = time.monotonic()
-        try:
-            completed = subprocess.run(
+        timed_out = False
+        with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+            process = subprocess.Popen(
                 argv,
-                capture_output=True,
-                text=True,
-                timeout=effective.wall_seconds,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
                 env=_scrubbed_env(home),
                 cwd=str(home),
                 preexec_fn=_apply_rlimits(effective),
-                check=False,
+                close_fds=True,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise SandboxTimeoutError(
-                f"sandboxed code exceeded {effective.wall_seconds}s wall clock"
-            ) from exc
+            try:
+                returncode = process.wait(timeout=effective.wall_seconds)
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                _kill_process_group(process)
+                process.wait()
+                raise SandboxTimeoutError(
+                    f"sandboxed code exceeded {effective.wall_seconds}s wall clock"
+                ) from exc
+            finally:
+                if not timed_out:
+                    # A transform can spawn a descendant and exit immediately;
+                    # clean up the process group even when the leader finished.
+                    _kill_process_group(process)
         duration = time.monotonic() - started
+        stdout = _read_capped_output(stdout_path, effective.output_bytes)
+        stderr = _read_capped_output(stderr_path, effective.output_bytes)
 
     return SandboxResult(
-        returncode=completed.returncode,
-        stdout=completed.stdout or "",
-        stderr=completed.stderr or "",
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
         duration_s=duration,
     )
 

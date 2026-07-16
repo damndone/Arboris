@@ -41,6 +41,118 @@ def test_sandbox_runs_ordinary_code_and_captures_stdout(tmp_path: Path) -> None:
     assert "hello from the sandbox" in result.stdout
 
 
+def test_sandbox_bounds_captured_output_before_returning(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Child output must not become an unbounded parent-memory allocation."""
+    import subprocess
+    import workbench.sandbox as sandbox_module
+
+    class FakePopen:
+        _next_pid = 41000
+
+        def __init__(self, _argv, *, stdout=None, stderr=None, **_kwargs):
+            self.args = _argv
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = None
+            self.pid = FakePopen._next_pid
+            FakePopen._next_pid += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def communicate(self, *_args, **_kwargs):
+            self.returncode = 0
+            return "s" * 100, "e" * 100
+
+        def wait(self, *_args, **_kwargs):
+            if hasattr(self.stdout, "write"):
+                self.stdout.write(b"s" * 100)
+                self.stdout.flush()
+            if hasattr(self.stderr, "write"):
+                self.stderr.write(b"e" * 100)
+                self.stderr.flush()
+            self.returncode = 0
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr(sandbox_module, "isolation_backend", lambda: "fake")
+    monkeypatch.setattr(sandbox_module.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(sandbox_module.os, "killpg", lambda *_args: None)
+    script = tmp_path / "script.py"
+    script.write_text("print('unused')", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    result = sandbox_module.run_python_sandboxed(
+        script,
+        writable_dirs=[out],
+        limits=sandbox_module.SandboxLimits(output_bytes=32),
+    )
+
+    assert len(result.stdout.encode("utf-8")) <= 32
+    assert len(result.stderr.encode("utf-8")) <= 32
+
+
+def test_sandbox_kills_the_process_group_on_wall_timeout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A timed-out transform must not leave spawned descendants running."""
+    import signal
+    import subprocess
+    import workbench.sandbox as sandbox_module
+
+    class FakePopen:
+        pid = 42000
+
+        def __init__(self, _argv, **_kwargs):
+            self.wait_calls = 0
+            self.returncode = None
+
+        def wait(self, *_args, **_kwargs):
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("fake-sandbox", 2.0)
+            self.returncode = -signal.SIGKILL
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -signal.SIGKILL
+
+    killed: list[tuple[int, int]] = []
+    monkeypatch.setattr(sandbox_module, "isolation_backend", lambda: "fake")
+    monkeypatch.setattr(sandbox_module.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(
+        sandbox_module.os,
+        "killpg",
+        lambda pid, sig: killed.append((pid, sig)),
+    )
+    script = tmp_path / "script.py"
+    script.write_text("print('unused')", encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    with pytest.raises(sandbox_module.SandboxTimeoutError):
+        sandbox_module.run_python_sandboxed(
+            script,
+            writable_dirs=[out],
+            limits=sandbox_module.SandboxLimits(wall_seconds=2.0),
+        )
+
+    assert killed == [(FakePopen.pid, signal.SIGKILL)]
+
+
 def test_sandbox_denies_network_egress(tmp_path: Path) -> None:
     out = tmp_path / "out"
     out.mkdir()
