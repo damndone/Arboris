@@ -7,6 +7,7 @@ anything raised from here.
 """
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 import httpx
@@ -34,9 +35,7 @@ class LLMUpstreamError(Exception):
 def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
     """GET {base_url}/models and return the provider's model summaries."""
     if not config.is_configured():
-        raise LLMNotConfiguredError(
-            "LLM is not configured. Set a provider base URL, API key and model."
-        )
+        raise LLMNotConfiguredError(config.configuration_error_message())
     try:
         with _client_factory(config) as client:
             response = client.get(
@@ -83,22 +82,31 @@ def fetch_models(config: LLMConfig) -> list[dict[str, str]]:
     return models
 
 
-def chat_completion(messages: list[dict[str, str]], config: LLMConfig) -> dict[str, Any]:
-    """POST {base_url}/chat/completions; return {"text", "model"}."""
+def chat_completion(
+    messages: list[dict[str, Any]],
+    config: LLMConfig,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """POST Chat Completions and normalize text plus optional tool calls."""
     if not config.is_configured():
-        raise LLMNotConfiguredError(
-            "LLM is not configured. Set WORKBENCH_LLM_BASE_URL, "
-            "WORKBENCH_LLM_API_KEY and WORKBENCH_LLM_MODEL."
-        )
+        raise LLMNotConfiguredError(config.configuration_error_message())
     try:
         with _client_factory(config) as client:
+            request_payload: dict[str, Any] = {
+                "model": config.model,
+                "messages": messages,
+                "stream": False,
+            }
+            if tools:
+                request_payload["tools"] = tools
             response = client.post(
                 f"{config.base_url.rstrip('/')}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {config.api_key}",
                     "Content-Type": "application/json",
                 },
-                json={"model": config.model, "messages": messages, "stream": False},
+                json=request_payload,
                 timeout=config.timeout_s,
             )
     except (httpx.HTTPError, ValueError) as exc:
@@ -112,14 +120,50 @@ def chat_completion(messages: list[dict[str, str]], config: LLMConfig) -> dict[s
         )
     try:
         payload = response.json()
-        text = payload["choices"][0]["message"]["content"]
+        message = payload["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise TypeError
+        text = message.get("content") or ""
+        if not isinstance(text, str):
+            raise TypeError
+        raw_tool_calls = message.get("tool_calls") or []
+        if not isinstance(raw_tool_calls, list):
+            raise TypeError
+        tool_calls: list[dict[str, Any]] = []
+        for raw_tool_call in raw_tool_calls:
+            if not isinstance(raw_tool_call, dict):
+                raise TypeError
+            function = raw_tool_call.get("function")
+            if not isinstance(function, dict):
+                raise TypeError
+            tool_call_id = raw_tool_call.get("id")
+            tool_id = function.get("name")
+            raw_arguments = function.get("arguments", "{}")
+            if not isinstance(tool_call_id, str) or not tool_call_id:
+                raise TypeError
+            if not isinstance(tool_id, str) or not tool_id:
+                raise TypeError
+            if isinstance(raw_arguments, str):
+                arguments = json.loads(raw_arguments)
+            else:
+                arguments = raw_arguments
+            if not isinstance(arguments, dict):
+                raise TypeError
+            tool_calls.append(
+                {
+                    "tool_call_id": tool_call_id,
+                    "tool_id": tool_id,
+                    "arguments": arguments,
+                }
+            )
     except (ValueError, LookupError, TypeError) as exc:
         raise LLMUpstreamError(
             "LLM provider returned an unexpected response shape"
         ) from exc
-    if not isinstance(text, str):
-        raise LLMUpstreamError("LLM provider returned non-text content")
     model = payload.get("model")
     if not isinstance(model, str) or not model:
         model = config.model
-    return {"text": text, "model": model}
+    result = {"text": text, "model": model}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    return result

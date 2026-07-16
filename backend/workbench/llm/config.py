@@ -10,11 +10,21 @@ from urllib.parse import urlparse
 
 from .provider_store import (
     ProviderRecord,
+    ProviderStoreError,
     environment_provider_from_env,
+    explicit_config_path,
     load_provider_store,
+    load_provider_store_strict,
 )
 
 DEFAULT_TIMEOUT_S = 60.0
+
+# `source` values for a config that is unusable BECAUSE the operator-pinned
+# store is broken. These must never fall through to the environment or default
+# config: the one real-provider call this system ever made by accident happened
+# exactly that way (explicit path missing → silent environment fallback).
+SOURCE_EXPLICIT_CONFIG_MISSING = "explicit_config_missing"
+SOURCE_EXPLICIT_CONFIG_INVALID = "explicit_config_invalid"
 
 
 def validate_provider_url(value: str | None, field_name: str) -> str | None:
@@ -54,13 +64,59 @@ class LLMConfig:
     source: str = "none"
     context_window_tokens: int | None = None
     supports_1m: bool = False
+    supports_vision: bool = False
 
     def is_configured(self) -> bool:
         return all(value.strip() for value in (self.base_url, self.api_key, self.model))
 
+    def configuration_error_message(self) -> str:
+        """The reason this config cannot be used for a call-out, stated truthfully.
+
+        A broken explicit store must not be reported as plain "not configured" —
+        the operator DID configure something; the file they pinned is gone or
+        unreadable, and no fallback was consulted on purpose.
+        """
+
+        if self.source == SOURCE_EXPLICIT_CONFIG_MISSING:
+            return (
+                "WORKBENCH_LLM_CONFIG_PATH is set but the file does not exist. "
+                "Refusing to fall back to the environment or default provider "
+                "configuration; restore the file or unset the variable."
+            )
+        if self.source == SOURCE_EXPLICIT_CONFIG_INVALID:
+            return (
+                "WORKBENCH_LLM_CONFIG_PATH is set but the file is not a valid "
+                "provider store. Refusing to fall back to the environment or "
+                "default provider configuration; fix the file or unset the variable."
+            )
+        return (
+            "LLM is not configured. Set a provider base URL, API key and model."
+        )
+
 
 def load_llm_config() -> LLMConfig:
-    store = load_provider_store()
+    explicit = explicit_config_path()
+    if explicit is not None:
+        # The operator pinned the config source. A missing or unreadable file is
+        # a configuration ERROR, not "use something else": falling through to
+        # the environment here is how an offline smoke run once made a real
+        # provider call. Fail closed — no call-out can use this config, and the
+        # message says exactly why.
+        if not explicit.is_file():
+            return LLMConfig(
+                base_url="", api_key="", model="",
+                source=SOURCE_EXPLICIT_CONFIG_MISSING,
+            )
+        try:
+            store = load_provider_store_strict(explicit)
+        except ProviderStoreError:
+            return LLMConfig(
+                base_url="", api_key="", model="",
+                source=SOURCE_EXPLICIT_CONFIG_INVALID,
+            )
+    else:
+        store = load_provider_store()
+
     provider = next(
         (
             candidate
@@ -105,4 +161,7 @@ def _config_from_provider(provider: ProviderRecord, *, source: str) -> LLMConfig
             model_record.context_window_tokens if model_record is not None else None
         ),
         supports_1m=model_record.supports_1m if model_record is not None else False,
+        supports_vision=(
+            model_record.supports_vision if model_record is not None else False
+        ),
     )
