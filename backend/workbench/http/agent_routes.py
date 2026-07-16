@@ -685,6 +685,15 @@ def _ensure_fork_source_session(
         repository, events = _stores(root)
         session_id = f"agent_chain_fork_{uuid4().hex}"
         chain_id = body.chain_id or f"chain:{body.source_run_id}"
+        try:
+            _authoritative_active_head(
+                root,
+                chain_id=chain_id,
+                requested_active_head_run_id=body.active_head_run_id,
+            )
+        except WorkbenchAPIError as exc:
+            if exc.code != "AGENT_CHAIN_NOT_MANAGED":
+                raise
         metadata = repository.create_session(session_id, chain_id=chain_id, role="chain")
         _ensure_chain_scope(
             root,
