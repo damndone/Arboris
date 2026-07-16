@@ -16,12 +16,18 @@ from ..agent.context_tools import InspectNodeContextRequest
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
-from ..agent.navigation import AgentNavigationProjector
-from ..agent.operations import OperationRecordStore, OperationValidationError
+from ..agent.navigation import AgentNavigationProjector, AgentNavigationRef
+from ..agent.operations import (
+    OperationRecordStore,
+    OperationRegistry,
+    OperationValidationError,
+)
+from ..agent.execution import OperationClaimConflict
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
-from ..agent.session import JsonlSessionRepository
+from ..agent.session import EntryRef, JsonlSessionRepository
 from ..api_errors import WorkbenchAPIError
+from ..control_plane import control_plane_capability
 from ..llm.config import load_llm_config
 
 router = APIRouter()
@@ -38,10 +44,26 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for a proposal, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
 - propose_operation creates a reviewable pending proposal only; it does not execute a Workbench mutation. Never claim that a run, graph, or data change was executed from this tool.
-- Use the exact operation_id and operation_version returned by inspect_operation_contract. In target, use exactly run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
+- Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
+- graph.fork creates a durable fork, child Chain, and child Agent session after confirmation. It does not submit a child statistical run and does not automatically continue with model.rerun.
 - Include changes as the requested field-level change (prefer {"old": ..., "new": ...}), plus evidence_refs, expected_effect, and risks.
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.
 """
+
+
+def _chain_agent_protocol(registry: OperationRegistry) -> str:
+    """Add the registry's current executable operation ids to the protocol."""
+
+    operation_ids = registry.natural_language_operation_ids(
+        scope_requirements=("chain", "active_head")
+    )
+    return (
+        CHAIN_AGENT_PROTOCOL
+        + "- The currently registered executable operation ids are: "
+        + ", ".join(operation_ids)
+        + ". Do not propose an id outside this registry.\n"
+        + "- For an unsupported request, explain the boundary explicitly; never translate it into a nearby operation.\n"
+    )
 
 
 class AgentSessionCreateRequest(BaseModel):
@@ -80,6 +102,22 @@ class AgentProposalRevisionRequest(BaseModel):
     changes: dict[str, Any]
     expected_effect: list[str] | None = None
     risks: list[str] | None = None
+
+
+class AgentForkProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str | None = Field(default=None, min_length=1, max_length=200)
+    chain_id: str | None = Field(default=None, min_length=1, max_length=200)
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_ref: str = Field(min_length=1, max_length=300)
+    source_session_entry_id: str | None = Field(default=None, min_length=1, max_length=200)
+    active_head_run_id: str = Field(min_length=1, max_length=200)
+    reason: str = Field(
+        default="Fork from verified graph context",
+        min_length=1,
+        max_length=1_000,
+    )
 
 
 def _project_root(raw: str) -> Path:
@@ -158,6 +196,7 @@ def _get_session(
 
 def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    projector = AgentNavigationProjector(repository.root.parent)
     for entry in repository.get_branch(session_id):
         if entry.entry_type != "message":
             continue
@@ -165,18 +204,25 @@ def _messages(repository: JsonlSessionRepository, session_id: str) -> list[dict[
         content = entry.payload.get("content")
         if not isinstance(role, str) or not isinstance(content, str):
             continue
-        result.append(
-            {
-                "entry_id": entry.entry_id,
-                "role": role,
-                "content": content,
-                # Tool entries carry the tool id in `name`; the panel projects
-                # it as the typed status label instead of a generic "tool".
-                "name": entry.payload.get("name"),
-                "stop_reason": entry.payload.get("stop_reason"),
-                "error": entry.payload.get("error"),
-            }
-        )
+        message = {
+            "entry_id": entry.entry_id,
+            "role": role,
+            "content": content,
+            # Tool entries carry the tool id in `name`; the panel projects
+            # it as the typed status label instead of a generic "tool".
+            "name": entry.payload.get("name"),
+            "stop_reason": entry.payload.get("stop_reason"),
+            "error": entry.payload.get("error"),
+        }
+        try:
+            message["navigation"] = [
+                link.to_dict()
+                for link in projector.entry(session_id, entry.entry_id).links
+            ]
+        except (KeyError, ValueError):
+            # A legacy/corrupt entry must not make the whole session unreadable.
+            message["navigation"] = []
+        result.append(message)
     return result
 
 
@@ -267,6 +313,58 @@ def _public_proposal(store: ProposalStore, proposal_id: str) -> dict[str, Any]:
     return proposal
 
 
+def _current_data_columns_cast_fingerprint(root: Path, proposal) -> str:
+    """Re-derive a data cast's *preview* fingerprint before confirmation.
+
+    For model.rerun/graph.fork the freshness identity is the node-operation
+    context (`nocv1:…`). A data cast's identity is its preview over the real
+    data, so re-previewing here is the same check, expressed in this
+    operation's own vocabulary — and it is the same fingerprint the manual UI
+    path confirms against.
+    """
+
+    from ..data_operations import (
+        DataCastItem,
+        DataColumnCastValidationError,
+        DataColumnsCastSpecV1,
+        preview_data_columns_cast,
+    )
+
+    target = proposal.target
+    try:
+        spec = DataColumnsCastSpecV1(
+            source_run_id=str(target["run_id"]),
+            source_node_id=str(target["node_ref"]),
+            source_artifact_id=str(target["artifact_id"]),
+            casts=tuple(
+                DataCastItem(str(item["column"]), str(item["target_dtype"]))
+                for item in target["casts"]
+            ),
+            output_format=str(target.get("output_format", "csv")),
+        )
+        preview = preview_data_columns_cast(root, spec)
+    except (DataColumnCastValidationError, KeyError, OSError, TypeError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_STALE",
+            message="The proposal target or source data changed before confirmation.",
+            details={"proposal_id": proposal.proposal_id, "reason": str(exc)},
+        ) from exc
+    if preview.status != "ready":
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_BLOCKED",
+            message="The cast preview has blocking conversion failures.",
+            details={
+                "proposal_id": proposal.proposal_id,
+                "blocked_columns": [
+                    item.column for item in preview.items if item.status != "ready"
+                ],
+            },
+        )
+    return preview.fingerprint
+
+
 def _current_proposal_context_fingerprint(
     root: Path,
     proposal,
@@ -275,11 +373,13 @@ def _current_proposal_context_fingerprint(
 ) -> str:
     """Re-derive the current node context before creating a confirmation record."""
 
-    if proposal.operation_id != "model.rerun":
+    if proposal.operation_id == "data.columns.cast":
+        return _current_data_columns_cast_fingerprint(root, proposal)
+    if proposal.operation_id not in {"model.rerun", "graph.fork"}:
         raise WorkbenchAPIError(
             status_code=422,
             code="AGENT_PROPOSAL_OPERATION_UNSUPPORTED",
-            message="This Agent endpoint only confirms model.rerun proposals.",
+            message="This Agent endpoint does not confirm this operation.",
             details={"operation_id": proposal.operation_id},
         )
     target = proposal.target
@@ -346,6 +446,7 @@ def create_agent_session(
         },
     )
     if body.role == "chain":
+        registry = OperationRegistry()
         repository.append(
             session_id,
             "custom_message",
@@ -353,7 +454,7 @@ def create_agent_session(
                 "message_type": "agent_protocol",
                 "audience": "model",
                 "name": "workbench_agent_protocol",
-                "content": CHAIN_AGENT_PROTOCOL,
+                "content": _chain_agent_protocol(registry),
                 "metadata": {"protocol_version": "agent/v1"},
             },
         )
@@ -429,6 +530,242 @@ def get_agent_graph_navigation(
             details={"run_id": run_id, "node_ref": node_ref},
         )
     return {"projection": projection.to_dict()}
+
+
+@router.get("/agent/activity")
+def get_agent_activity(project_root: str) -> dict[str, Any]:
+    """Return the durable, read-only operation projection for AI Activity."""
+
+    root = _project_root(project_root)
+    projection = AgentNavigationProjector(root)
+    hierarchy = projection.activity_hierarchy()
+    return {
+        "activities": [item.to_dict() for item in projection.activity()],
+        "events": [item.to_dict() for item in projection.activity_events()],
+        "hierarchy": hierarchy.to_dict() if hierarchy is not None else None,
+    }
+
+
+@router.get("/agent/capabilities")
+def get_agent_capabilities(
+    project_root: str,
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """Return registry-owned operation capabilities without creating storage."""
+
+    root = _project_root(project_root)
+    capabilities = OperationRegistry().capabilities()
+    if scope is not None:
+        capabilities = [item for item in capabilities if item["scope"] == scope]
+    return {
+        "project_root": str(root),
+        "scope": scope,
+        **control_plane_capability(),
+        "capabilities": capabilities,
+        "boundary": OperationRegistry().boundary(),
+    }
+
+
+def _ensure_fork_source_session(
+    root: Path,
+    body: AgentForkProposalRequest,
+    snapshot: dict[str, Any],
+) -> tuple[JsonlSessionRepository, AgentEventStream, dict[str, Any], str]:
+    """Resolve a chain session and a reachable source entry for a fork proposal."""
+
+    if body.session_id:
+        repository, events, metadata = _get_session(root, body.session_id)
+        if metadata.get("role") != "chain":
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_FORK_SCOPE_INVALID",
+                message="A graph fork proposal must belong to a Chain Agent session.",
+                details={"session_id": body.session_id},
+            )
+        if body.chain_id and metadata.get("chain_id") != body.chain_id:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_FORK_SCOPE_INVALID",
+                message="The Agent session is outside the requested Chain scope.",
+                details={"session_id": body.session_id, "chain_id": body.chain_id},
+            )
+    else:
+        repository, events = _stores(root)
+        session_id = f"agent_chain_fork_{uuid4().hex}"
+        chain_id = body.chain_id or f"chain:{body.source_run_id}"
+        metadata = repository.create_session(session_id, chain_id=chain_id, role="chain")
+        context = {
+            "packet_version": "agent/fork-context/v1",
+            "context_fingerprint": snapshot.get("context_fingerprint"),
+            "source": {
+                "run_id": body.source_run_id,
+                "node_ref": body.source_node_ref,
+                "active_head_run_id": body.active_head_run_id,
+            },
+        }
+        serialized, fingerprint = _context_serialized(context)
+        context_entry = repository.append(
+            session_id,
+            "custom_message",
+            {
+                "message_type": "agent_context",
+                "audience": "model",
+                "name": "workbench_context",
+                "content": (
+                    "Workbench verified fork context. Do not invent graph facts.\n"
+                    + serialized
+                ),
+                "metadata": {
+                    "context_fingerprint": fingerprint,
+                    "run_id": body.source_run_id,
+                },
+            },
+        )
+        events.emit(
+            session_id,
+            "session_created",
+            {
+                "role": "chain",
+                "chain_id": chain_id,
+                "run_id": body.source_run_id,
+                "context_fingerprint": fingerprint,
+            },
+        )
+        metadata = repository.get_metadata(session_id)
+        if body.source_session_entry_id and body.source_session_entry_id != context_entry.entry_id:
+            raise WorkbenchAPIError(
+                status_code=409,
+                code="AGENT_FORK_ENTRY_NOT_FOUND",
+                message="The requested source Agent entry is not present in the new session.",
+                details={"entry_id": body.source_session_entry_id},
+            )
+
+    source_entry_id = body.source_session_entry_id or metadata.get("leaf_entry_id")
+    if not isinstance(source_entry_id, str) or not source_entry_id:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_FORK_ENTRY_NOT_FOUND",
+            message="The Chain Agent session has no durable source entry.",
+            details={"session_id": metadata.get("session_id")},
+        )
+    try:
+        repository.get_entry(EntryRef(str(metadata["session_id"]), source_entry_id))
+        branch_ids = {
+            entry.entry_id for entry in repository.get_branch(str(metadata["session_id"]))
+        }
+    except (KeyError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_FORK_ENTRY_NOT_FOUND",
+            message="The source Agent entry is not reachable from the current Chain head.",
+            details={"entry_id": source_entry_id},
+        ) from exc
+    if source_entry_id not in branch_ids:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_FORK_ENTRY_NOT_FOUND",
+            message="The source Agent entry is not reachable from the current Chain head.",
+            details={"entry_id": source_entry_id},
+        )
+    return repository, events, metadata, source_entry_id
+
+
+@router.post("/agent/fork-proposals")
+def create_agent_fork_proposal(
+    project_root: str,
+    body: AgentForkProposalRequest,
+) -> dict[str, Any]:
+    """Create a confirmation-gated graph.fork proposal from verified context."""
+
+    root = _project_root(project_root)
+    try:
+        snapshot = NodeOperationContextProvider(root).inspect_node_context(
+            InspectNodeContextRequest(
+                request_id=f"fork-proposal:{body.source_run_id}:{body.source_node_ref}",
+                owner_run_id=body.source_run_id,
+                op_node_id=body.source_node_ref,
+                active_head_run_id=body.active_head_run_id,
+            )
+        )
+    except (KeyError, OSError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_STALE",
+            message="The graph node or active head could not be verified.",
+            details={"run_id": body.source_run_id, "node_ref": body.source_node_ref},
+        ) from exc
+
+    repository, events, metadata, source_entry_id = _ensure_fork_source_session(
+        root,
+        body,
+        snapshot,
+    )
+    session_id = str(metadata["session_id"])
+    chain_id = str(metadata["chain_id"])
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id=_ensure_main_session(repository, root),
+        context_provider=NodeOperationContextProvider(root),
+    )
+    agent = AgentCore(
+        repository,
+        events,
+        OpenAICompatibleModelAdapter(load_llm_config()),
+        session_id=session_id,
+    )
+    orchestrator.register_chain(chain_id, session_id, agent)
+    try:
+        proposal = orchestrator.create_proposal(
+            chain_id=chain_id,
+            operation_id="graph.fork",
+            target={
+                "run_id": body.source_run_id,
+                "node_ref": body.source_node_ref,
+                "node_hash": snapshot["node_hash"],
+                "forest_node_key": snapshot["forest_node_key"],
+                "source_session_entry_id": source_entry_id,
+            },
+            preconditions={
+                "context_version": snapshot["context_version"],
+                "context_fingerprint": snapshot["context_fingerprint"],
+                "active_head_run_id": snapshot["active_head_run_id"],
+                "owner_resolution": snapshot["owner_resolution"],
+            },
+            changes={"reason": body.reason},
+            evidence_refs=[
+                f"graph:{body.source_run_id}:{body.source_node_ref}",
+                f"agent_entry:{session_id}:{source_entry_id}",
+            ],
+            expected_effect=["create a durable child Chain and Agent session"],
+            risks=["no child statistical run is submitted by graph.fork"],
+        )
+    except OperationValidationError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="AGENT_PROPOSAL_INVALID",
+            message="The graph fork proposal is not valid for this context.",
+            details={"reason": str(exc)},
+        ) from exc
+    navigation = AgentNavigationRef(
+        kind="proposal",
+        id=proposal.proposal_id,
+        label=f"Proposal {proposal.proposal_id}",
+        relation="audit",
+        available=True,
+        href={
+            "view": "agent",
+            "session_id": session_id,
+            "proposal_id": proposal.proposal_id,
+        },
+    )
+    return {
+        "session_id": session_id,
+        "source_session_entry_id": source_entry_id,
+        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "navigation": navigation.to_dict(),
+        "status": "pending",
+    }
 
 
 @router.get("/agent/sessions/{session_id}/operations/{record_id}")
@@ -601,24 +938,28 @@ async def confirm_agent_proposal(
             message="The proposal revision or fingerprint is no longer confirmable.",
             details={"proposal_id": proposal_id},
         ) from exc
-    # Design §8.2: the user confirmation IS the execution gate. Run the
-    # confirmed proposal through the request-independent rerun executor now —
-    # child chain/fork/session plus a submitted child run. Executor failures
-    # come back as a durable `failed` record (never a fake success); a
-    # non-terminal child stays `running` until the reconcile endpoint
-    # verifies it deterministically.
+    # Design §8.2: the user confirmation IS the execution gate. The registry
+    # selects the request-independent operation handler; no model text
+    # participates in execution.
     try:
-        record = await orchestrator.execute_confirmed_proposal(
+        record = await orchestrator.execute_confirmed_operation(
             record.record_id,
+            project_root=root,
             current_context_fingerprint=current_context_fingerprint,
             current_active_head_run_id=body.active_head_run_id,
-            executor=orchestrator.model_rerun_executor(root),
         )
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
             code="AGENT_PROPOSAL_STALE",
             message="The proposal became stale before execution.",
+            details={"proposal_id": proposal_id},
+        ) from exc
+    except OperationClaimConflict as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_OPERATION_CONFLICT",
+            message="Another confirmed operation is already executing against this Chain head.",
             details={"proposal_id": proposal_id},
         ) from exc
     return {
@@ -665,9 +1006,10 @@ async def reconcile_agent_operation(
         main_session_id=_ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
-    record = await orchestrator.reconcile_confirmed_proposal(
-        record_id, project_root=root
-    )
+    if record.operation_id != "graph.fork":
+        record = await orchestrator.reconcile_confirmed_proposal(
+            record_id, project_root=root
+        )
     return {"operation": record.to_dict(), "status": record.status}
 
 
@@ -684,7 +1026,10 @@ async def run_agent_turn(
         raise WorkbenchAPIError(
             status_code=503,
             code="LLM_NOT_CONFIGURED",
-            message="Configure an active LLM provider before starting an Agent turn.",
+            # A broken explicit store must say so — "configure a provider" is
+            # the wrong advice when the operator already did and the pinned
+            # file is missing.
+            message=config.configuration_error_message(),
         )
     agent = AgentCore(
         repository,
@@ -698,15 +1043,21 @@ async def run_agent_turn(
         # tools through the existing orchestrator boundary — the model never
         # discovers Workbench capabilities on its own, and a plain inspection
         # turn performs zero Workbench mutation. Proposals stay allowlisted to
-        # model.rerun and remain confirmation-gated audit records.
+        # registry-enabled operations and remain confirmation-gated audit records.
+        operation_registry = OperationRegistry()
         orchestrator = WorkbenchOrchestrator(
             repository,
             events,
             main_session_id=_ensure_main_session(repository, root),
+            operation_registry=operation_registry,
             context_provider=NodeOperationContextProvider(root),
         )
         orchestrator.register_chain(str(metadata.get("chain_id")), session_id, agent)
-        tool_context = {"allowed_operations": ["model.rerun"]}
+        tool_context = {
+            "allowed_operations": operation_registry.natural_language_operation_ids(
+                scope_requirements=("chain", "active_head")
+            )
+        }
     await agent.prompt(
         body.question.strip(),
         budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
