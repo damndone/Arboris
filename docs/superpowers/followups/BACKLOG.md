@@ -20,8 +20,11 @@
 **当前版本 = v1.7 Agent Harness**（worktree `.worktrees/workbench-v1.7`,进行中未发版）。
 v1.6.12(.1) 已 SHIPPED + merge（main=`510ff5a`）,其 V 系列债全清（见 §3）。
 v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→execute→reconcile 环、
-`model.rerun`/`graph.fork`/`data.column.cast`(V11 第一数据切片,含浏览器自动化验收+幂等/failpoint 硬化)。
-**下一步 = NL Agent 生成同一份 typed proposal（v1.7 handoff 优先级 6）**;暂不做 Main Agent/多步编排。
+`model.rerun`/`graph.fork`/`data.column.cast`/`data.columns.cast`/`code.execute`，含真实浏览器验收、
+幂等/failpoint 硬化和真实宿主机 sandbox gate。**本版收口不再新增功能**；下一步沿现有
+`data.column.cast` 模式扩展更多数据 operation，暂不做 Main Agent/多步编排。
+
+> NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 剩余债按 §1 扁平优先级取。
 
 ---
@@ -54,11 +57,11 @@ v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→
 | 🟠 架构 | A-D4 | 全局 CSS 1053 行（低，churn>收益） | 架构 | 不专门立项；新组件用 CSS Modules 渐进 | 否 | arch:D4 |
 | 🟠 复盘 | A-D5 | lineage 复查（**非债**，每版一次"抽象是否挣钱"复盘） | 复盘 | 用户拍板；与 roadmap 北极星一致（有意复杂度投资） | 否 | arch:D5 |
 | 🔵 AI | V7 | 超大数据集 Ask AI 策略:profile 摘要已防爆(不随行数涨),但宽表/用户想深入时不够（反馈批3） | 设计 | ①列分块/top-K 列(按缺失率·方差·与y相关)②抽样预览(head+分层随机,标"样本")③v1.7 工具式 drill-down:AI 按需向后端取单列直方图/分位数,上下文只装摘要 | 否 | — |
-| 🟢 主线 | V11 | 图内数据层（🚧 v1.7 进行中）:`data.column.cast` 第一典型切片已落(typed preview/confirm/immutable child/幂等/failpoint/浏览器验收);cleaning 策略/异常值规则等更多数据 operation 未做 | 主线=v1.7 | 沿 data.column.cast 模式扩;先做 NL Agent 生成 typed proposal(优先级6),再扩 operation 面 | 否 | roadmap |
+| 🟢 主线 | V11 | 图内数据层（✅ v1.7 第一典型切片完成）:`data.column.cast`/`data.columns.cast` 已落(typed preview/confirm/immutable child/幂等/failpoint/浏览器验收);cleaning 策略/异常值规则等更多 data operation 未做 | 主线=v1.8+ | 沿 data.column.cast 模式扩 operation 面 | 否 | roadmap |
 | ~~🟢 方向~~ | ~~G1~~ | ~~图爆炸~~ **✅ 全清 v1.7**:batch `data.columns.cast`(N 列→1 record/1 child/1 recipe/1 diff)+ **投影层折叠**(`foldNodeClusters` 把 >3 个同源 data-cast 兄弟折成 "Data operations (N)" 卡,durable graph 一字不改) | — | — | — | — |
 | ~~🟢 方向~~ | ~~G2~~ | ~~AI 解读图表~~ **✅ 全清 v1.7**:第一步(figure→chart_type+数值源 context/`/figures/ai-context`/chat figure mode/图库按钮)+ 第二步多模态真·看图(`supports_vision` 能力位 + 默认关的显式 opt-in + PNG data URL + 专用 vision header:数字仍只能来自数值源) | — | — | — | — |
 | ~~🟢 方向~~ | ~~G3~~ | ~~terminal 面板~~ **✅ 全闭(2026-07-16)**:输入框去重 + 沙箱 runner(8 条安全测试真验)+ **`code.execute` typed operation 全链路**(preview=沙箱真跑进一次性 temp 目录、项目零写入;execute 二次跑并**校验结果与 preview 逐字节一致**,不确定代码→拒写;同 key 幂等重放)+ registry(`risk_level=high`)+ orchestrator + routes(sandbox 缺失→503 fail-closed)+ UI section + 真机验收(四条边界对真实项目实测)+ **terminal 外观**(sandboxed stdout 进 AgentPanel;诚实:是跑完的捕获输出**不是实时流**,真流式要 SSE) | v1.7 | 已完成 | 否 | roadmap G3 |
-| ~~🟢 主线~~ | ~~优先级 6~~ | ~~NL Agent 生成同一份 typed proposal~~ **✅ 真机闭环(2026-07-16)**:只开 `data.columns.cast`(**`code.execute` 保持 NL 关闭**)。模型只出意图,后端绑 `artifact_id`+preview fingerprint;新增只读 `inspect_data_schema`。真 DeepSeek 一句话→proposal→confirm→completed/verified。**真机抓到 4 个确定性测试盖不住的 bug**(contract 不可读 / `casts` 被声明成 string / oneOf 与父级 AND 导致顶层强制 model.rerun 形状 / confirm 端点算错 fingerprint 身份) | v1.7 | 已完成 | 否 | roadmap 优先级 6 |
+| ~~🟢 主线~~ | ~~优先级 6~~ | ~~NL Agent 生成同一份 typed proposal~~ **✅ 真机闭环(2026-07-16)**:只开 `data.columns.cast`(**`code.execute` 保持 NL 关闭**)。模型只出意图,后端绑 `artifact_id`+preview fingerprint;新增只读 `inspect_data_schema`。有单独真机 smoke 记录，但不作为本版 gate 或系统级 E2E 承诺。**真机抓到 4 个确定性测试盖不住的 bug**(contract 不可读 / `casts` 被声明成 string / oneOf 与父级 AND 导致顶层强制 model.rerun 形状 / confirm 端点算错 fingerprint 身份) | v1.7 | 已完成 | 否 | roadmap 优先级 6 |
 | ~~🟡 债~~ | ~~P6-1~~ | ~~失败只回 `invalid_tool_arguments`,不带校验详情~~ **✅ 已修(2026-07-16)**:`tools.py` 新增 `validation_details()`,`ToolResult.error_details` 进 tool payload(仅失败时出现,成功 payload 形状不变;`error` 码保持稳定)。**`oneOf` 用 `const` 判别式选分支,不用 `best_match`**——best_match 无判别式概念,曾把 model.rerun 的 `'node_hash' is a required property` 当成 cast 提议的建议:**给错建议比不给更糟**。plain schema 则保留全部顶层错误(一次说完,不要每轮只挤一条)。有界(5 条 / 240 字符,消息里嵌的是调用方自己的参数) | v1.7 | 已完成 | 否 | 本轮 |
 | 🟡 债 | P-CE1 | `code.execute` 一次 confirm 用户代码跑 **5 遍**(route freshness + lifecycle prepare/execute preview + apply 确定性 run)。正确但昂贵,每遍 30s wall clock。**减到 2 遍**=把已算 preview 带 execution key 缓存、confirm 复用——但那 4 遍分散在 failpoint 崩溃恢复里(恢复进程不能信任已死进程传入的 preview),减少=重写崩溃恢复契约,高风险须单独立项 | v1.7+ | 缓存 preview 结果 by execution key;prepare/execute/apply 复用而非重跑;崩溃恢复时才重算 | 否 | 本轮实测 |
 | 🟡 债 | P-RISK1 | `risk_level`(含 code.execute 的 `"high"`)是**纯装饰**——无任何逻辑读它,只在 UI 显示。任何人以为它触发额外确认/独立 scope 都是误解 | v1.7+ | 让 risk_level 变真:高风险操作强制二次确认或独立 confirm scope | 否 | 本轮盘点 |
