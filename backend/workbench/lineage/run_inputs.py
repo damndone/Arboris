@@ -40,6 +40,7 @@ def write_run_inputs(
     override_hash: str | None,
     dag_hash: str,
     rerun_from: dict[str, Any] | None = None,
+    workbench_context: dict[str, Any] | None = None,
 ) -> None:
     payload = {
         "run_input_schema_version": RUN_INPUT_SCHEMA_VERSION,
@@ -53,6 +54,8 @@ def write_run_inputs(
     }
     if rerun_from is not None:
         payload["rerun_from"] = rerun_from
+    if workbench_context is not None:
+        payload["workbench_context"] = dict(workbench_context)
     write_json(run_root / RUN_INPUTS_FILENAME, payload)
 
 

@@ -108,6 +108,36 @@ def encode_form_override(key: str, value: object) -> str:
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
+def parse_column_selector(raw: str, field: str = "x") -> list[str]:
+    """Parse a column-selector form field.
+
+    Accepts BOTH wire formats explicitly: comma-separated names (the historical
+    `x` format the frontend sends) and a JSON string array (the format
+    iv_endog/iv_instruments already use). A JSON array previously "worked" only
+    because normalize_column_name stripped the brackets downstream, and `[]`
+    turned into a bogus one-column request that blocked the run with
+    `missing_columns: [""]`. An empty value is a legal empty selector so
+    zero-covariate DID/CS families can be submitted over HTTP.
+
+    Raises ValueError for malformed JSON or non-string entries; _submit_run
+    callers convert that to a 422 before any run is created.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{field} must be a comma-separated list or a JSON array of column names."
+            ) from exc
+        if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+            raise ValueError(f"{field} JSON array must contain only column-name strings.")
+        return [item.strip() for item in parsed if item.strip()]
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
 def _submit_run(
     root: Path,
     *,
@@ -120,6 +150,7 @@ def _submit_run(
     rerun_reason: str = "initial",
     op_overrides: dict | None = None,
     rerun_from: dict[str, Any] | None = None,
+    workbench_context: dict[str, Any] | None = None,
     before_dispatch: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
@@ -129,7 +160,7 @@ def _submit_run(
     pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
     can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
     raises without leaving a junk run behind."""
-    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
+    x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
     iv_instruments_list = _parse_json_str_array(form.get("iv_instruments", ""), "iv_instruments")
@@ -158,6 +189,7 @@ def _submit_run(
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
+        workbench_context=workbench_context,
     )
 
     uploads_dir = run.root / "_uploads"

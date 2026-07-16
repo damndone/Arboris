@@ -18,7 +18,7 @@ def select_reference_cohort(cohort):
     the last cohort; it keeps all cohorts and relies on collinearity removal). The
     estimator therefore BLOCKS no-never-treated panels in `validate_sa_input`
     (SA_NO_NEVER_TREATED), so this branch is currently dormant scaffolding kept for a
-    future, properly-validated no-never implementation. See docs/v1.5.8-IMPL-NOTES.md."""
+    future, properly-validated no-never implementation. See docs/architecture/v1.5.8-IMPL-NOTES.md."""
     cohort = np.asarray(cohort, dtype=float)
     finite = cohort[np.isfinite(cohort)]
     has_never = bool(np.any(~np.isfinite(cohort)))
@@ -42,7 +42,7 @@ def validate_sa_input(*, cohort, times):
     # estimator then emits UNIDENTIFIED high-event-time coefficients (the Gram-Schmidt
     # collinearity drop does not fire on that construction) — i.e. silently-wrong
     # CATTs, the worst failure mode for an econometrics tool. Until a properly-
-    # validated no-never implementation lands, fail loud. See docs/v1.5.8-IMPL-NOTES.md.
+    # validated no-never implementation lands, fail loud. See docs/architecture/v1.5.8-IMPL-NOTES.md.
     if not np.any(~np.isfinite(cohort)):
         raise SASpecError(
             "SA_NO_NEVER_TREATED: Sun-Abraham in this version requires a never-treated "

@@ -16,7 +16,7 @@ from ..domain import GuardrailIssue, Severity
 from ..term_parser import is_q_quoted_dummy, parse_term
 
 
-def _model_results(run_root: Path) -> list[dict]:
+def read_model_results(run_root: Path) -> list[dict]:
     model_dir = run_root / "model_results"
     if not model_dir.is_dir():
         return []
@@ -26,6 +26,12 @@ def _model_results(run_root: Path) -> list[dict]:
         if isinstance(data, dict) and isinstance(data.get("coefficients"), dict):
             results.append(data)
     return results
+
+
+def _model_results(run_root: Path) -> list[dict]:
+    """Compatibility wrapper for the existing HTTP route import."""
+
+    return read_model_results(run_root)
 
 
 def _normalize_issue_stream(errors: dict, model_results: list[dict]) -> dict:

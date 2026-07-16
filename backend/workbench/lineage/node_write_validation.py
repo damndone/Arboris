@@ -54,6 +54,57 @@ def accepted_context_from(request: NodeWriteOperationRequestV1) -> AcceptedConte
     )
 
 
+def build_rerun_operation_context(
+    runs_root: Path,
+    *,
+    request_id: str,
+    owner_run_id: str,
+    op_node_id: str,
+    active_head_run_id: str,
+) -> NodeWriteOperationRequestV1:
+    """Derive and validate one canonical read-only rerun target context."""
+
+    if not _is_simple_run_id(owner_run_id):
+        raise ValueError("invalid_operation_target: owner_run_id")
+    if not _is_simple_run_id(active_head_run_id):
+        raise ValueError("invalid_operation_target: active_head_run_id")
+
+    run_root = runs_root / owner_run_id
+    if not run_root.exists():
+        raise ValueError("invalid_operation_target: owner_run_id")
+    graph = GraphStore(runs_root=runs_root).read(owner_run_id)
+    if op_node_id not in graph.nodes:
+        raise ValueError("invalid_operation_target: op_node_id")
+
+    node_hash = _read_indexed_node_hash(run_root, op_node_id)
+    if node_hash is None:
+        raise ValueError("context_stale: node_index")
+    owner_resolution: OwnerResolution = (
+        "active_head_contains_node"
+        if owner_run_id == active_head_run_id
+        else "selected_run_hint"
+    )
+    request = NodeWriteOperationRequestV1(
+        request_id=request_id,
+        operation="rerun",
+        context_version=SUPPORTED_CONTEXT_VERSION,
+        context_fingerprint="pending",
+        owner_run_id=owner_run_id,
+        op_node_id=op_node_id,
+        node_hash=node_hash,
+        forest_node_key=node_hash,
+        owner_resolution=owner_resolution,
+        active_head_run_id=active_head_run_id,
+    )
+    request = request.model_copy(
+        update={
+            "context_fingerprint": compute_context_fingerprint(runs_root, request),
+        }
+    )
+    validate_rerun_operation_target(runs_root, request)
+    return request
+
+
 def validate_rerun_operation_target(
     runs_root: Path,
     request: NodeWriteOperationRequestV1,

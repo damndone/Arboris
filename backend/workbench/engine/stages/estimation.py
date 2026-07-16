@@ -243,14 +243,51 @@ def _fit_dcdh(ctx, env):
     return "dcdh_1", primary, None
 
 
+def _ols_robust_se_decision(ctx):
+    """Record the ACTUAL standard-error choice for ols_1 (v1.7 honesty fix)."""
+    from ... import graph_decision_factory as dpf
+
+    covariance = (ctx.artifacts.get("_covariance") or "").strip()
+    if covariance == "unadjusted":
+        return dpf.ols_default_robust_se(variant="nonrobust", explicit=True)
+    if covariance == "clustered":
+        return dpf.ols_default_robust_se(variant="clustered", explicit=True)
+    return dpf.ols_default_robust_se(variant="HC1")
+
+
+def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
+    """Map the requested covariance onto run_ols arguments — honestly.
+
+    v1.7 finding: `_fit_ols` used to hardcode robust=True, silently ignoring
+    an explicit `unadjusted` or `clustered` request that the editable schema,
+    rerun UI, and run_inputs.json all accepted. Every accepted value must now
+    change the fit or fail closed.
+    """
+    covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
+    if covariance == "clustered":
+        from ...cleaning import normalize_column_name
+
+        entity_raw = (ctx.artifacts.get("_entity_col") or "").strip()
+        entity = normalize_column_name(entity_raw) if entity_raw else ""
+        if not entity or entity not in ctx.data.frame.columns:
+            raise ValueError(
+                "OLS_CLUSTER_FIELD_MISSING: clustered covariance for OLS requires "
+                "an entity field naming the cluster column."
+            )
+        return True, entity
+    return covariance != "unadjusted", None
+
+
 def _fit_ols(ctx, env):
+    robust, cluster_col = _ols_covariance_plan(ctx)
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
         x=ctx.artifacts["_normalized_x"],
-        robust=True,
+        robust=robust,
         model_id="ols_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
+        cluster_col=cluster_col,
     )
     return "ols_1", primary, fitted
 
@@ -423,7 +460,7 @@ class EstimationStage:
                 fitted_models[model_id] = fitted
             # OLS path (auto-continuous OR explicit `ols`) records robust SE DP.
             if model_id == "ols_1":
-                _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
+                _robust_se_dp = _ols_robust_se_decision(ctx)
         except ValueError as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
@@ -528,7 +565,7 @@ class EstimationStage:
                 ctx.artifacts["_robust_se_dp"] = _robust_se_dp
                 return ctx
 
-            _robust_se_dp = dpf.ols_default_robust_se(variant="HC1")
+            _robust_se_dp = _ols_robust_se_decision(ctx)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
             model_results.append(("ols_1", ols_result))
             fitted_models["ols_1"] = ols_fitted

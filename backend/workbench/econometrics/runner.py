@@ -115,15 +115,36 @@ def _root_cause_suffix(exc: Exception) -> str:
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
+    cluster_col: str | None = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
     original = smf.ols(formula=formula, data=frame).fit()
-    fitted = original.get_robustcov_results(cov_type="HC1") if robust else original
+    if cluster_col is not None:
+        # Explicit cluster-robust request (v1.7): the cluster column must exist
+        # after cleaning, and groups must align to the rows patsy actually used.
+        if cluster_col not in frame.columns:
+            raise ValueError(
+                "OLS_CLUSTER_FIELD_MISSING: clustered covariance for OLS requires "
+                f"an entity field naming an existing cluster column (got {cluster_col!r})."
+            )
+        row_labels = getattr(original.model.data, "row_labels", None)
+        groups = frame[cluster_col]
+        if row_labels is not None:
+            groups = groups.loc[row_labels]
+        codes = pd.factorize(groups)[0]
+        fitted = original.get_robustcov_results(cov_type="cluster", groups=codes)
+        model_type = "ols_clustered"
+    elif robust:
+        fitted = original.get_robustcov_results(cov_type="HC1")
+        model_type = "ols_robust"
+    else:
+        fitted = original
+        model_type = "ols"
     result = normalize_statsmodels_result(fitted, model_id)
-    result["model_type"] = "ols_robust" if robust else "ols"
+    result["model_type"] = model_type
     return _add_engine(result), original
 
 

@@ -5,7 +5,7 @@ element-wise against a committed `fixest::sunab` oracle (≤1e-8). The construct
 mirrors `feols(y ~ sunab(cohort, year) | id + year)` == the saturated
 `feols(y ~ i(rel, cohort, ref=-1) | id + year)` fit on TREATED-ONLY rows.
 
-Recipe (see docs/v1.5.8-IMPL-NOTES.md — derived & validated to ≤5e-14):
+Recipe (see docs/architecture/v1.5.8-IMPL-NOTES.md — derived & validated to ≤5e-14):
   1. Design rows = finite-cohort (treated) rows; never-treated excluded.
      Interaction columns = cohorts in (finite cohorts EXCEPT ref_cohort).
   2. Two-way FE absorption (alternating id/year demean to convergence) of y and

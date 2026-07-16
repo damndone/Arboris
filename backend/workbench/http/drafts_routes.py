@@ -19,7 +19,11 @@ from ..lineage.pipeline_drafts import DraftHashConflict, DraftLockedForExecution
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import delete_upload_if_unreferenced, verify_upload
 from ..repository.run_repository import _read_manifest, _resolve_project_runs_dir, _resolve_run_root
-from ..services.run_service import _STRUCTURAL_FOCAL_FAMILIES, _parse_focal_x
+from ..services.run_service import (
+    _STRUCTURAL_FOCAL_FAMILIES,
+    _parse_focal_x,
+    parse_column_selector,
+)
 from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
 
 from ..services.draft_service import execute_genesis_draft, execute_rerun_child_draft
@@ -43,7 +47,12 @@ def _inject_focal_x_control(
         return editable_schema
     if any(item.get("key") == "focal_x" for item in editable_schema):
         return editable_schema
-    x_columns = [part.strip() for part in form.get("x", "").split(",") if part.strip()]
+    try:
+        x_columns = parse_column_selector(form.get("x", ""), "x")
+    except ValueError:
+        # Draft schema decoration is best-effort; a malformed selector is
+        # rejected at submit time, not here.
+        return editable_schema
     if not x_columns:
         return editable_schema
     value = _parse_focal_x(form.get("focal_x", ""), x_columns)

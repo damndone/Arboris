@@ -47,6 +47,7 @@ from ..services.run_service import (
     _sse_frame,
     _submit_run,
     _write_upload,
+    parse_column_selector,
 )
 from ._deps import BYTES_PER_GB
 
@@ -64,7 +65,9 @@ async def run_endpoint(
     mode: str = Form("auto"),
     model_type: str = Form("auto"),
     y: str = Form(...),
-    x: str = Form(...),
+    # Optional: an omitted/empty x is a legal empty selector (zero-covariate
+    # DID/CS families). Accepts comma-separated names or a JSON string array.
+    x: str = Form(""),
     file: UploadFile = File(...),
     sheet_name: str = Form(""),
     transpose: str = Form("false"),
@@ -160,7 +163,10 @@ async def batch_run_endpoint(
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
     y_columns = [part.strip() for part in y_list.split(",") if part.strip()]
-    x_columns = [part.strip() for part in x.split(",") if part.strip()]
+    try:
+        x_columns = parse_column_selector(x, "x")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not y_columns:
         raise HTTPException(
             status_code=422,
@@ -208,7 +214,7 @@ def list_runs_endpoint(project_root: str) -> dict:
         manifest_path = entry / "run_manifest.json"
         if not manifest_path.is_file():
             continue
-        summaries.append(_summarize_manifest(read_json(manifest_path)))
+        summaries.append(_summarize_manifest(read_json(manifest_path), run_id=entry.name))
     return {"runs": summaries}
 
 
@@ -217,7 +223,7 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     run_root = _resolve_run_root(project_root, run_id)
     manifest = _read_manifest(run_root)
     _mark_interrupted_if_dead(run_root, manifest)
-    summary = _summarize_manifest(manifest)
+    summary = _summarize_manifest(manifest, run_id=run_id)
     errors_path = run_root / "errors.json"
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
     model_results = _model_results(run_root)
