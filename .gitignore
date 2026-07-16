@@ -44,6 +44,13 @@ frontend/dist/
 # line and tighten triggers to main-only (push:[main] + pull_request:[main]).
 .github/
 
+# Machine-local scratch that must SURVIVE reboots (seeded smoke projects,
+# verification fixtures). /tmp is wrong for these: macOS reclaims it, and the
+# offline smoke LLM config silently evaporating from /tmp is exactly how a
+# "cannot call out" guarantee once expired without anyone noticing. The
+# leading slash anchors to the repo root.
+/local/
+
 # Local-only design-prototype reference (root-level handoff/ + uiux/): the
 # original UI mockups, screenshots, and handoff/QA notes. Kept on disk as a
 # reference but deliberately out of the repo (~4M of prototype scratch). The
