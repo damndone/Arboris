@@ -25,6 +25,25 @@ from workbench.llm.provider_store import (
 API_KEY = "sk-test-secret-key"
 
 
+@pytest.fixture(autouse=True)
+def isolated_provider_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the provider store at an empty temp store file.
+
+    Without this, a REAL local provider configuration (written by the
+    Settings UI into ~/.config/econometrics-workbench/llm-providers.json)
+    leaks into the "not configured" expectations — the suite went red on
+    2026-07-15 the first time a developer machine had an active provider
+    saved. Tests must never read the user's real LLM configuration.
+
+    The file must actually EXIST: an explicit config path whose file is
+    missing now fails closed (no environment fallback), which is its own
+    contract with its own tests — here we want a valid, empty store.
+    """
+    store_path = tmp_path / "llm-providers.json"
+    save_provider_store(ProviderStore(), store_path)
+    monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(store_path))
+
+
 @pytest.fixture
 def api() -> TestClient:
     return TestClient(app)
@@ -340,12 +359,39 @@ class TestReportMode:
         # the node-context header must NOT leak into report mode
         assert "node assistant" not in system_prompt
 
-    def test_unknown_mode_lists_both_supported(self, api: TestClient, configured_env):
+    def test_figure_mode_prompt_forbids_pixels_and_isolates_headers(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        """G2: figure mode must interpret from the numeric source, never pixels."""
+        seen = _install_upstream(monkeypatch, lambda request: _ok_upstream("reading the numbers"))
+        body = {
+            "mode": "workbench_figure_context_v1",
+            "question": "What does this coefficient plot show?",
+            "packet": {
+                "figure_context_version": "figure-ai-context/v1",
+                "figure": {"artifact_id": "coef_plot", "chart_type": "coefficient plot"},
+                "source": {"artifact_id": "ols_1", "kind": "model", "preview_json": "{\"education\": 1.23}"},
+            },
+        }
+        response = api.post("/llm/chat", json=body)
+        assert response.status_code == 200
+
+        system_prompt = json.loads(seen[0].content)["messages"][0]["content"]
+        assert "figure assistant" in system_prompt
+        assert "CANNOT see the image" in system_prompt
+        # the numeric source must travel with the packet
+        assert "education" in system_prompt
+        # neither the node-context nor the report header may leak into figure mode
+        assert "node assistant" not in system_prompt
+        assert "[[c:ID]]" not in system_prompt
+
+    def test_unknown_mode_lists_every_supported_mode(self, api: TestClient, configured_env):
         response = api.post("/llm/chat", json={**self._report_body(), "mode": "bogus"})
         assert response.status_code == 422
         assert response.json()["error"]["details"]["supported_modes"] == [
             "workbench_node_context_v1",
             "workbench_report_v1",
+            "workbench_figure_context_v1",
         ]
 
 
@@ -388,10 +434,75 @@ class TestLlmConfigEndpoint:
         assert config.context_window_tokens == 1_000_000
         assert config.supports_1m is True
 
-    def test_missing_local_storage_preserves_environment_fallback(
+    def test_missing_explicit_store_fails_closed_never_environment_fallback(
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ):
+        """The incident this closes: an offline smoke config file vanished and
+        load_llm_config silently fell back to the operator's REAL provider —
+        one real DeepSeek call left the machine. An explicitly pinned config
+        path that does not exist is a configuration error, not permission to
+        guess another source. This test used to assert the fallback; it now
+        asserts the refusal.
+        """
+
         monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "missing.json"))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        config = load_llm_config()
+
+        assert config.is_configured() is False
+        assert config.source == "explicit_config_missing"
+        assert config.base_url == ""
+        assert config.api_key == ""
+        assert "WORKBENCH_LLM_CONFIG_PATH" in config.configuration_error_message()
+        assert "does not exist" in config.configuration_error_message()
+
+    def test_invalid_explicit_store_fails_closed_never_environment_fallback(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        broken = tmp_path / "broken.json"
+        broken.write_text("{not json", encoding="utf-8")
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(broken))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        config = load_llm_config()
+
+        assert config.is_configured() is False
+        assert config.source == "explicit_config_invalid"
+        assert "not a valid" in config.configuration_error_message()
+
+    def test_missing_explicit_store_refuses_chat_with_the_true_reason(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch, api: TestClient
+    ):
+        """The call-out endpoint must error loudly — and truthfully."""
+
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "missing.json"))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        response = api.post("/llm/chat", json=_chat_body())
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "LLM_NOT_CONFIGURED"
+        assert "WORKBENCH_LLM_CONFIG_PATH" in error["message"]
+        assert "Refusing to fall back" in error["message"]
+
+    def test_environment_fallback_still_works_on_the_default_path(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Fail-closed is scoped to the pinned path; a fresh machine with only
+        env vars and no store file anywhere keeps working."""
+
+        monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(
+            "workbench.llm.provider_store.Path.home", lambda: tmp_path
+        )
         monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
         monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
         monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
@@ -403,6 +514,7 @@ class TestLlmConfigEndpoint:
         assert config.api_key == "env-secret"
         assert config.model == "env-model"
         assert config.timeout_s == 60.0
+        assert config.source == "environment"
         assert config.provider_id == "environment"
         assert config.provider_name == "Environment"
         assert config.source == "environment"
@@ -437,3 +549,100 @@ class TestLlmConfigEndpoint:
         assert body["base_url"] is None
         assert body["model"] is None
         assert body["key_present"] is False
+
+
+class TestFigureVisionOptIn:
+    """v1.7 G2 step 2 — sending the rendered chart is opt-in and capability-gated."""
+
+    PNG = "data:image/png;base64,iVBORw0KGgo="
+
+    def _figure_body(self, **overrides):
+        body = {
+            "mode": "workbench_figure_context_v1",
+            "question": "Interpret this chart.",
+            "packet": {
+                "figure_context_version": "figure-ai-context/v1",
+                "figure": {"artifact_id": "coef_plot", "chart_type": "coefficient plot"},
+                "source": {"artifact_id": "ols_1", "kind": "model", "preview_json": "{\"education\": 1.23}"},
+            },
+        }
+        body.update(overrides)
+        return body
+
+    def _vision_provider(self, tmp_path, monkeypatch, *, vision: bool):
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(tmp_path / "providers.json"))
+        provider = ProviderRecord(
+            id="p1",
+            name="Vision Provider",
+            base_url="https://vision.example.com",
+            model="vmodel",
+            api_key="secret",
+            models=[ModelRecord("V", "vmodel", 128_000, False, vision)],
+        )
+        save_provider_store(ProviderStore(active_provider_id="p1", providers=[provider]))
+
+    def test_text_only_by_default_no_image_part(
+        self, api: TestClient, configured_env, monkeypatch
+    ):
+        seen = _install_upstream(monkeypatch, lambda request: _ok_upstream("ok"))
+        api.post("/llm/chat", json=self._figure_body())
+        payload = json.loads(seen[0].content)
+        # default request carries a plain string content — no image travels
+        assert payload["messages"][1]["content"] == "Interpret this chart."
+        assert "image_url" not in seen[0].content.decode()
+        assert "CANNOT see the image" in payload["messages"][0]["content"]
+
+    def test_opt_in_image_sent_as_multimodal_part_with_vision_header(
+        self, api: TestClient, tmp_path, monkeypatch
+    ):
+        self._vision_provider(tmp_path, monkeypatch, vision=True)
+        seen = _install_upstream(monkeypatch, lambda request: _ok_upstream("ok"))
+
+        response = api.post("/llm/chat", json=self._figure_body(image_data_url=self.PNG))
+        assert response.status_code == 200
+
+        payload = json.loads(seen[0].content)
+        content = payload["messages"][1]["content"]
+        assert content[0] == {"type": "text", "text": "Interpret this chart."}
+        assert content[1]["type"] == "image_url"
+        assert content[1]["image_url"]["url"] == self.PNG
+        header = payload["messages"][0]["content"]
+        # the text-only "cannot see" rule must NOT be claimed once an image is sent
+        assert "CANNOT see the image" not in header
+        assert "chose to send you the rendered" in header
+        # numbers must still come from the numeric source, not the pixels
+        assert "never read off the image" in header
+
+    def test_image_rejected_when_model_is_not_vision_capable(
+        self, api: TestClient, tmp_path, monkeypatch
+    ):
+        self._vision_provider(tmp_path, monkeypatch, vision=False)
+        response = api.post("/llm/chat", json=self._figure_body(image_data_url=self.PNG))
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "LLM_CHAT_VISION_UNSUPPORTED"
+
+    def test_image_rejected_outside_figure_mode(
+        self, api: TestClient, tmp_path, monkeypatch
+    ):
+        self._vision_provider(tmp_path, monkeypatch, vision=True)
+        response = api.post(
+            "/llm/chat",
+            json=self._figure_body(mode="workbench_node_context_v1", image_data_url=self.PNG),
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "LLM_CHAT_IMAGE_NOT_ALLOWED"
+
+    def test_non_png_data_url_rejected(self, api: TestClient, tmp_path, monkeypatch):
+        self._vision_provider(tmp_path, monkeypatch, vision=True)
+        response = api.post(
+            "/llm/chat",
+            json=self._figure_body(image_data_url="https://evil.example.com/x.png"),
+        )
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "LLM_CHAT_IMAGE_INVALID"
+
+    def test_llm_config_exposes_vision_capability(
+        self, api: TestClient, tmp_path, monkeypatch
+    ):
+        self._vision_provider(tmp_path, monkeypatch, vision=True)
+        assert api.get("/llm/config").json()["supports_vision"] is True

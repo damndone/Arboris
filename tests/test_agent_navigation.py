@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.chains import RerunExecutionResult
+from workbench.agent.chains import ChainStore, ForkStore
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.navigation import AgentNavigationProjector
@@ -150,6 +151,10 @@ def link_to(projection, *, kind: str, id: str):
     return next(link for link in projection.links if link.kind == kind and link.id == id)
 
 
+def hierarchy_child(node, *, kind: str, id: str):
+    return next(child for child in node.children if child.ref.kind == kind and child.ref.id == id)
+
+
 def test_projection_links_chain_message_operation_child_run_and_fork(tmp_path: Path):
     fixture = build_confirmed_rerun_fixture(tmp_path)
 
@@ -171,6 +176,105 @@ def test_projection_links_chain_message_operation_child_run_and_fork(tmp_path: P
         kind="agent_session",
         id=fixture.child_session_id,
     ).available
+
+
+def test_session_projection_contains_backend_owned_main_chain_hierarchy(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    projection = AgentNavigationProjector(fixture.project_root).session(
+        fixture.chain_session_id
+    )
+
+    assert projection.hierarchy is not None
+    assert projection.hierarchy.ref.kind == "agent_session"
+    assert projection.hierarchy.ref.id == "main-session"
+
+    source_chain = hierarchy_child(
+        projection.hierarchy,
+        kind="chain",
+        id="chain-a",
+    )
+    assert source_chain.status == "idle"
+    hierarchy_child(source_chain, kind="agent_session", id=fixture.chain_session_id)
+
+    operation = hierarchy_child(source_chain, kind="operation", id=fixture.record_id)
+    assert operation.status == "completed"
+    hierarchy_child(operation, kind="fork", id=fixture.fork_id)
+    hierarchy_child(operation, kind="run", id=fixture.child_run_id)
+
+    child_chain = hierarchy_child(source_chain, kind="chain", id=fixture.child_chain_id)
+    assert child_chain.status == "active"
+    hierarchy_child(child_chain, kind="agent_session", id=fixture.child_session_id)
+
+
+def test_activity_projection_contains_main_chain_operation_diff_and_links(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    activities = AgentNavigationProjector(fixture.project_root).activity()
+
+    assert len(activities) == 1
+    activity = activities[0]
+    assert activity.operation.id == fixture.record_id
+    assert activity.operation.label == "model.rerun · completed"
+    assert activity.main.id == "main-session"
+    assert activity.chain.id == "chain-a"
+    assert activity.diff_ref == {"kind": "canonical", "changed": ["covariance"]}
+    assert activity.verification["passed"] is True
+    assert activity.effect_status == "committed"
+    assert activity.projection_status == "complete"
+    assert {link.kind for link in activity.links} >= {
+        "proposal",
+        "graph_node",
+        "run",
+        "fork",
+        "chain",
+        "agent_session",
+        "diff",
+    }
+    diff = next(link for link in activity.links if link.kind == "diff")
+    assert diff.href["operation_record_id"] == fixture.record_id
+    assert diff.href["diff"] == "1"
+
+
+def test_activity_hierarchy_contains_operation_diff_and_child_links(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    hierarchy = AgentNavigationProjector(fixture.project_root).activity_hierarchy()
+
+    assert hierarchy is not None
+    operation = next(
+        child for child in hierarchy.children[0].children
+        if child.ref.kind == "operation"
+    )
+    diff = next(child for child in operation.children if child.ref.kind == "diff")
+    assert diff.ref.href["operation_record_id"] == fixture.record_id
+    assert diff.status == "available"
+
+
+def test_activity_events_project_durable_lifecycle_and_typed_links(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    events = AgentNavigationProjector(fixture.project_root).activity_events()
+
+    event_types = {event.event_type for event in events}
+    assert {
+        "proposal_ready",
+        "needs_confirmation",
+        "proposal_confirmed",
+        "operation_submitted",
+        "operation_completed",
+    } <= event_types
+    completed = next(event for event in events if event.event_type == "operation_completed")
+    assert completed.session.id == fixture.chain_session_id
+    assert completed.chain.id == "chain-a"
+    assert completed.details["record_id"] == fixture.record_id
+    assert {link.kind for link in completed.links} >= {
+        "operation",
+        "fork",
+        "run",
+        "chain",
+        "agent_session",
+    }
 
 
 def test_projection_marks_missing_relationship_unavailable(tmp_path: Path):
@@ -204,3 +308,82 @@ def test_graph_projection_requires_a_real_run(tmp_path: Path, selector: str):
 
     assert projection.subject.kind == "graph_node"
     assert projection.subject.available is True
+
+
+def test_child_graph_projection_links_back_to_child_agent_and_operation(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    projection = AgentNavigationProjector(fixture.project_root).graph(
+        run_id=fixture.child_run_id,
+        node_ref=fixture.child_node_ref,
+        forest_node_key=f"{fixture.child_run_id}::{fixture.child_node_ref}",
+    )
+
+    assert link_to(projection, kind="operation", id=fixture.record_id).available
+    assert link_to(
+        projection,
+        kind="agent_session",
+        id=fixture.child_session_id,
+    ).available
+
+
+def test_graph_projection_includes_source_fork_without_operation_record(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+    repository = fixture.repository
+    repository.create_session("agent-orphan-child", chain_id="chain-orphan", role="chain")
+    ChainStore(fixture.project_root / "workbench").create_child(
+        child_chain_id="chain-orphan",
+        source_chain_id="chain-a",
+        run_family_id="family-a",
+        source_run_id=fixture.source_run_id,
+        source_node_ref=fixture.source_node_ref,
+        fork_id="fork-source-only",
+        child_session_id="agent-orphan-child",
+    )
+    ForkStore(fixture.project_root / "workbench").create(
+        fork_id="fork-source-only",
+        source_chain_id="chain-a",
+        source_node_ref=fixture.source_node_ref,
+        source_session_id=fixture.chain_session_id,
+        source_session_entry_id="entry-source-only",
+        inherited_context_fingerprint="context-1",
+        child_chain_id="chain-orphan",
+        child_session_id="agent-orphan-child",
+    )
+
+    projection = AgentNavigationProjector(fixture.project_root).graph(
+        run_id=fixture.source_run_id,
+        node_ref=fixture.source_node_ref,
+        forest_node_key=fixture.source_forest_node_key,
+    )
+
+    assert link_to(projection, kind="fork", id="fork-source-only").available
+    assert link_to(projection, kind="chain", id="chain-orphan").available
+    assert link_to(projection, kind="agent_session", id="agent-orphan-child").available
+
+
+def test_graph_projection_rejects_inconsistent_forest_key_without_links(tmp_path: Path):
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+
+    projection = AgentNavigationProjector(fixture.project_root).graph(
+        run_id=fixture.source_run_id,
+        node_ref=fixture.source_node_ref,
+        forest_node_key="run-child::model:ols_1",
+    )
+
+    assert projection.subject.available is False
+    assert projection.links == ()
+
+
+def test_read_only_graph_projection_does_not_create_agent_storage(tmp_path: Path):
+    project_root = tmp_path / "empty-project"
+    project_root.mkdir()
+
+    projection = AgentNavigationProjector(project_root).graph(
+        run_id="unknown-run",
+        node_ref="model:ols_1",
+        forest_node_key=None,
+    )
+
+    assert projection.subject.available is False
+    assert not (project_root / "workbench").exists()

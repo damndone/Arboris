@@ -216,6 +216,35 @@ def test_get_session_projection_returns_typed_links(tmp_path: Path) -> None:
         link["href"].get("operation_record_id") == fixture.record_id
         for link in body["projection"]["links"]
     )
+    hierarchy = body["projection"]["hierarchy"]
+    assert hierarchy["ref"]["id"] == "main-session"
+    source_chain = next(
+        child for child in hierarchy["children"]
+        if child["ref"]["id"] == "chain-a"
+    )
+    assert any(
+        child["ref"]["id"] == fixture.child_chain_id
+        for child in source_chain["children"]
+    )
+
+
+def test_agent_messages_include_durable_navigation_refs(tmp_path: Path) -> None:
+    from test_agent_navigation import build_confirmed_rerun_fixture
+
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            f"/agent/sessions/{fixture.chain_session_id}",
+            params={"project_root": str(fixture.project_root)},
+        )
+
+    assert response.status_code == 200
+    messages = response.json()["messages"]
+    user_message = next(message for message in messages if message["role"] == "user")
+    assert any(
+        link["href"].get("operation_record_id") == fixture.record_id
+        for link in user_message["navigation"]
+    )
 
 
 def test_graph_projection_rejects_unknown_scope(tmp_path: Path) -> None:
@@ -247,6 +276,106 @@ def test_get_operation_projection_is_read_only(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.json()["operation"]["record_id"] == fixture.record_id
+
+
+def test_get_activity_projection_returns_durable_operation_and_diff(tmp_path: Path) -> None:
+    from test_agent_navigation import build_confirmed_rerun_fixture
+
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            "/agent/activity",
+            params={"project_root": str(fixture.project_root)},
+        )
+
+    assert response.status_code == 200
+    activities = response.json()["activities"]
+    assert len(activities) == 1
+    activity = activities[0]
+    assert activity["kind"] == "operation"
+    assert activity["activity_id"] == fixture.record_id
+    assert activity["main"]["id"] == "main-session"
+    assert activity["chain"]["id"] == "chain-a"
+    assert activity["operation"]["id"] == fixture.record_id
+    assert activity["status"] == "completed"
+    assert activity["effect_status"] == "committed"
+    assert activity["projection_status"] == "complete"
+    assert activity["diff_ref"]["changed"] == ["covariance"]
+    assert activity["verification"]["passed"] is True
+    assert {link["kind"] for link in activity["links"]} >= {
+        "proposal",
+        "graph_node",
+        "run",
+        "fork",
+        "chain",
+        "agent_session",
+        "diff",
+    }
+    assert activity["diff"]["href"]["diff"] == "1"
+    hierarchy = response.json()["hierarchy"]
+    assert hierarchy["ref"]["kind"] == "agent_session"
+    assert any(
+        child["ref"]["kind"] == "operation"
+        and any(grandchild["ref"]["kind"] == "diff" for grandchild in child["children"])
+        for child in hierarchy["children"][0]["children"]
+    )
+    assert {event["event_type"] for event in response.json()["events"]} >= {
+        "proposal_ready",
+        "proposal_confirmed",
+        "operation_completed",
+    }
+
+
+def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/fork-proposals",
+            params={"project_root": str(project_root)},
+            json={
+                "source_run_id": "run-a",
+                "source_node_ref": "model:ols_1",
+                "active_head_run_id": "run-a",
+                "reason": "从当前图节点开启新的 Agent 分支",
+            },
+        )
+
+        assert created.status_code == 200, created.text
+        body = created.json()
+        assert body["proposal"]["operation_id"] == "graph.fork"
+        assert body["navigation"]["kind"] == "proposal"
+        session_id = body["session_id"]
+        proposal = body["proposal"]
+
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root": str(project_root)},
+            json={
+                "revision": proposal["revision"],
+                "fingerprint": proposal["fingerprint"],
+                "active_head_run_id": "run-a",
+            },
+        )
+
+        assert confirmed.status_code == 200, confirmed.text
+        operation = confirmed.json()["operation"]
+        assert operation["operation_id"] == "graph.fork"
+        assert operation["status"] == "completed"
+        assert operation["verification"]["passed"] is True
+        assert operation["execution"]["execution_key"].startswith("exec_")
+        assert operation["execution"]["bindings"]["fork_id"] == operation["outputs"]["fork_id"]
+        assert operation["execution"]["bindings"]["child_chain_id"] == operation["outputs"]["child_chain_id"]
+        assert "target_run_id" not in operation["outputs"]
+        assert operation["outputs"]["fork_id"]
+        assert operation["outputs"]["child_chain_id"]
+        assert operation["outputs"]["child_session_id"]
+        assert sorted(path.name for path in (project_root / "runs").iterdir()) == ["run-a"]
+        assert (project_root / "workbench" / "forks").is_dir()
 
 
 class ToolCallingAdapter:
@@ -748,13 +877,25 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
             tool for tool in adapter.requests[0].tools if tool.get("tool_id") == "propose_operation"
         )
         proposal_schema = proposal_tool["input_schema"]
-        assert proposal_schema["properties"]["target"]["required"] == [
+        # The envelope stays shape-agnostic: a `oneOf` is an AND with its
+        # parent, so requiring model.rerun's target here would make every other
+        # operation unproposable (it did — data.columns.cast could not be
+        # proposed at all). Each operation's real shape lives in its branch.
+        assert proposal_schema["properties"]["target"] == {"type": "object"}
+        assert proposal_schema["properties"]["preconditions"] == {"type": "object"}
+
+        rerun_branch = next(
+            item
+            for item in proposal_schema["oneOf"]
+            if item["properties"]["operation_id"]["const"] == "model.rerun"
+        )
+        assert rerun_branch["properties"]["target"]["required"] == [
             "run_id",
             "node_ref",
             "node_hash",
             "forest_node_key",
         ]
-        assert proposal_schema["properties"]["preconditions"]["required"] == [
+        assert rerun_branch["properties"]["preconditions"]["required"] == [
             "context_version",
             "context_fingerprint",
             "active_head_run_id",
@@ -839,6 +980,148 @@ class ProposingAdapter:
             return
         yield ModelStreamEvent.text_delta(request.request_id, "已生成待确认的 rerun 提议。")
         yield ModelStreamEvent.done(request.request_id)
+
+
+def test_natural_language_turn_can_propose_registry_enabled_graph_fork(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from workbench.http import agent_routes
+
+    ProposingAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    ProposingAdapter.proposal_arguments = {
+        "operation_id": "graph.fork",
+        "operation_version": "v1",
+        "target": {
+            "run_id": "run-a",
+            "node_ref": "model:ols_1",
+            "node_hash": "model-hash-from-model",
+            "forest_node_key": "forest-key-from-model",
+        },
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "fingerprint-from-model",
+            "active_head_run_id": "run-a",
+            "owner_resolution": "model-guess",
+        },
+        "changes": {"reason": "尝试另一套稳健标准误"},
+        "evidence_refs": ["node:model:ols_1"],
+        "expected_effect": ["创建一个新的 Agent 分支"],
+        "risks": ["分支尚未执行新的统计 run"],
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        session_id = created.json()["session_id"]
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "从当前节点创建一个新分支。"},
+        )
+
+    assert turn.status_code == 200, turn.text
+    proposals = turn.json()["session"]["proposals"]
+    assert len(proposals) == 1
+    proposal = proposals[0]
+    assert proposal["operation_id"] == "graph.fork"
+    assert proposal["target"]["node_hash"] != "model-hash-from-model"
+    assert proposal["target"]["forest_node_key"] != "forest-key-from-model"
+    assert proposal["target"]["source_session_entry_id"]
+
+    with TestClient(app) as client:
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root": str(project_root)},
+            json={
+                "revision": proposal["revision"],
+                "fingerprint": proposal["fingerprint"],
+                "active_head_run_id": "run-a",
+            },
+        )
+
+    assert confirmed.status_code == 200, confirmed.text
+    operation = confirmed.json()["operation"]
+    assert operation["operation_id"] == "graph.fork"
+    assert operation["status"] == "completed"
+    assert "target_run_id" not in operation["outputs"]
+    assert operation["execution"]["bindings"]["fork_id"] == operation["outputs"]["fork_id"]
+    assert operation["verification"]["checks"] == {
+        "fork_record": True,
+        "child_chain": True,
+        "child_session": True,
+    }
+    assert not list((project_root / "runs").glob("run-*child*"))
+
+
+def test_unsupported_natural_language_operation_creates_no_proposal_or_effect(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from workbench.http import agent_routes
+
+    ProposingAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", ProposingAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    ProposingAdapter.proposal_arguments = {
+        "operation_id": "data.cleaning",
+        "operation_version": "v1",
+        "target": {
+            "run_id": "run-a",
+            "node_ref": "model:ols_1",
+            "node_hash": "model-hash-from-model",
+            "forest_node_key": "forest-key-from-model",
+        },
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "fingerprint-from-model",
+            "active_head_run_id": "run-a",
+            "owner_resolution": "model-guess",
+        },
+        "changes": {"rule": "drop missing values"},
+        "evidence_refs": [],
+        "expected_effect": ["change data"],
+        "risks": [],
+    }
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        session_id = created.json()["session_id"]
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "直接修改缺失值清洗规则。"},
+        )
+
+    assert turn.status_code == 200, turn.text
+    assert turn.json()["session"]["proposals"] == []
+    assert not list((project_root / "workbench" / "operation-records").glob("*.jsonl"))
+    assert not list((project_root / "runs").glob("run-*child*"))
 
 
 def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
@@ -960,7 +1243,9 @@ def test_confirmed_proposal_executes_rerun_and_reconciles_to_completion(
         # Confirmation EXECUTES: the child run is submitted through the
         # request-independent rerun service before the response returns.
         assert operation["status"] == "running"
+        assert operation["execution"]["execution_key"].startswith("exec_")
         child_run_id = operation["outputs"]["target_run_id"]
+        assert operation["execution"]["bindings"]["child_run_id"] == child_run_id
         assert child_run_id and child_run_id != parent_run_id
         child_inputs = json.loads(
             (project.root / "runs" / child_run_id / "run_inputs.json").read_text()

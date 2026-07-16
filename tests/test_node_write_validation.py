@@ -8,6 +8,7 @@ from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 from workbench.lineage.node_write_validation import (
     NodeWriteOperationRequestV1,
+    SUPPORTED_CONTEXT_VERSION,
     compute_context_fingerprint,
     validate_rerun_operation_target,
 )
@@ -115,6 +116,41 @@ def test_matching_node_index_hash_passes(tmp_path: Path):
     _write_node_index(tmp_path)
 
     validate_rerun_operation_target(tmp_path, _valid_request(tmp_path))
+
+
+def test_build_rerun_operation_context_derives_canonical_target(tmp_path: Path):
+    import workbench.lineage.node_write_validation as validation
+
+    builder = getattr(validation, "build_rerun_operation_context", None)
+    assert callable(builder), "canonical context builder is not registered"
+    _write_graph(tmp_path, "run_a")
+    _write_node_index(tmp_path)
+    run_root = tmp_path / "run_a"
+    (run_root / "run_inputs.json").write_text(
+        json.dumps({"rerun_of": None, "form": {"model_type": "ols"}}),
+        encoding="utf-8",
+    )
+    (run_root / "run_manifest.json").write_text(
+        json.dumps({"status": "completed", "started_at": "2026-07-14T00:00:00+00:00"}),
+        encoding="utf-8",
+    )
+
+    request = builder(
+        tmp_path,
+        request_id="inspect-1",
+        owner_run_id="run_a",
+        op_node_id="model:ols_1",
+        active_head_run_id="run_a",
+    )
+
+    assert request.context_version == SUPPORTED_CONTEXT_VERSION
+    assert request.context_fingerprint.startswith("nocv1:")
+    assert request.owner_run_id == "run_a"
+    assert request.op_node_id == "model:ols_1"
+    assert request.node_hash == "hash_a"
+    assert request.forest_node_key == "hash_a"
+    assert request.owner_resolution == "active_head_contains_node"
+    assert request.active_head_run_id == "run_a"
 
 
 def test_context_fingerprint_mismatch_fails_closed(tmp_path: Path):

@@ -154,3 +154,82 @@ def test_run_endpoint_accepts_valid_iv_endog(tmp_path):
     kw = m.call_args.kwargs
     assert kw["iv_endog"] == ["educ"]
     assert kw["iv_instruments"] == ["dist"]
+
+
+# --- x column-selector wire format (v1.7 smoke finding) -----------------------
+#
+# `x` historically was comma-separated while iv_endog/iv_instruments are JSON
+# arrays. JSON-array x "worked" only because normalize_column_name stripped the
+# brackets, and `x=[]` produced a blocked run with `missing_columns: [""]`.
+# The selector now accepts BOTH forms explicitly, and an empty x is legal over
+# HTTP so zero-covariate DID/CS families can be submitted (the engine and
+# run_workflow tests already support x=[]).
+
+
+def _submit_x(client, root, x_value: str | None, model_type: str = "panel_ols"):
+    data = {
+        "project_root": root, "mode": "auto", "model_type": model_type,
+        "y": "y", "entity_col": "firm", "time_col": "yr",
+    }
+    if x_value is not None:
+        data["x"] = x_value
+    with patch(
+        "workbench.services.run_service._run_workflow",
+        return_value={"run_id": "r", "status": "succeeded"},
+    ) as m:
+        resp = client.post("/runs", data=data,
+                           files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
+        for _ in range(100):
+            if m.call_args is not None or resp.status_code != 200:
+                break
+            time.sleep(0.05)
+    return resp, m
+
+
+def test_run_endpoint_accepts_json_array_x(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+    resp, m = _submit_x(client, root, '["x"]')
+    assert resp.status_code == 200
+    assert m.call_args.args[5] == ["x"]
+
+
+def test_run_endpoint_accepts_empty_json_array_x(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+    resp, m = _submit_x(client, root, "[]")
+    assert resp.status_code == 200
+    assert m.call_args.args[5] == []
+
+
+def test_run_endpoint_accepts_omitted_x_for_did_families(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+    resp, m = _submit_x(client, root, None)
+    assert resp.status_code == 200
+    assert m.call_args.args[5] == []
+
+
+def test_run_endpoint_rejects_malformed_json_x(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+    resp, _ = _submit_x(client, root, '["a"')
+    assert resp.status_code == 422
+    assert "x" in str(resp.json()["detail"])
+
+
+def test_run_endpoint_rejects_non_string_json_x(tmp_path):
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+    resp, _ = _submit_x(client, root, "[1, 2]")
+    assert resp.status_code == 422
