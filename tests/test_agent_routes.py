@@ -378,6 +378,47 @@ def test_graph_fork_proposal_route_confirms_into_child_agent_without_child_run(
         assert (project_root / "workbench" / "forks").is_dir()
 
 
+def test_graph_fork_proposal_rejects_a_request_head_outside_chain_scope(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    run_b = project_root / "runs" / "run-b"
+    run_b.mkdir()
+    (run_b / "run_manifest.json").write_text(
+        json.dumps({"status": "completed"}),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        session = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-b",
+                "context_packet": {},
+            },
+        )
+        assert session.status_code == 200, session.text
+
+        proposal = client.post(
+            "/agent/fork-proposals",
+            params={"project_root": str(project_root)},
+            json={
+                "session_id": session.json()["session_id"],
+                "source_run_id": "run-a",
+                "source_node_ref": "model:ols_1",
+                "active_head_run_id": "run-a",
+            },
+        )
+
+    assert proposal.status_code == 409
+    assert proposal.json()["error"]["code"] == "AGENT_PROPOSAL_STALE"
+
+
 class ToolCallingAdapter:
     """First turn asks for inspect_node_context, second turn summarizes."""
 
@@ -690,12 +731,22 @@ def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
         first = client.post(
             "/agent/sessions",
             params={"project_root": str(project_root)},
-            json={"role": "chain", "chain_id": "chain-a", "context_packet": {}},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": {},
+            },
         ).json()["session_id"]
         second = client.post(
             "/agent/sessions",
             params={"project_root": str(project_root)},
-            json={"role": "chain", "chain_id": "chain-b", "context_packet": {}},
+            json={
+                "role": "chain",
+                "chain_id": "chain-b",
+                "run_id": "run-a",
+                "context_packet": {},
+            },
         ).json()["session_id"]
         proposal = _create_route_proposal(project_root, session_id=first)
 
@@ -732,6 +783,53 @@ def test_proposal_confirmation_is_scoped_and_stale_context_fails_closed(
         assert not list((project_root / "workbench" / "operation-records").glob("*.jsonl"))
 
 
+def test_proposal_confirmation_uses_chain_store_active_head(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A request must not replace the ChainStore's authoritative active head."""
+    from workbench.http import agent_routes
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_inspectable_run(project_root)
+    run_b = project_root / "runs" / "run-b"
+    run_b.mkdir()
+    (run_b / "run_manifest.json").write_text(
+        json.dumps({"status": "completed"}),
+        encoding="utf-8",
+    )
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-b",
+                "context_packet": _context_packet(),
+            },
+        )
+        assert created.status_code == 200, created.text
+        session_id = created.json()["session_id"]
+
+        proposal = _create_route_proposal(project_root, session_id=session_id)
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal.proposal_id}/confirm",
+            params={"project_root": str(project_root)},
+            json={
+                "revision": proposal.revision,
+                "fingerprint": proposal.fingerprint,
+                "active_head_run_id": "run-a",
+            },
+        )
+
+    assert confirmed.status_code == 409
+    assert confirmed.json()["error"]["code"] == "AGENT_PROPOSAL_STALE"
+
+
 def test_proposal_decline_is_a_scoped_append_only_decision(
     tmp_path: Path,
     monkeypatch,
@@ -748,7 +846,12 @@ def test_proposal_decline_is_a_scoped_append_only_decision(
         session_id = client.post(
             "/agent/sessions",
             params={"project_root": str(project_root)},
-            json={"role": "chain", "chain_id": "chain-a", "context_packet": {}},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": {},
+            },
         ).json()["session_id"]
         proposal = _create_route_proposal(project_root, session_id=session_id)
 

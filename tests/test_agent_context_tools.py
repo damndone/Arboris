@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.core import AgentCore
+from workbench.agent.chains import ChainStore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import JsonlSessionRepository
@@ -233,6 +234,8 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert result.output["context_version"] == "node-operation-context/v1"
     assert result.output["context_fingerprint"].startswith("nocv1:")
     assert result.output["owner_run_id"] == "run-a"
+
+
     assert result.output["op_node_id"] == "model:ols_1"
     assert result.output["node_hash"] == "hash-a"
     assert result.output["forest_node_key"] == "hash-a"
@@ -388,6 +391,40 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         for path in project_root.rglob("*")
         if path.is_file()
     }
+
+
+def test_managed_chain_context_tool_rejects_a_forged_active_head(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    ChainStore(project_root / "workbench").create_root(
+        chain_id="chain-a",
+        run_family_id="legacy-family:run-b",
+        active_head_run_id="run-b",
+        agent_session_id="chain-session",
+    )
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-forged-head",
+                "tool_id": "inspect_node_context",
+                "arguments": {
+                    "request_id": "inspect-forged-head",
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is False
+    assert result.error == "ChainHeadConflict"
 
 
 def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(

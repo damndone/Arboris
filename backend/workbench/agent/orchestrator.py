@@ -33,6 +33,7 @@ from ..data_operations import (
 )
 from ..lineage.run_inputs import read_run_inputs
 from .chains import (
+    ChainHeadConflict,
     ChainStore,
     ForkStore,
     RerunExecutionRequest,
@@ -433,6 +434,21 @@ class WorkbenchOrchestrator:
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
         self._lease_owner = f"agent:{uuid4().hex}"
+
+    def _resolve_chain_head(
+        self,
+        chain_id: str,
+        requested_active_head_run_id: str | None,
+    ) -> str | None:
+        """Read a managed Chain head without breaking legacy/unit-only callers."""
+
+        try:
+            return ChainStore(self.repository.root, create=False).resolve_active_head(
+                chain_id,
+                requested_active_head_run_id=requested_active_head_run_id,
+            )
+        except KeyError:
+            return requested_active_head_run_id
 
     def create_proposal(
         self,
@@ -1485,6 +1501,13 @@ class WorkbenchOrchestrator:
             record.operation_id,
             record.operation_version,
         )
+        try:
+            current_active_head_run_id = self._resolve_chain_head(
+                record.chain_id,
+                current_active_head_run_id,
+            )
+        except ChainHeadConflict as exc:
+            raise ProposalStaleError(str(exc)) from exc
         handler = _OrchestratorOperationHandler(
             self,
             executor_key=definition.executor_key,
@@ -1896,6 +1919,16 @@ class WorkbenchOrchestrator:
 
         target = dict(arguments.get("target") or {})
         preconditions = dict(arguments.get("preconditions") or {})
+        metadata = self.repository.get_metadata(session_id)
+        chain_id = metadata.get("chain_id")
+        if isinstance(chain_id, str) and chain_id:
+            try:
+                preconditions["active_head_run_id"] = self._resolve_chain_head(
+                    chain_id,
+                    str(preconditions.get("active_head_run_id")),
+                )
+            except ChainHeadConflict as exc:
+                raise ValueError("active_head_run_id: " + str(exc)) from exc
         snapshot = inspect(
             InspectNodeContextRequest(
                 request_id=f"propose:{target.get('run_id')}",
@@ -1911,7 +1944,6 @@ class WorkbenchOrchestrator:
         preconditions["owner_resolution"] = snapshot["owner_resolution"]
         preconditions["active_head_run_id"] = snapshot["active_head_run_id"]
         if operation_id == "graph.fork":
-            metadata = self.repository.get_metadata(session_id)
             current_leaf = metadata.get("leaf_entry_id")
             if not isinstance(current_leaf, str) or not current_leaf:
                 raise ValueError("graph_fork_source_entry_missing")

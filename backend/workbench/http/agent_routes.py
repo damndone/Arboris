@@ -11,6 +11,12 @@ from uuid import uuid4
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..agent.chains import (
+    ChainHeadConflict,
+    ChainHeadUnavailable,
+    ChainStore,
+    ensure_chain_root,
+)
 from ..agent.context_tools import NodeOperationContextProvider
 from ..agent.context_tools import InspectNodeContextRequest
 from ..agent.core import AgentCore
@@ -138,6 +144,69 @@ def _stores(root: Path) -> tuple[JsonlSessionRepository, AgentEventStream]:
     # `workbench/` namespace, kept out of the runs/graph scanners' inputs.
     storage_root = root / "workbench"
     return JsonlSessionRepository(storage_root), AgentEventStream(storage_root)
+
+
+def _context_active_head(packet: dict[str, Any]) -> str | None:
+    direct = packet.get("active_head_run_id")
+    if isinstance(direct, str) and direct:
+        return direct
+    ownership = packet.get("ownership")
+    if isinstance(ownership, dict):
+        nested = ownership.get("active_head_run_id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None
+
+
+def _ensure_chain_scope(
+    root: Path,
+    *,
+    chain_id: str,
+    active_head_run_id: str,
+    agent_session_id: str,
+) -> dict[str, Any]:
+    try:
+        return ensure_chain_root(
+            root / "workbench",
+            runs_root=root / "runs",
+            chain_id=chain_id,
+            active_head_run_id=active_head_run_id,
+            agent_session_id=agent_session_id,
+        )
+    except ChainHeadConflict as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_CHAIN_SCOPE_CONFLICT",
+            message="The Chain session is outside the durable active-head scope.",
+            details={"chain_id": chain_id, "reason": str(exc)},
+        ) from exc
+
+
+def _authoritative_active_head(
+    root: Path,
+    *,
+    chain_id: str,
+    requested_active_head_run_id: str | None,
+) -> str:
+    try:
+        return ChainStore(root / "workbench", create=False).resolve_active_head(
+            chain_id,
+            requested_active_head_run_id=requested_active_head_run_id,
+        )
+    except KeyError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_CHAIN_NOT_MANAGED",
+            message="The Chain has no durable active-head record.",
+            details={"chain_id": chain_id},
+        ) from exc
+    except (ChainHeadConflict, ChainHeadUnavailable) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_STALE",
+            message="The durable Chain active head changed before this operation.",
+            details={"chain_id": chain_id, "reason": str(exc)},
+        ) from exc
 
 
 def _context_serialized(packet: dict[str, Any]) -> tuple[str, str]:
@@ -373,6 +442,11 @@ def _current_proposal_context_fingerprint(
 ) -> str:
     """Re-derive the current node context before creating a confirmation record."""
 
+    active_head_run_id = _authoritative_active_head(
+        root,
+        chain_id=str(proposal.chain_id),
+        requested_active_head_run_id=active_head_run_id,
+    )
     if proposal.operation_id == "data.columns.cast":
         return _current_data_columns_cast_fingerprint(root, proposal)
     if proposal.operation_id not in {"model.rerun", "graph.fork"}:
@@ -427,7 +501,25 @@ def create_agent_session(
     repository, events = _stores(root)
     session_id = f"agent_{body.role}_{uuid4().hex}"
     chain_id = body.chain_id or f"project:{root}"
+    active_head_run_id = body.run_id or _context_active_head(body.context_packet)
+    if body.role == "chain" and active_head_run_id:
+        try:
+            _authoritative_active_head(
+                root,
+                chain_id=chain_id,
+                requested_active_head_run_id=active_head_run_id,
+            )
+        except WorkbenchAPIError as exc:
+            if exc.code != "AGENT_CHAIN_NOT_MANAGED":
+                raise
     repository.create_session(session_id, chain_id=chain_id, role=body.role)
+    if body.role == "chain" and active_head_run_id:
+        _ensure_chain_scope(
+            root,
+            chain_id=chain_id,
+            active_head_run_id=active_head_run_id,
+            agent_session_id=session_id,
+        )
     repository.append(
         session_id,
         "custom_message",
@@ -594,6 +686,12 @@ def _ensure_fork_source_session(
         session_id = f"agent_chain_fork_{uuid4().hex}"
         chain_id = body.chain_id or f"chain:{body.source_run_id}"
         metadata = repository.create_session(session_id, chain_id=chain_id, role="chain")
+        _ensure_chain_scope(
+            root,
+            chain_id=chain_id,
+            active_head_run_id=body.active_head_run_id,
+            agent_session_id=session_id,
+        )
         context = {
             "packet_version": "agent/fork-context/v1",
             "context_fingerprint": snapshot.get("context_fingerprint"),
@@ -678,13 +776,21 @@ def create_agent_fork_proposal(
     """Create a confirmation-gated graph.fork proposal from verified context."""
 
     root = _project_root(project_root)
+    authoritative_active_head_run_id = body.active_head_run_id
+    if body.session_id:
+        _repository, _events, metadata = _get_session(root, body.session_id)
+        authoritative_active_head_run_id = _authoritative_active_head(
+            root,
+            chain_id=str(metadata.get("chain_id")),
+            requested_active_head_run_id=body.active_head_run_id,
+        )
     try:
         snapshot = NodeOperationContextProvider(root).inspect_node_context(
             InspectNodeContextRequest(
                 request_id=f"fork-proposal:{body.source_run_id}:{body.source_node_ref}",
                 owner_run_id=body.source_run_id,
                 op_node_id=body.source_node_ref,
-                active_head_run_id=body.active_head_run_id,
+                active_head_run_id=authoritative_active_head_run_id,
             )
         )
     except (KeyError, OSError, ValueError) as exc:
@@ -904,10 +1010,15 @@ async def confirm_agent_proposal(
         session_id=session_id,
         chain_id=metadata.get("chain_id"),
     )
+    authoritative_active_head_run_id = _authoritative_active_head(
+        root,
+        chain_id=str(proposal.chain_id),
+        requested_active_head_run_id=body.active_head_run_id,
+    )
     current_context_fingerprint = _current_proposal_context_fingerprint(
         root,
         proposal,
-        active_head_run_id=body.active_head_run_id,
+        active_head_run_id=authoritative_active_head_run_id,
     )
     orchestrator = WorkbenchOrchestrator(
         repository,
@@ -922,7 +1033,7 @@ async def confirm_agent_proposal(
             fingerprint=body.fingerprint,
             actor_type="user",
             current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=body.active_head_run_id,
+            current_active_head_run_id=authoritative_active_head_run_id,
         )
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
@@ -946,7 +1057,7 @@ async def confirm_agent_proposal(
             record.record_id,
             project_root=root,
             current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=body.active_head_run_id,
+            current_active_head_run_id=authoritative_active_head_run_id,
         )
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(

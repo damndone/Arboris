@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json
+from .chains import ChainHeadConflict, ChainStore
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..diagnostic_preview.artifact_manifest import build_artifact_manifest
 from ..graph_store import GraphStore, graph_to_json
@@ -90,6 +91,26 @@ class NodeOperationContextProvider:
     def __init__(self, project_root: Path | str) -> None:
         self.project_root = Path(project_root).resolve()
 
+    def _tool_active_head(self, chain_id: str, requested: str) -> str:
+        """Use the durable head when this tool belongs to a managed Chain.
+
+        Legacy read-only sessions have no ChainStore record yet and retain the
+        existing selected-run behavior. Mutation canonicalization and HTTP
+        confirmation require a managed record before they can proceed.
+        """
+
+        try:
+            return ChainStore(
+                self.project_root / "workbench", create=False
+            ).resolve_active_head(
+                chain_id,
+                requested_active_head_run_id=requested,
+            )
+        except KeyError:
+            return requested
+        except ChainHeadConflict:
+            raise
+
     def tool_definitions(
         self,
         *,
@@ -112,7 +133,9 @@ class NodeOperationContextProvider:
                     request_id=str(arguments.get("request_id") or "inspect-node-context"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                 )
             )
 
@@ -129,7 +152,9 @@ class NodeOperationContextProvider:
                     ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                     operation_id=str(arguments["operation_id"]),
                     operation_version=str(arguments.get("operation_version") or "v1"),
                 ),
@@ -147,7 +172,9 @@ class NodeOperationContextProvider:
                     request_id=str(arguments.get("request_id") or "inspect-diagnostics"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                 )
             )
 
@@ -162,7 +189,9 @@ class NodeOperationContextProvider:
                     request_id=str(arguments.get("request_id") or "inspect-result-summary"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                 )
             )
 
@@ -177,7 +206,9 @@ class NodeOperationContextProvider:
                     request_id=str(arguments.get("request_id") or "inspect-artifact-preview"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                 )
             )
 
@@ -192,7 +223,9 @@ class NodeOperationContextProvider:
                     request_id=str(arguments.get("request_id") or "inspect-data-schema"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
-                    active_head_run_id=str(arguments["active_head_run_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
                 )
             )
 

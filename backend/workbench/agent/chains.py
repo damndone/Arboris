@@ -9,6 +9,49 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from ..artifacts import read_json, write_json
+from ..lineage.family import scan_family
+
+
+class ChainHeadConflict(ValueError):
+    """The caller supplied a head that differs from the durable chain head."""
+
+
+class ChainHeadUnavailable(ValueError):
+    """A managed chain does not currently have a usable active head."""
+
+
+def legacy_family_anchor(runs_root: Path | str, run_id: str) -> str:
+    """Return the deterministic family id used when adopting a legacy run."""
+
+    family = scan_family(Path(runs_root), run_id)
+    root_run_id = family.ancestors[-1] if family.ancestors else run_id
+    return f"legacy-family:{root_run_id}"
+
+
+def ensure_chain_root(
+    workbench_root: Path | str,
+    *,
+    runs_root: Path | str,
+    chain_id: str,
+    active_head_run_id: str,
+    agent_session_id: str,
+) -> dict[str, Any]:
+    """Create or validate the managed record for a Chain Agent session."""
+
+    store = ChainStore(workbench_root)
+    try:
+        store.resolve_active_head(
+            chain_id,
+            requested_active_head_run_id=active_head_run_id,
+        )
+        return store.get(chain_id)
+    except KeyError:
+        return store.create_root(
+            chain_id=chain_id,
+            run_family_id=legacy_family_anchor(runs_root, active_head_run_id),
+            active_head_run_id=active_head_run_id,
+            agent_session_id=agent_session_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -108,6 +151,54 @@ class ChainStore(_JsonRecordStore):
 
     def __init__(self, root: Path | str, *, create: bool = True) -> None:
         super().__init__(root, "chains", create=create)
+
+    def create_root(
+        self,
+        *,
+        chain_id: str,
+        run_family_id: str,
+        active_head_run_id: str,
+        agent_session_id: str,
+    ) -> dict[str, Any]:
+        """Create the first managed record for a legacy-backed Chain session."""
+
+        return self._create(
+            chain_id,
+            {
+                "schema_version": "chain.v1",
+                "chain_id": chain_id,
+                "run_family_id": run_family_id,
+                "parent_chain_id": None,
+                "source_run_id": active_head_run_id,
+                "source_node_ref": None,
+                "fork_id": None,
+                "agent_session_id": agent_session_id,
+                "active_head_run_id": active_head_run_id,
+                "status": "active",
+            },
+        )
+
+    def resolve_active_head(
+        self,
+        chain_id: str,
+        *,
+        requested_active_head_run_id: str | None = None,
+    ) -> str:
+        """Read the durable head and optionally compare a caller's expectation."""
+
+        record = self.get(chain_id)
+        active_head = record.get("active_head_run_id")
+        if not isinstance(active_head, str) or not active_head:
+            raise ChainHeadUnavailable(f"chain has no active head: {chain_id}")
+        if (
+            requested_active_head_run_id is not None
+            and requested_active_head_run_id != active_head
+        ):
+            raise ChainHeadConflict(
+                f"active head mismatch for {chain_id}: "
+                f"expected {active_head}, received {requested_active_head_run_id}"
+            )
+        return active_head
 
     def create_child(
         self,

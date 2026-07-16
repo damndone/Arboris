@@ -7,6 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..agent.chains import ChainHeadConflict, ensure_chain_root
 from ..agent.events import AgentEventStream
 from ..agent.operations import OperationRecordStore, OperationRegistry, OperationValidationError
 from ..agent.orchestrator import WorkbenchOrchestrator
@@ -232,6 +233,32 @@ def _ensure_session(repository: JsonlSessionRepository, session_id: str, chain_i
         )
 
 
+def _ensure_data_chain_scope(
+    root,
+    repository: JsonlSessionRepository,
+    *,
+    session_id: str,
+    chain_id: str,
+    active_head_run_id: str,
+) -> None:
+    _ensure_session(repository, session_id, chain_id)
+    try:
+        ensure_chain_root(
+            root / "workbench",
+            runs_root=root / "runs",
+            chain_id=chain_id,
+            active_head_run_id=active_head_run_id,
+            agent_session_id=session_id,
+        )
+    except ChainHeadConflict as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The typed operation Chain active head changed before confirmation.",
+            details={"chain_id": chain_id, "reason": str(exc)},
+        ) from exc
+
+
 def _ensure_main_session(repository: JsonlSessionRepository, root) -> str:
     try:
         repository.get_metadata("agent_main")
@@ -275,7 +302,13 @@ async def confirm_column_cast(
     repository = JsonlSessionRepository(workbench_root)
     events = AgentEventStream(workbench_root)
     chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_session(repository, body.session_id, chain_id)
+    _ensure_data_chain_scope(
+        root,
+        repository,
+        session_id=body.session_id,
+        chain_id=chain_id,
+        active_head_run_id=body.source_run_id,
+    )
     main_session_id = _ensure_main_session(repository, root)
     proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
@@ -417,7 +450,13 @@ async def confirm_columns_cast(
     repository = JsonlSessionRepository(workbench_root)
     events = AgentEventStream(workbench_root)
     chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_session(repository, body.session_id, chain_id)
+    _ensure_data_chain_scope(
+        root,
+        repository,
+        session_id=body.session_id,
+        chain_id=chain_id,
+        active_head_run_id=body.source_run_id,
+    )
     main_session_id = _ensure_main_session(repository, root)
     proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
@@ -555,7 +594,13 @@ async def confirm_code_execute(
     repository = JsonlSessionRepository(workbench_root)
     events = AgentEventStream(workbench_root)
     chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_session(repository, body.session_id, chain_id)
+    _ensure_data_chain_scope(
+        root,
+        repository,
+        session_id=body.session_id,
+        chain_id=chain_id,
+        active_head_run_id=body.source_run_id,
+    )
     main_session_id = _ensure_main_session(repository, root)
     proposal_store = ProposalStore(workbench_root)
     registry = OperationRegistry()
