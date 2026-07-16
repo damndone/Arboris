@@ -20,12 +20,22 @@ import * as api from "../../api";
 import { NodeActionMenu } from "./NodeActionMenu";
 import { ForestContext } from "../../workbench/ForestContext";
 import { ProjectRootProvider } from "../../workbench/ProjectRootContext";
+import { AgentNavigationContext } from "../../workbench/agent/agentNavigation";
 import { NodeOperationContextProvider } from "../detail/NodeOperationContextProvider";
 import { makeOwnerResolutionSeedFixture } from "../api/nodeOperationContext";
 import type {
   GraphViewModel,
   GraphViewNode,
 } from "../api/graphViewTypes";
+import {
+  createAgentForkProposal,
+  getAgentGraphNavigation,
+} from "../../workbench/agent/agentApi";
+
+vi.mock("../../workbench/agent/agentApi", () => ({
+  getAgentGraphNavigation: vi.fn(),
+  createAgentForkProposal: vi.fn(),
+}));
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -357,6 +367,50 @@ describe("NodeActionMenu", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("surfaces a visible error when fork draft fails (not console-only)", async () => {
+    const onForkDraft = vi.fn();
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+    vi.spyOn(api, "createPipelineDraftFromNode").mockRejectedValue(
+      new Error("SOURCE_CONTEXT_MISMATCH: context_stale: context_fingerprint"),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <MemoryRouter>
+        <ForestContext.Provider
+          value={{
+            forest: seed.forest,
+            activeRunId: "run_a",
+            setActiveRunId: vi.fn(),
+          }}
+        >
+          <NodeOperationContextProvider node={selected}>
+            <NodeActionMenu
+              node={selected}
+              model={seed.graphModel}
+              onShowJson={vi.fn()}
+              projectRoot="/tmp/project"
+              onForkDraft={onForkDraft}
+            />
+          </NodeOperationContextProvider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /fork draft here/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/SOURCE_CONTEXT_MISMATCH/);
+    expect(onForkDraft).not.toHaveBeenCalled();
+
+    // Re-opening the menu clears the stale error.
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    consoleError.mockRestore();
+  });
+
   it("uses ProjectRootProvider on slug routes when no projectRoot prop or query exists", async () => {
     const seed = makeOwnerResolutionSeedFixture();
     const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
@@ -386,5 +440,123 @@ describe("NodeActionMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
 
     expect(screen.getByRole("menuitem", { name: /fork draft here/i })).toBeInTheDocument();
+  });
+
+  it("projects graph-node lineage links back to Agent and child runs", async () => {
+    const openNavigation = vi.fn().mockReturnValue(true);
+    vi.mocked(getAgentGraphNavigation).mockResolvedValue({
+      projection: {
+        subject: {
+          kind: "graph_node",
+          id: "run-1::model:ols_1",
+          label: "Model model:ols_1",
+          relation: "context",
+          available: true,
+          href: { view: "graph", run_id: "run-1", node_ref: "model:ols_1" },
+        },
+        links: [{
+          kind: "agent_session",
+          id: "agent_chain_1",
+          label: "Agent agent_chain_1",
+          relation: "child",
+          available: true,
+          href: { view: "agent", session_id: "agent_chain_1" },
+        }, {
+          kind: "run",
+          id: "run-child",
+          label: "Child run run-child",
+          relation: "child",
+          available: true,
+          href: { view: "graph", run_id: "run-child" },
+        }],
+        last_event_seq: 7,
+      },
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentNavigationContext.Provider value={openNavigation}>
+          <NodeActionMenu
+            node={makeNode()}
+            model={makeModel(makeNode())}
+            onShowJson={vi.fn()}
+            projectRoot="/tmp/project"
+          />
+        </AgentNavigationContext.Provider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    await waitFor(() => expect(getAgentGraphNavigation).toHaveBeenCalledWith(
+      "/tmp/project",
+      {
+        runId: "run-1",
+        nodeRef: "model:ols_1",
+        forestNodeKey: "model:ols_1",
+      },
+    ));
+    const childAgent = await screen.findByRole("menuitem", { name: /open agent agent_chain_1/i });
+    expect(screen.getByRole("menuitem", { name: /open child run run-child/i })).toBeInTheDocument();
+    fireEvent.click(childAgent);
+    expect(openNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "agent_session", id: "agent_chain_1" }),
+    );
+  });
+
+  it("creates a confirmation-gated Agent fork proposal from a graph node", async () => {
+    const openNavigation = vi.fn().mockReturnValue(true);
+    const seed = makeOwnerResolutionSeedFixture();
+    const selected = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+    vi.mocked(createAgentForkProposal).mockResolvedValue({
+      session_id: "agent_chain_fork",
+      source_session_entry_id: "entry-source",
+      proposal: { proposal_id: "proposal-fork" },
+      navigation: {
+        kind: "proposal",
+        id: "proposal-fork",
+        label: "Proposal proposal-fork",
+        relation: "audit",
+        available: true,
+        href: {
+          view: "agent",
+          session_id: "agent_chain_fork",
+          proposal_id: "proposal-fork",
+        },
+      },
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <AgentNavigationContext.Provider value={openNavigation}>
+          <ForestContext.Provider
+            value={{ forest: seed.forest, activeRunId: "run_a", setActiveRunId: vi.fn() }}
+          >
+            <NodeOperationContextProvider node={selected}>
+              <NodeActionMenu
+                node={selected}
+                model={seed.graphModel}
+                onShowJson={vi.fn()}
+                projectRoot="/tmp/project"
+              />
+            </NodeOperationContextProvider>
+          </ForestContext.Provider>
+        </AgentNavigationContext.Provider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /node actions/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /fork agent context/i }));
+
+    await waitFor(() => expect(createAgentForkProposal).toHaveBeenCalledWith(
+      "/tmp/project",
+      expect.objectContaining({
+        source_run_id: expect.any(String),
+        source_node_ref: seed.sharedOpNodeId,
+        active_head_run_id: "run_a",
+      }),
+    ));
+    await waitFor(() => expect(openNavigation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "proposal", id: "proposal-fork" }),
+    ));
   });
 });

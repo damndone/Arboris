@@ -19,7 +19,7 @@ import type {
   GraphViewNode,
   Stage,
 } from "../api/graphViewTypes";
-import { foldVariableClusters, type GroupNode } from "../folding";
+import { foldNodeClusters, type GroupNode } from "../folding";
 import { rolesByVariable, primaryRole } from "./variableRoles";
 import { roleEdgeStyle, suppressAggregateEdges, isRoleOp } from "./roleEdges";
 import { roleAbbrev, roleColorVar, roleLabel, type Role } from "../roles";
@@ -446,7 +446,7 @@ export function GraphCanvas({
   // without rebuilding positions, so dragged cards don't snap back to
   // dagre on every selection change.
   const { seedNodes, rfEdges, memberToGroup } = useMemo(() => {
-    const { kept, groups } = foldVariableClusters(model.nodes, expandedGroups);
+    const { kept, groups } = foldNodeClusters(model.nodes, expandedGroups);
 
     // v1.6.5: which role(s) each variable node holds for the primary model,
     // derived from the role-bearing var→model edges.

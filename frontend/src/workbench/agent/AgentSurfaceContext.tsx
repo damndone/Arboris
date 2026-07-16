@@ -1,0 +1,627 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useSearchParams } from "react-router-dom";
+import { useLineage } from "../../lineage/LineageContext";
+import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
+import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
+import { fetchLlmConfig, fetchLlmProviders, updateLlmProvider } from "../../llm/llmApi";
+import type { LlmConfigInfo, LlmProvider } from "../../llm/llmTypes";
+import { useForest } from "../ForestContext";
+import { useWorkbench } from "../WorkbenchStateProvider";
+import { useAgentNavigationOptional } from "./agentNavigation";
+import {
+  createAgentSession,
+  createAgentForkProposal,
+  confirmAgentProposal,
+  declineAgentProposal,
+  fallbackProjectContext,
+  getAgentEvents,
+  getAgentCapabilities,
+  getAgentOperationProjection,
+  getAgentSession,
+  getAgentSessionProjection,
+  reconcileAgentOperation,
+  reviseAgentProposal,
+  sendAgentTurn,
+} from "./agentApi";
+import type {
+  AgentContextPacket,
+  AgentCapabilityCatalog,
+  AgentEvent,
+  AgentHierarchyNode,
+  AgentMessage,
+  AgentModelOption,
+  AgentNavigationRef,
+  AgentOperationRecord,
+  AgentProposal,
+} from "./agentTypes";
+
+/** Terminal operation-record states — reconcile polling stops here. */
+const TERMINAL_OPERATION_STATUSES = new Set([
+  "completed",
+  "failed",
+  "stale",
+  "cancelled",
+]);
+
+export interface AgentOperationStatus {
+  record_id: string;
+  operation_id: string;
+  status: string;
+  target_run_id: string | null;
+  /** Program output captured from a sandboxed operation (code.execute). */
+  stdout: string | null;
+  diff_ref: Record<string, unknown> | null;
+  verification: Record<string, unknown>;
+  diffFocused: boolean;
+}
+
+function toOperationStatus(
+  record: AgentOperationRecord,
+  diffFocused = false,
+): AgentOperationStatus {
+  const outputs = record.outputs as
+    | { target_run_id?: unknown; stdout?: unknown }
+    | undefined;
+  const target = outputs && typeof outputs === "object" ? outputs.target_run_id : null;
+  const stdout = outputs && typeof outputs === "object" ? outputs.stdout : null;
+  const rawDiff = record.diff_ref;
+  const rawVerification = record.verification;
+  return {
+    record_id: record.record_id,
+    operation_id: record.operation_id,
+    status: record.status,
+    target_run_id: typeof target === "string" ? target : null,
+    stdout: typeof stdout === "string" && stdout.length > 0 ? stdout : null,
+    diff_ref: rawDiff && typeof rawDiff === "object"
+      ? rawDiff as Record<string, unknown>
+      : null,
+    verification: rawVerification && typeof rawVerification === "object"
+      ? rawVerification as Record<string, unknown>
+      : {},
+    diffFocused,
+  };
+}
+
+export interface AgentSurfaceContextValue {
+  messages: AgentMessage[];
+  prompt: string;
+  setPrompt: (value: string) => void;
+  sendPrompt: (value?: string) => Promise<void>;
+  isSubmitting: boolean;
+  error: string | null;
+  scopeLabel: string;
+  contextUsedTokens: number;
+  contextWindowTokens: number | null;
+  contextPercent: number | null;
+  model: string;
+  modelOptions: AgentModelOption[];
+  setModel: (value: string) => Promise<void>;
+  sessionStatus: string;
+  proposals: AgentProposal[];
+  confirmationBusyId: string | null;
+  confirmProposal: (proposalId: string) => Promise<void>;
+  declineProposal: (proposalId: string, reason?: string) => Promise<boolean>;
+  reviseProposal: (
+    proposalId: string,
+    baseRevision: number,
+    changes: Record<string, unknown>,
+  ) => Promise<boolean>;
+  forkFromMessage: (entryId: string, sourceRef: AgentNavigationRef) => Promise<boolean>;
+  openNavigation?: (ref: AgentNavigationRef) => boolean;
+  navigationLinks: AgentNavigationRef[];
+  hierarchy: AgentHierarchyNode | null;
+  activeOperation: AgentOperationStatus | null;
+  eventCursor: number;
+  lastEventType: string | null;
+  capabilityCatalog?: AgentCapabilityCatalog | null;
+}
+
+export const AgentSurfaceContext = createContext<AgentSurfaceContextValue | null>(null);
+
+export function useAgentSurface(): AgentSurfaceContextValue {
+  const context = useContext(AgentSurfaceContext);
+  if (!context) throw new Error("useAgentSurface must be used inside AgentSurfaceProvider");
+  return context;
+}
+
+export function useAgentSurfaceOptional(): AgentSurfaceContextValue | null {
+  return useContext(AgentSurfaceContext);
+}
+
+export function AgentSurfaceProvider({
+  projectRoot,
+  runId,
+  children,
+}: {
+  projectRoot: string;
+  runId: string;
+  children: ReactNode;
+}) {
+  const { model: graphModel } = useLineage();
+  const forest = useForest();
+  const workbench = useWorkbench();
+  const navigation = useAgentNavigationOptional();
+  const [searchParams] = useSearchParams();
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionStatus, setSessionStatus] = useState("idle");
+  const [proposals, setProposals] = useState<AgentProposal[]>([]);
+  const [confirmationBusyId, setConfirmationBusyId] = useState<string | null>(null);
+  const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
+  const [eventCursor, setEventCursor] = useState(0);
+  const [lastEventType, setLastEventType] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [navigationLinks, setNavigationLinks] = useState<AgentNavigationRef[]>([]);
+  const [hierarchy, setHierarchy] = useState<AgentHierarchyNode | null>(null);
+  const [providers, setProviders] = useState<LlmProvider[]>([]);
+  const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
+  const [capabilityCatalog, setCapabilityCatalog] = useState<AgentCapabilityCatalog | null>(null);
+
+  const selectedKey = workbench.state.selectedKey;
+  const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
+  const selectedNode = graphNodes.find((node) => node.nodeKey === selectedKey) ?? null;
+  const contextPacket = useMemo<AgentContextPacket>(() => {
+    if (forest && selectedKey) {
+      const resolved = resolveNodeOperationContext({
+        forest: forest.forest,
+        selected_forest_node_key: selectedKey,
+        active_head_run_id: forest.activeRunId,
+      });
+      if (resolved.ok) return buildAskAIContextPacket(resolved.context);
+    }
+    return fallbackProjectContext(runId, selectedKey);
+  }, [forest, runId, selectedKey]);
+
+  const contextFingerprint = typeof contextPacket.context_fingerprint === "string"
+    && contextPacket.context_fingerprint
+    ? contextPacket.context_fingerprint
+    : `${runId}:${selectedKey ?? "none"}`;
+  const storageKey = `workbench:agent-session:${projectRoot}:${runId}:${encodeURIComponent(contextFingerprint)}`;
+  const linkedSessionId = searchParams.get("agent_session") || null;
+  const linkedOperationId = searchParams.get("operation") || null;
+  const linkedDiffFocused = searchParams.get("diff") === "1";
+  const sessionScope = linkedSessionId
+    ? `workbench:agent-linked:${projectRoot}:${linkedSessionId}`
+    : storageKey;
+  const activeScopeRef = useRef(sessionScope);
+  const applyEvents = useCallback((events: AgentEvent[]) => {
+    if (events.length === 0) return;
+    const latest = events.reduce((current, event) => (
+      event.seq > current.seq ? event : current
+    ));
+    setEventCursor((current) => Math.max(current, latest.seq));
+    setLastEventType(latest.event_type);
+  }, []);
+  const replayEvents = useCallback(async (
+    activeSessionId: string,
+    afterSeq: number,
+    scope: string,
+  ) => {
+    const result = await getAgentEvents(projectRoot, activeSessionId, afterSeq);
+    if (activeScopeRef.current !== scope || !Array.isArray(result.events)) return;
+    applyEvents(result.events);
+  }, [applyEvents, projectRoot]);
+  const refreshNavigation = useCallback(async (
+    activeSessionId: string,
+    scope: string,
+  ) => {
+    try {
+      const result = await getAgentSessionProjection(projectRoot, activeSessionId);
+      if (activeScopeRef.current !== scope) return;
+      const links = result?.projection?.links;
+      if (Array.isArray(links)) setNavigationLinks(links);
+      setHierarchy(result?.projection?.hierarchy ?? null);
+    } catch {
+      // Navigation is an optional projection; a session remains usable when
+      // the read-only projection endpoint is unavailable.
+    }
+  }, [projectRoot]);
+  useEffect(() => {
+    let cancelled = false;
+    activeScopeRef.current = sessionScope;
+    setSessionId(null);
+    setMessages([]);
+    setProposals([]);
+    setSessionStatus("idle");
+    setPrompt("");
+    setError(null);
+    setNavigationLinks([]);
+    setHierarchy(null);
+    setActiveOperation(null);
+    setIsSubmitting(false);
+    setConfirmationBusyId(null);
+    setEventCursor(0);
+    setLastEventType(null);
+    const stored = linkedSessionId ?? sessionStorage.getItem(storageKey);
+    if (!stored) return () => { cancelled = true; };
+    getAgentSession(projectRoot, stored)
+      .then(async (session) => {
+        if (cancelled) return;
+        setSessionId(session.session_id);
+        setMessages(session.messages);
+        setProposals(session.proposals ?? []);
+        setSessionStatus(session.status);
+        await refreshNavigation(session.session_id, sessionScope);
+        if (linkedOperationId) {
+          try {
+            const operation = await getAgentOperationProjection(
+              projectRoot,
+              session.session_id,
+              linkedOperationId,
+            );
+            if (!cancelled && activeScopeRef.current === sessionScope) {
+              setActiveOperation(toOperationStatus(operation.operation, linkedDiffFocused));
+            }
+          } catch {
+            // The linked session remains usable when an operation focus is stale.
+          }
+        }
+        try {
+          await replayEvents(session.session_id, 0, sessionScope);
+        } catch {
+          // A session remains usable when its optional event replay is unavailable.
+        }
+      })
+    .catch(() => {
+        if (!linkedSessionId) sessionStorage.removeItem(storageKey);
+      });
+    return () => { cancelled = true; };
+  }, [linkedDiffFocused, linkedOperationId, linkedSessionId, projectRoot, refreshNavigation, replayEvents, sessionScope, storageKey]);
+
+  useEffect(() => {
+    if (!sessionId || !isSubmitting) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        await replayEvents(sessionId, eventCursor, sessionScope);
+      } catch {
+        // The request-response turn remains authoritative if polling fails.
+      }
+      if (!cancelled) timer = setTimeout(poll, 500);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [eventCursor, isSubmitting, replayEvents, sessionId, sessionScope]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchLlmProviders(), fetchLlmConfig()])
+      .then(([providerResult, config]) => {
+        if (cancelled) return;
+        setProviders(Array.isArray(providerResult?.providers) ? providerResult.providers : []);
+        setLlmConfig(config && typeof config === "object" ? config : null);
+      })
+      .catch(() => {
+        if (!cancelled) setLlmConfig(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAgentCapabilities(projectRoot)
+      .then((catalog) => {
+        if (!cancelled) setCapabilityCatalog(catalog);
+      })
+      .catch(() => {
+        if (!cancelled) setCapabilityCatalog(null);
+      });
+    return () => { cancelled = true; };
+  }, [projectRoot]);
+
+  const activeProvider = providers.find((provider) => provider.id === llmConfig?.provider_id);
+  const modelOptions = useMemo(() => {
+    const options = Array.isArray(activeProvider?.models)
+      ? activeProvider.models.map((model) => ({ ...model }))
+      : [];
+    if (options.length > 0) return options;
+    return llmConfig?.model
+      ? [{
+          display_name: llmConfig.model,
+          request_model: llmConfig.model,
+          context_window_tokens: llmConfig.context_window_tokens,
+          supports_1m: llmConfig.supports_1m,
+        }]
+      : [];
+  }, [activeProvider, llmConfig?.model]);
+  const model = llmConfig?.model ?? modelOptions[0]?.request_model ?? "Not configured";
+  const contextUsedTokens = useMemo(
+    () => Math.max(
+      1,
+      Math.ceil(JSON.stringify(contextPacket).length / 4)
+        + messages.reduce((sum, item) => sum + Math.ceil(item.content.length / 4), 0)
+        + Math.ceil(prompt.length / 4),
+    ),
+    [contextPacket, messages, prompt],
+  );
+  const contextWindowTokens = llmConfig?.context_window_tokens ?? null;
+  const contextPercent = contextWindowTokens
+    ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
+    : null;
+  const scopeLabel = selectedNode
+    ? `${forest ? "Current chain" : "Run"} · ${selectedNode.title}`
+    : forest
+      ? `Current chain · ${forest.activeRunId}`
+      : `Run · ${runId}`;
+
+  const setModel = useCallback(async (value: string) => {
+    if (!activeProvider || value === llmConfig?.model) return;
+    setError(null);
+    try {
+      const updated = await updateLlmProvider(activeProvider.id, { model: value });
+      setProviders((current) => current.map((provider) => provider.id === updated.id ? updated : provider));
+      setLlmConfig((current) => current ? { ...current, model: updated.model } : current);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to update Agent model");
+    }
+  }, [activeProvider, llmConfig?.model]);
+
+  const sendPrompt = useCallback(async (value = prompt) => {
+    const question = value.trim();
+    if (!question || isSubmitting) return;
+    const requestScope = sessionScope;
+    if (activeScopeRef.current !== requestScope) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      let activeSessionId = sessionId;
+      if (!activeSessionId) {
+        const created = await createAgentSession(projectRoot, {
+          role: "chain",
+          chain_id: forest ? `chain:${forest.activeRunId}` : `run:${runId}`,
+          run_id: runId,
+          context_packet: contextPacket,
+        });
+        activeSessionId = created.session_id;
+        if (activeScopeRef.current !== requestScope) return;
+        setSessionId(activeSessionId);
+        if (!linkedSessionId) sessionStorage.setItem(storageKey, activeSessionId);
+      }
+      const result = await sendAgentTurn(projectRoot, activeSessionId, question);
+      if (activeScopeRef.current !== requestScope) return;
+      setMessages(result.session.messages);
+      setProposals(result.session.proposals ?? []);
+      setSessionStatus(result.status);
+      await refreshNavigation(activeSessionId, requestScope);
+      try {
+        await replayEvents(activeSessionId, eventCursor, requestScope);
+      } catch {
+        // The durable session response still contains the completed turn.
+      }
+      setPrompt("");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Agent turn failed");
+      setSessionStatus("failed");
+    } finally {
+      if (activeScopeRef.current === requestScope) setIsSubmitting(false);
+    }
+  }, [contextPacket, eventCursor, forest, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, runId, sessionId, sessionScope, storageKey]);
+
+  const confirmProposal = useCallback(async (proposalId: string) => {
+    if (!sessionId || confirmationBusyId !== null) return;
+    const requestScope = sessionScope;
+    if (activeScopeRef.current !== requestScope) return;
+    const proposal = proposals.find((item) => item.proposal_id === proposalId);
+    if (!proposal || proposal.status !== "pending") return;
+    const ownership = contextPacket.ownership;
+    const activeHead = ownership && typeof ownership === "object"
+      ? (ownership as { active_head_run_id?: unknown }).active_head_run_id
+      : undefined;
+    const activeHeadRunId = typeof activeHead === "string" && activeHead
+      ? activeHead
+      : forest?.activeRunId ?? runId;
+    setConfirmationBusyId(proposalId);
+    setError(null);
+    try {
+      const result = await confirmAgentProposal(projectRoot, sessionId, proposalId, {
+        revision: proposal.revision,
+        fingerprint: proposal.fingerprint,
+        active_head_run_id: activeHeadRunId,
+      });
+      if (activeScopeRef.current !== requestScope) return;
+      setProposals((current) => current.map((item) => (
+        item.proposal_id === proposalId ? result.proposal : item
+      )));
+      // Confirmation EXECUTES (design §8.2): surface the running operation
+      // and poll the idempotent reconcile endpoint until the backend proves a
+      // terminal state. The forest's own polling picks up the child run.
+      let operation = toOperationStatus(result.operation);
+      setActiveOperation(operation);
+      while (!TERMINAL_OPERATION_STATUSES.has(operation.status)) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (activeScopeRef.current !== requestScope) return;
+        const reconciled = await reconcileAgentOperation(
+          projectRoot,
+          sessionId,
+          operation.record_id,
+        );
+        if (activeScopeRef.current !== requestScope) return;
+        operation = toOperationStatus(reconciled.operation);
+        setActiveOperation(operation);
+      }
+      await refreshNavigation(sessionId, requestScope);
+    } catch (requestError) {
+      if (activeScopeRef.current !== requestScope) return;
+      setError(requestError instanceof Error ? requestError.message : "Proposal confirmation failed");
+    } finally {
+      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+    }
+  }, [confirmationBusyId, contextPacket, forest?.activeRunId, projectRoot, proposals, refreshNavigation, runId, sessionId, sessionScope]);
+
+  const declineProposal = useCallback(async (proposalId: string, reason?: string) => {
+    if (!sessionId || confirmationBusyId !== null) return false;
+    const requestScope = sessionScope;
+    if (activeScopeRef.current !== requestScope) return false;
+    const proposal = proposals.find((item) => item.proposal_id === proposalId);
+    if (!proposal || proposal.status !== "pending") return false;
+    setConfirmationBusyId(proposalId);
+    setError(null);
+    try {
+      const result = await declineAgentProposal(projectRoot, sessionId, proposalId, reason);
+      if (activeScopeRef.current !== requestScope) return false;
+      setProposals((current) => current.map((item) => (
+        item.proposal_id === proposalId ? result.proposal : item
+      )));
+      await refreshNavigation(sessionId, requestScope);
+      await replayEvents(sessionId, eventCursor, requestScope);
+      return true;
+    } catch (requestError) {
+      if (activeScopeRef.current === requestScope) {
+        setError(requestError instanceof Error ? requestError.message : "Proposal decline failed");
+      }
+      return false;
+    } finally {
+      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+    }
+  }, [confirmationBusyId, eventCursor, projectRoot, proposals, refreshNavigation, replayEvents, sessionId, sessionScope]);
+
+  const reviseProposal = useCallback(async (
+    proposalId: string,
+    baseRevision: number,
+    changes: Record<string, unknown>,
+  ) => {
+    if (!sessionId || confirmationBusyId !== null) return false;
+    const requestScope = sessionScope;
+    if (activeScopeRef.current !== requestScope) return false;
+    const proposal = proposals.find((item) => item.proposal_id === proposalId);
+    if (!proposal || proposal.status !== "pending") return false;
+    setConfirmationBusyId(proposalId);
+    setError(null);
+    try {
+      const result = await reviseAgentProposal(projectRoot, sessionId, proposalId, {
+        base_revision: baseRevision,
+        changes,
+      });
+      if (activeScopeRef.current !== requestScope) return false;
+      setProposals((current) => current.map((item) => (
+        item.proposal_id === proposalId ? result.proposal : item
+      )));
+      await refreshNavigation(sessionId, requestScope);
+      await replayEvents(sessionId, eventCursor, requestScope);
+      return true;
+    } catch (requestError) {
+      if (activeScopeRef.current === requestScope) {
+        setError(requestError instanceof Error ? requestError.message : "Proposal revision failed");
+      }
+      return false;
+    } finally {
+      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+    }
+  }, [confirmationBusyId, eventCursor, projectRoot, proposals, refreshNavigation, replayEvents, sessionId, sessionScope]);
+
+  const forkFromMessage = useCallback(async (
+    entryId: string,
+    sourceRef: AgentNavigationRef,
+  ) => {
+    if (!sessionId || confirmationBusyId !== null) return false;
+    if (sourceRef.kind !== "graph_node") return false;
+    const sourceRunId = sourceRef.href.run_id;
+    const sourceNodeRef = sourceRef.href.node_ref;
+    if (!sourceRunId || !sourceNodeRef) return false;
+    const requestScope = sessionScope;
+    if (activeScopeRef.current !== requestScope) return false;
+    const activeHeadRunId = forest?.activeRunId ?? runId;
+    const busyId = `fork:${entryId}`;
+    setConfirmationBusyId(busyId);
+    setError(null);
+    try {
+      const result = await createAgentForkProposal(projectRoot, {
+        session_id: sessionId,
+        source_run_id: sourceRunId,
+        source_node_ref: sourceNodeRef,
+        source_session_entry_id: entryId,
+        active_head_run_id: activeHeadRunId,
+      });
+      if (activeScopeRef.current !== requestScope) return false;
+      setProposals((current) => [
+        ...current.filter((item) => item.proposal_id !== result.proposal.proposal_id),
+        result.proposal,
+      ]);
+      navigation?.(result.navigation);
+      await refreshNavigation(sessionId, requestScope);
+      await replayEvents(sessionId, eventCursor, requestScope);
+      return true;
+    } catch (requestError) {
+      if (activeScopeRef.current === requestScope) {
+        setError(requestError instanceof Error ? requestError.message : "Agent fork proposal failed");
+      }
+      return false;
+    } finally {
+      if (activeScopeRef.current === requestScope) setConfirmationBusyId(null);
+    }
+  }, [confirmationBusyId, eventCursor, forest, navigation, projectRoot, refreshNavigation, replayEvents, runId, sessionId, sessionScope]);
+
+  const value = useMemo<AgentSurfaceContextValue>(() => ({
+    messages,
+    prompt,
+    setPrompt,
+    sendPrompt,
+    isSubmitting,
+    error,
+    scopeLabel,
+    contextUsedTokens,
+    contextWindowTokens,
+    contextPercent,
+    model,
+    modelOptions,
+    setModel,
+    sessionStatus,
+    proposals,
+    confirmationBusyId,
+    confirmProposal,
+    declineProposal,
+    reviseProposal,
+    forkFromMessage,
+    openNavigation: navigation ?? undefined,
+    navigationLinks,
+    hierarchy,
+    activeOperation,
+    eventCursor,
+    lastEventType,
+    capabilityCatalog,
+  }), [
+    activeOperation,
+    contextPercent,
+    contextUsedTokens,
+    contextWindowTokens,
+    error,
+    isSubmitting,
+    messages,
+    navigationLinks,
+    hierarchy,
+    model,
+    modelOptions,
+    prompt,
+    scopeLabel,
+    sendPrompt,
+    setModel,
+    sessionStatus,
+    proposals,
+    confirmationBusyId,
+    confirmProposal,
+    declineProposal,
+    reviseProposal,
+    forkFromMessage,
+    navigation,
+    eventCursor,
+    lastEventType,
+    capabilityCatalog,
+  ]);
+
+  return <AgentSurfaceContext.Provider value={value}>{children}</AgentSurfaceContext.Provider>;
+}

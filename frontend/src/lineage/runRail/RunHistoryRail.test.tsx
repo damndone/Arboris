@@ -67,6 +67,38 @@ describe("RunHistoryRail", () => {
     expect(screen.getByLabelText("Run history")).toBeInTheDocument();
   });
 
+  it("skips an id-less run instead of taking the whole workbench down", async () => {
+    // The rail renders inside the shell, so a crash here blanks the entire
+    // page. A run with no id cannot be keyed, navigated to, or labelled —
+    // drop it and keep rendering the runs that are real.
+    fetchRunsMock.mockResolvedValue({
+      runs: [
+        {
+          run_id: null as unknown as string,
+          status: "completed",
+          mode: "auto",
+          started_at: null,
+          y: null,
+          x: null,
+        },
+        {
+          run_id: "20260525_210044_142101_055d5cbd",
+          status: "completed",
+          mode: "auto",
+          started_at: new Date(Date.now() - 60_000).toISOString(),
+          y: null,
+          x: null,
+        },
+      ],
+    });
+    harness(["/runs/r-a?project_root=/tmp/p"]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("run-rail-row-20260525_210044_142101_055d5cbd")).toBeInTheDocument(),
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
   it("renders a row per fetched run with short id + status pill", async () => {
     fetchRunsMock.mockResolvedValue({
       runs: [

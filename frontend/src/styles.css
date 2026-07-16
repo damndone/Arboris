@@ -70,6 +70,21 @@ button:disabled {
   min-height: 0;
 }
 
+.workbench-navigation-row {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.workbench-navigation-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
 .workbench-header {
   align-items: center;
   border-bottom: 1px solid var(--border-strong);
@@ -524,7 +539,7 @@ dd {
 .tabs {
   display: flex;
   gap: 0.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0;
 }
 
 .tabs button[role="tab"] {
@@ -568,7 +583,7 @@ dd {
   min-height: 0;
   width: 100%;
   max-width: none;
-  padding: 16px 24px 0;
+  padding: 8px 24px 0;
   overflow: hidden;
 }
 .workbench-shell--lineage .workbench-header {
@@ -579,6 +594,10 @@ dd {
 }
 .workbench-shell--lineage .tabs {
   flex: 0 0 auto;
+}
+.workbench-shell--lineage .workbench-navigation-row {
+  flex: 0 0 auto;
+  margin-bottom: 6px;
 }
 .workbench-shell--lineage .workbench-outlet {
   display: flex;

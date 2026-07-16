@@ -93,7 +93,13 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const sorted = useMemo(() => {
     // Newest first — backend already does this, but defend against
     // ordering changes by sorting on `started_at` here too.
-    return [...runs].sort((a, b) => {
+    //
+    // Drop runs with no id first: a run we cannot key, navigate to, or label is
+    // not listable, and one malformed run directory must not take the whole
+    // workbench down with it (this rail renders inside the shell).
+    return runs
+      .filter((r) => typeof r.run_id === "string" && r.run_id.length > 0)
+      .sort((a, b) => {
       const at = a.started_at ? Date.parse(a.started_at) : 0;
       const bt = b.started_at ? Date.parse(b.started_at) : 0;
       return bt - at;

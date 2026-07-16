@@ -152,6 +152,35 @@ describe("LlmProviderEditor", () => {
     expect(screen.getByLabelText(/default model/i)).toHaveValue("");
   });
 
+  it("offers explicit DeepSeek V4 Flash/Pro mappings and includes them when saved", async () => {
+    const deepSeekProvider = { ...provider, id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com" };
+    render(<LlmProviderEditor provider={deepSeekProvider} onSaved={vi.fn()} onBack={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("add-deepseek-v4-models"));
+    expect(screen.getByTestId("llm-provider-model-row-deepseek-v4-flash")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-provider-model-row-deepseek-v4-pro")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith(
+      "deepseek",
+      expect.objectContaining({
+        models: expect.arrayContaining([
+          expect.objectContaining({ request_model: "deepseek-v4-flash" }),
+          expect.objectContaining({ request_model: "deepseek-v4-pro" }),
+        ]),
+      }),
+    ));
+  });
+
+  it("allows model mappings to be added and removed", () => {
+    render(<LlmProviderEditor provider={provider} onSaved={vi.fn()} onBack={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add model" }));
+    expect(screen.getByTestId("llm-provider-model-row-new-model-2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove model new-model-2" }));
+    expect(screen.queryByTestId("llm-provider-model-row-new-model-2")).not.toBeInTheDocument();
+  });
+
   it("reveals a masked key and supports an explicit clear action", () => {
     render(<LlmProviderEditor provider={provider} onSaved={vi.fn()} onBack={vi.fn()} />);
     const key = screen.getByLabelText("api key");

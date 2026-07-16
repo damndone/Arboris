@@ -67,6 +67,21 @@ function formatContextWindow(value: number | null): string {
   return value === null ? "—" : value.toLocaleString("en-US");
 }
 
+const deepSeekV4Models: LlmModel[] = [
+  {
+    display_name: "DeepSeek V4 Flash",
+    request_model: "deepseek-v4-flash",
+    context_window_tokens: null,
+    supports_1m: false,
+  },
+  {
+    display_name: "DeepSeek V4 Pro",
+    request_model: "deepseek-v4-pro",
+    context_window_tokens: null,
+    supports_1m: false,
+  },
+];
+
 export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }: LlmProviderEditorProps) {
   const isEditing = Boolean(provider && !isCopy);
   const [id, setId] = useState(provider?.id ?? "");
@@ -133,6 +148,42 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
   function updateModel(index: number, patch: Partial<LlmModel>) {
     setModels((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...patch } : entry));
   }
+
+  function addModel() {
+    setModels((current) => {
+      const requestModel = `new-model-${current.length + 1}`;
+      return [
+        ...current,
+        {
+          display_name: "New model",
+          request_model: requestModel,
+          context_window_tokens: null,
+          supports_1m: false,
+        },
+      ];
+    });
+  }
+
+  function removeModel(index: number) {
+    setModels((current) => {
+      const removed = current[index];
+      const next = current.filter((_, entryIndex) => entryIndex !== index);
+      if (removed?.request_model === model) setModel(next[0]?.request_model ?? "");
+      return next;
+    });
+  }
+
+  function addDeepSeekV4Models() {
+    setModels((current) => {
+      const existing = new Set(current.map((entry) => entry.request_model));
+      return [
+        ...current,
+        ...deepSeekV4Models.filter((entry) => !existing.has(entry.request_model)),
+      ];
+    });
+  }
+
+  const isDeepSeek = /deepseek/i.test(`${id} ${name} ${baseUrl}`);
 
   async function handleProbe() {
     if (!isEditing || !provider?.id) {
@@ -286,6 +337,8 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Model mapping</h2>
             <button type="button" onClick={() => void handleRefreshModels()} disabled={modelsLoading} style={{ ...actionStyle, marginLeft: "auto" }}>{modelsLoading ? "Refreshing…" : "Refresh models"}</button>
+            <button type="button" onClick={addModel} style={actionStyle}>Add model</button>
+            {isDeepSeek && <button type="button" data-testid="add-deepseek-v4-models" onClick={addDeepSeekV4Models} style={actionStyle}>Add DeepSeek V4 presets</button>}
           </div>
           {modelsMessage && <div aria-live="polite" style={{ color: modelsMessage === "Models refreshed" ? "var(--green, #30d158)" : "var(--danger, #ff453a)", marginBottom: 10 }}>{modelsMessage}</div>}
           <label>Default model
@@ -294,7 +347,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
           </label>
           <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
             {models.map((entry, index) => (
-              <div key={`${entry.request_model}-${index}`} data-testid={`llm-provider-model-row-${entry.request_model}`} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 0.8fr auto", gap: 8, alignItems: "center", padding: 10, borderTop: "1px solid var(--separator, #3a3a3c)" }}>
+              <div key={`${entry.request_model}-${index}`} data-testid={`llm-provider-model-row-${entry.request_model}`} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 0.8fr auto auto", gap: 8, alignItems: "center", padding: 10, borderTop: "1px solid var(--separator, #3a3a3c)" }}>
                 <input aria-label={`display name ${entry.request_model}`} value={entry.display_name} onChange={(event) => updateModel(index, { display_name: event.target.value })} style={inputStyle} />
                 <input aria-label={`request model ${entry.request_model}`} value={entry.request_model} onChange={(event) => updateModel(index, { request_model: event.target.value })} style={inputStyle} />
                 <label style={{ fontSize: 12 }}>Context window
@@ -303,6 +356,7 @@ export function LlmProviderEditor({ provider, isCopy = false, onSaved, onBack }:
                 <label style={{ fontSize: 12, whiteSpace: "nowrap" }}><input aria-label={`supports 1M ${entry.request_model}`} type="checkbox" checked={entry.supports_1m} onChange={(event) => updateModel(index, { supports_1m: event.target.checked })} /> Supports 1M
                   <div style={{ color: "var(--label-secondary, #98989d)", marginTop: 6 }}>{formatContextWindow(entry.context_window_tokens)} · {entry.supports_1m ? "Yes" : "No"}</div>
                 </label>
+                <button type="button" aria-label={`Remove model ${entry.request_model}`} onClick={() => removeModel(index)} style={{ ...actionStyle, color: "var(--danger, #ff453a)" }}>Remove</button>
               </div>
             ))}
           </div>

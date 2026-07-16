@@ -7,6 +7,8 @@ import {
   deleteLlmProvider,
   fetchLlmProviders,
   probeLlmProvider,
+  refreshLlmProviderModels,
+  updateLlmProvider,
 } from "./llmApi";
 import type { LlmProvider, LlmProvidersResponse } from "./llmTypes";
 
@@ -35,6 +37,18 @@ const providers: LlmProvider[] = [
         display_name: "DeepSeek Chat",
         request_model: "deepseek-chat",
         context_window_tokens: 128000,
+        supports_1m: false,
+      },
+      {
+        display_name: "DeepSeek V4 Flash",
+        request_model: "deepseek-v4-flash",
+        context_window_tokens: null,
+        supports_1m: false,
+      },
+      {
+        display_name: "DeepSeek V4 Pro",
+        request_model: "deepseek-v4-pro",
+        context_window_tokens: null,
         supports_1m: false,
       },
     ],
@@ -66,6 +80,17 @@ describe("LlmProviderManager", () => {
     vi.mocked(activateLlmProvider).mockResolvedValue(providers[1]);
     vi.mocked(deleteLlmProvider).mockResolvedValue(providers[0]);
     vi.mocked(probeLlmProvider).mockResolvedValue(providers[0]);
+    vi.mocked(refreshLlmProviderModels).mockResolvedValue({
+      ...providers[0],
+      models: [
+        { display_name: "DeepSeek V4 Flash", request_model: "deepseek-v4-flash", context_window_tokens: null, supports_1m: false },
+        { display_name: "DeepSeek V4 Pro", request_model: "deepseek-v4-pro", context_window_tokens: null, supports_1m: false },
+      ],
+    });
+    vi.mocked(updateLlmProvider).mockResolvedValue({
+      ...providers[0],
+      model: "deepseek-v4-pro",
+    });
   });
 
   it("renders provider status rows in a full-height manager dialog", async () => {
@@ -84,7 +109,7 @@ describe("LlmProviderManager", () => {
     expect(screen.getByTestId("llm-provider-active-deepseek")).toHaveTextContent("Active");
     expect(screen.getByText("API key configured")).toBeInTheDocument();
     expect(screen.getByText("API key missing")).toBeInTheDocument();
-    expect(screen.getByText("deepseek-chat")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Model for DeepSeek" })).toHaveValue("deepseek-chat");
     expect(screen.getByText(/https:\/\/api\.deepseek\.com/)).toBeInTheDocument();
     expect(screen.getAllByText(/Not tested/)).not.toHaveLength(0);
     expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument();
@@ -145,6 +170,34 @@ describe("LlmProviderManager", () => {
 
     fireEvent.click(screen.getByTestId("llm-provider-activate-openai"));
     expect(await screen.findByRole("alert")).toHaveTextContent("activation failed");
+  });
+
+  it("refreshes and persists the provider model mapping from the manager", async () => {
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    await screen.findByTestId("llm-provider-manager");
+
+    fireEvent.click(screen.getByTestId("llm-provider-refresh-models-deepseek"));
+
+    await waitFor(() => expect(refreshLlmProviderModels).toHaveBeenCalledWith("deepseek"));
+    expect(await screen.findByTestId("llm-provider-models-deepseek")).toHaveTextContent("DeepSeek V4 Pro");
+    expect(screen.getByTestId("llm-provider-manager-status")).toHaveTextContent("models refreshed");
+  });
+
+  it("switches the active provider model directly and exposes Configure", async () => {
+    render(<LlmProviderManager onBack={vi.fn()} />);
+    await screen.findByTestId("llm-provider-manager");
+
+    expect(screen.getByTestId("llm-provider-configure-deepseek")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Model for DeepSeek" }), {
+      target: { value: "deepseek-v4-pro" },
+    });
+
+    await waitFor(() => expect(updateLlmProvider).toHaveBeenCalledWith("deepseek", {
+      model: "deepseek-v4-pro",
+    }));
+    expect(await screen.findByTestId("llm-provider-manager-status")).toHaveTextContent(
+      /model switched/i,
+    );
   });
 
   it("opens a fresh create editor for copy without carrying the API key", async () => {

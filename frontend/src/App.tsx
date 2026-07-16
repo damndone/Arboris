@@ -351,16 +351,6 @@ function AppShell() {
     <main
       className={`workbench-shell${isLineageDarkScope ? " workbench-shell--lineage" : ""}`}
     >
-      <header className="workbench-header">
-        <h1>Local Econometrics Workbench</h1>
-        <div className="workbench-header__right">
-          <span className="activity" aria-live="polite">
-            {activity}
-          </span>
-          <ThemeToggle />
-        </div>
-      </header>
-
       {errorMessage && (
         <section className="panel panel-error" role="alert">
           <strong>Request error</strong>
@@ -368,34 +358,42 @@ function AppShell() {
         </section>
       )}
 
-      <nav className="tabs" role="tablist" aria-label="workbench views">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={isProjectHomeActive}
-          onClick={() => {
-            if (isProjectGraphRoute && projectRoot) {
-              navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
-            } else {
-              navigate("/");
-            }
-          }}
-        >
-          Home
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={isWorkbenchActive}
-          disabled={!projectRoot}
-          onClick={() => {
-            navigate(`/p/${rootToSlug(projectRoot)}/graph`);
-            setErrorMessage(null);
-          }}
-        >
-          Workbench
-        </button>
-      </nav>
+      <div className="workbench-navigation-row">
+        <nav className="tabs" role="tablist" aria-label="workbench views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isProjectHomeActive}
+            onClick={() => {
+              if (isProjectGraphRoute && projectRoot) {
+                navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
+              } else {
+                navigate("/");
+              }
+            }}
+          >
+            Home
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isWorkbenchActive}
+            disabled={!projectRoot}
+            onClick={() => {
+              navigate(`/p/${rootToSlug(projectRoot)}/graph`);
+              setErrorMessage(null);
+            }}
+          >
+            Workbench
+          </button>
+        </nav>
+        <div className="workbench-navigation-actions">
+          <span className="activity" aria-live="polite">
+            {activity}
+          </span>
+          <ThemeToggle />
+        </div>
+      </div>
 
       <div className="workbench-outlet">
         <Outlet context={context} />

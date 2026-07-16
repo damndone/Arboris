@@ -26,6 +26,7 @@ export const DraftEditorSlot: FC<{ node: GraphViewNode }> = ({ node }) => {
   return (
     <DraftEditorSection
       entry={entry}
+      error={actions.errors?.[entry.draftId] ?? null}
       onPatch={actions.onPatch}
       onValidate={actions.onValidate}
       onExecute={actions.onExecute}

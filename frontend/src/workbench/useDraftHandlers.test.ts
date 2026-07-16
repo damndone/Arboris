@@ -127,6 +127,7 @@ describe("useDraftHandlers", () => {
       );
       expect(setDraftBusy.mock.calls).toEqual([[true], [false]]);
       expect(console.error).toHaveBeenCalled();
+      await waitFor(() => expect(result.current.errors.d1).toBe("boom"));
     });
   });
 
@@ -182,6 +183,7 @@ describe("useDraftHandlers", () => {
         expect.objectContaining({ type: "validated" }),
       );
       expect(setDraftBusy.mock.calls).toEqual([[true], [false]]);
+      await waitFor(() => expect(result.current.errors.d1).toBe("nope"));
     });
   });
 

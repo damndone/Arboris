@@ -43,6 +43,7 @@ export interface WorkbenchUrlSlice {
   agentSessionId?: string;
   agentEntryId?: string;
   operationRecordId?: string;
+  diffFocused?: boolean;
 }
 
 export const defaultUrlSlice: WorkbenchUrlSlice = {
@@ -85,6 +86,7 @@ export function parseWorkbenchUrl(
   const agentSessionId = params.get("agent_session") || undefined;
   const agentEntryId = params.get("agent_entry") || undefined;
   const operationRecordId = params.get("operation") || undefined;
+  const diffFocused = Boolean(operationRecordId) && params.get("diff") === "1";
 
   const slice: WorkbenchUrlSlice = {
     view,
@@ -96,6 +98,7 @@ export function parseWorkbenchUrl(
   if (agentSessionId) slice.agentSessionId = agentSessionId;
   if (agentEntryId) slice.agentEntryId = agentEntryId;
   if (operationRecordId) slice.operationRecordId = operationRecordId;
+  if (diffFocused) slice.diffFocused = true;
   return slice;
 }
 
@@ -143,6 +146,8 @@ export function writeWorkbenchUrl(
   else out.delete("agent_entry");
   if (slice.operationRecordId) out.set("operation", slice.operationRecordId);
   else out.delete("operation");
+  if (slice.diffFocused && slice.operationRecordId) out.set("diff", "1");
+  else out.delete("diff");
 
   return out;
 }

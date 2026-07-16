@@ -1,8 +1,13 @@
 import { apiUrl, readResponse } from "../../api";
 import type {
   AgentContextPacket,
+  AgentCapabilityCatalog,
+  AgentActivityItem,
+  AgentActivityEventItem,
   AgentEvent,
+  AgentHierarchyNode,
   AgentNavigationProjection,
+  AgentNavigationRef,
   AgentOperationRecord,
   AgentProposal,
   AgentSession,
@@ -11,6 +16,15 @@ import type {
 
 function agentPath(projectRoot: string, path: string): string {
   return apiUrl(`${path}?project_root=${encodeURIComponent(projectRoot)}`);
+}
+
+export function getAgentCapabilities(
+  projectRoot: string,
+  scope?: string,
+): Promise<AgentCapabilityCatalog> {
+  const query = new URLSearchParams({ project_root: projectRoot });
+  if (scope) query.set("scope", scope);
+  return request<AgentCapabilityCatalog>(apiUrl(`/agent/capabilities?${query.toString()}`));
 }
 
 export function createAgentSession(
@@ -76,6 +90,43 @@ export function getAgentOperationProjection(
       `/agent/sessions/${encodeURIComponent(sessionId)}/operations/${encodeURIComponent(recordId)}`,
     ),
   );
+}
+
+export function getAgentActivity(
+  projectRoot: string,
+): Promise<{
+  activities: AgentActivityItem[];
+  events: AgentActivityEventItem[];
+  hierarchy?: AgentHierarchyNode | null;
+}> {
+  return request(agentPath(projectRoot, "/agent/activity"));
+}
+
+export type AgentForkProposalResponse = {
+  session_id: string;
+  source_session_entry_id: string;
+  proposal: AgentProposal;
+  navigation: AgentNavigationRef;
+  status: string;
+};
+
+export function createAgentForkProposal(
+  projectRoot: string,
+  body: {
+    session_id?: string | null;
+    chain_id?: string | null;
+    source_run_id: string;
+    source_node_ref: string;
+    source_session_entry_id?: string | null;
+    active_head_run_id: string;
+    reason?: string;
+  },
+): Promise<AgentForkProposalResponse> {
+  return request(agentPath(projectRoot, "/agent/fork-proposals"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export function getAgentEvents(

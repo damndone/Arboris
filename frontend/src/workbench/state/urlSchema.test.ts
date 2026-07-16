@@ -94,6 +94,13 @@ describe("parseWorkbenchUrl", () => {
     expect(s.agentEntryId).toBe("entry-7");
     expect(s.operationRecordId).toBe("oprec-9");
   });
+
+  it("parses an operation diff focus", () => {
+    const s = parseWorkbenchUrl(
+      p("panel=agent&agent_session=agent_chain_child&operation=oprec-9&diff=1"),
+    );
+    expect(s.diffFocused).toBe(true);
+  });
 });
 
 describe("writeWorkbenchUrl", () => {
@@ -168,6 +175,17 @@ describe("writeWorkbenchUrl", () => {
     expect(out.get("tab")).toBe("lineage");
   });
 
+  it("writes an explicit operation diff focus", () => {
+    const out = writeWorkbenchUrl(new URLSearchParams(), {
+      ...defaultUrlSlice,
+      bottomPanel: "agent",
+      agentSessionId: "agent_chain_child",
+      operationRecordId: "oprec-9",
+      diffFocused: true,
+    });
+    expect(out.get("diff")).toBe("1");
+  });
+
   it("uses structured navigation hrefs instead of arbitrary URLs", () => {
     const ref: AgentNavigationRef = {
       kind: "graph_node",
@@ -217,6 +235,19 @@ describe("round-trip (parse → write → parse)", () => {
         bottomPanel: "logs",
         focusKey: null,
         pinned: false,
+      },
+    ],
+    [
+      "Agent operation diff focus",
+      {
+        view: "graph",
+        searchQuery: "",
+        bottomPanel: "agent",
+        focusKey: null,
+        pinned: false,
+        agentSessionId: "agent_chain_child",
+        operationRecordId: "oprec-9",
+        diffFocused: true,
       },
     ],
   ];

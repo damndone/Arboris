@@ -3,6 +3,8 @@ export interface LlmModel {
   request_model: string;
   context_window_tokens: number | null;
   supports_1m: boolean;
+  /** v1.7 G2: model accepts image content — gates the send-the-chart opt-in. */
+  supports_vision?: boolean;
 }
 
 export interface LlmProvider {
@@ -34,6 +36,8 @@ export interface LlmConfigInfo {
   source: "local" | "environment" | "none";
   context_window_tokens: number | null;
   supports_1m: boolean;
+  /** v1.7 G2: whether the active model can accept the rendered chart image. */
+  supports_vision?: boolean;
 }
 
 export interface ProviderUpsertInput {
