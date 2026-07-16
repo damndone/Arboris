@@ -47,6 +47,21 @@ def write_text_durable(path: Path, text: str) -> None:
         os.close(directory_fd)
 
 
+def write_bytes_durable(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    with temp_path.open("wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temp_path.replace(path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def write_json(path: Path, payload: Any) -> None:
     text = json.dumps(payload, indent=2, ensure_ascii=False)
     write_text_durable(path, text)
