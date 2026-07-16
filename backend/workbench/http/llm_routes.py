@@ -44,6 +44,7 @@ from ..llm.provider_store import (
     provider_public_dict,
     provider_store_lock,
     save_provider_store,
+    environment_provider_from_env,
     ProviderStoreInvalidError,
     ProviderStoreUnavailableError,
 )
@@ -75,6 +76,7 @@ router = APIRouter(route_class=_SanitizedValidationRoute)
 
 SUPPORTED_MODE = "workbench_node_context_v1"
 REPORT_MODE = "workbench_report_v1"
+FIGURE_MODE = "workbench_figure_context_v1"
 MAX_QUESTION_CHARS = 4_000
 PROVIDER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 _PROVIDER_MUTATION_LOCK = RLock()
@@ -173,6 +175,47 @@ _SYSTEM_PROMPT_HEADER = (
     "- Answer in the language the user asked in."
 )
 
+_FIGURE_PROMPT_HEADER = (
+    "You are the figure assistant of a local econometrics workbench. The user "
+    "selected one generated chart. You CANNOT see the image. The JSON packet "
+    "below gives the chart type and a safe preview of the numeric artifact the "
+    "chart was drawn from.\n"
+    "Hard rules (non-negotiable):\n"
+    "- Interpret the chart ONLY from the numeric source in the packet; never "
+    "claim to see colours, shapes, or pixels.\n"
+    "- Ground every statement in the numbers. If the source does not support a "
+    "reading, say so instead of guessing.\n"
+    "- The preview may be truncated; disclose this limit whenever it affects "
+    "your answer.\n"
+    "- Advisory text only. Never output executable actions or backend payloads.\n"
+    "- Answer in the language the user asked in."
+)
+
+# v1.7 G2 step 2 — the user explicitly opted into sending the rendered chart to
+# a vision-capable provider. The text-only header above would now be a lie, so
+# vision requests get their own header: the image is admissible for visual
+# structure, but numbers must still come from the numeric source (a model
+# reading values off pixels is exactly the failure mode we avoid).
+_FIGURE_VISION_PROMPT_HEADER = (
+    "You are the figure assistant of a local econometrics workbench. The user "
+    "selected one generated chart and explicitly chose to send you the rendered "
+    "image. You are given BOTH the chart image and the JSON packet with its "
+    "chart type and a safe preview of the numeric artifact it was drawn from.\n"
+    "Hard rules (non-negotiable):\n"
+    "- Every NUMBER you state must come from the numeric source in the packet, "
+    "never read off the image. Use the image only for visual structure the "
+    "numbers cannot show (shape, outliers, overplotting, layout problems).\n"
+    "- If image and numbers disagree, trust the numbers and say so.\n"
+    "- The preview may be truncated; disclose this limit whenever it affects "
+    "your answer.\n"
+    "- Advisory text only. Never output executable actions or backend payloads.\n"
+    "- Answer in the language the user asked in."
+)
+
+# Bound the opt-in payload: these are matplotlib PNGs (tens to hundreds of KB).
+MAX_IMAGE_DATA_URL_CHARS = 6_000_000
+_IMAGE_DATA_URL_PREFIX = "data:image/png;base64,"
+
 
 # v1.6.12 T5 (A4) — read-only provider visibility. Returns WHICH provider and
 # model /llm/chat will use and whether a key is present — never the key itself
@@ -192,6 +235,7 @@ def llm_config() -> dict[str, Any]:
         "source": config.source,
         "context_window_tokens": config.context_window_tokens,
         "supports_1m": config.supports_1m,
+        "supports_vision": config.supports_vision,
     }
 
 
@@ -202,6 +246,7 @@ class ProviderModelRequest(BaseModel):
     request_model: str = Field(min_length=1)
     context_window_tokens: int | None = Field(default=None, ge=1)
     supports_1m: bool = False
+    supports_vision: bool = False
 
     @field_validator("display_name", "request_model")
     @classmethod
@@ -273,6 +318,8 @@ ProviderID = Annotated[str, Path(pattern=PROVIDER_ID_PATTERN)]
 def _provider_or_error(provider_id: str) -> ProviderRecord:
     store = _load_provider_store_for_mutation()
     provider = next((item for item in store.providers if item.id == provider_id), None)
+    if provider is None and not store.providers and provider_id == "environment":
+        provider = environment_provider_from_env()
     if provider is None:
         raise WorkbenchAPIError(
             status_code=404,
@@ -432,6 +479,13 @@ def _load_provider_store_for_mutation() -> ProviderStore:
 @router.get("/llm/providers")
 def list_llm_providers() -> dict[str, Any]:
     store = _load_provider_store_for_mutation()
+    if not store.providers:
+        environment_provider = environment_provider_from_env()
+        if environment_provider is not None:
+            return {
+                "active_provider_id": environment_provider.id,
+                "providers": [_public_provider_dict(environment_provider)],
+            }
     return {
         "active_provider_id": store.active_provider_id,
         "providers": [_public_provider_dict(provider) for provider in store.providers],
@@ -467,14 +521,21 @@ def update_llm_provider(
     with _provider_store_mutation_lock():
         store = _load_provider_store_for_mutation()
         existing = next((item for item in store.providers if item.id == provider_id), None)
+        if existing is None and not store.providers and provider_id == "environment":
+            existing = environment_provider_from_env()
         if existing is None:
             raise WorkbenchAPIError(
                 status_code=404,
                 code="LLM_PROVIDER_NOT_FOUND",
                 message=f"LLM provider {provider_id!r} was not found.",
             )
+        is_environment_bootstrap = existing.id == "environment" and not store.providers
         provider = _to_provider_record(request, provider_id=provider_id, existing=existing)
-        updated_store = _replace_provider(store, provider)
+        updated_store = (
+            ProviderStore(active_provider_id=provider.id, providers=[provider])
+            if is_environment_bootstrap
+            else _replace_provider(store, provider)
+        )
         if (
             store.active_provider_id == provider_id
             and not _is_provider_configured(provider)
@@ -572,6 +633,8 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
         current_provider = next(
             (item for item in current_store.providers if item.id == provider_id), None
         )
+        if current_provider is None and not current_store.providers and provider_id == "environment":
+            current_provider = environment_provider_from_env()
         if current_provider is None:
             raise WorkbenchAPIError(
                 status_code=404,
@@ -608,6 +671,11 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
                     if model["id"] in existing_models
                     else False
                 ),
+                supports_vision=(
+                    existing_models[model["id"]].supports_vision
+                    if model["id"] in existing_models
+                    else False
+                ),
             )
             for model in models
         ]
@@ -623,7 +691,12 @@ def refresh_llm_provider_models(provider_id: ProviderID) -> dict[str, Any]:
             timeout_s=current_provider.timeout_s,
             models=refreshed_models,
         )
-        _save_provider_store_or_error(_replace_provider(current_store, refreshed))
+        updated_store = (
+            ProviderStore(active_provider_id=refreshed.id, providers=[refreshed])
+            if not current_store.providers and refreshed.id == "environment"
+            else _replace_provider(current_store, refreshed)
+        )
+        _save_provider_store_or_error(updated_store)
         return _public_provider_dict(refreshed)
 
 
@@ -649,6 +722,8 @@ def probe_llm_provider(provider_id: ProviderID) -> dict[str, Any]:
             ),
             None,
         )
+        if current_provider is None and provider_id == "environment":
+            current_provider = environment_provider_from_env()
         if current_provider is None:
             raise WorkbenchAPIError(
                 status_code=404,
@@ -676,16 +751,20 @@ class AskAIChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     packet: dict[str, Any]
     response_guardrails: dict[str, Any] | None = None
+    # v1.7 G2 step 2 — opt-in only. The client attaches the rendered chart as a
+    # PNG data URL after the user explicitly agreed to send it to the provider.
+    # Absent by default: the standing policy is binaries-excluded.
+    image_data_url: str | None = Field(default=None, max_length=MAX_IMAGE_DATA_URL_CHARS)
 
 
 @router.post("/llm/chat")
 def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
-    if request.mode not in (SUPPORTED_MODE, REPORT_MODE):
+    if request.mode not in (SUPPORTED_MODE, REPORT_MODE, FIGURE_MODE):
         raise WorkbenchAPIError(
             status_code=422,
             code="LLM_CHAT_UNSUPPORTED_MODE",
             message=f"Unsupported mode: {request.mode!r}",
-            details={"supported_modes": [SUPPORTED_MODE, REPORT_MODE]},
+            details={"supported_modes": [SUPPORTED_MODE, REPORT_MODE, FIGURE_MODE]},
         )
     if request.question.strip() == "":
         raise WorkbenchAPIError(
@@ -695,9 +774,10 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
         )
 
     config = load_llm_config()
+    _validate_image_optin(request, config)
     messages = [
         {"role": "system", "content": _build_system_prompt(request)},
-        {"role": "user", "content": request.question},
+        {"role": "user", "content": _build_user_content(request)},
     ]
     try:
         result = chat_completion(messages, config)
@@ -720,8 +800,58 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
     }
 
 
+def _validate_image_optin(request: AskAIChatRequest, config) -> None:
+    """Fail closed on the image opt-in: figure mode + vision model + PNG only."""
+
+    if request.image_data_url is None:
+        return
+    if request.mode != FIGURE_MODE:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="LLM_CHAT_IMAGE_NOT_ALLOWED",
+            message="An image may only be sent in figure mode.",
+            details={"mode": request.mode},
+        )
+    if not request.image_data_url.startswith(_IMAGE_DATA_URL_PREFIX):
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="LLM_CHAT_IMAGE_INVALID",
+            message="The chart image must be a base64 PNG data URL.",
+        )
+    if not config.supports_vision:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="LLM_CHAT_VISION_UNSUPPORTED",
+            message=(
+                "The active model is not marked as vision-capable; "
+                "the chart image was not sent."
+            ),
+            details={"model": config.model or None},
+        )
+
+
+def _build_user_content(request: AskAIChatRequest) -> Any:
+    """Text-only by default; OpenAI-compatible multimodal parts when opted in."""
+
+    if request.image_data_url is None:
+        return request.question
+    return [
+        {"type": "text", "text": request.question},
+        {"type": "image_url", "image_url": {"url": request.image_data_url}},
+    ]
+
+
 def _build_system_prompt(request: AskAIChatRequest) -> str:
-    header = _REPORT_PROMPT_HEADER if request.mode == REPORT_MODE else _SYSTEM_PROMPT_HEADER
+    if request.mode == REPORT_MODE:
+        header = _REPORT_PROMPT_HEADER
+    elif request.mode == FIGURE_MODE:
+        header = (
+            _FIGURE_VISION_PROMPT_HEADER
+            if request.image_data_url is not None
+            else _FIGURE_PROMPT_HEADER
+        )
+    else:
+        header = _SYSTEM_PROMPT_HEADER
     sections = [header]
     guardrails = request.response_guardrails or request.packet.get("response_guardrails")
     if guardrails:

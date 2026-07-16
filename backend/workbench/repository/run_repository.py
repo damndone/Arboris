@@ -78,9 +78,17 @@ def _read_manifest(run_root: Path) -> dict:
     return read_json(manifest_path)
 
 
-def _summarize_manifest(manifest: dict) -> dict:
+def _summarize_manifest(manifest: dict, *, run_id: str | None = None) -> dict:
+    """Summarize one run manifest for the run list.
+
+    The run directory name IS the run id (`runs/<run_id>/`), so a manifest that
+    omits the field is incomplete, not unidentifiable — prefer the manifest and
+    fall back to the directory. Emitting `run_id: null` would push a value no
+    consumer can key, navigate to, or render.
+    """
+
     return {
-        "run_id": manifest.get("run_id"),
+        "run_id": manifest.get("run_id") or run_id,
         "status": manifest.get("status"),
         "mode": manifest.get("mode"),
         "started_at": manifest.get("started_at"),

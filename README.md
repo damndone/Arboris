@@ -25,6 +25,14 @@ Start the local API:
 uvicorn workbench.api:app --reload
 ```
 
+Agent-confirmed operation state currently uses a project-local JSONL/file-lock
+control plane and therefore has an explicit `single_worker` deployment
+contract. The backend rejects `WORKBENCH_WORKERS` or `WEB_CONCURRENCY` values
+other than `1` at startup. `/health` and `/agent/capabilities` expose this as
+`control_plane_mode: single_worker`. Supporting multiple workers requires a
+transactional control-plane store with unique constraints and compare-and-swap
+semantics; it is not implied by the current local deployment.
+
 Start the local UI:
 
 ```bash
@@ -37,7 +45,7 @@ The V1 workflow writes outputs into `project/runs/{run_id}/`, including `run_man
 
 ## V1.5.3.1 Backend Expansion
 
-V1.5.3.1 adds explicit model types, prediction-only ML artifacts, MICE imputation, and imbalanced sampling - all backend-only. See [docs/v1.5.3.1-release-notes.md](docs/v1.5.3.1-release-notes.md) for details.
+V1.5.3.1 adds explicit model types, prediction-only ML artifacts, MICE imputation, and imbalanced sampling - all backend-only. See [docs/releases/v1.5.3.1-release-notes.md](docs/releases/v1.5.3.1-release-notes.md) for details.
 
 ### Optional extras
 

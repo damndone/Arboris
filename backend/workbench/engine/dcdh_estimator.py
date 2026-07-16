@@ -3,7 +3,7 @@
 v1.5.9 — binary, non-absorbing, same_switchers=TRUE, DID_l long-difference
 estimator + analytic cluster-robust influence function. Validated element-wise
 against the committed R `DIDmultiplegtDYN` 2.3.4 oracle (point estimates 1e-12,
-per-l SE reconstructed to machine precision; see docs/v1.5.9-IMPL-NOTES.md).
+per-l SE reconstructed to machine precision; see docs/architecture/v1.5.9-IMPL-NOTES.md).
 
 Zero new deps (NumPy/pandas only). Reuses the project SE helper convention:
 each IF column is N-scaled so `cs_aggregate._se(IF[:,k], arange(N), N)` returns

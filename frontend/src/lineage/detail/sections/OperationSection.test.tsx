@@ -8,6 +8,7 @@ import type {
   NodeOperationContextV1,
   ResolveNodeOperationContextResult,
 } from "../../api/nodeOperationContext";
+import { ApiError } from "../../../api";
 
 const { resolvedContextMock } = vi.hoisted(() => ({
   resolvedContextMock: {
@@ -337,6 +338,20 @@ describe("OperationSection (editable)", () => {
         },
       }),
     });
+  });
+
+  it("shows the structured 409 rerun failure instead of swallowing it", async () => {
+    const submitRerun = vi.fn().mockRejectedValue(
+      new ApiError(409, "A child run already exists for this request", "RERUN_CONFLICT"),
+    );
+    renderWithRerun(modelNode(), submitRerun);
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "robust" } });
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+    fireEvent.click(screen.getByTestId("operation-rerun-submit"));
+
+    expect(await screen.findByTestId("operation-rerun-error")).toHaveTextContent(
+      "A child run already exists for this request",
+    );
   });
 
   it("degrades to read-only without a RerunProvider", () => {

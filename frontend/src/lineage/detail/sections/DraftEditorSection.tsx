@@ -10,6 +10,7 @@ type ModelNode = Extract<PipelineDraftNode, { node_type: "model" }>;
 
 export interface DraftEditorSectionProps {
   entry: DraftEntry;
+  error?: string | null;
   onPatch: (draftId: string, body: PipelineDraftPatchRequest) => void;
   onValidate: (draftId: string) => void;
   onExecute: (draftId: string) => void;
@@ -18,7 +19,7 @@ export interface DraftEditorSectionProps {
 }
 
 export function DraftEditorSection({
-  entry, onPatch, onValidate, onExecute, onDiscard, busy,
+  entry, error = null, onPatch, onValidate, onExecute, onDiscard, busy,
 }: DraftEditorSectionProps) {
   const modelNode = entry.draft?.graph.nodes.find(
     (n): n is ModelNode => n.node_type === "model",
@@ -27,6 +28,11 @@ export function DraftEditorSection({
 
   return (
     <section className="draft-editor" aria-label="Draft editor">
+      {error && (
+        <div role="alert" style={{ color: "var(--danger, #b00020)", marginBottom: 8 }}>
+          Draft request failed: {error}
+        </div>
+      )}
       {modelNode ? (
         <ModelNodeInspector
           node={modelNode}

@@ -76,4 +76,9 @@ describe("DraftEditorSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
     expect(onDiscard).toHaveBeenCalledWith("d1");
   });
+
+  it("renders an actionable draft request error", () => {
+    render(<DraftEditorSection entry={makeEntry()} error="Draft hash is stale" onPatch={vi.fn()} onValidate={vi.fn()} onExecute={vi.fn()} onDiscard={vi.fn()} busy={false} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Draft hash is stale");
+  });
 });

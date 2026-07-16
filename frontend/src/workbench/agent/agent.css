@@ -1,0 +1,707 @@
+/* v1.7 Agent surface — theme-token styling for the Graph composer bar and the
+ * terminal-form bottom panel. All colors come from the lineage.css tokens
+ * (`:root[data-theme=…]`), so dark/light follow the app theme; the previous
+ * inline styles fell back to a hardcoded #202124 dark surface in light mode. */
+
+/* ---- Composer: Claude-Code-style bar under the graph ---- */
+
+.wb-agent-composer {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--bg-card) 72%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+
+:root[data-theme="light"] .wb-agent-composer {
+  box-shadow:
+    0 8px 24px rgba(20, 18, 16, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.wb-agent-composer:focus-within {
+  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 0 0 2px color-mix(in oklch, var(--tint) 22%, transparent);
+}
+
+.wb-agent-composer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.wb-agent-composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  min-height: 34px;
+  max-height: 140px;
+  padding: 7px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  line-height: 1.35;
+  outline: none;
+}
+
+.wb-agent-composer textarea::placeholder {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-context-control {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.wb-agent-ring {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  max-width: 30px;
+  max-height: 30px;
+  aspect-ratio: 1 / 1;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklch, var(--label) 16%, var(--separator));
+  background: conic-gradient(
+    var(--tint) var(--agent-ring-progress, 0%),
+    color-mix(in oklch, var(--label) 12%, transparent) 0
+  );
+  color: var(--label-secondary);
+  cursor: pointer;
+  font-size: 9px;
+  padding: 2px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+}
+
+.wb-agent-ring > span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--bg-card);
+}
+
+.wb-agent-ring:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--tint));
+  outline-offset: 2px;
+}
+
+.wb-agent-context-popover {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  bottom: calc(100% + 9px);
+  width: 220px;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--bg-card-2) 94%, transparent);
+  color: var(--label-secondary);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.wb-agent-context-popover strong {
+  color: var(--label);
+  font-size: 12px;
+}
+
+.wb-agent-context-popover-model {
+  overflow-wrap: anywhere;
+  color: var(--label-tertiary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-send {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--tint);
+  color: var(--bg-card);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 100ms ease-out, opacity 150ms ease;
+}
+
+.wb-agent-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.wb-agent-send:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.wb-agent-composer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 16px;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.wb-agent-composer-meta select {
+  max-width: 190px;
+  border: 0;
+  border-radius: 5px;
+  padding: 2px 4px;
+  background: color-mix(in oklch, var(--label) 8%, transparent);
+  color: inherit;
+  font: inherit;
+}
+
+.wb-agent-capability-control {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.wb-agent-capability-trigger {
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: transparent;
+  color: var(--label-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-agent-capability-trigger:hover,
+.wb-agent-capability-trigger:focus-visible {
+  color: var(--label);
+  border-color: var(--tint);
+}
+
+.wb-agent-capability-popover {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(560px, 70vh);
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--bg-card-2) 96%, transparent);
+  color: var(--label-secondary);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  text-align: left;
+  line-height: 1.4;
+}
+
+.wb-agent-capability-section h4 {
+  margin: 0 0 5px;
+  color: var(--label);
+  font-size: 11px;
+}
+
+.wb-agent-capability-section ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-agent-capability-section li {
+  padding: 6px 7px;
+  border: 1px solid color-mix(in oklch, var(--separator) 80%, transparent);
+  border-radius: 7px;
+}
+
+.wb-agent-capability-title {
+  display: flex;
+  gap: 5px;
+  color: var(--label);
+  font-size: 11px;
+}
+
+.wb-agent-capability-description,
+.wb-agent-capability-meta,
+.wb-agent-capability-example,
+.wb-agent-capability-empty,
+.wb-agent-capability-unavailable {
+  margin-top: 2px;
+  color: var(--label-tertiary);
+  font-size: 10px;
+}
+
+.wb-agent-capability-meta {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-error {
+  margin-top: 6px;
+  color: var(--red);
+  font-size: 12px;
+}
+
+/* ---- Bottom panel: terminal-form transcript ---- */
+
+.wb-agent-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 10px 12px 12px;
+  gap: 8px;
+}
+
+.wb-agent-terminal {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--label);
+}
+
+.wb-agent-terminal-line {
+  display: flex;
+  gap: 8px;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 1px 0;
+}
+
+.wb-agent-terminal-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wb-agent-terminal-plain {
+  white-space: pre-wrap;
+}
+
+.wb-agent-terminal-markdown {
+  flex: 1;
+  min-width: 0;
+}
+
+.wb-agent-terminal-markdown p:first-child,
+.wb-agent-terminal-markdown [role="heading"]:first-child {
+  margin-top: 0;
+}
+
+.wb-agent-terminal-markdown p:last-child,
+.wb-agent-terminal-markdown pre:last-child,
+.wb-agent-terminal-markdown ul:last-child,
+.wb-agent-terminal-markdown ol:last-child {
+  margin-bottom: 0;
+}
+
+.wb-agent-terminal-line[data-role="user"] {
+  color: var(--tint);
+  font-weight: 600;
+}
+
+.wb-agent-terminal-line[data-role="tool"] {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-terminal-marker {
+  flex: 0 0 auto;
+  user-select: none;
+  color: var(--label-tertiary);
+}
+
+.wb-agent-terminal-line[data-role="user"] > .wb-agent-terminal-marker {
+  color: var(--tint);
+}
+
+.wb-agent-message-links {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.wb-agent-message-link {
+  max-width: 220px;
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 1px solid color-mix(in oklch, var(--separator) 75%, transparent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--label-tertiary);
+  cursor: pointer;
+  font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-message-link:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--tint) 40%, var(--separator));
+  color: var(--tint);
+}
+
+.wb-agent-message-link:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.wb-agent-navigation-links {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1px 0;
+  scrollbar-width: thin;
+}
+
+.wb-agent-navigation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 4px 7px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--bg-canvas) 82%, transparent);
+  color: var(--label-secondary);
+  cursor: pointer;
+  font: 10px/1.25 var(--font-mono, ui-monospace, monospace);
+  white-space: nowrap;
+}
+
+.wb-agent-navigation-link:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
+  color: var(--label);
+}
+
+.wb-agent-navigation-link:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--tint));
+  outline-offset: 1px;
+}
+
+.wb-agent-navigation-link:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.wb-agent-navigation-link-relation {
+  color: var(--tint);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.wb-agent-hierarchy {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--bg-canvas) 82%, transparent);
+  color: var(--label-secondary);
+  font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-hierarchy-title {
+  margin-bottom: 3px;
+  color: var(--label-tertiary);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wb-agent-hierarchy-list,
+.wb-agent-hierarchy-children {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wb-agent-hierarchy-children {
+  margin-left: 14px;
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in oklch, var(--separator) 75%, transparent);
+}
+
+.wb-agent-hierarchy-node {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--label-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.wb-agent-hierarchy-node:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--tint) 8%, transparent);
+  color: var(--label);
+}
+
+.wb-agent-hierarchy-node:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--tint));
+  outline-offset: 1px;
+}
+
+.wb-agent-hierarchy-node:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.wb-agent-hierarchy-marker {
+  width: 10px;
+  flex: 0 0 auto;
+  color: var(--tint);
+  text-align: center;
+}
+
+.wb-agent-hierarchy-node > span:nth-child(2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-hierarchy-status {
+  margin-left: auto;
+  color: var(--label-tertiary);
+  font-size: 9px;
+}
+
+.wb-agent-terminal-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--label-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.wb-agent-terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--bg-canvas);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-terminal-input-marker {
+  flex: 0 0 auto;
+  color: var(--tint);
+  user-select: none;
+}
+
+.wb-agent-terminal-input-row input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 28px;
+  min-height: 28px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.wb-agent-terminal-input-row input::placeholder {
+  color: var(--label-tertiary);
+}
+
+.wb-agent-terminal-input-row:focus-within {
+  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 18%, transparent);
+}
+
+.wb-agent-terminal-input-hint {
+  flex: 0 0 auto;
+  color: var(--label-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.wb-agent-proposal {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in oklch, var(--tint) 35%, var(--separator));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--tint) 7%, var(--bg-card));
+  font-size: 12px;
+}
+
+.wb-agent-action-rail {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 6px;
+  max-height: min(35%, 180px);
+  overflow: auto;
+  padding: 1px;
+}
+
+.wb-agent-proposal-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wb-agent-proposal-header > span {
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.wb-agent-proposal-status {
+  margin-left: auto;
+  color: var(--tint) !important;
+  font-weight: 600;
+}
+
+.wb-agent-proposal-change {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
+}
+
+.wb-agent-proposal-detail {
+  color: var(--label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.wb-agent-proposal-confirm {
+  justify-self: start;
+  margin-top: 3px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in oklch, var(--tint) 45%, var(--separator));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tint);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.wb-agent-proposal-confirm:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.wb-agent-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.wb-agent-proposal-decline,
+.wb-agent-proposal-revise {
+  padding: 5px 9px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--label-secondary);
+  cursor: pointer;
+  font: inherit;
+}
+
+.wb-agent-proposal-decline:hover,
+.wb-agent-proposal-revise:hover {
+  color: var(--label);
+  border-color: var(--label-secondary);
+}
+
+.wb-agent-proposal-decline:disabled,
+.wb-agent-proposal-revise:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.wb-agent-proposal-editor {
+  display: grid;
+  gap: 6px;
+  margin-top: 3px;
+}
+
+.wb-agent-proposal-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 7px 8px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--bg-canvas);
+  color: var(--label);
+  font: 11px/1.45 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-proposal-editor [role="alert"] {
+  color: var(--danger, #ff453a);
+  font-size: 11px;
+}
+
+/* ---- Accessibility fallbacks ---- */
+
+@media (prefers-reduced-transparency: reduce) {
+  .wb-agent-composer {
+    background: var(--bg-card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .wb-agent-composer {
+    background: var(--bg-card);
+    border-color: var(--border-strong, var(--separator));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-agent-composer,
+  .wb-agent-send {
+    transition: none;
+  }
+}

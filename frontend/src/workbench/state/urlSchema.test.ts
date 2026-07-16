@@ -13,6 +13,7 @@ import {
   writeWorkbenchUrl,
   type WorkbenchUrlSlice,
 } from "./urlSchema";
+import type { AgentNavigationRef } from "../agent/agentTypes";
 
 function p(qs: string): URLSearchParams {
   return new URLSearchParams(qs);
@@ -84,6 +85,22 @@ describe("parseWorkbenchUrl", () => {
     const s = parseWorkbenchUrl(p("focus=anything"));
     expect(s.focusKey).toBe("anything");
   });
+
+  it("parses Agent session, entry, and operation focus", () => {
+    const s = parseWorkbenchUrl(
+      p("agent_session=agent_chain_child&agent_entry=entry-7&operation=oprec-9"),
+    );
+    expect(s.agentSessionId).toBe("agent_chain_child");
+    expect(s.agentEntryId).toBe("entry-7");
+    expect(s.operationRecordId).toBe("oprec-9");
+  });
+
+  it("parses an operation diff focus", () => {
+    const s = parseWorkbenchUrl(
+      p("panel=agent&agent_session=agent_chain_child&operation=oprec-9&diff=1"),
+    );
+    expect(s.diffFocused).toBe(true);
+  });
 });
 
 describe("writeWorkbenchUrl", () => {
@@ -140,6 +157,51 @@ describe("writeWorkbenchUrl", () => {
     expect(out.get("focus")).toBeNull();
     expect(out.get("pinned")).toBeNull();
   });
+
+  it("writes Agent focus while preserving unrelated params", () => {
+    const out = writeWorkbenchUrl(
+      p("project_root=/foo&tab=lineage"),
+      {
+        ...defaultUrlSlice,
+        agentSessionId: "agent_chain_child",
+        agentEntryId: "entry-7",
+        operationRecordId: "oprec-9",
+      },
+    );
+    expect(out.get("agent_session")).toBe("agent_chain_child");
+    expect(out.get("agent_entry")).toBe("entry-7");
+    expect(out.get("operation")).toBe("oprec-9");
+    expect(out.get("project_root")).toBe("/foo");
+    expect(out.get("tab")).toBe("lineage");
+  });
+
+  it("writes an explicit operation diff focus", () => {
+    const out = writeWorkbenchUrl(new URLSearchParams(), {
+      ...defaultUrlSlice,
+      bottomPanel: "agent",
+      agentSessionId: "agent_chain_child",
+      operationRecordId: "oprec-9",
+      diffFocused: true,
+    });
+    expect(out.get("diff")).toBe("1");
+  });
+
+  it("uses structured navigation hrefs instead of arbitrary URLs", () => {
+    const ref: AgentNavigationRef = {
+      kind: "graph_node",
+      id: "run-child::model:ols_1",
+      label: "OLS",
+      relation: "source",
+      available: true,
+      href: {
+        view: "graph",
+        run_id: "run-child",
+        node_ref: "model:ols_1",
+        forest_node_key: "run-child::model:ols_1",
+      },
+    };
+    expect(ref.href).not.toHaveProperty("url");
+  });
 });
 
 describe("round-trip (parse → write → parse)", () => {
@@ -173,6 +235,19 @@ describe("round-trip (parse → write → parse)", () => {
         bottomPanel: "logs",
         focusKey: null,
         pinned: false,
+      },
+    ],
+    [
+      "Agent operation diff focus",
+      {
+        view: "graph",
+        searchQuery: "",
+        bottomPanel: "agent",
+        focusKey: null,
+        pinned: false,
+        agentSessionId: "agent_chain_child",
+        operationRecordId: "oprec-9",
+        diffFocused: true,
       },
     ],
   ];

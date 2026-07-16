@@ -75,9 +75,32 @@ def categorical_auto_dummy(
     )
 
 
-def ols_default_robust_se(*, variant: str = "HC1") -> DecisionPoint:
+def ols_default_robust_se(*, variant: str = "HC1", explicit: bool = False) -> DecisionPoint:
+    """OLS standard-error decision.
+
+    Default call (explicit=False) keeps the historical shape: HC1 as the
+    hardcoded system default. With explicit=True the run form carried a
+    user-chosen covariance (nonrobust/clustered), so the decision is recorded
+    as user_explicit instead of pretending it was a system default (v1.7
+    covariance-honesty fix).
+    """
     decision_id = "ols_default_robust_se"
     _assert_stage_configured(decision_id)
+    if explicit:
+        return DecisionPoint(
+            decision_id=decision_id,
+            selected=variant,
+            candidates=(),
+            source="user_explicit",
+            contestability=Contestability.derive(
+                assumption_checks_needed=("breusch_pagan", "white_test"),
+            ),
+            reason=AutoChosenReason(
+                reason_type="user_config",
+                explanation=f"Covariance chosen explicitly in the run form: {variant}.",
+                chosen_params={"se_type": variant, "variant": variant},
+            ),
+        )
     return DecisionPoint(
         decision_id=decision_id,
         selected=variant,

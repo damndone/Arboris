@@ -189,6 +189,28 @@ def test_list_runs_returns_summary_for_completed_run(completed_run):
     assert "run_id" in summary
 
 
+def test_list_runs_falls_back_to_the_directory_name_for_a_manifest_without_run_id(
+    completed_run,
+):
+    """A run directory IS its run id, so a thin manifest is still identifiable.
+
+    Hand-seeded fixture runs (and any partially written manifest) used to list
+    as `run_id: null`, which no consumer can key, navigate to, or render.
+    """
+
+    client, project_root, _run_id = completed_run
+    thin = Path(project_root) / "runs" / "run-hand-seeded"
+    thin.mkdir(parents=True)
+    (thin / "run_manifest.json").write_text(json.dumps({"status": "completed"}))
+
+    payload = client.get("/runs", params={"project_root": project_root}).json()
+
+    summaries = {run["run_id"]: run for run in payload["runs"]}
+    assert None not in summaries
+    assert "run-hand-seeded" in summaries
+    assert summaries["run-hand-seeded"]["status"] == "completed"
+
+
 def test_list_runs_returns_empty_for_project_with_no_runs(tmp_path: Path):
     client = TestClient(app)
     response = client.post(

@@ -125,12 +125,11 @@ function makeXlsxFile(): File {
   });
 }
 
-test("renders workbench panels and disables run when invalid", () => {
+test("renders workbench navigation and disables run when invalid", () => {
   renderAt("/submit");
 
-  expect(
-    screen.getByRole("heading", { name: "Local Econometrics Workbench" })
-  ).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Home" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Workbench" })).toBeInTheDocument();
   expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
   expect(screen.getByLabelText("project name")).toBeInTheDocument();
   expect(screen.getByLabelText("run mode")).toBeInTheDocument();

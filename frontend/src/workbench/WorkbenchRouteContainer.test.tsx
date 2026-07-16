@@ -323,10 +323,10 @@ describe("WorkbenchRouteContainer", () => {
     await screen.findByTestId("graph-workbench");
 
     fireEvent.click(screen.getByTestId("workbench-topbar-settings"));
-    expect(screen.getByTestId("llm-provider-editor")).toBeInTheDocument();
+    expect(screen.getByTestId("llm-provider-manager")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("view-tab-graph"));
-    expect(screen.queryByTestId("llm-provider-editor")).toBeNull();
+    expect(screen.queryByTestId("llm-provider-manager")).toBeNull();
     expect(screen.getByTestId("workbench-main")).toHaveAttribute(
       "data-view",
       "graph",

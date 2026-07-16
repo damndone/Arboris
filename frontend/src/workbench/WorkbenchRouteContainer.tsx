@@ -69,6 +69,11 @@ import {
 } from "../api";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
+import { AgentSurfaceProvider } from "./agent/AgentSurfaceContext";
+import {
+  AgentNavigationContext,
+  applyAgentNavigationRef,
+} from "./agent/agentNavigation";
 
 type PendingFocusTarget = {
   runId: string;
@@ -523,6 +528,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
             value={{
               registry,
               busy: draftBusy,
+              errors: draftHandlers.errors,
               onForkDraft: draftHandlers.onForkDraft,
               onPatch: draftHandlers.onPatch,
               onValidate: draftHandlers.onValidate,
@@ -806,8 +812,18 @@ function WorkbenchShell({
   const { state } = useWorkbench();
   const location = useLocation();
   const navigate = useNavigate();
+  const [navigationParams, setNavigationParams] = useSearchParams();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
+
+  const openAgentNavigation = useMemo(
+    () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
+      if (!ref.available) return false;
+      setNavigationParams(applyAgentNavigationRef(navigationParams, ref));
+      return true;
+    },
+    [navigationParams, setNavigationParams],
+  );
 
   useEffect(() => {
     setSettingsOpen(false);
@@ -912,52 +928,56 @@ function WorkbenchShell({
           ) : null
         }
       />
-      <div
-        data-testid="workbench-main-row"
-        style={{
-          display: "flex",
-          flexDirection: "row",
-          flex: 1,
-          minHeight: 0,
-          overflow: "hidden",
-        }}
-      >
-        {state.view !== "home" && <RunHistoryRail projectRoot={projectRoot} />}
+      <AgentNavigationContext.Provider value={openAgentNavigation}>
         <div
-          data-testid="workbench-center-column"
+          data-testid="workbench-main-row"
           style={{
             display: "flex",
-            flexDirection: "column",
+            flexDirection: "row",
             flex: 1,
             minHeight: 0,
-            minWidth: 0,
             overflow: "hidden",
           }}
         >
-          {settingsOpen ? (
-            <LlmProviderManager onBack={() => setSettingsOpen(false)} />
-          ) : (
-            <WorkbenchMain
+          {state.view !== "home" && <RunHistoryRail projectRoot={projectRoot} />}
+          <div
+            data-testid="workbench-center-column"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              overflow: "hidden",
+            }}
+          >
+            {settingsOpen ? (
+              <LlmProviderManager onBack={() => setSettingsOpen(false)} />
+            ) : (
+              <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
+                <WorkbenchMain
+                  projectRoot={projectRoot}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenProject={(root) => {
+                    navigate(`/p/${rootToSlug(root)}/graph`);
+                  }}
+                />
+                {!settingsOpen && state.view !== "home" && (
+                  <BottomPanel runId={runId} projectRoot={projectRoot} />
+                )}
+              </AgentSurfaceProvider>
+            )}
+          </div>
+          {!settingsOpen && state.view !== "home" && selectedNode !== null && (
+            <DetailDrawer
+              node={selectedNode}
               projectRoot={projectRoot}
-              onOpenSettings={() => setSettingsOpen(true)}
-              onOpenProject={(root) => {
-                navigate(`/p/${rootToSlug(root)}/graph`);
-              }}
+              onClose={() => select(null)}
+              onShowJson={() => setRawJsonOpen(true)}
             />
           )}
-          {!settingsOpen && state.view !== "home" && (
-            <BottomPanel runId={runId} projectRoot={projectRoot} />
-          )}
         </div>
-        {!settingsOpen && state.view !== "home" && selectedNode !== null && (
-          <DetailDrawer
-            node={selectedNode}
-            projectRoot={projectRoot}
-            onClose={() => select(null)}
-            onShowJson={() => setRawJsonOpen(true)}
-          />
-        )}
-      </div>
+      </AgentNavigationContext.Provider>
       {!settingsOpen && state.view !== "home" && <ContextMenu />}
       {!settingsOpen && state.view !== "home" && <SearchPalette />}
       {!settingsOpen && state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}

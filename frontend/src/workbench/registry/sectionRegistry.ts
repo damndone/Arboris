@@ -39,6 +39,8 @@ import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSecti
 import { EstimatedEquationSection } from "../../lineage/detail/sections/EstimatedEquationSection";
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
+import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
+import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
 
@@ -87,6 +89,21 @@ export const sectionRegistry: SectionEntry[] = [
     order: 26,
     shouldRender: (n) => "runs" in n && !n.isDraft,
     Component: CompareNodesSection,
+  },
+  {
+    id: "dataColumnCast",
+    order: 28,
+    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    Component: DataColumnCastSection,
+  },
+  {
+    // v1.7 G3 — sandboxed `code.execute`, the typed operation behind "the
+    // terminal can change code". Sits under the cast builder: same node, same
+    // lifecycle, wider blast radius.
+    id: "codeExecute",
+    order: 29,
+    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    Component: CodeExecuteSection,
   },
   {
     id: "operation",

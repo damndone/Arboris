@@ -23,6 +23,9 @@ import {
   fetchRunDetail,
 } from "../../api";
 import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
+import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
+import { fetchLlmConfig } from "../../llm/llmApi";
+import type { LlmConfigInfo } from "../../llm/llmTypes";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -107,7 +110,130 @@ function FigureCard({
       >
         {label}
       </figcaption>
+      <FigureAskAi item={item} projectRoot={projectRoot} runId={runId} />
     </figure>
+  );
+}
+
+/** G2: interpret a chart from the numbers it was drawn from (not the pixels). */
+function FigureAskAi({
+  item,
+  projectRoot,
+  runId,
+}: {
+  item: ArtifactItem;
+  projectRoot: string;
+  runId: string;
+}) {
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [chartType, setChartType] = useState<string | null>(null);
+  const [sendImage, setSendImage] = useState(false);
+  const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchLlmConfig()
+      .then((config) => {
+        if (!cancelled) setLlmConfig(config);
+      })
+      .catch(() => {
+        /* vision opt-in simply stays hidden when the config is unreadable */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visionAvailable = llmConfig?.configured === true && llmConfig.supports_vision === true;
+
+  async function handleAsk() {
+    if (!projectRoot) return;
+    setStatus("loading");
+    setError(null);
+    setAnswer(null);
+    try {
+      const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
+      setChartType(context.figure.chart_type);
+      const question = sendImage
+        ? `Interpret this ${context.figure.chart_type} for me: what does it show about the analysis, and what should I watch out for? Take every number from the numeric source; use the image only for visual structure.`
+        : `Interpret this ${context.figure.chart_type} for me: what does it show about the analysis, and what should I watch out for? Use only the numeric source in the context.`;
+      const imageDataUrl =
+        sendImage && visionAvailable
+          ? await figureAsDataUrl(artifactDownloadUrl(projectRoot, runId, item.artifact_id))
+          : undefined;
+      const response = await askAiAboutFigure(context, question, imageDataUrl);
+      setAnswer(response.text);
+      setStatus("done");
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div data-testid={`figure-ask-ai-${item.artifact_id}`} style={{ marginTop: 6 }}>
+      <button
+        type="button"
+        data-testid={`figure-ask-ai-button-${item.artifact_id}`}
+        disabled={status === "loading"}
+        onClick={() => void handleAsk()}
+        style={{ fontSize: 11 }}
+      >
+        {status === "loading" ? "Asking AI…" : "Ask AI about this figure"}
+      </button>
+      {/* G2 step 2 — opt-in only, default off, and it names the destination:
+       *  this is the one place the binaries-excluded policy is broken, so the
+       *  user must see exactly what leaves the machine and to whom. */}
+      {visionAvailable && (
+        <label
+          data-testid={`figure-send-image-${item.artifact_id}`}
+          style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11, marginTop: 4 }}
+        >
+          <input
+            type="checkbox"
+            aria-label={`Also send the ${humanize(item.artifact_id)} image to the model`}
+            checked={sendImage}
+            disabled={status === "loading"}
+            onChange={(event) => setSendImage(event.target.checked)}
+          />
+          <span style={{ color: "var(--label-tertiary)" }}>
+            Also send the rendered image to {llmConfig?.provider_name ?? "the provider"} (
+            {llmConfig?.model ?? "vision model"}) — leaves your machine
+          </span>
+        </label>
+      )}
+      {chartType && status !== "idle" && (
+        <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginTop: 4 }}>
+          Interpreting from numeric source · {chartType}
+        </div>
+      )}
+      {status === "error" && (
+        <div
+          data-testid={`figure-ask-ai-error-${item.artifact_id}`}
+          role="alert"
+          style={{ fontSize: 11, color: "var(--accent-negative, #d33)", marginTop: 4 }}
+        >
+          {error}
+        </div>
+      )}
+      {status === "done" && answer && (
+        <div
+          data-testid={`figure-ask-ai-answer-${item.artifact_id}`}
+          style={{
+            fontSize: 12,
+            marginTop: 6,
+            padding: 8,
+            whiteSpace: "pre-wrap",
+            background: "var(--bg-card-2, rgba(0,0,0,0.03))",
+            borderRadius: 6,
+          }}
+        >
+          {answer}
+        </div>
+      )}
+    </div>
   );
 }
 

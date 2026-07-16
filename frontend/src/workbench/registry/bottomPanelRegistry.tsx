@@ -13,8 +13,9 @@ import type { FC } from "react";
 import type { RegistryEntry } from "./registryTypes";
 import { LogsPanel } from "../panels/LogsPanel";
 import { AiActivityPanel } from "../panels/AiActivityPanel";
+import { AgentPanel } from "../agent/AgentPanel";
 
-export type BottomPanelId = "logs" | "ai";
+export type BottomPanelId = "agent" | "logs" | "ai";
 
 export interface BottomPanelContext {
   runId: string;
@@ -29,6 +30,13 @@ export interface BottomPanelEntry extends RegistryEntry<BottomPanelContext> {
 }
 
 export const bottomPanelRegistry: BottomPanelEntry[] = [
+  {
+    id: "agent",
+    order: 5,
+    label: "Agent",
+    Component: AgentPanel,
+    shouldRender: () => true,
+  },
   {
     id: "logs",
     order: 10,

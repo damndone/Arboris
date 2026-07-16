@@ -9,6 +9,7 @@ import type { DraftRegistry } from "./draftRegistry";
 export interface DraftActionsValue {
   registry: DraftRegistry;
   busy: boolean;
+  errors?: Readonly<Record<string, string>>;
   onForkDraft: (created: PipelineDraftResponse) => void;
   onPatch: (draftId: string, body: PipelineDraftPatchRequest) => void;
   onValidate: (draftId: string) => void;

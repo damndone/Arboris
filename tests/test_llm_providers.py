@@ -90,6 +90,34 @@ def test_create_and_list_return_only_public_provider_data(api, store_path):
     assert stored.providers[0].notes == "Primary research provider"
 
 
+def test_environment_provider_is_visible_and_model_switch_materializes_local_settings(
+    api, store_path, monkeypatch
+):
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "deepseek-v4-flash")
+
+    listed = api.get("/llm/providers")
+    assert listed.status_code == 200, listed.text
+    payload = listed.json()
+    assert payload["active_provider_id"] == "environment"
+    assert {model["request_model"] for model in payload["providers"][0]["models"]} >= {
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    }
+    assert API_KEY not in listed.text
+
+    updated = api.put(
+        "/llm/providers/environment",
+        json={"model": "deepseek-v4-pro"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["model"] == "deepseek-v4-pro"
+    assert load_provider_store(store_path).active_provider_id == "environment"
+    assert load_llm_config().source == "local"
+    assert load_llm_config().model == "deepseek-v4-pro"
+
+
 def test_update_preserves_and_can_replace_management_metadata(api, store_path):
     _create(api)
 
@@ -864,6 +892,10 @@ def test_duplicate_create_and_missing_update_use_workbench_errors(api, store_pat
 
 
 def test_chat_upstream_echoed_api_key_is_redacted(api, store_path, monkeypatch):
+    # This test exercises redaction via the ENVIRONMENT provider. The pinned
+    # store file must exist (empty is fine): a missing explicit store now fails
+    # closed instead of falling through to the environment.
+    save_provider_store(ProviderStore(), store_path)
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://llm.example.com")
     monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
     monkeypatch.setenv("WORKBENCH_LLM_MODEL", "test-model")
@@ -1095,6 +1127,9 @@ def test_refresh_models_preserves_provider_updates_during_fetch(
             "request_model": "deepseek-chat",
             "context_window_tokens": 256000,
             "supports_1m": True,
+            # v1.7 G2: vision capability is preserved across a model refresh
+            # exactly like supports_1m (it is operator metadata, not upstream's).
+            "supports_vision": False,
         }
     ]
     assert "updated-secret" not in response.text
@@ -1413,3 +1448,63 @@ def test_fetch_models_allows_missing_owned_by(monkeypatch):
     assert llm_client.fetch_models(config) == [
         {"id": "deepseek-chat", "owned_by": ""}
     ]
+
+
+def test_refresh_models_preserves_operator_marked_vision_capability(
+    api, store_path, monkeypatch
+):
+    """v1.7 G2: supports_vision is operator metadata, not upstream's.
+
+    A model refresh must not silently un-mark a vision-capable model — that
+    would quietly disable the chart-image opt-in with no visible cause.
+    """
+    _create(api)
+    save_provider_store(
+        ProviderStore(
+            active_provider_id="deepseek",
+            providers=[
+                ProviderRecord(
+                    id="deepseek",
+                    name="DeepSeek",
+                    base_url="https://api.deepseek.com/v1",
+                    model="deepseek-chat",
+                    api_key=API_KEY,
+                    models=[
+                        ModelRecord("DeepSeek Chat", "deepseek-chat", 128000, False, True),
+                    ],
+                )
+            ],
+        ),
+        store_path,
+    )
+    _install_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200, json={"data": [{"id": "deepseek-chat", "owned_by": "deepseek"}]}
+        ),
+    )
+
+    response = api.post("/llm/providers/deepseek/models/refresh")
+
+    assert response.status_code == 200, response.text
+    models = response.json()["models"]
+    assert models[0]["request_model"] == "deepseek-chat"
+    assert models[0]["supports_vision"] is True
+
+    # a model the operator never marked stays text-only by default
+    _install_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "deepseek-chat", "owned_by": "deepseek"},
+                    {"id": "brand-new-model", "owned_by": "deepseek"},
+                ]
+            },
+        ),
+    )
+    refreshed = api.post("/llm/providers/deepseek/models/refresh").json()["models"]
+    by_id = {m["request_model"]: m for m in refreshed}
+    assert by_id["deepseek-chat"]["supports_vision"] is True
+    assert by_id["brand-new-model"]["supports_vision"] is False

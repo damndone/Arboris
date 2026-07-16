@@ -5,6 +5,8 @@ import {
   deleteLlmProvider,
   fetchLlmProviders,
   probeLlmProvider,
+  refreshLlmProviderModels,
+  updateLlmProvider,
 } from "./llmApi";
 import type { LlmProvider } from "./llmTypes";
 
@@ -114,6 +116,40 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
     }
   }
 
+  async function refreshModels(providerId: string) {
+    setBusyId(providerId);
+    setError(null);
+    setStatus(null);
+    try {
+      const updated = await refreshLlmProviderModels(providerId);
+      setProviders((current) => current.map((provider) => (
+        provider.id === updated.id ? updated : provider
+      )));
+      setStatus(`${updated.name} models refreshed`);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function changeModel(providerId: string, model: string) {
+    setBusyId(providerId);
+    setError(null);
+    setStatus(null);
+    try {
+      const updated = await updateLlmProvider(providerId, { model });
+      setProviders((current) => current.map((provider) => (
+        provider.id === updated.id ? updated : provider
+      )));
+      setStatus(`Model switched to ${updated.model}`);
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function copy(provider: LlmProvider) {
     const baseId = `${provider.id}-copy`;
     let copyId = baseId;
@@ -171,6 +207,17 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
           const isActive = provider.id === activeProviderId;
           const probeState = probeStates[provider.id] ?? "idle";
           const probeLabel = probeState === "success" ? "Reachable" : probeState === "error" ? "Failed" : probeState === "loading" ? "Testing…" : "Not tested";
+          const modelOptions = provider.models.some((model) => model.request_model === provider.model)
+            ? provider.models
+            : [
+                {
+                  display_name: provider.model || "Current model",
+                  request_model: provider.model,
+                  context_window_tokens: null,
+                  supports_1m: false,
+                },
+                ...provider.models,
+              ];
           return (
             <article key={provider.id} style={{ border: "1px solid var(--separator, #3a3a3c)", borderRadius: 12, padding: 16, background: "var(--bg-card-2, rgba(255,255,255,0.04))" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -179,15 +226,64 @@ export function LlmProviderManager({ onBack }: LlmProviderManagerProps) {
                   {isActive ? "Active" : "Available"}
                 </span>
                 <span style={{ color: "var(--label-secondary, #98989d)" }}>{provider.key_present ? "API key configured" : "API key missing"}</span>
-                <span style={{ color: "var(--label-secondary, #98989d)", fontFamily: "var(--font-mono, monospace)" }}>{provider.model || "No default model"}</span>
+                {modelOptions.length > 0 ? (
+                  <select
+                    aria-label={`Model for ${provider.name}`}
+                    value={provider.model}
+                    disabled={busyId === provider.id}
+                    onChange={(event) => void changeModel(provider.id, event.target.value)}
+                    style={{
+                      maxWidth: 240,
+                      border: "1px solid var(--separator, #3a3a3c)",
+                      borderRadius: 6,
+                      padding: "3px 6px",
+                      background: "var(--bg-card-2, rgba(255,255,255,0.06))",
+                      color: "var(--label, #f5f5f7)",
+                      fontFamily: "var(--font-mono, monospace)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {modelOptions.map((model) => (
+                      <option key={model.request_model} value={model.request_model}>
+                        {model.display_name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span style={{ color: "var(--label-secondary, #98989d)", fontFamily: "var(--font-mono, monospace)" }}>
+                    {provider.model || "No default model"}
+                  </span>
+                )}
               </div>
               <div style={{ marginTop: 8, color: "var(--label-secondary, #98989d)", fontSize: 12 }}>Base URL: {provider.base_url || "—"}</div>
+              <div
+                data-testid={`llm-provider-models-${provider.id}`}
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "5px 10px",
+                  marginTop: 8,
+                  color: "var(--label-secondary, #98989d)",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono, monospace)",
+                }}
+              >
+                {provider.models.length > 0
+                  ? provider.models.map((model) => (
+                    <span key={model.request_model} title={model.request_model}>
+                      {model.display_name}
+                    </span>
+                  ))
+                  : <span>No mapped models</span>}
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                 <span style={{ color: probeState === "success" ? "var(--green, #30d158)" : probeState === "error" ? "var(--danger, #ff453a)" : "var(--label-tertiary, #8e8e93)" }}>Probe: {probeLabel}</span>
                 {!isActive && <button type="button" data-testid={`llm-provider-activate-${provider.id}`} disabled={busyId === provider.id} onClick={() => void activate(provider.id)} style={buttonStyle}>Use</button>}
                 {isActive && <button type="button" data-testid={`llm-provider-activate-${provider.id}`} disabled style={buttonStyle}>Active</button>}
                 <button type="button" onClick={() => void probe(provider.id)} disabled={probeState === "loading"} style={buttonStyle}>Test connection</button>
+                <button type="button" data-testid={`llm-provider-refresh-models-${provider.id}`} onClick={() => void refreshModels(provider.id)} disabled={busyId === provider.id} style={buttonStyle}>Refresh models</button>
                 <button type="button" data-testid={`llm-provider-edit-${provider.id}`} onClick={() => setEditingProvider(provider)} style={buttonStyle}>Edit</button>
+                <button type="button" data-testid={`llm-provider-configure-${provider.id}`} onClick={() => setEditingProvider(provider)} style={buttonStyle}>Configure</button>
                 <button type="button" data-testid={`llm-provider-copy-${provider.id}`} onClick={() => copy(provider)} style={buttonStyle}>Copy</button>
                 <button type="button" data-testid={`llm-provider-delete-${provider.id}`} disabled={busyId === provider.id} onClick={() => void remove(provider)} style={{ ...buttonStyle, color: "var(--danger, #ff453a)" }}>Delete</button>
               </div>

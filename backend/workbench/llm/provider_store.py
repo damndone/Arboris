@@ -43,6 +43,9 @@ class ModelRecord:
     request_model: str
     context_window_tokens: int | None = None
     supports_1m: bool = False
+    # v1.7 G2: whether this model accepts image content. Gates the opt-in that
+    # sends a rendered chart to the provider; default False = text-only.
+    supports_vision: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -50,6 +53,7 @@ class ModelRecord:
             "request_model": self.request_model,
             "context_window_tokens": self.context_window_tokens,
             "supports_1m": self.supports_1m,
+            "supports_vision": self.supports_vision,
         }
 
 
@@ -106,6 +110,19 @@ def config_path() -> Path:
     if configured:
         return Path(configured).expanduser()
     return Path.home() / _DEFAULT_CONFIG_DIR / _DEFAULT_CONFIG_FILENAME
+
+
+def explicit_config_path() -> Path | None:
+    """The operator-pinned store path, or None when running on the default.
+
+    The distinction matters for failure handling: a missing default store just
+    means "not configured yet", but a missing *explicit* store means the config
+    the operator pointed at is gone — guessing another source at that moment is
+    how an offline smoke run once called a real provider.
+    """
+
+    configured = os.environ.get(_CONFIG_PATH_ENV)
+    return Path(configured).expanduser() if configured else None
 
 
 @contextmanager
@@ -208,6 +225,19 @@ def environment_provider_from_env() -> ProviderRecord | None:
     raw_timeout = os.environ.get("WORKBENCH_LLM_TIMEOUT_S", "")
     timeout_s = _timeout_value(raw_timeout or DEFAULT_TIMEOUT_S)
 
+    known_display_names = {
+        "deepseek-v4-flash": "DeepSeek V4 Flash",
+        "deepseek-v4-pro": "DeepSeek V4 Pro",
+    }
+    models = [ModelRecord(known_display_names.get(model, model), model, None, False)]
+    if "deepseek" in base_url.lower():
+        known_models = [
+            ModelRecord("DeepSeek V4 Flash", "deepseek-v4-flash", None, False),
+            ModelRecord("DeepSeek V4 Pro", "deepseek-v4-pro", None, False),
+        ]
+        existing_ids = {entry.request_model for entry in models}
+        models.extend(entry for entry in known_models if entry.request_model not in existing_ids)
+
     return ProviderRecord(
         id="environment",
         name="Environment",
@@ -215,7 +245,7 @@ def environment_provider_from_env() -> ProviderRecord | None:
         model=model,
         api_key=api_key,
         timeout_s=timeout_s,
-        models=[ModelRecord(model, model, None, False)],
+        models=models,
     )
 
 
@@ -297,11 +327,15 @@ def _model_from_dict(raw: Any) -> ModelRecord:
     supports_1m = raw.get("supports_1m", False)
     if not isinstance(supports_1m, bool):
         raise ValueError("supports_1m must be a boolean")
+    supports_vision = raw.get("supports_vision", False)
+    if not isinstance(supports_vision, bool):
+        raise ValueError("supports_vision must be a boolean")
     return ModelRecord(
         display_name=_required_nonblank_string(raw, "display_name"),
         request_model=_required_nonblank_string(raw, "request_model"),
         context_window_tokens=context_window_tokens,
         supports_1m=supports_1m,
+        supports_vision=supports_vision,
     )
 
 

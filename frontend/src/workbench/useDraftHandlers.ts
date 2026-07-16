@@ -17,7 +17,7 @@
 // Move is VERBATIM: busy wrapping, console.error messages, and best-effort
 // catches are identical to the former inline container handlers.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   listPipelineDrafts,
   getPipelineDraft,
@@ -38,6 +38,7 @@ export interface UseDraftHandlersParams {
 }
 
 export interface DraftActionHandlers {
+  errors: Readonly<Record<string, string>>;
   onForkDraft: (created: PipelineDraftResponse) => void;
   onPatch: (draftId: string, body: PipelineDraftPatchRequest) => Promise<void>;
   onValidate: (draftId: string) => Promise<void>;
@@ -58,6 +59,21 @@ export function useDraftHandlers({
   dispatchDraft,
   setDraftBusy,
 }: UseDraftHandlersParams): DraftActionHandlers {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const clearError = (draftId: string) => {
+    setErrors((current) => {
+      if (!(draftId in current)) return current;
+      const next = { ...current };
+      delete next[draftId];
+      return next;
+    });
+  };
+  const recordError = (draftId: string, error: unknown) => {
+    setErrors((current) => ({
+      ...current,
+      [draftId]: error instanceof Error ? error.message : String(error),
+    }));
+  };
   // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
   // survive a page reload. Best-effort: never block the forest if it fails.
   useEffect(() => {
@@ -109,10 +125,12 @@ export function useDraftHandlers({
     body: PipelineDraftPatchRequest,
   ) => {
     setDraftBusy(true);
+    clearError(draftId);
     try {
       const res = await patchPipelineDraftParams(projectRoot, draftId, body);
       dispatchDraft({ type: "patch", draftId, draft: res.draft, draftHash: res.draft_hash });
     } catch (e) {
+      recordError(draftId, e);
       console.error("draft patch failed", e);
     } finally {
       setDraftBusy(false);
@@ -121,6 +139,7 @@ export function useDraftHandlers({
 
   const onValidate = async (draftId: string) => {
     setDraftBusy(true);
+    clearError(draftId);
     dispatchDraft({ type: "validating", draftId });
     try {
       const v = await validatePipelineDraft(projectRoot, draftId, "rerun_child");
@@ -132,6 +151,7 @@ export function useDraftHandlers({
       });
     } catch (e) {
       dispatchDraft({ type: "revertToDraft", draftId });
+      recordError(draftId, e);
       console.error("draft validate failed", e);
     } finally {
       setDraftBusy(false);
@@ -140,10 +160,12 @@ export function useDraftHandlers({
 
   const onDiscard = async (draftId: string) => {
     setDraftBusy(true);
+    clearError(draftId);
     try {
       await deletePipelineDraft(projectRoot, draftId);
       dispatchDraft({ type: "remove", draftId });
     } catch (e) {
+      recordError(draftId, e);
       console.error("draft discard failed", e);
     } finally {
       setDraftBusy(false);
@@ -157,7 +179,7 @@ export function useDraftHandlers({
       const res = await getPipelineDraft(projectRoot, draftId);
       dispatchDraft({ type: "put", draftId, draft: res.draft, draftHash: res.draft_hash });
     } catch {
-      /* best-effort; editor shows "Loading draft…" until retried */
+      recordError(draftId, "Unable to load this draft. Retry after checking the project state.");
     }
   };
 
@@ -192,6 +214,7 @@ export function useDraftHandlers({
   };
 
   return {
+    errors,
     onForkDraft,
     onPatch,
     onValidate,
