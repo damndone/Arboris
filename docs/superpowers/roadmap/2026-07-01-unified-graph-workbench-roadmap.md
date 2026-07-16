@@ -65,7 +65,7 @@
 - draft-execute 长 run 窗口修复（`usePendingRun` 索引等待层，draft 不再"消失"）+ RUNS rail 即时刷新;
 - D3 CLI 参数补全（22 参，与 `run_workflow` 零缺口）;`POST /runs`/`batch` 项目根校验对称;
 - 删 dead RunHistory、REV-3 `classifyError`、429/useCapabilities/global.fetch 测试卫生;`WorkbenchRouteContainer` 987→859(抽 `usePendingRun`/`useDraftHandlers`);
-- 详见 `docs/superpowers/followups/v1.6.9-followups.md`（含本版新增留痕 §4.1b，最高优先 = P1 auto-draft 不可编辑）。
+- 详见 `docs/superpowers/followups/BACKLOG.md`（原 v1.6.9-followups.md）（含本版新增留痕 §4.1b，最高优先 = P1 auto-draft 不可编辑）。
 
 ### v1.6.10 — 图内对比 + 节点 AI + 引用报告（**handoff Vision 2，北极星实质步**）
 - **任选对比**：图上选两个节点/两个 run 直接 compare（compareWithSource 升级为通用双节点 diff）;

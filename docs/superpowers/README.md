@@ -1,33 +1,51 @@
-# docs/superpowers — 文档分类与生命周期约定
+# docs/superpowers — 文档地图与生命周期约定
 
-> 目的：这几类文档生命周期不同，混在一起会烂账（旧快照没人清、债没人勾）。
-> 本文件定义约定，新对话/收尾时照此维护，避免再次堆积。
+> 目的:这几类文档生命周期不同,混在一起会烂账。本文件定义约定,新对话/收尾时照此维护。
+> 2026-07-15 修订:补上 specs/plans/根目录会话文件的定位(此前缺失,导致"不知道看哪")。
 
-## 四类文档
+## 🧭 看这里(人类 owner 只需要这 3 个)
 
-| 目录 | 是什么 | 生命周期 | 维护规则 |
-|---|---|---|---|
-| `handoff/` | "在某版本怎么起手"的快照 | 一次性，下一份出来即作废 | **只留最新一份 live**，旧的移 `archive/handoff/` |
-| `followups/` | 某版本评审记下的债 | 逐项到解决为止 | **只保留最新版本那份**当 live 滚动 backlog，见下 |
-| `roadmap/` | 长期产品/技术方向（含 `architecture-debt.md` 架构债台账） | 长活 | 就地更新，不归档 |
-| `archive/` | 已冻结的历史 handoff / followups / 复盘 | immutable | 只读留痕，不再维护 |
+| 想知道什么 | 看哪个 |
+|---|---|
+| **产品方向、下个版本做什么** | `roadmap/2026-07-01-unified-graph-workbench-roadmap.md`(北极星)+ 同目录其他方向文档 |
+| **还欠什么债 / 开放问题** | `followups/BACKLOG.md`(唯一滚动清单,§1 一处看全) |
+| **现在做到哪、新会话怎么接手** | `handoffs/` 里唯一的最新一份 |
 
-## followups = 单一滚动 backlog（核心约定）
+其余全部是 agent 的工作产物或已冻结历史,不需要主动读。
 
-**开着的债只放一个地方**：最新版本的 `followups/vX.Y.Z-followups.md` 就是当前 live
-backlog。规则：
+## 全部七类(给维护者)
 
-1. 所有还开着的债都收在这份 live 文件里，每条标注来源版本。
-2. **做完就删**——git 历史留痕，不靠 `[x]` 勾（实践证明没人回去勾，checkbox 状态不可信）。
-3. 下个版本起手：把新债续在**同一份** live 文件（或新建 vX.Y.(Z+1) 并把上一份未清的债滚过来）。
-4. 版本收尾、且该份债确实清空/冻结时，整份移进 `archive/followups/`。
+| 位置 | 是什么 | 给谁看 | 生命周期 | 维护规则 |
+|---|---|---|---|---|
+| `roadmap/` | 长期产品/技术方向 + `architecture-debt.md` 架构债台账 | **人** | 长活 | 就地更新,不归档 |
+| `followups/BACKLOG.md` | **唯一** live 滚动欠账清单(2026-07-15 定名,不再随版本改名) | **人** | 长活滚动 | 做完就删(git 留痕);版本收尾时复制快照进 `archive/followups/`,本体继续滚 |
+| `handoffs/` | 会话交接快照(现状+下一步+恢复协议) | **人+agent** | 最新即权威 | **只留最新一份**,旧的移 `archive/handoff/` |
+| `specs/` | 每个 feature 一份设计文档(做什么/为什么/契约) | agent(实现者) | 写完即历史 | 只留**当前未发版**版本的;发版收尾移 `archive/specs/` |
+| `plans/` | 对应 spec 的任务清单(TDD 勾选框) | agent(实现者) | 写完即历史 | 同上,发版收尾移 `archive/plans/` |
+| 仓库根 `task_plan.md` / `findings.md` / `progress.md` | 当前开发线的会话草稿(计划/发现/流水账),跨会话恢复用 | agent | 随开发线 | 不是正式文档;开发线收尾可整份冻结进 `archive/` 或清空重开 |
+| `archive/` | 已冻结历史(handoff/followups/specs/plans/复盘) | 考古 | immutable | 只读留痕,不再维护 |
 
-> 反面教材（整理前的状态）：v1.4.1/v1.5.0/v1.5.1/v1.6.5/v1.6.8 各一份 followups，
-> 里面 14+ 个 `[ ]` 没人勾，分不清哪些早随后续版本做完了。2026-07-08 整理时逐份核销：
-> 只有 v1.5.0 的 REV-3 经代码核实仍未解决 → 滚进当时的 live backlog（v1.6.8-followups §5），
-> 其余全部冻结进 `archive/`。
+## 核心约定
 
-## handoff = 只留最新
+1. **只有"带开放状态"的文档需要维护**:handoff(只留最新)和 BACKLOG(做完就删)。
+   specs/plans/progress 是一次性写完的历史,不需要读也不需要清,只在版本收尾时批量归档。
+2. **开着的债只放一个地方** = `followups/BACKLOG.md`。§1 是跨文档扁平总索引
+   (架构债/roadmap 主线只放 pointer 行,正文在各自文档就地更新)。
+   做完就删,git 历史留痕,不靠 `[x]` 勾(实践证明没人回去勾)。
+3. **版本收尾仪式**(发版 merge+tag 后,一次做完):
+   - 本版 spec/plan → `archive/specs/`、`archive/plans/`;
+   - 旧 handoff → `archive/handoff/`,新 handoff 成为唯一 live;
+   - BACKLOG:清掉本版做完的项(§3 留一行痕),复制快照进 `archive/followups/`;
+   - 根目录会话草稿按需冻结/清空;
+   - 检查 `docs/superpowers/` 顶层没有裸放文件(除本 README)。
+4. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
+5. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):
+   - `docs/releases/` = 各版 release notes,发版时写一份进这里,write-once 历史;
+   - `docs/architecture/` = 长活技术参考(含被 estimator 源码注释引用的 `v1.5.8/v1.5.9/v1.6.0-IMPL-NOTES.md`
+     实现配方——**是活参考不是历史,移动必须同步改代码注释里的路径**);
+   - `docs/api-contracts/`、`docs/*-howto.md`、`docs/dev-browser-smoke.md`、`docs/extensions.md` = 活文档,就地更新;
+   - `docs/` 顶层不再裸放版本号文件;release notes 之外的版本产物一律走 superpowers 七类。
 
-起手快照天然"最新即权威"。收尾发版后，旧 handoff 移 `archive/handoff/`；`archive/` 里的
-仍可作历史背景查阅（新 handoff 通常会显式引用旧的作为背景）。
+> 反面教材(2026-07-08 与 2026-07-15 两次整理前的状态):根目录躺着 v1.5.4.3 的 HANDOFF、
+> superpowers 顶层裸放两份 HANDOFF、plans/ 混进 progress 文件、五份 followups 各自 14+ 个
+> 没人勾的 checkbox、specs/plans 积了 47 份跨 15 个版本的历史无人能辨认哪份现役。

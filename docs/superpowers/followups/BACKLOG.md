@@ -1,7 +1,8 @@
-# v1.6.9 follow-ups（当前 live 滚动 backlog）
+# BACKLOG — 当前唯一 live 滚动欠账清单
 
-> 来源：v1.6.8 handoff §7 / spec §9 / T14 真机 smoke + v1.6.9 三级评审留痕。
-> 状态：不阻塞已发布版本验收；用于 v1.6.9.1 / v1.6.10+ 取任务。
+> 2026-07-15 从 `v1.6.9-followups.md` 改名（历次版本名误导已久）。文件名从此固定,
+> 不再随版本改名;版本收尾冻结时复制快照进 `archive/followups/`,本文件继续滚动。
+> 来源：v1.6.8 起各版评审/smoke 留痕,逐版滚动至今。
 >
 > **本文件 = 当前 live 的滚动 backlog**（约定见 `docs/superpowers/README.md`）：
 > 所有还开着的债都收在这里，做完就删（git 历史留痕），下个版本起手时把
@@ -16,23 +17,19 @@
 
 ## 0. 一句话结论
 
-v1.6.8 把「Launcher → 项目图 → 创世 draft 链 → 第一个 run」搬进图工作台；v1.6.9 清了一批前置工程债（draft-execute 长 run 窗口、POST/runs 校验对称、D3 CLI 补全、REV-3、flake 卫生）。剩余债按 §1 扁平优先级取。
-
-**当前版本 = v1.6.12「AI 收尾 + 兼容」（2026-07-12 圈定,worktree `.worktrees/workbench-v1.6.12`）**，
-= v1.7 Agent 前置集：**V3**(留痕 tab,v1.7 diff 留痕的操作记录契约打底,硬前置) + **V6/V5**(AskAI 历史+md 渲染,与 V3 同素材) +
-**V1/V2**(A3 Explain / A4 LLM 设置面板) + **V9**(折叠框回归,已销案) + **V8**(画布复位键,小) +
-**V10**(Home 整合,已含用户方向认可,实现细节进版时拍板)。
-不进本版：V7③ drill-down、V11 数据层图内化（= v1.7 主战场）、二类工程债 N2/S/W/U/D（非阻塞,余量顺手）、M6 统计方法线（独立穿插另排）。
-
-**v1.6.12 进度（2026-07-12）**：✅ V1/V2/V3/V5/V6/V8/V10 已在 `workbench-v1.6.12` 实现；V4 已在本地 closeout 修复并通过独立 legacy `/graph` smoke。V9 已销案(非 bug)。V2 现为可写的多供应商设置管理器（含 1M 上下文元数据、模型映射、探活与脱敏预览）；V10 现为 Workbench 内 Home 视图（含最近项目、创建项目、LLM 状态与设置入口），`/?home=1` 仅作兼容别名。最终 gate：BE 1530/8 skip、golden 23 0-drift、FE 1046、tsc 0，`GATE PASSED`；发版流程未走:review→PR→merge main→tag v1.6.12。
-**v1.6.12 后 = v1.7 Agent Harness**（自然语言 AI 操作 → 提议→确认→执行→留痕 操作环 + diff 留痕 + 沙箱,需充分 brainstorm）。
+**当前版本 = v1.7 Agent Harness**（worktree `.worktrees/workbench-v1.7`,进行中未发版）。
+v1.6.12(.1) 已 SHIPPED + merge（main=`510ff5a`）,其 V 系列债全清（见 §3）。
+v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→execute→reconcile 环、
+`model.rerun`/`graph.fork`/`data.column.cast`(V11 第一数据切片,含浏览器自动化验收+幂等/failpoint 硬化)。
+**下一步 = NL Agent 生成同一份 typed proposal（v1.7 handoff 优先级 6）**;暂不做 Main Agent/多步编排。
+剩余债按 §1 扁平优先级取。
 
 ---
 
 ## 1. 债务扁平优先级总表（跨三文档索引，一处看全）
 
 > 「详情」列：`§2-x` = 本文件下方展开；`arch:Dn` = `roadmap/architecture-debt.md`；
-> `roadmap` = `roadmap/2026-07-01-unified-graph-workbench-roadmap.md`；
+> `roadmap` = `roadmap/2026-07-01-unified-graph-workbench-roadmap.md`；`roadmap G*` = `roadmap/2026-07-15-graph-scale-artifact-ai-terminal-directions.md`；
 > `handoff §5.x` = archived `archive/handoff/v1.6.8-graph-native-genesis-handoff.md`。
 > 「阻塞」= 是否阻塞用户正常使用（非验收阻塞）。
 
@@ -49,26 +46,22 @@ v1.6.8 把「Launcher → 项目图 → 创世 draft 链 → 第一个 run」搬
 | 🟡 同族 | S6 | `WorkbenchRouteContainer` Escape/modal 预存 flake（观测 1/10） | 测试 flake | 查独立根因（与 useCapabilities flake 无关） | 否 | §2-S6 |
 | 🔵 拍板 | U1 | drawer 元信息裸机器串（`runId·64hex·owner_resolution` 枚举） | UX 拍板 | 人类可读文案 + tooltip/copy 保机器串；连同 v1.6.2 验收意图改 | 否 | §2-U1 |
 | 🔵 拍板 | U2 | role 缩写 `X` 二义（`focal` 与 `explanatory_unspecified` 都显示 X） | UX 拍板 | 新呈现方案（淡色/斜体 X），仅 tooltip 可区分现状 | 否 | §2-U2 |
-| ~~🔵 拍板~~ | ~~U3~~ | ~~covariance 默认值硬耦合~~ **✅ 已清 v1.6.11**（`2a3eca5`，后端标 `default` 字段单源） | UX/契约拍板 | — | — | §2-U3 |
 | 🔵 指针 | R1 | Variables 面板规模化（搜索 / 虚拟列表 / role tabs） | 前端规模化 | 规模化时再动 | 否 | handoff §5.3 |
 | 🔵 指针 | R2 | Browse 产品边界 / workspace root / 项目注册表 | 产品 | 见 §4 范围外 | 否 | handoff §5.1 |
 | 🔵 指针 | R3 | schema-driven `modelParams()` | 前端 | 用 schema 驱动替手写 | 否 | handoff §5.2 |
-| ~~🟠 架构~~ | ~~A-D1~~ | ~~api.py 2204 行万能垃圾桶~~ **✅ 已清 v1.6.10**:api.py 2206→32 facade,拆成 app.py + http/(5 router 簇)+ services/ + repository/,单向依赖 | 架构 | 剩 `drafts_routes` 819>500 → 见 N1 | — | arch:D1 |
 | 🟠 架构 | A-D2 | GLM 6 家族（ols/logit/probit/poisson/negbin/glm）该收敛成策略+注册表 | 架构 | `GLM_FAMILIES` 注册表；DID 家族维持异构；golden 23 护栏钉数值 | 否 | arch:D2 |
 | 🟠 架构 | A-D6 | 无 OpenAPI codegen，api.ts 44 手写 type 迟早漂移 | 架构 | `openapi-typescript` 从 `/openapi.json` 生成 | 否 | arch:D6 |
 | 🟠 架构 | A-D4 | 全局 CSS 1053 行（低，churn>收益） | 架构 | 不专门立项；新组件用 CSS Modules 渐进 | 否 | arch:D4 |
 | 🟠 复盘 | A-D5 | lineage 复查（**非债**，每版一次"抽象是否挣钱"复盘） | 复盘 | 用户拍板；与 roadmap 北极星一致（有意复杂度投资） | 否 | arch:D5 |
-| ~~🟢 主线~~ | ~~M1~~ | ~~图内任选对比 / 节点 Ask AI / 引用报告~~ **✅ SHIPPED v1.6.11**（切片 A/B/C + C-2/C-3;多厂商 `/llm/chat` OpenAI-compat,模型选型已决） | 主线 | — | — | roadmap |
-| ~~🔵 AI~~ | ~~V1~~ | ~~A3 逐 artifact Explain~~ **✅ 已清 v1.6.12**(`3b826d9`):AskAISection 每 artifact 一个 Explain,聚焦提问 | — | — | — | — |
-| ~~🔵 AI~~ | ~~V2~~ | ~~A4 LLM 设置面板~~ **✅ 已清 v1.6.12**（provider manager + Home 状态卡）:多供应商本地存储/切换/复制/删除、API key 掩码与显式清除、探活、模型刷新/映射、1M/context 元数据、notes/icon、脱敏配置预览；Ask AI 仍只读显示当前 provider | — | — | — | — |
-| ~~🔵 AI~~ | ~~V3~~ | ~~C2 AI 交互留痕 tab~~ **✅ 已清 v1.6.12**(`dbdb0f2`):typed `aiActivityLog` + 底部 AI activity 面板,三个 stale 占位 tab 移除;v1.7 diff 留痕契约打底 | — | — | — | — |
-| ~~🔵 AI~~ | ~~V5~~ | ~~Ask AI 裸 markdown~~ **✅ 已清 v1.6.12**(`dbdb0f2`):零依赖 `report/markdown.tsx` 渲染器,AskAI+Report 共用,cite-chip 走 renderTextSpan 缝 | — | — | — | — |
-| ~~🔵 AI~~ | ~~V6~~ | ~~Ask AI 无历史~~ **✅ 已清 v1.6.12**(`dbdb0f2`):per-node History 折叠列表,重问不覆盖旧答 | — | — | — | — |
 | 🔵 AI | V7 | 超大数据集 Ask AI 策略:profile 摘要已防爆(不随行数涨),但宽表/用户想深入时不够（反馈批3） | 设计 | ①列分块/top-K 列(按缺失率·方差·与y相关)②抽样预览(head+分层随机,标"样本")③v1.7 工具式 drill-down:AI 按需向后端取单列直方图/分位数,上下文只装摘要 | 否 | — |
-| ~~🟡 前端~~ | ~~V8~~ | ~~画布复位键~~ **✅ 已清 v1.6.12**(`7d99d41`):Reset 按钮丢弃拖拽偏移回 dagre+fit | — | — | — | — |
-| ~~🟡 待查~~ | ~~V9~~ | ~~变量折叠框「又没了」~~ **✅ 销案 2026-07-12(非 bug)**:阈值=严格>3 才折叠是设计;真机 7 变量复现折叠+容器框全正常,用户确认场景是 ≤3 变量本来就不折 | — | — | — | — |
-| ~~🔵 已批~~ | ~~V10~~ | ~~Home 整合~~ **✅ 已清 v1.6.12**（Workbench Home）:Home 是 `/p/<slug>/graph?view=home` 的真实视图，含当前/最近项目、新建、LLM 状态与设置；外层 Home 在已有项目时进入该视图，`/?home=1` 保留为兼容别名，旧 `/submit` deep link 不变 | — | — | — | — |
-| 🟢 主线 | V11 | 图内全流程还差数据层:cleaning/异常值/类型推断是自动黑盒 stage,图内不可编辑(模型层 编辑/rerun/对比/AskAI/报告 已闭环)（反馈批3） | 主线=v1.7 | 与 v1.7「AI 操作+diff 留痕」同一战役:cleaning 节点 editable_schema 化(缺失策略/异常值规则/类型覆写)→fork-rerun | 否 | roadmap |
+| 🟢 主线 | V11 | 图内数据层（🚧 v1.7 进行中）:`data.column.cast` 第一典型切片已落(typed preview/confirm/immutable child/幂等/failpoint/浏览器验收);cleaning 策略/异常值规则等更多数据 operation 未做 | 主线=v1.7 | 沿 data.column.cast 模式扩;先做 NL Agent 生成 typed proposal(优先级6),再扩 operation 面 | 否 | roadmap |
+| ~~🟢 方向~~ | ~~G1~~ | ~~图爆炸~~ **✅ 全清 v1.7**:batch `data.columns.cast`(N 列→1 record/1 child/1 recipe/1 diff)+ **投影层折叠**(`foldNodeClusters` 把 >3 个同源 data-cast 兄弟折成 "Data operations (N)" 卡,durable graph 一字不改) | — | — | — | — |
+| ~~🟢 方向~~ | ~~G2~~ | ~~AI 解读图表~~ **✅ 全清 v1.7**:第一步(figure→chart_type+数值源 context/`/figures/ai-context`/chat figure mode/图库按钮)+ 第二步多模态真·看图(`supports_vision` 能力位 + 默认关的显式 opt-in + PNG data URL + 专用 vision header:数字仍只能来自数值源) | — | — | — | — |
+| ~~🟢 方向~~ | ~~G3~~ | ~~terminal 面板~~ **✅ 全闭(2026-07-16)**:输入框去重 + 沙箱 runner(8 条安全测试真验)+ **`code.execute` typed operation 全链路**(preview=沙箱真跑进一次性 temp 目录、项目零写入;execute 二次跑并**校验结果与 preview 逐字节一致**,不确定代码→拒写;同 key 幂等重放)+ registry(`risk_level=high`)+ orchestrator + routes(sandbox 缺失→503 fail-closed)+ UI section + 真机验收(四条边界对真实项目实测)+ **terminal 外观**(sandboxed stdout 进 AgentPanel;诚实:是跑完的捕获输出**不是实时流**,真流式要 SSE) | v1.7 | 已完成 | 否 | roadmap G3 |
+| ~~🟢 主线~~ | ~~优先级 6~~ | ~~NL Agent 生成同一份 typed proposal~~ **✅ 真机闭环(2026-07-16)**:只开 `data.columns.cast`(**`code.execute` 保持 NL 关闭**)。模型只出意图,后端绑 `artifact_id`+preview fingerprint;新增只读 `inspect_data_schema`。真 DeepSeek 一句话→proposal→confirm→completed/verified。**真机抓到 4 个确定性测试盖不住的 bug**(contract 不可读 / `casts` 被声明成 string / oneOf 与父级 AND 导致顶层强制 model.rerun 形状 / confirm 端点算错 fingerprint 身份) | v1.7 | 已完成 | 否 | roadmap 优先级 6 |
+| ~~🟡 债~~ | ~~P6-1~~ | ~~失败只回 `invalid_tool_arguments`,不带校验详情~~ **✅ 已修(2026-07-16)**:`tools.py` 新增 `validation_details()`,`ToolResult.error_details` 进 tool payload(仅失败时出现,成功 payload 形状不变;`error` 码保持稳定)。**`oneOf` 用 `const` 判别式选分支,不用 `best_match`**——best_match 无判别式概念,曾把 model.rerun 的 `'node_hash' is a required property` 当成 cast 提议的建议:**给错建议比不给更糟**。plain schema 则保留全部顶层错误(一次说完,不要每轮只挤一条)。有界(5 条 / 240 字符,消息里嵌的是调用方自己的参数) | v1.7 | 已完成 | 否 | 本轮 |
+| 🟡 债 | P-CE1 | `code.execute` 一次 confirm 用户代码跑 **5 遍**(route freshness + lifecycle prepare/execute preview + apply 确定性 run)。正确但昂贵,每遍 30s wall clock。**减到 2 遍**=把已算 preview 带 execution key 缓存、confirm 复用——但那 4 遍分散在 failpoint 崩溃恢复里(恢复进程不能信任已死进程传入的 preview),减少=重写崩溃恢复契约,高风险须单独立项 | v1.7+ | 缓存 preview 结果 by execution key;prepare/execute/apply 复用而非重跑;崩溃恢复时才重算 | 否 | 本轮实测 |
+| 🟡 债 | P-RISK1 | `risk_level`(含 code.execute 的 `"high"`)是**纯装饰**——无任何逻辑读它,只在 UI 显示。任何人以为它触发额外确认/独立 scope 都是误解 | v1.7+ | 让 risk_level 变真:高风险操作强制二次确认或独立 confirm scope | 否 | 本轮盘点 |
 | 🟢 更远 | M2 | 画布拖放建链 | v1.7+ | 独立版本，不与图内操作混排 | — | §4 |
 | 🟢 更远 | M3 | batch run (`y_list`) 图内化 | v1.7+ | 创世向导 v1 只做单 run | — | §4 |
 | 🟢 更远 | M4 | 后端项目注册表 / 项目级设置页 | v1.7+ | Launcher 最近项目仍走前端 localStorage | — | §4 |
@@ -95,6 +88,13 @@ v1.6.8 把「Launcher → 项目图 → 创世 draft 链 → 第一个 run」搬
 > （`25bc798`+`06619f7`，987→859）、裸 `global.fetch=` 卫生（`fe65cad`）、`did_mode` 值核查（全对）。
 
 ---
+
+> **已清（v1.6.12,做完即删,git 历史留痕）**：🔵 **V1**(A3 逐 artifact Explain,`3b826d9`)、
+> **V2**(A4 LLM 多供应商设置面板+Home 状态卡)、**V3**(typed `aiActivityLog`+底部 AI activity 面板,
+> v1.7 diff 留痕契约打底,`dbdb0f2`)、**V5**(零依赖 markdown 渲染器,AskAI+Report 共用)、
+> **V6**(per-node AskAI History)、**V8**(画布 Reset 键,`7d99d41`)、**V9**(折叠框,销案非 bug)、
+> **V10**(Workbench Home 视图,`/?home=1` 兼容别名)、**V4**(legacy `/graph` 挂住,v1.6.12 closeout 修复)。
+> 🟢 **M1**(图内对比/节点 AskAI/引用报告)已 SHIPPED v1.6.11;🟠 **A-D1**/🔵 **U3** 见上方各版已清块。
 
 ## 2. 本文件债务详情（按 ID）
 
@@ -147,22 +147,7 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 `focal` 和 `explanatory_unspecified` 现在都显示 `X`（v1.6.8 把 `X?` 改掉响应"看不出变量名"的抱怨），仅 tooltip 可区分。如果 unspecified 的视觉信号还重要，需要新的呈现方案（如淡色/斜体 X）。
 
-### §2-U3 · covariance 默认值硬耦合（需拍板）
-
-GenesisWizard 对非 DID 家族总是显式发送 `covariance_options[0]`（今天恰好 = 后端默认 `robust`）。前端 options 顺序一变就静默改变所有默认 run 的标准误。要么后端 capabilities 明确标 `default` 字段，要么前端只发用户显式选择。
-
 ---
-
-### §2-V1 · A3 逐 artifact「Explain」（v1.6.11 用户反馈折入未做）
-drawer 的 artifact 列表行加「Explain」→ 打开 Ask AI 并把该 artifact 的 preview/summary 置为提问焦点。
-通道已通（askAiAboutNode + A2 serve-time artifacts decorate），只差入口与 packet 聚焦字段。
-
-### §2-V2 · A4 LLM 设置面板（✅ v1.6.12）
-Workbench Home 的设置入口打开 provider manager，支持本地多供应商 CRUD/激活/复制/删除、API key 掩码与显式清除、连接探活、模型刷新与角色映射、context window/1M 元数据、备注/icon 和脱敏配置预览。`GET /llm/config` 与 Home 状态卡只返回脱敏状态；API key 永不回传。
-
-### §2-V3 · C2 底部面板 AI 交互留痕 tab（v1.6.11 用户反馈折入未做）
-底部面板三个 stale tab（"lands in V1.5.3"）做实第一块:AskAI 问答与报告生成的只读时间线
-（复用 reportHistory 的 localStorage 模式）。战略意义:v1.7 Agent 需要**带类型的可检查操作记录**。
 
 ## 3. 已清留痕（做完即删的历史，防重复排查）
 
@@ -180,7 +165,7 @@ Workbench Home 的设置入口打开 provider manager，支持本地多供应商
 - **Submit 表单代码删除**：只摘除主导航和 Launcher 入口；`/submit` 保留给 Command Palette「快速 run（旧表单）」和 batch 兜底。
 - **batch run (`y_list`) 图内化**（M3）：创世向导 v1 只做单 run。
 - **后端项目注册表 / 项目级设置页**（M4，R2）：Launcher 最近项目仍走前端 localStorage；项目根仍是文件系统路径。
-- **图内任选对比 / 节点 Ask AI / 引用报告**（M1）：原 roadmap v1.6.8 内容已改签到 v1.6.10。
+- **图内任选对比 / 节点 Ask AI / 引用报告**（M1）：已 SHIPPED v1.6.11。
 
 ---
 
@@ -188,5 +173,3 @@ Workbench Home 的设置入口打开 provider manager，支持本地多供应商
 
 > 整理 followups 时（2026-07-08）逐份核销：只有 v1.5.0 的 REV-3 曾滚入本 live backlog，
 > **已于 v1.6.9 清掉**（见 §3）。更早版本滚入的债至此全部清空；其余更早 followups 已冻结进 `archive/`。
-### §2-V10 · Home 整合（✅ v1.6.12）
-Home 已从“只有新建项目”的 Launcher 入口变成 Workbench 内的 `view=home`：展示当前/最近项目、打开项目、新建项目、LLM 状态和设置入口。项目图仍保留 Graph/Table/Report；`/`、`/?home=1` 和旧项目切换行为继续兼容，`/submit` 保留 deep link。
