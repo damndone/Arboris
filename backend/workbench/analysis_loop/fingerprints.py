@@ -19,6 +19,12 @@ def dataset_snapshot_fingerprint(
     *,
     dataset: Any = _OMITTED,
 ) -> str:
+    """Fingerprint a dataset source; omitted and explicit ``None`` differ.
+
+    ``snapshot`` and ``dataset`` are aliases. Supplying neither omits the
+    source key, while supplying either as ``None`` preserves a JSON null.
+    """
+
     if snapshot is not _OMITTED and dataset is not _OMITTED:
         raise TypeError("provide snapshot or dataset, not both")
     source = snapshot if snapshot is not _OMITTED else dataset
@@ -75,6 +81,8 @@ def coefficient_schema_fingerprint(
     *,
     coefficients: Any = _OMITTED,
 ) -> str:
+    """Fingerprint a coefficient schema; omitted and explicit ``None`` differ."""
+
     if schema is not _OMITTED and coefficients is not _OMITTED:
         raise TypeError("provide schema or coefficients, not both")
     source = schema if schema is not _OMITTED else coefficients
@@ -97,6 +105,13 @@ def inference_config_fingerprint(
     version: Any = _OMITTED,
     engine_version: Any = _OMITTED,
 ) -> str:
+    """Fingerprint inference settings with sentinel-preserved aliases.
+
+    Omitted cluster-vector/version aliases leave their keys absent; explicit
+    ``None`` emits JSON null. The raw/fingerprint and version/engine-version
+    names are aliases and cannot be supplied together.
+    """
+
     if version is not _OMITTED and engine_version is not _OMITTED:
         raise TypeError("provide version or engine_version, not both")
     if (

@@ -136,8 +136,10 @@ def numbers_equal(
     by the finite-number tolerance rule. Signed zeroes compare equal.
     """
 
+    _require_numeric_operand(left, "left")
+    _require_numeric_operand(right, "right")
     for name, tolerance in (("atol", atol), ("rtol", rtol)):
-        if not isinstance(tolerance, (int, float)):
+        if type(tolerance) not in (int, float):
             raise TypeError(f"{name} must be a finite non-negative number")
         if isinstance(tolerance, float) and not math.isfinite(tolerance):
             raise ValueError(f"{name} must be a finite non-negative number")
@@ -166,12 +168,16 @@ def _is_infinite(value: float | int) -> bool:
 
 
 def _as_decimal(value: float | int) -> Decimal:
-    if isinstance(value, int):
+    if type(value) is int:
         return Decimal(value)
-    if isinstance(value, float):
+    if type(value) is float:
         return Decimal(repr(value))
     raise TypeError("numbers_equal operands must be float or int")
 
 
-canonical_number_equal = numbers_equal
+def _require_numeric_operand(value: Any, name: str) -> None:
+    if type(value) not in (int, float):
+        raise TypeError(f"{name} operand must be int or float")
+
+
 numeric_equal = numbers_equal

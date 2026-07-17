@@ -1,10 +1,12 @@
 import math
+from decimal import Decimal
 
 import pytest
 
 from workbench.analysis_loop.canonical import (
     CanonicalJSONError,
     canonical_json_v1,
+    numeric_equal,
     numbers_equal,
     sha256_canonical,
 )
@@ -90,6 +92,16 @@ def test_numbers_equal_handles_arbitrarily_large_integers_without_overflow():
     assert numbers_equal(value, value)
     assert numbers_equal(value, value + 1, atol=1.0)
     assert not numbers_equal(value, value + 2, atol=1.0)
+
+
+def test_numbers_equal_rejects_bool_and_decimal_like_operands():
+    for invalid in (True, False, Decimal("1")):
+        with pytest.raises(TypeError, match="int or float"):
+            numbers_equal(invalid, 1)
+        with pytest.raises(TypeError, match="int or float"):
+            numbers_equal(1, invalid)
+
+    assert numeric_equal is numbers_equal
 
 
 def _envelope(status: str = "complete") -> PacketEnvelope:
@@ -246,8 +258,19 @@ def test_packet_idempotence_does_not_overwrite_terminal_packet():
 
 def test_pending_packet_can_advance_only_with_same_packet_identity():
     existing = _envelope("pending")
-    incoming = PacketEnvelope.from_dict(existing.to_dict() | {"payload": {"value": 2}})
-    assert ensure_packet_idempotent(existing, incoming) is incoming
+    same = PacketEnvelope.from_dict(existing.to_dict())
+    assert ensure_packet_idempotent(existing, same) is existing
+
+    changed_pending = PacketEnvelope.from_dict(
+        existing.to_dict() | {"payload": {"value": 2}}
+    )
+    with pytest.raises(PacketConflictError, match="pending"):
+        ensure_packet_idempotent(existing, changed_pending)
+
+    terminal = PacketEnvelope.from_dict(
+        existing.to_dict() | {"status": "complete", "payload": {"value": 2}}
+    )
+    assert ensure_packet_idempotent(existing, terminal) is terminal
 
     for field in ("packet_type", "schema_version", "logical_key"):
         changed = PacketEnvelope.from_dict(
@@ -319,6 +342,61 @@ def test_packet_envelope_from_dict_rejects_wrong_contract_types():
     for field, wrong_value in invalid.items():
         with pytest.raises((TypeError, ValueError), match=field):
             PacketEnvelope.from_dict(value | {field: wrong_value})
+
+
+def test_packet_envelope_direct_constructor_matches_from_dict_type_validation():
+    value = _envelope().to_dict()
+    invalid = {
+        "packet_type": 1,
+        "schema_version": 1,
+        "status": 1,
+        "source": [],
+        "logical_key": 1,
+        "input_fingerprints": {"dataset": 1},
+        "reasons": {},
+        "payload": [],
+    }
+    for field, wrong_value in invalid.items():
+        with pytest.raises((TypeError, ValueError), match=field):
+            PacketEnvelope(**(value | {field: wrong_value}))
+
+
+def test_compare_payload_direct_and_from_dict_validation_match():
+    with pytest.raises(TypeError, match="compare_status"):
+        ComparePayload(compare_status=1, payload={})
+    with pytest.raises(TypeError, match="compare_status"):
+        ComparePayload.from_dict({"compare_status": 1})
+    with pytest.raises(TypeError, match="payload"):
+        ComparePayload(compare_status="complete", payload=[])
+    with pytest.raises(TypeError, match="mapping"):
+        ComparePayload.from_dict([])
+
+
+def test_packet_and_compare_payload_recursively_freeze_inputs_and_thaw_to_json():
+    source = {"nested": {"items": [1]}}
+    payload = {"nested": {"items": ["x"]}}
+    packet = PacketEnvelope.from_dict(
+        _envelope().to_dict() | {"source": source, "payload": payload}
+    )
+    comparison = ComparePayload(compare_status="complete", payload=payload)
+
+    source["nested"]["items"].append(2)
+    payload["nested"]["items"].append("y")
+    assert packet.source["nested"]["items"] == (1,)
+    assert comparison.payload["nested"]["items"] == ("x",)
+
+    with pytest.raises(TypeError):
+        packet.source["nested"]["new"] = "blocked"
+    with pytest.raises(TypeError):
+        comparison.payload["nested"]["new"] = "blocked"
+
+    packet_dict = packet.to_dict()
+    compare_dict = comparison.to_dict()
+    assert isinstance(packet_dict["source"], dict)
+    assert isinstance(packet_dict["source"]["nested"]["items"], list)
+    assert isinstance(compare_dict["nested"]["items"], list)
+    assert PacketEnvelope.from_dict(packet_dict) == packet
+    assert ComparePayload.from_dict(compare_dict) == comparison
 
 
 def test_ols_cluster_policy_is_immutable_and_has_exact_values():

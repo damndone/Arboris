@@ -1,3 +1,5 @@
+import pytest
+
 from workbench.analysis_loop.fingerprints import (
     analysis_sample_fingerprint,
     coefficient_schema_fingerprint,
@@ -173,3 +175,20 @@ def test_inference_config_fingerprint_distinguishes_omitted_and_explicit_null_al
     assert omitted != inference_config_fingerprint(**kwargs, cluster_group_vector=None)
     assert omitted != inference_config_fingerprint(**kwargs, version=None)
     assert omitted != inference_config_fingerprint(**kwargs, engine_version=None)
+
+    assert inference_config_fingerprint(**kwargs, version="v1") == inference_config_fingerprint(
+        **kwargs, engine_version="v1"
+    )
+    assert inference_config_fingerprint(
+        **kwargs, cluster_group_vector="vector-v1"
+    ) == inference_config_fingerprint(
+        **kwargs, cluster_group_vector_fingerprint="vector-v1"
+    )
+    with pytest.raises(TypeError, match="version"):
+        inference_config_fingerprint(**kwargs, version="v1", engine_version="v1")
+    with pytest.raises(TypeError, match="cluster_group_vector"):
+        inference_config_fingerprint(
+            **kwargs,
+            cluster_group_vector="vector-v1",
+            cluster_group_vector_fingerprint="vector-v1",
+        )

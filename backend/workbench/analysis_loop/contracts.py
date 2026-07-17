@@ -2,14 +2,93 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from types import MappingProxyType
+from typing import Any, Literal
 
 from .canonical import sha256_canonical
 
 PacketStatus = Literal["pending", "complete", "blocked", "failed"]
 CompareStatus = Literal["complete", "partial", "not_comparable", "blocked_by_integrity"]
 TERMINAL_PACKET_STATUSES = frozenset({"complete", "blocked", "failed"})
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
+
+
+def _require_string(value: Any, field_name: str) -> None:
+    if type(value) is not str:
+        raise TypeError(f"{field_name} must be a string")
+
+
+def _require_mapping(value: Any, field_name: str) -> None:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{field_name} must be a mapping")
+
+
+def _validate_envelope(
+    *,
+    packet_type: Any,
+    schema_version: Any,
+    status: Any,
+    source: Any,
+    child: Any,
+    operation: Any,
+    execution: Any,
+    logical_key: Any,
+    input_fingerprints: Any,
+    policy_versions: Any,
+    timestamps: Any,
+    reasons: Any,
+    payload: Any,
+) -> None:
+    for field_name, value in (
+        ("packet_type", packet_type),
+        ("schema_version", schema_version),
+        ("status", status),
+        ("logical_key", logical_key),
+    ):
+        _require_string(value, field_name)
+    if status not in {"pending", "complete", "blocked", "failed"}:
+        raise ValueError(f"invalid packet status: {status}")
+
+    mapping_fields = {
+        "source": source,
+        "child": child,
+        "operation": operation,
+        "execution": execution,
+        "input_fingerprints": input_fingerprints,
+        "policy_versions": policy_versions,
+        "timestamps": timestamps,
+        "payload": payload,
+    }
+    for field_name, value in mapping_fields.items():
+        _require_mapping(value, field_name)
+    for field_name, value in (
+        ("input_fingerprints", input_fingerprints),
+        ("policy_versions", policy_versions),
+        ("timestamps", timestamps),
+    ):
+        if any(type(item) is not str for item in value.values()):
+            raise TypeError(f"{field_name} values must be strings")
+    if not isinstance(reasons, (list, tuple)):
+        raise TypeError("reasons must be a list")
+    if any(type(item) is not str for item in reasons):
+        raise TypeError("reasons items must be strings")
 
 
 @dataclass(frozen=True)
@@ -29,25 +108,49 @@ class PacketEnvelope:
     payload: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.status not in {"pending", "complete", "blocked", "failed"}:
-            raise ValueError(f"invalid packet status: {self.status}")
-        object.__setattr__(self, "reasons", tuple(str(item) for item in self.reasons))
+        _validate_envelope(
+            packet_type=self.packet_type,
+            schema_version=self.schema_version,
+            status=self.status,
+            source=self.source,
+            child=self.child,
+            operation=self.operation,
+            execution=self.execution,
+            logical_key=self.logical_key,
+            input_fingerprints=self.input_fingerprints,
+            policy_versions=self.policy_versions,
+            timestamps=self.timestamps,
+            reasons=self.reasons,
+            payload=self.payload,
+        )
+        for field_name in (
+            "source",
+            "child",
+            "operation",
+            "execution",
+            "input_fingerprints",
+            "policy_versions",
+            "timestamps",
+            "payload",
+        ):
+            object.__setattr__(self, field_name, _freeze(getattr(self, field_name)))
+        object.__setattr__(self, "reasons", tuple(self.reasons))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "packet_type": self.packet_type,
             "schema_version": self.schema_version,
             "status": self.status,
-            "source": dict(self.source),
-            "child": dict(self.child),
-            "operation": dict(self.operation),
-            "execution": dict(self.execution),
+            "source": _thaw(self.source),
+            "child": _thaw(self.child),
+            "operation": _thaw(self.operation),
+            "execution": _thaw(self.execution),
             "logical_key": self.logical_key,
-            "input_fingerprints": dict(self.input_fingerprints),
-            "policy_versions": dict(self.policy_versions),
-            "timestamps": dict(self.timestamps),
+            "input_fingerprints": _thaw(self.input_fingerprints),
+            "policy_versions": _thaw(self.policy_versions),
+            "timestamps": _thaw(self.timestamps),
             "reasons": list(self.reasons),
-            "payload": dict(self.payload),
+            "payload": _thaw(self.payload),
         }
 
     @classmethod
@@ -73,46 +176,20 @@ class PacketEnvelope:
         if missing:
             raise KeyError(f"missing envelope field(s): {', '.join(missing)}")
 
-        for field in ("packet_type", "schema_version", "status", "logical_key"):
-            if type(value[field]) is not str:
-                raise TypeError(f"{field} must be a string")
-
-        for field in (
-            "source",
-            "child",
-            "operation",
-            "execution",
-            "input_fingerprints",
-            "policy_versions",
-            "timestamps",
-            "payload",
-        ):
-            if not isinstance(value[field], Mapping):
-                raise TypeError(f"{field} must be a mapping")
-
-        for field in ("input_fingerprints", "policy_versions", "timestamps"):
-            if any(type(item) is not str for item in value[field].values()):
-                raise TypeError(f"{field} values must be strings")
-
-        if not isinstance(value["reasons"], (list, tuple)):
-            raise TypeError("reasons must be a list")
-        if any(type(item) is not str for item in value["reasons"]):
-            raise TypeError("reasons items must be strings")
-
         return cls(
             packet_type=value["packet_type"],
             schema_version=value["schema_version"],
             status=value["status"],
-            source=dict(value["source"]),
-            child=dict(value["child"]),
-            operation=dict(value["operation"]),
-            execution=dict(value["execution"]),
+            source=value["source"],
+            child=value["child"],
+            operation=value["operation"],
+            execution=value["execution"],
             logical_key=value["logical_key"],
-            input_fingerprints=dict(value["input_fingerprints"]),
-            policy_versions=dict(value["policy_versions"]),
-            timestamps=dict(value["timestamps"]),
-            reasons=tuple(value["reasons"]),
-            payload=dict(value["payload"]),
+            input_fingerprints=value["input_fingerprints"],
+            policy_versions=value["policy_versions"],
+            timestamps=value["timestamps"],
+            reasons=value["reasons"],
+            payload=value["payload"],
         )
 
 
@@ -122,8 +199,8 @@ class ComparePayload:
     payload: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.payload, Mapping):
-            raise TypeError("payload must be a mapping")
+        _require_string(self.compare_status, "compare_status")
+        _require_mapping(self.payload, "payload")
         if self.compare_status not in {
             "complete",
             "partial",
@@ -133,14 +210,19 @@ class ComparePayload:
             raise ValueError(f"invalid compare_status: {self.compare_status}")
         if "compare_status" in self.payload:
             raise ValueError("payload reserves compare_status")
+        object.__setattr__(self, "payload", _freeze(self.payload))
 
     def to_dict(self) -> dict[str, Any]:
-        return {"compare_status": self.compare_status, **dict(self.payload)}
+        return {"compare_status": self.compare_status, **_thaw(self.payload)}
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ComparePayload":
+        if not isinstance(value, Mapping):
+            raise TypeError("compare payload must be a mapping")
+        if "compare_status" not in value:
+            raise KeyError("missing compare_status")
         return cls(
-            compare_status=str(value["compare_status"]),
+            compare_status=value["compare_status"],
             payload={
                 key: item
                 for key, item in value.items()
@@ -176,6 +258,12 @@ def ensure_packet_idempotent(
         incoming.logical_key,
     ):
         raise PacketConflictError("packet identity does not match")
+    if existing.status == "pending":
+        if incoming.status == "pending":
+            if existing.to_dict() == incoming.to_dict():
+                return existing
+            raise PacketConflictError("pending packet content conflicts")
+        return incoming
     if existing.to_dict() == incoming.to_dict():
         return existing
     if existing.status in TERMINAL_PACKET_STATUSES:
