@@ -61,6 +61,11 @@ from .proposals import (
     ProposalStaleError,
     ProposalStore,
 )
+from .risk import (
+    RiskAuthorizationReplay,
+    RiskAuthorizationRequired,
+    RiskAuthorizationStore,
+)
 from .session import EntryRef, JsonlSessionRepository
 from .tools import ToolDefinition, ToolRegistry
 
@@ -417,6 +422,7 @@ class WorkbenchOrchestrator:
         operation_registry: OperationRegistry | None = None,
         context_provider: WorkbenchContextProvider | None = None,
         failpoint: OperationFailpoint | None = None,
+        risk_authorization_store: RiskAuthorizationStore | None = None,
     ) -> None:
         self.repository = repository
         self.events = events
@@ -426,6 +432,9 @@ class WorkbenchOrchestrator:
         self.operation_registry = operation_registry or OperationRegistry()
         self.context_provider = context_provider
         self.failpoint = failpoint or NoopFailpoint()
+        self.risk_authorization_store = risk_authorization_store or RiskAuthorizationStore(
+            repository.root
+        )
         self.chain_store = ChainStore(repository.root)
         self.fork_store = ForkStore(repository.root)
         self._chains: dict[str, tuple[str, AgentCore]] = {}
@@ -1485,6 +1494,8 @@ class WorkbenchOrchestrator:
         current_active_head_run_id: str | None,
         allow_recovery: bool = False,
         rerun_executor: RerunExecutor | None = None,
+        risk_authorization_id: str | None = None,
+        risk_authorization_token: str | None = None,
     ) -> OperationRecord:
         """Execute one confirmed record through the shared lifecycle entry point."""
 
@@ -1508,6 +1519,47 @@ class WorkbenchOrchestrator:
             )
         except ChainHeadConflict as exc:
             raise ProposalStaleError(str(exc)) from exc
+        if definition.requires_risk_authorization:
+            if (risk_authorization_id is None) != (risk_authorization_token is None):
+                raise RiskAuthorizationRequired(
+                    "risk authorization id and token must be provided together"
+                )
+            if risk_authorization_id is not None and risk_authorization_token is not None:
+                key = self._operation_execution_key(record)
+                existing_authorization_id = record.execution.get("risk_authorization_id")
+                if (
+                    existing_authorization_id is not None
+                    and existing_authorization_id != risk_authorization_id
+                ):
+                    try:
+                        existing_authorization = self.risk_authorization_store.read(
+                            str(existing_authorization_id)
+                        )
+                    except (KeyError, ValueError, FileNotFoundError) as exc:
+                        raise RiskAuthorizationRequired(
+                            "the operation's existing risk authorization is unavailable"
+                        ) from exc
+                    if existing_authorization.get("status") == "consumed":
+                        raise RiskAuthorizationReplay(
+                            "the operation already has a consumed risk authorization"
+                        )
+                record = self.operation_store.bind_risk_authorization(
+                    record.record_id,
+                    risk_authorization_id,
+                )
+                self.risk_authorization_store.consume(
+                    risk_authorization_id,
+                    token=risk_authorization_token,
+                    operation_id=record.operation_id,
+                    operation_version=record.operation_version,
+                    proposal_id=record.proposal_id,
+                    revision=record.proposal_revision,
+                    fingerprint=record.proposal_fingerprint,
+                    session_id=record.agent_session_id,
+                    chain_id=record.chain_id,
+                    active_head_run_id=str(current_active_head_run_id or ""),
+                    execution_key=key,
+                )
         handler = _OrchestratorOperationHandler(
             self,
             executor_key=definition.executor_key,
@@ -1538,6 +1590,7 @@ class WorkbenchOrchestrator:
             handlers={definition.executor_key: handler},
             lease_owner=self._lease_owner,
             failpoint=self.failpoint,
+            risk_authorization_store=self.risk_authorization_store,
         )
         return await lifecycle.execute(record_id)
 

@@ -20,6 +20,9 @@ interface BottomPanelProps {
   projectRoot: string;
 }
 
+// Keep a modest safety bound, but let the user choose the working height with
+// the splitter. The panel is no longer forced into a 480px default or a
+// separate Focus mode.
 const MIN_PANEL_HEIGHT = 160;
 const DEFAULT_PANEL_HEIGHT = 240;
 const MAX_PANEL_HEIGHT = 520;

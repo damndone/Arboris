@@ -3,12 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeExecuteSection } from "./CodeExecuteSection";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 
-const { resolvedMock, projectRootMock, contextMock, previewMock, confirmMock } = vi.hoisted(
+const {
+  resolvedMock,
+  projectRootMock,
+  contextMock,
+  previewMock,
+  authorizeMock,
+  confirmMock,
+} = vi.hoisted(
   () => ({
     resolvedMock: { current: null as unknown },
     projectRootMock: { current: null as unknown },
     contextMock: vi.fn(),
     previewMock: vi.fn(),
+    authorizeMock: vi.fn(),
     confirmMock: vi.fn(),
   }),
 );
@@ -22,6 +30,7 @@ vi.mock("../../../workbench/ProjectRootContext", () => ({
 vi.mock("../../dataOperations", () => ({
   fetchDataColumnCastContext: (...args: unknown[]) => contextMock(...args),
   previewCodeExecute: (...args: unknown[]) => previewMock(...args),
+  authorizeCodeExecuteRisk: (...args: unknown[]) => authorizeMock(...args),
   confirmCodeExecute: (...args: unknown[]) => confirmMock(...args),
 }));
 
@@ -68,6 +77,25 @@ function readyPreview(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function riskAuthorizationResponse() {
+  return {
+    status: "risk_authorized",
+    proposal: {},
+    risk_authorization: {
+      authorization_id: "risk-1",
+      token: "opaque-risk-token",
+      operation_id: "code.execute",
+      operation_version: "v1",
+      proposal_id: "proposal-1",
+      revision: 1,
+      fingerprint: "fp-1",
+      active_head_run_id: "run-1",
+      expires_at: "2026-07-16T00:05:00Z",
+      status: "issued",
+    },
+  };
+}
+
 describe("CodeExecuteSection", () => {
   beforeEach(() => {
     projectRootMock.current = "/tmp/project";
@@ -80,6 +108,8 @@ describe("CodeExecuteSection", () => {
     };
     contextMock.mockReset();
     previewMock.mockReset();
+    authorizeMock.mockReset();
+    authorizeMock.mockResolvedValue(riskAuthorizationResponse());
     confirmMock.mockReset();
     contextMock.mockResolvedValue({
       source_run_id: "run-1",
@@ -139,6 +169,48 @@ describe("CodeExecuteSection", () => {
     expect(screen.getByTestId("code-execute-confirm-button")).toBeDisabled();
   });
 
+  it("requires explicit high-risk authorization after the preview", async () => {
+    previewMock.mockResolvedValue(readyPreview());
+    authorizeMock.mockResolvedValue({
+      status: "risk_authorized",
+      proposal: {},
+      risk_authorization: {
+        authorization_id: "risk-1",
+        token: "opaque-risk-token",
+        operation_id: "code.execute",
+        operation_version: "v1",
+        proposal_id: "proposal-1",
+        revision: 1,
+        fingerprint: "fp-1",
+        active_head_run_id: "run-1",
+        expires_at: "2026-07-16T00:05:00Z",
+        status: "issued",
+      },
+    });
+    render(<CodeExecuteSection node={node()} />);
+    await screen.findByTestId("code-execute-columns");
+
+    fireEvent.click(screen.getByTestId("code-execute-preview-button"));
+    await screen.findByTestId("code-execute-diff");
+    expect(screen.getByTestId("code-execute-confirm-button")).toBeDisabled();
+    expect(screen.getByTestId("code-execute-risk-warning").textContent).toContain(
+      "sandboxed does not mean low risk",
+    );
+
+    fireEvent.click(screen.getByTestId("code-execute-risk-acknowledgement"));
+    fireEvent.click(screen.getByTestId("code-execute-authorize-button"));
+    await screen.findByTestId("code-execute-risk-authorized");
+
+    expect(authorizeMock).toHaveBeenCalledWith(
+      "/tmp/project",
+      expect.objectContaining({
+        preview_fingerprint: "fp-1",
+        acknowledge_risk: true,
+      }),
+    );
+    expect(screen.getByTestId("code-execute-confirm-button")).toBeEnabled();
+  });
+
   it("invalidates a stale preview when the code changes", async () => {
     previewMock.mockResolvedValue(readyPreview());
     render(<CodeExecuteSection node={node()} />);
@@ -146,7 +218,7 @@ describe("CodeExecuteSection", () => {
 
     fireEvent.click(screen.getByTestId("code-execute-preview-button"));
     await screen.findByTestId("code-execute-diff");
-    expect(screen.getByTestId("code-execute-confirm-button")).toBeEnabled();
+    expect(screen.getByTestId("code-execute-confirm-button")).toBeDisabled();
 
     fireEvent.change(screen.getByTestId("code-execute-code"), {
       target: { value: "result = df.head(1)" },
@@ -154,6 +226,61 @@ describe("CodeExecuteSection", () => {
 
     expect(screen.queryByTestId("code-execute-diff")).toBeNull();
     expect(screen.getByTestId("code-execute-confirm-button")).toBeDisabled();
+  });
+
+  it("clears the applied state when code changes after a successful apply", async () => {
+    previewMock.mockResolvedValue(readyPreview());
+    confirmMock.mockResolvedValue({
+      proposal: {},
+      operation: { record_id: "op-9" },
+      status: "completed",
+    });
+    render(<CodeExecuteSection node={node()} />);
+    await screen.findByTestId("code-execute-columns");
+
+    fireEvent.click(screen.getByTestId("code-execute-preview-button"));
+    await screen.findByTestId("code-execute-diff");
+    fireEvent.click(screen.getByTestId("code-execute-risk-acknowledgement"));
+    fireEvent.click(screen.getByTestId("code-execute-authorize-button"));
+    await screen.findByTestId("code-execute-risk-authorized");
+    fireEvent.click(screen.getByTestId("code-execute-confirm-button"));
+    await screen.findByTestId("code-execute-complete");
+
+    fireEvent.change(screen.getByTestId("code-execute-code"), {
+      target: { value: "result = df.head(1)" },
+    });
+
+    expect(screen.queryByTestId("code-execute-complete")).toBeNull();
+    expect(screen.getByTestId("code-execute-preview-button")).toBeEnabled();
+  });
+
+  it("locks the operation inputs while apply is in flight", async () => {
+    previewMock.mockResolvedValue(readyPreview());
+    let resolveConfirm: ((value: unknown) => void) | undefined;
+    confirmMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveConfirm = resolve;
+      }),
+    );
+    render(<CodeExecuteSection node={node()} />);
+    await screen.findByTestId("code-execute-columns");
+
+    fireEvent.click(screen.getByTestId("code-execute-preview-button"));
+    await screen.findByTestId("code-execute-diff");
+    fireEvent.click(screen.getByTestId("code-execute-risk-acknowledgement"));
+    fireEvent.click(screen.getByTestId("code-execute-authorize-button"));
+    await screen.findByTestId("code-execute-risk-authorized");
+    fireEvent.click(screen.getByTestId("code-execute-confirm-button"));
+
+    expect(screen.getByTestId("code-execute-code")).toBeDisabled();
+    expect(screen.getByTestId("code-execute-format")).toBeDisabled();
+
+    resolveConfirm?.({
+      proposal: {},
+      operation: { record_id: "op-10" },
+      status: "completed",
+    });
+    await screen.findByTestId("code-execute-complete");
   });
 
   it("shows the traceback and blocks applying when the code fails", async () => {
@@ -196,12 +323,19 @@ describe("CodeExecuteSection", () => {
 
     fireEvent.click(screen.getByTestId("code-execute-preview-button"));
     await screen.findByTestId("code-execute-diff");
+    fireEvent.click(screen.getByTestId("code-execute-risk-acknowledgement"));
+    fireEvent.click(screen.getByTestId("code-execute-authorize-button"));
+    await screen.findByTestId("code-execute-risk-authorized");
     fireEvent.click(screen.getByTestId("code-execute-confirm-button"));
 
     await screen.findByTestId("code-execute-complete");
     expect(confirmMock).toHaveBeenCalledWith(
       "/tmp/project",
-      expect.objectContaining({ preview_fingerprint: "fp-1" }),
+      expect.objectContaining({
+        preview_fingerprint: "fp-1",
+        risk_authorization_id: "risk-1",
+        risk_authorization_token: "opaque-risk-token",
+      }),
     );
     expect(screen.getByTestId("code-execute-complete").textContent).toContain("op-9");
   });
@@ -214,6 +348,9 @@ describe("CodeExecuteSection", () => {
 
     fireEvent.click(screen.getByTestId("code-execute-preview-button"));
     await screen.findByTestId("code-execute-diff");
+    fireEvent.click(screen.getByTestId("code-execute-risk-acknowledgement"));
+    fireEvent.click(screen.getByTestId("code-execute-authorize-button"));
+    await screen.findByTestId("code-execute-risk-authorized");
     fireEvent.click(screen.getByTestId("code-execute-confirm-button"));
 
     await waitFor(() => {

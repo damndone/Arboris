@@ -491,6 +491,30 @@
   color: var(--label-secondary);
   overflow: hidden;
 }
+.run-rail__resizer,
+.detail-drawer__resizer {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 6px;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.run-rail__resizer:hover,
+.run-rail__resizer:focus-visible,
+.detail-drawer__resizer:hover,
+.detail-drawer__resizer:focus-visible {
+  background: color-mix(in oklch, var(--tint) 35%, transparent);
+  outline: none;
+}
+.detail-drawer__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  flex: none;
+}
 .run-rail__header {
   display: flex;
   align-items: baseline;

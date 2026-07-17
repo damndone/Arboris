@@ -28,7 +28,6 @@ import { useLineage } from "../../lineage/LineageContext";
 import { useWorkbenchOptional } from "../WorkbenchStateProvider";
 import { useForest } from "../ForestContext";
 import { buildRunSnapshot } from "../RunSnapshotAdapter";
-import { AgentComposer } from "../agent/AgentComposer";
 
 export function GraphView() {
   const { model, selectedKey, select } = useLineage();
@@ -222,9 +221,6 @@ export function GraphView() {
           searchHitKeys={searchHitKeys}
           searchCursorKey={searchCursorKey}
         />
-      </div>
-      <div style={{ flex: "0 0 auto", padding: "10px 14px 14px" }}>
-        <AgentComposer />
       </div>
     </div>
   );

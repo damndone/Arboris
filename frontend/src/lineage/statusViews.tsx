@@ -27,9 +27,10 @@ const ERROR_TITLE: Record<GraphError["kind"], string> = {
 interface ErrorBannerProps {
   error: GraphError;
   onRetry: () => void;
+  onHome?: () => void;
 }
 
-export function ErrorBanner({ error, onRetry }: ErrorBannerProps) {
+export function ErrorBanner({ error, onRetry, onHome }: ErrorBannerProps) {
   const detail =
     error.kind === "unsupported_schema"
       ? `Backend returned schema_version=${error.schemaVersion}, which this UI does not understand.`
@@ -48,6 +49,15 @@ export function ErrorBanner({ error, onRetry }: ErrorBannerProps) {
             style={{ marginTop: 12 }}
           >
             Try again
+          </button>
+        )}
+        {!canRetry && onHome && (
+          <button
+            className="ln-btn-primary"
+            onClick={onHome}
+            style={{ marginTop: 12 }}
+          >
+            Back to Home
           </button>
         )}
       </div>

@@ -27,7 +27,7 @@ API_KEY = "sk-test-secret-key"
 
 @pytest.fixture(autouse=True)
 def isolated_provider_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the provider store at an empty temp store file.
+    """Isolate the default provider path from the developer's real home.
 
     Without this, a REAL local provider configuration (written by the
     Settings UI into ~/.config/econometrics-workbench/llm-providers.json)
@@ -35,13 +35,14 @@ def isolated_provider_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     2026-07-15 the first time a developer machine had an active provider
     saved. Tests must never read the user's real LLM configuration.
 
-    The file must actually EXIST: an explicit config path whose file is
-    missing now fails closed (no environment fallback), which is its own
-    contract with its own tests — here we want a valid, empty store.
+    Tests that need explicit-pin semantics set WORKBENCH_LLM_CONFIG_PATH
+    themselves. Ordinary chat tests exercise the default path, where
+    environment fallback remains supported.
     """
-    store_path = tmp_path / "llm-providers.json"
-    save_provider_store(ProviderStore(), store_path)
-    monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(store_path))
+    monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(
+        "workbench.llm.provider_store.Path.home", lambda: tmp_path
+    )
 
 
 @pytest.fixture
@@ -459,6 +460,48 @@ class TestLlmConfigEndpoint:
         assert "WORKBENCH_LLM_CONFIG_PATH" in config.configuration_error_message()
         assert "does not exist" in config.configuration_error_message()
 
+    def test_incomplete_explicit_provider_fails_closed_never_environment_fallback(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """A valid pinned store with an unusable active provider is still a pin."""
+
+        store = tmp_path / "pinned.json"
+        store.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "active_provider_id": "offline",
+                    "providers": [
+                        {
+                            "id": "offline",
+                            "name": "Offline",
+                            "base_url": "http://127.0.0.1:9/v1",
+                            "model": "offline-model",
+                            "api_key": "",
+                            "timeout_s": 60.0,
+                            "models": [],
+                            "website_url": "",
+                            "icon": "",
+                            "notes": "",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("WORKBENCH_LLM_CONFIG_PATH", str(store))
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "sk-test-env-only")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        config = load_llm_config()
+
+        assert config.is_configured() is False
+        assert config.source == "explicit_config_unconfigured"
+        assert config.base_url == ""
+        assert config.api_key == ""
+        assert "Refusing to fall back" in config.configuration_error_message()
+
     def test_invalid_explicit_store_fails_closed_never_environment_fallback(
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ):
@@ -521,9 +564,68 @@ class TestLlmConfigEndpoint:
         assert config.context_window_tokens is None
         assert config.supports_1m is False
 
-    def test_configured_env_reports_provider_without_key(
-        self, api: TestClient, configured_env
+    def test_default_path_falls_back_when_active_provider_is_unconfigured(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ):
+        """Fail-closed is scoped to the pinned path.
+
+        On the default path a store whose active provider lost its key (the
+        Settings-UI "clear key" / "delete active provider" flow) must still
+        fall back to the environment. The tests that used to cover this were
+        correctly converted to pinned fail-closed semantics; this keeps the
+        default-path behaviour pinned.
+        """
+
+        monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(
+            "workbench.llm.provider_store.Path.home", lambda: tmp_path
+        )
+        default_store = (
+            tmp_path / ".config" / "econometrics-workbench" / "llm-providers.json"
+        )
+        default_store.parent.mkdir(parents=True)
+        default_store.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "active_provider_id": "local",
+                    "providers": [
+                        {
+                            "id": "local",
+                            "name": "Local",
+                            "base_url": "https://local.example.com",
+                            "model": "local-model",
+                            "api_key": "",
+                            "timeout_s": 60.0,
+                            "models": [],
+                            "website_url": "",
+                            "icon": "",
+                            "notes": "",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/")
+        monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "env-secret")
+        monkeypatch.setenv("WORKBENCH_LLM_MODEL", "env-model")
+
+        config = load_llm_config()
+
+        assert config.source == "environment"
+        assert config.is_configured() is True
+        assert config.base_url == "https://env.example.com"
+
+    def test_configured_env_reports_provider_without_key(
+        self, api: TestClient, configured_env, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ):
+        # This test exercises the default environment path. Keep it isolated
+        # from both the autouse explicit empty store and the developer's home.
+        monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+        monkeypatch.setattr(
+            "workbench.llm.provider_store.Path.home", lambda: tmp_path
+        )
         r = api.get("/llm/config")
         assert r.status_code == 200
         body = r.json()

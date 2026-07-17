@@ -3,14 +3,10 @@
 // V1.5.2 P4 — live Logs panel for the workbench bottom panel.
 //
 // Subscribes to /runs/<runId>/events via the existing `connectRunEvents`
-// SSE helper while mounted. For an in-progress run, events stream as
-// the orchestrator emits them; for a completed run, the server sends
-// a single terminal event and closes the stream — the panel shows
-// that final event + "Stream closed."
-//
-// V1.5.3+ may add backfill (fetch the run's complete event log on
-// mount before subscribing). V1.5.2 only shows events that arrive
-// during the mount lifetime.
+// SSE helper while mounted. For an in-progress run, events stream as the
+// orchestrator emits them; for a completed run, the server replays the
+// durable workflow_log.jsonl and closes the stream. This keeps Logs useful
+// when the panel is opened after the in-memory event window has expired.
 
 import { useEffect, useRef, useState } from "react";
 import {

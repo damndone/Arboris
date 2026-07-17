@@ -13,6 +13,7 @@ from typing import Any, Protocol
 import fcntl
 
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
+from .risk import RiskAuthorizationRequired, RiskAuthorizationStore
 
 
 class OperationClaimConflict(RuntimeError):
@@ -220,12 +221,14 @@ class WorkbenchOperationLifecycle:
         handlers: dict[str, OperationHandler],
         lease_owner: str,
         failpoint: OperationFailpoint | None = None,
+        risk_authorization_store: RiskAuthorizationStore | None = None,
     ) -> None:
         self.operation_store = operation_store
         self.operation_registry = operation_registry
         self.handlers = handlers
         self.lease_owner = lease_owner
         self.failpoint = failpoint or NoopFailpoint()
+        self.risk_authorization_store = risk_authorization_store
 
     async def execute(self, record_id: str) -> OperationRecord:
         record = self.operation_store.get(record_id)
@@ -252,6 +255,26 @@ class WorkbenchOperationLifecycle:
         self.failpoint.hit("after_claim", record)
         domain_lease: Any = None
         try:
+            if definition.requires_risk_authorization:
+                authorization_id = record.execution.get("risk_authorization_id")
+                if not authorization_id or self.risk_authorization_store is None:
+                    raise RiskAuthorizationRequired(
+                        "high-risk operation requires a consumed risk authorization"
+                    )
+                self.risk_authorization_store.require_consumed(
+                    str(authorization_id),
+                    operation_id=record.operation_id,
+                    operation_version=record.operation_version,
+                    proposal_id=record.proposal_id,
+                    revision=record.proposal_revision,
+                    fingerprint=record.proposal_fingerprint,
+                    session_id=record.agent_session_id,
+                    chain_id=record.chain_id,
+                    active_head_run_id=str(
+                        record.preconditions.get("active_head_run_id") or ""
+                    ),
+                    execution_key=key,
+                )
             acquire_domain_lease = getattr(handler, "acquire_domain_lease", None)
             if acquire_domain_lease is not None:
                 domain_lease = acquire_domain_lease(

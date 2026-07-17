@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  authorizeCodeExecuteRisk,
   confirmDataColumnCast,
+  confirmCodeExecute,
   fetchDataColumnCastContext,
   previewDataColumnCast,
 } from "./dataOperations";
@@ -63,6 +65,69 @@ describe("data column cast API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/data-operations/column-cast/confirm?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps high-risk code execution as an explicit two-request contract", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "risk_authorized",
+            proposal: {},
+            risk_authorization: {
+              authorization_id: "risk-1",
+              token: "opaque-token",
+              operation_id: "code.execute",
+              operation_version: "v1",
+              proposal_id: "proposal-1",
+              revision: 1,
+              fingerprint: "fp-1",
+              active_head_run_id: "run-1",
+              expires_at: "2026-07-16T00:05:00Z",
+              status: "issued",
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ operation: { record_id: "op-1" } }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = {
+      source_run_id: "run-1",
+      source_node_id: "stage:cleaned",
+      source_artifact_id: "cleaned_dataset",
+      code: "result = df",
+      language: "python" as const,
+      output_format: "csv" as const,
+    };
+
+    const authorized = await authorizeCodeExecuteRisk("/tmp/project", {
+      ...request,
+      preview_fingerprint: "fp-1",
+      acknowledge_risk: true,
+    });
+    await confirmCodeExecute("/tmp/project", {
+      ...request,
+      preview_fingerprint: "fp-1",
+      risk_authorization_id: authorized.risk_authorization.authorization_id,
+      risk_authorization_token: authorized.risk_authorization.token,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/data-operations/code-execute/risk-authorize?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/data-operations/code-execute/confirm?project_root=%2Ftmp%2Fproject",
       expect.objectContaining({ method: "POST" }),
     );
   });

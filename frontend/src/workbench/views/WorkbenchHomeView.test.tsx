@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchHomeView } from "./WorkbenchHomeView";
-import { touchRecent } from "../../launcher/recents";
+import { listRecents, touchRecent } from "../../launcher/recents";
 
 describe("WorkbenchHomeView", () => {
   beforeEach(() => {
@@ -71,7 +71,93 @@ describe("WorkbenchHomeView", () => {
     const onOpenProject = vi.fn();
     render(<WorkbenchHomeView onOpenProject={onOpenProject} />);
     fireEvent.click(screen.getByTestId("workbench-home-recent-/tmp/other"));
-    expect(onOpenProject).toHaveBeenCalledWith("/tmp/other");
-    await waitFor(() => expect(screen.getByTestId("workbench-home-llm-ready")).toBeInTheDocument());
+    await waitFor(() => {
+      expect(onOpenProject).toHaveBeenCalledWith("/tmp/other");
+      expect(screen.getByTestId("workbench-home-llm-ready")).toBeInTheDocument();
+    });
+  });
+
+  it("reconciles missing recents and records the current project", async () => {
+    touchRecent("/gone/project");
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: unknown) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes("gone%2Fproject")) {
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({
+            error: { code: "PROJECT_NOT_FOUND", message: "Project not found", details: {} },
+          }),
+        });
+      }
+      if (requestUrl.includes("/runs")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ runs: [] }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ configured: false, supports_1m: false }),
+      });
+    });
+    const onOpenProject = vi.fn();
+    render(
+      <WorkbenchHomeView
+        projectRoot="/tmp/current"
+        onOpenProject={onOpenProject}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("workbench-home-recent-/gone/project")).not.toBeInTheDocument();
+      expect(screen.getByTestId("workbench-home-recent-/tmp/current")).toBeInTheDocument();
+    });
+    expect(listRecents().map((recent) => recent.root)).toEqual(["/tmp/current"]);
+    expect(onOpenProject).not.toHaveBeenCalled();
+  });
+
+  it("removes a missing recent on click without leaving a dead-route error", async () => {
+    touchRecent("/gone/project");
+    let runsCalls = 0;
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation((url: unknown) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes("/runs")) {
+        runsCalls += 1;
+        if (runsCalls === 1) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ runs: [] }),
+          });
+        }
+        return Promise.resolve({
+          ok: false,
+          status: 404,
+          json: () => Promise.resolve({
+            error: { code: "PROJECT_NOT_FOUND", message: "Project not found", details: {} },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ configured: false, supports_1m: false }),
+      });
+    });
+    const onOpenProject = vi.fn();
+    render(<WorkbenchHomeView onOpenProject={onOpenProject} />);
+
+    fireEvent.click(screen.getByTestId("workbench-home-recent-/gone/project"));
+
+    await waitFor(() => {
+      expect(listRecents()).toEqual([]);
+      expect(screen.queryByTestId("workbench-home-recent-/gone/project")).not.toBeInTheDocument();
+    });
+    expect(onOpenProject).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Project missing or moved")).not.toBeInTheDocument();
   });
 });

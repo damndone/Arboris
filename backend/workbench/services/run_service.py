@@ -208,7 +208,7 @@ def _submit_run(
         before_dispatch(run.run_id)
 
     events = get_event_manager()
-    events.register_run(run.run_id)
+    events.register_run(run.run_id, run.root / "workflow_log.jsonl")
     events.mark_active(run.run_id)
     events.executor.submit(
         _bg_run, run.root, run.run_id, saved_path,

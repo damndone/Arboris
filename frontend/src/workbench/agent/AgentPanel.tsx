@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { AgentHierarchyTree } from "./AgentHierarchyTree";
+import { AgentComposer } from "./AgentComposer";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
 
@@ -104,6 +105,7 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState("");
   const [revisionError, setRevisionError] = useState<string | null>(null);
+  const hasNavigationContext = Boolean(agent.hierarchy || agent.navigationLinks.length > 0);
   const contextLabel = agent.contextWindowTokens === null
     ? `${agent.contextUsedTokens.toLocaleString()} tokens · capacity unknown`
     : `${agent.contextUsedTokens.toLocaleString()} / ${agent.contextWindowTokens.toLocaleString()} tokens`;
@@ -137,35 +139,50 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
           events #{agent.eventCursor}
         </span>
       </header>
-      {agent.hierarchy && (
-        <AgentHierarchyTree
-          root={agent.hierarchy}
-          openNavigation={agent.openNavigation}
-        />
-      )}
-      {agent.navigationLinks.length > 0 && (
-        <nav
-          data-testid="agent-navigation-links"
-          aria-label="Agent lineage links"
-          className="wb-agent-navigation-links"
+      {hasNavigationContext && (
+        <details
+          data-testid="agent-context-details"
+          className="wb-agent-context-details"
         >
-          {agent.navigationLinks.map((link) => (
-            <button
-              key={`${link.kind}:${link.id}:${link.relation}`}
-              type="button"
-              className="wb-agent-navigation-link"
-              aria-label={navigationButtonLabel(link)}
-              disabled={!link.available || !agent.openNavigation}
-              title={link.available ? link.label : link.reason ?? "Unavailable"}
-              onClick={() => {
-                if (link.available) agent.openNavigation?.(link);
-              }}
-            >
-              <span className="wb-agent-navigation-link-relation">{link.relation}</span>
-              <span>{link.label}</span>
-            </button>
-          ))}
-        </nav>
+          <summary>
+            <span>Agent context</span>
+            <span className="wb-agent-context-summary-meta">
+              {agent.hierarchy ? "Main / Chain" : `${agent.navigationLinks.length} links`}
+            </span>
+          </summary>
+          <div className="wb-agent-context-body">
+            {agent.hierarchy && (
+              <AgentHierarchyTree
+                root={agent.hierarchy}
+                openNavigation={agent.openNavigation}
+              />
+            )}
+            {agent.navigationLinks.length > 0 && (
+              <nav
+                data-testid="agent-navigation-links"
+                aria-label="Agent lineage links"
+                className="wb-agent-navigation-links"
+              >
+                {agent.navigationLinks.map((link) => (
+                  <button
+                    key={`${link.kind}:${link.id}:${link.relation}`}
+                    type="button"
+                    className="wb-agent-navigation-link"
+                    aria-label={navigationButtonLabel(link)}
+                    disabled={!link.available || !agent.openNavigation}
+                    title={link.available ? link.label : link.reason ?? "Unavailable"}
+                    onClick={() => {
+                      if (link.available) agent.openNavigation?.(link);
+                    }}
+                  >
+                    <span className="wb-agent-navigation-link-relation">{link.relation}</span>
+                    <span>{link.label}</span>
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+        </details>
       )}
       <div
         role="log"
@@ -239,24 +256,6 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
             );
           })
         )}
-      </div>
-      {/* G3: the bottom panel is a read-only transcript / inspection surface.
-       *  The Agent has a single input — the composer under the graph — so this
-       *  panel no longer carries a redundant, in-sync input row. Elevated
-       *  capability (e.g. code.execute) is a typed, confirmed operation whose
-       *  output streams here, not a second, higher-privilege input box. */}
-      <div
-        data-testid="agent-terminal-input-moved-hint"
-        className="wb-agent-terminal-input-hint"
-        style={{
-          flex: "0 0 auto",
-          fontFamily: "var(--font-mono, ui-monospace, monospace)",
-          fontSize: 11,
-          color: "var(--label-tertiary)",
-        }}
-      >
-        <span aria-hidden="true">❯ </span>
-        Input moved to the Agent bar under the graph · this panel shows the transcript, operations, and diffs
       </div>
       {agent.activeOperation && (
         <div
@@ -449,6 +448,7 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
           })}
         </aside>
       )}
+      <AgentComposer showScope={false} variant="terminal" />
     </section>
   );
 }

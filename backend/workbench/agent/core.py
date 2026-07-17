@@ -37,6 +37,7 @@ class AgentRunBudget:
 
     max_steps: int | None = None
     timeout_s: float | None = None
+    max_consecutive_identical_tool_calls: int = 2
 
     @classmethod
     def from_value(
@@ -65,9 +66,22 @@ class AgentRunBudget:
             ):
                 raise AgentCoreBudgetError("timeout_s must be a positive finite number")
 
+        max_consecutive_identical_tool_calls = value.get(
+            "max_consecutive_identical_tool_calls", 2
+        )
+        if (
+            isinstance(max_consecutive_identical_tool_calls, bool)
+            or not isinstance(max_consecutive_identical_tool_calls, int)
+            or max_consecutive_identical_tool_calls <= 0
+        ):
+            raise AgentCoreBudgetError(
+                "max_consecutive_identical_tool_calls must be a positive integer"
+            )
+
         return cls(
             max_steps=max_steps,
             timeout_s=float(timeout_s) if timeout_s is not None else None,
+            max_consecutive_identical_tool_calls=max_consecutive_identical_tool_calls,
         )
 
 
@@ -107,6 +121,8 @@ class AgentCore:
         self._active_message_started = False
         self._active_context_fingerprint: str | None = None
         self._final_status: str | None = None
+        self._last_tool_call_fingerprint: str | None = None
+        self._consecutive_identical_tool_calls = 0
 
     def attach_tools(
         self,
@@ -193,6 +209,8 @@ class AgentCore:
         self._budget = budget
         self._steps_used = 0
         self._final_status = None
+        self._last_tool_call_fingerprint = None
+        self._consecutive_identical_tool_calls = 0
 
     def _end(self) -> None:
         self.repository.update_status(self.session_id, self._final_status or "idle")
@@ -205,6 +223,8 @@ class AgentCore:
         self._timeout_requested = False
         self._budget = AgentRunBudget()
         self._steps_used = 0
+        self._last_tool_call_fingerprint = None
+        self._consecutive_identical_tool_calls = 0
         self._active_turn_started = False
         self._active_request_id = None
         self._active_message_started = False
@@ -222,6 +242,23 @@ class AgentCore:
             raise AgentCoreContinuationError(
                 "cannot continue when the last message is not user or tool result"
             )
+
+    @staticmethod
+    def _tool_call_fingerprint(tool_call: Mapping[str, Any]) -> str:
+        """Return a stable identity for loop detection, excluding provider call ids."""
+
+        tool_id = str(tool_call.get("tool_id", ""))
+        arguments = tool_call.get("arguments", {})
+        try:
+            encoded_arguments = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            encoded_arguments = repr(arguments)
+        return f"{tool_id}\x00{encoded_arguments}"
 
     async def _run_commands(
         self,
@@ -504,6 +541,29 @@ class AgentCore:
                         return self._persist_terminal_error(
                             "agent_timeout" if self._timeout_requested else "agent_aborted"
                         )
+                    fingerprint = self._tool_call_fingerprint(tool_call)
+                    if fingerprint == self._last_tool_call_fingerprint:
+                        self._consecutive_identical_tool_calls += 1
+                    else:
+                        self._last_tool_call_fingerprint = fingerprint
+                        self._consecutive_identical_tool_calls = 1
+                    if (
+                        self._consecutive_identical_tool_calls
+                        >= self._budget.max_consecutive_identical_tool_calls
+                    ):
+                        self.events.emit(
+                            self.session_id,
+                            "loop_guard",
+                            {
+                                "tool_id": tool_id,
+                                "repetition_count": self._consecutive_identical_tool_calls,
+                                "reason": "identical_tool_call",
+                            },
+                            command_id=command_id,
+                        )
+                        return self._persist_terminal_error(
+                            "repeated_tool_call_limit"
+                        )
                 self.events.emit(
                     self.session_id,
                     "turn_end",
@@ -546,7 +606,7 @@ class AgentCore:
     def _persist_terminal_error(self, error: str) -> str:
         """Persist a budget stop as a complete, replayable assistant turn."""
 
-        if error == "max_steps_exceeded":
+        if error in {"max_steps_exceeded", "repeated_tool_call_limit"}:
             self._final_status = "blocked"
         elif error == "agent_aborted":
             self._final_status = "cancelled"

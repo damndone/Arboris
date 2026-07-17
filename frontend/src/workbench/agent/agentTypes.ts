@@ -156,6 +156,7 @@ export type AgentCapability = {
   scope: string;
   scope_requirements: string[];
   risk_level: string;
+  risk_authorization_policy?: string;
   confirmation_policy: string;
   ui_description: string;
   example_prompts: string[];

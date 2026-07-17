@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
-import { AgentComposer } from "./AgentComposer";
 import { AgentSurfaceProvider } from "./AgentSurfaceContext";
 import type { AgentMessage, AgentProposal } from "./agentTypes";
 
@@ -128,7 +127,6 @@ function mount() {
   return render(
     <MemoryRouter>
       <AgentSurfaceProvider projectRoot="/proj" runId="run-a">
-        <AgentComposer />
         <AgentPanel projectRoot="/proj" runId="run-a" />
       </AgentSurfaceProvider>
     </MemoryRouter>,
@@ -348,7 +346,6 @@ describe("AgentSurfaceProvider", () => {
     rendered.rerender(
       <MemoryRouter>
         <AgentSurfaceProvider projectRoot="/proj" runId="run-a">
-          <AgentComposer />
           <AgentPanel projectRoot="/proj" runId="run-a" />
         </AgentSurfaceProvider>
       </MemoryRouter>,

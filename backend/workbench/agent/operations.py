@@ -54,6 +54,16 @@ class OperationDefinition:
     natural_language_enabled: bool = False
     validator: OperationValidator | None = None
 
+    @property
+    def risk_authorization_policy(self) -> str:
+        """Return the backend policy implied by the registry risk level."""
+
+        return "explicit_single_use" if self.risk_level == "high" else "none"
+
+    @property
+    def requires_risk_authorization(self) -> bool:
+        return self.risk_level == "high"
+
     def validate(
         self,
         *,
@@ -89,9 +99,9 @@ class OperationRegistry:
                 reconciler_key="model.rerun",
                 diff_builder_key="rerun.diff.v1",
                 verification_builder_key="rerun.verification.v1",
-                ui_description="修改当前模型参数并重新运行。",
+                ui_description="Change the current model parameters and rerun.",
                 example_prompts=(
-                    "把当前模型的 covariance 从 clustered 改成 unadjusted，然后重新估计。",
+                    "Change the current model covariance from clustered to unadjusted, then rerun.",
                 ),
                 natural_language_enabled=True,
                 validator=_validate_model_rerun,
@@ -121,9 +131,9 @@ class OperationRegistry:
                 reconciler_key="graph.fork",
                 diff_builder_key="none",
                 verification_builder_key="fork.verification.v1",
-                ui_description="从当前已验证的节点创建一个新 Chain 分支。",
+                ui_description="Create a new Chain branch from the current verified node.",
                 example_prompts=(
-                    "从当前节点创建一个新分支，后续我想测试另一套稳健标准误。",
+                    "Create a new branch from the current node so I can test another robust standard-error specification.",
                 ),
                 natural_language_enabled=True,
                 validator=_validate_graph_fork,
@@ -154,8 +164,8 @@ class OperationRegistry:
                 reconciler_key="data.column.cast",
                 diff_builder_key="data.schema_diff.v1",
                 verification_builder_key="data.column_cast.verification.v1",
-                ui_description="将当前数据节点的一个现有列转换为受限目标类型。",
-                example_prompts=("把当前数据节点的 age 列转换为数值型。",),
+                ui_description="Cast one existing column in the current dataset node to a supported target type.",
+                example_prompts=("Cast the age column in the current dataset node to numeric.",),
                 natural_language_enabled=False,
                 validator=_validate_data_column_cast,
             )
@@ -201,10 +211,10 @@ class OperationRegistry:
                 reconciler_key="data.columns.cast",
                 diff_builder_key="data.schema_diff.v1",
                 verification_builder_key="data.column_cast.verification.v1",
-                ui_description="一次把当前数据节点的多个现有列转换为受限目标类型，产生单个子数据节点。",
+                ui_description="Cast multiple existing columns in the current dataset node in one operation, producing one child dataset node.",
                 example_prompts=(
-                    "把当前数据节点的 age、income 两列都转换为数值型。",
-                    "把 region 列转成字符串，再把 wage 转成数值。",
+                    "Cast both the age and income columns in the current dataset node to numeric.",
+                    "Cast region to string and wage to numeric.",
                 ),
                 # v1.7 优先级 6：NL Agent 生成同一份 typed proposal。批量 cast 是
                 # 最佳目标形态——一句话本来就是一个意图。artifact_id 与
@@ -240,8 +250,9 @@ class OperationRegistry:
                 diff_builder_key="data.schema_diff.v1",
                 verification_builder_key="data.column_cast.verification.v1",
                 ui_description=(
-                    "在沙箱中对当前数据节点运行一段 Python 转换代码（给 df，产出 result），"
-                    "生成子数据节点；源数据不可写、无网络、有资源限额。"
+                    "Run a Python transformation in the sandbox against the current dataset node "
+                    "(read df and produce result), creating a child dataset node; the source is read-only, "
+                    "network access is disabled, and resources are limited."
                 ),
                 example_prompts=(),
                 natural_language_enabled=False,
@@ -274,6 +285,7 @@ class OperationRegistry:
                 "scope": definition.scope,
                 "scope_requirements": list(definition.scope_requirements),
                 "risk_level": definition.risk_level,
+                "risk_authorization_policy": definition.risk_authorization_policy,
                 "confirmation_policy": definition.confirmation_policy,
                 "proposal_schema": definition.proposal_schema,
                 "editable_schema": definition.editable_schema,
@@ -301,6 +313,13 @@ class OperationRegistry:
             and required.issubset(set(definition.scope_requirements))
         )
 
+    def requires_risk_authorization(
+        self,
+        operation_id: str,
+        operation_version: str = "v1",
+    ) -> bool:
+        return self.require(operation_id, operation_version).requires_risk_authorization
+
     def boundary(self) -> dict[str, list[dict[str, str]]]:
         """Return registry-owned non-mutating and unavailable boundaries."""
 
@@ -308,30 +327,30 @@ class OperationRegistry:
             "advisory": [
                 {
                     "id": "analysis.explain",
-                    "label": "比较结果和解释诊断",
-                    "description": "可以询问并解释证据，但不会直接修改图或运行数据。",
+                    "label": "Compare results and explain diagnostics",
+                    "description": "Ask for evidence-based explanations without directly changing the graph or running data.",
                 },
                 {
                     "id": "analysis.suggest",
-                    "label": "建议下一步分析",
-                    "description": "可以给出建议，但不会自动执行多步计划。",
+                    "label": "Suggest the next analysis step",
+                    "description": "Get recommendations without automatically executing a multi-step plan.",
                 },
             ],
             "unsupported": [
                 {
                     "id": "data.cleaning",
-                    "label": "修改数据清洗规则",
-                    "description": "当前没有对应的 typed operation。",
+                    "label": "Modify data-cleaning rules",
+                    "description": "No corresponding typed operation is available yet.",
                 },
                 {
                     "id": "workspace.arbitrary",
-                    "label": "任意文件、代码或网络操作",
-                    "description": "Agent 没有任意 shell、文件、Python 或网络工具。",
+                    "label": "Arbitrary file, code, or network operations",
+                    "description": "The Agent has no arbitrary shell, file, Python, or network tools.",
                 },
                 {
                     "id": "operation.multi_step",
-                    "label": "多步骤自动执行",
-                    "description": "当前只支持逐个确认的 typed operation。",
+                    "label": "Multi-step automatic execution",
+                    "description": "Only individually confirmed typed operations are supported.",
                 },
             ],
         }
@@ -901,6 +920,38 @@ class OperationRecordStore:
             )
             append_jsonl_atomic(path, record.to_dict())
             return record
+
+    def bind_risk_authorization(
+        self,
+        record_id: str,
+        authorization_id: str,
+    ) -> OperationRecord:
+        """Durably bind a high-risk grant before its token is consumed."""
+
+        if not authorization_id:
+            raise ValueError("authorization_id is required")
+        with self._lock:
+            current = self.get(record_id)
+            existing = current.execution.get("risk_authorization_id")
+            if existing is not None and existing != authorization_id:
+                # A grant may expire or be rejected after this pending record
+                # was created. Reauthorization is safe until execution is
+                # claimed; after a claim, changing the authorization binding
+                # would make recovery ambiguous and must fail closed.
+                if current.execution.get("execution_key") is not None:
+                    raise OperationRecordTransitionError(
+                        f"operation already has another risk authorization: {record_id}"
+                    )
+            if existing == authorization_id:
+                return current
+            return self.append_status(
+                record_id,
+                current.status,
+                execution={
+                    **current.execution,
+                    "risk_authorization_id": authorization_id,
+                },
+            )
 
     def claim_execution(
         self,

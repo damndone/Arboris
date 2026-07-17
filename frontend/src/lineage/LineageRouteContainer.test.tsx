@@ -1,6 +1,6 @@
 // frontend/src/lineage/LineageRouteContainer.test.tsx
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LineageRouteContainer } from "./LineageRouteContainer";
 
@@ -65,8 +65,14 @@ function v3Graph() {
 }
 
 function renderContainer(path = "/") {
+  function LocationProbe() {
+    const location = useLocation();
+    return <output data-testid="location-probe">{location.pathname}{location.search}</output>;
+  }
+
   return render(
     <MemoryRouter initialEntries={[path]}>
+      <LocationProbe />
       <LineageRouteContainer projectRoot="/proj" runId="r1" />
     </MemoryRouter>,
   );
@@ -92,6 +98,14 @@ describe("LineageRouteContainer", () => {
       expect(screen.getByText(/run not found/i)).toBeTruthy(),
     );
     expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+    const backHome = screen.getByRole("button", { name: /back to home/i });
+    expect(backHome).toBeInTheDocument();
+    fireEvent.click(backHome);
+    await waitFor(() =>
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        "/p/L3Byb2o/graph?view=home",
+      ),
+    );
   });
 
   it("error branch (422 corrupt): shows 'Lineage data is corrupt' with Try again button", async () => {

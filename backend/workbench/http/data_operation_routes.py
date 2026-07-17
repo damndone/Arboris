@@ -9,9 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.chains import ChainHeadConflict, ensure_chain_root
 from ..agent.events import AgentEventStream
-from ..agent.operations import OperationRecordStore, OperationRegistry, OperationValidationError
+from ..agent.operations import (
+    OperationRecordStore,
+    OperationRecordTransitionError,
+    OperationRegistry,
+    OperationValidationError,
+)
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
+from ..agent.risk import (
+    RiskAuthorizationError,
+    RiskAuthorizationExpired,
+    RiskAuthorizationReplay,
+    RiskAuthorizationRequired,
+    RiskAuthorizationStore,
+    RiskAuthorizationStale,
+)
 from ..agent.session import JsonlSessionRepository
 from ..api_errors import WorkbenchAPIError
 from ..data_operations import (
@@ -91,6 +104,14 @@ class CodeExecuteRequest(BaseModel):
 class CodeExecuteConfirmRequest(CodeExecuteRequest):
     preview_fingerprint: str = Field(min_length=1, max_length=200)
     session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+    risk_authorization_id: str | None = Field(default=None, min_length=1, max_length=200)
+    risk_authorization_token: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class CodeExecuteRiskAuthorizationRequest(CodeExecuteRequest):
+    preview_fingerprint: str = Field(min_length=1, max_length=200)
+    session_id: str = Field(default="agent_data_ui", min_length=1, max_length=200)
+    acknowledge_risk: Literal[True]
 
 
 def _root(project_root: str):
@@ -216,6 +237,128 @@ def _code_preview_or_error(root, spec: CodeExecuteSpecV1, *, confirm: bool):
             ),
             details={"operation_id": "code.execute", "reason": str(exc)},
         ) from exc
+
+
+def _require_ready_code_preview(
+    body: CodeExecuteConfirmRequest | CodeExecuteRiskAuthorizationRequest,
+    preview,
+) -> None:
+    if preview.status != "ready":
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="DATA_OPERATION_BLOCKED",
+            message="The code failed when it was run in the sandbox.",
+            details={"operation_id": "code.execute", "error": preview.error},
+        )
+    if preview.fingerprint != body.preview_fingerprint:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message=(
+                "The preview fingerprint no longer matches. Either the source data "
+                "changed, or the code does not produce the same result every run."
+            ),
+            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
+        )
+
+
+def _code_operation_context(
+    root,
+    body: CodeExecuteConfirmRequest | CodeExecuteRiskAuthorizationRequest,
+    spec,
+    preview,
+) -> dict[str, Any]:
+    """Build the same canonical typed proposal context for authorize and confirm."""
+
+    workbench_root = root / "workbench"
+    repository = JsonlSessionRepository(workbench_root)
+    events = AgentEventStream(workbench_root)
+    chain_id = f"data_chain:{body.source_run_id}"
+    _ensure_data_chain_scope(
+        root,
+        repository,
+        session_id=body.session_id,
+        chain_id=chain_id,
+        active_head_run_id=body.source_run_id,
+    )
+    main_session_id = _ensure_main_session(repository, root)
+    proposal_store = ProposalStore(workbench_root)
+    registry = OperationRegistry()
+    definition = registry.require("code.execute", "v1")
+    target = {
+        "run_id": spec.source_run_id,
+        "node_ref": spec.source_node_id,
+        "artifact_id": spec.source_artifact_id,
+        "code": spec.code,
+        "language": spec.language,
+        "output_format": spec.output_format,
+    }
+    preconditions = {
+        "context_version": "code-execute.v1",
+        "context_fingerprint": preview.fingerprint,
+        "active_head_run_id": spec.source_run_id,
+        "owner_resolution": "typed_data_node",
+        "source_sha256": preview.source_sha256,
+    }
+    changes = {
+        "code": spec.code,
+        "language": spec.language,
+        "output_format": spec.output_format,
+    }
+    definition.validate(target=target, preconditions=preconditions, changes=changes)
+    proposal_id = f"proposal_code_exec_{preview.fingerprint[:24]}"
+    try:
+        proposal = proposal_store.latest_revision(proposal_id)
+    except KeyError:
+        proposal = proposal_store.create(
+            session_id=body.session_id,
+            chain_id=chain_id,
+            operation_id="code.execute",
+            operation_version="v1",
+            target=target,
+            preconditions=preconditions,
+            changes=changes,
+            evidence_refs=["code-execute-preview"],
+            expected_effect=["create one immutable child data artifact"],
+            risks=[
+                "arbitrary user code, run sandboxed against a copy of the source",
+                "sandboxed does not mean low risk; downstream model rerun required",
+            ],
+            proposal_id=proposal_id,
+        )
+        events.emit(body.session_id, "proposal_ready", proposal.to_dict())
+        events.emit(
+            body.session_id,
+            "needs_confirmation",
+            {"proposal_id": proposal_id, "revision": proposal.revision},
+        )
+    if proposal.target != target or proposal.preconditions != preconditions:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_CONFLICT",
+            message="A different typed proposal already owns this preview fingerprint.",
+            details={"proposal_id": proposal_id},
+        )
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id=main_session_id,
+        proposal_store=proposal_store,
+        operation_store=OperationRecordStore(workbench_root),
+        operation_registry=registry,
+        risk_authorization_store=RiskAuthorizationStore(workbench_root),
+    )
+    return {
+        "workbench_root": workbench_root,
+        "repository": repository,
+        "events": events,
+        "chain_id": chain_id,
+        "proposal_store": proposal_store,
+        "registry": registry,
+        "definition": definition,
+        "proposal": proposal,
+        "orchestrator": orchestrator,
+    }
 
 
 def _ensure_session(repository: JsonlSessionRepository, session_id: str, chain_id: str) -> None:
@@ -564,6 +707,59 @@ def preview_code_execute_route(project_root: str, body: CodeExecuteRequest) -> d
     return {"spec": spec.to_dict(), "preview": preview.to_dict()}
 
 
+@router.post("/data-operations/code-execute/risk-authorize")
+def authorize_code_execute_risk(
+    project_root: str,
+    body: CodeExecuteRiskAuthorizationRequest,
+) -> dict[str, Any]:
+    root = _root(project_root)
+    spec = _code_spec(body)
+    preview = _code_preview_or_error(root, spec, confirm=True)
+    _require_ready_code_preview(body, preview)
+    context = _code_operation_context(root, body, spec, preview)
+    proposal_store = context["proposal_store"]
+    proposal = context["proposal"]
+    try:
+        proposal_store.confirm(
+            proposal.proposal_id,
+            revision=proposal.revision,
+            fingerprint=proposal.fingerprint,
+            actor_type="human_ui",
+            current_context_fingerprint=preview.fingerprint,
+            current_active_head_run_id=spec.source_run_id,
+        )
+        grant = RiskAuthorizationStore(context["workbench_root"]).issue(
+            operation_id="code.execute",
+            operation_version="v1",
+            proposal_id=proposal.proposal_id,
+            revision=proposal.revision,
+            fingerprint=proposal.fingerprint,
+            session_id=proposal.session_id,
+            chain_id=proposal.chain_id,
+            active_head_run_id=spec.source_run_id,
+            actor_type="human_ui",
+        )
+    except ProposalStaleError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_STALE",
+            message="The typed data operation became stale before risk authorization.",
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except ProposalConfirmationError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="DATA_OPERATION_CONFLICT",
+            message="The typed data proposal is no longer confirmable.",
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    return {
+        "proposal": proposal_store.latest_revision(proposal.proposal_id).to_dict(),
+        "risk_authorization": grant.to_dict(include_token=True),
+        "status": "risk_authorized",
+    }
+
+
 @router.post("/data-operations/code-execute/confirm")
 async def confirm_code_execute(
     project_root: str,
@@ -572,105 +768,14 @@ async def confirm_code_execute(
     root = _root(project_root)
     spec = _code_spec(body)
     preview = _code_preview_or_error(root, spec, confirm=True)
-    if preview.status != "ready":
-        raise WorkbenchAPIError(
-            status_code=422,
-            code="DATA_OPERATION_BLOCKED",
-            message="The code failed when it was run in the sandbox.",
-            details={"operation_id": "code.execute", "error": preview.error},
-        )
-    if preview.fingerprint != body.preview_fingerprint:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_STALE",
-            message=(
-                "The preview fingerprint no longer matches. Either the source data "
-                "changed, or the code does not produce the same result every run."
-            ),
-            details={"expected": preview.fingerprint, "received": body.preview_fingerprint},
-        )
-
-    workbench_root = root / "workbench"
-    repository = JsonlSessionRepository(workbench_root)
-    events = AgentEventStream(workbench_root)
-    chain_id = f"data_chain:{body.source_run_id}"
-    _ensure_data_chain_scope(
-        root,
-        repository,
-        session_id=body.session_id,
-        chain_id=chain_id,
-        active_head_run_id=body.source_run_id,
-    )
-    main_session_id = _ensure_main_session(repository, root)
-    proposal_store = ProposalStore(workbench_root)
-    registry = OperationRegistry()
-    definition = registry.require("code.execute", "v1")
-    target = {
-        "run_id": spec.source_run_id,
-        "node_ref": spec.source_node_id,
-        "artifact_id": spec.source_artifact_id,
-        "code": spec.code,
-        "language": spec.language,
-        "output_format": spec.output_format,
-    }
-    preconditions = {
-        "context_version": "code-execute.v1",
-        "context_fingerprint": preview.fingerprint,
-        "active_head_run_id": spec.source_run_id,
-        "owner_resolution": "typed_data_node",
-        "source_sha256": preview.source_sha256,
-    }
-    changes = {
-        "code": spec.code,
-        "language": spec.language,
-        "output_format": spec.output_format,
-    }
-    definition.validate(target=target, preconditions=preconditions, changes=changes)
-    proposal_id = f"proposal_code_exec_{preview.fingerprint[:24]}"
-    try:
-        proposal = proposal_store.latest_revision(proposal_id)
-    except KeyError:
-        proposal = proposal_store.create(
-            session_id=body.session_id,
-            chain_id=chain_id,
-            operation_id="code.execute",
-            operation_version="v1",
-            target=target,
-            preconditions=preconditions,
-            changes=changes,
-            evidence_refs=["code-execute-preview"],
-            expected_effect=["create one immutable child data artifact"],
-            risks=[
-                "arbitrary user code, run sandboxed against a copy of the source",
-                "downstream model rerun required",
-            ],
-            proposal_id=proposal_id,
-        )
-        events.emit(body.session_id, "proposal_ready", proposal.to_dict())
-        events.emit(
-            body.session_id,
-            "needs_confirmation",
-            {"proposal_id": proposal_id, "revision": proposal.revision},
-        )
-    if proposal.target != target or proposal.preconditions != preconditions:
-        raise WorkbenchAPIError(
-            status_code=409,
-            code="DATA_OPERATION_CONFLICT",
-            message="A different typed proposal already owns this preview fingerprint.",
-            details={"proposal_id": proposal_id},
-        )
-
-    orchestrator = WorkbenchOrchestrator(
-        repository,
-        events,
-        main_session_id=main_session_id,
-        proposal_store=proposal_store,
-        operation_store=OperationRecordStore(workbench_root),
-        operation_registry=registry,
-    )
+    _require_ready_code_preview(body, preview)
+    context = _code_operation_context(root, body, spec, preview)
+    proposal_store = context["proposal_store"]
+    proposal = context["proposal"]
+    orchestrator = context["orchestrator"]
     try:
         confirmation = proposal_store.confirm(
-            proposal_id,
+            proposal.proposal_id,
             revision=proposal.revision,
             fingerprint=proposal.fingerprint,
             actor_type="human_ui",
@@ -681,12 +786,50 @@ async def confirm_code_execute(
             confirmation,
             command_id=confirmation.command_id,
         )
+        if not body.risk_authorization_id or not body.risk_authorization_token:
+            raise RiskAuthorizationRequired(
+                "code.execute requires explicit risk authorization before apply"
+            )
         record = await orchestrator.execute_confirmed_operation(
             record.record_id,
             project_root=root,
             current_context_fingerprint=preview.fingerprint,
             current_active_head_run_id=spec.source_run_id,
+            risk_authorization_id=body.risk_authorization_id,
+            risk_authorization_token=body.risk_authorization_token,
         )
+    except RiskAuthorizationExpired as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_EXPIRED",
+            message="The high-risk authorization expired; review the preview again.",
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except RiskAuthorizationReplay as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_REPLAY",
+            message="The high-risk authorization has already been consumed.",
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except RiskAuthorizationStale as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_STALE",
+            message="The high-risk authorization no longer matches this preview or active head.",
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except RiskAuthorizationRequired as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_REQUIRED",
+            message="A high-risk operation needs explicit risk authorization before it can run.",
+            details={
+                "proposal_id": proposal.proposal_id,
+                "operation_id": "code.execute",
+                "risk_authorization_endpoint": "/data-operations/code-execute/risk-authorize",
+            },
+        ) from exc
     except NondeterministicCodeError as exc:
         raise WorkbenchAPIError(
             status_code=409,
@@ -695,24 +838,41 @@ async def confirm_code_execute(
                 "The code produced a different result when it was run again, so it is "
                 "not a deterministic transform. Nothing was written."
             ),
-            details={"proposal_id": proposal_id, "reason": str(exc)},
+            details={"proposal_id": proposal.proposal_id, "reason": str(exc)},
         ) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,
             code="DATA_OPERATION_STALE",
             message="The typed data operation became stale before execution.",
-            details={"proposal_id": proposal_id},
+            details={"proposal_id": proposal.proposal_id},
         ) from exc
     except ProposalConfirmationError as exc:
         raise WorkbenchAPIError(
             status_code=409,
             code="DATA_OPERATION_CONFLICT",
             message="The typed data proposal is no longer confirmable.",
-            details={"proposal_id": proposal_id},
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except OperationRecordTransitionError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_REPLAY",
+            message=(
+                "This operation already has an execution claim with another "
+                "risk authorization."
+            ),
+            details={"proposal_id": proposal.proposal_id},
+        ) from exc
+    except RiskAuthorizationError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RISK_AUTHORIZATION_INVALID",
+            message="The high-risk authorization could not be validated.",
+            details={"proposal_id": proposal.proposal_id, "reason": str(exc)},
         ) from exc
     return {
-        "proposal": proposal_store.latest_revision(proposal_id).to_dict(),
+        "proposal": proposal_store.latest_revision(proposal.proposal_id).to_dict(),
         "operation": record.to_dict(),
         "status": record.status,
     }

@@ -22,6 +22,7 @@ from workbench.agent.model import (
 )
 from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import EntryRef, JsonlSessionRepository
+from workbench.agent.tools import ToolDefinition, ToolRegistry
 from workbench.llm.config import LLMConfig
 
 
@@ -120,6 +121,42 @@ class MissingRuntimeToolAdapter:
                 "tool_call_id": "call-without-runtime",
                 "tool_id": "inspect_node_context",
                 "arguments": {},
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+
+class RepeatingToolCallAdapter:
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": f"repeat-{len(self.requests)}",
+                "tool_id": "inspect_node_context",
+                "arguments": {"node_ref": "model:ols_1"},
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+
+class SequencedToolCallAdapter:
+    def __init__(self, node_refs: list[str]) -> None:
+        self.node_refs = node_refs
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        node_ref = self.node_refs[len(self.requests) - 1]
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": f"sequence-{len(self.requests)}",
+                "tool_id": "inspect_node_context",
+                "arguments": {"node_ref": node_ref},
             },
         )
         yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
@@ -500,6 +537,120 @@ def test_agent_core_enforces_max_steps_before_a_queued_follow_up_call(
             "save_point",
             "agent_end",
         ]
+
+    asyncio.run(scenario())
+
+
+def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+
+        async def handler(arguments, context):
+            del context
+            return {"node_ref": arguments["node_ref"], "status": "ready"}
+
+        tools.register(
+            ToolDefinition(
+                tool_id="inspect_node_context",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["node_ref"],
+                    "properties": {"node_ref": {"type": "string"}},
+                },
+                side_effect="none",
+                handler=handler,
+            )
+        )
+        adapter = RepeatingToolCallAdapter()
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt("inspect the same node", budget={"max_steps": 6}) == ""
+
+        assert len(adapter.requests) == 2
+        assert repository.get_metadata("session-a")["status"] == "blocked"
+        branch = repository.get_branch("session-a")
+        assert branch[-1].payload == {
+            "role": "assistant",
+            "content": "",
+            "stop_reason": "error",
+            "error": "repeated_tool_call_limit",
+        }
+        guard_events = [
+            event
+            for event in events.replay("session-a")
+            if event.event_type == "loop_guard"
+        ]
+        assert len(guard_events) == 1
+        assert guard_events[0].payload == {
+            "tool_id": "inspect_node_context",
+            "repetition_count": 2,
+            "reason": "identical_tool_call",
+        }
+
+    asyncio.run(scenario())
+
+
+def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+
+        async def handler(arguments, context):
+            del context
+            return {"node_ref": arguments["node_ref"], "status": "ready"}
+
+        tools.register(
+            ToolDefinition(
+                tool_id="inspect_node_context",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["node_ref"],
+                    "properties": {"node_ref": {"type": "string"}},
+                },
+                side_effect="none",
+                handler=handler,
+            )
+        )
+        adapter = SequencedToolCallAdapter(
+            ["model:ols_1", "model:ols_2", "model:ols_2"]
+        )
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt("inspect the requested nodes", budget={"max_steps": 6}) == ""
+
+        assert len(adapter.requests) == 3
+        guard_events = [
+            event
+            for event in events.replay("session-a")
+            if event.event_type == "loop_guard"
+        ]
+        assert guard_events[0].payload["repetition_count"] == 2
+        assert guard_events[0].payload["tool_id"] == "inspect_node_context"
 
     asyncio.run(scenario())
 
