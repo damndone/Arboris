@@ -7,20 +7,23 @@ from typing import Any
 from .canonical import canonical_json_v1, sha256_canonical
 
 
+_OMITTED = object()
+
+
 def _fingerprint(kind: str, value: Any) -> str:
     return sha256_canonical({"fingerprint_type": kind, "value": value})
 
 
 def dataset_snapshot_fingerprint(
-    snapshot: Any = None,
+    snapshot: Any = _OMITTED,
     *,
-    dataset: Any = None,
+    dataset: Any = _OMITTED,
 ) -> str:
-    if snapshot is not None and dataset is not None:
+    if snapshot is not _OMITTED and dataset is not _OMITTED:
         raise TypeError("provide snapshot or dataset, not both")
-    if snapshot is None:
-        snapshot = dataset
-    return _fingerprint("dataset_snapshot_v1", snapshot)
+    source = snapshot if snapshot is not _OMITTED else dataset
+    value = {} if source is _OMITTED else {"source": source}
+    return _fingerprint("dataset_snapshot_v1", value)
 
 
 def analysis_sample_fingerprint(
@@ -68,51 +71,60 @@ def point_estimation_fingerprint(
 
 
 def coefficient_schema_fingerprint(
-    schema: Any = None,
+    schema: Any = _OMITTED,
     *,
-    coefficients: Any = None,
+    coefficients: Any = _OMITTED,
 ) -> str:
-    if schema is not None and coefficients is not None:
+    if schema is not _OMITTED and coefficients is not _OMITTED:
         raise TypeError("provide schema or coefficients, not both")
-    if schema is None:
-        schema = coefficients
-    return _fingerprint("coefficient_schema_v1", schema)
+    source = schema if schema is not _OMITTED else coefficients
+    value = {} if source is _OMITTED else {"source": source}
+    return _fingerprint("coefficient_schema_v1", value)
 
 
 def inference_config_fingerprint(
     *,
     covariance: Any,
     cluster_var: Any,
-    cluster_group_vector: Any = None,
-    cluster_group_vector_fingerprint: str | None = None,
+    cluster_group_vector: Any = _OMITTED,
+    cluster_group_vector_fingerprint: Any = _OMITTED,
     cluster_count: Any,
     corrections: Any,
     df: Any,
     use_t: Any,
     confidence_level: Any,
     engine: Any,
-    version: Any = None,
-    engine_version: Any = None,
+    version: Any = _OMITTED,
+    engine_version: Any = _OMITTED,
 ) -> str:
-    if version is not None and engine_version is not None:
+    if version is not _OMITTED and engine_version is not _OMITTED:
         raise TypeError("provide version or engine_version, not both")
+    if (
+        cluster_group_vector is not _OMITTED
+        and cluster_group_vector_fingerprint is not _OMITTED
+    ):
+        raise TypeError("provide cluster_group_vector or its fingerprint, not both")
     vector_value = (
-        cluster_group_vector_fingerprint
-        if cluster_group_vector_fingerprint is not None
-        else cluster_group_vector
+        cluster_group_vector
+        if cluster_group_vector is not _OMITTED
+        else cluster_group_vector_fingerprint
     )
+    version_value = version if version is not _OMITTED else engine_version
+    value = {
+        "covariance": covariance,
+        "cluster_var": cluster_var,
+        "cluster_count": cluster_count,
+        "corrections": corrections,
+        "df": df,
+        "use_t": use_t,
+        "confidence_level": confidence_level,
+        "engine": engine,
+    }
+    if vector_value is not _OMITTED:
+        value["cluster_group_vector"] = vector_value
+    if version_value is not _OMITTED:
+        value["version"] = version_value
     return _fingerprint(
         "inference_config_v1",
-        {
-            "covariance": covariance,
-            "cluster_var": cluster_var,
-            "cluster_group_vector": vector_value,
-            "cluster_count": cluster_count,
-            "corrections": corrections,
-            "df": df,
-            "use_t": use_t,
-            "confidence_level": confidence_level,
-            "engine": engine,
-            "version": version if version is not None else engine_version,
-        },
+        value,
     )

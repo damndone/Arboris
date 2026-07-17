@@ -37,31 +37,81 @@ class OLSClusterPolicyV1:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "OLSClusterPolicyV1":
-        return cls(
-            allowed_model=str(value["allowed_model"]),
-            allowed_covariance=str(value["allowed_covariance"]),
+        if not isinstance(value, Mapping):
+            raise TypeError("policy must be a mapping")
+        fields = set(cls.__dataclass_fields__)
+        if set(value) != fields:
+            raise ValueError("policy fields do not match exact v1 contract")
+
+        string_fields = {
+            "allowed_model",
+            "allowed_covariance",
+            "all_singleton_clusters",
+            "inference_distribution",
+            "p_value_method",
+            "confidence_interval_method",
+            "effective_degrees_of_freedom",
+            "engine",
+        }
+        bool_fields = {
+            "reject_boolean",
+            "reject_float",
+            "reject_mixed_object",
+            "reject_null_or_nan",
+            "one_way_only",
+            "allow_singleton_clusters",
+            "small_sample_correction",
+            "degrees_of_freedom_correction",
+            "use_t",
+        }
+        int_fields = {"hard_min_cluster_count", "warning_cluster_count_below"}
+        float_fields = {"confidence_level", "alpha", "minimum_engine_version"}
+        for field in string_fields:
+            if type(value[field]) is not str:
+                raise TypeError(f"{field} must be a string")
+        for field in bool_fields:
+            if type(value[field]) is not bool:
+                raise TypeError(f"{field} must be a boolean")
+        for field in int_fields:
+            if type(value[field]) is not int:
+                raise TypeError(f"{field} must be an integer")
+        for field in float_fields:
+            if type(value[field]) is not float:
+                raise TypeError(f"{field} must be a float")
+        if not isinstance(value["allowed_cluster_types"], (list, tuple)):
+            raise TypeError("allowed_cluster_types must be a list or tuple")
+        if any(type(item) is not str for item in value["allowed_cluster_types"]):
+            raise TypeError("allowed_cluster_types items must be strings")
+
+        candidate = cls(
+            allowed_model=value["allowed_model"],
+            allowed_covariance=value["allowed_covariance"],
             allowed_cluster_types=tuple(value["allowed_cluster_types"]),
-            reject_boolean=bool(value["reject_boolean"]),
-            reject_float=bool(value["reject_float"]),
-            reject_mixed_object=bool(value["reject_mixed_object"]),
-            reject_null_or_nan=bool(value["reject_null_or_nan"]),
-            hard_min_cluster_count=int(value["hard_min_cluster_count"]),
-            warning_cluster_count_below=int(value["warning_cluster_count_below"]),
-            one_way_only=bool(value["one_way_only"]),
-            allow_singleton_clusters=bool(value["allow_singleton_clusters"]),
-            all_singleton_clusters=str(value["all_singleton_clusters"]),
-            small_sample_correction=bool(value["small_sample_correction"]),
-            degrees_of_freedom_correction=bool(value["degrees_of_freedom_correction"]),
-            use_t=bool(value["use_t"]),
-            confidence_level=float(value["confidence_level"]),
-            alpha=float(value["alpha"]),
-            inference_distribution=str(value["inference_distribution"]),
-            p_value_method=str(value["p_value_method"]),
-            confidence_interval_method=str(value["confidence_interval_method"]),
-            effective_degrees_of_freedom=str(value["effective_degrees_of_freedom"]),
-            engine=str(value["engine"]),
-            minimum_engine_version=float(value["minimum_engine_version"]),
+            reject_boolean=value["reject_boolean"],
+            reject_float=value["reject_float"],
+            reject_mixed_object=value["reject_mixed_object"],
+            reject_null_or_nan=value["reject_null_or_nan"],
+            hard_min_cluster_count=value["hard_min_cluster_count"],
+            warning_cluster_count_below=value["warning_cluster_count_below"],
+            one_way_only=value["one_way_only"],
+            allow_singleton_clusters=value["allow_singleton_clusters"],
+            all_singleton_clusters=value["all_singleton_clusters"],
+            small_sample_correction=value["small_sample_correction"],
+            degrees_of_freedom_correction=value["degrees_of_freedom_correction"],
+            use_t=value["use_t"],
+            confidence_level=value["confidence_level"],
+            alpha=value["alpha"],
+            inference_distribution=value["inference_distribution"],
+            p_value_method=value["p_value_method"],
+            confidence_interval_method=value["confidence_interval_method"],
+            effective_degrees_of_freedom=value["effective_degrees_of_freedom"],
+            engine=value["engine"],
+            minimum_engine_version=value["minimum_engine_version"],
         )
+        for field in fields:
+            if getattr(candidate, field) != getattr(ols_cluster_policy_v1, field):
+                raise ValueError(f"{field} does not match exact v1 contract")
+        return candidate
 
 
 ols_cluster_policy_v1 = OLSClusterPolicyV1(

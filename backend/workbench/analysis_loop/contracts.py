@@ -52,20 +52,67 @@ class PacketEnvelope:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "PacketEnvelope":
+        if not isinstance(value, Mapping):
+            raise TypeError("envelope must be a mapping")
+        required = (
+            "packet_type",
+            "schema_version",
+            "status",
+            "source",
+            "child",
+            "operation",
+            "execution",
+            "logical_key",
+            "input_fingerprints",
+            "policy_versions",
+            "timestamps",
+            "reasons",
+            "payload",
+        )
+        missing = [field for field in required if field not in value]
+        if missing:
+            raise KeyError(f"missing envelope field(s): {', '.join(missing)}")
+
+        for field in ("packet_type", "schema_version", "status", "logical_key"):
+            if type(value[field]) is not str:
+                raise TypeError(f"{field} must be a string")
+
+        for field in (
+            "source",
+            "child",
+            "operation",
+            "execution",
+            "input_fingerprints",
+            "policy_versions",
+            "timestamps",
+            "payload",
+        ):
+            if not isinstance(value[field], Mapping):
+                raise TypeError(f"{field} must be a mapping")
+
+        for field in ("input_fingerprints", "policy_versions", "timestamps"):
+            if any(type(item) is not str for item in value[field].values()):
+                raise TypeError(f"{field} values must be strings")
+
+        if not isinstance(value["reasons"], (list, tuple)):
+            raise TypeError("reasons must be a list")
+        if any(type(item) is not str for item in value["reasons"]):
+            raise TypeError("reasons items must be strings")
+
         return cls(
-            packet_type=str(value["packet_type"]),
-            schema_version=str(value["schema_version"]),
-            status=str(value["status"]),
-            source=dict(value.get("source") or {}),
-            child=dict(value.get("child") or {}),
-            operation=dict(value.get("operation") or {}),
-            execution=dict(value.get("execution") or {}),
-            logical_key=str(value["logical_key"]),
-            input_fingerprints=dict(value.get("input_fingerprints") or {}),
-            policy_versions=dict(value.get("policy_versions") or {}),
-            timestamps=dict(value.get("timestamps") or {}),
-            reasons=tuple(str(item) for item in (value.get("reasons") or ())),
-            payload=dict(value.get("payload") or {}),
+            packet_type=value["packet_type"],
+            schema_version=value["schema_version"],
+            status=value["status"],
+            source=dict(value["source"]),
+            child=dict(value["child"]),
+            operation=dict(value["operation"]),
+            execution=dict(value["execution"]),
+            logical_key=value["logical_key"],
+            input_fingerprints=dict(value["input_fingerprints"]),
+            policy_versions=dict(value["policy_versions"]),
+            timestamps=dict(value["timestamps"]),
+            reasons=tuple(value["reasons"]),
+            payload=dict(value["payload"]),
         )
 
 
@@ -75,6 +122,8 @@ class ComparePayload:
     payload: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.payload, Mapping):
+            raise TypeError("payload must be a mapping")
         if self.compare_status not in {
             "complete",
             "partial",
@@ -82,6 +131,8 @@ class ComparePayload:
             "blocked_by_integrity",
         }:
             raise ValueError(f"invalid compare_status: {self.compare_status}")
+        if "compare_status" in self.payload:
+            raise ValueError("payload reserves compare_status")
 
     def to_dict(self) -> dict[str, Any]:
         return {"compare_status": self.compare_status, **dict(self.payload)}
@@ -115,6 +166,16 @@ def ensure_packet_idempotent(
 
     if existing is None:
         return incoming
+    if (
+        existing.packet_type,
+        existing.schema_version,
+        existing.logical_key,
+    ) != (
+        incoming.packet_type,
+        incoming.schema_version,
+        incoming.logical_key,
+    ):
+        raise PacketConflictError("packet identity does not match")
     if existing.to_dict() == incoming.to_dict():
         return existing
     if existing.status in TERMINAL_PACKET_STATUSES:

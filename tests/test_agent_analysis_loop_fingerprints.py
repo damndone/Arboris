@@ -21,6 +21,14 @@ def test_dataset_snapshot_fingerprint_is_stable_under_object_key_order():
     )
 
 
+def test_dataset_snapshot_fingerprint_distinguishes_omitted_and_explicit_null_sources():
+    assert dataset_snapshot_fingerprint() != dataset_snapshot_fingerprint(snapshot=None)
+    assert dataset_snapshot_fingerprint() != dataset_snapshot_fingerprint(dataset=None)
+    assert dataset_snapshot_fingerprint(snapshot={"rows": []}) == dataset_snapshot_fingerprint(
+        dataset={"rows": []}
+    )
+
+
 def test_analysis_sample_fingerprint_binds_row_set_and_row_order():
     base = analysis_sample_fingerprint(row_set=["r1", "r2"], row_order=["r1", "r2"])
     assert base == analysis_sample_fingerprint(row_set=["r1", "r2"], row_order=["r1", "r2"])
@@ -140,3 +148,28 @@ def test_coefficient_schema_and_inference_fingerprints_bind_each_domain_input():
         engine="statsmodels",
         version="0.14",
     )
+
+
+def test_coefficient_schema_fingerprint_distinguishes_omitted_and_explicit_null_sources():
+    assert coefficient_schema_fingerprint() != coefficient_schema_fingerprint(schema=None)
+    assert coefficient_schema_fingerprint() != coefficient_schema_fingerprint(coefficients=None)
+    assert coefficient_schema_fingerprint(schema=["x"]) == coefficient_schema_fingerprint(
+        coefficients=["x"]
+    )
+
+
+def test_inference_config_fingerprint_distinguishes_omitted_and_explicit_null_aliases():
+    kwargs = {
+        "covariance": "clustered",
+        "cluster_var": "firm_id",
+        "cluster_count": 2,
+        "corrections": {"small_sample": True},
+        "df": "record_per_target",
+        "use_t": False,
+        "confidence_level": 0.95,
+        "engine": "statsmodels",
+    }
+    omitted = inference_config_fingerprint(**kwargs)
+    assert omitted != inference_config_fingerprint(**kwargs, cluster_group_vector=None)
+    assert omitted != inference_config_fingerprint(**kwargs, version=None)
+    assert omitted != inference_config_fingerprint(**kwargs, engine_version=None)

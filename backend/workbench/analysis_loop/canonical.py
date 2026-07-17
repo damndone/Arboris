@@ -7,6 +7,7 @@ import json
 import math
 import unicodedata
 from collections.abc import Mapping
+from decimal import Decimal
 from typing import Any
 
 
@@ -51,16 +52,66 @@ def canonical_json_v1(value: Any) -> str:
     """
 
     normalized = _normalize(value)
-    try:
-        return json.dumps(
-            normalized,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
+    return _encode_json(normalized)
+
+
+def _encode_json(value: Any) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, int):
+        return _canonical_int(value)
+    if isinstance(value, float):
+        return _canonical_float(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    if isinstance(value, list):
+        return "[" + ",".join(_encode_json(item) for item in value) + "]"
+    if isinstance(value, dict):
+        items = (
+            json.dumps(key, ensure_ascii=False, separators=(",", ":"))
+            + ":"
+            + _encode_json(item)
+            for key, item in sorted(value.items())
         )
-    except (TypeError, ValueError) as exc:
-        raise CanonicalJSONError(str(exc)) from exc
+        return "{" + ",".join(items) + "}"
+    raise CanonicalJSONError(
+        f"unsupported canonical JSON value: {type(value).__name__}"
+    )
+
+
+def _canonical_float(value: float) -> str:
+    if not math.isfinite(value):
+        raise CanonicalJSONError("canonical JSON does not allow NaN or Infinity")
+    if value == 0.0:
+        return "0"
+
+    magnitude = abs(value)
+    decimal_value = Decimal(repr(value))
+    if 1e-6 <= magnitude < 1e21:
+        rendered = format(decimal_value, "f")
+        if "." in rendered:
+            rendered = rendered.rstrip("0").rstrip(".")
+        return "0" if rendered in {"", "-0"} else rendered
+
+    return _canonical_scientific(decimal_value)
+
+
+def _canonical_int(value: int) -> str:
+    if abs(value) < 10**21:
+        return str(value)
+    return _canonical_scientific(Decimal(value))
+
+
+def _canonical_scientific(value: Decimal) -> str:
+    rendered = format(value.normalize(), "e")
+    mantissa, exponent = rendered.split("e")
+    if "." in mantissa:
+        mantissa = mantissa.rstrip("0").rstrip(".")
+    return f"{mantissa}e{int(exponent):+d}"
 
 
 def sha256_canonical(value: Any) -> str:

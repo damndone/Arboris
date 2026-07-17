@@ -18,6 +18,7 @@ from workbench.analysis_loop.contracts import (
     compare_packet_logical_key,
 )
 from workbench.analysis_loop.policy import ols_cluster_policy_v1
+from workbench.analysis_loop.policy import OLSClusterPolicyV1
 
 
 def test_canonical_json_v1_normalizes_keys_unicode_and_negative_zero():
@@ -30,6 +31,18 @@ def test_canonical_json_v1_normalizes_keys_unicode_and_negative_zero():
     assert canonical_json_v1(first) == '{"z":0,"é":"café"}'
     assert sha256_canonical(first) == sha256_canonical(second)
     assert sha256_canonical({"field": None}) != sha256_canonical({})
+
+
+def test_canonical_json_v1_uses_one_number_text_for_equal_int_and_float_values():
+    assert canonical_json_v1(1) == canonical_json_v1(1.0) == "1"
+    assert canonical_json_v1(1e-6) == "0.000001"
+    assert canonical_json_v1(1e-7) == "1e-7"
+    assert canonical_json_v1(1e20) == "100000000000000000000"
+    assert canonical_json_v1(1e21) == "1e+21"
+    assert canonical_json_v1(10**21) == canonical_json_v1(1e21)
+    assert canonical_json_v1(9007199254740993) == "9007199254740993"
+    assert canonical_json_v1(9007199254740992.0) == "9007199254740992"
+    assert canonical_json_v1(9007199254740993) != canonical_json_v1(9007199254740992.0)
 
 
 def test_canonical_json_v1_rejects_non_finite_numbers_and_hash_is_sha256_hex():
@@ -93,6 +106,14 @@ def test_compare_payload_rejects_pending_but_accepts_terminal_compare_statuses()
         ComparePayload(compare_status="pending")
 
 
+def test_compare_payload_rejects_reserved_compare_status_in_nested_payload():
+    with pytest.raises(ValueError, match="compare_status"):
+        ComparePayload(compare_status="complete", payload={"compare_status": "partial"})
+
+    with pytest.raises(ValueError, match="compare_status"):
+        ComparePayload(compare_status="complete", payload={"compare_status": "complete"})
+
+
 def test_logical_keys_bind_exact_declared_inputs():
     plan_key = plan_diff_logical_key(
         source_run_id="run-1",
@@ -150,6 +171,45 @@ def test_logical_keys_bind_exact_declared_inputs():
     )
 
 
+def test_every_logical_key_component_changes_its_key():
+    plan = {
+        "source_run_id": "run-1",
+        "source_context_fingerprint": "ctx-1",
+        "action_id": "patch",
+        "canonical_patch_hash": "patch-1",
+        "comparison_target_hash": "target-1",
+        "schema_version": "v1",
+    }
+    baseline = plan_diff_logical_key(**plan)
+    for field in plan:
+        changed = plan | {field: f"changed-{field}"}
+        assert plan_diff_logical_key(**changed) != baseline
+
+    validation = {
+        "child_run_id": "child-1",
+        "executed_payload_hash": "payload-1",
+        "artifact_manifest_hash": "manifest-1",
+        "validation_policy_version": "policy-1",
+        "schema_version": "v1",
+    }
+    baseline = validation_packet_logical_key(**validation)
+    for field in validation:
+        changed = validation | {field: f"changed-{field}"}
+        assert validation_packet_logical_key(**changed) != baseline
+
+    compare = {
+        "source_run_id": "source-1",
+        "child_run_id": "child-1",
+        "comparison_target_set_hash": "targets-1",
+        "strategy_version": "strategy-1",
+        "schema_version": "v1",
+    }
+    baseline = compare_packet_logical_key(**compare)
+    for field in compare:
+        changed = compare | {field: f"changed-{field}"}
+        assert compare_packet_logical_key(**changed) != baseline
+
+
 def test_packet_idempotence_does_not_overwrite_terminal_packet():
     existing = _envelope("complete")
     same = PacketEnvelope.from_dict(existing.to_dict())
@@ -158,6 +218,83 @@ def test_packet_idempotence_does_not_overwrite_terminal_packet():
     assert ensure_packet_idempotent(existing, same) is existing
     with pytest.raises(PacketConflictError):
         ensure_packet_idempotent(existing, changed)
+
+
+def test_pending_packet_can_advance_only_with_same_packet_identity():
+    existing = _envelope("pending")
+    incoming = PacketEnvelope.from_dict(existing.to_dict() | {"payload": {"value": 2}})
+    assert ensure_packet_idempotent(existing, incoming) is incoming
+
+    for field in ("packet_type", "schema_version", "logical_key"):
+        changed = PacketEnvelope.from_dict(
+            existing.to_dict() | {field: f"different-{field}"}
+        )
+        with pytest.raises(PacketConflictError, match="identity"):
+            ensure_packet_idempotent(existing, changed)
+
+
+def test_packet_envelope_requires_every_field_and_preserves_empty_values():
+    value = _envelope("pending").to_dict()
+    value.update(
+        {
+            "source": {},
+            "child": {},
+            "operation": {},
+            "execution": {},
+            "input_fingerprints": {},
+            "policy_versions": {},
+            "timestamps": {},
+            "reasons": [],
+            "payload": {},
+        }
+    )
+    restored = PacketEnvelope.from_dict(value)
+    assert restored.source == {}
+    assert restored.reasons == ()
+    assert restored.payload == {}
+
+    fields = (
+        "packet_type",
+        "schema_version",
+        "status",
+        "source",
+        "child",
+        "operation",
+        "execution",
+        "logical_key",
+        "input_fingerprints",
+        "policy_versions",
+        "timestamps",
+        "reasons",
+        "payload",
+    )
+    for field in fields:
+        with pytest.raises((KeyError, TypeError, ValueError), match=field):
+            PacketEnvelope.from_dict({key: item for key, item in value.items() if key != field})
+        with pytest.raises((TypeError, ValueError), match=field):
+            PacketEnvelope.from_dict(value | {field: None})
+
+
+def test_packet_envelope_from_dict_rejects_wrong_contract_types():
+    value = _envelope().to_dict()
+    invalid = {
+        "packet_type": 1,
+        "schema_version": 1,
+        "status": 1,
+        "source": [],
+        "child": [],
+        "operation": [],
+        "execution": [],
+        "logical_key": 1,
+        "input_fingerprints": [],
+        "policy_versions": [],
+        "timestamps": [],
+        "reasons": {},
+        "payload": [],
+    }
+    for field, wrong_value in invalid.items():
+        with pytest.raises((TypeError, ValueError), match=field):
+            PacketEnvelope.from_dict(value | {field: wrong_value})
 
 
 def test_ols_cluster_policy_is_immutable_and_has_exact_values():
@@ -188,3 +325,39 @@ def test_ols_cluster_policy_is_immutable_and_has_exact_values():
 
     with pytest.raises((AttributeError, TypeError)):
         policy.use_t = True
+
+
+def test_ols_cluster_policy_round_trips_and_rejects_non_exact_contract_values():
+    assert OLSClusterPolicyV1.from_dict(ols_cluster_policy_v1.to_dict()) == ols_cluster_policy_v1
+
+    invalid_values = {
+        "allowed_model": "logit",
+        "allowed_covariance": "HC1",
+        "allowed_cluster_types": ["integer", "float"],
+        "reject_boolean": "false",
+        "reject_float": 1,
+        "reject_mixed_object": None,
+        "reject_null_or_nan": "true",
+        "hard_min_cluster_count": "2",
+        "warning_cluster_count_below": True,
+        "one_way_only": 1,
+        "allow_singleton_clusters": "true",
+        "all_singleton_clusters": "warn",
+        "small_sample_correction": "true",
+        "degrees_of_freedom_correction": 1,
+        "use_t": "false",
+        "confidence_level": "0.95",
+        "alpha": True,
+        "inference_distribution": "t",
+        "p_value_method": "t",
+        "confidence_interval_method": "t",
+        "effective_degrees_of_freedom": "residual",
+        "engine": "numpy",
+        "minimum_engine_version": "0.14",
+    }
+    for field, invalid in invalid_values.items():
+        with pytest.raises((TypeError, ValueError), match=field):
+            OLSClusterPolicyV1.from_dict(ols_cluster_policy_v1.to_dict() | {field: invalid})
+
+    with pytest.raises(ValueError, match="exact"):
+        OLSClusterPolicyV1.from_dict(ols_cluster_policy_v1.to_dict() | {"extra": True})
