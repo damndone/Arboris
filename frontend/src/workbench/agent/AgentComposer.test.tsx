@@ -62,7 +62,7 @@ describe("AgentComposer", () => {
     );
     expect(screen.getByRole("textbox", { name: "Ask Agent" })).toHaveAttribute(
       "placeholder",
-      "询问当前分析，或请求修改当前模型参数并重新运行",
+      "Ask about the current analysis or request a typed change and rerun",
     );
   });
 
@@ -71,14 +71,44 @@ describe("AgentComposer", () => {
       capabilityCatalog: {
         capabilities: [],
         boundary: {
-          advisory: [{ id: "a", label: "比较结果", description: "只读" }],
-          unsupported: [{ id: "u", label: "任意文件操作", description: "不支持" }],
+          advisory: [{ id: "a", label: "Compare results", description: "Read-only explanation" }],
+          unsupported: [{ id: "u", label: "Arbitrary file operations", description: "Not supported" }],
         },
       },
     }));
     fireEvent.click(screen.getByTestId("agent-capability-trigger"));
-    expect(screen.getByTestId("agent-capability-advisory")).toHaveTextContent("比较结果");
-    expect(screen.getByTestId("agent-capability-unsupported")).toHaveTextContent("任意文件操作");
+    expect(screen.getByTestId("agent-capability-advisory")).toHaveTextContent("Compare results");
+    expect(screen.getByTestId("agent-capability-unsupported")).toHaveTextContent("Arbitrary file operations");
+  });
+
+  it("turns an executable capability example into an editable prompt", () => {
+    const context = value({
+      capabilityCatalog: {
+        capabilities: [{
+          operation_id: "graph.fork",
+          operation_version: "v1",
+          effect_level: "mutation",
+          scope: "current chain/node",
+          scope_requirements: ["chain", "active_head"],
+          risk_level: "mutating",
+          confirmation_policy: "required",
+          ui_description: "Create a new Chain branch from the current verified node.",
+          example_prompts: ["Create a new branch from the current node."],
+          natural_language_enabled: true,
+        }],
+        boundary: { advisory: [], unsupported: [] },
+      },
+    });
+    mount(context);
+
+    fireEvent.click(screen.getByTestId("agent-capability-trigger"));
+    fireEvent.click(screen.getByTestId("agent-capability-use-graph.fork"));
+
+    expect(context.setPrompt).toHaveBeenCalledWith(
+      "Create a new branch from the current node.",
+    );
+    expect(context.sendPrompt).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("agent-capability-popover")).not.toBeInTheDocument();
   });
 
   it("styles the bar with theme-token classes instead of hardcoded dark surfaces", () => {

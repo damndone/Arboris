@@ -136,6 +136,7 @@ export function WorkbenchRouteContainer({
 
 function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
@@ -371,7 +372,13 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   });
 
   if (error !== null && forest === null) {
-    return <ErrorBanner error={error} onRetry={refetch} />;
+    return (
+      <ErrorBanner
+        error={error}
+        onRetry={refetch}
+        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+      />
+    );
   }
   if (loading || forest === null || model === null) return <Loading />;
   // Legacy target (no node identity) → fall back to the legacy per-run
@@ -742,6 +749,7 @@ function LegacyGraphWorkbench({
   projectRoot,
   runId,
 }: WorkbenchRouteContainerProps) {
+  const navigate = useNavigate();
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
 
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(() => {
@@ -750,7 +758,15 @@ function LegacyGraphWorkbench({
   }, [model]);
 
   if (loading) return <Loading />;
-  if (error !== null) return <ErrorBanner error={error} onRetry={refetch} />;
+  if (error !== null) {
+    return (
+      <ErrorBanner
+        error={error}
+        onRetry={refetch}
+        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+      />
+    );
+  }
   if (model === null) return <Loading />;
 
   return (

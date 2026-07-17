@@ -48,6 +48,19 @@ def test_code_execute_preview_confirm_and_provenance_readback(tmp_path: Path) ->
         assert preview["columns_added"] == ["doubled"]
         assert preview["row_count_after"] == 2
 
+        authorize_response = client.post(
+            "/data-operations/code-execute/risk-authorize",
+            params={"project_root": str(project)},
+            json={
+                **_request(run_id, artifact_id, code),
+                "preview_fingerprint": preview["fingerprint"],
+                "session_id": "agent_data_ui",
+                "acknowledge_risk": True,
+            },
+        )
+        assert authorize_response.status_code == 200, authorize_response.text
+        authorization = authorize_response.json()["risk_authorization"]
+
         confirm_response = client.post(
             "/data-operations/code-execute/confirm",
             params={"project_root": str(project)},
@@ -55,6 +68,8 @@ def test_code_execute_preview_confirm_and_provenance_readback(tmp_path: Path) ->
                 **_request(run_id, artifact_id, code),
                 "preview_fingerprint": preview["fingerprint"],
                 "session_id": "agent_data_ui",
+                "risk_authorization_id": authorization["authorization_id"],
+                "risk_authorization_token": authorization["token"],
             },
         )
         assert confirm_response.status_code == 200, confirm_response.text

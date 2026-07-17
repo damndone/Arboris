@@ -6,7 +6,7 @@ import {
   AgentSurfaceContext,
   type AgentSurfaceContextValue,
 } from "./AgentSurfaceContext";
-import type { AgentNavigationRef } from "./agentTypes";
+import type { AgentHierarchyNode, AgentNavigationRef } from "./agentTypes";
 
 function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceContextValue {
   return {
@@ -113,6 +113,35 @@ describe("AgentPanel", () => {
     expect(userLine).toHaveTextContent("❯");
     expect(userLine.className).toContain("wb-agent-terminal-line");
     expect(agentLine.className).toContain("wb-agent-terminal-line");
+  });
+
+  it("keeps navigation context collapsed so the terminal owns the panel space", () => {
+    const rootRef: AgentNavigationRef = {
+      kind: "agent_session",
+      id: "agent-main",
+      label: "Agent agent_main",
+      relation: "context",
+      available: true,
+      href: { view: "agent", session_id: "agent-main" },
+    };
+    const hierarchy: AgentHierarchyNode = {
+      ref: rootRef,
+      status: "idle",
+      children: [],
+    };
+
+    render(
+      <AgentSurfaceContext.Provider
+        value={value({ hierarchy, navigationLinks: [rootRef] })}
+      >
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const context = screen.getByTestId("agent-context-details");
+    expect(context).not.toHaveAttribute("open");
+    expect(screen.getByRole("log", { name: /Agent transcript/ })).toBeInTheDocument();
+    expect(screen.getByText("Agent context")).toBeInTheDocument();
   });
 
   it("offers a typed fork action on a message with a verified source node", () => {
@@ -511,7 +540,7 @@ describe("AgentPanel", () => {
     );
   });
 
-  it("is a read-only transcript surface with no redundant input row (G3 dedup)", () => {
+  it("provides the single terminal composer inside the Agent panel", () => {
     const withPrompt = value({ prompt: "inspect the active head" });
     render(
       <AgentSurfaceContext.Provider value={withPrompt}>
@@ -519,16 +548,15 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    // The Agent has a single input (the composer under the graph); the bottom
-    // panel no longer carries its own in-sync input row.
+    // The Agent panel owns the single terminal-like input. There must not be
+    // be a second graph composer for the same prompt state.
+    expect(screen.getByRole("textbox", { name: "Ask Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Agent model" })).toBeInTheDocument();
+    expect(screen.getByTestId("agent-context-ring")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-terminal-prompt-marker")).toHaveTextContent("❯");
     expect(screen.queryByRole("textbox", { name: "Agent terminal input" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("agent-terminal-input-row")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "Ask Agent" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("listbox", { name: "Agent model" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("agent-context-ring")).not.toBeInTheDocument();
-
-    // A hint tells the user where the single input lives.
-    expect(screen.getByTestId("agent-terminal-input-moved-hint")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-terminal-input-moved-hint")).not.toBeInTheDocument();
   });
 
   it("renders assistant Markdown as readable terminal blocks", () => {

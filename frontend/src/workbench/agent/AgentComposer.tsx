@@ -1,23 +1,32 @@
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
 import "./agent.css";
 
-export function AgentComposer({ showScope = true }: { showScope?: boolean } = {}) {
+export function AgentComposer({
+  showScope = true,
+  variant = "graph",
+}: {
+  showScope?: boolean;
+  variant?: "graph" | "terminal";
+} = {}) {
   const agent = useAgentSurfaceOptional();
   if (!agent) return null;
 
-  return <AgentComposerContent agent={agent} showScope={showScope} />;
+  return <AgentComposerContent agent={agent} showScope={showScope} variant={variant} />;
 }
 
 function AgentComposerContent({
   agent,
   showScope,
+  variant,
 }: {
   agent: NonNullable<ReturnType<typeof useAgentSurfaceOptional>>;
   showScope: boolean;
+  variant: "graph" | "terminal";
 }) {
   const [contextOpen, setContextOpen] = useState(false);
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   const {
     contextPercent,
@@ -53,13 +62,26 @@ function AgentComposerContent({
     : Math.max(0, contextWindowTokens - contextUsedTokens);
 
   return (
-    <div data-testid="agent-composer" className="wb-agent-composer">
+    <div
+      data-testid="agent-composer"
+      className={`wb-agent-composer${variant === "terminal" ? " wb-agent-terminal-composer" : ""}`}
+    >
       <div className="wb-agent-composer-row">
+        {variant === "terminal" && (
+          <span
+            data-testid="agent-terminal-prompt-marker"
+            className="wb-agent-terminal-input-marker"
+            aria-hidden="true"
+          >
+            ❯
+          </span>
+        )}
         <textarea
+          ref={promptInputRef}
           aria-label="Ask Agent"
           rows={1}
           value={prompt}
-          placeholder="询问当前分析，或请求修改当前模型参数并重新运行"
+          placeholder="Ask about the current analysis or request a typed change and rerun"
           onChange={(event) => setPrompt(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -140,7 +162,13 @@ function AgentComposerContent({
         <span style={{ marginLeft: "auto" }} role="status" aria-live="polite">
           {isSubmitting ? "Thinking" : sessionStatus}
         </span>
-        <AgentCapabilityPopover catalog={capabilityCatalog} />
+        <AgentCapabilityPopover
+          catalog={capabilityCatalog}
+          onPromptSelect={(nextPrompt) => {
+            setPrompt(nextPrompt);
+            promptInputRef.current?.focus();
+          }}
+        />
       </div>
       {error && (
         <div role="alert" className="wb-agent-error">

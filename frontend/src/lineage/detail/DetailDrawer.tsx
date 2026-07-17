@@ -15,7 +15,7 @@
 //
 // Spec §8.2.
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { DetailHeader, DETAIL_HEADER_TITLE_ID } from "../header/DetailHeader";
 import { useLineage } from "../LineageContext";
 import type { GraphViewNode } from "../api/graphViewTypes";
@@ -35,6 +35,20 @@ interface DetailDrawerProps {
    * GraphWorkbench to open RawJsonModal.
    */
   onShowJson?: () => void;
+}
+
+const MIN_DRAWER_WIDTH = 320;
+const DEFAULT_DRAWER_WIDTH = 460;
+const MAX_DRAWER_WIDTH = 720;
+
+function clampDrawerWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_DRAWER_WIDTH;
+  return Math.min(MAX_DRAWER_WIDTH, Math.max(MIN_DRAWER_WIDTH, Math.round(width)));
+}
+
+function readDrawerWidth(storageKey: string): number {
+  const raw = sessionStorage.getItem(storageKey);
+  return raw === null ? DEFAULT_DRAWER_WIDTH : clampDrawerWidth(Number(raw));
 }
 
 export function DetailDrawer({
@@ -68,6 +82,42 @@ export function DetailDrawer({
       .sort((a, b) => a.order - b.order);
   }, [resolved]);
 
+  const widthStorageKey = `workbench:detailDrawerWidth:${projectRoot ?? "default"}`;
+  const [drawerWidth, setDrawerWidth] = useState(() => readDrawerWidth(widthStorageKey));
+  const dragStart = useRef<{ x: number; width: number; pointerId: number } | null>(null);
+
+  useEffect(() => {
+    setDrawerWidth(readDrawerWidth(widthStorageKey));
+  }, [widthStorageKey]);
+
+  const commitDrawerWidth = useCallback((nextWidth: number) => {
+    const clamped = clampDrawerWidth(nextWidth);
+    setDrawerWidth(clamped);
+    sessionStorage.setItem(widthStorageKey, String(clamped));
+  }, [widthStorageKey]);
+
+  const onDrawerResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    dragStart.current = {
+      x: event.clientX,
+      width: drawerWidth,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [drawerWidth]);
+
+  const onDrawerResizeMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    commitDrawerWidth(start.width + start.x - event.clientX);
+  }, [commitDrawerWidth]);
+
+  const onDrawerResizeEnd = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragStart.current = null;
+  }, []);
+
   if (resolved === null) return null;
 
   return (
@@ -76,13 +126,41 @@ export function DetailDrawer({
       aria-labelledby={DETAIL_HEADER_TITLE_ID}
       data-testid="detail-drawer"
       style={{
-        width: 460,
+        width: drawerWidth,
+        flex: `0 0 ${drawerWidth}px`,
+        minWidth: 0,
+        position: "relative",
         borderLeft: "1px solid var(--separator)",
         padding: 22,
         overflowY: "auto",
         background: "var(--bg-canvas)",
       }}
     >
+      <div
+        role="separator"
+        aria-label="Resize detail drawer"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_DRAWER_WIDTH}
+        aria-valuemax={MAX_DRAWER_WIDTH}
+        aria-valuenow={drawerWidth}
+        data-testid="detail-drawer-resizer"
+        tabIndex={0}
+        onPointerDown={onDrawerResizeStart}
+        onPointerMove={onDrawerResizeMove}
+        onPointerUp={onDrawerResizeEnd}
+        onPointerCancel={onDrawerResizeEnd}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            commitDrawerWidth(drawerWidth + 24);
+          }
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            commitDrawerWidth(drawerWidth - 24);
+          }
+        }}
+        className="detail-drawer__resizer"
+      />
       {tabs.length > 0 && setActiveTab && closeTab && (
         <DetailDrawerTabs
           tabs={tabs}

@@ -25,6 +25,7 @@ DEFAULT_TIMEOUT_S = 60.0
 # exactly that way (explicit path missing → silent environment fallback).
 SOURCE_EXPLICIT_CONFIG_MISSING = "explicit_config_missing"
 SOURCE_EXPLICIT_CONFIG_INVALID = "explicit_config_invalid"
+SOURCE_EXPLICIT_CONFIG_UNCONFIGURED = "explicit_config_unconfigured"
 
 
 def validate_provider_url(value: str | None, field_name: str) -> str | None:
@@ -89,6 +90,13 @@ class LLMConfig:
                 "provider store. Refusing to fall back to the environment or "
                 "default provider configuration; fix the file or unset the variable."
             )
+        if self.source == SOURCE_EXPLICIT_CONFIG_UNCONFIGURED:
+            return (
+                "WORKBENCH_LLM_CONFIG_PATH is set but its active provider is not "
+                "fully configured. Refusing to fall back to the environment or "
+                "default provider configuration; complete the provider or unset "
+                "the variable."
+            )
         return (
             "LLM is not configured. Set a provider base URL, API key and model."
         )
@@ -129,6 +137,14 @@ def load_llm_config() -> LLMConfig:
         local_config = _config_from_provider(provider, source="local")
         if local_config.is_configured():
             return local_config
+
+    if explicit is not None:
+        return LLMConfig(
+            base_url="",
+            api_key="",
+            model="",
+            source=SOURCE_EXPLICIT_CONFIG_UNCONFIGURED,
+        )
 
     provider = environment_provider_from_env()
     if provider is not None:

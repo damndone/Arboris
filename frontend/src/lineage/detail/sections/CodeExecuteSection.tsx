@@ -3,10 +3,12 @@ import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import {
+  authorizeCodeExecuteRisk,
   confirmCodeExecute,
   fetchDataColumnCastContext,
   previewCodeExecute,
   type CodeExecutePreview,
+  type CodeExecuteRiskAuthorization,
   type DataCastOutputFormat,
   type DataColumnCastContext,
 } from "../../dataOperations";
@@ -55,10 +57,13 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
   const [outputFormat, setOutputFormat] = useState<DataCastOutputFormat>("csv");
   const [preview, setPreview] = useState<CodeExecutePreview | null>(null);
   const [status, setStatus] = useState<
-    "idle" | "loading" | "previewing" | "confirming" | "complete" | "error"
+    "idle" | "loading" | "previewing" | "authorizing" | "confirming" | "complete" | "error"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [operationId, setOperationId] = useState<string | null>(null);
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  const [riskAuthorization, setRiskAuthorization] =
+    useState<CodeExecuteRiskAuthorization | null>(null);
 
   const sourceRunId = resolved?.ok ? resolved.context.ownership.owner_run_id : null;
   const sourceNodeId = resolved?.ok ? resolved.context.operation_target.op_node_id : null;
@@ -69,6 +74,8 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
     setPreview(null);
     setError(null);
     setOperationId(null);
+    setRiskAcknowledged(false);
+    setRiskAuthorization(null);
     if (!isDatasetNode || !projectRoot || !sourceRunId || !sourceNodeId) return;
 
     setStatus("loading");
@@ -103,11 +110,30 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
         }
       : null;
 
+  function invalidateExecutionState() {
+    setPreview(null);
+    setRiskAcknowledged(false);
+    setRiskAuthorization(null);
+    setOperationId(null);
+    setError(null);
+    setStatus((current) =>
+      current === "loading" ||
+      current === "previewing" ||
+      current === "authorizing" ||
+      current === "confirming"
+        ? current
+        : "idle",
+    );
+  }
+
   async function handlePreview() {
     if (!projectRoot || !request) return;
     setStatus("previewing");
     setError(null);
     setPreview(null);
+    setRiskAcknowledged(false);
+    setRiskAuthorization(null);
+    setOperationId(null);
     try {
       const response = await previewCodeExecute(projectRoot, request);
       setPreview(response.preview);
@@ -118,14 +144,40 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
     }
   }
 
+  async function handleAuthorizeRisk() {
+    if (!projectRoot || !request || !preview || preview.status !== "ready" || !riskAcknowledged) return;
+    setStatus("authorizing");
+    setError(null);
+    try {
+      const response = await authorizeCodeExecuteRisk(projectRoot, {
+        ...request,
+        preview_fingerprint: preview.fingerprint,
+        acknowledge_risk: true,
+      });
+      setRiskAuthorization(response.risk_authorization);
+      setStatus("idle");
+    } catch (reason: unknown) {
+      setStatus("error");
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
   async function handleConfirm() {
-    if (!projectRoot || !request || !preview || preview.status !== "ready") return;
+    if (
+      !projectRoot ||
+      !request ||
+      !preview ||
+      preview.status !== "ready" ||
+      !riskAuthorization
+    ) return;
     setStatus("confirming");
     setError(null);
     try {
       const response = await confirmCodeExecute(projectRoot, {
         ...request,
         preview_fingerprint: preview.fingerprint,
+        risk_authorization_id: riskAuthorization.authorization_id,
+        risk_authorization_token: riskAuthorization.token,
       });
       const recordId = response.operation.record_id;
       setOperationId(typeof recordId === "string" ? recordId : null);
@@ -136,7 +188,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
     }
   }
 
-  const busy = status === "previewing" || status === "confirming";
+  const busy = status === "previewing" || status === "authorizing" || status === "confirming";
 
   return (
     <section
@@ -178,12 +230,13 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
           id="code-execute-code"
           data-testid="code-execute-code"
           value={code}
+          disabled={busy}
           spellCheck={false}
           rows={8}
           onChange={(event) => {
             setCode(event.target.value);
-            // The preview is only meaningful for the code that produced it.
-            setPreview(null);
+            // The preview and any applied state are only meaningful for this code.
+            invalidateExecutionState();
           }}
           style={{
             fontFamily: "var(--font-mono, ui-monospace, monospace)",
@@ -205,9 +258,10 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
             id="code-execute-format"
             data-testid="code-execute-format"
             value={outputFormat}
+            disabled={busy}
             onChange={(event) => {
               setOutputFormat(event.target.value as DataCastOutputFormat);
-              setPreview(null);
+              invalidateExecutionState();
             }}
           >
             <option value="csv">CSV</option>
@@ -227,7 +281,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
             data-testid="code-execute-confirm-button"
             className="primary"
             onClick={() => void handleConfirm()}
-            disabled={!preview || preview.status !== "ready" || busy}
+            disabled={!preview || preview.status !== "ready" || !riskAuthorization || busy}
           >
             {status === "confirming" ? "Applying…" : "Apply as new node"}
           </button>
@@ -271,6 +325,45 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
               Nothing has been written yet — this ran on a copy. Applying creates the
               child node and marks downstream models for rerun.
             </div>
+            <div
+              data-testid="code-execute-risk-warning"
+              style={{
+                padding: 8,
+                border: "1px solid var(--danger, #f87171)",
+                borderRadius: 6,
+                lineHeight: 1.45,
+              }}
+            >
+              sandboxed does not mean low risk. This code still creates a new child
+              data node and can invalidate downstream model results.
+              <label style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "flex-start" }}>
+                <input
+                  type="checkbox"
+                  data-testid="code-execute-risk-acknowledgement"
+                  checked={riskAcknowledged}
+                  disabled={busy || riskAuthorization !== null}
+                  onChange={(event) => {
+                    setRiskAcknowledged(event.target.checked);
+                    if (!event.target.checked) setRiskAuthorization(null);
+                  }}
+                />
+                <span>I understand this is a high-risk operation and want to continue.</span>
+              </label>
+            </div>
+            {!riskAuthorization ? (
+              <button
+                type="button"
+                data-testid="code-execute-authorize-button"
+                disabled={!riskAcknowledged || busy}
+                onClick={() => void handleAuthorizeRisk()}
+              >
+                {status === "authorizing" ? "Authorizing…" : "Authorize high-risk operation"}
+              </button>
+            ) : (
+              <div data-testid="code-execute-risk-authorized" style={{ color: "var(--ok, #4ade80)" }}>
+                Risk authorization granted · expires {riskAuthorization.expires_at}
+              </div>
+            )}
           </div>
         )}
 

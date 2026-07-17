@@ -196,6 +196,25 @@ export interface CodeExecutePreviewResponse {
   preview: CodeExecutePreview;
 }
 
+export interface CodeExecuteRiskAuthorization {
+  authorization_id: string;
+  token: string;
+  operation_id: "code.execute";
+  operation_version: "v1";
+  proposal_id: string;
+  revision: number;
+  fingerprint: string;
+  active_head_run_id: string;
+  expires_at: string;
+  status: "issued";
+}
+
+export interface CodeExecuteRiskAuthorizationResponse {
+  proposal: Record<string, unknown>;
+  risk_authorization: CodeExecuteRiskAuthorization;
+  status: "risk_authorized";
+}
+
 function projectQuery(projectRoot: string): string {
   return `?project_root=${encodeURIComponent(projectRoot)}`;
 }
@@ -215,11 +234,32 @@ export async function previewCodeExecute(
   return readResponse<CodeExecutePreviewResponse>(response);
 }
 
+export async function authorizeCodeExecuteRisk(
+  projectRoot: string,
+  request: CodeExecuteRequest & {
+    preview_fingerprint: string;
+    session_id?: string;
+    acknowledge_risk: true;
+  },
+): Promise<CodeExecuteRiskAuthorizationResponse> {
+  const response = await fetch(
+    apiUrl(`/data-operations/code-execute/risk-authorize${projectQuery(projectRoot)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+  return readResponse<CodeExecuteRiskAuthorizationResponse>(response);
+}
+
 export async function confirmCodeExecute(
   projectRoot: string,
   request: CodeExecuteRequest & {
     preview_fingerprint: string;
     session_id?: string;
+    risk_authorization_id: string;
+    risk_authorization_token: string;
   },
 ): Promise<DataColumnCastConfirmResponse> {
   const response = await fetch(

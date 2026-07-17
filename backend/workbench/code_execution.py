@@ -22,7 +22,10 @@ promise into a check. Non-deterministic code fails loudly
 (`NondeterministicCodeError`) instead of silently materializing something the
 user never approved.
 
-Replaying an already-materialized execution key does not re-run anything.
+Replaying an execution key re-runs the deterministic code and replays each
+idempotent materialization step. That is intentional: a crash can leave the
+artifact and recipe present before registration, graph commit, or node-index
+repair, and replay must reconcile all of those durable projections.
 
 CODE CONTRACT
 -------------
@@ -565,11 +568,6 @@ def apply_code_execute(
     recipe_rel = recipe_rel_path.as_posix()
     artifact_path = run_root / artifact_rel
     recipe_path = run_root / recipe_rel
-
-    # Idempotent replay: this execution key is already materialized. Do not run
-    # the code again — the same key is by construction the same result.
-    if recipe_path.is_file() and artifact_path.is_file():
-        return effect
 
     source_sha = str(source_artifact.get("sha256") or sha256_file(source_path))
     if source_sha != preview.source_sha256:

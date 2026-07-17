@@ -298,10 +298,13 @@ async def run_events_endpoint(run_id: str, project_root: str):
     run_root = _resolve_run_root(project_root, run_id)
     manifest = _read_manifest(run_root)
     events = get_event_manager()
+    # Rehydrate durable history for every run, not only interrupted runs. The
+    # in-memory event window is intentionally short-lived; Logs must still be
+    # useful after a completed run has aged out of that window.
+    events.register_run(run_id, run_root / "workflow_log.jsonl")
 
     status = _mark_interrupted_if_dead(run_root, manifest)
     if status == "interrupted":
-        events.register_run(run_id)
         events.emit_terminal(run_id, "interrupted", "Server stopped before completion.")
 
     sub_queue, snapshot = events.subscribe(run_id)

@@ -117,6 +117,16 @@ function dispatchPointerDrag(
   fireEvent(target, event);
 }
 
+function dispatchHorizontalPointerDrag(
+  target: Element,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  clientX: number,
+) {
+  const event = new MouseEvent(type, { bubbles: true, clientX });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  fireEvent(target, event);
+}
+
 function forestResponse(focusKey = "hash_model"): HeadSetResponse {
   return {
     schema_version: 2,
@@ -407,6 +417,17 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.queryByTestId("raw-json-modal")).toBeNull();
     });
 
+    it("opens the right drawer from a node click while Agent is active", async () => {
+      mountAt("/?tab=lineage&panel=agent");
+      await screen.findByTestId("graph-workbench");
+
+      fireEvent.click(screen.getAllByTestId("graph-node")[0]);
+
+      const drawer = await screen.findByTestId("detail-drawer");
+      expect(drawer).toBeInTheDocument();
+      expect(drawer).toHaveStyle({ flex: "0 0 460px" });
+    });
+
     it("S1: Escape with modal open closes only the modal, NOT the selection", async () => {
       mountAt("/?tab=lineage&tabs=n1&active=n1");
       await screen.findByTestId("detail-drawer");
@@ -464,6 +485,64 @@ describe("WorkbenchRouteContainer", () => {
 
       expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
+    });
+
+    it("keeps the bottom panel freely resizable instead of forcing Focus mode", async () => {
+      mountAt("/?tab=lineage&panel=agent");
+      await screen.findByTestId("graph-workbench");
+
+      expect(screen.getByTestId("bottom-panel")).toHaveStyle({
+        height: "240px",
+        minHeight: "160px",
+      });
+      expect(screen.queryByTestId("bottom-panel-focus")).not.toBeInTheDocument();
+    });
+
+    it("hosts the single Agent composer inside the Agent bottom panel", async () => {
+      mountAt("/?tab=lineage&panel=agent");
+      await screen.findByTestId("graph-workbench");
+
+      const composer = screen.getByTestId("agent-composer");
+      expect(screen.getByTestId("bottom-panel")).toContainElement(composer);
+      expect(screen.getAllByTestId("agent-composer")).toHaveLength(1);
+    });
+
+    it("resizes the left run rail with a horizontal splitter", async () => {
+      sessionStorage.removeItem("workbench:runRailWidth:/proj");
+      mountAt("/?tab=lineage");
+      await screen.findByTestId("graph-workbench");
+
+      const rail = screen.getByTestId("run-rail");
+      const splitter = screen.getByTestId("run-rail-resizer");
+      expect(rail).toHaveStyle({ width: "240px" });
+
+      dispatchHorizontalPointerDrag(splitter, "pointerdown", 240);
+      dispatchHorizontalPointerDrag(splitter, "pointermove", 320);
+      dispatchHorizontalPointerDrag(splitter, "pointerup", 320);
+
+      expect(rail).toHaveStyle({ width: "320px" });
+      expect(sessionStorage.getItem("workbench:runRailWidth:/proj")).toBe("320");
+    });
+
+    it("resizes the right detail drawer with a horizontal splitter", async () => {
+      sessionStorage.removeItem("workbench:detailDrawerWidth:/proj");
+      mountAt("/?tab=lineage&tabs=n1&active=n1");
+      const drawer = await screen.findByTestId("detail-drawer");
+      const splitter = screen.getByTestId("detail-drawer-resizer");
+      expect(drawer).toHaveStyle({ width: "460px" });
+
+      dispatchHorizontalPointerDrag(splitter, "pointerdown", 1000);
+      dispatchHorizontalPointerDrag(splitter, "pointermove", 900);
+      dispatchHorizontalPointerDrag(splitter, "pointerup", 900);
+
+      expect(drawer).toHaveStyle({ width: "560px" });
+      expect(sessionStorage.getItem("workbench:detailDrawerWidth:/proj")).toBe("560");
+    });
+
+    it("does not render a focus-only control for the active Agent panel", async () => {
+      mountAt("/?tab=lineage&panel=agent");
+      await screen.findByTestId("graph-workbench");
+      expect(screen.queryByTestId("bottom-panel-focus")).not.toBeInTheDocument();
     });
 
     it("persists BottomPanel height when pointer-dragging the top splitter", async () => {

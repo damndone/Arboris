@@ -33,6 +33,37 @@
     0 0 0 2px color-mix(in oklch, var(--tint) 22%, transparent);
 }
 
+.wb-agent-terminal-composer {
+  border-radius: 8px;
+  padding: 3px 8px;
+  background: var(--bg-canvas);
+  box-shadow: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-terminal-composer .wb-agent-composer-row {
+  align-items: center;
+}
+
+.wb-agent-terminal-composer textarea {
+  min-height: 24px;
+  max-height: 96px;
+  padding: 2px 0;
+}
+
+.wb-agent-terminal-composer .wb-agent-send {
+  height: 24px;
+  border-radius: 6px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.wb-agent-terminal-composer .wb-agent-composer-meta {
+  min-height: 14px;
+  margin-top: 2px;
+  font-size: 10px;
+}
+
 .wb-agent-composer-row {
   display: flex;
   gap: 8px;
@@ -197,10 +228,10 @@
 }
 
 .wb-agent-capability-popover {
-  position: absolute;
-  z-index: 30;
-  right: 0;
-  bottom: calc(100% + 8px);
+  position: fixed;
+  z-index: 1000;
+  right: 16px;
+  bottom: 16px;
   width: min(390px, calc(100vw - 32px));
   max-height: min(560px, 70vh);
   overflow: auto;
@@ -236,6 +267,13 @@
   border-radius: 7px;
 }
 
+.wb-agent-capability-help {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .wb-agent-capability-title {
   display: flex;
   gap: 5px;
@@ -255,6 +293,24 @@
 
 .wb-agent-capability-meta {
   font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-capability-action {
+  margin-top: 6px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in oklch, var(--tint) 45%, var(--separator));
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tint);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.wb-agent-capability-action:hover,
+.wb-agent-capability-action:focus-visible {
+  background: var(--tint-bg, rgba(10, 132, 255, 0.12));
+  outline: none;
 }
 
 .wb-agent-error {
@@ -384,6 +440,70 @@
   scrollbar-width: thin;
 }
 
+.wb-agent-context-details {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-height: 208px;
+  overflow: auto;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--bg-canvas) 82%, transparent);
+  color: var(--label-secondary);
+  font: 10px/1.35 var(--font-mono, ui-monospace, monospace);
+}
+
+.wb-agent-context-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.wb-agent-context-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-agent-context-details > summary::before {
+  content: "▸";
+  color: var(--tint);
+}
+
+.wb-agent-context-details[open] > summary::before {
+  content: "▾";
+}
+
+.wb-agent-context-details > summary:hover,
+.wb-agent-context-details > summary:focus-visible {
+  color: var(--label);
+}
+
+.wb-agent-context-details > summary:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--tint));
+  outline-offset: -2px;
+}
+
+.wb-agent-context-summary-meta {
+  margin-left: auto;
+  color: var(--label-tertiary);
+  font-size: 9px;
+}
+
+.wb-agent-context-body {
+  display: grid;
+  gap: 6px;
+  padding: 0 6px 6px;
+}
+
+.wb-agent-context-body .wb-agent-hierarchy {
+  max-height: 120px;
+}
+
 .wb-agent-navigation-link {
   display: inline-flex;
   align-items: center;
@@ -424,6 +544,8 @@
 .wb-agent-hierarchy {
   flex: 0 0 auto;
   min-width: 0;
+  max-height: 120px;
+  overflow: auto;
   padding: 6px 8px;
   border: 1px solid var(--separator);
   border-radius: 7px;

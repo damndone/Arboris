@@ -15,7 +15,7 @@
  * already on a run page so a giant "Loading…" splash would be silly.
  */
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useRunHistory } from "./useRunHistory";
 import type { RunSummary } from "../../api";
 import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
@@ -60,6 +60,20 @@ function statusClass(status: string): string {
   }
 }
 
+const MIN_RAIL_WIDTH = 160;
+const DEFAULT_RAIL_WIDTH = 240;
+const MAX_RAIL_WIDTH = 480;
+
+function clampRailWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_RAIL_WIDTH;
+  return Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, Math.round(width)));
+}
+
+function readRailWidth(storageKey: string): number {
+  const raw = sessionStorage.getItem(storageKey);
+  return raw === null ? DEFAULT_RAIL_WIDTH : clampRailWidth(Number(raw));
+}
+
 export interface RunHistoryRailProps {
   /** Optional override. When omitted, reads `project_root` from URL. */
   projectRoot?: string | null;
@@ -72,6 +86,41 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root");
   const navigate = useNavigate();
   const { runs, loading, error, refresh } = useRunHistory(projectRoot);
+  const widthStorageKey = `workbench:runRailWidth:${projectRoot ?? "default"}`;
+  const [railWidth, setRailWidth] = useState(() => readRailWidth(widthStorageKey));
+  const dragStart = useRef<{ x: number; width: number; pointerId: number } | null>(null);
+
+  useEffect(() => {
+    setRailWidth(readRailWidth(widthStorageKey));
+  }, [widthStorageKey]);
+
+  const commitRailWidth = useCallback((nextWidth: number) => {
+    const clamped = clampRailWidth(nextWidth);
+    setRailWidth(clamped);
+    sessionStorage.setItem(widthStorageKey, String(clamped));
+  }, [widthStorageKey]);
+
+  const onRailResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    dragStart.current = {
+      x: event.clientX,
+      width: railWidth,
+      pointerId: event.pointerId,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [railWidth]);
+
+  const onRailResizeMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    commitRailWidth(start.width + event.clientX - start.x);
+  }, [commitRailWidth]);
+
+  const onRailResizeEnd = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const start = dragStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    dragStart.current = null;
+  }, []);
 
   // v1.6.9 B1-4 — refresh the moment a pending run (genesis / draft-execute)
   // indexes, instead of waiting out the 30s poll. ForestWorkbench bumps the
@@ -117,11 +166,13 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   };
 
   return (
-    <aside
-      className="run-rail"
-      data-testid="run-rail"
-      aria-label="Run history"
-    >
+    <>
+      <aside
+        className="run-rail"
+        data-testid="run-rail"
+        aria-label="Run history"
+        style={{ width: railWidth, flexBasis: railWidth }}
+      >
       <header className="run-rail__header">
         <h3 className="run-rail__title">Runs</h3>
         {projectRoot && (
@@ -170,6 +221,32 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           })}
         </ul>
       )}
-    </aside>
+      </aside>
+      <div
+        role="separator"
+        aria-label="Resize run history rail"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_RAIL_WIDTH}
+        aria-valuemax={MAX_RAIL_WIDTH}
+        aria-valuenow={railWidth}
+        data-testid="run-rail-resizer"
+        tabIndex={0}
+        onPointerDown={onRailResizeStart}
+        onPointerMove={onRailResizeMove}
+        onPointerUp={onRailResizeEnd}
+        onPointerCancel={onRailResizeEnd}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowRight") {
+            event.preventDefault();
+            commitRailWidth(railWidth + 24);
+          }
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            commitRailWidth(railWidth - 24);
+          }
+        }}
+        className="run-rail__resizer"
+      />
+    </>
   );
 }

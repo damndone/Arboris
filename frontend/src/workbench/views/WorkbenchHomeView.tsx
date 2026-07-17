@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { ApiError, fetchRuns } from "../../api";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
-import { listRecents, touchRecent } from "../../launcher/recents";
+import { listRecents, removeRecent, touchRecent } from "../../launcher/recents";
 import type { RecentProject } from "../../launcher/recents";
 import { CreateProjectModal } from "../../launcher/CreateProjectModal";
 
@@ -34,10 +35,12 @@ function errorMessage(error: unknown): string {
 function RecentProjectCard({
   recent,
   current,
+  probing,
   onOpen,
 }: {
   recent: RecentProject;
   current: boolean;
+  probing: boolean;
   onOpen: (root: string) => void;
 }) {
   return (
@@ -46,6 +49,7 @@ function RecentProjectCard({
         type="button"
         data-testid={`workbench-home-recent-${recent.root}`}
         onClick={() => onOpen(recent.root)}
+        disabled={probing}
         style={{
           width: "100%",
           minHeight: 92,
@@ -55,7 +59,7 @@ function RecentProjectCard({
           borderRadius: 12,
           background: "var(--bg-card-2, rgba(255,255,255,0.04))",
           color: "var(--label, #f5f5f7)",
-          cursor: "pointer",
+          cursor: probing ? "default" : "pointer",
         }}
       >
         <strong style={{ display: "block", fontSize: 15 }}>
@@ -95,7 +99,7 @@ function RecentProjectCard({
             fontSize: 11,
           }}
         >
-          Last opened {recent.lastOpened}
+          {probing ? "Opening…" : `Last opened ${recent.lastOpened}`}
         </span>
       </button>
     </li>
@@ -109,6 +113,8 @@ export function WorkbenchHomeView({
   onOpenProject,
 }: WorkbenchHomeViewProps) {
   const [recents, setRecents] = useState<RecentProject[]>(() => listRecents());
+  const [probingRoot, setProbingRoot] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [llm, setLlm] = useState<LlmState>({
     status: "loading",
@@ -132,10 +138,73 @@ export function WorkbenchHomeView({
     };
   }, []);
 
-  function openProject(root: string) {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function reconcileRecentProjects() {
+      const saved = listRecents();
+      await Promise.all(
+        saved.map(async (recent) => {
+          try {
+            await fetchRuns(recent.root);
+          } catch (error: unknown) {
+            // A recent is a local pointer, not a project registry. Remove it
+            // when the backend proves that its directory moved or disappeared;
+            // transient/backend errors stay visible for a later retry.
+            if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
+              removeRecent(recent.root);
+            }
+          }
+        }),
+      );
+
+      if (projectRoot) {
+        try {
+          await fetchRuns(projectRoot);
+          touchRecent(projectRoot);
+        } catch {
+          // The graph route may still be loading; do not manufacture a recent
+          // entry until the backend confirms this project root.
+        }
+      }
+
+      if (!cancelled) setRecents(listRecents());
+    }
+
+    void reconcileRecentProjects();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot]);
+
+  async function openProject(root: string) {
+    if (probingRoot) return;
+    setProbingRoot(root);
+    setProjectError(null);
+    try {
+      await fetchRuns(root);
+    } catch (error: unknown) {
+      if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
+        removeProject(root);
+        // A missing recent is a stale local pointer, not a navigable route
+        // failure. Remove it and keep the user on Home without an alert that
+        // looks like the graph route itself has failed.
+        setProjectError(null);
+      } else {
+        setProjectError(error instanceof Error ? error.message : "Unable to open project");
+      }
+      return;
+    } finally {
+      setProbingRoot(null);
+    }
     touchRecent(root);
     setRecents(listRecents());
     onOpenProject?.(root);
+  }
+
+  function removeProject(root: string) {
+    removeRecent(root);
+    setRecents(listRecents());
   }
 
   function createProject() {
@@ -233,9 +302,15 @@ export function WorkbenchHomeView({
                   recent={recent}
                   current={recent.root === projectRoot}
                   onOpen={openProject}
+                  probing={probingRoot === recent.root}
                 />
               ))}
             </ul>
+          )}
+          {projectError && (
+            <p role="alert" style={{ color: "var(--danger, #ff453a)" }}>
+              {projectError}
+            </p>
           )}
         </section>
 

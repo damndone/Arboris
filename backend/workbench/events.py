@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+from pathlib import Path
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
+
+
+
+def _read_history(path: Path) -> list[dict]:
+    # Import lazily: importing ``workbench.agent.storage`` executes the agent
+    # package exports, some of which import services that depend on events.
+    # Keeping this edge lazy avoids a package-initialization cycle when this
+    # low-level event module is imported on its own.
+    from .agent.storage import read_jsonl
+
+    return read_jsonl(path)
+
+
+def _append_history(path: Path, event: dict) -> None:
+    from .agent.storage import append_jsonl_atomic
+
+    append_jsonl_atomic(path, event)
 
 
 class EventManager:
@@ -13,6 +31,7 @@ class EventManager:
         self._history: dict[str, list[dict]] = {}
         self._subscribers: dict[str, set[queue.Queue]] = {}
         self._sequence: dict[str, int] = {}
+        self._history_paths: dict[str, Path] = {}
         self._active_runs: set[str] = set()
         self._reserved_slots = 0
         self._max_workers = max_workers
@@ -48,12 +67,21 @@ class EventManager:
 
     # --- event subscriptions ---
 
-    def register_run(self, run_id: str) -> None:
+    def register_run(self, run_id: str, history_path: Path | None = None) -> None:
         with self._lock:
+            if history_path is not None:
+                self._history_paths[run_id] = history_path
             if run_id not in self._history:
-                self._history[run_id] = []
+                history = []
+                path = self._history_paths.get(run_id)
+                if path is not None:
+                    history = _read_history(path)
+                self._history[run_id] = history
                 self._subscribers[run_id] = set()
-                self._sequence[run_id] = 0
+                self._sequence[run_id] = max(
+                    (int(event.get("sequence", index)) for index, event in enumerate(history)),
+                    default=-1,
+                ) + 1
 
     def subscribe(self, run_id: str) -> tuple[queue.Queue, list[dict]]:
         with self._lock:
@@ -84,6 +112,9 @@ class EventManager:
             event.setdefault("status", None)
 
             self._history.setdefault(run_id, []).append(event)
+            history_path = self._history_paths.get(run_id)
+            if history_path is not None:
+                _append_history(history_path, event)
 
             for sub in list(self._subscribers.get(run_id, set())):
                 sub.put(event)
@@ -111,6 +142,7 @@ class EventManager:
                 self._history.pop(run_id, None)
                 self._subscribers.pop(run_id, None)
                 self._sequence.pop(run_id, None)
+                self._history_paths.pop(run_id, None)
 
         t = threading.Thread(target=_cleanup, daemon=True)
         t.start()
@@ -121,6 +153,7 @@ class EventManager:
             self._history.clear()
             self._subscribers.clear()
             self._sequence.clear()
+            self._history_paths.clear()
             self._active_runs.clear()
             self._reserved_slots = 0
 

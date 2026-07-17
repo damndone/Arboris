@@ -450,7 +450,7 @@ def test_probe_rejects_unsafe_legacy_provider_base_url_at_runtime(
     }
 
 
-def test_load_llm_config_clears_unsafe_active_legacy_base_url(
+def test_load_llm_config_fails_closed_for_unsafe_active_legacy_base_url(
     store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/v1")
@@ -473,14 +473,14 @@ def test_load_llm_config_clears_unsafe_active_legacy_base_url(
 
     config = load_llm_config()
 
-    assert config.base_url == "https://env.example.com/v1"
-    assert config.api_key == "env-secret"
-    assert config.model == "env-model"
-    assert config.is_configured() is True
-    assert config.source == "environment"
+    assert config.base_url == ""
+    assert config.api_key == ""
+    assert config.model == ""
+    assert config.is_configured() is False
+    assert config.source == "explicit_config_unconfigured"
 
 
-def test_load_llm_config_falls_back_when_active_local_provider_is_unconfigured(
+def test_load_llm_config_fails_closed_when_active_local_provider_is_unconfigured(
     store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/v1")
@@ -503,9 +503,9 @@ def test_load_llm_config_falls_back_when_active_local_provider_is_unconfigured(
 
     config = load_llm_config()
 
-    assert config.source == "environment"
-    assert config.is_configured() is True
-    assert config.base_url == "https://env.example.com/v1"
+    assert config.source == "explicit_config_unconfigured"
+    assert config.is_configured() is False
+    assert config.base_url == ""
 
 
 def test_unsafe_legacy_provider_cannot_be_activated(api, store_path):
@@ -530,7 +530,7 @@ def test_unsafe_legacy_provider_cannot_be_activated(api, store_path):
     assert load_provider_store(store_path).active_provider_id is None
 
 
-def test_unsafe_legacy_provider_is_skipped_by_fallback_for_environment(
+def test_unsafe_legacy_provider_does_not_open_environment_fallback(
     api, store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/v1")
@@ -564,9 +564,9 @@ def test_unsafe_legacy_provider_is_skipped_by_fallback_for_environment(
     assert api.get("/llm/providers").json()["active_provider_id"] is None
     config = api.get("/llm/config")
     assert config.status_code == 200, config.text
-    assert config.json()["source"] == "environment"
-    assert config.json()["configured"] is True
-    assert config.json()["base_url"] == "https://env.example.com/v1"
+    assert config.json()["source"] == "explicit_config_unconfigured"
+    assert config.json()["configured"] is False
+    assert config.json()["base_url"] is None
     assert "environment-secret" not in config.text
     assert load_provider_store(store_path).active_provider_id is None
 
@@ -772,7 +772,7 @@ def test_activation_rejects_unconfigured_provider_and_preserves_active(
     assert load_provider_store(store_path).active_provider_id == "active"
 
 
-def test_clearing_active_provider_key_falls_back_to_environment(
+def test_clearing_active_provider_key_fails_closed(
     api, store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/v1")
@@ -792,10 +792,9 @@ def test_clearing_active_provider_key_falls_back_to_environment(
     assert api.get("/llm/providers").json()["active_provider_id"] is None
     config = api.get("/llm/config")
     assert config.status_code == 200, config.text
-    assert config.json()["source"] == "environment"
-    assert config.json()["provider_id"] == "environment"
-    assert config.json()["configured"] is True
-    assert config.json()["base_url"] == "https://env.example.com/v1"
+    assert config.json()["source"] == "explicit_config_unconfigured"
+    assert config.json()["configured"] is False
+    assert config.json()["base_url"] is None
     assert "environment-secret" not in config.text
     assert load_provider_store(store_path).providers[0].api_key == ""
 
@@ -838,7 +837,7 @@ def test_delete_active_provider_skips_unconfigured_remaining_provider(
     assert api.get("/llm/providers").json()["active_provider_id"] == "configured"
 
 
-def test_delete_active_provider_clears_id_for_environment_fallback(
+def test_delete_active_provider_clears_id_fail_closed(
     api, store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://env.example.com/v1")
@@ -872,10 +871,9 @@ def test_delete_active_provider_clears_id_for_environment_fallback(
     listed = api.get("/llm/providers")
     assert listed.json()["active_provider_id"] is None
     config = api.get("/llm/config")
-    assert config.json()["source"] == "environment"
-    assert config.json()["provider_id"] == "environment"
-    assert config.json()["configured"] is True
-    assert config.json()["base_url"] == "https://env.example.com/v1"
+    assert config.json()["source"] == "explicit_config_unconfigured"
+    assert config.json()["configured"] is False
+    assert config.json()["base_url"] is None
     assert "environment-secret" not in config.text
 
 
@@ -891,11 +889,15 @@ def test_duplicate_create_and_missing_update_use_workbench_errors(api, store_pat
     assert missing.json()["error"]["code"] == "LLM_PROVIDER_NOT_FOUND"
 
 
-def test_chat_upstream_echoed_api_key_is_redacted(api, store_path, monkeypatch):
-    # This test exercises redaction via the ENVIRONMENT provider. The pinned
-    # store file must exist (empty is fine): a missing explicit store now fails
-    # closed instead of falling through to the environment.
-    save_provider_store(ProviderStore(), store_path)
+def test_chat_upstream_echoed_api_key_is_redacted(
+    api, store_path, tmp_path, monkeypatch
+):
+    # This test exercises redaction via the ENVIRONMENT provider on the default
+    # path. An explicit incomplete store is intentionally fail-closed.
+    monkeypatch.delenv("WORKBENCH_LLM_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(
+        "workbench.llm.provider_store.Path.home", lambda: tmp_path
+    )
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://llm.example.com")
     monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
     monkeypatch.setenv("WORKBENCH_LLM_MODEL", "test-model")
