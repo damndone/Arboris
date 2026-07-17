@@ -17,7 +17,10 @@ class CanonicalJSONError(ValueError):
 
 def _normalize(value: Any) -> Any:
     if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
+        normalized = unicodedata.normalize("NFC", value)
+        if any(0xD800 <= ord(char) <= 0xDFFF for char in normalized):
+            raise CanonicalJSONError("canonical JSON does not allow surrogate code points")
+        return normalized
     if isinstance(value, float):
         if not math.isfinite(value):
             raise CanonicalJSONError("canonical JSON does not allow NaN or Infinity")
@@ -27,7 +30,7 @@ def _normalize(value: Any) -> Any:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise CanonicalJSONError("canonical JSON object keys must be strings")
-            normalized_key = unicodedata.normalize("NFC", key)
+            normalized_key = _normalize(key)
             if normalized_key in normalized:
                 raise CanonicalJSONError(
                     "Unicode normalization produced duplicate object keys"
@@ -133,13 +136,41 @@ def numbers_equal(
     by the finite-number tolerance rule. Signed zeroes compare equal.
     """
 
-    if atol < 0 or rtol < 0 or not math.isfinite(atol) or not math.isfinite(rtol):
-        raise ValueError("atol and rtol must be finite and non-negative")
-    if math.isnan(left) or math.isnan(right):
+    for name, tolerance in (("atol", atol), ("rtol", rtol)):
+        if not isinstance(tolerance, (int, float)):
+            raise TypeError(f"{name} must be a finite non-negative number")
+        if isinstance(tolerance, float) and not math.isfinite(tolerance):
+            raise ValueError(f"{name} must be a finite non-negative number")
+        if tolerance < 0:
+            raise ValueError(f"{name} must be a finite non-negative number")
+
+    if _is_nan(left) or _is_nan(right):
         return False
-    if math.isinf(left) or math.isinf(right):
+    if _is_infinite(left) or _is_infinite(right):
         return left == right
-    return abs(left - right) <= atol + rtol * max(abs(left), abs(right))
+
+    left_decimal = _as_decimal(left)
+    right_decimal = _as_decimal(right)
+    tolerance = _as_decimal(atol) + _as_decimal(rtol) * max(
+        abs(left_decimal), abs(right_decimal)
+    )
+    return abs(left_decimal - right_decimal) <= tolerance
+
+
+def _is_nan(value: float | int) -> bool:
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _is_infinite(value: float | int) -> bool:
+    return isinstance(value, float) and math.isinf(value)
+
+
+def _as_decimal(value: float | int) -> Decimal:
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, float):
+        return Decimal(repr(value))
+    raise TypeError("numbers_equal operands must be float or int")
 
 
 canonical_number_equal = numbers_equal

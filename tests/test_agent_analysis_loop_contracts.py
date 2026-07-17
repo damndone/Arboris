@@ -58,6 +58,23 @@ def test_canonical_json_v1_rejects_non_finite_numbers_and_hash_is_sha256_hex():
     assert all(char in "0123456789abcdef" for char in digest)
 
 
+@pytest.mark.parametrize(
+    "value",
+    ["\ud800", {"nested": "\ud800"}, ["valid", "\ud800"], {"\ud800": "value"}],
+)
+def test_canonical_json_v1_rejects_lone_surrogates_before_utf8_encoding(value):
+    with pytest.raises(CanonicalJSONError):
+        canonical_json_v1(value)
+    with pytest.raises(CanonicalJSONError):
+        sha256_canonical(value)
+
+
+def test_canonical_json_v1_keeps_unicode_scalar_values_stable():
+    value = {"text": "世界🙂"}
+    assert canonical_json_v1(value) == '{"text":"世界🙂"}'
+    assert sha256_canonical(value) == sha256_canonical({"text": "世界🙂"})
+
+
 def test_numbers_equal_uses_absolute_relative_tolerance_and_special_values():
     assert numbers_equal(10.0, 10.000001, atol=1e-6)
     assert not numbers_equal(10.0, 10.000002, atol=1e-6)
@@ -66,6 +83,13 @@ def test_numbers_equal_uses_absolute_relative_tolerance_and_special_values():
     assert not numbers_equal(math.nan, math.nan)
     assert numbers_equal(math.inf, math.inf)
     assert not numbers_equal(math.inf, -math.inf)
+
+
+def test_numbers_equal_handles_arbitrarily_large_integers_without_overflow():
+    value = 10**1000
+    assert numbers_equal(value, value)
+    assert numbers_equal(value, value + 1, atol=1.0)
+    assert not numbers_equal(value, value + 2, atol=1.0)
 
 
 def _envelope(status: str = "complete") -> PacketEnvelope:
