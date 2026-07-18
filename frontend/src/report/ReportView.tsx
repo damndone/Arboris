@@ -9,8 +9,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useForest } from "../workbench/ForestContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
-import { buildFactTable, type CitableFact } from "./factTable";
-import { DEFAULT_REPORT_INSTRUCTION, generateReport } from "./reportClient";
+import { buildFactTable, buildFigureFacts, type CitableFact } from "./factTable";
+import {
+  DEFAULT_REPORT_INSTRUCTION,
+  exportReport,
+  generateReport,
+  type ReportFigure,
+} from "./reportClient";
 import { CiteChip, parseCiteSegments } from "./citeMarkup";
 import { renderMarkdown } from "./markdown";
 import { appendAiActivity, makeActivityId } from "../aiActivity/aiActivityLog";
@@ -21,6 +26,8 @@ import {
   saveReportRecord,
   type ReportRecord,
 } from "./reportHistory";
+import { artifactDownloadUrl, fetchRunArtifacts } from "../api";
+import { fetchFigureAiContext } from "../workbench/views/figureAi";
 
 export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const forest = useForest();
@@ -32,15 +39,82 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [reportFigures, setReportFigures] = useState<ReportFigure[]>([]);
+  const [figureContextLoading, setFigureContextLoading] = useState(false);
+  const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
 
   useEffect(() => {
     setHistory(loadReportHistory(historyRoot));
   }, [historyRoot]);
 
+  useEffect(() => {
+    const runId = forest?.activeRunId;
+    if (!runId || !projectRoot) {
+      setReportFigures([]);
+      setFigureContextLoading(false);
+      setFigureInventoryError(null);
+      return;
+    }
+    let cancelled = false;
+    setFigureContextLoading(true);
+    setFigureInventoryError(null);
+    void fetchRunArtifacts(projectRoot, runId)
+      .then(async (response) => {
+        const items = response.groups.flatMap((group) => group.items)
+          .filter((item) => item.artifact_type === "figure");
+        const resolved = await Promise.all(
+          items.map(async (item) => {
+            try {
+              const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
+              return {
+                artifact_id: item.artifact_id,
+                chart_type: context.figure.chart_type,
+                path: context.figure.path,
+                source: context.source,
+              } satisfies ReportFigure;
+            } catch {
+              // The figure remains visible/exportable even when its numeric
+              // source is unavailable; the report packet records that gap.
+              return {
+                artifact_id: item.artifact_id,
+                chart_type: item.artifact_id,
+                source: null,
+              } satisfies ReportFigure;
+            }
+          }),
+        );
+        if (!cancelled) setReportFigures(resolved);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReportFigures([]);
+          setFigureInventoryError(
+            "Unable to load the run figure inventory; report generation is disabled.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setFigureContextLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [forest?.activeRunId, projectRoot]);
+
   const table = useMemo(() => {
     if (!forest || !forest.activeRunId) return null;
     return buildFactTable(forest.forest, forest.activeRunId);
   }, [forest]);
+
+  const figureFacts = useMemo(
+    () => buildFigureFacts(reportFigures, table?.facts.length ?? 0),
+    [reportFigures, table?.facts.length],
+  );
+  const allFacts = useMemo(
+    () => (table ? [...table.facts, ...figureFacts] : []),
+    [figureFacts, table],
+  );
 
   if (!forest || !forest.activeRunId || !table) {
     return (
@@ -50,7 +124,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     );
   }
 
-  const includedFacts = table.facts.filter((fact) => !excludedIds.has(fact.id));
+  const includedFacts = allFacts.filter((fact) => !excludedIds.has(fact.id));
   const jumpToNode = (nodeKey: string) => {
     if (!wb) return;
     wb.dispatch.setView("graph");
@@ -74,6 +148,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         facts: includedFacts,
         scope: table.scope,
         fingerprints: table.fingerprints,
+        figures: reportFigures,
         instruction,
       });
       const record: ReportRecord = {
@@ -83,8 +158,9 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         instruction,
         text: response.text,
         scope: table.scope,
-        facts: table.facts, // FULL snapshot, exclusions included — audit trail
+        facts: allFacts, // FULL snapshot, exclusions included — audit trail
         excluded_fact_ids: [...excludedIds],
+        figures: reportFigures,
       };
       setCurrent(record);
       setHistory(saveReportRecord(historyRoot, record));
@@ -106,8 +182,37 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     }
   }
 
+  async function handleExport(format: "html" | "docx" | "tex" | "pdf-print") {
+    if (!current || !projectRoot) return;
+    if (format === "pdf-print") {
+      window.print();
+      return;
+    }
+    setExporting(true);
+    setError(null);
+    try {
+      const blob = await exportReport({
+        projectRoot,
+        runId: current.scope.run_id,
+        format,
+        markdown: current.text,
+        figures: current.figures ?? reportFigures,
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `workbench-report-${current.scope.run_id}.${format === "tex" ? "zip" : format}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Report export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const viewingFactsById = new Map(
-    (current?.facts ?? table.facts).map((fact) => [fact.id, fact]),
+    (current?.facts ?? allFacts).map((fact) => [fact.id, fact]),
   );
 
   return (
@@ -126,14 +231,40 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         <button
           type="button"
           onClick={handleGenerate}
-          disabled={busy || includedFacts.length === 0}
+          disabled={
+            busy ||
+            figureContextLoading ||
+            figureInventoryError !== null ||
+            includedFacts.length === 0
+          }
         >
-          {busy ? "Generating…" : "Generate report"}
+          {busy ? "Generating…" : figureContextLoading ? "Loading figures…" : "Generate report"}
         </button>
         {current && (
-          <button type="button" onClick={() => setCurrent(null)}>
-            New report
-          </button>
+          <>
+            <button type="button" onClick={() => setCurrent(null)}>
+              New report
+            </button>
+            <label style={{ fontSize: 12 }}>
+              <span className="sr-only">Download report</span>
+              <select
+                aria-label="Download report"
+                disabled={exporting || !projectRoot}
+                defaultValue=""
+                onChange={(event) => {
+                  const value = event.target.value as "html" | "docx" | "tex" | "pdf-print" | "";
+                  if (value) void handleExport(value);
+                  event.target.value = "";
+                }}
+              >
+                <option value="">Download…</option>
+                <option value="html">HTML</option>
+                <option value="docx">Word</option>
+                <option value="tex">LaTeX (.zip)</option>
+                <option value="pdf-print">Print / PDF</option>
+              </select>
+            </label>
+          </>
         )}
       </div>
 
@@ -142,7 +273,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         style={{ fontSize: 12, color: "var(--label-tertiary)", marginBottom: 12 }}
       >
         Scope: run <code>{table.scope.run_id}</code> · {table.scope.node_count} nodes ·{" "}
-        {includedFacts.length} of {table.facts.length} facts included
+        {includedFacts.length} of {allFacts.length} facts included
         {excludedIds.size > 0 && (
           <strong style={{ color: "var(--diff-removed, #b35900)" }}>
             {" "}
@@ -172,11 +303,27 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         </div>
       )}
 
+      {figureInventoryError && (
+        <div
+          role="alert"
+          style={{ fontSize: 13, color: "var(--diff-removed, #b35900)", marginBottom: 12 }}
+        >
+          {figureInventoryError}
+        </div>
+      )}
+
       {current ? (
-        <ReportBody text={current.text} factsById={viewingFactsById} onJump={jumpToNode} />
+        <ReportBody
+          text={current.text}
+          factsById={viewingFactsById}
+          figures={current.figures ?? reportFigures}
+          projectRoot={projectRoot ?? ""}
+          runId={current.scope.run_id}
+          onJump={jumpToNode}
+        />
       ) : (
         <FactTablePreview
-          facts={table.facts}
+          facts={allFacts}
           excludedIds={excludedIds}
           onToggle={toggleFact}
           onJump={jumpToNode}
@@ -192,6 +339,11 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
           if (current?.id === record.id) setCurrent(null);
         }}
       />
+      {figureContextLoading && !current && (
+        <div style={{ fontSize: 11, color: "var(--label-tertiary)" }}>
+          Loading numeric sources for report figures…
+        </div>
+      )}
     </div>
   );
 }
@@ -199,25 +351,56 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
 function ReportBody({
   text,
   factsById,
+  figures,
+  projectRoot,
+  runId,
   onJump,
 }: {
   text: string;
   factsById: Map<string, CitableFact>;
+  figures: ReportFigure[];
+  projectRoot: string;
+  runId: string;
   onJump: (nodeKey: string) => void;
 }) {
   // v1.6.12 (V5): markdown blocks; [[c:ID]] markers become chips inside every
   // plain-text leaf via the renderTextSpan seam (bold/list content included).
-  const renderCiteSpan = (span: string, key: string) => (
-    <span key={key}>
-      {parseCiteSegments(span).map((segment, index) =>
-        segment.type === "text" ? (
-          <span key={index}>{segment.text}</span>
-        ) : (
-          <CiteChip key={index} id={segment.id} fact={factsById.get(segment.id)} onJump={onJump} />
-        ),
-      )}
-    </span>
-  );
+  const figureById = new Map(figures.map((figure) => [figure.artifact_id, figure]));
+  const renderCiteSpan = (span: string, key: string) => {
+    const parts = span.split(/(\[\[fig:[A-Za-z0-9._-]+\]\])/g);
+    return (
+      <span key={key}>
+        {parts.map((part, index) => {
+          const figureMatch = /^\[\[fig:([A-Za-z0-9._-]+)\]\]$/.exec(part);
+          if (figureMatch) {
+            const figure = figureById.get(figureMatch[1]);
+            return figure ? (
+              <img
+                key={index}
+                src={artifactDownloadUrl(projectRoot, runId, figure.artifact_id)}
+                alt={`${figure.chart_type} figure`}
+                data-testid={`report-figure-${figure.artifact_id}`}
+                style={{ display: "block", width: "100%", margin: "10px 0" }}
+              />
+            ) : (
+              <span key={index}>[Figure unavailable: {figureMatch[1]}]</span>
+            );
+          }
+          return (
+            <span key={index}>
+              {parseCiteSegments(part).map((segment, segmentIndex) =>
+                segment.type === "text" ? (
+                  <span key={segmentIndex}>{segment.text}</span>
+                ) : (
+                  <CiteChip key={segmentIndex} id={segment.id} fact={factsById.get(segment.id)} onJump={onJump} />
+                ),
+              )}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
   return (
     <div data-testid="report-body" style={{ fontSize: 13, maxWidth: 860 }}>
       {renderMarkdown(text, renderCiteSpan)}

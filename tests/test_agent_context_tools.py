@@ -103,6 +103,10 @@ def _write_project_run(project_root: Path) -> None:
                     "cautions": [],
                     "info": [],
                 },
+                "run_status": {
+                    "report_render_status": "complete",
+                    "report_available": True,
+                },
                 "narrative_contract": {
                     "constraints": {"causal_language_allowed": False}
                 },
@@ -298,6 +302,8 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     diagnostics = diagnostics_result.output["diagnostics"]
     assert diagnostics["available"] is True
     assert diagnostics["preview_status"] == "complete"
+    assert diagnostics["run_status"]["report_render_status"] == "complete"
+    assert diagnostics["run_status"]["report_available"] is True
     assert diagnostics["trust_label"] == "interpret_with_caution"
     assert diagnostics["trust_counts"] == {
         "blockers": 0,

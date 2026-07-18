@@ -43,6 +43,41 @@ def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     return {"model_id": None, "model_type": None}
 
 
+def _result_contract_summary(run_root: Path) -> dict[str, Any] | None:
+    """Expose persisted OLS contract metadata without deriving legacy fields."""
+    model_dir = run_root / "model_results"
+    if not model_dir.is_dir():
+        return None
+    for path in sorted(model_dir.glob("*.json")):
+        data = read_json(path)
+        if not isinstance(data, dict) or data.get("contract_version") is None:
+            continue
+        if data.get("model") != "ols":
+            continue
+        return {
+            key: data.get(key)
+            for key in (
+                "contract_version",
+                "model",
+                "model_type",
+                "covariance",
+                "covariance_wire",
+                "entity_col",
+                "source_eligible",
+                "stable_result_ids",
+                "candidate_result_ids",
+                "primary_estimand",
+                "dataset_snapshot_fingerprint",
+                "analysis_sample_fingerprint",
+                "point_estimation_fingerprint",
+                "coefficient_schema_fingerprint",
+                "inference_config_fingerprint",
+                "covariance_evidence",
+            )
+        }
+    return None
+
+
 def _lineage(input_files: list[Path]) -> list[dict[str, str]]:
     return [
         {"source": str(path), "artifact_id": f"raw_{Path(path).name}"}
@@ -97,7 +132,30 @@ def _write_manifest(
     requested_model_type: str | None = None,
     model_routing: dict[str, Any] | None = None,
     rerun_of: str | None = None,
+    from_node: str | None = None,
+    rerun_reason: str | None = None,
+    source_lineage: dict[str, Any] | None = None,
+    rerun_from: dict[str, Any] | None = None,
+    source_run_id: str | None = None,
 ) -> None:
+    existing_lineage: dict[str, Any] = {}
+    existing_path = run_root / "run_manifest.json"
+    if existing_path.is_file():
+        try:
+            existing = read_json(existing_path)
+        except (OSError, ValueError, TypeError):
+            existing = None
+        if isinstance(existing, dict):
+            for field in (
+                "rerun_of",
+                "from_node",
+                "rerun_reason",
+                "source_lineage",
+                "rerun_from",
+                "source_run_id",
+            ):
+                if field in existing:
+                    existing_lineage[field] = existing[field]
     payload: dict[str, Any] = {
         "run_id": run_id,
         "mode": mode,
@@ -107,12 +165,25 @@ def _write_manifest(
         "x": list(x),
         "lineage": lineage,
     }
+    payload.update(existing_lineage)
     if requested_model_type is not None:
         payload["requested_model_type"] = requested_model_type
     if model_routing is not None:
         payload["model_routing"] = model_routing
     if rerun_of is not None:
         payload["rerun_of"] = rerun_of
+    for field, value in (
+        ("from_node", from_node),
+        ("rerun_reason", rerun_reason),
+        ("source_lineage", source_lineage),
+        ("rerun_from", rerun_from),
+        ("source_run_id", source_run_id),
+    ):
+        if value is not None:
+            payload[field] = value
+    contract = _result_contract_summary(run_root)
+    if contract is not None:
+        payload["result_contract"] = contract
     write_json(
         run_root / "run_manifest.json",
         payload,

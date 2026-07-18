@@ -2,7 +2,9 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ForestContext } from "../../../workbench/ForestContext";
+import { ProjectRootProvider } from "../../../workbench/ProjectRootContext";
 import { makeOwnerResolutionSeedFixture } from "../../api/nodeOperationContext";
+import { fetchAnalysisLoopPackets, type AnalysisLoopPacketsResponse } from "../../api/analysisLoop";
 import { NodeOperationContextProvider } from "../NodeOperationContextProvider";
 import type { AskAIResponse } from "./askAiClient";
 import { askAiForNode, fetchLlmConfig } from "./askAiClient";
@@ -18,6 +20,10 @@ vi.mock("./askAiClient", () => ({
     context_window_tokens: 1_000_000,
     supports_1m: true,
   }),
+}));
+
+vi.mock("../../api/analysisLoop", () => ({
+  fetchAnalysisLoopPackets: vi.fn(),
 }));
 
 function renderAskAISection(
@@ -41,9 +47,11 @@ function renderAskAISection(
           setActiveRunId: vi.fn(),
         }}
       >
-        <NodeOperationContextProvider node={selectedNode}>
-          <AskAISection node={selectedNode} />
-        </NodeOperationContextProvider>
+        <ProjectRootProvider projectRoot="/p">
+          <NodeOperationContextProvider node={selectedNode}>
+            <AskAISection node={selectedNode} />
+          </NodeOperationContextProvider>
+        </ProjectRootProvider>
       </ForestContext.Provider>
     );
   }
@@ -71,6 +79,7 @@ describe("AskAISection", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_WORKBENCH_ASK_AI", "1");
     vi.mocked(askAiForNode).mockReset();
+    vi.mocked(fetchAnalysisLoopPackets).mockReset();
     vi.mocked(fetchLlmConfig).mockClear();
   });
 
@@ -193,6 +202,87 @@ describe("AskAISection", () => {
     const answer = await screen.findByTestId("ask-ai-answer");
     expect(answer).toHaveTextContent('{"operation":"rerun","owner_run_id":"run_a"}');
     expect(screen.queryByTestId("ask-ai-executable-action")).not.toBeInTheDocument();
+  });
+
+  it("adds backend-owned source and compare facts to a rerun child packet", async () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    vi.mocked(fetchAnalysisLoopPackets).mockResolvedValueOnce({
+      status: "complete",
+      run: {
+        run_id: "run_c",
+        status: "completed",
+        model: "ols",
+        contract_version: "ols_result/v1",
+        covariance: "clustered",
+        covariance_product: "clustered",
+        covariance_wire: "clustered",
+        entity_col: "company_id",
+        stable_result_ids: ["coef:treatment"],
+        primary_estimand: { result_id: "coef:treatment", estimate: 0.41 },
+        analysis_sample: { row_count: 428, row_order: [] },
+        fingerprints: {},
+      },
+      source_run: {
+        run_id: "run_a",
+        status: "completed",
+        model: "ols",
+        contract_version: "ols_result/v1",
+        covariance: "unadjusted",
+        covariance_product: "conventional",
+        covariance_wire: "unadjusted",
+        entity_col: null,
+        stable_result_ids: ["coef:treatment"],
+        primary_estimand: { result_id: "coef:treatment", estimate: 0.42 },
+        analysis_sample: { row_count: 428, row_order: [] },
+        fingerprints: {},
+      },
+      packet: {
+        child_run_id: "run_c",
+        source_run_id: "run_a",
+        plan_diff: { plan_hash: "plan:ols-clustered" },
+        validation_packet: { status: "complete", overall_status: "passed" },
+        compare_packet: {
+          compare_status: "complete",
+          result_diff: { estimate: { before: 0.42, after: 0.41 } },
+          conclusion_diff: { classification: "UNCERTAINTY_INCREASED" },
+        },
+      },
+      children: [],
+    } satisfies AnalysisLoopPacketsResponse);
+    renderAskAISection(seed.activeHeadRunId, (node) => {
+      node.runRerunFrom = {
+        owner_run_id: "run_a",
+        op_node_id: seed.sharedOpNodeId,
+        node_hash: seed.sharedNodeKey,
+        context_fingerprint: "ctx:run-c",
+        rerun_request_id: "req:run-c",
+      };
+
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Ask AI about this node" }),
+    ).toBeDisabled();
+
+    await waitFor(() => {
+      expect(fetchAnalysisLoopPackets).toHaveBeenCalledWith("/p", "run_c");
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Ask AI about this node" }),
+      ).toBeEnabled();
+    });
+    vi.mocked(askAiForNode).mockResolvedValueOnce({ text: "grounded" });
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+
+    await waitFor(() => expect(askAiForNode).toHaveBeenCalledTimes(1));
+    const packet = vi.mocked(askAiForNode).mock.calls[0][0] as Record<string, any>;
+    expect(packet.analysis_loop.source_run.primary_estimand.estimate).toBe(0.42);
+    expect(packet.analysis_loop.run.primary_estimand.estimate).toBe(0.41);
+    expect(packet.analysis_loop.packet.compare_packet.result_diff).toEqual({
+      estimate: { before: 0.42, after: 0.41 },
+    });
+    expect(packet.node_summary.params).not.toEqual({ covariance: "clustered" });
   });
 
   it("shows resolver failure and omits packet preview when context cannot resolve", async () => {

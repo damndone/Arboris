@@ -236,6 +236,7 @@ def _check_dropped_variables(
     issue_dicts: list[dict[str, Any]],
     run_root: Path,
     categorical_vars: set[str] | None = None,
+    model_declared_variables: set[str] | None = None,
 ) -> list[dict[str, str]]:
     """Check for user-specified X variables dropped from the model silently.
 
@@ -244,6 +245,8 @@ def _check_dropped_variables(
     """
     if categorical_vars is None:
         categorical_vars = set()
+    if model_declared_variables is None:
+        model_declared_variables = set()
 
     if not model_results:
         return []
@@ -266,6 +269,12 @@ def _check_dropped_variables(
 
     dropped: list[dict[str, str]] = []
     for var in x_vars:
+        # Some estimators (CS/SA/DCDH) expose a compact ATT result whose
+        # coefficient table intentionally does not contain each covariate.
+        # Their own structured metadata is authoritative; absence from the
+        # headline coefficient table is not evidence that a covariate dropped.
+        if var in model_declared_variables:
+            continue
         if _in_coefficients(var):
             continue
         if var not in frame.columns or frame[var].isna().all():

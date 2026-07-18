@@ -54,6 +54,7 @@
     "time_trend": []
   },
   "error_codes": [
+    "DID_DYNAMIC_THIN_SUPPORT",
     "PANEL_POOLED_MODEL",
     "VARIABLE_DROPPED"
   ],

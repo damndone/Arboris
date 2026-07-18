@@ -48,6 +48,12 @@ from ..llm.provider_store import (
     ProviderStoreInvalidError,
     ProviderStoreUnavailableError,
 )
+from ..report_contract import (
+    ReportContractError,
+    ReportPacketContract,
+    validate_report_packet,
+    validate_report_response,
+)
 
 
 
@@ -142,11 +148,14 @@ def _public_config_base_url(config) -> str | None:
 # deterministic fact_table built client-side from the lineage contexts; the
 # model may only reference numbers through [[c:ID]] markers, and the client
 # renders every marker from ITS OWN table (never from model output), so a
-# hallucinated number cannot become a chip.
+# hallucinated number cannot become a chip. Figures use the same boundary:
+# the model receives numeric source context and emits only figure markers; the
+# serving/export layers resolve those markers to the run-owned artifacts.
 _REPORT_PROMPT_HEADER = (
     "You are the report writer of a local econometrics workbench. The JSON "
     "packet below contains a fact_table: the ONLY numbers you may use. Each "
-    "fact has an id.\n"
+    "fact has an id. It may also contain a figures list. Each figure has an "
+    "artifact_id and a numeric source summary.\n"
     "Hard rules (non-negotiable):\n"
     "- Write a structured empirical report in Markdown with these sections: "
     "Title (# heading), Data, Methods, Results, Limitations.\n"
@@ -156,8 +165,23 @@ _REPORT_PROMPT_HEADER = (
     "- Never invent, round differently, or combine numbers not present in "
     "the fact_table. If something is missing, name the gap in Limitations "
     "instead of guessing.\n"
+    "- Use only the supplied figures. Include every supplied figure exactly "
+    "once in the Markdown and reference it with the exact marker "
+    "[[fig:artifact_id]]. "
+    "Never invent an artifact_id, never use a pixel-level claim, and do not "
+    "replace a figure marker with a data URI or an image. If a figure's "
+    "source is missing, "
+    "say so instead of guessing.\n"
     "- Advisory text only: no executable actions, no code, no backend payloads.\n"
     "- Write in the language of the user's instruction."
+)
+
+_REPORT_CORRECTION_PROMPT = (
+    "Your previous report response violated the Workbench report contract. "
+    "Rewrite the complete report in Markdown. Fix every listed violation, "
+    "preserve the supplied evidence boundary, and include each supplied figure "
+    "marker exactly once. Do not explain the correction; return only the report. "
+    "Violations: "
 )
 
 _SYSTEM_PROMPT_HEADER = (
@@ -773,14 +797,66 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
             message="Question must not be blank",
         )
 
+    report_contract: ReportPacketContract | None = None
+    if request.mode == REPORT_MODE:
+        try:
+            report_contract = validate_report_packet(request.packet)
+        except ReportContractError as exc:
+            raise WorkbenchAPIError(
+                status_code=422,
+                code="LLM_REPORT_PACKET_INVALID",
+                message=str(exc),
+                details={"violations": list(exc.violations)},
+            ) from exc
+
     config = load_llm_config()
     _validate_image_optin(request, config)
     messages = [
         {"role": "system", "content": _build_system_prompt(request)},
         {"role": "user", "content": _build_user_content(request)},
     ]
+    result = _chat_or_api_error(messages, config)
+    text = result["text"]
+    if report_contract is not None:
+        try:
+            text = validate_report_response(text, report_contract)
+        except ReportContractError as first_error:
+            retry_messages = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": _REPORT_CORRECTION_PROMPT
+                    + "; ".join(first_error.violations)[:1_000],
+                },
+            ]
+            retry_result = _chat_or_api_error(retry_messages, config)
+            try:
+                text = validate_report_response(retry_result["text"], report_contract)
+            except ReportContractError as second_error:
+                raise WorkbenchAPIError(
+                    status_code=502,
+                    code="LLM_RESPONSE_CONTRACT_INVALID",
+                    message=(
+                        "The LLM returned a report that did not satisfy the "
+                        "Workbench evidence and figure contract after one retry."
+                    ),
+                    details={
+                        "retry_attempted": True,
+                        "violations": list(second_error.violations),
+                    },
+                ) from second_error
+            result = retry_result
+
+    return {
+        "text": text,
+        "model": result["model"],
+        "context_fingerprint": request.packet.get("context_fingerprint"),
+    }
+
+
+def _chat_or_api_error(messages: list[dict[str, Any]], config) -> dict[str, Any]:
     try:
-        result = chat_completion(messages, config)
+        return chat_completion(messages, config)
     except LLMNotConfiguredError as exc:
         raise WorkbenchAPIError(
             status_code=503, code="LLM_NOT_CONFIGURED", message=str(exc)
@@ -792,12 +868,6 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
             message=str(exc),
             details={"upstream_status": exc.upstream_status},
         ) from exc
-
-    return {
-        "text": result["text"],
-        "model": result["model"],
-        "context_fingerprint": request.packet.get("context_fingerprint"),
-    }
 
 
 def _validate_image_optin(request: AskAIChatRequest, config) -> None:

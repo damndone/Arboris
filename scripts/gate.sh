@@ -4,6 +4,8 @@ set -uo pipefail
 
 fail=0
 mode="full"
+PYTHON=""
+python_resolution_attempted=0
 
 usage() {
   cat <<'EOF'
@@ -51,12 +53,64 @@ run_stage() {
   "$@" || fail=1
 }
 
+resolve_pytest_python() {
+  local common_git_dir=""
+  local common_python=""
+  local candidate
+  local -a candidates=()
+
+  if [ -n "$PYTHON" ]; then
+    return 0
+  fi
+  if [ "$python_resolution_attempted" -eq 1 ]; then
+    return 1
+  fi
+  python_resolution_attempted=1
+
+  if [ -n "${WORKBENCH_PYTHON:-}" ]; then
+    candidates+=("$WORKBENCH_PYTHON")
+  fi
+  candidates+=("$PWD/.venv/bin/python")
+
+  if common_git_dir="$(git rev-parse --git-common-dir 2>/dev/null)" \
+    && [ -n "$common_git_dir" ]; then
+    case "$common_git_dir" in
+      /*) ;;
+      *) common_git_dir="$PWD/$common_git_dir" ;;
+    esac
+    common_python="$(dirname "$common_git_dir")/.venv/bin/python"
+    if [ "$common_python" != "$PWD/.venv/bin/python" ]; then
+      candidates+=("$common_python")
+    fi
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+      && "$candidate" -c 'import pytest' >/dev/null 2>&1; then
+      PYTHON="$candidate"
+      return 0
+    fi
+  done
+
+  printf '\nERROR: No pytest-capable Python interpreter found.\n' >&2
+  printf 'Checked candidates (in order):\n' >&2
+  for candidate in "${candidates[@]}"; do
+    printf '  - %s\n' "$candidate" >&2
+  done
+  return 1
+}
+
+run_pytest() {
+  resolve_pytest_python || return 1
+  "$PYTHON" -m pytest "$@"
+}
+
 run_backend_full() {
-  .venv/bin/python -m pytest -q
+  run_pytest -q
 }
 
 run_golden() {
-  .venv/bin/python -m pytest \
+  run_pytest \
     tests/test_engine_golden.py \
     tests/test_lineage_invariants.py \
     tests/test_behavior_snapshot.py \
@@ -81,11 +135,11 @@ run_gate_syntax() {
 }
 
 run_gate_script_tests() {
-  .venv/bin/python -m pytest tests/test_gate_script.py -q
+  run_pytest tests/test_gate_script.py -q
 }
 
 run_backend_agent_llm() {
-  .venv/bin/python -m pytest -q \
+  run_pytest -q \
     tests/test_agent_*.py \
     tests/test_llm_*.py \
     tests/test_rerun_service.py \

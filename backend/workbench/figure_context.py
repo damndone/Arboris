@@ -34,6 +34,8 @@ _FIGURE_SPECS: dict[str, dict[str, str]] = {
     "coef_plot": {"chart_type": "coefficient (forest) plot with confidence intervals", "reads": "model"},
     "residuals_fitted": {"chart_type": "residuals-vs-fitted diagnostic scatter", "reads": "diagnostics"},
     "qq_residuals": {"chart_type": "normal Q-Q plot of residuals", "reads": "diagnostics"},
+    "event_study": {"chart_type": "event-study dynamic effects with confidence bands", "reads": "event_study"},
+    "time_trend": {"chart_type": "time trend of numeric variables", "reads": "time_trend"},
 }
 
 
@@ -76,6 +78,19 @@ def _resolve_source_artifact(records: list[dict[str, Any]], reads: str) -> dict[
             ),
             None,
         )
+    if reads == "event_study":
+        # CS/SA/DCDH store the numeric event-study source in their model-level
+        # JSON artifact; TWFE stores the same shape in did_diagnostics.json.
+        return next(
+            (
+                r
+                for r in records
+                if r.get("artifact_id") in {"cs_did", "sa_did", "dcdh", "did_diagnostics"}
+            ),
+            None,
+        )
+    if reads == "time_trend":
+        return by_id("cleaned_dataset")
     return None
 
 
@@ -84,6 +99,74 @@ def _bounded_preview(payload: Any) -> tuple[str, bool]:
     if len(text) <= MAX_SOURCE_PREVIEW_CHARS:
         return text, False
     return text[:MAX_SOURCE_PREVIEW_CHARS], True
+
+
+def _event_study_payload(payload: Any) -> Any:
+    """Select only the numeric series that produced the event-study figure."""
+
+    if not isinstance(payload, dict):
+        return payload
+    dynamic = payload.get("aggregations", {}).get("dynamic")
+    if isinstance(dynamic, dict):
+        return {
+            key: dynamic.get(key)
+            for key in (
+                "label_kind", "event_time", "label", "estimate", "se",
+                "pointwise_ci", "uniform_band", "uniform_crit",
+            )
+            if key in dynamic
+        }
+    event_study = payload.get("event_study")
+    if isinstance(event_study, dict):
+        return event_study
+    return payload
+
+
+def _time_trend_payload(run_root: Path, source_record: dict[str, Any]) -> Any | None:
+    """Reconstruct the numeric series used by ``visualization._plot_time_trend``.
+
+    This is intentionally serve-time decoration: the immutable artifact index and
+    the visualization output remain untouched. The chart plots each numeric column
+    against the configured time column, so the cleaned parquet is the authoritative
+    source rather than a lossy image or a guessed summary statistic.
+    """
+
+    source_path = (run_root / str(source_record.get("path"))).resolve()
+    try:
+        source_path.relative_to(run_root.resolve())
+    except ValueError as exc:
+        raise FigureContextError("time-trend source escapes run root") from exc
+    if not source_path.is_file():
+        return None
+    try:
+        import pandas as pd
+
+        frame = pd.read_parquet(source_path)
+        run_inputs = read_json(run_root / "run_inputs.json")
+        form = run_inputs.get("form") if isinstance(run_inputs, dict) else {}
+        time_column = str((form or {}).get("time_col") or "").strip()
+        if not time_column or time_column not in frame.columns:
+            return None
+        columns = [
+            str(column)
+            for column in frame.select_dtypes(include="number").columns
+            if str(column) != time_column
+        ]
+        if not columns:
+            return None
+        # Bound rows before serialising; preserve the same sorted order as the
+        # plotting function and let the common preview bound handle large payloads.
+        preview_frame = frame[[time_column, *columns]].sort_values(time_column).head(400)
+        rows = json.loads(preview_frame.to_json(orient="records", date_format="iso"))
+        return {
+            "time_column": time_column,
+            "series": columns,
+            "rows": rows,
+            "row_count_preview": len(rows),
+            "row_count_total": int(len(frame)),
+        }
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
 
 
 def resolve_figure_ai_context(
@@ -124,8 +207,15 @@ def resolve_figure_ai_context(
             source_path.relative_to(run_root.resolve())
         except ValueError as exc:
             raise FigureContextError("source artifact escapes run root") from exc
-        if source_path.is_file() and source_path.suffix.lower() == ".json":
-            preview, truncated = _bounded_preview(read_json(source_path))
+        source_payload: Any | None = None
+        if reads == "event_study" and source_path.is_file() and source_path.suffix.lower() == ".json":
+            source_payload = _event_study_payload(read_json(source_path))
+        elif reads == "time_trend":
+            source_payload = _time_trend_payload(run_root, source_record)
+        elif source_path.is_file() and source_path.suffix.lower() == ".json":
+            source_payload = read_json(source_path)
+        if source_payload is not None:
+            preview, truncated = _bounded_preview(source_payload)
             source = {
                 "artifact_id": source_record.get("artifact_id"),
                 "path": source_record.get("path"),

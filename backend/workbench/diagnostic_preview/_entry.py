@@ -88,6 +88,9 @@ def _complete_or_partial_preview(
     label = trust_label_for_status(status)
     identity = model_identity(summary, manifest, model_results)
     all_issues = [*blockers, *warnings, *cautions]
+    persisted_status = summary.get("run_status")
+    if not isinstance(persisted_status, dict):
+        persisted_status = {}
     preview = {
         "available": True,
         "preview_contract_version": PREVIEW_CONTRACT_VERSION,
@@ -104,6 +107,8 @@ def _complete_or_partial_preview(
             "has_warnings": counts["warnings"] > 0,
             "has_cautions": counts["cautions"] > 0,
             "model_results_available": has_results,
+            "report_render_status": persisted_status.get("report_render_status", "unknown"),
+            "report_available": bool(persisted_status.get("report_available", False)),
         },
         "trust_label": label,
         "trust_counts": counts,

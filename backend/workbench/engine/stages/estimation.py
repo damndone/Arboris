@@ -170,6 +170,7 @@ def _fit_cs_did(ctx, env):
         anticipation=int(ctx.artifacts.get("_cs_anticipation") or 0),
         cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,
         honest_did=ctx.artifacts.get("_honest_did", False),
+        progress=lambda message: env.progress("honest_did", message),
     )
     ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
     simple = result["aggregations"]["simple"]
@@ -206,6 +207,7 @@ def _fit_sa_did(ctx, env):
         norm,
         cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,   # reuse the CS cluster channel
         honest_did=ctx.artifacts.get("_honest_did", False),
+        progress=lambda message: env.progress("honest_did", message),
     )
     ctx.artifacts["_sa_did_result"] = result
     simple = result["aggregations"]["simple"]
@@ -280,6 +282,13 @@ def _ols_covariance_plan(ctx) -> tuple[bool, str | None]:
 
 def _fit_ols(ctx, env):
     robust, cluster_col = _ols_covariance_plan(ctx)
+    from ...lineage.run_inputs import read_run_inputs
+
+    try:
+        persisted_form = (read_run_inputs(env.run_root).get("form") or {})
+    except (FileNotFoundError, OSError, ValueError):
+        persisted_form = {}
+    requested_covariance = (ctx.artifacts.get("_covariance") or "").strip() or "robust"
     primary, fitted = _orch().run_ols(
         ctx.data.frame,
         y=ctx.artifacts["_normalized_y"],
@@ -288,8 +297,57 @@ def _fit_ols(ctx, env):
         model_id="ols_1",
         categorical_x=ctx.artifacts.get("_categorical_vars"),
         cluster_col=cluster_col,
+        covariance=requested_covariance,
+        covariance_explicit=bool((ctx.artifacts.get("_covariance") or "").strip()),
+        dataset_snapshot={
+            "upload_sha256": ctx.artifacts.get("_upload_hash", ""),
+            "model_input_artifact": ctx.data.artifact_id,
+        },
+        row_ids=[str(value) for value in ctx.data.frame.index],
+        focal_x=persisted_form.get("focal_x"),
+        primary_estimand=persisted_form.get("primary_estimand"),
     )
     return "ols_1", primary, fitted
+
+
+def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
+    """Append terminal OLS evidence while leaving executable payload immutable."""
+    from ...lineage.run_inputs import update_run_inputs_metadata
+
+    if not (run_root / "run_inputs.json").is_file():
+        return
+    fingerprint_fields = (
+        "dataset_snapshot_fingerprint",
+        "analysis_sample_fingerprint",
+        "point_estimation_fingerprint",
+        "coefficient_schema_fingerprint",
+        "inference_config_fingerprint",
+    )
+    update_run_inputs_metadata(
+        run_root,
+        executed_payload={
+            "model_type": "ols",
+            "covariance": result.get("covariance_wire"),
+            "entity_col": result.get("entity_col"),
+            "y": result.get("y_column"),
+            "x": result.get("x_columns", []),
+        },
+        contract_metadata={
+            "contract_version": result.get("contract_version"),
+            "model": result.get("model"),
+            "model_type": result.get("model_type"),
+            "covariance": result.get("covariance_wire"),
+            "entity_col": result.get("entity_col"),
+            "stable_result_ids": result.get("stable_result_ids", []),
+            "candidate_result_ids": result.get("candidate_result_ids", []),
+            "primary_estimand": result.get("primary_estimand"),
+            "fingerprints": {
+                field: result.get(field)
+                for field in fingerprint_fields
+            },
+            "covariance_evidence": result.get("covariance_evidence", {}),
+        },
+    )
 
 
 # ---- core pack registration (dogfood the registry) ----
@@ -455,6 +513,8 @@ class EstimationStage:
             handler = resolve(resolve_ctx)
             model_id, primary, fitted = handler.fit(ctx, env)
             _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            if model_id == "ols_1":
+                _persist_ols_contract_metadata(run_root, primary)
             model_results.append((model_id, primary))
             if fitted is not None:
                 fitted_models[model_id] = fitted
@@ -567,6 +627,7 @@ class EstimationStage:
 
             _robust_se_dp = _ols_robust_se_decision(ctx)
             _write_model_result(run_root, "ols_1", ols_result, inputs=model_input_ids)
+            _persist_ols_contract_metadata(run_root, ols_result)
             model_results.append(("ols_1", ols_result))
             fitted_models["ols_1"] = ols_fitted
             ctx.y_type = "continuous"

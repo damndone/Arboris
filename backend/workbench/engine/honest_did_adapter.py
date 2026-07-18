@@ -30,6 +30,10 @@ BOTH tracks read. The adapter NEVER throws: a shape mismatch returns
 """
 from __future__ import annotations
 
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
+
 import numpy as np
 
 from .honest_did import honest_rm, honest_sd, HonestDiDError
@@ -45,13 +49,49 @@ def _na(reason: str) -> dict:
     return {"status": "not_available", "reason": reason}
 
 
-def _run_track(fn, *, betahat, sigma, num_pre, num_post, et, extra, **kw) -> dict:
+def _run_track_target_in_process(
+    fn_name: str,
+    betahat: np.ndarray,
+    sigma: np.ndarray,
+    num_pre: int,
+    num_post: int,
+    l_vec: np.ndarray,
+    kw: dict,
+) -> tuple[dict, list[str]]:
+    """Run one pure honest-DID target in a worker process.
+
+    The optimization routines spend their time in repeated LP/SLSQP calls. A
+    process boundary avoids the Python GIL that made a thread fan-out measure
+    no faster on the real fixture. Progress is collected as plain strings and
+    replayed by the parent, so worker processes never touch run files or the
+    event manager.
+    """
+    fn = {"honest_rm": honest_rm, "honest_sd": honest_sd}[fn_name]
+    messages: list[str] = []
+    result = fn(
+        betahat=betahat,
+        sigma=sigma,
+        num_pre=num_pre,
+        num_post=num_post,
+        l_vec=l_vec,
+        progress=messages.append,
+        **kw,
+    )
+    return result, messages
+
+
+def _run_track(
+    fn, *, betahat, sigma, num_pre, num_post, et, extra, progress=None,
+    workers=1, **kw
+) -> dict:
     """Run one honest-DID track for the post-average and each post event-time.
 
     Returns ``{status:"ok", ...}`` on success, ``{status:"not_available", ...}``
     on ``HonestDiDError``. Both ``num_pre``/``num_post`` are always echoed.
     """
     try:
+        if progress is not None:
+            progress("post-average")
         # Let the engine raise its clean HONEST_NO_PRE/POST_PERIODS guard BEFORE we
         # build the averaging weights (1/num_post would ZeroDivisionError on an
         # empty-post snapshot, escaping the narrow `except HonestDiDError`).
@@ -59,15 +99,99 @@ def _run_track(fn, *, betahat, sigma, num_pre, num_post, et, extra, **kw) -> dic
             fn(betahat=betahat, sigma=sigma, num_pre=num_pre,
                num_post=num_post, l_vec=np.zeros(max(num_post, 0)), **kw)
         l_avg = np.full(num_post, 1.0 / num_post)
-        avg = fn(betahat=betahat, sigma=sigma, num_pre=num_pre,
-                 num_post=num_post, l_vec=l_avg, **kw)
-        per_event = []
+        targets = [("post-average", l_avg)]
         for j in range(num_post):
             lv = np.zeros(num_post)
             lv[j] = 1.0
-            r = fn(betahat=betahat, sigma=sigma, num_pre=num_pre,
-                   num_post=num_post, l_vec=lv, **kw)
-            per_event.append({"event_time": et[num_pre + j], **r})
+            targets.append((f"event_time={et[num_pre + j]:g}", lv))
+
+        def _run_target(target):
+            label, l_vec = target
+            if progress is not None:
+                progress(label)
+            return fn(
+                betahat=betahat,
+                sigma=sigma,
+                num_pre=num_pre,
+                num_post=num_post,
+                l_vec=l_vec,
+                progress=progress,
+                **kw,
+            )
+
+        # The expensive honest-DID work is a collection of independent LP/SLSQP
+        # paths (post average + one path per post event time). A thread fan-out
+        # does not help reliably because the Python-side orchestration around
+        # scipy remains serialized by the GIL, so use bounded stdlib worker
+        # processes. Futures are stored back in target order; progress events may
+        # arrive by target completion, but every M heartbeat remains durable and
+        # carries its own track/value.
+        worker_count = max(1, min(int(workers), len(targets)))
+        if worker_count == 1:
+            outputs = [_run_target(target) for target in targets]
+        else:
+            try:
+                ctx = mp.get_context("spawn")
+                with ProcessPoolExecutor(max_workers=worker_count, mp_context=ctx) as executor:
+                    grid_name = "mbar_grid" if fn.__name__ == "honest_rm" else "m_grid"
+                    grid_values = list(kw[grid_name])
+                    futures = {
+                        executor.submit(
+                            _run_track_target_in_process,
+                            fn.__name__,
+                            betahat,
+                            sigma,
+                            num_pre,
+                            num_post,
+                            target[1],
+                            {**kw, grid_name: [grid_value]},
+                        ): (target_index, grid_index)
+                        for target_index, target in enumerate(targets)
+                        for grid_index, grid_value in enumerate(grid_values)
+                    }
+                    collected: dict[int, list[tuple[int, dict]]] = {
+                        index: [] for index in range(len(targets))
+                    }
+                    for future in as_completed(futures):
+                        target_index, grid_index = futures[future]
+                        result, messages = future.result()
+                        if progress is not None:
+                            for message in messages:
+                                progress(message)
+                        collected[target_index].append((grid_index, result))
+                outputs = []
+                for target_index in range(len(targets)):
+                    pieces = [
+                        result for _, result in sorted(
+                            collected[target_index], key=lambda pair: pair[0]
+                        )
+                    ]
+                    rows = [
+                        row
+                        for piece in pieces
+                        for row in piece.get("results", [])
+                    ]
+                    breakdowns = [
+                        piece.get("breakdown")
+                        for piece in pieces
+                        if piece.get("breakdown") is not None
+                    ]
+                    outputs.append({
+                        "results": rows,
+                        "breakdown": max(breakdowns) if breakdowns else None,
+                    })
+            except (OSError, BrokenProcessPool):
+                # A restricted embedding (for example an interactive runner
+                # without an importable __main__) may reject process spawning.
+                # The pure serial path remains correct and keeps the run usable;
+                # production uvicorn/CLI paths use the process fan-out.
+                outputs = [_run_target(target) for target in targets]
+
+        avg = outputs[0]
+        per_event = [
+            {"event_time": et[num_pre + j], **outputs[j + 1]}
+            for j in range(num_post)
+        ]
         return {"status": "ok", "reason": None,
                 "num_pre": num_pre, "num_post": num_post,
                 **extra, "post_average": avg, "per_event_time": per_event}
@@ -81,7 +205,8 @@ def _run_track(fn, *, betahat, sigma, num_pre, num_post, et, extra, **kw) -> dic
 
 def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total, mbar_grid,
                                alpha=0.05, grid_points=1000, m_mult=None,
-                               scale_floor=HONEST_SD_SCALE_FLOOR) -> dict:
+                               scale_floor=HONEST_SD_SCALE_FLOOR, progress=None,
+                               workers=1) -> dict:
     """Run BOTH honest-DID tracks from one CS dynamic aggregation snapshot.
 
     Returns a JSON-safe NESTED block ``{"rm": ..., "sd": ..., "_debug_*": ...}``.
@@ -129,6 +254,8 @@ def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total, mbar_grid,
         honest_rm, betahat=betahat, sigma=sigma, num_pre=num_pre,
         num_post=num_post, et=et,
         extra={"mbar_grid": list(map(float, mbar_grid))},
+        progress=progress,
+        workers=workers,
         mbar_grid=mbar_grid, alpha=alpha, grid_points=grid_points,
     )
 
@@ -143,6 +270,8 @@ def honest_did_from_cs_dynamic(agg_dynamic, *, row_cluster, n_total, mbar_grid,
         honest_sd, betahat=betahat, sigma=sigma, num_pre=num_pre,
         num_post=num_post, et=et,
         extra={"method": "FLCI", "m_grid": m_grid, "scale": scale},
+        progress=progress,
+        workers=workers,
         m_grid=m_grid, alpha=alpha,
     )
 

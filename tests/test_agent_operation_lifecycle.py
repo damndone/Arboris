@@ -138,6 +138,68 @@ def test_generic_lifecycle_dispatches_by_registry_hook_and_persists_effect(
     assert handler.execute_calls == 1
 
 
+def test_async_effect_stays_nonterminal_until_reconcile(
+    tmp_path: Path,
+) -> None:
+    """A submitted child is not a failed effect or a completed projection."""
+
+    from workbench.agent.execution import (
+        OperationEffect,
+        WorkbenchOperationLifecycle,
+    )
+    from workbench.agent.operations import OperationRegistry
+
+    class Handler:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.reconcile_calls = 0
+
+        async def execute(self, record, *, execution_key, failpoint):
+            self.execute_calls += 1
+            return OperationEffect(
+                outputs={"status": "running", "target_run_id": "run-child-async"},
+                bindings={"child_run_id": "run-child-async"},
+                status="running",
+            )
+
+        async def reconcile(self, record, *, execution_key, failpoint):
+            self.reconcile_calls += 1
+            return OperationEffect(
+                outputs={"status": "completed", "target_run_id": "run-child-async"},
+                bindings=dict(record.execution["bindings"]),
+                status="completed",
+                verification={"passed": True},
+            )
+
+    store = OperationRecordStore(tmp_path)
+    record = store.create_pending(_confirmation())
+    handler = Handler()
+    lifecycle = WorkbenchOperationLifecycle(
+        operation_store=store,
+        operation_registry=OperationRegistry(),
+        handlers={"model.rerun": handler},
+        lease_owner="test-worker",
+    )
+
+    submitted = asyncio.run(lifecycle.execute(record.record_id))
+
+    assert submitted.status == "running"
+    assert submitted.effect_status == "pending"
+    assert submitted.projection_status == "pending"
+    assert submitted.error is None
+    assert handler.execute_calls == 1
+    assert handler.reconcile_calls == 0
+
+    completed = asyncio.run(lifecycle.execute(record.record_id))
+
+    assert completed.status == "completed"
+    assert completed.effect_status == "committed"
+    assert completed.projection_status == "complete"
+    assert completed.verification["passed"] is True
+    assert handler.execute_calls == 1
+    assert handler.reconcile_calls == 1
+
+
 def test_generic_lifecycle_commits_domain_state_before_terminalizing(
     tmp_path: Path,
 ) -> None:

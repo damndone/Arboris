@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   updateLlmProvider: vi.fn(),
   lineageModel: { current: { nodes: [] } as Record<string, unknown> },
   workbenchState: { selectedKey: null as string | null },
+  forest: { current: null as unknown },
 }));
 
 vi.mock("./agentApi", () => ({
@@ -50,7 +51,7 @@ vi.mock("../../llm/llmApi", () => ({
 vi.mock("../../lineage/LineageContext", () => ({
   useLineage: () => ({ model: mocks.lineageModel.current, selectedKey: null, select: vi.fn() }),
 }));
-vi.mock("../ForestContext", () => ({ useForest: () => null }));
+vi.mock("../ForestContext", () => ({ useForest: () => mocks.forest.current }));
 vi.mock("../WorkbenchStateProvider", () => ({
   useWorkbench: () => ({ state: mocks.workbenchState }),
 }));
@@ -139,6 +140,7 @@ describe("AgentSurfaceProvider", () => {
     vi.clearAllMocks();
     mocks.lineageModel.current = { nodes: [] };
     mocks.workbenchState.selectedKey = null;
+    mocks.forest.current = null;
     mocks.fetchLlmProviders.mockResolvedValue({ active_provider_id: provider.id, providers: [provider] });
     mocks.fetchLlmConfig.mockResolvedValue(config);
     mocks.getAgentEvents.mockResolvedValue({ events: [] });
@@ -202,6 +204,66 @@ describe("AgentSurfaceProvider", () => {
       context_packet: expect.objectContaining({ packet_version: "agent-context/v1" }),
     })));
     await waitFor(() => expect(screen.getByText("已检查 active head。")).toBeInTheDocument());
+  });
+
+  it("binds a run-rail focus to the active model node instead of sending a run pseudo-key", async () => {
+    mocks.workbenchState.selectedKey = "run:run-a";
+    const modelNode = {
+      id: "node-hash-a",
+      nodeKey: "node-hash-a",
+      opNodeId: "model:ols_1",
+      nodeHash: "node-hash-a",
+      raw: null,
+      stage: "model",
+      kind: "model",
+      title: "OLS",
+      parentStageId: null,
+      trust: "ok",
+      decisions: [],
+      runs: ["run-a"],
+    };
+    mocks.forest.current = {
+      forest: {
+        schemaVersion: 4,
+        legacy: false,
+        nodes: [modelNode],
+        edges: [],
+        heads: [{
+          runId: "run-a",
+          headNodeHash: "node-hash-a",
+          fromNode: null,
+          rerunOf: null,
+          rerunReason: null,
+          status: "completed",
+          createdAt: "2026-07-18T00:00:00Z",
+        }],
+        familyCount: 1,
+        familyRunCount: 1,
+      },
+      activeRunId: "run-a",
+      setActiveRunId: vi.fn(),
+    };
+
+    mount();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
+      target: { value: "检查当前模型" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      "/proj",
+      expect.objectContaining({
+        context_packet: expect.objectContaining({
+          selection: expect.objectContaining({
+            forest_node_key: "node-hash-a",
+          }),
+          operation_target: expect.objectContaining({
+            owner_run_id: "run-a",
+            op_node_id: "model:ols_1",
+          }),
+        }),
+      }),
+    ));
   });
 
   it("hydrates a durable session after reload", async () => {

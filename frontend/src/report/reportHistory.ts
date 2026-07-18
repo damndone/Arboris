@@ -6,6 +6,7 @@
 // and each record keeps what was excluded — a curated report is auditable
 // against the facts its author chose to leave out.
 import type { CitableFact, ReportScope } from "./factTable";
+import type { ReportFigure } from "./reportClient";
 
 export interface ReportRecord {
   id: string;
@@ -18,6 +19,8 @@ export interface ReportRecord {
   facts: CitableFact[];
   /** Fact ids the user excluded; disclosed in the UI, kept for audit. */
   excluded_fact_ids: string[];
+  /** Figure metadata used by [[fig:artifact_id]] markers in the report. */
+  figures?: ReportFigure[];
 }
 
 const MAX_RECORDS = 20;

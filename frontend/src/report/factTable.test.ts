@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
-import { buildFactTable } from "./factTable";
+import { buildFactTable, buildFigureFacts } from "./factTable";
 
 function fixtureWithValues() {
   const seed = makeOwnerResolutionSeedFixture();
@@ -75,5 +75,45 @@ describe("buildFactTable", () => {
     expect(facts.map((f) => f.field)).toEqual(["param:formula"]);
     // run_a's path excludes run_c-only nodes (the report node)
     expect(scope.node_keys).not.toContain("hash_report_c");
+  });
+});
+
+describe("buildFigureFacts", () => {
+  it("extracts bounded numeric leaves with figure provenance", () => {
+    const facts = buildFigureFacts(
+      [
+        {
+          artifact_id: "event_study",
+          chart_type: "event study",
+          source: {
+            preview_json: JSON.stringify({
+              event_time: [-2, 0],
+              estimate: [0.12, 2.001],
+              se: [0.1, 0.3],
+            }),
+            preview_truncated: false,
+          },
+        },
+      ],
+      3,
+    );
+
+    expect(facts.map((fact) => fact.id)).toEqual(["c4", "c5", "c6", "c7", "c8", "c9"]);
+    expect(facts.find((fact) => fact.field.endsWith("estimate[1]"))?.value).toBe(2.001);
+    expect(facts[0].node_key).toBe("figure:event_study");
+  });
+
+  it("records truncation without inventing values and ignores malformed source", () => {
+    const facts = buildFigureFacts([
+      {
+        artifact_id: "time_trend",
+        chart_type: "time trend",
+        source: { preview_json: "{not-json", preview_truncated: true },
+      },
+    ]);
+
+    expect(facts).toHaveLength(1);
+    expect(facts[0].field).toBe("figure:time_trend:preview_truncated");
+    expect(facts[0].value).toBe(true);
   });
 });

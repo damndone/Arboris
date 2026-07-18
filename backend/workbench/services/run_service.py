@@ -17,6 +17,7 @@ Extracted from ``api.py`` in v1.6.10 (D1 decomposition, Phase 3).
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,6 +26,7 @@ from fastapi import HTTPException, UploadFile
 from ..artifacts import write_json
 from ..config import load_config
 from ..domain import GuardrailIssue, Severity
+from ..engine.context import RunInterruptionRequested
 from ..events import get_event_manager
 from ..lineage.hashing import dag_hash, override_hash
 from ..lineage.role_layer import canonicalize_focal_x
@@ -181,6 +183,43 @@ def _submit_run(
     sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
     run = create_run(root, mode=form.get("mode", "auto"))
 
+    model_type = form_for_persist.get("model_type", "auto")
+    requested_covariance = str(form_for_persist.get("covariance", "")).strip().lower()
+    wire_covariance = requested_covariance or "robust"
+    executable_payload = {
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+        "form": dict(form_for_persist),
+        "rerun_of": rerun_of,
+        "from_node": from_node,
+    }
+    confirmed_payload = {
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+    }
+    contract_summary = {
+        "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
+        "model": "ols" if model_type == "ols" else model_type,
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "covariance_explicit": bool(requested_covariance),
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+        "source_eligible": model_type == "ols" and requested_covariance == "unadjusted",
+    }
+    source_lineage = {
+        "source_run_id": rerun_of,
+        "from_node": from_node,
+        "rerun_from": rerun_from,
+    }
+
     write_run_inputs(
         run.root,
         form=form_for_persist,
@@ -189,7 +228,17 @@ def _submit_run(
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
+        source_lineage=source_lineage,
         workbench_context=workbench_context,
+        contract_summary=contract_summary,
+        executable_payload=executable_payload,
+        rerun_inputs={
+            "rerun_of": rerun_of,
+            "from_node": from_node,
+            "rerun_reason": rerun_reason,
+            "override_hash": override_hash(op_overrides) if op_overrides else None,
+        },
+        confirmed_payload=confirmed_payload if rerun_of is not None else None,
     )
 
     uploads_dir = run.root / "_uploads"
@@ -203,6 +252,11 @@ def _submit_run(
         y=form.get("y", ""), x=x_columns,
         requested_model_type=form.get("model_type", "auto"),
         rerun_of=rerun_of,
+        from_node=from_node,
+        rerun_reason=rerun_reason if rerun_of is not None else None,
+        source_lineage=source_lineage if rerun_of is not None else None,
+        rerun_from=rerun_from,
+        source_run_id=rerun_of,
     )
     if before_dispatch is not None:
         before_dispatch(run.run_id)
@@ -264,6 +318,14 @@ def _bg_run(
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
+    deadline = time.monotonic() + float(getattr(config, "run_timeout_s", 1800.0))
+
+    def _stop_reason() -> str | None:
+        if events.is_cancel_requested(run_id):
+            return "cancelled"
+        if time.monotonic() >= deadline:
+            return "timeout"
+        return None
 
     def _on_step(step: str, status: str, message: str) -> None:
         if status == "blocked":
@@ -308,9 +370,28 @@ def _bg_run(
             cs_cluster_var=cs_cluster_var,
             cs_anticipation=cs_anticipation,
             honest_did=honest_did,
+            stop_reason=_stop_reason,
         )
         status = result["status"]
         events.emit_terminal(run_id, status, f"Workflow {status}")
+    except RunInterruptionRequested as exc:
+        reason = exc.reason
+        code = "WORKFLOW_CANCELLED" if reason == "cancelled" else "WORKFLOW_TIMEOUT"
+        message = (
+            "Workflow interrupted by user cancellation."
+            if reason == "cancelled"
+            else "Workflow interrupted after exceeding the configured run timeout."
+        )
+        _write_manifest(
+            run_root, run_id, mode, "interrupted",
+            _lineage([saved_path]),
+            started_at=started_at, y=y, x=x_columns,
+            requested_model_type=model_type,
+        )
+        write_json(run_root / "errors.json", {
+            "issues": [GuardrailIssue(Severity.BLOCKER, code, message, {}).to_dict()],
+        })
+        events.emit_terminal(run_id, "interrupted", message)
     except Exception as exc:
         _write_manifest(
             run_root, run_id, mode, "failed",

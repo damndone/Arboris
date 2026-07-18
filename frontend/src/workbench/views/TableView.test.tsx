@@ -260,6 +260,33 @@ describe("TableView", () => {
     const askArgs = figureAskMock.mock.calls[0];
     expect((askArgs[0] as { source: { kind: string } }).source.kind).toBe("model");
   });
+
+  it("renders Figure Ask AI Markdown instead of exposing marker syntax", async () => {
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "figure",
+          items: [
+            { artifact_id: "coef_plot", path: "figures/coef_plot.png", artifact_type: "figure", step: "viz", sha256: "a" },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    figureCtxMock.mockResolvedValue({
+      figure: { artifact_id: "coef_plot", chart_type: "coefficient plot" },
+      source: { artifact_id: "ols_1", kind: "model", preview_json: "{}" },
+      response_guardrails: {},
+    });
+    figureAskMock.mockResolvedValue({ text: "**Supported**\n\n- Review the interval." });
+
+    renderTable();
+    await waitFor(() => expect(screen.getByTestId("figure-ask-ai-button-coef_plot")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("figure-ask-ai-button-coef_plot"));
+    const answer = await screen.findByTestId("figure-ask-ai-answer-coef_plot");
+    expect(answer.textContent).toContain("Supported");
+    expect(answer.textContent).toContain("Review the interval.");
+    expect(answer.textContent).not.toContain("**");
+  });
 });
 
 describe("TableView — figure vision opt-in (G2 step 2)", () => {

@@ -610,7 +610,14 @@ def test_submitted_child_is_reconciled_before_operation_completion(
         "workbench.agent.orchestrator.RerunService", CompletedRerunService
     )
     orchestrator = make_orchestrator(tmp_path)
-    proposal = orchestrator.create_proposal(**proposal_kwargs())
+    kwargs = proposal_kwargs()
+    kwargs["preconditions"] = {
+        **kwargs["preconditions"],
+        "confirmed_payload_hash": "payload-hash",
+        "plan_hash": "plan-hash",
+        "canonical_patch_hash": "patch-hash",
+    }
+    proposal = orchestrator.create_proposal(**kwargs)
     record = orchestrator.confirm_proposal(
         proposal.proposal_id,
         revision=proposal.revision,
@@ -646,6 +653,9 @@ def test_submitted_child_is_reconciled_before_operation_completion(
     }
     assert len(reconciliation_calls) == 1
     assert reconciliation_calls[0].target_run_id == "run-child"
+    assert reconciliation_calls[0].workbench_context["confirmed_payload_hash"] == "payload-hash"
+    assert reconciliation_calls[0].workbench_context["plan_hash"] == "plan-hash"
+    assert reconciliation_calls[0].workbench_context["canonical_patch_hash"] == "patch-hash"
     assert orchestrator.chain_store.get(completed.execution["child_chain_id"])["status"] == "active"
     assert orchestrator.fork_store.get(completed.execution["fork_id"])["status"] == "active"
 

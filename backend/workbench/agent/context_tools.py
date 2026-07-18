@@ -14,6 +14,10 @@ from ..graph_store import GraphStore, graph_to_json
 from ..lineage.node_write_validation import build_rerun_operation_context
 from ..lineage.op_contract import resolve_operation_contract
 from ..services.results_service import read_model_results
+from ..analysis_loop.compare import ComparePacket
+from ..analysis_loop.plan import PlanDiff
+from ..analysis_loop.recovery import RECOVERY_ACTIONS
+from ..analysis_loop.validation import ValidationPacket
 from .operations import OperationRegistry
 from .tools import ToolContext, ToolDefinition
 
@@ -229,6 +233,57 @@ class NodeOperationContextProvider:
                 )
             )
 
+        def inspect_analysis_loop_context_tool(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            try:
+                plan_diff, validation_packet, compare_packet = (
+                    parse_analysis_loop_packet_payloads(
+                        plan_diff=arguments.get("plan_diff"),
+                        validation_packet=arguments.get("validation_packet"),
+                        compare_packet=arguments.get("compare_packet"),
+                    )
+                )
+                result = inspect_analysis_loop_context(
+                    source_context=arguments.get("source_context", {}),
+                    scope=str(arguments.get("scope", "")),
+                    plan_diff=plan_diff,
+                    validation_packet=validation_packet,
+                    compare_packet=compare_packet,
+                )
+            except AnalysisLoopContextError as exc:
+                return {
+                    "status": "rejected",
+                    "error": {"code": exc.code, "message": str(exc)},
+                }
+            return {
+                "status": result["status"],
+                "context": result,
+                "registered_actions": [
+                    action.to_dict() for action in RECOVERY_ACTIONS.values()
+                ],
+            }
+
+        def submit_analysis_loop_intent(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            from .analysis_loop_driver import forward_analysis_intent
+
+            decision = forward_analysis_intent(arguments["intent"])
+            return {
+                "status": "accepted" if decision.accepted else "rejected",
+                "decision": decision.to_dict(),
+                "registered_actions": [
+                    action.to_dict() for action in RECOVERY_ACTIONS.values()
+                ],
+            }
+
         return [
             ToolDefinition(
                 tool_id="inspect_data_schema",
@@ -252,6 +307,51 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_data_schema,
+            ),
+            ToolDefinition(
+                tool_id="inspect_analysis_loop_context",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["scope", "source_context"],
+                    "properties": {
+                        "scope": {
+                            "type": "string",
+                            "enum": ["inspect", "plan", "validation", "compare"],
+                        },
+                        "source_context": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                        "plan_diff": {"type": "object"},
+                        "validation_packet": {"type": "object"},
+                        "compare_packet": {"type": "object"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_analysis_loop_context_tool,
+            ),
+            ToolDefinition(
+                tool_id="submit_analysis_loop_intent",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["intent"],
+                    "properties": {
+                        "intent": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=submit_analysis_loop_intent,
             ),
             ToolDefinition(
                 tool_id="inspect_node_context",
@@ -836,3 +936,133 @@ def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[
         diagnostics.setdefault("omitted_item_counts", {})[key] = len(values) - limit
 
     return diagnostics, omitted_sections
+
+# v1.7.2 Analysis Loop read-only context seam. This is intentionally appended
+# to preserve the existing provider/request API above.
+_ANALYSIS_LOOP_SCOPES = frozenset({"inspect", "plan", "validation", "compare"})
+_ANALYSIS_LOOP_SOURCE_FIELDS = frozenset({
+    "run_id",
+    "status",
+    "model",
+    "covariance",
+    "primary_target",
+    "diagnostics",
+})
+
+
+class AnalysisLoopContextError(ValueError):
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class AnalysisLoopPacketPayloadError(AnalysisLoopContextError):
+    """A JSON packet cannot cross the typed Agent context boundary."""
+
+
+def _safe_analysis_loop_source_context(source_context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(source_context, dict):
+        raise AnalysisLoopContextError(
+            "source_context must be a mapping",
+            code="SOURCE_CONTEXT_INVALID",
+        )
+    extra = set(source_context) - _ANALYSIS_LOOP_SOURCE_FIELDS
+    if extra:
+        raise AnalysisLoopContextError(
+            "source_context contains unsupported fields",
+            code="SOURCE_CONTEXT_SCOPE_VIOLATION",
+        )
+    return {key: source_context[key] for key in sorted(source_context)}
+
+
+def _analysis_loop_packet_payload(
+    packet: Any,
+    expected_type: type[Any],
+    scope: str,
+) -> dict[str, Any] | None:
+    if packet is None:
+        return None
+    if not isinstance(packet, expected_type):
+        raise AnalysisLoopContextError(
+            f"{scope} packet has an unsupported type",
+            code="PACKET_TYPE_INVALID",
+        )
+    return packet.to_dict()
+
+
+def parse_analysis_loop_packet_payloads(
+    *,
+    plan_diff: Any = None,
+    validation_packet: Any = None,
+    compare_packet: Any = None,
+) -> tuple[PlanDiff | None, ValidationPacket | None, ComparePacket | None]:
+    """Deserialize optional JSON packets for the read-only context seam."""
+
+    try:
+        parsed_plan = PlanDiff.from_dict(plan_diff) if plan_diff is not None else None
+        parsed_validation = (
+            ValidationPacket.from_dict(validation_packet)
+            if validation_packet is not None
+            else None
+        )
+        parsed_compare = (
+            ComparePacket.from_dict(compare_packet)
+            if compare_packet is not None
+            else None
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AnalysisLoopPacketPayloadError(
+            "analysis-loop packet payload is invalid",
+            code="ANALYSIS_LOOP_PACKET_INVALID",
+        ) from exc
+    return parsed_plan, parsed_validation, parsed_compare
+
+
+def inspect_analysis_loop_context(
+    *,
+    source_context: dict[str, Any],
+    scope: str = "inspect",
+    plan_diff: PlanDiff | None = None,
+    validation_packet: ValidationPacket | None = None,
+    compare_packet: ComparePacket | None = None,
+) -> dict[str, Any]:
+    """Return only typed, read-only context for one declared scope.
+
+    The seam accepts packets supplied by a trusted backend resolver. It never
+    reads files, calls providers, computes comparisons, or infers fields.
+    """
+    if type(scope) is not str or scope not in _ANALYSIS_LOOP_SCOPES:
+        raise AnalysisLoopContextError(
+            "unsupported analysis-loop context scope",
+            code="CONTEXT_SCOPE_UNSUPPORTED",
+        )
+    result: dict[str, Any] = {
+        "scope": scope,
+        "source": _safe_analysis_loop_source_context(source_context),
+    }
+    if scope == "inspect":
+        result["status"] = "available"
+        return result
+    if scope == "plan":
+        payload = _analysis_loop_packet_payload(plan_diff, PlanDiff, scope)
+        result.update({
+            "status": "available" if payload is not None else "not_available",
+            "packet": payload,
+        })
+    elif scope == "validation":
+        payload = _analysis_loop_packet_payload(
+            validation_packet,
+            ValidationPacket,
+            scope,
+        )
+        result.update({
+            "status": validation_packet.status if validation_packet is not None else "absent",
+            "packet": payload,
+        })
+    else:
+        payload = _analysis_loop_packet_payload(compare_packet, ComparePacket, scope)
+        result.update({
+            "status": "available" if payload is not None else "not_available",
+            "packet": payload,
+        })
+    return result

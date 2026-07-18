@@ -37,3 +37,13 @@ def test_model_params_expose_regressors_for_rerun_editing():
     assert regressors["kind"] == "columns"
     assert regressors["required"] is True
     assert regressors["role"] == "x"
+
+
+def test_ols_cluster_variable_is_a_scalar_text_wire_field():
+    caps = build_capabilities()
+    ols = next(e for e in caps["model_types"] if e["key"] == "ols")
+    cluster = next(p for p in ols["params"] if p["key"] == "entity_col")
+
+    assert cluster["kind"] == "text"
+    assert cluster["required"] is False
+    assert cluster["role"] == "cluster"

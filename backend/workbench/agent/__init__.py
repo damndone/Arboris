@@ -16,6 +16,8 @@ from .chains import (
 )
 from .events import AgentEvent, AgentEventStream
 from .context_tools import (
+    AnalysisLoopContextError,
+    AnalysisLoopPacketPayloadError,
     InspectArtifactPreviewRequest,
     InspectDiagnosticsRequest,
     InspectNodeContextRequest,
@@ -23,6 +25,8 @@ from .context_tools import (
     InspectResultSummaryRequest,
     NodeOperationContextProvider,
     WorkbenchContextProvider,
+    inspect_analysis_loop_context,
+    parse_analysis_loop_packet_payloads,
 )
 from .model import (
     ModelAdapter,
@@ -62,6 +66,8 @@ __all__ = [
     "AgentCoreBudgetError",
     "AgentCoreContinuationError",
     "AgentRunBudget",
+    "AnalysisLoopContextError",
+    "AnalysisLoopPacketPayloadError",
     "ChainStore",
     "AgentEvent",
     "AgentEventStream",
@@ -72,6 +78,8 @@ __all__ = [
     "InspectResultSummaryRequest",
     "NodeOperationContextProvider",
     "WorkbenchContextProvider",
+    "inspect_analysis_loop_context",
+    "parse_analysis_loop_packet_payloads",
     "AgentCommand",
     "OperationRecord",
     "OperationDefinition",

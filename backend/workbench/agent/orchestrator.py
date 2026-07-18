@@ -7,6 +7,7 @@ import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -40,7 +41,7 @@ from .chains import (
     RerunExecutionResult,
     RerunExecutor,
 )
-from .context_tools import WorkbenchContextProvider
+from .context_tools import InspectNodeContextRequest, WorkbenchContextProvider
 from .core import AgentCore
 from .execution import (
     ChainExecutionLease,
@@ -385,6 +386,16 @@ class _OrchestratorOperationHandler:
                 },
                 command_id=record.command_id,
             )
+
+    def observe_terminal(self, record: OperationRecord) -> dict[str, Any] | None:
+        """Build optional deterministic analysis packets after terminalization."""
+
+        if record.status not in {"completed", "failed"}:
+            return None
+        return self.orchestrator.observe_analysis_loop_terminal(
+            record,
+            project_root=self.project_root,
+        )
 
     def _result_session_id(self, record: OperationRecord) -> str:
         child_session_id = record.execution.get("child_session_id")
@@ -1026,6 +1037,15 @@ class WorkbenchOrchestrator:
             }
             if request.execution_key:
                 workbench_context["execution_key"] = request.execution_key
+            for field_name in (
+                "confirmed_payload_hash",
+                "executed_proposal_payload_hash",
+                "plan_hash",
+                "canonical_patch_hash",
+            ):
+                value = getattr(request, field_name, "")
+                if value:
+                    workbench_context[field_name] = value
             submission = service.submit(
                 RerunSubmissionRequest(
                     source_run_id=request.source_run_id,
@@ -1073,6 +1093,44 @@ class WorkbenchOrchestrator:
             record.preconditions.get("run_family_id")
             or f"legacy-family:{source_run_id}"
         )
+        proposal = self.proposal_store.latest_revision(record.proposal_id)
+        executed_proposal_payload_hash = ""
+        analysis_loop_binding = self._analysis_loop_binding(record)
+        if analysis_loop_binding is not None:
+            from ..analysis_loop.plan import confirmed_payload_hash_for_plan
+            from ..analysis_loop.storage import PlanDiffStore
+
+            plan_logical_key = analysis_loop_binding.get("plan_logical_key")
+            if type(plan_logical_key) is not str or not plan_logical_key:
+                raise ValueError("analysis-loop proposal has no PlanDiff logical key")
+            plan_packet = PlanDiffStore(
+                self.repository.root,
+                create=False,
+            ).get_terminal_packet(plan_logical_key)
+            if plan_packet is None:
+                raise ValueError("analysis-loop PlanDiff terminal packet is unavailable")
+            executed_proposal_payload_hash = confirmed_payload_hash_for_plan(
+                plan_packet.plan_diff,
+                proposal_id=proposal.proposal_id,
+                revision=proposal.revision,
+                operation_version=record.operation_version,
+                target=proposal.target,
+                preconditions=proposal.preconditions,
+                changes=proposal.changes,
+            )
+            confirmed_payload_hash = str(
+                record.preconditions.get("confirmed_payload_hash") or ""
+            )
+            if executed_proposal_payload_hash != confirmed_payload_hash:
+                raise ValueError("confirmed_executed_proposal_hash_mismatch")
+            persisted_payload_hash = record.execution.get(
+                "executed_proposal_payload_hash"
+            )
+            if (
+                persisted_payload_hash
+                and persisted_payload_hash != executed_proposal_payload_hash
+            ):
+                raise ValueError("executed_proposal_hash_witness_mismatch")
         execution = {
             **record.execution,
             "source_run_id": source_run_id,
@@ -1085,6 +1143,10 @@ class WorkbenchOrchestrator:
             "child_chain_id": child_chain_id,
             "child_session_id": child_session_id,
         }
+        if executed_proposal_payload_hash:
+            execution[
+                "executed_proposal_payload_hash"
+            ] = executed_proposal_payload_hash
         self._ensure_child_context(
             record=record,
             source_session_entry_id=source_leaf_id,
@@ -1115,11 +1177,19 @@ class WorkbenchOrchestrator:
             forest_node_key=str(record.target["forest_node_key"]),
             owner_resolution=str(record.preconditions["owner_resolution"]),
             active_head_run_id=str(record.preconditions["active_head_run_id"]),
-            changes=dict(self.proposal_store.latest_revision(record.proposal_id).changes),
+            changes=dict(proposal.changes),
             fork_id=fork_id,
             child_chain_id=child_chain_id,
             child_session_id=child_session_id,
             execution_key=execution_key,
+            confirmed_payload_hash=str(
+                record.preconditions.get("confirmed_payload_hash") or ""
+            ),
+            executed_proposal_payload_hash=executed_proposal_payload_hash,
+            plan_hash=str(record.preconditions.get("plan_hash") or ""),
+            canonical_patch_hash=str(
+                record.preconditions.get("canonical_patch_hash") or ""
+            ),
         )
         if executor is None:
             return OperationEffect(execution=execution, status="submitted")
@@ -1207,6 +1277,21 @@ class WorkbenchOrchestrator:
             "child_session_id": execution["child_session_id"],
             "execution_key": execution.get("execution_key"),
         }
+        for field_name in (
+            "confirmed_payload_hash",
+            "plan_hash",
+            "canonical_patch_hash",
+        ):
+            value = record.preconditions.get(field_name)
+            if value:
+                workbench_context[field_name] = value
+        executed_proposal_payload_hash = execution.get(
+            "executed_proposal_payload_hash"
+        )
+        if executed_proposal_payload_hash:
+            workbench_context[
+                "executed_proposal_payload_hash"
+            ] = executed_proposal_payload_hash
         request = RerunReconciliationRequest(
             source_run_id=source_run_id,
             target_run_id=target_run_id,
@@ -1501,7 +1586,10 @@ class WorkbenchOrchestrator:
 
         record = self.operation_store.get(record_id)
         if record.status in {"completed", "failed", "stale", "cancelled"}:
-            return record
+            return self._ensure_terminal_analysis_loop_observation(
+                record,
+                project_root=project_root,
+            )
         if (
             not allow_recovery
             and record.status in {"submitted", "running", "recovering"}
@@ -1725,6 +1813,191 @@ class WorkbenchOrchestrator:
         )
         return record
 
+    @staticmethod
+    def _analysis_loop_binding(record: OperationRecord) -> dict[str, Any] | None:
+        binding = record.preconditions.get("analysis_loop")
+        return dict(binding) if isinstance(binding, dict) else None
+
+    def observe_analysis_loop_terminal(
+        self,
+        record: OperationRecord,
+        *,
+        project_root: Path | str,
+    ) -> dict[str, Any] | None:
+        """Materialize post-rerun packets from terminal persisted evidence.
+
+        Packet construction is deliberately supplementary: a packet build
+        failure is reported as an observable analysis-loop status and never
+        rewrites an already terminal operation into a second execution.
+        """
+
+        if record.operation_id != "model.rerun":
+            return None
+        binding = self._analysis_loop_binding(record)
+        if binding is None:
+            return None
+        observation_started = perf_counter()
+        try:
+            # Keep packet storage/observation imports lazy: the analysis-loop
+            # storage module depends on the Agent persistence package, whose
+            # package initializer also exposes this orchestrator.
+            from ..analysis_loop.observation import build_and_store_analysis_loop_packets
+            from ..analysis_loop.canonical import sha256_canonical
+            from ..analysis_loop.resolver import (
+                resolve_analysis_loop_inputs,
+                resolve_analysis_loop_run,
+            )
+            from ..analysis_loop.storage import (
+                ComparePacketStore,
+                PlanDiffStore,
+                ValidationPacketStore,
+            )
+
+            plan_key = binding.get("plan_logical_key")
+            if type(plan_key) is not str or not plan_key:
+                raise ValueError("analysis-loop proposal has no PlanDiff logical key")
+            plan_packet = PlanDiffStore(
+                self.repository.root,
+                create=False,
+            ).get_terminal_packet(plan_key)
+            if plan_packet is None:
+                raise ValueError("analysis-loop PlanDiff terminal packet is unavailable")
+            plan = plan_packet.plan_diff
+            cluster_variable = plan.product_patch.get("cluster_variable")
+            if type(cluster_variable) is not str or not cluster_variable:
+                raise ValueError("analysis-loop PlanDiff has no exact cluster variable")
+            source_run_id = str(record.target["run_id"])
+            child_run_id = (
+                (record.execution.get("bindings") or {}).get("child_run_id")
+                or record.outputs.get("target_run_id")
+            )
+            if type(child_run_id) is not str or not child_run_id:
+                raise ValueError("analysis-loop operation has no child run")
+
+            resolved_source = resolve_analysis_loop_inputs(
+                project_root,
+                run_id=source_run_id,
+                cluster_variable=cluster_variable,
+            )
+            source_run = resolve_analysis_loop_run(
+                project_root,
+                run_id=source_run_id,
+                require_result=True,
+            )
+            child_run = resolve_analysis_loop_run(
+                project_root,
+                run_id=child_run_id,
+                require_result=False,
+            )
+            if resolved_source.source.run_id != source_run.run_id:
+                raise ValueError("resolved source identity does not match operation target")
+
+            context = child_run.run_inputs.get("workbench_context")
+            context = context if isinstance(context, dict) else {}
+            confirmed_payload = child_run.run_inputs.get("confirmed_payload")
+            executed_payload = child_run.run_inputs.get("executed_payload")
+            confirmed_payload_hash = sha256_canonical(
+                confirmed_payload
+                if isinstance(confirmed_payload, dict)
+                else {"missing": "confirmed_payload"}
+            )
+            executed_payload_hash = sha256_canonical(
+                executed_payload
+                if isinstance(executed_payload, dict)
+                else {"missing": "executed_payload"}
+            )
+            plan_hash = str(context.get("plan_hash") or plan.plan_hash)
+            canonical_patch_hash = str(
+                context.get("canonical_patch_hash") or plan.canonical_patch_hash
+            )
+            execution_evidence = {
+                "operation_id": record.operation_id,
+                "execution_key": record.execution.get("execution_key"),
+                "confirmed_payload_hash": confirmed_payload_hash,
+                "executed_payload_hash": executed_payload_hash,
+                "draft_hash": plan_hash,
+                "executed_draft_hash": plan_hash,
+                "plan_hash": plan.plan_hash,
+                "executed_plan_hash": plan_hash,
+                "canonical_patch_hash": plan.canonical_patch_hash,
+                "executed_canonical_patch_hash": canonical_patch_hash,
+                "effect_status": record.effect_status,
+                "projection_status": record.projection_status,
+                "child_terminal": child_run.manifest.get("status")
+                in {"completed", "failed", "cancelled", "interrupted", "partial", "blocked"},
+            }
+            observation = build_and_store_analysis_loop_packets(
+                source=resolved_source.source,
+                source_run=source_run,
+                child_run=child_run,
+                plan=plan,
+                execution_evidence=execution_evidence,
+                validation_store=ValidationPacketStore(self.repository.root),
+                compare_store=ComparePacketStore(self.repository.root),
+            )
+            payload = observation.to_dict()
+            timings_ms = dict(observation.timings_ms or {})
+            timings_ms["terminal_observation_ms"] = round(
+                (perf_counter() - observation_started) * 1000,
+                3,
+            )
+            self.events.emit(
+                record.agent_session_id,
+                "analysis_loop_packets_materialized",
+                {"record_id": record.record_id, **payload, "timings_ms": timings_ms},
+                command_id=record.command_id,
+            )
+            return {"analysis_loop": payload}
+        except Exception as exc:
+            error = {
+                "code": getattr(exc, "code", type(exc).__name__),
+                "type": type(exc).__name__,
+                "message": str(exc),
+            }
+            self.events.emit(
+                record.agent_session_id,
+                "analysis_loop_packet_build_failed",
+                {"record_id": record.record_id, "error": error},
+                command_id=record.command_id,
+            )
+            return {
+                "analysis_loop": {
+                    "status": "failed",
+                    "error": error,
+                }
+            }
+
+    def _ensure_terminal_analysis_loop_observation(
+        self,
+        record: OperationRecord,
+        *,
+        project_root: Path | str,
+    ) -> OperationRecord:
+        if record.status not in {"completed", "failed"}:
+            return record
+        if record.operation_id != "model.rerun" or self._analysis_loop_binding(record) is None:
+            return record
+        current = record.outputs.get("analysis_loop")
+        if isinstance(current, dict) and current.get("status") not in {None, "failed"}:
+            return record
+        observation = self.observe_analysis_loop_terminal(
+            record,
+            project_root=project_root,
+        )
+        if not observation:
+            return record
+        return self.operation_store.append_status(
+            record.record_id,
+            record.status,
+            execution=record.execution,
+            outputs={**record.outputs, **observation},
+            diff_ref=record.diff_ref,
+            verification=record.verification,
+            error=record.error,
+            effect_status=record.effect_status,
+            projection_status=record.projection_status,
+        )
+
     async def reconcile_confirmed_proposal(
         self,
         record_id: str,
@@ -1943,6 +2216,167 @@ class WorkbenchOrchestrator:
             "changes": changes,
         }
 
+    def _create_analysis_loop_proposal_from_agent_arguments(
+        self,
+        *,
+        chain_id: str,
+        session_id: str,
+        arguments: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create the typed OLS proposal from backend-resolved source facts.
+
+        The generic ``model.rerun`` registry remains available for operations
+        outside v1.7.2.  A conventional-to-clustered OLS request, however,
+        must enter the Analysis Loop seam so its PlanDiff binding is present
+        before confirmation.  This method is shared by the dedicated typed
+        tool and the compatibility path that older Agents already call.
+        """
+
+        project_root = self.data_operation_project_root
+        if project_root is None:
+            raise ValueError("analysis_loop_project_root_unavailable")
+        provider = self.context_provider
+        inspect = getattr(provider, "inspect_node_context", None)
+        if inspect is None:
+            raise ValueError("analysis_loop_context_provider_unavailable")
+
+        target = dict(arguments.get("target") or {})
+        source_run_id = str(
+            arguments.get("source_run_id") or target.get("run_id") or ""
+        )
+        source_node_ref = str(
+            arguments.get("source_node_ref") or target.get("node_ref") or ""
+        )
+        requested_active_head = str(
+            arguments.get("active_head_run_id")
+            or (arguments.get("preconditions") or {}).get("active_head_run_id")
+            or ""
+        )
+        cluster_variable = str(arguments.get("cluster_variable") or "")
+        if not source_run_id or not source_node_ref:
+            raise ValueError("analysis_loop_source_identity_required")
+        if not cluster_variable:
+            raise ValueError("analysis_loop_cluster_variable_required")
+
+        active_head_run_id = self._resolve_chain_head(
+            chain_id,
+            requested_active_head,
+        )
+        if not active_head_run_id:
+            raise ValueError("analysis_loop_active_head_required")
+
+        snapshot = inspect(
+            InspectNodeContextRequest(
+                request_id=f"analysis-loop-proposal:{source_run_id}:{source_node_ref}",
+                owner_run_id=source_run_id,
+                op_node_id=source_node_ref,
+                active_head_run_id=str(active_head_run_id),
+            )
+        )
+        if snapshot.get("active_head_run_id") != active_head_run_id:
+            raise ValueError("analysis_loop_active_head_context_mismatch")
+        context_fingerprint = str(snapshot.get("context_fingerprint") or "")
+        if not context_fingerprint:
+            raise ValueError("analysis_loop_context_fingerprint_missing")
+        command_context_fingerprint = (metadata or {}).get("context_fingerprint")
+        if (
+            command_context_fingerprint is not None
+            and context_fingerprint != command_context_fingerprint
+        ):
+            raise ValueError("context_fingerprint_mismatch")
+
+        from ..analysis_loop.lifecycle import create_analysis_loop_proposal
+        from ..analysis_loop.resolver import resolve_analysis_loop_inputs
+        from ..analysis_loop.storage import PlanDiffStore
+
+        resolved = resolve_analysis_loop_inputs(
+            project_root,
+            run_id=source_run_id,
+            cluster_variable=cluster_variable,
+        )
+        if resolved.source.run_id != source_run_id:
+            raise ValueError("analysis_loop_source_identity_mismatch")
+
+        proposal = create_analysis_loop_proposal(
+            orchestrator=self,
+            chain_id=chain_id,
+            command_id=(metadata or {}).get("command_id"),
+            plan_store=PlanDiffStore(self.repository.root, create=False),
+            source=resolved.source,
+            intent={
+                "action_id": "ols.use_clustered_covariance_v1",
+                "patch": {
+                    "covariance": "clustered",
+                    "cluster_variable": cluster_variable,
+                },
+            },
+            cluster_values=resolved.cluster_values,
+            model_row_ids=resolved.model_row_ids,
+            requested_result_id=arguments.get("result_id"),
+            source_context_fingerprint=context_fingerprint,
+            source_identity={
+                "run_id": source_run_id,
+                "node_ref": source_node_ref,
+                "node_hash": str(snapshot.get("node_hash") or ""),
+                "forest_node_key": str(snapshot.get("forest_node_key") or ""),
+            },
+            active_head_run_id=str(active_head_run_id),
+            owner_resolution=str(snapshot.get("owner_resolution") or ""),
+        )
+        plan_store = PlanDiffStore(self.repository.root, create=False)
+        packet = plan_store.get_terminal_packet(
+            str(proposal.preconditions.get("plan_logical_key") or "")
+        )
+        if packet is None:
+            raise ValueError("analysis_loop_plan_missing")
+
+        source_facts = {
+            "run_id": resolved.source.run_id,
+            "status": resolved.source.status,
+            "model": resolved.source.model,
+            "covariance": resolved.source.covariance,
+            "contract_version": resolved.source.contract_version,
+            "result_ids": list(resolved.source.result_ids),
+            "primary_estimand": (
+                dict(resolved.source.primary_estimand)
+                if resolved.source.primary_estimand is not None
+                else None
+            ),
+            "analysis_row_count": len(resolved.source.analysis_row_ids),
+        }
+        return {
+            "requires_confirmation": True,
+            "proposal": proposal.to_dict(),
+            "plan_diff": packet.plan_diff.to_dict(),
+            "analysis_loop": {
+                "status": "pending",
+                "action_id": "ols.use_clustered_covariance_v1",
+                "source": source_facts,
+                "plan_diff": packet.plan_diff.to_dict(),
+            },
+        }
+
+    @staticmethod
+    def _clustered_analysis_loop_intent(arguments: dict[str, Any]) -> str | None:
+        """Extract an exact cluster field from a legacy generic proposal."""
+
+        def new_value(value: Any) -> Any:
+            return value.get("new") if isinstance(value, dict) and "new" in value else value
+
+        changes = arguments.get("changes")
+        if not isinstance(changes, dict):
+            return None
+        covariance = new_value(changes.get("covariance"))
+        if covariance != "clustered":
+            return None
+        cluster = new_value(changes.get("cluster_variable"))
+        if cluster is None:
+            cluster = new_value(changes.get("entity_col"))
+        if type(cluster) is not str or not cluster:
+            raise ValueError("analysis_loop_cluster_variable_required")
+        return cluster
+
     def _canonicalize_proposal_arguments(
         self,
         operation_id: str,
@@ -2049,6 +2483,22 @@ class WorkbenchOrchestrator:
             command_id = metadata.get("command_id")
             if command_id is not None and not isinstance(command_id, str):
                 raise ValueError("invalid_command_id")
+            cluster_variable = self._clustered_analysis_loop_intent(arguments)
+            if operation_id == "model.rerun" and cluster_variable is not None:
+                return self._create_analysis_loop_proposal_from_agent_arguments(
+                    chain_id=chain_id,
+                    session_id=session_id,
+                    arguments={
+                        **arguments,
+                        "source_run_id": arguments["target"]["run_id"],
+                        "source_node_ref": arguments["target"]["node_ref"],
+                        "active_head_run_id": arguments["preconditions"][
+                            "active_head_run_id"
+                        ],
+                        "cluster_variable": cluster_variable,
+                    },
+                    metadata=metadata,
+                )
             proposal = self.create_proposal(
                 chain_id=chain_id,
                 operation_id=operation_id,
@@ -2062,6 +2512,50 @@ class WorkbenchOrchestrator:
                 command_id=command_id,
             )
             return {"requires_confirmation": True, "proposal": proposal.to_dict()}
+
+        def propose_analysis_loop(arguments: dict[str, Any], context) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            metadata = context.metadata
+            allowed_operations = metadata.get("allowed_operations")
+            if allowed_operations is not None and "model.rerun" not in {
+                str(item) for item in (allowed_operations or [])
+            }:
+                raise PermissionError("operation_not_allowed")
+            return self._create_analysis_loop_proposal_from_agent_arguments(
+                chain_id=chain_id,
+                session_id=session_id,
+                arguments=arguments,
+                metadata=metadata,
+            )
+
+        registry.register(
+            ToolDefinition(
+                tool_id="propose_analysis_loop",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "source_run_id",
+                        "source_node_ref",
+                        "active_head_run_id",
+                        "cluster_variable",
+                    ],
+                    "properties": {
+                        "source_run_id": {"type": "string", "minLength": 1},
+                        "source_node_ref": {"type": "string", "minLength": 1},
+                        "active_head_run_id": {"type": "string", "minLength": 1},
+                        "cluster_variable": {"type": "string", "minLength": 1},
+                        "result_id": {"type": "string", "minLength": 1},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="proposal",
+                scope_requirements=("chain", "active_head"),
+                max_output_budget=24_000,
+                handler=propose_analysis_loop,
+            )
+        )
 
         registry.register(
             ToolDefinition(
