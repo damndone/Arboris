@@ -223,6 +223,18 @@ def run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": str(prediction_cv_folds),
         "prediction_sampling_method": prediction_sampling_method,
+        "did_mode": did_mode,
+        "did_cohort_col": did_cohort_col,
+        "did_treat_col": did_treat_col,
+        "did_post_col": did_post_col,
+        "did_status_col": did_status_col,
+        "did_treatment_path": did_treatment_path,
+        "cs_control_group": cs_control_group,
+        "cs_est_method": cs_est_method,
+        "cs_base_period": cs_base_period,
+        "cs_anticipation": str(cs_anticipation),
+        "cs_cluster_var": cs_cluster_var,
+        "honest_did": str(honest_did).lower(),
     }
     upload_path = input_files[0] if input_files else None
     upload_bytes = upload_path.read_bytes() if upload_path is not None else b""

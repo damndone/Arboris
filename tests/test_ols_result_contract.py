@@ -315,6 +315,27 @@ def test_analysis_row_ids_are_collision_safe_after_stringification():
     assert row_order[0] != row_order[1]
 
 
+def test_analysis_row_ids_preserve_timestamp_vs_string_type_identity():
+    timestamps = [pd.Timestamp("2020-01-01") + pd.Timedelta(days=index) for index in range(4)]
+    index = [value for timestamp in timestamps for value in (timestamp, timestamp.isoformat())]
+    frame = _frame().set_axis(index)
+
+    result, _ = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=False,
+        covariance="unadjusted",
+        covariance_explicit=True,
+        model_id="ols_1",
+    )
+
+    row_order = result["analysis_sample"]["row_order"]
+    assert len(row_order) == len(frame)
+    assert len(set(row_order)) == len(frame)
+    assert row_order[0] != row_order[1]
+
+
 @pytest.mark.parametrize(
     ("cluster_values", "error_code"),
     [
@@ -351,6 +372,21 @@ def test_clustered_covariance_accepts_category_group_dtype():
     )
 
     assert result["covariance_evidence"]["cluster_count"] == 4
+
+
+def test_clustered_covariance_rejects_null_entity_on_dropped_y_x_row():
+    frame = _frame().copy()
+    frame.loc["row-2", "y"] = np.nan
+    frame.loc["row-2", "firm"] = None
+
+    with pytest.raises(ValueError, match="OLS_CLUSTER_VALUES_MISSING"):
+        _run(
+            frame,
+            robust=False,
+            covariance="clustered",
+            covariance_explicit=True,
+            cluster_col="firm",
+        )
 
 
 @pytest.mark.parametrize(
@@ -497,3 +533,59 @@ def test_completed_workflow_manifest_exposes_ols_contract_summary(tmp_path: Path
     assert run_inputs["executable_payload"]["model_type"] == "ols"
     assert run_inputs["contract_summary"]["covariance"] == "unadjusted"
     assert len(run_inputs["upload"]["sha256"]) == 64
+
+
+def test_direct_workflow_run_inputs_round_trip_preserves_did_cs_honest_wire_fields(
+    tmp_path: Path,
+):
+    project = create_project(tmp_path, "direct-wire-round-trip")
+    source = tmp_path / "data.csv"
+    pd.DataFrame(
+        {
+            "y": [1.0 + 0.5 * i for i in range(40)],
+            "x": list(range(40)),
+        }
+    ).to_csv(source, index=False)
+
+    run = run_workflow(
+        project.root,
+        [source],
+        mode="explicit",
+        y="y",
+        x=["x"],
+        model_type="ols",
+        covariance="unadjusted",
+        did_mode="twfe",
+        did_cohort_col="cohort",
+        did_treat_col="treated",
+        did_post_col="post",
+        did_status_col="status",
+        did_treatment_path="treatment_path",
+        cs_control_group="not_yet_treated",
+        cs_est_method="dr",
+        cs_base_period="universal",
+        cs_anticipation=2,
+        cs_cluster_var="firm",
+        honest_did=True,
+    )
+
+    run_inputs = json.loads(
+        (project.root / "runs" / run["run_id"] / "run_inputs.json").read_text()
+    )
+    expected = {
+        "did_mode": "twfe",
+        "did_cohort_col": "cohort",
+        "did_treat_col": "treated",
+        "did_post_col": "post",
+        "did_status_col": "status",
+        "did_treatment_path": "treatment_path",
+        "cs_control_group": "not_yet_treated",
+        "cs_est_method": "dr",
+        "cs_base_period": "universal",
+        "cs_anticipation": "2",
+        "cs_cluster_var": "firm",
+        "honest_did": "true",
+    }
+    for field, value in expected.items():
+        assert run_inputs["form"][field] == value
+        assert run_inputs["executable_payload"]["form"][field] == value

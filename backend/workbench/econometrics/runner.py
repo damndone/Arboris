@@ -150,11 +150,18 @@ def _row_id_values(
     row_ids: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
     def collision_safe(values: list[Any]) -> list[str]:
+        original_types = [
+            f"{type(value).__module__}.{type(value).__qualname__}"
+            for value in values
+        ]
         normalized = [_python_scalar(value) for value in values]
         rendered = [str(value) for value in normalized]
         if len(set(rendered)) == len(rendered):
             return rendered
-        typed = [f"{type(value).__name__}:{value}" for value in normalized]
+        typed = [
+            f"{original_type}:{value}"
+            for original_type, value in zip(original_types, normalized, strict=True)
+        ]
         return typed
 
     if row_ids is None:
@@ -560,6 +567,8 @@ def run_ols(
     if covariance == "clustered":
         robust = False
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+    if covariance == "clustered":
+        _validate_cluster_group_values(frame[cluster_col])
     model_frame = frame.copy()
     if not frame.index.is_unique:
         # Patsy/statsmodels uses row labels for its model data. A positional
