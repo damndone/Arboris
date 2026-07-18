@@ -608,7 +608,25 @@ def preflight_cluster_variable(
             evidence={"missing_positions": missing_positions},
         )
     declared = _declared_dtype(columns[cluster_variable])
-    runtime_types = {_runtime_dtype(value) for value in cluster_values}
+    runtime_types: set[str | None] = set()
+    for index, value in enumerate(cluster_values):
+        try:
+            runtime_types.add(_runtime_dtype(value))
+        except Exception as exc:
+            return _cluster_result(
+                source=source,
+                cluster_variable=cluster_variable,
+                valid=False,
+                status="fail",
+                severity="error",
+                code="CLUSTER_VALUES_UNINSPECTABLE",
+                row_count=len(actual_rows),
+                evidence={
+                    "position": index,
+                    "error_type": type(exc).__name__,
+                    "inspection_stage": "runtime_dtype",
+                },
+            )
     if None in runtime_types or "bool" in runtime_types or "float" in runtime_types:
         return _cluster_result(
             source=source,
@@ -659,7 +677,26 @@ def preflight_cluster_variable(
             evidence={"declared_dtype": declared, "runtime_type": runtime},
         )
     value_type = "category" if declared == "category" else runtime
-    counts = Counter(_canonical_cluster_identity(value) for value in cluster_values)
+    counts: Counter[tuple[str, Any]] = Counter()
+    for index, value in enumerate(cluster_values):
+        try:
+            identity = _canonical_cluster_identity(value)
+            counts[identity] += 1
+        except Exception as exc:
+            return _cluster_result(
+                source=source,
+                cluster_variable=cluster_variable,
+                valid=False,
+                status="fail",
+                severity="error",
+                code="CLUSTER_VALUES_UNINSPECTABLE",
+                row_count=len(actual_rows),
+                evidence={
+                    "position": index,
+                    "error_type": type(exc).__name__,
+                    "inspection_stage": "cluster_identity",
+                },
+            )
     cluster_count = len(counts)
     singleton_count = sum(count == 1 for count in counts.values())
     all_singleton = cluster_count > 0 and singleton_count == cluster_count

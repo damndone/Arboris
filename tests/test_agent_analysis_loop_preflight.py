@@ -624,6 +624,35 @@ def test_recovery_action_metadata_requires_non_empty_covered_fields(
         RecoveryAction.from_dict(direct)
 
 
+def test_recovery_action_rejects_duplicate_required_fields_direct_and_from_dict() -> None:
+    action = get_recovery_action("ols.use_clustered_covariance_v1")
+    assert action is not None
+    duplicate = action.to_dict() | {
+        "required_fields": ["cluster_variable", "cluster_variable"],
+    }
+
+    with pytest.raises((TypeError, ValueError)):
+        RecoveryAction(**duplicate)  # type: ignore[arg-type]
+    with pytest.raises((TypeError, ValueError)):
+        RecoveryAction.from_dict(duplicate)
+
+
+def test_recovery_action_registry_rejects_duplicate_required_fields() -> None:
+    malformed = object.__new__(RecoveryAction)
+    object.__setattr__(malformed, "action_id", "malformed")
+    object.__setattr__(malformed, "operation_id", "model.rerun")
+    object.__setattr__(malformed, "allowed_model", "ols")
+    object.__setattr__(malformed, "source_covariance", "unadjusted")
+    object.__setattr__(malformed, "target_covariance", "clustered")
+    object.__setattr__(malformed, "required_fields", ("cluster_variable", "cluster_variable"))
+    object.__setattr__(malformed, "covariance_only", True)
+    object.__setattr__(malformed, "field_mapping", {"cluster_variable": "entity_col"})
+    object.__setattr__(malformed, "policy_version", "ols_cluster_policy_v1")
+
+    with pytest.raises((TypeError, ValueError)):
+        type(RECOVERY_ACTION_REGISTRY)((malformed,))
+
+
 @pytest.mark.parametrize(
     "metadata",
     [
@@ -994,6 +1023,53 @@ class _ExplodingVector:
 class _ExplodingElement:
     def __ne__(self, other: object) -> bool:
         raise RuntimeError("element comparison exploded")
+
+
+class _ExplodingIdentityInt(int):
+    def __int__(self) -> int:
+        raise RuntimeError("integer identity exploded")
+
+
+def test_exploding_cluster_identity_element_is_uninspectable_with_position_evidence() -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="integer_id",
+        cluster_values=[1, _ExplodingIdentityInt(2), 3, 4],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VALUES_UNINSPECTABLE"
+    assert result.status == "fail"
+    assert result.evidence["position"] == 1
+    assert result.evidence["error_type"] == "RuntimeError"
+
+
+def test_exploding_runtime_dtype_element_is_uninspectable_with_position_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_runtime_dtype = preflight_cluster_variable.__globals__["_runtime_dtype"]
+
+    def exploding_runtime_dtype(value: object) -> str | None:
+        if isinstance(value, _ExplodingIdentityInt):
+            raise RuntimeError("runtime dtype exploded")
+        return original_runtime_dtype(value)
+
+    monkeypatch.setitem(
+        preflight_cluster_variable.__globals__, "_runtime_dtype", exploding_runtime_dtype
+    )
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="integer_id",
+        cluster_values=[1, _ExplodingIdentityInt(2), 3, 4],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VALUES_UNINSPECTABLE"
+    assert result.evidence["position"] == 1
+    assert result.evidence["error_type"] == "RuntimeError"
+    assert result.evidence["inspection_stage"] == "runtime_dtype"
 
 
 def test_exploding_cluster_element_is_uninspectable_with_position_evidence(

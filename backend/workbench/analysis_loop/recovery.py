@@ -41,6 +41,8 @@ class RecoveryAction:
         required_fields = tuple(self.required_fields)
         if not required_fields:
             raise ValueError("required_fields must not be empty")
+        if len(set(required_fields)) != len(required_fields):
+            raise ValueError("required_fields must not contain duplicates")
         if not isinstance(self.field_mapping, Mapping):
             raise TypeError("field_mapping must be a mapping")
         if any(
@@ -114,6 +116,10 @@ class RecoveryActionRegistry:
         for action in actions:
             if not isinstance(action, RecoveryAction):
                 raise TypeError("recovery action registry accepts RecoveryAction values")
+            if len(action.required_fields) != len(set(action.required_fields)):
+                raise ValueError("required_fields must not contain duplicates")
+            if set(action.field_mapping) != set(action.required_fields):
+                raise ValueError("field_mapping keys must exactly match required_fields")
             if action.action_id in by_id:
                 raise ValueError(f"duplicate recovery action: {action.action_id}")
             by_id[action.action_id] = action
