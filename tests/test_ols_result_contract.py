@@ -89,6 +89,54 @@ def test_unadjusted_ols_emits_contract_ids_and_fingerprints():
     assert result["analysis_sample"]["row_order"] == list(_frame().index)
 
 
+def test_unadjusted_contract_records_statsmodels_t_inference_semantics():
+    result, _ = _run(
+        _frame(),
+        robust=False,
+        covariance="unadjusted",
+        covariance_explicit=True,
+    )
+    fitted = smf.ols("y ~ x", data=_frame()).fit()
+    evidence = result["covariance_evidence"]
+
+    assert fitted.use_t is True
+    assert evidence["use_t"] is True
+    assert evidence["inference_distribution"] == "t"
+    assert evidence["p_value_method"] == "t"
+    assert evidence["confidence_interval_method"] == "t"
+    assert evidence["effective_df"] == pytest.approx(fitted.df_resid)
+
+    confidence_intervals = fitted.conf_int()
+    for position, (term, coefficient) in enumerate(result["coefficients"].items()):
+        assert coefficient["p_value"] == pytest.approx(
+            round(float(fitted.pvalues.iloc[position]), 6)
+        )
+        assert coefficient["ci_lower"] == pytest.approx(
+            float(confidence_intervals.iloc[position, 0])
+        )
+        assert coefficient["ci_upper"] == pytest.approx(
+            float(confidence_intervals.iloc[position, 1])
+        )
+
+    assert result["inference_config_fingerprint"] == inference_config_fingerprint(
+        covariance="unadjusted",
+        cluster_var=None,
+        cluster_count=0,
+        corrections={
+            "small_sample_correction": False,
+            "degrees_of_freedom_correction": False,
+        },
+        df=float(fitted.df_resid),
+        use_t=True,
+        confidence_level=0.95,
+        engine="statsmodels",
+        version=evidence["library_version"],
+        inference_distribution="t",
+        p_value_method="t",
+        confidence_interval_method="t",
+    )
+
+
 def test_default_robust_remains_hc1_and_is_not_source_eligible():
     result, _ = _run(_frame(), robust=True)
 
@@ -248,6 +296,63 @@ def test_duplicate_index_clustered_ols_aligns_groups_by_occurrence():
     assert result["covariance_evidence"]["cluster_count"] == 4
 
 
+def test_analysis_row_ids_are_collision_safe_after_stringification():
+    frame = _frame().set_axis([1, "1", 2, "2", 3, "3", 4, "4"])
+
+    result, _ = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=False,
+        covariance="unadjusted",
+        covariance_explicit=True,
+        model_id="ols_1",
+    )
+
+    row_order = result["analysis_sample"]["row_order"]
+    assert len(row_order) == len(frame)
+    assert len(set(row_order)) == len(frame)
+    assert row_order[0] != row_order[1]
+
+
+@pytest.mark.parametrize(
+    ("cluster_values", "error_code"),
+    [
+        ([1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0], "OLS_CLUSTER_TYPE_UNSUPPORTED"),
+        ([True, True, False, False, True, True, False, False], "OLS_CLUSTER_TYPE_UNSUPPORTED"),
+        ([1, 1, "b", "b", 3, 3, "d", "d"], "OLS_CLUSTER_TYPE_MIXED"),
+    ],
+)
+def test_clustered_covariance_rejects_policy_disallowed_group_types(
+    cluster_values, error_code
+):
+    frame = _frame().assign(firm=cluster_values)
+
+    with pytest.raises(ValueError, match=error_code):
+        _run(
+            frame,
+            robust=False,
+            covariance="clustered",
+            covariance_explicit=True,
+            cluster_col="firm",
+        )
+
+
+def test_clustered_covariance_accepts_category_group_dtype():
+    frame = _frame().copy()
+    frame["firm"] = pd.Categorical(frame["firm"])
+
+    result, _ = _run(
+        frame,
+        robust=False,
+        covariance="clustered",
+        covariance_explicit=True,
+        cluster_col="firm",
+    )
+
+    assert result["covariance_evidence"]["cluster_count"] == 4
+
+
 @pytest.mark.parametrize(
     ("mutator", "error_code"),
     [
@@ -386,3 +491,9 @@ def test_completed_workflow_manifest_exposes_ols_contract_summary(tmp_path: Path
     assert manifest["result_contract"]["inference_config_fingerprint"] == model_result[
         "inference_config_fingerprint"
     ]
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text())
+    assert run_inputs["form"]["model_type"] == "ols"
+    assert run_inputs["form"]["covariance"] == "unadjusted"
+    assert run_inputs["executable_payload"]["model_type"] == "ols"
+    assert run_inputs["contract_summary"]["covariance"] == "unadjusted"
+    assert len(run_inputs["upload"]["sha256"]) == 64

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import numbers
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import statsmodels
 import statsmodels.formula.api as smf
@@ -15,6 +17,7 @@ from ..analysis_loop.fingerprints import (
     inference_config_fingerprint,
     point_estimation_fingerprint,
 )
+from ..analysis_loop.policy import ols_cluster_policy_v1
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
@@ -146,16 +149,24 @@ def _row_id_values(
     frame: pd.DataFrame,
     row_ids: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
+    def collision_safe(values: list[Any]) -> list[str]:
+        normalized = [_python_scalar(value) for value in values]
+        rendered = [str(value) for value in normalized]
+        if len(set(rendered)) == len(rendered):
+            return rendered
+        typed = [f"{type(value).__name__}:{value}" for value in normalized]
+        return typed
+
     if row_ids is None:
         if frame.index.is_unique:
-            return [str(_python_scalar(value)) for value in frame.index]
+            return collision_safe(list(frame.index))
         return [f"position:{position}" for position in range(len(frame))]
     if len(row_ids) != len(frame):
         raise ValueError(
             "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
             "and aligned to the input frame."
         )
-    values = [str(value) for value in row_ids]
+    values = collision_safe(list(row_ids))
     if len(set(values)) == len(values):
         return values
     if frame.index.is_unique:
@@ -164,6 +175,47 @@ def _row_id_values(
             "and aligned to the input frame."
         )
     return [f"{value}#occurrence:{position}" for position, value in enumerate(values)]
+
+
+def _cluster_runtime_type(value: Any) -> str | None:
+    if isinstance(value, (bool, np.bool_)):
+        return "bool"
+    if isinstance(value, (numbers.Integral, np.integer)):
+        return "integer"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, (numbers.Real, np.floating)):
+        return "float"
+    return None
+
+
+def _validate_cluster_group_values(groups: pd.Series) -> None:
+    runtime_types: set[str | None] = set()
+    for position, value in enumerate(groups):
+        safe_value = _python_scalar(value)
+        if safe_value is None:
+            raise ValueError(
+                "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
+                f"on analysis rows at position {position}."
+            )
+        runtime_types.add(_cluster_runtime_type(safe_value))
+
+    policy = ols_cluster_policy_v1
+    if (
+        None in runtime_types
+        or "bool" in runtime_types and policy.reject_boolean
+        or "float" in runtime_types and policy.reject_float
+        or any(item not in policy.allowed_cluster_types for item in runtime_types)
+    ):
+        raise ValueError(
+            "OLS_CLUSTER_TYPE_UNSUPPORTED: entity_col values violate "
+            f"ols_cluster_policy_v1 (runtime_types={sorted(str(item) for item in runtime_types)})."
+        )
+    if len(runtime_types) > 1 and policy.reject_mixed_object:
+        raise ValueError(
+            "OLS_CLUSTER_TYPE_MIXED: entity_col contains mixed runtime value types "
+            f"({sorted(str(item) for item in runtime_types)})."
+        )
 
 
 def _analysis_row_context(
@@ -363,11 +415,14 @@ def _attach_ols_result_contract(
         )
         cluster_count = len({json.dumps(value, sort_keys=True) for value in group_vector})
 
-    use_t = False
+    use_t = bool(getattr(fitted, "use_t", False))
     inference_df = getattr(fitted, "df_resid_inference", None)
     effective_df = _json_safe_float(inference_df)
     if effective_df is None:
         effective_df = _json_safe_float(getattr(fitted, "df_resid", None))
+    inference_distribution = "t" if use_t else "normal"
+    p_value_method = "t" if use_t else "normal_z"
+    confidence_interval_method = "t" if use_t else "normal_z"
     evidence = {
         "covariance": covariance,
         "covariance_estimator": "cluster" if covariance == "clustered" else (
@@ -379,9 +434,11 @@ def _attach_ols_result_contract(
         "small_sample_correction": covariance == "clustered",
         "degrees_of_freedom_correction": covariance == "clustered",
         "use_t": use_t,
-        "inference_distribution": "normal",
-        "p_value_method": "normal_z",
-        "confidence_interval_method": "normal_z",
+        "inference_distribution": inference_distribution,
+        "p_value_method": p_value_method,
+        "confidence_interval_method": confidence_interval_method,
+        "confidence_level": 0.95,
+        "alpha": 0.05,
         "effective_df": effective_df,
         "cluster_variable": cluster_col,
         "entity_col": cluster_col,
@@ -398,12 +455,12 @@ def _attach_ols_result_contract(
         },
         "df": effective_df,
         "use_t": use_t,
-        "confidence_level": 0.95,
+        "confidence_level": evidence["confidence_level"],
         "engine": "statsmodels",
         "version": statsmodels.__version__,
-        "inference_distribution": "normal",
-        "p_value_method": "normal_z",
-        "confidence_interval_method": "normal_z",
+        "inference_distribution": inference_distribution,
+        "p_value_method": p_value_method,
+        "confidence_interval_method": confidence_interval_method,
     }
     if group_vector_fp is not None:
         inference_kwargs["cluster_group_vector_fingerprint"] = group_vector_fp
@@ -526,6 +583,7 @@ def run_ols(
                 "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
                 "on analysis rows."
             )
+        _validate_cluster_group_values(groups)
         fitted = original.get_robustcov_results(
             cov_type="cluster",
             groups=groups.to_numpy(copy=True),

@@ -205,6 +205,11 @@ def _submit_run(
         "x": list(x_columns),
         "source_eligible": model_type == "ols" and requested_covariance == "unadjusted",
     }
+    source_lineage = {
+        "source_run_id": rerun_of,
+        "from_node": from_node,
+        "rerun_from": rerun_from,
+    }
 
     write_run_inputs(
         run.root,
@@ -214,11 +219,7 @@ def _submit_run(
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
-        source_lineage={
-            "source_run_id": rerun_of,
-            "from_node": from_node,
-            "rerun_from": rerun_from,
-        },
+        source_lineage=source_lineage,
         workbench_context=workbench_context,
         contract_summary=contract_summary,
         executable_payload=executable_payload,
@@ -242,6 +243,11 @@ def _submit_run(
         y=form.get("y", ""), x=x_columns,
         requested_model_type=form.get("model_type", "auto"),
         rerun_of=rerun_of,
+        from_node=from_node,
+        rerun_reason=rerun_reason if rerun_of is not None else None,
+        source_lineage=source_lineage if rerun_of is not None else None,
+        rerun_from=rerun_from,
+        source_run_id=rerun_of,
     )
     if before_dispatch is not None:
         before_dispatch(run.run_id)

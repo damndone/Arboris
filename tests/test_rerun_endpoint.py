@@ -151,6 +151,9 @@ def test_rerun_creates_child_with_rerun_of(tmp_path: Path):
     assert inputs["override_hash"] is not None
     manifest = json.loads((project.root / "runs" / child / "run_manifest.json").read_text())
     assert manifest["rerun_of"] == parent
+    assert manifest["from_node"] == node_id
+    assert manifest["rerun_reason"] == "manual_override"
+    assert manifest["source_lineage"] == inputs["source_lineage"]
     parent_inputs = json.loads((project.root / "runs" / parent / "run_inputs.json").read_text())
     assert inputs["upload"]["sha256"] == parent_inputs["upload"]["sha256"]
 

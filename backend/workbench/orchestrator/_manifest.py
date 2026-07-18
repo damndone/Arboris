@@ -132,6 +132,11 @@ def _write_manifest(
     requested_model_type: str | None = None,
     model_routing: dict[str, Any] | None = None,
     rerun_of: str | None = None,
+    from_node: str | None = None,
+    rerun_reason: str | None = None,
+    source_lineage: dict[str, Any] | None = None,
+    rerun_from: dict[str, Any] | None = None,
+    source_run_id: str | None = None,
 ) -> None:
     existing_lineage: dict[str, Any] = {}
     existing_path = run_root / "run_manifest.json"
@@ -167,6 +172,15 @@ def _write_manifest(
         payload["model_routing"] = model_routing
     if rerun_of is not None:
         payload["rerun_of"] = rerun_of
+    for field, value in (
+        ("from_node", from_node),
+        ("rerun_reason", rerun_reason),
+        ("source_lineage", source_lineage),
+        ("rerun_from", rerun_from),
+        ("source_run_id", source_run_id),
+    ):
+        if value is not None:
+            payload[field] = value
     contract = _result_contract_summary(run_root)
     if contract is not None:
         payload["result_contract"] = contract

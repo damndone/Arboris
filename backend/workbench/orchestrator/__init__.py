@@ -201,10 +201,72 @@ def run_workflow(
     cs_cluster_var: str = "",
     honest_did: bool = False,
 ) -> dict[str, str]:
+    from ..lineage.hashing import dag_hash
+    from ..lineage.run_inputs import write_run_inputs
+    from ..lineage.upload_store import store_upload_bytes
+
     project_root = Path(project_root)
     config = load_config(project_root / "config.yml")
     run = create_run(project_root, mode=mode)
     started_at = datetime.now(timezone.utc).isoformat()
+    direct_form = {
+        "mode": mode,
+        "model_type": model_type,
+        "covariance": covariance,
+        "entity_col": entity_col,
+        "time_col": time_col,
+        "iv_endog": json.dumps(list(iv_endog or [])),
+        "iv_instruments": json.dumps(list(iv_instruments or [])),
+        "y": y,
+        "x": ",".join(x),
+        "imputation": json.dumps(imputation) if imputation is not None else "",
+        "prediction_model_type": prediction_model_type,
+        "prediction_cv_folds": str(prediction_cv_folds),
+        "prediction_sampling_method": prediction_sampling_method,
+    }
+    upload_path = input_files[0] if input_files else None
+    upload_bytes = upload_path.read_bytes() if upload_path is not None else b""
+    upload_filename = upload_path.name if upload_path is not None else None
+    upload_sha = store_upload_bytes(
+        project_root,
+        upload_bytes,
+        filename=upload_filename or "upload.csv",
+    )
+    requested_covariance = (covariance or "").strip().lower()
+    wire_covariance = requested_covariance or "robust"
+    executable_payload = {
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "entity_col": entity_col,
+        "y": y,
+        "x": list(x),
+        "form": direct_form,
+        "rerun_of": None,
+        "from_node": None,
+    }
+    write_run_inputs(
+        run.root,
+        form=direct_form,
+        upload={"sha256": upload_sha, "filename": upload_filename},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash=dag_hash(upload_sha, direct_form),
+        contract_summary={
+            "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
+            "model": "ols" if model_type == "ols" else model_type,
+            "model_type": model_type,
+            "covariance": wire_covariance,
+            "covariance_explicit": bool(requested_covariance),
+            "entity_col": entity_col,
+            "y": y,
+            "x": list(x),
+            "source_eligible": model_type == "ols" and requested_covariance == "unadjusted",
+        },
+        executable_payload=executable_payload,
+        rerun_inputs={"rerun_of": None, "from_node": None, "rerun_reason": "initial"},
+    )
     _write_manifest(
         run.root,
         run.run_id,
