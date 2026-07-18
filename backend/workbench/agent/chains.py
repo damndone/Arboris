@@ -78,6 +78,7 @@ class RerunExecutionRequest:
     child_session_id: str
     execution_key: str = ""
     confirmed_payload_hash: str = ""
+    executed_proposal_payload_hash: str = ""
     plan_hash: str = ""
     canonical_patch_hash: str = ""
 

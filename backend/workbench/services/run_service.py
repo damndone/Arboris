@@ -194,6 +194,13 @@ def _submit_run(
         "rerun_of": rerun_of,
         "from_node": from_node,
     }
+    confirmed_payload = {
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+    }
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
         "model": "ols" if model_type == "ols" else model_type,
@@ -229,7 +236,7 @@ def _submit_run(
             "rerun_reason": rerun_reason,
             "override_hash": override_hash(op_overrides) if op_overrides else None,
         },
-        confirmed_payload=executable_payload if rerun_of is not None else None,
+        confirmed_payload=confirmed_payload if rerun_of is not None else None,
     )
 
     uploads_dir = run.root / "_uploads"

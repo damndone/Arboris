@@ -324,8 +324,7 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
     update_run_inputs_metadata(
         run_root,
         executed_payload={
-            "model": "ols",
-            "model_type": result.get("model_type"),
+            "model_type": "ols",
             "covariance": result.get("covariance_wire"),
             "entity_col": result.get("entity_col"),
             "y": result.get("y_column"),

@@ -137,8 +137,18 @@ _COMMON_MODEL_PARAMS = [
      "options": [o["key"] for o in COVARIANCE_UI], "value": _COVARIANCE_DEFAULT},
 ]
 
+_OLS_MODEL_PARAMS = _COMMON_MODEL_PARAMS + [
+    {
+        "key": "entity_col",
+        "kind": "text",
+        "label": "Cluster variable",
+        "required": False,
+        "role": "cluster",
+    },
+]
+
 _MODEL_PARAMS: dict[str, list[dict]] = {
-    "ols": _COMMON_MODEL_PARAMS,
+    "ols": _OLS_MODEL_PARAMS,
     "logit": _COMMON_MODEL_PARAMS,
     "probit": _COMMON_MODEL_PARAMS,
     "poisson": _COMMON_MODEL_PARAMS,

@@ -31,6 +31,16 @@ def _csv_with_two_x() -> bytes:
     return ("y,x1,x2\n" + rows + "\n").encode()
 
 
+def _clustered_ols_csv() -> bytes:
+    rows = ["y,x,firm"]
+    for firm in range(12):
+        for period in range(3):
+            x = firm + period / 10
+            y = 2 + 1.5 * x + (firm % 3) / 10
+            rows.append(f"{y},{x},firm-{firm}")
+    return ("\n".join(rows) + "\n").encode()
+
+
 def _wait_terminal(project_root: Path, run_id: str, tries: int = 100) -> str:
     terminal = {"completed", "failed", "cancelled", "interrupted", "partial"}
     body: dict = {}
@@ -55,6 +65,32 @@ def _create_terminal_run(project_root: Path) -> str:
             "x": "x1,x2",
         },
         files={"file": ("d.csv", io.BytesIO(_csv_with_two_x()), "text/csv")},
+    )
+    response.raise_for_status()
+    run_id = response.json()["run_id"]
+    assert _wait_terminal(project_root, run_id) == "completed"
+    return run_id
+
+
+def _create_terminal_unadjusted_ols_run(project_root: Path) -> str:
+    response = client.post(
+        "/runs",
+        data={
+            "project_root": str(project_root),
+            "mode": "auto",
+            "model_type": "ols",
+            "y": "y",
+            "x": "x",
+            "focal_x": "x",
+            "covariance": "unadjusted",
+        },
+        files={
+            "file": (
+                "clustered.csv",
+                io.BytesIO(_clustered_ols_csv()),
+                "text/csv",
+            )
+        },
     )
     response.raise_for_status()
     run_id = response.json()["run_id"]
@@ -143,6 +179,61 @@ def test_rerun_service_submits_child_with_wire_format_and_workbench_context(
     assert child_inputs["rerun_from"]["op_node_id"] == model_node_id
     assert child_inputs["workbench_context"] == context
     assert _wait_terminal(project.root, result.run_id) == "completed"
+
+
+def test_rerun_service_accepts_cluster_variable_for_ols_clustered_covariance(
+    tmp_path: Path,
+) -> None:
+    project = create_project(tmp_path, "clustered-ols")
+    parent_run_id = _create_terminal_unadjusted_ols_run(project.root)
+    graph = GraphStore(project.root / "runs").read(parent_run_id)
+    model_node_id = next(
+        node_id
+        for node_id, node in graph.nodes.items()
+        if getattr(node.stage, "value", node.stage) == "model"
+    )
+    context = _workbench_context(project.root, parent_run_id, model_node_id)
+
+    result = RerunService(project.root).submit(
+        RerunSubmissionRequest(
+            source_run_id=parent_run_id,
+            from_node=model_node_id,
+            op_overrides={
+                "covariance": "clustered",
+                "entity_col": "firm",
+            },
+            rerun_reason="agent_confirmed",
+            rerun_from={
+                "owner_run_id": parent_run_id,
+                "op_node_id": model_node_id,
+            },
+            workbench_context=context,
+        )
+    )
+
+    child_inputs = json.loads(
+        (project.root / "runs" / result.run_id / "run_inputs.json").read_text()
+    )
+    assert child_inputs["form"]["covariance"] == "clustered"
+    assert child_inputs["form"]["entity_col"] == "firm"
+    assert _wait_terminal(project.root, result.run_id) == "completed"
+    child_inputs = json.loads(
+        (project.root / "runs" / result.run_id / "run_inputs.json").read_text()
+    )
+    assert child_inputs["confirmed_payload"] == child_inputs["executed_payload"]
+
+    model_result = json.loads(
+        (
+            project.root
+            / "runs"
+            / result.run_id
+            / "model_results"
+            / "ols_1.json"
+        ).read_text()
+    )
+    assert model_result["covariance"] == "clustered"
+    assert model_result["entity_col"] == "firm"
+    assert model_result["x_columns"] == ["x"]
 
 
 @pytest.mark.parametrize(

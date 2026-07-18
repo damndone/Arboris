@@ -1039,6 +1039,7 @@ class WorkbenchOrchestrator:
                 workbench_context["execution_key"] = request.execution_key
             for field_name in (
                 "confirmed_payload_hash",
+                "executed_proposal_payload_hash",
                 "plan_hash",
                 "canonical_patch_hash",
             ):
@@ -1092,6 +1093,44 @@ class WorkbenchOrchestrator:
             record.preconditions.get("run_family_id")
             or f"legacy-family:{source_run_id}"
         )
+        proposal = self.proposal_store.latest_revision(record.proposal_id)
+        executed_proposal_payload_hash = ""
+        analysis_loop_binding = self._analysis_loop_binding(record)
+        if analysis_loop_binding is not None:
+            from ..analysis_loop.plan import confirmed_payload_hash_for_plan
+            from ..analysis_loop.storage import PlanDiffStore
+
+            plan_logical_key = analysis_loop_binding.get("plan_logical_key")
+            if type(plan_logical_key) is not str or not plan_logical_key:
+                raise ValueError("analysis-loop proposal has no PlanDiff logical key")
+            plan_packet = PlanDiffStore(
+                self.repository.root,
+                create=False,
+            ).get_terminal_packet(plan_logical_key)
+            if plan_packet is None:
+                raise ValueError("analysis-loop PlanDiff terminal packet is unavailable")
+            executed_proposal_payload_hash = confirmed_payload_hash_for_plan(
+                plan_packet.plan_diff,
+                proposal_id=proposal.proposal_id,
+                revision=proposal.revision,
+                operation_version=record.operation_version,
+                target=proposal.target,
+                preconditions=proposal.preconditions,
+                changes=proposal.changes,
+            )
+            confirmed_payload_hash = str(
+                record.preconditions.get("confirmed_payload_hash") or ""
+            )
+            if executed_proposal_payload_hash != confirmed_payload_hash:
+                raise ValueError("confirmed_executed_proposal_hash_mismatch")
+            persisted_payload_hash = record.execution.get(
+                "executed_proposal_payload_hash"
+            )
+            if (
+                persisted_payload_hash
+                and persisted_payload_hash != executed_proposal_payload_hash
+            ):
+                raise ValueError("executed_proposal_hash_witness_mismatch")
         execution = {
             **record.execution,
             "source_run_id": source_run_id,
@@ -1104,6 +1143,10 @@ class WorkbenchOrchestrator:
             "child_chain_id": child_chain_id,
             "child_session_id": child_session_id,
         }
+        if executed_proposal_payload_hash:
+            execution[
+                "executed_proposal_payload_hash"
+            ] = executed_proposal_payload_hash
         self._ensure_child_context(
             record=record,
             source_session_entry_id=source_leaf_id,
@@ -1134,7 +1177,7 @@ class WorkbenchOrchestrator:
             forest_node_key=str(record.target["forest_node_key"]),
             owner_resolution=str(record.preconditions["owner_resolution"]),
             active_head_run_id=str(record.preconditions["active_head_run_id"]),
-            changes=dict(self.proposal_store.latest_revision(record.proposal_id).changes),
+            changes=dict(proposal.changes),
             fork_id=fork_id,
             child_chain_id=child_chain_id,
             child_session_id=child_session_id,
@@ -1142,6 +1185,7 @@ class WorkbenchOrchestrator:
             confirmed_payload_hash=str(
                 record.preconditions.get("confirmed_payload_hash") or ""
             ),
+            executed_proposal_payload_hash=executed_proposal_payload_hash,
             plan_hash=str(record.preconditions.get("plan_hash") or ""),
             canonical_patch_hash=str(
                 record.preconditions.get("canonical_patch_hash") or ""
@@ -1233,6 +1277,21 @@ class WorkbenchOrchestrator:
             "child_session_id": execution["child_session_id"],
             "execution_key": execution.get("execution_key"),
         }
+        for field_name in (
+            "confirmed_payload_hash",
+            "plan_hash",
+            "canonical_patch_hash",
+        ):
+            value = record.preconditions.get(field_name)
+            if value:
+                workbench_context[field_name] = value
+        executed_proposal_payload_hash = execution.get(
+            "executed_proposal_payload_hash"
+        )
+        if executed_proposal_payload_hash:
+            workbench_context[
+                "executed_proposal_payload_hash"
+            ] = executed_proposal_payload_hash
         request = RerunReconciliationRequest(
             source_run_id=source_run_id,
             target_run_id=target_run_id,
@@ -1783,6 +1842,7 @@ class WorkbenchOrchestrator:
             # storage module depends on the Agent persistence package, whose
             # package initializer also exposes this orchestrator.
             from ..analysis_loop.observation import build_and_store_analysis_loop_packets
+            from ..analysis_loop.canonical import sha256_canonical
             from ..analysis_loop.resolver import (
                 resolve_analysis_loop_inputs,
                 resolve_analysis_loop_run,
@@ -1834,16 +1894,17 @@ class WorkbenchOrchestrator:
 
             context = child_run.run_inputs.get("workbench_context")
             context = context if isinstance(context, dict) else {}
-            confirmed_payload_hash = str(
-                context.get("confirmed_payload_hash")
-                or binding.get("confirmed_payload_hash")
-                or record.preconditions.get("confirmed_payload_hash")
-                or ""
+            confirmed_payload = child_run.run_inputs.get("confirmed_payload")
+            executed_payload = child_run.run_inputs.get("executed_payload")
+            confirmed_payload_hash = sha256_canonical(
+                confirmed_payload
+                if isinstance(confirmed_payload, dict)
+                else {"missing": "confirmed_payload"}
             )
-            executed_payload_hash = str(
-                context.get("executed_payload_hash")
-                or confirmed_payload_hash
-                or ""
+            executed_payload_hash = sha256_canonical(
+                executed_payload
+                if isinstance(executed_payload, dict)
+                else {"missing": "executed_payload"}
             )
             plan_hash = str(context.get("plan_hash") or plan.plan_hash)
             canonical_patch_hash = str(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 from workbench.analysis_loop.contracts import SourceRunContract
 from workbench.agent.core import AgentCore
+from workbench.agent.chains import RerunExecutionResult
 from workbench.agent.events import AgentEventStream
 from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import JsonlSessionRepository
@@ -238,6 +240,58 @@ def test_confirm_analysis_loop_proposal_rejects_changed_source_before_operation(
 
     assert exc_info.value.code == "STALE_PLAN"
     assert orchestrator.operation_store.list_records() == []
+
+
+def test_analysis_loop_execution_recomputes_and_persists_executed_proposal_hash(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    kwargs = _adapter_kwargs(tmp_path)
+    proposal = create_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        chain_id="chain-a",
+        **kwargs,
+    )
+    record = confirm_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        plan_store=kwargs["plan_store"],
+        proposal_id=proposal.proposal_id,
+        current_source=_source(),
+        current_source_context_fingerprint=proposal.preconditions[
+            "source_context_fingerprint"
+        ],
+        current_active_head_run_id="run-source",
+        revision=proposal.revision,
+        fingerprint=proposal.fingerprint,
+        confirmed_payload_hash=proposal.preconditions["confirmed_payload_hash"],
+    )
+    captured = []
+
+    async def executor(request):
+        captured.append(request)
+        return RerunExecutionResult(
+            target_run_id="run-child",
+            outputs={"status": "completed"},
+        )
+
+    completed = asyncio.run(
+        orchestrator.execute_confirmed_proposal(
+            record.record_id,
+            current_context_fingerprint=proposal.preconditions[
+                "context_fingerprint"
+            ],
+            current_active_head_run_id="run-source",
+            executor=executor,
+        )
+    )
+
+    assert len(captured) == 1
+    assert captured[0].executed_proposal_payload_hash == proposal.preconditions[
+        "confirmed_payload_hash"
+    ]
+    assert completed.execution["executed_proposal_payload_hash"] == captured[
+        0
+    ].executed_proposal_payload_hash
 
 
 def test_build_analysis_loop_proposal_returns_existing_proposal_kwargs_and_binding(

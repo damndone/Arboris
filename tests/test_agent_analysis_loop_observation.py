@@ -74,6 +74,13 @@ def _write_run(
     }
     if covariance == "clustered":
         form["entity_col"] = "company_id"
+    payload = {
+        "model_type": "ols",
+        "covariance": covariance,
+        "entity_col": form.get("entity_col", ""),
+        "y": "y",
+        "x": ["x"],
+    }
     write_run_inputs(
         run_root,
         form=form,
@@ -85,6 +92,8 @@ def _write_run(
         dag_hash="b" * 64,
         source_lineage={"source_run_id": rerun_of, "from_node": "model:ols" if rerun_of else None},
         workbench_context=workbench_context,
+        confirmed_payload=payload if rerun_of else None,
+        executed_payload=payload if rerun_of else None,
     )
     return result
 
@@ -108,6 +117,7 @@ def test_terminal_observation_builds_validation_and_compare_packets_once(tmp_pat
         rerun_of="run-source",
         workbench_context={
             "confirmed_payload_hash": "payload-hash-1",
+            "executed_payload_hash": "payload-hash-1",
             "plan_hash": "plan-hash-1",
             "canonical_patch_hash": "patch-hash-1",
         },
