@@ -27,6 +27,16 @@ from .fingerprints import (
     point_estimation_fingerprint,
 )
 from .policy import OLS_CLUSTER_POLICY_V1, ols_cluster_policy_v1
+from .plan import (
+    ACTION_ID,
+    PLAN_DIFF_SCHEMA_VERSION,
+    PLAN_STRATEGY_VERSION,
+    PlanDiff,
+    PlanValidationError,
+    build_plan_diff,
+    canonicalize_intent,
+    confirmed_payload_hash,
+)
 from .preflight import (
     preflight_cluster_variable,
     resolve_comparison_target,
@@ -44,6 +54,7 @@ from .recovery import (
 
 __all__ = [
     "CanonicalJSONError",
+    "ACTION_ID",
     "ClusterPreflightResult",
     "ComparePayload",
     "ComparisonTarget",
@@ -52,6 +63,10 @@ __all__ = [
     "OLS_CLUSTERED_RECOVERY_ACTION",
     "PacketConflictError",
     "PacketEnvelope",
+    "PLAN_DIFF_SCHEMA_VERSION",
+    "PLAN_STRATEGY_VERSION",
+    "PlanDiff",
+    "PlanValidationError",
     "ProposalRejection",
     "RECOVERY_ACTION_REGISTRY",
     "RECOVERY_ACTIONS",
@@ -60,8 +75,11 @@ __all__ = [
     "SourceRunContract",
     "SourceValidationResult",
     "analysis_sample_fingerprint",
+    "build_plan_diff",
+    "canonicalize_intent",
     "canonical_json_v1",
     "coefficient_schema_fingerprint",
+    "confirmed_payload_hash",
     "dataset_snapshot_fingerprint",
     "ensure_packet_idempotent",
     "inference_config_fingerprint",
