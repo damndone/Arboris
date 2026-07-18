@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from .canonical import sha256_canonical
 from .contracts import SourceRunContract, _freeze, _thaw
+
+if TYPE_CHECKING:
+    from .storage import ValidationPacketStore
 
 VALIDATION_PACKET_SCHEMA_VERSION = "validation_packet_v1"
 VALIDATION_POLICY_VERSION = "validation_policy_v1"
@@ -509,11 +512,57 @@ def build_validation_packet(
     )
 
 
+def build_and_store_validation_packet(
+    *,
+    store: "ValidationPacketStore",
+    source: SourceRunContract,
+    child: Mapping[str, Any],
+    plan_diff: Any,
+    execution_evidence: Mapping[str, Any],
+    model_evidence: Mapping[str, Any],
+    artifact_evidence: Mapping[str, Any],
+    comparison_evidence: Mapping[str, Any],
+    validation_policy_version: str = VALIDATION_POLICY_VERSION,
+    schema_version: str = VALIDATION_PACKET_SCHEMA_VERSION,
+) -> ValidationPacket:
+    """Build one terminal observation through the immutable packet store."""
+
+    child = _mapping(child, "child")
+    execution = _mapping(execution_evidence, "execution_evidence")
+    artifacts = _mapping(artifact_evidence, "artifact_evidence")
+    logical_key = validation_packet_logical_key(
+        child_run_id=_string(child.get("run_id"), "child.run_id"),
+        executed_payload_hash=_string(
+            execution.get("executed_payload_hash"), "executed_payload_hash"
+        ),
+        artifact_manifest_hash=_string(
+            artifacts.get("manifest_hash"), "artifact_manifest_hash"
+        ),
+        validation_policy_version=validation_policy_version,
+        schema_version=schema_version,
+    )
+    return store.build_packet(
+        logical_key=logical_key,
+        builder=lambda: build_validation_packet(
+            source=source,
+            child=child,
+            plan_diff=plan_diff,
+            execution_evidence=execution,
+            model_evidence=model_evidence,
+            artifact_evidence=artifacts,
+            comparison_evidence=comparison_evidence,
+            validation_policy_version=validation_policy_version,
+            schema_version=schema_version,
+        ),
+    )
+
+
 __all__ = [
     "VALIDATION_PACKET_SCHEMA_VERSION",
     "VALIDATION_POLICY_VERSION",
     "ValidationCheck",
     "ValidationPacket",
+    "build_and_store_validation_packet",
     "build_validation_packet",
     "validation_packet_logical_key",
 ]
