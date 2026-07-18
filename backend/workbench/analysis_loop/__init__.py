@@ -53,6 +53,14 @@ from .preflight import (
     validate_clustered_intent,
     validate_source_contract,
 )
+from .validation import (
+    VALIDATION_PACKET_SCHEMA_VERSION,
+    VALIDATION_POLICY_VERSION,
+    ValidationCheck,
+    ValidationPacket,
+    build_validation_packet,
+    validation_packet_logical_key,
+)
 from .recovery import (
     OLS_CLUSTERED_RECOVERY_ACTION,
     RECOVERY_ACTION_REGISTRY,
@@ -111,4 +119,10 @@ __all__ = [
     "validate_clustered_intent",
     "validate_confirmation_binding",
     "validate_source_contract",
+    "VALIDATION_PACKET_SCHEMA_VERSION",
+    "VALIDATION_POLICY_VERSION",
+    "ValidationCheck",
+    "ValidationPacket",
+    "build_validation_packet",
+    "validation_packet_logical_key",
 ]
