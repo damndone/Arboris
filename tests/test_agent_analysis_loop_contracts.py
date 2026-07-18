@@ -430,6 +430,86 @@ def test_compare_payload_direct_and_from_dict_validation_match():
         ComparePayload.from_dict([])
 
 
+def test_compare_payload_rejects_integer_top_level_keys_direct_and_from_dict():
+    with pytest.raises(TypeError, match="payload.*keys"):
+        ComparePayload(compare_status="complete", payload={1: "value"})
+    with pytest.raises(TypeError, match="payload.*keys"):
+        ComparePayload.from_dict({"compare_status": "complete", 1: "value"})
+
+
+def test_packet_and_compare_payload_reject_nested_non_string_mapping_keys():
+    nested = {"nested": {1: "value"}}
+
+    with pytest.raises(TypeError, match="source.*keys"):
+        PacketEnvelope(**(_envelope().to_dict() | {"source": nested}))
+    with pytest.raises(TypeError, match="source.*keys"):
+        PacketEnvelope.from_dict(_envelope().to_dict() | {"source": nested})
+    with pytest.raises(TypeError, match="payload.*keys"):
+        ComparePayload(compare_status="complete", payload=nested)
+    with pytest.raises(TypeError, match="payload.*keys"):
+        ComparePayload.from_dict(
+            {"compare_status": "complete", "nested": {1: "value"}}
+        )
+
+
+def test_packet_and_compare_payload_reject_unsupported_nested_leaves_and_nonfinite_numbers():
+    class MutableLeaf:
+        pass
+
+    invalid_values = [
+        {"unsupported": {1, 2}},
+        {"unsupported": bytearray(b"x")},
+        {"unsupported": MutableLeaf()},
+        {"unsupported": math.nan},
+        {"unsupported": math.inf},
+        {"unsupported": -math.inf},
+    ]
+    for nested in invalid_values:
+        with pytest.raises(
+            (TypeError, ValueError), match="source|unsupported|finite|JSON"
+        ):
+            PacketEnvelope(**(_envelope().to_dict() | {"source": nested}))
+        with pytest.raises(
+            (TypeError, ValueError), match="source|unsupported|finite|JSON"
+        ):
+            PacketEnvelope.from_dict(_envelope().to_dict() | {"source": nested})
+        with pytest.raises(
+            (TypeError, ValueError), match="payload|unsupported|finite|JSON"
+        ):
+            ComparePayload(compare_status="complete", payload=nested)
+        with pytest.raises(
+            (TypeError, ValueError), match="payload|unsupported|finite|JSON"
+        ):
+            ComparePayload.from_dict({"compare_status": "complete", **nested})
+
+
+def test_packet_and_compare_payload_accept_finite_json_recursive_values():
+    nested = {
+        "none": None,
+        "string": "value",
+        "boolean": True,
+        "integer": 10**100,
+        "float": 1.25,
+        "sequence": [None, ("nested", 2.5)],
+    }
+    packet = PacketEnvelope.from_dict(
+        _envelope().to_dict() | {"source": nested, "payload": nested}
+    )
+    comparison = ComparePayload(compare_status="complete", payload=nested)
+
+    assert packet.to_dict()["source"] == {
+        **nested,
+        "sequence": [None, ["nested", 2.5]],
+    }
+    assert comparison.to_dict() == {
+        "compare_status": "complete",
+        **nested,
+        "sequence": [None, ["nested", 2.5]],
+    }
+    assert PacketEnvelope.from_dict(packet.to_dict()) == packet
+    assert ComparePayload.from_dict(comparison.to_dict()) == comparison
+
+
 def test_packet_and_compare_payload_recursively_freeze_inputs_and_thaw_to_json():
     source = {"nested": {"items": [1]}}
     payload = {"nested": {"items": ["x"]}}

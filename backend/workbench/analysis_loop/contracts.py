@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -14,12 +15,26 @@ CompareStatus = Literal["complete", "partial", "not_comparable", "blocked_by_int
 TERMINAL_PACKET_STATUSES = frozenset({"complete", "blocked", "failed"})
 
 
-def _freeze(value: Any) -> Any:
+def _freeze(value: Any, path: str = "value") -> Any:
+    if value is None or type(value) in {str, bool, int}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain only finite numbers")
+        return value
     if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+        frozen = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError(f"{path} mapping keys must be strings")
+            frozen[key] = _freeze(item, f"{path}.{key}")
+        return MappingProxyType(frozen)
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    return value
+        return tuple(_freeze(item, f"{path}[]") for item in value)
+    raise TypeError(
+        f"{path} contains unsupported JSON-compatible leaf "
+        f"{type(value).__name__}"
+    )
 
 
 def _thaw(value: Any) -> Any:
@@ -135,7 +150,11 @@ class PacketEnvelope:
             "timestamps",
             "payload",
         ):
-            object.__setattr__(self, field_name, _freeze(getattr(self, field_name)))
+            object.__setattr__(
+                self,
+                field_name,
+                _freeze(getattr(self, field_name), field_name),
+            )
         object.__setattr__(self, "reasons", tuple(self.reasons))
 
     def to_dict(self) -> dict[str, Any]:
@@ -217,7 +236,7 @@ class ComparePayload:
             raise ValueError(f"invalid compare_status: {self.compare_status}")
         if "compare_status" in self.payload:
             raise ValueError("payload reserves compare_status")
-        object.__setattr__(self, "payload", _freeze(self.payload))
+        object.__setattr__(self, "payload", _freeze(self.payload, "payload"))
 
     def to_dict(self) -> dict[str, Any]:
         return {"compare_status": self.compare_status, **_thaw(self.payload)}
