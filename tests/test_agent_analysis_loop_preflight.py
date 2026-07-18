@@ -1072,6 +1072,40 @@ def test_exploding_runtime_dtype_element_is_uninspectable_with_position_evidence
     assert result.evidence["inspection_stage"] == "runtime_dtype"
 
 
+@pytest.mark.parametrize("invalid_row_id", [object(), None, "", 7])
+def test_invalid_model_row_id_elements_fail_closed_without_raw_evidence(
+    invalid_row_id: object,
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", invalid_row_id, "r3", "r4"],  # type: ignore[list-item]
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_ROW_IDS_INVALID"
+    assert result.status == "fail"
+    assert result.evidence["row_count"] == 4
+    assert result.evidence["invalid_position"] == 1
+    assert isinstance(result.evidence["invalid_element_type"], str)
+    assert "actual_row_ids" not in result.evidence
+
+
+def test_validated_numpy_row_ids_still_preserve_alignment_mismatch_evidence() -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=np.asarray(["r2", "r1", "r3", "r4"]),
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_ROW_ALIGNMENT_MISMATCH"
+    assert result.evidence["expected_row_ids"] == ("r1", "r2", "r3", "r4")
+    assert result.evidence["actual_row_ids"] == ("r2", "r1", "r3", "r4")
+
+
 def test_exploding_cluster_element_is_uninspectable_with_position_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -528,7 +528,34 @@ def preflight_cluster_variable(
             evidence={"received_type": type(model_row_ids).__name__},
         )
     cluster_values = cluster_value_vector
-    model_row_ids = model_row_id_vector
+    normalized_row_ids: list[str] = []
+    for index, row_id in enumerate(model_row_id_vector):
+        invalid_element = False
+        try:
+            invalid_element = not isinstance(row_id, str) or not bool(row_id)
+            normalized_row_id = str(row_id) if not invalid_element else ""
+            invalid_element = invalid_element or not normalized_row_id
+        except Exception:
+            invalid_element = True
+            normalized_row_id = ""
+        if invalid_element:
+            return _cluster_result(
+                source=source,
+                cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+                valid=False,
+                status="fail",
+                severity="error",
+                code="CLUSTER_ROW_IDS_INVALID",
+                row_count=len(model_row_id_vector),
+                evidence={
+                    "row_count": len(model_row_id_vector),
+                    "invalid_position": index,
+                    "invalid_element_type": type(row_id).__name__,
+                    "received_type": type(model_row_ids).__name__,
+                },
+            )
+        normalized_row_ids.append(normalized_row_id)
+    model_row_ids = tuple(normalized_row_ids)
     if not isinstance(policy, OLSClusterPolicyV1):
         return _cluster_result(
             source=source,
