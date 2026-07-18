@@ -54,8 +54,8 @@ class RecoveryAction:
         field_mapping = dict(self.field_mapping)
         if not field_mapping:
             raise ValueError("field_mapping must not be empty")
-        if not set(required_fields).issubset(field_mapping):
-            raise ValueError("field_mapping must cover required_fields")
+        if set(field_mapping) != set(required_fields):
+            raise ValueError("field_mapping keys must exactly match required_fields")
         object.__setattr__(self, "required_fields", required_fields)
         object.__setattr__(self, "field_mapping", MappingProxyType(field_mapping))
 

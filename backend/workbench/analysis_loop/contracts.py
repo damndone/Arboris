@@ -64,6 +64,27 @@ def _string_sequence(value: Any, field_name: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _validate_validation_state(
+    *, valid: bool, status: str, severity: str, reason_codes: tuple[str, ...]
+) -> None:
+    expected_valid = status in {"pass", "warning"}
+    expected_severity = {
+        "pass": "info",
+        "warning": "warning",
+        "fail": "error",
+    }.get(status)
+    if status not in {"pass", "warning", "fail"}:
+        raise ValueError(f"invalid validation status: {status}")
+    if valid is not expected_valid:
+        raise ValueError("valid does not match validation status")
+    if severity != expected_severity:
+        raise ValueError("severity does not match validation status")
+    if status == "fail" and not reason_codes:
+        raise ValueError("failed validation must include reason_codes")
+    if status == "pass" and reason_codes:
+        raise ValueError("passed validation must not include reason_codes")
+
+
 def _require_non_empty_string(value: Any, field_name: str) -> None:
     _require_string(value, field_name)
     if not value:
@@ -257,13 +278,18 @@ class SourceValidationResult:
     def __post_init__(self) -> None:
         if type(self.valid) is not bool:
             raise TypeError("valid must be a bool")
-        if self.status not in {"pass", "warning", "fail"}:
-            raise ValueError(f"invalid source validation status: {self.status}")
         _require_non_empty_string(self.severity, "severity")
         _require_non_empty_string(self.code, "code")
         _require_mapping(self.evidence, "evidence")
         object.__setattr__(self, "evidence", _freeze(self.evidence, "evidence"))
-        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
+        reason_codes = _string_sequence(self.reason_codes, "reason_codes")
+        _validate_validation_state(
+            valid=self.valid,
+            status=self.status,
+            severity=self.severity,
+            reason_codes=reason_codes,
+        )
+        object.__setattr__(self, "reason_codes", reason_codes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -317,8 +343,6 @@ class ClusterPreflightResult:
     def __post_init__(self) -> None:
         if type(self.valid) is not bool:
             raise TypeError("valid must be a bool")
-        if self.status not in {"pass", "warning", "fail"}:
-            raise ValueError(f"invalid cluster preflight status: {self.status}")
         if type(self.all_singleton_clusters) is not bool:
             raise TypeError("all_singleton_clusters must be a bool")
         _require_non_empty_string(self.severity, "severity")
@@ -339,7 +363,14 @@ class ClusterPreflightResult:
         _require_mapping(self.invariants, "invariants")
         object.__setattr__(self, "evidence", _freeze(self.evidence, "evidence"))
         object.__setattr__(self, "invariants", _freeze(self.invariants, "invariants"))
-        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
+        reason_codes = _string_sequence(self.reason_codes, "reason_codes")
+        _validate_validation_state(
+            valid=self.valid,
+            status=self.status,
+            severity=self.severity,
+            reason_codes=reason_codes,
+        )
+        object.__setattr__(self, "reason_codes", reason_codes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -428,8 +459,6 @@ class IntentValidationResult:
     def __post_init__(self) -> None:
         if type(self.valid) is not bool:
             raise TypeError("valid must be a bool")
-        if self.status not in {"pass", "warning", "fail"}:
-            raise ValueError(f"invalid intent validation status: {self.status}")
         if type(self.message) is not str:
             raise TypeError("message must be a string")
         nested_contracts = {
@@ -451,7 +480,14 @@ class IntentValidationResult:
             object.__setattr__(self, field_name, _freeze(value, field_name))
         if any(type(key) is not str or type(value) is not bool for key, value in self.side_effects.items()):
             raise TypeError("side_effects must map strings to booleans")
-        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
+        reason_codes = _string_sequence(self.reason_codes, "reason_codes")
+        _validate_validation_state(
+            valid=self.valid,
+            status=self.status,
+            severity=self.severity,
+            reason_codes=reason_codes,
+        )
+        object.__setattr__(self, "reason_codes", reason_codes)
 
     def to_dict(self) -> dict[str, Any]:
         return {

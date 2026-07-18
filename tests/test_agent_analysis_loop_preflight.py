@@ -568,12 +568,48 @@ def test_intent_nested_contracts_are_typed_on_direct_and_json_boundaries(
         IntentValidationResult.from_dict(payload)
 
 
+def test_validation_contracts_reject_contradictory_state_direct_and_from_dict() -> None:
+    source_validation = validate_source_contract(_source())
+    cluster_preflight = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+    intent_validation = validate_clustered_intent(
+        _source(),
+        action_id="ols.use_clustered_covariance_v1",
+        patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+        requested_result_id=None,
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+    contracts = (source_validation, cluster_preflight, intent_validation)
+    contradictions = (
+        {"valid": True, "status": "fail", "severity": "error", "reason_codes": ["FAIL"]},
+        {"valid": False, "status": "pass", "severity": "info", "reason_codes": ["FAIL"]},
+        {"valid": False, "status": "warning", "severity": "warning", "reason_codes": ["FAIL"]},
+        {"valid": True, "status": "pass", "severity": "warning", "reason_codes": []},
+        {"valid": True, "status": "pass", "severity": "info", "reason_codes": ["UNEXPECTED"]},
+        {"valid": False, "status": "fail", "severity": "info", "reason_codes": ["FAIL"]},
+        {"valid": False, "status": "fail", "severity": "error", "reason_codes": []},
+    )
+
+    for contract in contracts:
+        for override in contradictions:
+            with pytest.raises((TypeError, ValueError)):
+                type(contract)(**contract.__dict__ | override)
+            with pytest.raises((TypeError, ValueError)):
+                type(contract).from_dict(contract.to_dict() | override)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
         {"required_fields": ()},
         {"field_mapping": {}},
         {"required_fields": ("cluster_variable",), "field_mapping": {"other": "entity_col"}},
+        {"field_mapping": {"cluster_variable": "entity_col", "extra": "extra_wire"}},
     ],
 )
 def test_recovery_action_metadata_requires_non_empty_covered_fields(
@@ -953,6 +989,36 @@ class _ExplodingVector:
 
     def __iter__(self) -> object:
         raise RuntimeError("iteration exploded")
+
+
+class _ExplodingElement:
+    def __ne__(self, other: object) -> bool:
+        raise RuntimeError("element comparison exploded")
+
+
+def test_exploding_cluster_element_is_uninspectable_with_position_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_isna = pd.isna
+
+    def exploding_isna(value: object) -> object:
+        if isinstance(value, _ExplodingElement):
+            raise RuntimeError("element missing inspection exploded")
+        return original_isna(value)
+
+    monkeypatch.setattr("workbench.analysis_loop.preflight.pd.isna", exploding_isna)
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", _ExplodingElement(), "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VALUES_UNINSPECTABLE"
+    assert result.status == "fail"
+    assert result.evidence["position"] == 1
+    assert result.evidence["error_type"] == "RuntimeError"
 
 
 @pytest.mark.parametrize(

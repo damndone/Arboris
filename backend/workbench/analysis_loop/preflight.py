@@ -575,7 +575,26 @@ def preflight_cluster_variable(
             row_count=len(actual_rows),
             evidence={"expected_row_ids": list(expected_rows), "actual_row_ids": list(actual_rows)},
         )
-    missing_positions = [index for index, value in enumerate(cluster_values) if _is_missing(value)]
+    missing_positions: list[int] = []
+    for index, value in enumerate(cluster_values):
+        try:
+            is_missing = _is_missing(value)
+        except Exception as exc:
+            return _cluster_result(
+                source=source,
+                cluster_variable=cluster_variable,
+                valid=False,
+                status="fail",
+                severity="error",
+                code="CLUSTER_VALUES_UNINSPECTABLE",
+                row_count=len(actual_rows),
+                evidence={
+                    "position": index,
+                    "error_type": type(exc).__name__,
+                },
+            )
+        if is_missing:
+            missing_positions.append(index)
     if missing_positions:
         return _cluster_result(
             source=source,
