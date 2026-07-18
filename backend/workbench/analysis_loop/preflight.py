@@ -21,7 +21,12 @@ from .contracts import (
     SourceRunContract,
     SourceValidationResult,
 )
-from .policy import OLSClusterPolicyV1, cluster_runtime_type, ols_cluster_policy_v1
+from .policy import (
+    OLSClusterPolicyV1,
+    cluster_declared_runtime_compatible,
+    cluster_runtime_type,
+    ols_cluster_policy_v1,
+)
 from .recovery import RECOVERY_ACTION_REGISTRY, RecoveryAction, get_recovery_action
 
 RECOVERY_ACTION_ID = "ols.use_clustered_covariance_v1"
@@ -671,7 +676,7 @@ def preflight_cluster_variable(
             evidence={"declared_dtype": declared, "runtime_types": sorted(runtime_types)},
         )
     runtime = next(iter(runtime_types))
-    if declared in {"bool", "float"} or declared not in {None, "integer", "string", "category"}:
+    if not cluster_declared_runtime_compatible(declared, runtime):
         return _cluster_result(
             source=source,
             cluster_variable=cluster_variable,

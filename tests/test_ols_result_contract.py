@@ -475,6 +475,29 @@ def test_clustered_object_entity_with_timestamp_values_matches_preflight_rejecti
     assert preflight.code == "CLUSTER_TYPE_UNSUPPORTED"
 
 
+def test_clustered_object_integer_entity_matches_preflight_rejection():
+    frame = _frame().assign(
+        firm=pd.Series(
+            [1, 1, 2, 2, 3, 3, 4, 4],
+            index=_frame().index,
+            dtype=object,
+        )
+    )
+
+    with pytest.raises(ValueError, match="OLS_CLUSTER_TYPE_UNSUPPORTED"):
+        _run(
+            frame,
+            robust=False,
+            covariance="clustered",
+            covariance_explicit=True,
+            cluster_col="firm",
+        )
+
+    preflight = _cluster_preflight(frame, dtype="object")
+    assert preflight.valid is False
+    assert preflight.code == "CLUSTER_TYPE_UNSUPPORTED"
+
+
 def test_clustered_covariance_rejects_null_entity_on_dropped_y_x_row():
     frame = _frame().copy()
     frame.loc["row-2", "y"] = np.nan

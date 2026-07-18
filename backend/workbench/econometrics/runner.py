@@ -16,7 +16,11 @@ from ..analysis_loop.fingerprints import (
     inference_config_fingerprint,
     point_estimation_fingerprint,
 )
-from ..analysis_loop.policy import cluster_runtime_type, ols_cluster_policy_v1
+from ..analysis_loop.policy import (
+    cluster_declared_runtime_compatible,
+    cluster_runtime_type,
+    ols_cluster_policy_v1,
+)
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
@@ -222,8 +226,12 @@ def _validate_cluster_group_values(groups: pd.Series) -> None:
         or "bool" in runtime_types and policy.reject_boolean
         or "float" in runtime_types and policy.reject_float
         or any(item not in policy.allowed_cluster_types for item in runtime_types)
-        or declared in {"bool", "float"}
-        or declared not in {None, "integer", "string", "category"}
+        or (
+            len(runtime_types) == 1
+            and not cluster_declared_runtime_compatible(
+                declared, next(iter(runtime_types))
+            )
+        )
     ):
         raise ValueError(
             "OLS_CLUSTER_TYPE_UNSUPPORTED: entity_col values violate "

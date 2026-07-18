@@ -50,6 +50,24 @@ def cluster_runtime_type(value: Any) -> str | None:
     return None
 
 
+def cluster_declared_runtime_compatible(
+    declared: str | None,
+    runtime: str | None,
+) -> bool:
+    """Apply the v1 declared dtype to runtime type compatibility rule."""
+
+    if declared in {"bool", "float"} or declared not in {
+        None,
+        "integer",
+        "string",
+        "category",
+    }:
+        return False
+    if declared in {"integer", "string"} and runtime != declared:
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class OLSClusterPolicyV1:
     allowed_model: str
