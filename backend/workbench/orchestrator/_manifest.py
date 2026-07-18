@@ -133,6 +133,24 @@ def _write_manifest(
     model_routing: dict[str, Any] | None = None,
     rerun_of: str | None = None,
 ) -> None:
+    existing_lineage: dict[str, Any] = {}
+    existing_path = run_root / "run_manifest.json"
+    if existing_path.is_file():
+        try:
+            existing = read_json(existing_path)
+        except (OSError, ValueError, TypeError):
+            existing = None
+        if isinstance(existing, dict):
+            for field in (
+                "rerun_of",
+                "from_node",
+                "rerun_reason",
+                "source_lineage",
+                "rerun_from",
+                "source_run_id",
+            ):
+                if field in existing:
+                    existing_lineage[field] = existing[field]
     payload: dict[str, Any] = {
         "run_id": run_id,
         "mode": mode,
@@ -142,6 +160,7 @@ def _write_manifest(
         "x": list(x),
         "lineage": lineage,
     }
+    payload.update(existing_lineage)
     if requested_model_type is not None:
         payload["requested_model_type"] = requested_model_type
     if model_routing is not None:

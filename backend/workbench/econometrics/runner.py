@@ -147,35 +147,47 @@ def _row_id_values(
     row_ids: list[str] | tuple[str, ...] | None,
 ) -> list[str]:
     if row_ids is None:
-        return [str(_python_scalar(value)) for value in frame.index]
-    if len(row_ids) != len(frame) or len(set(row_ids)) != len(row_ids):
+        if frame.index.is_unique:
+            return [str(_python_scalar(value)) for value in frame.index]
+        return [f"position:{position}" for position in range(len(frame))]
+    if len(row_ids) != len(frame):
         raise ValueError(
             "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
             "and aligned to the input frame."
         )
-    return [str(value) for value in row_ids]
+    values = [str(value) for value in row_ids]
+    if len(set(values)) == len(values):
+        return values
+    if frame.index.is_unique:
+        raise ValueError(
+            "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
+            "and aligned to the input frame."
+        )
+    return [f"{value}#occurrence:{position}" for position, value in enumerate(values)]
 
 
 def _analysis_row_context(
     frame: pd.DataFrame,
     row_labels: Any,
     *,
+    model_index: Any = None,
     row_ids: list[str] | tuple[str, ...] | None,
     cluster_row_ids: list[str] | tuple[str, ...] | None,
-) -> tuple[list[Any], list[str]]:
-    if not frame.index.is_unique:
-        raise ValueError(
-            "OLS_CLUSTER_ROW_ALIGNMENT: duplicate frame index prevents stable row alignment."
-        )
-    labels = list(row_labels) if row_labels is not None else list(frame.index)
+) -> tuple[list[int], list[str]]:
+    reference_index = list(model_index if model_index is not None else frame.index)
+    labels = list(row_labels) if row_labels is not None else reference_index
     source_ids = _row_id_values(frame, row_ids)
-    positions = {label: position for position, label in enumerate(frame.index)}
-    try:
-        selected_positions = [positions[label] for label in labels]
-    except KeyError as exc:
-        raise ValueError(
-            "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
-        ) from exc
+    positions_by_label: dict[Any, list[int]] = {}
+    for position, label in enumerate(reference_index):
+        positions_by_label.setdefault(label, []).append(position)
+    selected_positions: list[int] = []
+    for label in labels:
+        positions = positions_by_label.get(label)
+        if not positions:
+            raise ValueError(
+                "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
+            )
+        selected_positions.append(positions.pop(0))
     analysis_ids = [source_ids[position] for position in selected_positions]
     if cluster_row_ids is not None:
         observed_cluster_ids = [str(value) for value in cluster_row_ids]
@@ -184,7 +196,7 @@ def _analysis_row_context(
                 "OLS_CLUSTER_ROW_ALIGNMENT: cluster vector row identifiers do not "
                 "match the model analysis rows in order."
             )
-    return labels, analysis_ids
+    return selected_positions, analysis_ids
 
 
 def _frame_snapshot(frame: pd.DataFrame) -> dict[str, Any]:
@@ -262,6 +274,7 @@ def _attach_ols_result_contract(
     covariance: str,
     covariance_explicit: bool,
     cluster_col: str | None,
+    model_index: Any,
     dataset_snapshot: Any,
     row_ids: list[str] | tuple[str, ...] | None,
     cluster_row_ids: list[str] | tuple[str, ...] | None,
@@ -272,9 +285,10 @@ def _attach_ols_result_contract(
     missing_policy: str,
     solver_options: Any,
 ) -> dict[str, Any]:
-    row_labels, analysis_ids = _analysis_row_context(
+    row_positions, analysis_ids = _analysis_row_context(
         frame,
         getattr(original.model.data, "row_labels", None),
+        model_index=model_index,
         row_ids=row_ids,
         cluster_row_ids=cluster_row_ids,
     )
@@ -285,7 +299,7 @@ def _attach_ols_result_contract(
         row_set=analysis_ids,
         row_order=analysis_ids,
     )
-    selected = frame.loc[row_labels, [y, *x]]
+    selected = frame.iloc[row_positions][[y, *x]]
     point_fp = point_estimation_fingerprint(
         y=[_python_scalar(value) for value in selected[y]],
         X={
@@ -328,7 +342,7 @@ def _attach_ols_result_contract(
     group_vector_fp: str | None = None
     cluster_count = 0
     if cluster_col is not None:
-        groups = frame.loc[row_labels, cluster_col]
+        groups = frame.iloc[row_positions][cluster_col]
         group_vector = [_python_scalar(value) for value in groups]
         missing_positions = [
             position
@@ -350,7 +364,10 @@ def _attach_ols_result_contract(
         cluster_count = len({json.dumps(value, sort_keys=True) for value in group_vector})
 
     use_t = False
-    effective_df = _json_safe_float(getattr(fitted, "df_resid", None))
+    inference_df = getattr(fitted, "df_resid_inference", None)
+    effective_df = _json_safe_float(inference_df)
+    if effective_df is None:
+        effective_df = _json_safe_float(getattr(fitted, "df_resid", None))
     evidence = {
         "covariance": covariance,
         "covariance_estimator": "cluster" if covariance == "clustered" else (
@@ -486,13 +503,23 @@ def run_ols(
     if covariance == "clustered":
         robust = False
     formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    original = smf.ols(formula=formula, data=frame).fit()
+    model_frame = frame.copy()
+    if not frame.index.is_unique:
+        # Patsy/statsmodels uses row labels for its model data. A positional
+        # index makes duplicate input labels unambiguous without changing any
+        # values, columns, formula, sample order, or point estimate.
+        model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
+    original = smf.ols(formula=formula, data=model_frame).fit()
     if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
-        if row_labels is not None:
-            groups = frame.loc[list(row_labels), cluster_col]
-        else:
-            groups = frame[cluster_col]
+        row_positions, _ = _analysis_row_context(
+            frame,
+            row_labels,
+            model_index=model_frame.index,
+            row_ids=row_ids,
+            cluster_row_ids=cluster_row_ids,
+        )
+        groups = frame.iloc[row_positions][cluster_col]
         group_values = [_python_scalar(value) for value in groups]
         if any(value is None for value in group_values):
             raise ValueError(
@@ -527,6 +554,7 @@ def run_ols(
         covariance=covariance,
         covariance_explicit=bool(covariance_explicit),
         cluster_col=cluster_col if covariance == "clustered" else None,
+        model_index=model_frame.index,
         dataset_snapshot=dataset_snapshot,
         row_ids=row_ids,
         cluster_row_ids=cluster_row_ids,

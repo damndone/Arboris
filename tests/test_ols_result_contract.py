@@ -4,7 +4,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import statsmodels.formula.api as smf
 
+from workbench.analysis_loop.fingerprints import inference_config_fingerprint
 from workbench.econometrics.runner import run_ols
 from workbench.lineage.run_inputs import read_run_inputs, write_run_inputs
 from workbench.orchestrator import run_workflow
@@ -36,6 +38,17 @@ def _run(frame: pd.DataFrame, **kwargs):
         row_ids=list(frame.index),
         dataset_snapshot={"upload_sha256": "a" * 64},
         **kwargs,
+    )
+
+
+def _cluster_fitted(frame: pd.DataFrame):
+    original = smf.ols("y ~ x", data=frame).fit()
+    return original.get_robustcov_results(
+        cov_type="cluster",
+        groups=frame["firm"].to_numpy(copy=True),
+        use_correction=True,
+        df_correction=True,
+        use_t=False,
     )
 
 
@@ -125,10 +138,114 @@ def test_clustered_covariance_changes_only_inference_and_records_evidence():
     assert evidence["p_value_method"] == "normal_z"
     assert evidence["confidence_interval_method"] == "normal_z"
     assert evidence["effective_df"] is not None
+    fitted = _cluster_fitted(_frame())
+    assert evidence["effective_df"] == pytest.approx(
+        getattr(fitted, "df_resid_inference", fitted.df_resid)
+    )
     assert evidence["engine"] == "statsmodels"
     assert evidence["library_version"]
     assert evidence["cluster_count"] == 4
     assert len(evidence["group_vector_fingerprint"]) == 64
+
+
+def test_clustered_contract_uses_statsmodels_inference_df_for_pvalues_and_ci():
+    result, _ = _run(
+        _frame(),
+        robust=False,
+        covariance="clustered",
+        covariance_explicit=True,
+        cluster_col="firm",
+    )
+
+    fitted = _cluster_fitted(_frame())
+    expected_df = getattr(fitted, "df_resid_inference", fitted.df_resid)
+    assert expected_df != fitted.df_resid
+    assert result["covariance_evidence"]["effective_df"] == pytest.approx(expected_df)
+    assert result["inference_config"]["effective_df"] == pytest.approx(expected_df)
+    evidence = result["covariance_evidence"]
+    assert result["inference_config_fingerprint"] == inference_config_fingerprint(
+        covariance=evidence["covariance"],
+        cluster_var=evidence["cluster_variable"],
+        cluster_count=evidence["cluster_count"],
+        corrections={
+            "small_sample_correction": evidence["small_sample_correction"],
+            "degrees_of_freedom_correction": evidence["degrees_of_freedom_correction"],
+        },
+        df=expected_df,
+        use_t=evidence["use_t"],
+        confidence_level=0.95,
+        engine=evidence["engine"],
+        version=evidence["library_version"],
+        inference_distribution=evidence["inference_distribution"],
+        p_value_method=evidence["p_value_method"],
+        confidence_interval_method=evidence["confidence_interval_method"],
+        cluster_group_vector_fingerprint=evidence["group_vector_fingerprint"],
+    )
+
+    confidence_intervals = fitted.conf_int()
+    for position, (term, coefficient) in enumerate(result["coefficients"].items()):
+        assert coefficient["p_value"] == pytest.approx(
+            round(float(fitted.pvalues[position]), 6)
+        )
+        assert coefficient["ci_lower"] == pytest.approx(
+            float(confidence_intervals[position][0])
+        )
+        assert coefficient["ci_upper"] == pytest.approx(
+            float(confidence_intervals[position][1])
+        )
+
+
+@pytest.mark.parametrize(
+    ("robust", "covariance"),
+    [(False, "unadjusted"), (True, "robust")],
+)
+def test_duplicate_index_nonclustered_ols_uses_occurrence_row_ids(robust, covariance):
+    frame = _frame().set_axis(["duplicate"] * len(_frame()))
+    expected, _ = _run(
+        _frame(),
+        robust=robust,
+        covariance=covariance,
+        covariance_explicit=True,
+    )
+
+    result, fitted = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=robust,
+        covariance=covariance,
+        covariance_explicit=True,
+        model_id="ols_1",
+    )
+
+    assert fitted.nobs == len(frame)
+    assert result["coefficients"]["x"]["estimate"] == pytest.approx(
+        expected["coefficients"]["x"]["estimate"]
+    )
+    row_order = result["analysis_sample"]["row_order"]
+    assert len(row_order) == len(frame)
+    assert len(set(row_order)) == len(frame)
+
+
+def test_duplicate_index_clustered_ols_aligns_groups_by_occurrence():
+    frame = _frame().set_axis(["duplicate"] * len(_frame()))
+
+    result, fitted = run_ols(
+        frame,
+        y="y",
+        x=["x"],
+        robust=False,
+        covariance="clustered",
+        covariance_explicit=True,
+        cluster_col="firm",
+        model_id="ols_1",
+    )
+
+    assert fitted.nobs == len(frame)
+    row_order = result["analysis_sample"]["row_order"]
+    assert len(row_order) == len(frame)
+    assert len(set(row_order)) == len(frame)
+    assert result["covariance_evidence"]["cluster_count"] == 4
 
 
 @pytest.mark.parametrize(
