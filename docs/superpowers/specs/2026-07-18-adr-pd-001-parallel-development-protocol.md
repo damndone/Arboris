@@ -68,7 +68,10 @@ inspect → diagnose → PlanDiff → confirm → child rerun
 | --- | --- |
 | **Release snapshot** | 经过完整验证后合入 `main` 并标 tag 的版本；不是开发分支。 |
 | **Integration baseline** | Integration Release Train 从 v1.7.2 基线创建、仅承载合同和受控集成的提交线。 |
-| **Contract lock** | 某一并行波次唯一允许的起点提交，包含版本化 schema、canonical fixture、mock packet 和兼容性测试。 |
+| **Contract lock** | 某一并行波次唯一允许消费的合同提交，包含版本化 schema、canonical fixture、mock packet 和兼容性测试。 |
+| **Release baseline commit** | 已发布 v1.7.2 的不可变产品基线。 |
+| **Integration base commit** | `integration/v1.7.3` 创建时的起点提交。 |
+| **Branch start commit** | 当前 Lane 实际创建的提交；首轮应等于 Contract Lock，经过批准的移植才可不同。 |
 | **Lane wave** | 全部功能 Lane 与 Evaluation Lane 从同一 `contract_lock_commit` 开始的一组并行工作。 |
 | **Work package** | 一个可独立评审、可回滚的工作单元，具有 owner、文件边界、输入输出合同、验收命令和 non-goals。 |
 | **Evaluation** | 独立生产测试、fixture、golden、故障注入、性能和浏览器验证证据的角色。 |
@@ -103,7 +106,7 @@ origin/main → tag v1.7.3
 规则：
 
 1. `integration/v1.7.3` 从本 ADR 所记录的基线建立；所有功能与测试 Lane 从同一个 `contract_lock_commit` 建立，不能从另一个 feature branch 建立。
-2. `base_commit` 与 `contract_lock_commit` 必须写入每个 work order，并且可由 `git rev-parse` 验证。一个 Lane 不得自行 `pull`、rebase 到其他 feature 的未锁定提交。
+2. 每个 work order 必须记录 `release_baseline_commit`、`integration_base_commit`、`contract_lock_commit` 和 `branch_start_commit`，并且可由 `git rev-parse` 验证。首轮 `branch_start_commit` 必须等于 `contract_lock_commit`；经过批准的移植或恢复才可不同，并必须说明原因。一个 Lane 不得自行 `pull`、rebase 到其他 feature 的未锁定提交。
 3. 若合同必须变化，Integration 先发起新合同提交、更新版本和 fixture，并生成新的 lock；受影响的 Lane 重新从新 lock 开始或以明确记录的方式移植。不得在同一 wave 中悄悄混用两套合同。
 4. 每条 Lane 使用独立 worktree。功能作者、Evaluation 和 Integration 不得在同一 worktree 中修改同一批实现；临时 scratch、浏览器证据和生产代码也必须分开。
 5. 建议的 worktree 名称为 `integration-v1.7.3`、`v173-agent-recipes-recovery`、`v173-model-linear-mixed-effects`、`v173-ui-agent-inspector-compare`、`v173-evaluation-harness` 与 `v173-release-train`。命名表达职责，不用版本号伪装为功能分支。
@@ -113,7 +116,7 @@ origin/main → tag v1.7.3
 
 ### 5.1 共同合同集合
 
-首个并行波次至少锁定下列合同。它们可以由现有 dataclass/JSON schema 演进而来，但不能把未版本化的内部 dict 当成公共接口。
+首个并行波次至少锁定下列合同。它们可以由现有 dataclass/JSON schema 演进而来，但不能把未版本化的内部 dict 当成公共接口。下表的“主生产者”指产生符合合同的 packet 实例，不表示在 lock 后拥有公共 schema 的写权限；公共 schema 始终由 Integration 管理。
 
 | 合同 | 主生产者 | 主要消费者 | 语义职责 |
 | --- | --- | --- | --- |
@@ -176,7 +179,8 @@ UI Lane 只依赖合同 mock 开发，不能读取 feature branch 的内部 JSON
 
 ```yaml
 release: v1.7.3
-baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: <integration-branch-initial-sha>
 contract_lock_commit: <exact-sha>
 
 contracts:
@@ -236,14 +240,17 @@ UI feature adapter / slot
 
 并不要求自动发现机制。若自动发现会扩大启动、打包或安全风险，则允许 Integration 维护一个极薄的显式注册表；其提交只能增加新声明，不能携带 estimator 或 UI 功能改动。
 
+Contract Sprint 生成 C1 后，所有公共合同定义由 Integration 专属维护。推荐把新合同根放在 `backend/workbench/contracts/model/**`、`backend/workbench/contracts/agent/**` 和 `backend/workbench/contracts/common/**`；如果 C1 为兼容现有代码继续使用 `backend/workbench/engine/model_contracts/**`，该目录同样是 Model Lane 的只读消费边界，不因名称含有 `model` 而成为其 owned scope。
+
 在 Contract Sprint 完成后，Model Lane 的理想 owned scope 收缩为：
 
 ```text
 backend/workbench/engine/packs/<pack_name>/**
-backend/workbench/engine/model_contracts/**
 tests/models/<pack_name>/**
 tests/fixtures/models/<pack_name>/**
 ```
+
+Model Lane 的 `read_only_contracts` 列表必须指向 C1 中锁定的公共合同根。若模型实现发现合同无法表达需要的事实或诊断，必须停止该 Lane、提交 Contract Change Request、由 Integration 形成新 lock wave 后再继续；不得在模型分支中补字段或改 schema。
 
 这些路径在 v1.7.2 基线尚未全部存在，不能预先假装已经存在。Contract Sprint 必须以现有 `engine/pack.py`、`registry.py` 和 `capabilities.py` 为依据创建最小、明确的路径和 loader；之后每个 work order 列出实际路径，不得笼统声明拥有 `backend/workbench/engine/**`。
 
@@ -271,6 +278,8 @@ Agent Recipe 的职责是决策与编排，不是模型事实的所有者。模�
 **生产：** `ModelCapabilityContract`、`ModelInputSchema`、validator、estimator adapter、`DiagnosticPacket`、`ModelResultContract`、`FigureContext`、`RecommendedActionCandidate`、compare adapter、known-truth fixture 和模型测试。
 
 **消费：** pack/registry extension contract、artifact contract、error contract 以及 Contract Lock Manifest。
+
+Model Lane 产出的是符合锁定 schema 的模型 packet；锁定后的 `ModelCapabilityContract`、`ModelResultContract`、`DiagnosticPacket`、`FigureContext` 和 `RecommendedActionCandidate` 定义均为只读公共合同。
 
 **禁止：**
 
@@ -352,11 +361,22 @@ Model Pack 的最小能力为 `linear_mixed_effects`：
 - 可选 random slope；
 - 收敛、奇异随机效应、组数不足、缺失必要字段等结构化诊断。
 
-Agent Lane 提供 Repeated Measures Analysis Recipe：识别 subject/time/outcome/group、检查设计条件、提出 schema-valid run/rerun、解释诊断，并将模型的候选恢复动作转换为需要确认的 proposal。
+Agent Lane 提供 Repeated Measures Analysis Recipe：识别 subject/time/outcome/group、检查设计条件、提出 schema-valid run/rerun、解释诊断，并将模型的候选恢复动作转换为需要确认的 proposal。对阻塞性设计错误，它必须解释缺少什么或为何不可估计，而不是伪造可执行的 recovery。
 
 UI Lane 提供对应 proposal、PlanDiff、confirmation、execution、Node Inspector、诊断、source/child Compare、figure 和 error/loading 状态。
 
 Evaluation Lane 提供已知固定效应与随机效应方差的合成重复测量数据，以及缺失 `subject_id`、组数不足、singular random effects、不收敛、非法配置、过度解释和 child rerun 等故障路径。
+
+### 8.2 Linear Mixed Effects statistical contract
+
+Contract Sprint 必须在任何 `linear_mixed_effects` 实现前锁定下列统计语义。仅冻结 JSON 字段不足以保证 source/child 的结果可解释或可比较。
+
+1. **拟合方法与比较。** 锁定默认使用 ML 或 REML、是否可编辑、以及有效 fit method 如何写入 PlanDiff、ModelResultContract 和 result identity。若两个 REML 模型的固定效应结构不同，ComparePacket 必须返回 `comparability: restricted` 与 `reason_code: REML_FIXED_EFFECTS_DIFFER`；不得以 likelihood、AIC 或 likelihood-ratio test 宣称其中一个模型更好。用户安全文案必须说明限制，而不是展示绿色优胜结论。
+2. **固定效应推断。** 锁定公式的 canonical representation、分类变量参考水平、时间作为连续或分类变量的编码、交互项编码、系数估计/标准误/置信区间的来源，以及自由度或 p-value 方法。若实现仅提供渐近正态近似，结果与报告必须如实标注，不能暗示使用未实现的自由度修正。
+3. **随机效应输出。** 明确 random-intercept variance、random-slope variance、intercept–slope covariance、residual variance、group count 与每组 observations summary 的单位、稳定 result id 和 `null` 规则。
+4. **缺失值策略。** 明确哪些缺失阻塞、哪些字段纳入 complete-case filtering、过滤在公式展开前后的顺序、每种排除原因的计数，以及过滤后的 `n_obs`/`n_groups`。ComparePacket 必须把样本改变与参数改变分开，不能只输出一个最终 n。
+5. **收敛和奇异性。** 锁定标准化 convergence code、optimizer status、可获得的梯度/迭代证据、singularity threshold、variance 近零规则，以及 warning 与 blocking 的界线。模型不得把“随机效应方差很小”的原始数值交给 LLM 自行判定；确定性 DiagnosticPacket 负责分类。
+6. **结果身份与可比性。** result identity 至少包含 dataset fingerprint、analysis unit、outcome、fixed-effects formula、random-effects specification、group variable、fit method、missing-data policy、estimator version 与 contract version。不同 identity 组成部分发生变化时，ComparePacket 必须按锁定规则返回 comparable、restricted、partial 或 not-comparable，并带稳定 reason code。
 
 ```text
 repeated-measures data
@@ -371,7 +391,7 @@ repeated-measures data
   → constrained Agent explanation
 ```
 
-### 8.2 明确不做
+### 8.3 明确不做
 
 - 一次性扩充十几个模型、自动选择任意模型族或建立独立 models 平台；
 - 无限制 Agent autonomy、任意 custom code 或未经确认的多分支运行；
@@ -381,7 +401,7 @@ repeated-measures data
 - 为 Mixed Effects 引入新的公共依赖环境，除非用户另行明确批准；
 - 真实 LLM/API 作为日常 feature 或测试依赖。真实 provider 只可在用户明确授权的独立验收步骤调用，且不成为 release gate 的唯一证据。
 
-### 8.3 与已有 v1.7.3 文档的关系
+### 8.4 与已有 v1.7.3 文档的关系
 
 `2026-07-18-v1.7.3-report-ops-closeout.md` 记录的是并行协议前已经追踪的 report/operations 工作包及其验证证据。本 ADR 不重写、伪造完成或自动发布那份计划；它要求后续 v1.7.3 release ledger 明确列出该工作包与 Repeated Measures 试点各自的状态和证据。
 
@@ -401,7 +421,7 @@ Repeated Measures 是 **首个采用本协议的 3+1 垂直切片**。它不能�
 ### Phase 1：从同一 lock 并行开发
 
 1. 每条 Lane 基于相同 lock 建立独立 worktree，领取一个有边界的 work package。
-2. 功能 Lane 先让 lane-local test 变红，再完成最小实现；公共合同变更必须退回 Phase 0。
+2. 功能 Lane 在实现前必须建立或明确一个可失败的验收证据，再完成最小实现。证据可以是红色 unit/integration test、失败的 contract test、失败的 browser scenario、明确的 snapshot 差异、可重复的性能基线或可访问性检查；不能先完成实现，再编写只会验证当前实现的测试。公共合同变更必须退回 Phase 0。
 3. UI 使用 canonical mock；Agent 消费已有 schema；Model Pack 产出真实 packet。各 Lane 不等待另一个 feature branch 的内部实现。
 4. Lane 完成时提交 completion report，不自行宣称 release-ready。
 
@@ -433,14 +453,19 @@ Repeated Measures 是 **首个采用本协议的 3+1 垂直切片**。它不能�
 ```yaml
 work_package: v173-model-linear-mixed-effects
 lane: model
-base_commit: <contract_lock_commit>
-contract_lock_commit: <contract_lock_commit>
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: <integration-branch-initial-sha>
+contract_lock_commit: <C1-sha>
+branch_start_commit: <C1-sha>
 
 owned_files:
   - backend/workbench/engine/packs/linear_mixed_effects/**
-  - backend/workbench/engine/model_contracts/**
   - tests/models/linear_mixed_effects/**
   - tests/fixtures/models/linear_mixed_effects/**
+
+read_only_contracts:
+  - backend/workbench/contracts/model/**
+  - backend/workbench/contracts/common/**
 
 forbidden_files:
   - backend/workbench/agent/orchestrator.py
@@ -461,6 +486,11 @@ produces:
   - linear_mixed_effects ModelResultContract@1.0
   - RecommendedActionCandidate@1.0
 
+preimplementation_acceptance_evidence:
+  kind: failing contract test
+  command: "pytest ..."
+  initial_observation: "..."
+
 acceptance:
   - targeted unit tests
   - contract tests
@@ -474,7 +504,7 @@ non_goals:
   - unrestricted model selection
 ```
 
-`owned_files` 是许可清单，不是建议；出现共享文件需求时，作者必须提出 Integration work request，不能直接修改。`forbidden_files` 必须包含 `tests/test_honest_did_adversarial.py`、`tests/test_honest_did_sd_adversarial.py` 和本协议列出的 central files，除非用户和 Integration 显式改写 work order。
+`owned_files` 是许可清单，不是建议；`read_only_contracts` 明确锁定后可读取、不可改写的公共合同根。出现共享文件或合同需求时，作者必须提出 Integration work request，不能直接修改。`forbidden_files` 必须包含 `tests/test_honest_did_adversarial.py`、`tests/test_honest_did_sd_adversarial.py` 和本协议列出的 central files，除非用户和 Integration 显式改写 work order。
 
 ### 10.2 Completion Report
 
@@ -511,6 +541,7 @@ non_goals:
 
 每个 feature Lane 必须至少通过：
 
+- 实现前建立或明确的可失败验收证据；
 - 相关 unit/integration tests；
 - versioned contract validation；
 - 当前 lock 的 fixture/mock compatibility；
@@ -524,17 +555,62 @@ Evaluation 必须在已知真值和故障注入上证明：
 1. 所有公共 packet 能通过 schema validation；
 2. 前端 mock 与真实 packet 有相同合同形状；
 3. `linear_mixed_effects` 在 known-truth fixture 上达到 Contract Sprint 锁定的误差范围；
-4. 至少一个故障会产生有效 `RecommendedActionCandidate`，并经 Agent 转成合法、需确认的 proposal；
-5. recovery rerun 创建 child，不覆盖 source run；
-6. ComparePacket 能分别说明参数、样本、结果和结论变化，或诚实标为不可比较；
-7. Agent 不把关联性/模型结果越界表述为因果结论；
-8. UI 有 loading、error、confirmation、pending 和 success 的可见状态；
-9. 功能 Lane 未越权修改 protected tests、gate 或 central files；
-10. 浏览器路径从数据/节点上下文到确认、执行、诊断、child compare 和解释可用。
+4. 至少一个可恢复诊断会产生有效 `RecommendedActionCandidate`，并经 Agent 转成合法、需确认的 `RecoveryActionProposal`；
+5. 至少一个不可恢复诊断（例如缺少 `subject_id` 或每个 subject 仅一次观测）保持 `blocked`，且不会产生伪造的可执行 operation/proposal；
+6. 可恢复案例的 child rerun 创建新 child，不覆盖 source run；
+7. ComparePacket 能分别说明参数、样本、结果和结论变化，或诚实标为不可比较；
+8. Agent 不把关联性/模型结果越界表述为因果结论；
+9. UI 有 loading、error、confirmation、pending 和 success 的可见状态；
+10. 功能 Lane 未越权修改 protected tests、gate 或 central files；
+11. 浏览器路径从数据/节点上下文到确认、执行、诊断、child compare 和解释可用。
 
-### 12.3 性能证据
+### 12.3 Evaluation Evidence Manifest
 
-Evaluation 在固定 fixture、机器条件和数据规模下记录至少以下指标的 p50/p95、输入规模、artifact 数量和是否全量 refetch：
+每次 Independent Evaluation 都必须生成并提交一个结构化 evidence manifest。它是 Integration 判断的最小单位，而不是一句“tests passed”。manifest 一经提交不得原地改写；补跑、复验或更正必须生成新的 `evaluation_id` 并保留旧证据。
+
+```yaml
+evaluation_id: eval-v173-lmm-001
+evaluated_commit: <candidate-sha>
+contract_lock_commit: <C1-sha>
+evaluation_harness_commit: <evaluation-sha>
+
+environment:
+  python_version: "..."
+  node_version: "..."
+  os: "..."
+  dependency_lock_hash: "..."
+  machine_fingerprint: "..."
+
+commands:
+  - command: "pytest ..."
+    exit_code: 0
+    duration_seconds: 12.4
+    output_artifact: "..."
+    output_sha256: "..."
+
+fixtures:
+  - path: tests/fixtures/models/linear_mixed_effects/known_truth.json
+    sha256: "..."
+
+results:
+  contract_validation: passed
+  known_truth: passed
+  fault_injection: passed
+  browser_e2e: passed
+  overclaim_checks: passed
+
+artifacts:
+  - path: "..."
+    sha256: "..."
+
+generated_at: "..."
+```
+
+manifest 不得记录 API key、provider secret、原始机器身份或用户数据。任意中央 adapter、registry declaration、合同 projection 或冲突解决提交进入候选 integration tip 后，旧证据不得直接复用；Evaluation 至少重新运行受影响的合同、功能和浏览器检查，并生成指向新 `evaluated_commit` 的 manifest。
+
+### 12.4 性能证据
+
+Evaluation 在固定 fixture、机器条件和数据规模下记录 warmup 次数、正式运行次数、冷/热缓存状态、失败率、机器条件、输入规模、artifact 数量、是否全量 refetch，以及至少以下指标的 p50/p95：
 
 ```text
 NodeOperationContext construction
@@ -546,7 +622,7 @@ Graph child indexing / focus
 
 Contract Sprint 根据实测基线为本波次锁定可接受阈值；在没有基线前不虚构 SLO。性能优化只在指标阻塞闭环或明显违背锁定阈值时进入该 work package，不能以“顺手优化”为由扩大功能 scope。
 
-### 12.4 Release Definition of Done
+### 12.5 Release Definition of Done
 
 v1.7.3 只有在至少一条完整路径成立时才可被称为本协议的 0→1 试点完成：
 
@@ -557,8 +633,9 @@ repeated-measures data
 → user reviews PlanDiff and confirms
 → Linear Mixed Effects Model Pack executes
 → structured result, diagnostics and figure are visible
-→ failure yields a constrained RecoveryActionProposal
-→ confirmed child rerun preserves lineage
+→ recoverable failure yields a constrained, confirmed RecoveryActionProposal
+→ unrecoverable design failure remains blocked without an executable proposal
+→ confirmed recoverable child rerun preserves lineage
 → ComparePacket and Agent explanation state whether the conclusion is stable
 ```
 
@@ -587,11 +664,14 @@ repeated-measures data
 
 ## 15. 下一步
 
-本 ADR 只确立治理与设计，不创建 Lane、合同 lock、worktree 或产品代码。用户审阅并确认本文件后，下一步才是写出 v1.7.3 的实施计划：
+本 ADR 已正式接受并自 v1.7.3 起生效。本 ADR 本身不创建 Lane、合同 lock、worktree 或产品代码。
+
+下一步进入 v1.7.3 Repeated Measures 实施计划编写阶段。实施计划必须先完成 Contract Sprint、四个 Work Order 和 Repeated Measures vertical slice 的验收设计，并且把真实路径、真实命令和实际 contract SHA 写入可分派的工作包。
 
 1. Contract Sprint 的精确任务、合同 schema、fixture 和薄扩展点；
 2. 四个 work order 的实际 owned/forbidden paths 与验收命令；
 3. lane wave 的创建顺序、独立 Evaluation 和 Integration release train 流程；
 4. Repeated Measures vertical slice 的范围、风险和退出条件。
+5. Evaluation 的 golden 更新审批、重复性能测量和确定性 report-overclaim 检查。
 
-在该实施计划获得批准前，不启动任何功能 Lane。
+在实施计划获得用户批准前，不创建功能 Lane，不修改产品代码。
