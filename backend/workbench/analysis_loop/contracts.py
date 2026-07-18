@@ -174,6 +174,11 @@ class PacketEnvelope:
             "reasons",
             "payload",
         )
+        allowed = set(required)
+        extra = [key for key in value if key not in allowed]
+        if extra:
+            rendered = ", ".join(repr(key) for key in extra)
+            raise ValueError(f"extra envelope field(s): {rendered}")
         missing = [field for field in required if field not in value]
         if missing:
             raise KeyError(f"missing envelope field(s): {', '.join(missing)}")
@@ -234,7 +239,12 @@ class ComparePayload:
 
 
 class PacketConflictError(ValueError):
-    """Raised when a new packet would replace a different terminal packet."""
+    """Raised for identity mismatch or forbidden packet replacement.
+
+    Same-identity pending packets with different content cannot replace one
+    another; terminal packets cannot be replaced. A same-identity
+    pending-to-terminal advancement remains allowed.
+    """
 
 
 def ensure_packet_idempotent(

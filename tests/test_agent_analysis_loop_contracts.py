@@ -330,6 +330,15 @@ def test_packet_envelope_requires_every_field_and_preserves_empty_values():
             PacketEnvelope.from_dict(value | {field: None})
 
 
+def test_packet_envelope_from_dict_rejects_unknown_fields_fail_closed():
+    value = _envelope().to_dict()
+    with pytest.raises(ValueError, match="extra.*future_field"):
+        PacketEnvelope.from_dict(value | {"future_field": "not allowed"})
+
+    with pytest.raises(ValueError, match="extra.*unknown_field"):
+        PacketEnvelope.from_dict(value | {"unknown_field": {}})
+
+
 def test_packet_envelope_from_dict_rejects_wrong_contract_types():
     value = _envelope().to_dict()
     invalid = {
@@ -506,3 +515,17 @@ def test_ols_cluster_policy_direct_constructor_enforces_exact_v1_contract():
 
     with pytest.raises(ValueError, match="allowed_model.*expected.*actual"):
         OLSClusterPolicyV1(**(values | {"allowed_model": "logit"}))
+
+
+def test_ols_cluster_policy_from_dict_rejects_non_string_mapping_keys_clearly():
+    value = ols_cluster_policy_v1.to_dict()
+    value[1] = "invalid key"
+    with pytest.raises((TypeError, ValueError), match="keys.*strings"):
+        OLSClusterPolicyV1.from_dict(value)
+
+
+def test_packet_conflict_error_documents_all_conflict_semantics():
+    doc = PacketConflictError.__doc__ or ""
+    assert "identity" in doc
+    assert "pending" in doc
+    assert "terminal" in doc

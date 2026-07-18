@@ -69,6 +69,12 @@ class OLSClusterPolicyV1:
     def from_dict(cls, value: Mapping[str, Any]) -> "OLSClusterPolicyV1":
         if not isinstance(value, Mapping):
             raise TypeError("policy must be a mapping")
+        non_string_keys = [key for key in value if type(key) is not str]
+        if non_string_keys:
+            rendered = ", ".join(repr(key) for key in non_string_keys)
+            raise TypeError(
+                f"policy mapping keys must be strings; actual keys: {rendered}"
+            )
         fields = set(_EXPECTED_POLICY_VALUES)
         missing = sorted(fields - set(value))
         extra = sorted(set(value) - fields)
