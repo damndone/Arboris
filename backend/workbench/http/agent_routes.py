@@ -11,6 +11,12 @@ from uuid import uuid4
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..agent.analysis_loop_driver import forward_analysis_intent
+from ..agent.context_tools import (
+    AnalysisLoopContextError,
+    inspect_analysis_loop_context,
+    parse_analysis_loop_packet_payloads,
+)
 from ..agent.chains import (
     ChainHeadConflict,
     ChainHeadUnavailable,
@@ -19,6 +25,10 @@ from ..agent.chains import (
 )
 from ..agent.context_tools import NodeOperationContextProvider
 from ..agent.context_tools import InspectNodeContextRequest
+from ..analysis_loop.compare import ComparePacket
+from ..analysis_loop.plan import PlanDiff
+from ..analysis_loop.recovery import RECOVERY_ACTIONS
+from ..analysis_loop.validation import ValidationPacket
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
 from ..agent.model import OpenAICompatibleModelAdapter
@@ -124,6 +134,26 @@ class AgentForkProposalRequest(BaseModel):
         min_length=1,
         max_length=1_000,
     )
+
+
+class AnalysisLoopContextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Keep this a string so the domain seam, rather than FastAPI's generic
+    # validation error, owns the stable machine-readable scope code.
+    scope: str = Field(min_length=1, max_length=32)
+    source_context: dict[str, Any] = Field(default_factory=dict)
+    plan_diff: dict[str, Any] | None = None
+    validation_packet: dict[str, Any] | None = None
+    compare_packet: dict[str, Any] | None = None
+
+
+class AnalysisLoopIntentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # This is deliberately untrusted input. The route only classifies and
+    # returns it; it never turns it into a proposal or operation record.
+    intent: dict[str, Any] = Field(default_factory=dict)
 
 
 def _project_root(raw: str) -> Path:
@@ -655,6 +685,83 @@ def get_agent_capabilities(
         **control_plane_capability(),
         "capabilities": capabilities,
         "boundary": OperationRegistry().boundary(),
+    }
+
+
+def _analysis_loop_packets_from_request(
+    body: AnalysisLoopContextRequest,
+) -> tuple[PlanDiff | None, ValidationPacket | None, ComparePacket | None]:
+    """Parse packet payloads without reading or mutating project state."""
+
+    try:
+        return parse_analysis_loop_packet_payloads(
+            plan_diff=body.plan_diff,
+            validation_packet=body.validation_packet,
+            compare_packet=body.compare_packet,
+        )
+    except AnalysisLoopContextError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message="The analysis-loop packet payload is invalid.",
+            details={"reason": str(exc)},
+        ) from exc
+
+
+@router.post("/agent/sessions/{session_id}/analysis-loop/context")
+def inspect_agent_analysis_loop_context(
+    session_id: str,
+    project_root: str,
+    body: AnalysisLoopContextRequest,
+) -> dict[str, Any]:
+    """Return one scope of typed analysis-loop context, read-only.
+
+    The HTTP seam intentionally accepts already-structured packet payloads so
+    fixture clients and future backend resolvers share one strict domain
+    boundary. It does not calculate packets, read arbitrary files, create a
+    proposal, or execute an operation.
+    """
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    plan_diff, validation_packet, compare_packet = _analysis_loop_packets_from_request(body)
+    try:
+        context = inspect_analysis_loop_context(
+            source_context=body.source_context,
+            scope=body.scope,
+            plan_diff=plan_diff,
+            validation_packet=validation_packet,
+            compare_packet=compare_packet,
+        )
+    except AnalysisLoopContextError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message=str(exc),
+            details={"scope": body.scope},
+        ) from exc
+    return {
+        "status": context["status"],
+        "context": context,
+        "registered_actions": [action.to_dict() for action in RECOVERY_ACTIONS.values()],
+    }
+
+
+@router.post("/agent/sessions/{session_id}/analysis-loop/intents")
+def submit_agent_analysis_loop_intent(
+    session_id: str,
+    project_root: str,
+    body: AnalysisLoopIntentRequest,
+) -> dict[str, Any]:
+    """Classify one untrusted intent without creating a proposal or effect."""
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    decision = forward_analysis_intent(body.intent)
+    return {
+        "status": "accepted" if decision.accepted else "rejected",
+        "decision": decision.to_dict(),
+        "registered_actions": [action.to_dict() for action in RECOVERY_ACTIONS.values()],
     }
 
 

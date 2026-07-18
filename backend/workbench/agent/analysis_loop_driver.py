@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field as dataclass_field, replace
 from typing import Any, Literal, TYPE_CHECKING
 
+from ..analysis_loop.recovery import RECOVERY_ACTION_REGISTRY
+
 if TYPE_CHECKING:
     from ..analysis_loop.compare import ComparePacket
     from ..analysis_loop.plan import PlanDiff
@@ -16,7 +18,7 @@ IntentKind = Literal["ask", "rerun", "compare"]
 
 _SUPPORTED_INTENTS = frozenset({"ask", "rerun", "compare"})
 _SUPPORTED_FIELDS = frozenset(
-    {"intent", "cluster_variable", "result_id", "patch", "target"}
+    {"intent", "action_id", "cluster_variable", "result_id", "patch", "target"}
 )
 
 
@@ -34,6 +36,7 @@ class TypedAnalysisIntent:
     """The only intent shape the thin driver is allowed to forward."""
 
     kind: IntentKind
+    action_id: str | None = None
     cluster_variable: str | None = None
     result_id: str | None = None
 
@@ -43,6 +46,8 @@ class TypedAnalysisIntent:
 
     def to_dict(self) -> dict[str, str]:
         result = {"kind": self.kind}
+        if self.action_id is not None:
+            result["action_id"] = self.action_id
         if self.cluster_variable is not None:
             result["cluster_variable"] = self.cluster_variable
         if self.result_id is not None:
@@ -144,6 +149,27 @@ def classify_analysis_intent(value: Mapping[str, Any]) -> AnalysisLoopDecision:
             details={"received": kind},
         )
 
+    action_id = value.get("action_id")
+    if action_id is not None and (type(action_id) is not str or not action_id):
+        return _rejected(
+            "ACTION_ID_REQUIRED",
+            "action_id must be a non-empty registered action id",
+            field_name="action_id",
+        )
+    if action_id is not None and RECOVERY_ACTION_REGISTRY.get(action_id) is None:
+        return _rejected(
+            "UNSUPPORTED_ACTION",
+            "action_id is not registered for the analysis loop",
+            field_name="action_id",
+            details={"received": action_id, "registered": list(RECOVERY_ACTION_REGISTRY.action_ids)},
+        )
+    if action_id is not None and kind != "rerun":
+        return _rejected(
+            "ACTION_INTENT_MISMATCH",
+            "the registered covariance action can only accompany a rerun intent",
+            field_name="action_id",
+        )
+
     cluster_variable = value.get("cluster_variable")
     if cluster_variable is not None and (
         type(cluster_variable) is not str or not cluster_variable
@@ -178,6 +204,7 @@ def classify_analysis_intent(value: Mapping[str, Any]) -> AnalysisLoopDecision:
         accepted=True,
         intent=TypedAnalysisIntent(
             kind=kind,
+            action_id=action_id,
             cluster_variable=cluster_variable,
             result_id=result_id,
         ),
