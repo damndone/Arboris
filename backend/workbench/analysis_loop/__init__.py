@@ -62,6 +62,13 @@ from .validation import (
     validation_packet_logical_key,
 )
 from .storage import ValidationPacketStore
+from .compare import (
+    ComparePacket,
+    ConclusionClassification,
+    build_compare_packet,
+    classify_primary_target,
+    compare_logical_key,
+)
 from .recovery import (
     OLS_CLUSTERED_RECOVERY_ACTION,
     RECOVERY_ACTION_REGISTRY,
@@ -127,4 +134,9 @@ __all__ = [
     "build_validation_packet",
     "validation_packet_logical_key",
     "ValidationPacketStore",
+    "ConclusionClassification",
+    "ComparePacket",
+    "build_compare_packet",
+    "classify_primary_target",
+    "compare_logical_key",
 ]
