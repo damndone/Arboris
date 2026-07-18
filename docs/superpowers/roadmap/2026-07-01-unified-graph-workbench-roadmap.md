@@ -6,6 +6,7 @@
 > 对齐 v1.6.4 spec §3「unified Graph Workbench」+ handoff Vision 2（每个节点可编辑→rerun、节点 AskAI、引用报告）。
 > **策略（用户拍板）**：先清技术债 + 打磨，再逐步把散落的操作融进主图。
 > **2026-07-03 改签**：v1.6.8 插队为 Graph-native Genesis（从 Launcher 到第一个 run 全程在图内完成）。原 v1.6.8「任选对比 / 节点 Ask AI / 引用报告」顺延为 v1.6.9。
+> **状态同步 2026-07-18**：v1.7.2 已发布；v1.7.3 尚未发布，当前是报告/运行运维收口线。下方 §2 的 Gap 表保留为历史快照，当前实现以 §2.1 与版本段落为准。
 
 ---
 
@@ -16,7 +17,7 @@
 - draft（未执行的计划）、pending（执行中）、executed（已完成证据）、failed 节点**共存于同一张图**，视觉区分，语义分离（run=证据 / draft=计划 / snapshot=溯源）；
 - 独立的 Draft Graph 视图、Pipeline 标签页最终**融解**进主图或退役。
 
-## 2. 现状 Gap（对着代码，不是拍脑袋）
+## 2. 现状 Gap（历史快照；对着代码，不是拍脑袋）
 
 | 能力 | 现状 | 差距 |
 |---|---|---|
@@ -28,6 +29,14 @@
 | 问 AI | ❌「Ask AI」死按钮;抽屉 AskAI feature-flag 关、未接 `/llm/chat` | 无真 LLM |
 | 出报告 | ❌ 顶栏「Generate report」死按钮 | 无图内引用报告 |
 | 辅助视图 | ⚠️ Table 已做成结果预览;Pipeline 与底部 Shell/Pending/Timeline 仍是占位 | 剩余死界面仍需逐步做实 |
+
+## 2.1 当前实现状态（2026-07-18）
+
+- v1.7.2 已把 Agent Harness 从“可安全执行操作”推进到 OLS Analysis Loop：
+  `inspect → diagnose → PlanDiff → confirm → child rerun → ValidationPacket → ComparePacket → explain`。
+- 报告主路径已经拥有结构化 facts、figure numeric source、受控 figure marker、Markdown 渲染和 HTML/DOCX/LaTeX/print 导出。
+- run 运行层已经有 heartbeat、协作式 cancel、timeout 和 dead-run 修复；CS-DiD 变量角色一致性也已纳入确定性测试。
+- v1.7.3 只做 closeout/hardening：真实 DeepSeek `cs_did_staggered` 端到端验收、provider citation shorthand 回归、timeout 独立回归，以及清洁发布基线。
 
 ## 3. 收敛路径（版本切分）
 
@@ -75,6 +84,23 @@
 ### v1.7+ — Agent Harness（更远，可选）
 在"单图可做一切"之上，让 agent 自动编排多步（改参数→rerun→对比→筛选）。memory 多处提到的 Agent Harness 归此。
 
+### v1.7.2 — Agent Analysis Loop ✅ SHIPPED 2026-07-18
+
+- 只支持受控 OLS covariance rerun 的确定性 Analysis Loop；Agent 不拥有状态、不计算比较、不绕过 confirmation。
+- 生成并持久化 PlanDiff、ValidationPacket、ComparePacket、结论分类和 execution witnesses。
+- 报告链路纳入图表数值源、figure marker、契约校验、图表展开和多格式导出；运行层补齐 heartbeat/cancel/timeout 与变量语义一致性。
+
+### v1.7.3 — Report & Operations Closeout（未发版）
+
+- 以已发布 v1.7.2 为基线，完成真实 DeepSeek `cs_did_staggered` 报告验收：8 张图、verified citations、event-study/time-trend source 和导出结果。
+- 增加 provider citation shorthand（只对 packet 中存在的 fact 做安全归一化）与 timeout 释放槽位的独立回归测试。
+- 不扩展算法、不做 honest-DiD 性能优化、不做服务端 PDF 渲染、不开放 custom-code 或多 child 自治。
+
+### v1.8+ — 受控数据 operation 与更高自治（候选）
+
+- 沿 `data.column.cast` 的 registry/preview/confirm/immutable child/verification 模式扩展 cleaning、异常值和其他 typed data operations。
+- 在 Analysis Contract、有限 robustness branching 和多节点规划有稳定证据后，再评估更高自治；算法族扩张必须同步 diagnostics、recovery、Compare、Report 和 golden contract。
+
 ### 穿插线 — 统计方法（独立、低风险）
 按 `docs/superpowers/roadmap/2026-05-13-statistical-methods-roadmap.md` §12，ML / 时间序列 / 生存分析等可在任意版本穿插加，不阻塞产品线。
 
@@ -95,6 +121,9 @@ v1.6.6 (清债+图内编辑基础)
                  └─> v1.6.9 (前置债清理 ✅)  ← 清掉挡在主线前的工程债
                         └─> v1.6.10 (对比/AI/报告)  ← 北极星实质步
                                └─> v1.7 Agent Harness
+                                      └─> v1.7.2 Agent Analysis Loop ✅
+                                             └─> v1.7.3 Report & Operations Closeout（进行中）
+                                                    └─> v1.8+ typed data operations（候选）
 统计方法线：任意穿插，不阻塞。
 （可选穿插：v1.6.9.1 修 P1 auto-draft;架构债 D1 api.py 拆分 / D6 codegen 各占一版）
 ```
@@ -106,4 +135,4 @@ v1.6.6 (清债+图内编辑基础)
 ## 5. 开放问题（拍板记录）
 1. ~~v1.6.6 的占位视图：实现还是移除？~~ → **已决（2026-07-02）:一律保留、逐步做实,不移除。** v1.6.6 只做实 Table(结果预览);Pipeline 标签页→v1.6.7 合并入图;底部面板→backlog C。
 2. ~~draft/pending 节点在主图的视觉语言（虚线？角标？分层？）需要设计。~~ → **已由 v1.6.7/v1.6.8 承接**：draft 节点进入主图，创世 draft 链可在 0-run 项目中独立成岛。
-3. ~~Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。~~ → **已决（2026-07-11，用户拍板）：多厂商兼容，不绑定单一模型。** 线协议统一走 OpenAI-compatible Chat Completions（DeepSeek/GLM/Moonshot/Qwen/OpenAI 原生支持，Anthropic 有兼容端点）；后端单 adapter、零新厂商 SDK 依赖（复用 httpx）；配置驱动切换：`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三个环境变量。**测试用 DeepSeek key**（`api.deepseek.com` + `deepseek-chat`）跑真机 smoke；单测一律 mock HTTP 层（gate 离线可跑、不烧 key）。归 v1.6.11 实施。
+3. ~~Ask AI 的后端（`/llm/chat`）用哪个模型/如何接。~~ → **已落地并沿用多厂商兼容协议**：线协议统一走 OpenAI-compatible Chat Completions（DeepSeek/GLM/Moonshot/Qwen/OpenAI 原生支持，Anthropic 有兼容端点）；后端单 adapter、零新厂商 SDK 依赖（复用 httpx）；配置驱动切换：`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`。单测一律 mock HTTP 层；真实 DeepSeek 只在受控 smoke/acceptance 中调用，不作为离线 gate 的替代。
