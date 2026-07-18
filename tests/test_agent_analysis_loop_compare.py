@@ -226,6 +226,27 @@ def test_compare_packet_does_not_fuzzy_match_missing_primary_target() -> None:
     assert "PRIMARY_TARGET_MISSING" in packet.integrity_findings
 
 
+def test_compare_packet_blocks_when_analysis_fingerprint_changes() -> None:
+    packet = build_compare_packet(
+        source=_run(),
+        child=_run(
+            run_id="run-child",
+            source_run_id="run-source",
+            fingerprints={
+                "dataset_snapshot": "dataset-1",
+                "analysis_sample": "sample-changed",
+                "point_estimation": "point-1",
+                "coefficient_schema": "schema-1",
+            },
+        ),
+        validation=_validation(),
+        target="coef:treatment",
+    )
+
+    assert packet.compare_status == "blocked_by_integrity"
+    assert "ANALYSIS_SAMPLE_FINGERPRINT_MISMATCH" in packet.integrity_findings
+
+
 def test_compare_logical_key_changes_with_strategy_and_packet_round_trip_is_immutable() -> None:
     first = build_compare_packet(
         source=_run(),

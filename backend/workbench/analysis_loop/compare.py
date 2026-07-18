@@ -27,6 +27,8 @@ def _target_record(value: Mapping[str, Any], target_result_id: str | None) -> Ma
     coefficients = value.get("coefficients")
     if isinstance(coefficients, Mapping):
         result_id = target_result_id or value.get("primary_target_id")
+        if result_id is None and len(coefficients) == 1:
+            result_id = next(iter(coefficients))
         if type(result_id) is not str:
             return None
         candidate = coefficients.get(result_id)
@@ -119,7 +121,7 @@ def classify_primary_target(
     source: Mapping[str, Any],
     child: Mapping[str, Any],
     *,
-    target_result_id: str = "coef:treatment",
+    target_result_id: str | None = None,
     alpha: float = COMPARISON_ALPHA,
     confidence_level: float = COMPARISON_CONFIDENCE_LEVEL,
     estimate_atol: float = ESTIMATE_ATOL,
@@ -135,7 +137,7 @@ def classify_primary_target(
     child_record = _target_record(child, target_result_id)
     if source_record is None or child_record is None:
         return ConclusionClassification(
-            target_result_id=target_result_id,
+            target_result_id=target_result_id or "<unknown>",
             status="blocked",
             classification=None,
             reason_code="PRIMARY_TARGET_MISSING",
@@ -150,7 +152,7 @@ def classify_primary_target(
         or not math.isclose(child_confidence, confidence_level, rel_tol=0.0, abs_tol=1e-12)
     ):
         return ConclusionClassification(
-            target_result_id=target_result_id,
+            target_result_id=target_result_id or "<unknown>",
             status="blocked",
             classification=None,
             reason_code="CONFIDENCE_LEVEL_MISMATCH",
@@ -176,7 +178,7 @@ def classify_primary_target(
         and child_width is not None
     ):
         return ConclusionClassification(
-            target_result_id=target_result_id,
+            target_result_id=target_result_id or "<unknown>",
             status="blocked",
             classification=None,
             reason_code="TARGET_EVIDENCE_UNKNOWN",
@@ -189,7 +191,7 @@ def classify_primary_target(
         rtol=estimate_rtol,
     ):
         return ConclusionClassification(
-            target_result_id=target_result_id,
+            target_result_id=target_result_id or "<unknown>",
             status="blocked",
             classification=None,
             reason_code="EFFECT_ESTIMATE_MATERIALLY_CHANGED",
@@ -216,7 +218,7 @@ def classify_primary_target(
     else:
         classification = "NO_MATERIAL_CHANGE"
     return ConclusionClassification(
-        target_result_id=target_result_id,
+        target_result_id=target_result_id or str(source_record.get("result_id")),
         status="complete",
         classification=classification,
         evidence={
@@ -430,6 +432,8 @@ def build_compare_packet(
     findings: list[str] = []
     if validation.status != "complete":
         findings.append("VALIDATION_NOT_COMPLETE")
+    if validation.overall_status in {"failed", "unknown"}:
+        findings.append("VALIDATION_NOT_PASS")
     if validation.source_run_id != source_run_id or validation.child_run_id != child_run_id:
         findings.append("VALIDATION_LINEAGE_MISMATCH")
     if child.get("source_run_id") != source_run_id:
@@ -444,6 +448,15 @@ def build_compare_packet(
     child_fingerprints = child.get("fingerprints")
     source_fingerprints = source_fingerprints if isinstance(source_fingerprints, Mapping) else {}
     child_fingerprints = child_fingerprints if isinstance(child_fingerprints, Mapping) else {}
+    fingerprint_reason_codes = {
+        "dataset_snapshot": "DATASET_SNAPSHOT_FINGERPRINT_MISMATCH",
+        "analysis_sample": "ANALYSIS_SAMPLE_FINGERPRINT_MISMATCH",
+        "point_estimation": "POINT_ESTIMATION_FINGERPRINT_MISMATCH",
+        "coefficient_schema": "COEFFICIENT_SCHEMA_FINGERPRINT_MISMATCH",
+    }
+    for fingerprint_name, reason_code in fingerprint_reason_codes.items():
+        if source_fingerprints.get(fingerprint_name) != child_fingerprints.get(fingerprint_name):
+            findings.append(reason_code)
     data_fields = {
         key: {
             "before": source_fingerprints.get(key),
