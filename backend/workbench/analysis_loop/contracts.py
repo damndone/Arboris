@@ -170,11 +170,11 @@ class SourceRunContract:
             run_inputs=value["run_inputs"],
             lineage=value["lineage"],
             contract_version=value["contract_version"],
-            result_ids=tuple(value["result_ids"]),
+            result_ids=value["result_ids"],
             primary_estimand=value.get("primary_estimand"),
             result_labels=value.get("result_labels", {}),
             dataset_schema=value.get("dataset_schema", {}),
-            analysis_row_ids=tuple(value.get("analysis_row_ids", ())),
+            analysis_row_ids=value.get("analysis_row_ids", ()),
         )
 
 

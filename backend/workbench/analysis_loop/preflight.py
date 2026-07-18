@@ -45,6 +45,12 @@ _INVARIANTS = {
 }
 
 
+def _diagnostic_action_id(action_id: Any) -> str:
+    if type(action_id) is str and action_id:
+        return action_id
+    return "invalid_action_id"
+
+
 def _source_result(
     *,
     valid: bool,
@@ -66,7 +72,7 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
 
     if not isinstance(source, SourceRunContract):
         return _source_result(valid=False, code="SOURCE_CONTRACT_UNSUPPORTED")
-    if source.status not in {"completed", "complete"}:
+    if source.status != "completed":
         return _source_result(
             valid=False,
             code="SOURCE_NOT_COMPLETED",
@@ -88,6 +94,32 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
         return _source_result(valid=False, code="SOURCE_RESULT_ARTIFACT_MISSING")
     if not source.run_inputs:
         return _source_result(valid=False, code="SOURCE_RUN_INPUTS_MISSING")
+    form = source.run_inputs.get("form")
+    form_covariance = form.get("covariance") if isinstance(form, Mapping) else None
+    top_level_present = "covariance" in source.run_inputs
+    top_level_covariance = source.run_inputs.get("covariance")
+    if form_covariance is None and not top_level_present:
+        return _source_result(valid=False, code="SOURCE_WIRE_COVARIANCE_MISSING")
+    if (
+        form_covariance is not None
+        and top_level_present
+        and form_covariance != top_level_covariance
+    ):
+        return _source_result(
+            valid=False,
+            code="SOURCE_WIRE_COVARIANCE_CONFLICT",
+            evidence={
+                "form_covariance": form_covariance,
+                "top_level_covariance": top_level_covariance,
+            },
+        )
+    wire_covariance = form_covariance if form_covariance is not None else top_level_covariance
+    if wire_covariance != "unadjusted":
+        return _source_result(
+            valid=False,
+            code="SOURCE_WIRE_COVARIANCE_UNSUPPORTED",
+            evidence={"wire_covariance": wire_covariance},
+        )
     if not source.lineage:
         return _source_result(valid=False, code="SOURCE_LINEAGE_MISSING")
     if not source.contract_version:
@@ -105,10 +137,17 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
         return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
     if len(set(source.result_ids)) != len(source.result_ids):
         return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
-    artifact_ids = source.result_artifact.get("stable_result_ids")
-    if artifact_ids is not None:
-        if not isinstance(artifact_ids, (list, tuple)) or tuple(artifact_ids) != source.result_ids:
-            return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    if "stable_result_ids" not in source.result_artifact:
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_MISSING")
+    artifact_ids = source.result_artifact["stable_result_ids"]
+    if not isinstance(artifact_ids, (list, tuple)):
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    if any(type(result_id) is not str or not result_id for result_id in artifact_ids):
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    if len(set(artifact_ids)) != len(artifact_ids):
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    if tuple(artifact_ids) != source.result_ids:
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
     return _source_result(
         valid=True,
         code="SOURCE_CONTRACT_SUPPORTED",
@@ -116,6 +155,7 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
             "run_id": source.run_id,
             "model": source.model,
             "covariance": source.covariance,
+            "wire_covariance": wire_covariance,
             "contract_version": source.contract_version,
             "result_ids": list(source.result_ids),
         },
@@ -271,6 +311,13 @@ def _runtime_dtype(value: Any) -> str | None:
     return None
 
 
+def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:
+    runtime_type = _runtime_dtype(value)
+    if runtime_type == "integer":
+        return ("integer", int(value))
+    return (runtime_type or type(value).__name__, value)
+
+
 def _cluster_result(
     *,
     source: SourceRunContract,
@@ -335,6 +382,18 @@ def preflight_cluster_variable(
             code=source_validation.code,
             cluster_values=cluster_values,
             row_count=len(model_row_ids),
+        )
+    if not isinstance(policy, OLSClusterPolicyV1):
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_POLICY_INVALID",
+            cluster_values=cluster_values,
+            row_count=len(model_row_ids),
+            evidence={"policy_error": "expected OLSClusterPolicyV1"},
         )
     if type(cluster_variable) is not str or not cluster_variable:
         return _cluster_result(
@@ -444,7 +503,7 @@ def preflight_cluster_variable(
             evidence={"declared_dtype": declared, "runtime_type": runtime},
         )
     value_type = "category" if declared == "category" else runtime
-    counts = Counter((type(value).__name__, value) for value in cluster_values)
+    counts = Counter(_canonical_cluster_identity(value) for value in cluster_values)
     cluster_count = len(counts)
     singleton_count = sum(count == 1 for count in counts.values())
     all_singleton = cluster_count > 0 and singleton_count == cluster_count
@@ -514,9 +573,14 @@ def validate_clustered_intent(
 ) -> IntentValidationResult:
     """Validate and canonicalize one untrusted covariance-only intent."""
 
+    diagnostic_action_id = _diagnostic_action_id(action_id)
     action = get_recovery_action(action_id)
     if action is None:
-        return _intent_result(valid=False, code="RECOVERY_ACTION_UNSUPPORTED", action_id=action_id)
+        return _intent_result(
+            valid=False,
+            code="RECOVERY_ACTION_UNSUPPORTED",
+            action_id=diagnostic_action_id,
+        )
     if not isinstance(patch, Mapping):
         return _intent_result(valid=False, code="INTENT_PATCH_NOT_COVARIANCE_ONLY", action_id=action_id)
     allowed_fields = {"covariance", "cluster_variable"}

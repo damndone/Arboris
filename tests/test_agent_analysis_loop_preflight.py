@@ -72,6 +72,13 @@ def test_completed_explicit_unadjusted_supported_source_passes() -> None:
     assert result.evidence["contract_version"] == "ols_result_contract_v1"
 
 
+def test_source_status_complete_is_not_a_valid_completed_source_terminal() -> None:
+    result = validate_source_contract(_source(status="complete"))
+
+    assert result.valid is False
+    assert result.code == "SOURCE_NOT_COMPLETED"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "code"),
     [
@@ -104,6 +111,72 @@ def test_source_contract_does_not_implicitly_migrate_old_artifacts() -> None:
 
     assert result.valid is False
     assert result.code == "SOURCE_CONTRACT_UNSUPPORTED"
+
+
+@pytest.mark.parametrize(
+    ("run_inputs", "code"),
+    [
+        (
+            {"form": {"model_type": "ols"}, "payload_hash": "payload-hash"},
+            "SOURCE_WIRE_COVARIANCE_MISSING",
+        ),
+        (
+            {"form": {"model_type": "ols", "covariance": "robust"}},
+            "SOURCE_WIRE_COVARIANCE_UNSUPPORTED",
+        ),
+        (
+            {
+                "covariance": "clustered",
+                "form": {"model_type": "ols", "covariance": "unadjusted"},
+            },
+            "SOURCE_WIRE_COVARIANCE_CONFLICT",
+        ),
+    ],
+)
+def test_source_run_inputs_prove_explicit_unadjusted_wire_covariance(
+    run_inputs: dict[str, object], code: str
+) -> None:
+    result = validate_source_contract(_source(run_inputs=run_inputs))
+
+    assert result.valid is False
+    assert result.code == code
+
+
+def test_matching_top_level_and_form_wire_covariance_is_allowed() -> None:
+    result = validate_source_contract(
+        _source(
+            run_inputs={
+                "covariance": "unadjusted",
+                "form": {"model_type": "ols", "covariance": "unadjusted"},
+            }
+        )
+    )
+
+    assert result.valid is True
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        {"artifact_id": "ols-result"},
+        {"artifact_id": "ols-result", "stable_result_ids": ["coef:treatment"]},
+        {
+            "artifact_id": "ols-result",
+            "stable_result_ids": ["coef:treatment", "coef:treatment"],
+        },
+        {
+            "artifact_id": "ols-result",
+            "stable_result_ids": ["coef:treatment", 7],
+        },
+    ],
+)
+def test_source_requires_complete_unique_non_empty_artifact_result_ids(
+    artifact: dict[str, object],
+) -> None:
+    result = validate_source_contract(_source(result_artifact=artifact))
+
+    assert result.valid is False
+    assert result.code in {"SOURCE_RESULT_IDS_MISSING", "SOURCE_RESULT_IDS_UNSTABLE"}
 
 
 def test_primary_target_is_resolved_before_any_user_target() -> None:
@@ -378,3 +451,69 @@ def test_new_contracts_round_trip_through_json_compatible_dicts() -> None:
         model_row_ids=rows,
     )
     assert IntentValidationResult.from_dict(intent.to_dict()) == intent
+
+
+@pytest.mark.parametrize("field", ["result_ids", "analysis_row_ids"])
+def test_source_contract_rejects_scalar_sequence_fields_without_splitting_strings(
+    field: str,
+) -> None:
+    with pytest.raises(TypeError):
+        SourceRunContract(**_source().__dict__ | {field: "not-a-sequence"})
+
+    encoded = _source().to_dict() | {field: "not-a-sequence"}
+    with pytest.raises(TypeError):
+        SourceRunContract.from_dict(encoded)
+
+
+def test_python_and_numpy_integer_values_share_one_cluster_identity() -> None:
+    source = _source()
+    result = preflight_cluster_variable(
+        source,
+        cluster_variable="integer_id",
+        cluster_values=[1, np.int64(1), 1, np.int64(1)],
+        model_row_ids=list(source.analysis_row_ids),
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_COUNT_TOO_LOW"
+    assert result.cluster_count == 1
+
+
+@pytest.mark.parametrize("invalid_policy", [None, object()])
+def test_invalid_cluster_policy_returns_machine_readable_failure(invalid_policy: object) -> None:
+    values, rows = _aligned_values()
+
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=values,
+        model_row_ids=rows,
+        policy=invalid_policy,  # type: ignore[arg-type]
+    )
+
+    assert result.valid is False
+    assert result.status == "fail"
+    assert result.code == "CLUSTER_POLICY_INVALID"
+    assert result.evidence["policy_error"]
+
+
+@pytest.mark.parametrize("invalid_action_id", [None, "", 123, []])
+def test_invalid_action_ids_fail_closed_with_safe_diagnostic_identity(
+    invalid_action_id: object,
+) -> None:
+    values, rows = _aligned_values()
+
+    result = validate_clustered_intent(
+        _source(),
+        action_id=invalid_action_id,  # type: ignore[arg-type]
+        patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+        requested_result_id=None,
+        cluster_values=values,
+        model_row_ids=rows,
+    )
+
+    assert result.valid is False
+    assert result.code == "RECOVERY_ACTION_UNSUPPORTED"
+    assert isinstance(result.action_id, str)
+    assert result.action_id
+    assert all(value is False for value in result.side_effects.values())

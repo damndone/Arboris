@@ -114,6 +114,8 @@ class RecoveryActionRegistry:
         return tuple(sorted(self._actions))
 
     def get(self, action_id: str) -> RecoveryAction | None:
+        if type(action_id) is not str:
+            return None
         return self._actions.get(action_id)
 
     def require(self, action_id: str) -> RecoveryAction:
