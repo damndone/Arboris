@@ -5,10 +5,13 @@ from __future__ import annotations
 import math
 import numbers
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
+
+import pandas as pd
 
 from .contracts import (
     ClusterPreflightResult,
@@ -78,6 +81,12 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
             code="SOURCE_NOT_COMPLETED",
             evidence={"status": source.status},
         )
+    if (
+        not source.analysis_row_ids
+        or any(type(row_id) is not str or not row_id for row_id in source.analysis_row_ids)
+        or len(set(source.analysis_row_ids)) != len(source.analysis_row_ids)
+    ):
+        return _source_result(valid=False, code="SOURCE_ANALYSIS_ROWS_UNSTABLE")
     if source.model != "ols":
         return _source_result(
             valid=False,
@@ -95,6 +104,13 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
     if not source.run_inputs:
         return _source_result(valid=False, code="SOURCE_RUN_INPUTS_MISSING")
     form = source.run_inputs.get("form")
+    payload_model = form.get("model_type") if isinstance(form, Mapping) else None
+    if payload_model != "ols":
+        return _source_result(
+            valid=False,
+            code="SOURCE_MODEL_MISMATCH",
+            evidence={"payload_model_type": payload_model},
+        )
     form_covariance = form.get("covariance") if isinstance(form, Mapping) else None
     top_level_present = "covariance" in source.run_inputs
     top_level_covariance = source.run_inputs.get("covariance")
@@ -294,6 +310,14 @@ def _is_missing(value: Any) -> bool:
     if isinstance(value, float):
         return math.isnan(value)
     try:
+        pandas_missing = pd.isna(value)
+        if type(pandas_missing) is bool:
+            return pandas_missing
+        if getattr(pandas_missing, "ndim", 1) == 0:
+            return bool(pandas_missing)
+    except (TypeError, ValueError):
+        pass
+    try:
         return bool(value != value)
     except (TypeError, ValueError):
         return False
@@ -315,7 +339,17 @@ def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:
     runtime_type = _runtime_dtype(value)
     if runtime_type == "integer":
         return ("integer", int(value))
+    if runtime_type == "string":
+        return ("string", unicodedata.normalize("NFC", value))
     return (runtime_type or type(value).__name__, value)
+
+
+def _is_non_scalar_sequence(value: Any) -> bool:
+    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+
+
+def _safe_sequence_length(value: Any) -> int:
+    return len(value) if _is_non_scalar_sequence(value) else 0
 
 
 def _cluster_result(
@@ -354,7 +388,7 @@ def _cluster_result(
             "cluster_variable": cluster_variable,
             "wire_field": "entity_col",
             "row_count": row_count,
-            "source_run_id": source.run_id,
+                "source_run_id": source.run_id if isinstance(source, SourceRunContract) else None,
             **dict(evidence or {}),
         },
         invariants=dict(_INVARIANTS),
@@ -380,8 +414,32 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code=source_validation.code,
-            cluster_values=cluster_values,
-            row_count=len(model_row_ids),
+            cluster_values=(),
+            row_count=_safe_sequence_length(model_row_ids),
+        )
+    if not _is_non_scalar_sequence(cluster_values):
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_VALUES_INVALID",
+            cluster_values=(),
+            row_count=_safe_sequence_length(model_row_ids),
+            evidence={"received_type": type(cluster_values).__name__},
+        )
+    if not _is_non_scalar_sequence(model_row_ids):
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_ROW_IDS_INVALID",
+            cluster_values=(),
+            row_count=0,
+            evidence={"received_type": type(model_row_ids).__name__},
         )
     if not isinstance(policy, OLSClusterPolicyV1):
         return _cluster_result(

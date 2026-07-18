@@ -91,7 +91,7 @@ class RecoveryAction:
             allowed_model=value["allowed_model"],
             source_covariance=value["source_covariance"],
             target_covariance=value["target_covariance"],
-            required_fields=tuple(value["required_fields"]),
+            required_fields=value["required_fields"],
             covariance_only=value["covariance_only"],
             field_mapping=value["field_mapping"],
             policy_version=value["policy_version"],

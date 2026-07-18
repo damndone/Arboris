@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import unicodedata
+
 import pytest
 
 np = pytest.importorskip("numpy")
+pd = pytest.importorskip("pandas")
 
 from workbench.analysis_loop.contracts import (
+    ClusterPreflightResult,
     ComparisonTarget,
     IntentValidationResult,
+    SourceValidationResult,
     SourceRunContract,
 )
 from workbench.analysis_loop.preflight import (
@@ -18,6 +23,7 @@ from workbench.analysis_loop.preflight import (
 from workbench.analysis_loop.recovery import (
     RECOVERY_ACTION_REGISTRY,
     RECOVERY_ACTIONS,
+    RecoveryAction,
     get_recovery_action,
 )
 
@@ -156,6 +162,39 @@ def test_matching_top_level_and_form_wire_covariance_is_allowed() -> None:
 
 
 @pytest.mark.parametrize(
+    ("run_inputs", "code"),
+    [
+        (
+            {"form": {"covariance": "unadjusted"}, "payload_hash": "payload-hash"},
+            "SOURCE_MODEL_MISMATCH",
+        ),
+        (
+            {
+                "form": {"model_type": "logit", "covariance": "unadjusted"},
+                "payload_hash": "payload-hash",
+            },
+            "SOURCE_MODEL_MISMATCH",
+        ),
+    ],
+)
+def test_source_executable_payload_must_explicitly_be_ols(
+    run_inputs: dict[str, object], code: str
+) -> None:
+    result = validate_source_contract(_source(run_inputs=run_inputs))
+
+    assert result.valid is False
+    assert result.code == code
+
+
+@pytest.mark.parametrize("rows", [("r1", "r1", "r2", "r3"), ("r1", "", "r2", "r3"), ()])
+def test_source_analysis_row_ids_must_be_non_empty_and_unique(rows: tuple[str, ...]) -> None:
+    result = validate_source_contract(_source(analysis_row_ids=rows))
+
+    assert result.valid is False
+    assert result.code == "SOURCE_ANALYSIS_ROWS_UNSTABLE"
+
+
+@pytest.mark.parametrize(
     "artifact",
     [
         {"artifact_id": "ols-result"},
@@ -246,6 +285,74 @@ def test_cluster_preflight_accepts_numpy_integer_values() -> None:
 
     assert result.valid is True
     assert result.value_type == "integer"
+
+
+def test_cluster_preflight_normalizes_unicode_nfc_and_nfd_group_identity() -> None:
+    nfc = "é"
+    nfd = unicodedata.normalize("NFD", nfc)
+    source = _source()
+    result = preflight_cluster_variable(
+        source,
+        cluster_variable="firm_id",
+        cluster_values=[nfc, nfd, nfc, nfd],
+        model_row_ids=list(source.analysis_row_ids),
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_COUNT_TOO_LOW"
+    assert result.cluster_count == 1
+
+
+@pytest.mark.parametrize("source", [None, object()])
+def test_cluster_preflight_invalid_source_returns_structured_failure(source: object) -> None:
+    result = preflight_cluster_variable(
+        source,  # type: ignore[arg-type]
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.status == "fail"
+    assert result.severity == "error"
+    assert result.code == "SOURCE_CONTRACT_UNSUPPORTED"
+    assert result.evidence
+    assert result.invariants
+
+
+@pytest.mark.parametrize("cluster_values", [None, "aabb", b"aabb", 42, object()])
+def test_cluster_preflight_rejects_scalar_or_non_sequence_cluster_values(
+    cluster_values: object,
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=cluster_values,  # type: ignore[arg-type]
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.status == "fail"
+    assert result.code == "CLUSTER_VALUES_INVALID"
+    assert result.evidence["received_type"]
+    assert result.invariants
+
+
+@pytest.mark.parametrize("missing", [pd.NA, pd.NaT])
+def test_pandas_nullable_missing_values_are_audited_as_missing(
+    missing: object,
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", missing, "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VARIABLE_MISSING_VALUES"
+    assert result.missing_count == 1
+    assert list(result.evidence["missing_positions"]) == [1]
 
 
 def test_cluster_count_thresholds_are_machine_readable() -> None:
@@ -451,6 +558,49 @@ def test_new_contracts_round_trip_through_json_compatible_dicts() -> None:
         model_row_ids=rows,
     )
     assert IntentValidationResult.from_dict(intent.to_dict()) == intent
+
+
+@pytest.mark.parametrize(
+    ("factory", "field"),
+    [
+        (lambda: {"action_id": "a", "operation_id": "model.rerun", "allowed_model": "ols", "source_covariance": "unadjusted", "target_covariance": "clustered", "required_fields": "cluster_variable", "covariance_only": True, "field_mapping": {"cluster_variable": "entity_col"}, "policy_version": "ols_cluster_policy_v1"}, "required_fields"),
+        (lambda: {"valid": True, "status": "pass", "severity": "info", "code": "OK", "evidence": {}, "reason_codes": "OK"}, "reason_codes"),
+    ],
+)
+def test_malformed_json_sequence_fields_are_not_split_into_characters(
+    factory: object, field: str
+) -> None:
+    payload = factory()  # type: ignore[operator]
+    if field == "required_fields":
+        with pytest.raises(TypeError):
+            RecoveryAction.from_dict(payload)
+    else:
+        with pytest.raises(TypeError):
+            SourceValidationResult.from_dict(payload)
+
+
+@pytest.mark.parametrize("contract_type", [ClusterPreflightResult, IntentValidationResult])
+def test_malformed_reason_codes_are_rejected_by_new_contract_from_dict(contract_type: type) -> None:
+    if contract_type is ClusterPreflightResult:
+        valid = preflight_cluster_variable(
+            _source(),
+            cluster_variable="firm_id",
+            cluster_values=["a", "a", "b", "b"],
+            model_row_ids=["r1", "r2", "r3", "r4"],
+        ).to_dict()
+    else:
+        valid = validate_clustered_intent(
+            _source(),
+            action_id="ols.use_clustered_covariance_v1",
+            patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+            requested_result_id=None,
+            cluster_values=["a", "a", "b", "b"],
+            model_row_ids=["r1", "r2", "r3", "r4"],
+        ).to_dict()
+    valid["reason_codes"] = "not-a-sequence"
+
+    with pytest.raises(TypeError):
+        contract_type.from_dict(valid)
 
 
 @pytest.mark.parametrize("field", ["result_ids", "analysis_row_ids"])

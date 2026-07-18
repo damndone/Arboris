@@ -56,6 +56,14 @@ def _require_mapping(value: Any, field_name: str) -> None:
         raise TypeError(f"{field_name} must be a mapping")
 
 
+def _string_sequence(value: Any, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"{field_name} must be a list or tuple of strings")
+    if any(type(item) is not str for item in value):
+        raise TypeError(f"{field_name} must be a list or tuple of strings")
+    return tuple(value)
+
+
 def _require_non_empty_string(value: Any, field_name: str) -> None:
     _require_string(value, field_name)
     if not value:
@@ -255,7 +263,7 @@ class SourceValidationResult:
         _require_non_empty_string(self.code, "code")
         _require_mapping(self.evidence, "evidence")
         object.__setattr__(self, "evidence", _freeze(self.evidence, "evidence"))
-        object.__setattr__(self, "reason_codes", tuple(self.reason_codes))
+        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -284,7 +292,7 @@ class SourceValidationResult:
             severity=value["severity"],
             code=value["code"],
             evidence=value.get("evidence", {}),
-            reason_codes=tuple(value.get("reason_codes", ())),
+            reason_codes=value["reason_codes"],
         )
 
 
@@ -329,7 +337,7 @@ class ClusterPreflightResult:
         _require_mapping(self.invariants, "invariants")
         object.__setattr__(self, "evidence", _freeze(self.evidence, "evidence"))
         object.__setattr__(self, "invariants", _freeze(self.invariants, "invariants"))
-        object.__setattr__(self, "reason_codes", tuple(self.reason_codes))
+        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -390,7 +398,7 @@ class ClusterPreflightResult:
             singleton_cluster_count=value.get("singleton_cluster_count", 0),
             all_singleton_clusters=value.get("all_singleton_clusters", False),
             value_type=value.get("value_type"),
-            reason_codes=tuple(value.get("reason_codes", ())),
+            reason_codes=value["reason_codes"],
             evidence=value.get("evidence", {}),
             invariants=value.get("invariants", {}),
         )
@@ -430,7 +438,7 @@ class IntentValidationResult:
             object.__setattr__(self, field_name, _freeze(value, field_name))
         if any(type(key) is not str or type(value) is not bool for key, value in self.side_effects.items()):
             raise TypeError("side_effects must map strings to booleans")
-        object.__setattr__(self, "reason_codes", tuple(self.reason_codes))
+        object.__setattr__(self, "reason_codes", _string_sequence(self.reason_codes, "reason_codes"))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -507,7 +515,7 @@ class IntentValidationResult:
             evidence=value.get("evidence", {}),
             invariants=value.get("invariants", {}),
             side_effects=value.get("side_effects", {}),
-            reason_codes=tuple(value.get("reason_codes", ())),
+            reason_codes=value["reason_codes"],
             message=value.get("message", ""),
         )
 
