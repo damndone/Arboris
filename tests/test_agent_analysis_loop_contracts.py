@@ -41,7 +41,7 @@ def test_canonical_json_v1_uses_one_number_text_for_equal_int_and_float_values()
     assert canonical_json_v1(1e-7) == "1e-7"
     assert canonical_json_v1(1e20) == "100000000000000000000"
     assert canonical_json_v1(1e21) == "1e+21"
-    assert canonical_json_v1(10**21) == canonical_json_v1(1e21)
+    assert canonical_json_v1(10**21) == str(10**21)
     assert canonical_json_v1(9007199254740993) == "9007199254740993"
     assert canonical_json_v1(9007199254740992.0) == "9007199254740992"
     assert canonical_json_v1(9007199254740993) != canonical_json_v1(9007199254740992.0)
@@ -75,6 +75,14 @@ def test_canonical_json_v1_keeps_unicode_scalar_values_stable():
     value = {"text": "世界🙂"}
     assert canonical_json_v1(value) == '{"text":"世界🙂"}'
     assert sha256_canonical(value) == sha256_canonical({"text": "世界🙂"})
+
+
+def test_canonical_json_v1_preserves_all_digits_for_huge_integer_paths():
+    first = 10**100 + 1
+    second = 10**100 + 2
+    assert canonical_json_v1(first) == str(first)
+    assert canonical_json_v1(second) == str(second)
+    assert sha256_canonical(first) != sha256_canonical(second)
 
 
 def test_numbers_equal_uses_absolute_relative_tolerance_and_special_values():
@@ -344,6 +352,25 @@ def test_packet_envelope_from_dict_rejects_wrong_contract_types():
             PacketEnvelope.from_dict(value | {field: wrong_value})
 
 
+def test_packet_envelope_rejects_integer_mapping_keys_in_all_json_maps():
+    value = _envelope().to_dict()
+    fields = (
+        "source",
+        "child",
+        "operation",
+        "execution",
+        "input_fingerprints",
+        "policy_versions",
+        "timestamps",
+        "payload",
+    )
+    for field in fields:
+        with pytest.raises(TypeError, match=f"{field}.*keys"):
+            PacketEnvelope.from_dict(value | {field: {1: "value"}})
+        with pytest.raises(TypeError, match=f"{field}.*keys"):
+            PacketEnvelope(**(value | {field: {1: "value"}}))
+
+
 def test_packet_envelope_direct_constructor_matches_from_dict_type_validation():
     value = _envelope().to_dict()
     invalid = {
@@ -463,3 +490,19 @@ def test_ols_cluster_policy_round_trips_and_rejects_non_exact_contract_values():
 
     with pytest.raises(ValueError, match="exact"):
         OLSClusterPolicyV1.from_dict(ols_cluster_policy_v1.to_dict() | {"extra": True})
+
+
+def test_ols_cluster_policy_direct_constructor_enforces_exact_v1_contract():
+    values = ols_cluster_policy_v1.to_dict()
+    invalid_values = {
+        "allowed_model": "logit",
+        "allowed_cluster_types": ["integer", "string", "category"],
+        "reject_boolean": "false",
+        "confidence_level": "0.95",
+    }
+    for field, invalid in invalid_values.items():
+        with pytest.raises((TypeError, ValueError), match=field):
+            OLSClusterPolicyV1(**(values | {field: invalid}))
+
+    with pytest.raises(ValueError, match="allowed_model.*expected.*actual"):
+        OLSClusterPolicyV1(**(values | {"allowed_model": "logit"}))

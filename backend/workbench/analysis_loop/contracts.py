@@ -78,6 +78,8 @@ def _validate_envelope(
     }
     for field_name, value in mapping_fields.items():
         _require_mapping(value, field_name)
+        if any(type(key) is not str for key in value):
+            raise TypeError(f"{field_name} keys must be strings")
     for field_name, value in (
         ("input_fingerprints", input_fingerprints),
         ("policy_versions", policy_versions),

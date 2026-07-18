@@ -6,6 +6,33 @@ from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 
+_EXPECTED_POLICY_VALUES: dict[str, Any] = {
+    "allowed_model": "ols",
+    "allowed_covariance": "clustered",
+    "allowed_cluster_types": ("integer", "string", "category"),
+    "reject_boolean": True,
+    "reject_float": True,
+    "reject_mixed_object": True,
+    "reject_null_or_nan": True,
+    "hard_min_cluster_count": 2,
+    "warning_cluster_count_below": 30,
+    "one_way_only": True,
+    "allow_singleton_clusters": True,
+    "all_singleton_clusters": "warning",
+    "small_sample_correction": True,
+    "degrees_of_freedom_correction": True,
+    "use_t": False,
+    "confidence_level": 0.95,
+    "alpha": 0.05,
+    "inference_distribution": "normal",
+    "p_value_method": "normal_z",
+    "confidence_interval_method": "normal_z",
+    "effective_degrees_of_freedom": "record_per_target",
+    "engine": "statsmodels",
+    "minimum_engine_version": 0.14,
+}
+
+
 @dataclass(frozen=True)
 class OLSClusterPolicyV1:
     allowed_model: str
@@ -32,6 +59,9 @@ class OLSClusterPolicyV1:
     engine: str
     minimum_engine_version: float
 
+    def __post_init__(self) -> None:
+        _validate_policy_instance(self)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -39,105 +69,60 @@ class OLSClusterPolicyV1:
     def from_dict(cls, value: Mapping[str, Any]) -> "OLSClusterPolicyV1":
         if not isinstance(value, Mapping):
             raise TypeError("policy must be a mapping")
-        fields = set(cls.__dataclass_fields__)
-        if set(value) != fields:
-            raise ValueError("policy fields do not match exact v1 contract")
-
-        string_fields = {
-            "allowed_model",
-            "allowed_covariance",
-            "all_singleton_clusters",
-            "inference_distribution",
-            "p_value_method",
-            "confidence_interval_method",
-            "effective_degrees_of_freedom",
-            "engine",
-        }
-        bool_fields = {
-            "reject_boolean",
-            "reject_float",
-            "reject_mixed_object",
-            "reject_null_or_nan",
-            "one_way_only",
-            "allow_singleton_clusters",
-            "small_sample_correction",
-            "degrees_of_freedom_correction",
-            "use_t",
-        }
-        int_fields = {"hard_min_cluster_count", "warning_cluster_count_below"}
-        float_fields = {"confidence_level", "alpha", "minimum_engine_version"}
-        for field in string_fields:
-            if type(value[field]) is not str:
-                raise TypeError(f"{field} must be a string")
-        for field in bool_fields:
-            if type(value[field]) is not bool:
-                raise TypeError(f"{field} must be a boolean")
-        for field in int_fields:
-            if type(value[field]) is not int:
-                raise TypeError(f"{field} must be an integer")
-        for field in float_fields:
-            if type(value[field]) is not float:
-                raise TypeError(f"{field} must be a float")
-        if not isinstance(value["allowed_cluster_types"], (list, tuple)):
-            raise TypeError("allowed_cluster_types must be a list or tuple")
-        if any(type(item) is not str for item in value["allowed_cluster_types"]):
-            raise TypeError("allowed_cluster_types items must be strings")
-
-        candidate = cls(
-            allowed_model=value["allowed_model"],
-            allowed_covariance=value["allowed_covariance"],
-            allowed_cluster_types=tuple(value["allowed_cluster_types"]),
-            reject_boolean=value["reject_boolean"],
-            reject_float=value["reject_float"],
-            reject_mixed_object=value["reject_mixed_object"],
-            reject_null_or_nan=value["reject_null_or_nan"],
-            hard_min_cluster_count=value["hard_min_cluster_count"],
-            warning_cluster_count_below=value["warning_cluster_count_below"],
-            one_way_only=value["one_way_only"],
-            allow_singleton_clusters=value["allow_singleton_clusters"],
-            all_singleton_clusters=value["all_singleton_clusters"],
-            small_sample_correction=value["small_sample_correction"],
-            degrees_of_freedom_correction=value["degrees_of_freedom_correction"],
-            use_t=value["use_t"],
-            confidence_level=value["confidence_level"],
-            alpha=value["alpha"],
-            inference_distribution=value["inference_distribution"],
-            p_value_method=value["p_value_method"],
-            confidence_interval_method=value["confidence_interval_method"],
-            effective_degrees_of_freedom=value["effective_degrees_of_freedom"],
-            engine=value["engine"],
-            minimum_engine_version=value["minimum_engine_version"],
-        )
-        for field in fields:
-            if getattr(candidate, field) != getattr(ols_cluster_policy_v1, field):
-                raise ValueError(f"{field} does not match exact v1 contract")
-        return candidate
+        fields = set(_EXPECTED_POLICY_VALUES)
+        missing = sorted(fields - set(value))
+        extra = sorted(set(value) - fields)
+        if missing:
+            raise ValueError(
+                "missing field(s) for exact v1 contract: " + ", ".join(missing)
+            )
+        if extra:
+            raise ValueError(
+                "extra field(s) for exact v1 contract: " + ", ".join(extra)
+            )
+        candidate_values = dict(value)
+        cluster_types = candidate_values["allowed_cluster_types"]
+        if not isinstance(cluster_types, (list, tuple)):
+            raise TypeError(
+                "allowed_cluster_types: expected list or tuple, "
+                f"actual {type(cluster_types).__name__}"
+            )
+        candidate_values["allowed_cluster_types"] = tuple(cluster_types)
+        return cls(**candidate_values)
 
 
-ols_cluster_policy_v1 = OLSClusterPolicyV1(
-    allowed_model="ols",
-    allowed_covariance="clustered",
-    allowed_cluster_types=("integer", "string", "category"),
-    reject_boolean=True,
-    reject_float=True,
-    reject_mixed_object=True,
-    reject_null_or_nan=True,
-    hard_min_cluster_count=2,
-    warning_cluster_count_below=30,
-    one_way_only=True,
-    allow_singleton_clusters=True,
-    all_singleton_clusters="warning",
-    small_sample_correction=True,
-    degrees_of_freedom_correction=True,
-    use_t=False,
-    confidence_level=0.95,
-    alpha=0.05,
-    inference_distribution="normal",
-    p_value_method="normal_z",
-    confidence_interval_method="normal_z",
-    effective_degrees_of_freedom="record_per_target",
-    engine="statsmodels",
-    minimum_engine_version=0.14,
-)
+def _validate_policy_instance(policy: OLSClusterPolicyV1) -> None:
+    for field, expected in _EXPECTED_POLICY_VALUES.items():
+        actual = getattr(policy, field)
+        if field == "allowed_cluster_types":
+            if type(actual) is not tuple:
+                raise TypeError(
+                    f"{field}: expected tuple[str, ...], actual {type(actual).__name__}"
+                )
+            if any(type(item) is not str for item in actual):
+                raise TypeError(
+                    f"{field}: expected tuple[str, ...], actual item types"
+                )
+        elif type(expected) is bool and type(actual) is not bool:
+            raise TypeError(
+                f"{field}: expected bool, actual {type(actual).__name__}"
+            )
+        elif type(expected) is int and type(actual) is not int:
+            raise TypeError(
+                f"{field}: expected int, actual {type(actual).__name__}"
+            )
+        elif type(expected) is float and type(actual) is not float:
+            raise TypeError(
+                f"{field}: expected float, actual {type(actual).__name__}"
+            )
+        elif type(expected) is str and type(actual) is not str:
+            raise TypeError(
+                f"{field}: expected str, actual {type(actual).__name__}"
+            )
+        if actual != expected:
+            raise ValueError(f"{field}: expected {expected!r}, actual {actual!r}")
+
+
+ols_cluster_policy_v1 = OLSClusterPolicyV1(**_EXPECTED_POLICY_VALUES)
 
 OLS_CLUSTER_POLICY_V1 = ols_cluster_policy_v1

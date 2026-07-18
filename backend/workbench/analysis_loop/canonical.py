@@ -104,9 +104,7 @@ def _canonical_float(value: float) -> str:
 
 
 def _canonical_int(value: int) -> str:
-    if abs(value) < 10**21:
-        return str(value)
-    return _canonical_scientific(Decimal(value))
+    return str(value)
 
 
 def _canonical_scientific(value: Decimal) -> str:
