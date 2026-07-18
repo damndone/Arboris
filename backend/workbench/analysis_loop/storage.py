@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from ..agent.storage import append_jsonl_atomic, read_jsonl
 from .plan import PlanDiff, PlanValidationError
+from .validation import ValidationPacket
 
 
 def _now() -> str:
@@ -202,6 +203,151 @@ class PlanDiffStore:
         return self.terminals_dir / f"{logical_key}.json"
 
 
+class ValidationPacketStore:
+    """Append-only attempts and write-once terminal ValidationPackets."""
+
+    def __init__(self, root: Path | str, *, create: bool = True) -> None:
+        supplied_root = Path(root)
+        self.workbench_root = (
+            supplied_root if supplied_root.name == "workbench" else supplied_root / "workbench"
+        )
+        self.root = self.workbench_root / "analysis-packets"
+        self.attempts_path = self.root / "validation-build-attempts.jsonl"
+        self.terminals_dir = self.root / "validation-terminal"
+        if create:
+            self.terminals_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = RLock()
+
+    def persist_terminal_packet(self, packet: ValidationPacket) -> ValidationPacket:
+        if not isinstance(packet, ValidationPacket):
+            raise TypeError("packet must be a ValidationPacket")
+        if packet.status == "pending":
+            raise ValueError("pending validation packets cannot be terminalized")
+        with self._lock:
+            existing = self.get_terminal_packet(packet.logical_key)
+            if existing is not None:
+                if existing.to_dict() != packet.to_dict():
+                    raise TerminalPacketConflictError(
+                        f"terminal validation packet cannot be replaced: {packet.logical_key}"
+                    )
+                self._append_attempt(
+                    logical_key=packet.logical_key,
+                    status="reused",
+                    packet=packet,
+                )
+                return existing
+
+            path = self._terminal_path(packet.logical_key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            except FileExistsError:
+                existing = self.get_terminal_packet(packet.logical_key)
+                if existing is not None and existing.to_dict() == packet.to_dict():
+                    return existing
+                raise TerminalPacketConflictError(
+                    f"terminal validation packet cannot be replaced: {packet.logical_key}"
+                )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(packet.to_dict(), handle, ensure_ascii=False, sort_keys=True)
+                handle.write("\n")
+            self._append_attempt(
+                logical_key=packet.logical_key,
+                status="completed",
+                packet=packet,
+            )
+            return packet
+
+    def build_packet(
+        self,
+        *,
+        logical_key: str,
+        builder: Callable[[], ValidationPacket],
+    ) -> ValidationPacket:
+        existing = self.get_terminal_packet(logical_key)
+        if existing is not None:
+            self._append_attempt(
+                logical_key=logical_key,
+                status="reused",
+                packet=existing,
+            )
+            return existing
+        try:
+            packet = builder()
+            if not isinstance(packet, ValidationPacket):
+                raise TypeError("validation packet builder must return ValidationPacket")
+            if packet.logical_key != logical_key:
+                raise ValueError("validation packet logical key does not match requested key")
+            if packet.status == "pending":
+                self._append_attempt(
+                    logical_key=logical_key,
+                    status="pending",
+                    packet=packet,
+                )
+                return packet
+            return self.persist_terminal_packet(packet)
+        except Exception as exc:
+            self._append_attempt(
+                logical_key=logical_key,
+                status="failed",
+                packet=None,
+                error={
+                    "type": type(exc).__name__,
+                    "code": getattr(exc, "code", type(exc).__name__),
+                    "message": str(exc),
+                },
+            )
+            raise
+
+    build = build_packet
+
+    def get_terminal_packet(self, logical_key: str) -> ValidationPacket | None:
+        path = self._terminal_path(logical_key)
+        if not path.exists():
+            return None
+        return ValidationPacket.from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def list_terminal_packets(self) -> list[ValidationPacket]:
+        if not self.terminals_dir.exists():
+            return []
+        return [
+            ValidationPacket.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            for path in sorted(self.terminals_dir.glob("*.json"))
+        ]
+
+    def list_build_attempts(self, *, logical_key: str | None = None) -> list[dict[str, Any]]:
+        attempts = read_jsonl(self.attempts_path)
+        if logical_key is None:
+            return attempts
+        return [item for item in attempts if item.get("logical_key") == logical_key]
+
+    def _append_attempt(
+        self,
+        *,
+        logical_key: str,
+        status: str,
+        packet: ValidationPacket | None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        append_jsonl_atomic(
+            self.attempts_path,
+            {
+                "record_type": "validation_build_attempt",
+                "attempt_id": f"attempt_{uuid4().hex}",
+                "logical_key": logical_key,
+                "status": status,
+                "packet_status": packet.status if packet is not None else None,
+                "error": error,
+                "created_at": _now(),
+            },
+        )
+
+    def _terminal_path(self, logical_key: str) -> Path:
+        if not logical_key or Path(logical_key).name != logical_key:
+            raise ValueError("logical_key must be path-safe")
+        return self.terminals_dir / f"{logical_key}.json"
+
+
 AnalysisPacketStore = PlanDiffStore
 PlanStorage = PlanDiffStore
 TerminalPacketConflict = TerminalPacketConflictError
@@ -214,4 +360,5 @@ __all__ = [
     "TerminalPacket",
     "TerminalPacketConflict",
     "TerminalPacketConflictError",
+    "ValidationPacketStore",
 ]

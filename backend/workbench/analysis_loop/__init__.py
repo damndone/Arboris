@@ -61,6 +61,7 @@ from .validation import (
     build_validation_packet,
     validation_packet_logical_key,
 )
+from .storage import ValidationPacketStore
 from .recovery import (
     OLS_CLUSTERED_RECOVERY_ACTION,
     RECOVERY_ACTION_REGISTRY,
@@ -125,4 +126,5 @@ __all__ = [
     "ValidationPacket",
     "build_validation_packet",
     "validation_packet_logical_key",
+    "ValidationPacketStore",
 ]
