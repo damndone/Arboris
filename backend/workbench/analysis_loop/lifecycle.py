@@ -8,7 +8,14 @@ from types import MappingProxyType
 from typing import Any
 
 from .contracts import SourceRunContract
-from .plan import PlanDiff, build_plan_diff, confirmed_payload_hash_for_plan
+from .plan import (
+    PlanBindingError,
+    PlanDiff,
+    build_plan_diff,
+    confirmed_payload_hash_for_plan,
+    validate_confirmation_binding,
+)
+from .preflight import validate_source_contract
 from .storage import PlanDiffStore
 
 
@@ -213,8 +220,184 @@ def build_analysis_loop_proposal(
     )
 
 
+def _binding_value(preconditions: Mapping[str, Any], key: str) -> Any:
+    nested = preconditions.get("analysis_loop")
+    if isinstance(nested, Mapping) and key in nested:
+        return nested[key]
+    return preconditions.get(key)
+
+
+def create_analysis_loop_proposal(
+    *,
+    orchestrator: Any,
+    chain_id: str,
+    command_id: str | None = None,
+    **build_kwargs: Any,
+) -> Any:
+    """Adapt the pure spec into the existing ProposalStore lifecycle."""
+
+    spec = build_analysis_loop_proposal(**build_kwargs)
+    proposal_kwargs = spec.to_proposal_kwargs(
+        chain_id=chain_id,
+        command_id=command_id,
+    )
+    from ..agent.proposals import ProposalConfirmationError
+
+    try:
+        existing = orchestrator.proposal_store.latest_revision(spec.proposal_id)
+    except (KeyError, ValueError):
+        existing = None
+    if existing is not None:
+        if (
+            existing.operation_id == spec.operation_id
+            and existing.operation_version == spec.operation_version
+            and existing.target == proposal_kwargs["target"]
+            and existing.preconditions == proposal_kwargs["preconditions"]
+            and existing.changes == proposal_kwargs["changes"]
+        ):
+            return existing
+        raise AnalysisLoopProposalError(
+            "analysis-loop proposal identity is already bound to other content",
+            code="ANALYSIS_LOOP_PROPOSAL_CONFLICT",
+            details={"proposal_id": spec.proposal_id},
+        )
+    try:
+        return orchestrator.create_proposal(**proposal_kwargs)
+    except ProposalConfirmationError as exc:
+        # ProposalStore.create is append-only and the deterministic id makes a
+        # concurrent retry safe. Only convert a duplicate into the existing
+        # proposal; preserve all registry/validation failures unchanged.
+        try:
+            existing = orchestrator.proposal_store.latest_revision(spec.proposal_id)
+        except (KeyError, ValueError):
+            raise
+        if (
+            existing.operation_id == spec.operation_id
+            and existing.target == proposal_kwargs["target"]
+            and existing.preconditions == proposal_kwargs["preconditions"]
+            and existing.changes == proposal_kwargs["changes"]
+        ):
+            return existing
+        raise AnalysisLoopProposalError(
+            "analysis-loop proposal identity is already bound to other content",
+            code="ANALYSIS_LOOP_PROPOSAL_CONFLICT",
+            details={"proposal_id": spec.proposal_id},
+        ) from exc
+
+
+def confirm_analysis_loop_proposal(
+    *,
+    orchestrator: Any,
+    plan_store: PlanDiffStore,
+    proposal_id: str,
+    current_source: SourceRunContract,
+    current_source_context_fingerprint: str,
+    current_active_head_run_id: str,
+    revision: int,
+    fingerprint: str,
+    confirmed_payload_hash: str,
+    actor_type: str = "user",
+) -> Any:
+    """Validate an analysis-loop binding, then use existing confirmation code."""
+
+    proposal = orchestrator.proposal_store.latest_revision(proposal_id)
+    if revision != proposal.revision:
+        raise PlanBindingError(
+            "analysis-loop proposal revision is stale",
+            code="STALE_PLAN",
+            details={"expected_revision": proposal.revision, "actual_revision": revision},
+        )
+    logical_key = _binding_value(proposal.preconditions, "plan_logical_key")
+    if type(logical_key) is not str or not logical_key:
+        raise PlanBindingError(
+            "analysis-loop proposal has no PlanDiff logical key",
+            code="STALE_PLAN",
+        )
+    packet = plan_store.get_terminal_packet(logical_key)
+    if packet is None:
+        raise PlanBindingError(
+            "analysis-loop PlanDiff terminal packet is unavailable",
+            code="STALE_PLAN",
+            details={"logical_key": logical_key},
+        )
+    plan = packet.plan_diff
+    bound_plan_hash = _binding_value(proposal.preconditions, "plan_hash")
+    bound_canonical_patch_hash = _binding_value(
+        proposal.preconditions,
+        "canonical_patch_hash",
+    )
+    bound_source_context_fingerprint = _binding_value(
+        proposal.preconditions,
+        "source_context_fingerprint",
+    )
+    bound_target_hash = _binding_value(proposal.preconditions, "target_hash")
+    if not all(
+        type(value) is str and value
+        for value in (
+            bound_plan_hash,
+            bound_canonical_patch_hash,
+            bound_source_context_fingerprint,
+            bound_target_hash,
+        )
+    ):
+        raise PlanBindingError(
+            "analysis-loop proposal binding is incomplete",
+            code="STALE_PLAN",
+        )
+    validate_confirmation_binding(
+        plan,
+        bound_plan_hash=bound_plan_hash,
+        bound_canonical_patch_hash=bound_canonical_patch_hash,
+        bound_target_hash=bound_target_hash,
+        bound_source_context_fingerprint=bound_source_context_fingerprint,
+        current_source_context_fingerprint=current_source_context_fingerprint,
+        confirmed_payload_hash=confirmed_payload_hash,
+        proposal_id=proposal.proposal_id,
+        revision=proposal.revision,
+        operation_version=proposal.operation_version,
+        target=proposal.target,
+        preconditions=proposal.preconditions,
+        changes=proposal.changes,
+    )
+    source_validation = validate_source_contract(current_source)
+    if (
+        current_source.run_id != proposal.target.get("run_id")
+        or current_source.status != "completed"
+        or not source_validation.valid
+    ):
+        raise PlanBindingError(
+            "current source run is no longer the completed PlanDiff source",
+            code="STALE_PLAN",
+            details={
+                "source_run_id": current_source.run_id,
+                "source_status": current_source.status,
+                "source_validation": source_validation.code,
+            },
+        )
+    expected_active_head = proposal.preconditions.get("active_head_run_id")
+    if current_active_head_run_id != expected_active_head:
+        raise PlanBindingError(
+            "current active head no longer matches the analysis-loop proposal",
+            code="STALE_PLAN",
+            details={
+                "expected_active_head_run_id": expected_active_head,
+                "actual_active_head_run_id": current_active_head_run_id,
+            },
+        )
+    return orchestrator.confirm_proposal(
+        proposal_id,
+        revision=revision,
+        fingerprint=fingerprint,
+        actor_type=actor_type,
+        current_context_fingerprint=current_source_context_fingerprint,
+        current_active_head_run_id=current_active_head_run_id,
+    )
+
+
 __all__ = [
     "AnalysisLoopProposalError",
     "AnalysisLoopProposalSpec",
     "build_analysis_loop_proposal",
+    "confirm_analysis_loop_proposal",
+    "create_analysis_loop_proposal",
 ]

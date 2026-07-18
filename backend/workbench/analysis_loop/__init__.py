@@ -31,6 +31,8 @@ from .lifecycle import (
     AnalysisLoopProposalError,
     AnalysisLoopProposalSpec,
     build_analysis_loop_proposal,
+    confirm_analysis_loop_proposal,
+    create_analysis_loop_proposal,
 )
 from .plan import (
     ACTION_ID,
@@ -88,11 +90,13 @@ __all__ = [
     "analysis_sample_fingerprint",
     "build_plan_diff",
     "build_analysis_loop_proposal",
+    "confirm_analysis_loop_proposal",
     "canonicalize_intent",
     "canonical_json_v1",
     "coefficient_schema_fingerprint",
     "confirmed_payload_hash",
     "confirmed_payload_hash_for_plan",
+    "create_analysis_loop_proposal",
     "dataset_snapshot_fingerprint",
     "ensure_packet_idempotent",
     "inference_config_fingerprint",

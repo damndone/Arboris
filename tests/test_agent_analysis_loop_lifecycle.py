@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from workbench.analysis_loop.contracts import SourceRunContract
-from workbench.analysis_loop.lifecycle import build_analysis_loop_proposal
-from workbench.analysis_loop.plan import PlanValidationError, validate_confirmation_binding
+from workbench.agent.core import AgentCore
+from workbench.agent.events import AgentEventStream
+from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.session import JsonlSessionRepository
+from workbench.analysis_loop.lifecycle import (
+    build_analysis_loop_proposal,
+    confirm_analysis_loop_proposal,
+    create_analysis_loop_proposal,
+)
+from workbench.analysis_loop.plan import (
+    PlanBindingError,
+    PlanValidationError,
+    validate_confirmation_binding,
+)
 from workbench.analysis_loop.storage import PlanDiffStore
 
 
@@ -68,6 +81,163 @@ def _build(store: PlanDiffStore):
         active_head_run_id="run-source",
         owner_resolution="active_head_contains_node",
     )
+
+
+class _IdleAdapter:
+    async def stream(self, request):
+        if False:
+            yield request
+
+
+def _orchestrator(tmp_path: Path) -> WorkbenchOrchestrator:
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("main-session", chain_id="project", role="main")
+    repository.create_session("chain-session", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id="main-session",
+    )
+    orchestrator.register_chain(
+        "chain-a",
+        "chain-session",
+        AgentCore(repository, events, _IdleAdapter(), session_id="chain-session"),
+    )
+    return orchestrator
+
+
+def _adapter_kwargs(tmp_path: Path) -> dict[str, object]:
+    return {
+        "plan_store": PlanDiffStore(tmp_path / "workbench"),
+        "source": _source(),
+        "intent": _intent(),
+        "cluster_values": ["a", "a", "b", "b"],
+        "model_row_ids": ["r1", "r2", "r3", "r4"],
+        "source_context_fingerprint": "ctx:source-v1",
+        "source_identity": {
+            "run_id": "run-source",
+            "node_ref": "model:ols",
+            "node_hash": "node-hash-source",
+            "forest_node_key": "node-hash-source",
+        },
+        "active_head_run_id": "run-source",
+        "owner_resolution": "active_head_contains_node",
+    }
+
+
+def test_create_analysis_loop_proposal_adapter_uses_existing_proposal_store_once(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    kwargs = _adapter_kwargs(tmp_path)
+
+    first = create_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        chain_id="chain-a",
+        **kwargs,
+    )
+    second = create_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        chain_id="chain-a",
+        **kwargs,
+    )
+
+    assert first.proposal_id == second.proposal_id
+    assert first.operation_id == "model.rerun"
+    assert first.changes == {"covariance": "clustered", "entity_col": "firm_id"}
+    assert first.preconditions["plan_hash"]
+    assert first.preconditions["canonical_patch_hash"]
+    assert first.preconditions["source_context_fingerprint"] == "ctx:source-v1"
+    assert first.preconditions["target_hash"]
+    assert first.preconditions["confirmed_payload_hash"]
+    assert len(orchestrator.proposal_store.latest_revisions_for_session("chain-session")) == 1
+    assert orchestrator.operation_store.list_records() == []
+
+
+def test_create_analysis_loop_proposal_adapter_rejects_before_proposal_or_operation(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    kwargs = _adapter_kwargs(tmp_path)
+    kwargs["intent"] = {
+        "action_id": ACTION_ID,
+        "patch": {"covariance": "clustered", "entity_col": "firm_id"},
+    }
+
+    with pytest.raises(PlanValidationError) as exc_info:
+        create_analysis_loop_proposal(
+            orchestrator=orchestrator,
+            chain_id="chain-a",
+            **kwargs,
+        )
+
+    assert exc_info.value.code == "ENTITY_COL_GUESS_FORBIDDEN"
+    assert orchestrator.proposal_store.latest_revisions_for_session("chain-session") == []
+    assert orchestrator.operation_store.list_records() == []
+
+
+def test_confirm_analysis_loop_proposal_validates_binding_before_existing_confirmation(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    kwargs = _adapter_kwargs(tmp_path)
+    proposal = create_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        chain_id="chain-a",
+        **kwargs,
+    )
+    plan = kwargs["plan_store"].get_terminal_packet(
+        proposal.preconditions["plan_logical_key"]
+    ).plan_diff
+
+    with pytest.raises(PlanBindingError) as exc_info:
+        confirm_analysis_loop_proposal(
+            orchestrator=orchestrator,
+            plan_store=kwargs["plan_store"],
+            proposal_id=proposal.proposal_id,
+            current_source=_source(),
+            current_source_context_fingerprint=plan.source_context_fingerprint,
+            current_active_head_run_id="run-source",
+            revision=1,
+            fingerprint=proposal.fingerprint,
+            confirmed_payload_hash="wrong-payload-hash",
+        )
+
+    assert exc_info.value.code == "CONFIRMED_PAYLOAD_MISMATCH"
+    assert orchestrator.proposal_store.latest_status(proposal.proposal_id) == "pending"
+    assert orchestrator.operation_store.list_records() == []
+
+
+def test_confirm_analysis_loop_proposal_rejects_changed_source_before_operation(
+    tmp_path: Path,
+) -> None:
+    orchestrator = _orchestrator(tmp_path)
+    kwargs = _adapter_kwargs(tmp_path)
+    proposal = create_analysis_loop_proposal(
+        orchestrator=orchestrator,
+        chain_id="chain-a",
+        **kwargs,
+    )
+    changed_source = replace(_source(), status="running")
+
+    with pytest.raises(PlanBindingError) as exc_info:
+        confirm_analysis_loop_proposal(
+            orchestrator=orchestrator,
+            plan_store=kwargs["plan_store"],
+            proposal_id=proposal.proposal_id,
+            current_source=changed_source,
+            current_source_context_fingerprint=proposal.preconditions[
+                "source_context_fingerprint"
+            ],
+            current_active_head_run_id="run-source",
+            revision=1,
+            fingerprint=proposal.fingerprint,
+            confirmed_payload_hash=proposal.preconditions["confirmed_payload_hash"],
+        )
+
+    assert exc_info.value.code == "STALE_PLAN"
+    assert orchestrator.operation_store.list_records() == []
 
 
 def test_build_analysis_loop_proposal_returns_existing_proposal_kwargs_and_binding(
