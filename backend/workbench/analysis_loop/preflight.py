@@ -22,10 +22,9 @@ from .contracts import (
     SourceValidationResult,
 )
 from .policy import OLSClusterPolicyV1, ols_cluster_policy_v1
-from .recovery import get_recovery_action
+from .recovery import RECOVERY_ACTION_REGISTRY, RecoveryAction, get_recovery_action
 
 RECOVERY_ACTION_ID = "ols.use_clustered_covariance_v1"
-OPERATION_ID = "model.rerun"
 _CONTRACT_VERSION_RE = re.compile(r"^ols_result_contract_v(\d+)$")
 _NO_SIDE_EFFECTS = {
     "execution_key_created": False,
@@ -69,6 +68,21 @@ def _source_result(
         evidence=dict(evidence or {}),
         reason_codes=() if valid else (code,),
     )
+
+
+def _registered_action() -> RecoveryAction | None:
+    action = RECOVERY_ACTION_REGISTRY.get(RECOVERY_ACTION_ID)
+    return action if isinstance(action, RecoveryAction) else None
+
+
+def _default_operation_id() -> str:
+    action = _registered_action()
+    return action.operation_id if action is not None else "invalid.operation"
+
+
+def _default_policy_version() -> str:
+    action = _registered_action()
+    return action.policy_version if action is not None else "invalid.policy"
 
 
 def validate_source_contract(source: SourceRunContract) -> SourceValidationResult:
@@ -200,7 +214,7 @@ def _intent_result(
     valid: bool,
     code: str,
     action_id: str = RECOVERY_ACTION_ID,
-    operation_id: str = OPERATION_ID,
+    operation_id: str | None = None,
     source_validation: SourceValidationResult | None = None,
     cluster_preflight: ClusterPreflightResult | None = None,
     comparison_target: ComparisonTarget | None = None,
@@ -209,14 +223,17 @@ def _intent_result(
     evidence: Mapping[str, Any] | None = None,
     invariants: Mapping[str, Any] | None = None,
     message: str = "",
+    status: str | None = None,
+    severity: str | None = None,
+    reason_codes: Sequence[str] | None = None,
 ) -> IntentValidationResult:
     return IntentValidationResult(
         valid=valid,
-        status="pass" if valid else "fail",
-        severity="info" if valid else "error",
+        status=status if status is not None else ("pass" if valid else "fail"),
+        severity=severity if severity is not None else ("info" if valid else "error"),
         code=code,
         action_id=action_id,
-        operation_id=operation_id,
+        operation_id=operation_id if operation_id is not None else _default_operation_id(),
         canonical_patch=dict(canonical_patch or {}),
         wire_patch=dict(wire_patch or {}),
         comparison_target=comparison_target,
@@ -225,9 +242,36 @@ def _intent_result(
         evidence=dict(evidence or {}),
         invariants=dict(invariants or {}),
         side_effects=dict(_NO_SIDE_EFFECTS),
-        reason_codes=() if valid else (code,),
+        reason_codes=(
+            tuple(reason_codes)
+            if reason_codes is not None
+            else (() if valid else (code,))
+        ),
         message=message,
     )
+
+
+def _safe_action_operation_id(action: Any) -> str:
+    if isinstance(action, RecoveryAction) and type(action.operation_id) is str and action.operation_id:
+        return action.operation_id
+    return _default_operation_id()
+
+
+def _action_metadata_is_supported(action_id: str, action: Any) -> bool:
+    registered = _registered_action() if action_id == RECOVERY_ACTION_ID else None
+    if not isinstance(action, RecoveryAction) or registered is None or action != registered:
+        return False
+    if not action.covariance_only:
+        return False
+    if type(action.required_fields) is not tuple or len(action.required_fields) != 1:
+        return False
+    required_field = action.required_fields[0]
+    if required_field == "covariance":
+        return False
+    if not isinstance(action.field_mapping, Mapping) or not action.field_mapping:
+        return False
+    wire_field = action.field_mapping.get(required_field)
+    return type(wire_field) is str and bool(wire_field) and wire_field != "covariance"
 
 
 def resolve_comparison_target(
@@ -364,34 +408,36 @@ def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:
 def _is_vector_container(value: Any) -> bool:
     """Accept ordered one-dimensional containers without splitting scalar text."""
 
-    if value is None or isinstance(value, (str, bytes, bytearray, Mapping, Set)):
-        return False
-    if not isinstance(value, Sized) or not isinstance(value, Iterable):
-        return False
     try:
+        if value is None or isinstance(value, (str, bytes, bytearray, Mapping, Set)):
+            return False
+        if not isinstance(value, Sized) or not isinstance(value, Iterable):
+            return False
         len(value)
         iter(value)
-    except (TypeError, ValueError):
+        ndim = getattr(value, "ndim", None)
+        if ndim is not None and ndim != 1:
+            return False
+        shape = getattr(value, "shape", None)
+        if shape is not None and len(shape) != 1:
+            return False
+    except Exception:
         return False
-    ndim = getattr(value, "ndim", None)
-    if ndim is not None:
-        try:
-            if ndim != 1:
-                return False
-        except (TypeError, ValueError):
-            return False
-    shape = getattr(value, "shape", None)
-    if shape is not None:
-        try:
-            if len(shape) != 1:
-                return False
-        except (TypeError, ValueError):
-            return False
     return True
 
 
+def _vector_values(value: Any) -> tuple[Any, ...] | None:
+    if not _is_vector_container(value):
+        return None
+    try:
+        return tuple(value)
+    except Exception:
+        return None
+
+
 def _safe_sequence_length(value: Any) -> int:
-    return len(value) if _is_vector_container(value) else 0
+    values = _vector_values(value)
+    return len(values) if values is not None else 0
 
 
 def _cluster_result(
@@ -402,7 +448,6 @@ def _cluster_result(
     status: str,
     severity: str,
     code: str,
-    cluster_values: Sequence[Any],
     row_count: int,
     missing_count: int = 0,
     cluster_count: int = 0,
@@ -456,10 +501,10 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code=source_validation.code,
-            cluster_values=(),
             row_count=_safe_sequence_length(model_row_ids),
         )
-    if not _is_vector_container(cluster_values):
+    cluster_value_vector = _vector_values(cluster_values)
+    if cluster_value_vector is None:
         return _cluster_result(
             source=source,
             cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
@@ -467,11 +512,11 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_VALUES_INVALID",
-            cluster_values=(),
             row_count=_safe_sequence_length(model_row_ids),
             evidence={"received_type": type(cluster_values).__name__},
         )
-    if not _is_vector_container(model_row_ids):
+    model_row_id_vector = _vector_values(model_row_ids)
+    if model_row_id_vector is None:
         return _cluster_result(
             source=source,
             cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
@@ -479,10 +524,11 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_ROW_IDS_INVALID",
-            cluster_values=(),
             row_count=0,
             evidence={"received_type": type(model_row_ids).__name__},
         )
+    cluster_values = cluster_value_vector
+    model_row_ids = model_row_id_vector
     if not isinstance(policy, OLSClusterPolicyV1):
         return _cluster_result(
             source=source,
@@ -491,7 +537,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_POLICY_INVALID",
-            cluster_values=cluster_values,
             row_count=len(model_row_ids),
             evidence={"policy_error": "expected OLSClusterPolicyV1"},
         )
@@ -503,7 +548,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_VARIABLE_REQUIRED",
-            cluster_values=cluster_values,
             row_count=len(model_row_ids),
         )
     columns = _schema_columns(source.dataset_schema)
@@ -515,7 +559,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_VARIABLE_NOT_FOUND",
-            cluster_values=cluster_values,
             row_count=len(model_row_ids),
             evidence={"schema_columns": list(columns)},
         )
@@ -529,7 +572,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code=("SOURCE_ANALYSIS_ROWS_MISSING" if not expected_rows else "CLUSTER_ROW_ALIGNMENT_MISMATCH"),
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             evidence={"expected_row_ids": list(expected_rows), "actual_row_ids": list(actual_rows)},
         )
@@ -542,7 +584,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_VARIABLE_MISSING_VALUES",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             missing_count=len(missing_positions),
             evidence={"missing_positions": missing_positions},
@@ -557,7 +598,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_TYPE_UNSUPPORTED",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             value_type=declared,
             evidence={"declared_dtype": declared, "runtime_types": sorted(str(item) for item in runtime_types)},
@@ -570,7 +610,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_TYPE_MIXED",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             value_type=declared,
             evidence={"declared_dtype": declared, "runtime_types": sorted(runtime_types)},
@@ -584,7 +623,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_TYPE_UNSUPPORTED",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             value_type=declared,
             evidence={"declared_dtype": declared, "runtime_type": runtime},
@@ -597,7 +635,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_TYPE_UNSUPPORTED",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             value_type=declared,
             evidence={"declared_dtype": declared, "runtime_type": runtime},
@@ -615,7 +652,6 @@ def preflight_cluster_variable(
             status="fail",
             severity="error",
             code="CLUSTER_COUNT_TOO_LOW",
-            cluster_values=cluster_values,
             row_count=len(actual_rows),
             cluster_count=cluster_count,
             singleton_cluster_count=singleton_count,
@@ -643,7 +679,6 @@ def preflight_cluster_variable(
         status=status,
         severity=severity,
         code=code,
-        cluster_values=cluster_values,
         row_count=len(actual_rows),
         cluster_count=cluster_count,
         singleton_cluster_count=singleton_count,
@@ -655,7 +690,7 @@ def preflight_cluster_variable(
             "runtime_type": runtime,
             "singleton_cluster_count": singleton_count,
             "all_singleton_clusters": all_singleton,
-            "policy_version": "ols_cluster_policy_v1",
+            "policy_version": _default_policy_version(),
             "one_way_only": policy.one_way_only,
         },
     )
@@ -681,14 +716,30 @@ def validate_clustered_intent(
             code="RECOVERY_ACTION_UNSUPPORTED",
             action_id=diagnostic_action_id,
         )
+    if not _action_metadata_is_supported(action_id, action):
+        return _intent_result(
+            valid=False,
+            code="RECOVERY_ACTION_METADATA_INVALID",
+            action_id=diagnostic_action_id,
+            operation_id=_safe_action_operation_id(action),
+        )
+    operation_id = action.operation_id
+    required_field = action.required_fields[0]
+    wire_field = action.field_mapping[required_field]
     if not isinstance(patch, Mapping):
-        return _intent_result(valid=False, code="INTENT_PATCH_NOT_COVARIANCE_ONLY", action_id=action_id)
-    allowed_fields = {"covariance", "cluster_variable"}
+        return _intent_result(
+            valid=False,
+            code="INTENT_PATCH_NOT_COVARIANCE_ONLY",
+            action_id=action_id,
+            operation_id=operation_id,
+        )
+    allowed_fields = {"covariance", required_field}
     if set(patch) != allowed_fields:
         return _intent_result(
             valid=False,
             code="INTENT_PATCH_NOT_COVARIANCE_ONLY",
             action_id=action_id,
+            operation_id=operation_id,
             evidence={"received_fields": sorted(str(field) for field in patch)},
         )
     covariance_patch = patch.get("covariance")
@@ -697,6 +748,7 @@ def validate_clustered_intent(
             valid=False,
             code="COVARIANCE_DIRECTION_UNSUPPORTED",
             action_id=action_id,
+            operation_id=operation_id,
             evidence={"requested_covariance": covariance_patch, "target_covariance": action.target_covariance},
         )
     source_validation = validate_source_contract(source)
@@ -705,6 +757,7 @@ def validate_clustered_intent(
             valid=False,
             code=source_validation.code,
             action_id=action_id,
+            operation_id=operation_id,
             source_validation=source_validation,
         )
     if source.model != action.allowed_model or source.covariance != action.source_covariance:
@@ -712,18 +765,20 @@ def validate_clustered_intent(
             valid=False,
             code="RECOVERY_ACTION_SOURCE_MISMATCH",
             action_id=action_id,
+            operation_id=operation_id,
             source_validation=source_validation,
             evidence={"model": source.model, "covariance": source.covariance},
         )
     target = resolve_comparison_target(source, requested_result_id)
     if isinstance(target, IntentValidationResult):
-        return replace(target, action_id=action_id)
-    cluster_variable = patch.get("cluster_variable")
+        return replace(target, action_id=action_id, operation_id=operation_id)
+    cluster_variable = patch.get(required_field)
     if type(cluster_variable) is not str or not cluster_variable:
         return _intent_result(
             valid=False,
             code="CLUSTER_VARIABLE_REQUIRED",
             action_id=action_id,
+            operation_id=operation_id,
             source_validation=source_validation,
             comparison_target=target,
         )
@@ -739,19 +794,21 @@ def validate_clustered_intent(
             valid=False,
             code=cluster.code,
             action_id=action_id,
+            operation_id=operation_id,
             source_validation=source_validation,
             comparison_target=target,
             cluster_preflight=cluster,
         )
-    canonical_patch = {"covariance": action.target_covariance, "cluster_variable": cluster_variable}
+    canonical_patch = {"covariance": action.target_covariance, required_field: cluster_variable}
     wire_patch = {
         "covariance": action.target_covariance,
-        action.field_mapping["cluster_variable"]: cluster_variable,
+        wire_field: cluster_variable,
     }
     return _intent_result(
         valid=True,
         code="INTENT_VALID",
         action_id=action_id,
+        operation_id=operation_id,
         source_validation=source_validation,
         comparison_target=target,
         cluster_preflight=cluster,
@@ -759,7 +816,10 @@ def validate_clustered_intent(
         wire_patch=wire_patch,
         invariants=cluster.invariants,
         evidence={
-            "policy_version": "ols_cluster_policy_v1",
+            "policy_version": action.policy_version,
             "field_mapping": dict(action.field_mapping),
         },
+        status=cluster.status,
+        severity=cluster.severity,
+        reason_codes=cluster.reason_codes,
     )

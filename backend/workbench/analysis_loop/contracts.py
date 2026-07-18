@@ -432,6 +432,15 @@ class IntentValidationResult:
             raise ValueError(f"invalid intent validation status: {self.status}")
         if type(self.message) is not str:
             raise TypeError("message must be a string")
+        nested_contracts = {
+            "comparison_target": ComparisonTarget,
+            "source_validation": SourceValidationResult,
+            "cluster_preflight": ClusterPreflightResult,
+        }
+        for field_name, contract_type in nested_contracts.items():
+            value = getattr(self, field_name)
+            if value is not None and not isinstance(value, contract_type):
+                raise TypeError(f"{field_name} must be {contract_type.__name__} or None")
         _require_non_empty_string(self.severity, "severity")
         _require_non_empty_string(self.code, "code")
         _require_non_empty_string(self.action_id, "action_id")

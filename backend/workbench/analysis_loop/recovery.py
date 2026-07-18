@@ -38,6 +38,9 @@ class RecoveryAction:
             type(item) is not str or not item for item in self.required_fields
         ):
             raise TypeError("required_fields must contain non-empty strings")
+        required_fields = tuple(self.required_fields)
+        if not required_fields:
+            raise ValueError("required_fields must not be empty")
         if not isinstance(self.field_mapping, Mapping):
             raise TypeError("field_mapping must be a mapping")
         if any(
@@ -48,8 +51,13 @@ class RecoveryAction:
             for key, value in self.field_mapping.items()
         ):
             raise TypeError("field_mapping must map non-empty strings to strings")
-        object.__setattr__(self, "required_fields", tuple(self.required_fields))
-        object.__setattr__(self, "field_mapping", MappingProxyType(dict(self.field_mapping)))
+        field_mapping = dict(self.field_mapping)
+        if not field_mapping:
+            raise ValueError("field_mapping must not be empty")
+        if not set(required_fields).issubset(field_mapping):
+            raise ValueError("field_mapping must cover required_fields")
+        object.__setattr__(self, "required_fields", required_fields)
+        object.__setattr__(self, "field_mapping", MappingProxyType(field_mapping))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -104,6 +112,8 @@ class RecoveryActionRegistry:
     def __init__(self, actions: Iterable[RecoveryAction]) -> None:
         by_id: dict[str, RecoveryAction] = {}
         for action in actions:
+            if not isinstance(action, RecoveryAction):
+                raise TypeError("recovery action registry accepts RecoveryAction values")
             if action.action_id in by_id:
                 raise ValueError(f"duplicate recovery action: {action.action_id}")
             by_id[action.action_id] = action

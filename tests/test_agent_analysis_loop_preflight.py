@@ -520,6 +520,10 @@ def test_valid_intent_canonicalizes_cluster_variable_to_entity_col_without_side_
 
     assert result.valid is True
     assert result.code == "INTENT_VALID"
+    assert result.status == "warning"
+    assert result.severity == "warning"
+    assert result.cluster_preflight is not None
+    assert result.cluster_preflight.status == "warning"
     assert result.canonical_patch == {
         "covariance": "clustered",
         "cluster_variable": "firm_id",
@@ -533,6 +537,93 @@ def test_valid_intent_canonicalizes_cluster_variable_to_entity_col_without_side_
         "operation_record_created": False,
         "child_created": False,
     }
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["comparison_target", "source_validation", "cluster_preflight"],
+)
+def test_intent_nested_contracts_are_typed_on_direct_and_json_boundaries(
+    field: str,
+) -> None:
+    values, rows = _aligned_values()
+    result = validate_clustered_intent(
+        _source(),
+        action_id="ols.use_clustered_covariance_v1",
+        patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+        requested_result_id=None,
+        cluster_values=values,
+        model_row_ids=rows,
+    )
+    base = result.__dict__
+
+    assert IntentValidationResult(**base | {field: None}).valid is True
+    for invalid in ({}, object()):
+        with pytest.raises((TypeError, ValueError)):
+            IntentValidationResult(**base | {field: invalid})  # type: ignore[arg-type]
+
+    payload = result.to_dict()
+    payload[field] = "not-a-typed-contract"
+    with pytest.raises((TypeError, ValueError)):
+        IntentValidationResult.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"required_fields": ()},
+        {"field_mapping": {}},
+        {"required_fields": ("cluster_variable",), "field_mapping": {"other": "entity_col"}},
+    ],
+)
+def test_recovery_action_metadata_requires_non_empty_covered_fields(
+    overrides: dict[str, object],
+) -> None:
+    action = get_recovery_action("ols.use_clustered_covariance_v1")
+    assert action is not None
+    direct = action.to_dict() | overrides
+    with pytest.raises((TypeError, ValueError)):
+        RecoveryAction(**direct)  # type: ignore[arg-type]
+    with pytest.raises((TypeError, ValueError)):
+        RecoveryAction.from_dict(direct)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"operation_id": "other.operation"},
+        {"allowed_model": "logit"},
+        {"source_covariance": "clustered"},
+        {"target_covariance": "unadjusted"},
+        {"required_fields": ("other_field",), "field_mapping": {"other_field": "other_wire"}},
+        {"field_mapping": {"cluster_variable": "other_wire"}},
+        {"policy_version": "other_policy_v1"},
+    ],
+)
+def test_intent_rejects_inconsistent_recovery_metadata_without_key_error(
+    metadata: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action = get_recovery_action("ols.use_clustered_covariance_v1")
+    assert action is not None
+    inconsistent = RecoveryAction.from_dict(action.to_dict() | metadata)
+    monkeypatch.setattr(
+        "workbench.analysis_loop.preflight.get_recovery_action",
+        lambda _action_id: inconsistent,
+    )
+
+    values, rows = _aligned_values()
+    result = validate_clustered_intent(
+        _source(),
+        action_id="ols.use_clustered_covariance_v1",
+        patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+        requested_result_id=None,
+        cluster_values=values,
+        model_row_ids=rows,
+    )
+
+    assert result.valid is False
+    assert result.code == "RECOVERY_ACTION_METADATA_INVALID"
+    assert all(value is False for value in result.side_effects.values())
 
 
 @pytest.mark.parametrize(
@@ -852,3 +943,36 @@ def test_intent_validation_requires_string_message() -> None:
         IntentValidationResult.from_dict(payload)
     with pytest.raises(TypeError):
         IntentValidationResult(**result.__dict__ | {"message": 123})  # type: ignore[arg-type]
+
+
+class _ExplodingVector:
+    ndim = 1
+
+    def __len__(self) -> int:
+        raise RuntimeError("length exploded")
+
+    def __iter__(self) -> object:
+        raise RuntimeError("iteration exploded")
+
+
+@pytest.mark.parametrize(
+    ("cluster_values", "model_row_ids", "code"),
+    [
+        (_ExplodingVector(), ["r1", "r2", "r3", "r4"], "CLUSTER_VALUES_INVALID"),
+        (["a", "a", "b", "b"], _ExplodingVector(), "CLUSTER_ROW_IDS_INVALID"),
+    ],
+)
+def test_exploding_sized_iterable_vectors_fail_closed(
+    cluster_values: object, model_row_ids: object, code: str
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=cluster_values,  # type: ignore[arg-type]
+        model_row_ids=model_row_ids,  # type: ignore[arg-type]
+    )
+
+    assert result.valid is False
+    assert result.code == code
+    assert result.status == "fail"
+    assert result.invariants["cluster_field_is_group_vector_only"] is True
