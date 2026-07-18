@@ -17,15 +17,27 @@
 
 ## 0. 一句话结论
 
-**当前版本 = v1.7 Agent Harness**（worktree `.worktrees/workbench-v1.7`,进行中未发版）。
-v1.6.12(.1) 已 SHIPPED + merge（main=`510ff5a`）,其 V 系列债全清（见 §3）。
-v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→execute→reconcile 环、
-`model.rerun`/`graph.fork`/`data.column.cast`/`data.columns.cast`/`code.execute`，含真实浏览器验收、
-幂等/failpoint 硬化和真实宿主机 sandbox gate。**本版收口不再新增功能**；下一步沿现有
-`data.column.cast` 模式扩展更多数据 operation，暂不做 Main Agent/多步编排。
+**v1.7.2 已 SHIPPED**（tag `v1.7.2`，`origin/main`=`4b2e6c1`）。
+本版完成 OLS Agent Analysis Loop、结构化 Plan/Validation/Compare packet、报告与图表契约、
+导出、run heartbeat/cancel/timeout 以及 CS-DiD 变量语义修复；发布说明见
+`docs/releases/v1.7.2-release-notes.md`。
+
+**当前开发线 = v1.7.3 release train（未发版）**。它包含两个独立工作包，并须独立记账：
+（A）Report/Operations closeout：对 v1.7.2 报告/运行运维能力做真实 DeepSeek 验收、provider
+citation shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measures / LMM：当前只进入
+C1 Contract Sprint，尚未实现、尚未独立评估、尚未发布。A 的完成不得被表述为 B 已完成，反之亦然；
+不得把未 commit/未 tag 的工作称为已发布能力。
 
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
-剩余债按 §1 扁平优先级取。
+> P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
+
+## 0.1 当前版本状态（2026-07-18）
+
+- v1.7.1：已发布。
+- v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
+- v1.7.3：尚未发布；开发基线应从 `origin/main` 开始，是含 Report/Operations closeout 与
+  Repeated Measures/LMM C1 Contract Sprint 的单一 release train；两者证据独立。
+- v1.8+：沿 `data.column.cast` 模式扩展更多受控数据 operation，再评估更高自治和算法扩张。
 
 ---
 
@@ -38,6 +50,8 @@ v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→
 
 | 优先级 | ID | 债务（一句话） | 类别 | 修法 / 下一步 | 阻塞 | 详情 |
 |---|---|---|---|---|---|---|
+| 🟡 版本收口 | V1.7.3-R | v1.7.3 Report/Operations closeout：真实 DeepSeek `cs_did_staggered` 报告、8 图展开/导出、citation shorthand 与 timeout regression | 独立版本工作包 | 依独立计划与证据收口；不得据此宣称 LMM 已完成 | 否 | `plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
+| 🟡 合同冲刺 | V1.7.3-LMM-C1 | Repeated Measures / LMM：仅 C1 Contract Sprint（严格合同、canonical fixture、可行性 spike、薄接缝），不是模型实现、独立评估或发布 | 独立版本工作包 | 先锁定 C1，Feature/Evaluation lane 才可从同一 lock 开始；不得用 Report/Operations 证据替代 | 是，C1 尚未锁定 | `plans/2026-07-18-v1.7.3-repeated-measures-implementation-plan.md` |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |
 | 🟡 工程 | W2 | 全量孤儿 upload/draft GC（项目级后台回收未做） | 后端 | 单独设计 GC；本版只回收 discard 创世链的无引用 upload | 否 | §2-W2 |
@@ -58,8 +72,8 @@ v1.7 已落:Agent 会话/事件底座、Main/Chain、typed proposal→confirm→
 | 🟠 复盘 | A-D5 | lineage 复查（**非债**，每版一次"抽象是否挣钱"复盘） | 复盘 | 用户拍板；与 roadmap 北极星一致（有意复杂度投资） | 否 | arch:D5 |
 | 🔵 AI | V7 | 超大数据集 Ask AI 策略:profile 摘要已防爆(不随行数涨),但宽表/用户想深入时不够（反馈批3） | 设计 | ①列分块/top-K 列(按缺失率·方差·与y相关)②抽样预览(head+分层随机,标"样本")③v1.7 工具式 drill-down:AI 按需向后端取单列直方图/分位数,上下文只装摘要 | 否 | — |
 | 🟢 主线 | V11 | 图内数据层（✅ v1.7 第一典型切片完成）:`data.column.cast`/`data.columns.cast` 已落(typed preview/confirm/immutable child/幂等/failpoint/浏览器验收);cleaning 策略/异常值规则等更多 data operation 未做 | 主线=v1.8+ | 沿 data.column.cast 模式扩 operation 面 | 否 | roadmap |
-| ~~🟢 方向~~ | ~~G1~~ | ~~图爆炸~~ **✅ 全清 v1.7**:batch `data.columns.cast`(N 列→1 record/1 child/1 recipe/1 diff)+ **投影层折叠**(`foldNodeClusters` 把 >3 个同源 data-cast 兄弟折成 "Data operations (N)" 卡,durable graph 一字不改) | — | — | — | — |
-| ~~🟢 方向~~ | ~~G2~~ | ~~AI 解读图表~~ **✅ 全清 v1.7**:第一步(figure→chart_type+数值源 context/`/figures/ai-context`/chat figure mode/图库按钮)+ 第二步多模态真·看图(`supports_vision` 能力位 + 默认关的显式 opt-in + PNG data URL + 专用 vision header:数字仍只能来自数值源) | — | — | — | — |
+| ~~🟢 方向~~ | ~~G1~~ | ~~图爆炸~~ **✅ v1.7.2**:batch `data.columns.cast`(N 列→1 record/1 child/1 recipe/1 diff)+ **投影层折叠**(`foldNodeClusters` 把 >3 个同源 data-cast 兄弟折成 "Data operations (N)" 卡,durable graph 一字不改) | — | — | — | — |
+| ~~🟢 方向~~ | ~~G2~~ | ~~AI 解读图表~~ **✅ v1.7.2**:figure→chart_type+数值源 context/`/figures/ai-context`/chat figure mode/图库按钮、报告图表 marker 和导出；多模态真·看图仍是 provider-gated 可选方向 | — | — | — | — |
 | ~~🟢 方向~~ | ~~G3~~ | ~~terminal 面板~~ **✅ 全闭(2026-07-16)**:输入框去重 + 沙箱 runner(8 条安全测试真验)+ **`code.execute` typed operation 全链路**(preview=沙箱真跑进一次性 temp 目录、项目零写入;execute 二次跑并**校验结果与 preview 逐字节一致**,不确定代码→拒写;同 key 幂等重放)+ registry(`risk_level=high`)+ orchestrator + routes(sandbox 缺失→503 fail-closed)+ UI section + 真机验收(四条边界对真实项目实测)+ **terminal 外观**(sandboxed stdout 进 AgentPanel;诚实:是跑完的捕获输出**不是实时流**,真流式要 SSE) | v1.7 | 已完成 | 否 | roadmap G3 |
 | ~~🟢 主线~~ | ~~优先级 6~~ | ~~NL Agent 生成同一份 typed proposal~~ **✅ 真机闭环(2026-07-16)**:只开 `data.columns.cast`(**`code.execute` 保持 NL 关闭**)。模型只出意图,后端绑 `artifact_id`+preview fingerprint;新增只读 `inspect_data_schema`。有单独真机 smoke 记录，但不作为本版 gate 或系统级 E2E 承诺。**真机抓到 4 个确定性测试盖不住的 bug**(contract 不可读 / `casts` 被声明成 string / oneOf 与父级 AND 导致顶层强制 model.rerun 形状 / confirm 端点算错 fingerprint 身份) | v1.7 | 已完成 | 否 | roadmap 优先级 6 |
 | ~~🟡 债~~ | ~~P6-1~~ | ~~失败只回 `invalid_tool_arguments`,不带校验详情~~ **✅ 已修(2026-07-16)**:`tools.py` 新增 `validation_details()`,`ToolResult.error_details` 进 tool payload(仅失败时出现,成功 payload 形状不变;`error` 码保持稳定)。**`oneOf` 用 `const` 判别式选分支,不用 `best_match`**——best_match 无判别式概念,曾把 model.rerun 的 `'node_hash' is a required property` 当成 cast 提议的建议:**给错建议比不给更糟**。plain schema 则保留全部顶层错误(一次说完,不要每轮只挤一条)。有界(5 条 / 240 字符,消息里嵌的是调用方自己的参数) | v1.7 | 已完成 | 否 | 本轮 |
