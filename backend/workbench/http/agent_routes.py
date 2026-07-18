@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -36,8 +37,13 @@ from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.resolver import (
     AnalysisLoopSourceResolutionError,
     resolve_analysis_loop_inputs,
+    resolve_analysis_loop_run,
 )
-from ..analysis_loop.storage import PlanDiffStore
+from ..analysis_loop.storage import (
+    ComparePacketStore,
+    PlanDiffStore,
+    ValidationPacketStore,
+)
 from ..analysis_loop.validation import ValidationPacket
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
@@ -709,6 +715,162 @@ def get_agent_capabilities(
     }
 
 
+def _analysis_loop_run_facts(resolved) -> dict[str, Any]:
+    """Expose bounded persisted OLS facts for the read-only detail surface."""
+
+    result = resolved.result if isinstance(resolved.result, dict) else {}
+    sample = result.get("analysis_sample")
+    fingerprints = {
+        key: result.get(key)
+        for key in (
+            "dataset_snapshot_fingerprint",
+            "analysis_sample_fingerprint",
+            "point_estimation_fingerprint",
+            "coefficient_schema_fingerprint",
+            "inference_config_fingerprint",
+        )
+        if result.get(key) is not None
+    }
+    return {
+        "run_id": resolved.run_id,
+        "status": resolved.manifest.get("status"),
+        "model": result.get("model"),
+        "contract_version": result.get("contract_version"),
+        "covariance": result.get("covariance"),
+        "covariance_product": (
+            "conventional"
+            if result.get("covariance") == "unadjusted"
+            else result.get("covariance")
+        ),
+        "covariance_wire": result.get("covariance_wire"),
+        "entity_col": result.get("entity_col"),
+        "stable_result_ids": list(result.get("stable_result_ids") or []),
+        "primary_estimand": result.get("primary_estimand"),
+        "analysis_sample": {
+            "row_count": sample.get("row_count"),
+            "row_order": list(sample.get("row_order") or []),
+        } if isinstance(sample, dict) else None,
+        "fingerprints": fingerprints,
+    }
+
+
+def _analysis_loop_packet_bundle(
+    *,
+    validation_packet,
+    compare_packets: list[ComparePacket],
+    plan_packets,
+) -> dict[str, Any]:
+    compare = next(
+        (
+            packet
+            for packet in compare_packets
+            if packet.child_run_id == validation_packet.child_run_id
+            and packet.source_run_id == validation_packet.source_run_id
+        ),
+        None,
+    )
+    plan = next(
+        (
+            packet.plan_diff
+            for packet in plan_packets
+            if packet.plan_diff.plan_hash == validation_packet.plan_hash
+        ),
+        None,
+    )
+    return {
+        "child_run_id": validation_packet.child_run_id,
+        "source_run_id": validation_packet.source_run_id,
+        "plan_diff": plan.to_dict() if plan is not None else None,
+        "validation_packet": validation_packet.to_dict(),
+        "compare_packet": compare.to_dict() if compare is not None else None,
+    }
+
+
+@router.get("/analysis-loop/packets/{run_id}")
+def get_analysis_loop_packets(
+    run_id: str,
+    project_root: str,
+) -> dict[str, Any]:
+    """Read persisted Analysis Loop facts for one graph run.
+
+    This endpoint is deliberately read-only.  It never builds a packet or
+    infers a comparison.  Terminal packets are selected by their durable
+    child/source IDs; the UI receives the backend's exact packet payloads.
+    """
+
+    root = _project_root(project_root)
+    try:
+        resolved = resolve_analysis_loop_run(root, run_id=run_id, require_result=False)
+    except AnalysisLoopSourceResolutionError as exc:
+        status_code = 404 if exc.code == "SOURCE_RUN_NOT_FOUND" else 422
+        raise WorkbenchAPIError(
+            status_code=status_code,
+            code=("ANALYSIS_LOOP_RUN_NOT_FOUND" if status_code == 404 else exc.code),
+            message=str(exc),
+            details={"run_id": run_id},
+        ) from exc
+
+    validation_store = ValidationPacketStore(root, create=False)
+    compare_store = ComparePacketStore(root, create=False)
+    plan_store = PlanDiffStore(root, create=False)
+    validations = validation_store.list_terminal_packets()
+    compares = compare_store.list_terminal_packets()
+    plans = plan_store.list_terminal_packets()
+
+    current = [packet for packet in validations if packet.child_run_id == run_id]
+    current.sort(key=lambda packet: packet.logical_key)
+    current_bundle = (
+        _analysis_loop_packet_bundle(
+            validation_packet=current[0],
+            compare_packets=compares,
+            plan_packets=plans,
+        )
+        if current
+        else None
+    )
+    child_bundles = [
+        _analysis_loop_packet_bundle(
+            validation_packet=packet,
+            compare_packets=compares,
+            plan_packets=plans,
+        )
+        for packet in sorted(
+            (item for item in validations if item.source_run_id == run_id),
+            key=lambda item: item.logical_key,
+        )
+    ]
+
+    source_run = None
+    source_run_id = current[0].source_run_id if current else run_id
+    try:
+        source_resolved = resolve_analysis_loop_run(
+            root,
+            run_id=source_run_id,
+            require_result=False,
+        )
+        source_run = _analysis_loop_run_facts(source_resolved)
+    except AnalysisLoopSourceResolutionError:
+        # The packet remains inspectable even if a historical source has been
+        # removed or became unreadable; do not hide the durable child evidence.
+        source_run = {"run_id": source_run_id, "status": "unavailable"}
+
+    lifecycle_status = str(resolved.manifest.get("status") or "")
+    status = (
+        current[0].status
+        if current
+        else "pending"
+        if lifecycle_status in {"queued", "running", "pending"}
+        else "absent"
+    )
+    return {
+        "status": status,
+        "run": _analysis_loop_run_facts(resolved),
+        "source_run": source_run,
+        "packet": current_bundle,
+        "children": child_bundles,
+    }
+
+
 def _analysis_loop_packets_from_request(
     body: AnalysisLoopContextRequest,
 ) -> tuple[PlanDiff | None, ValidationPacket | None, ComparePacket | None]:
@@ -810,6 +972,7 @@ def create_agent_analysis_loop_proposal(
         requested_active_head_run_id=body.active_head_run_id,
     )
     provider = NodeOperationContextProvider(root)
+    context_started = perf_counter()
     try:
         snapshot = provider.inspect_node_context(
             InspectNodeContextRequest(
@@ -819,6 +982,7 @@ def create_agent_analysis_loop_proposal(
                 active_head_run_id=authoritative_active_head_run_id,
             )
         )
+        context_ms = round((perf_counter() - context_started) * 1000, 3)
         resolved = resolve_analysis_loop_inputs(
             root,
             run_id=body.source_run_id,
@@ -872,6 +1036,7 @@ def create_agent_analysis_loop_proposal(
         session_id=session_id,
     )
     orchestrator.register_chain(chain_id, session_id, agent)
+    plan_started = perf_counter()
     try:
         proposal = create_analysis_loop_proposal(
             orchestrator=orchestrator,
@@ -898,6 +1063,7 @@ def create_agent_analysis_loop_proposal(
             active_head_run_id=authoritative_active_head_run_id,
             owner_resolution=str(snapshot["owner_resolution"]),
         )
+        plan_ms = round((perf_counter() - plan_started) * 1000, 3)
     except AnalysisLoopProposalError as exc:
         raise WorkbenchAPIError(
             status_code=422,
@@ -934,6 +1100,10 @@ def create_agent_analysis_loop_proposal(
         "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
         "plan_diff": packet.plan_diff.to_dict(),
         "registered_action": RECOVERY_ACTIONS["ols.use_clustered_covariance_v1"].to_dict(),
+        "timings_ms": {
+            "node_operation_context_ms": context_ms,
+            "plan_diff_ms": plan_ms,
+        },
         "status": "pending",
     }
 

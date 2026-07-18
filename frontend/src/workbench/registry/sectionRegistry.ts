@@ -33,6 +33,7 @@ import { BasicInfoSection } from "../../lineage/detail/sections/BasicInfoSection
 import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
+import { AnalysisLoopSection } from "../../lineage/detail/sections/AnalysisLoopSection";
 import { CompareNodesSection } from "../../lineage/compare/CompareNodesSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
@@ -89,6 +90,13 @@ export const sectionRegistry: SectionEntry[] = [
     order: 26,
     shouldRender: (n) => "runs" in n && !n.isDraft,
     Component: CompareNodesSection,
+  },
+  {
+    id: "analysisLoop",
+    order: 27,
+    shouldRender: (n) =>
+      (n.kind === "model" || n.stage === "model") && !n.isDraft && "runs" in n,
+    Component: AnalysisLoopSection,
   },
   {
     id: "dataColumnCast",

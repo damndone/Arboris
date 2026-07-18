@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from workbench.analysis_loop.storage import (
+    ComparePacketStore,
     TerminalPacketConflictError,
     ValidationPacketStore,
 )
+from workbench.analysis_loop.compare import ComparePacket
 from workbench.analysis_loop.validation import ValidationCheck, ValidationPacket
 
 
@@ -74,3 +76,60 @@ def test_validation_store_records_transient_build_failures_without_terminal(tmp_
     attempts = store.list_build_attempts(logical_key="validation:failed")
     assert attempts[0]["status"] == "failed"
     assert attempts[0]["error"]["message"] == "artifact not ready"
+
+
+def _compare_packet(*, logical_key: str = "compare:one") -> ComparePacket:
+    return ComparePacket(
+        compare_status="complete",
+        source_run_id="run-source",
+        child_run_id="run-child",
+        target={"result_id": "coef:treatment", "role": "primary"},
+        data_diff={"changed": False},
+        parameter_diff={"changed": True},
+        result_diff={"coef:treatment": {"status": "complete"}},
+        conclusion_diff={
+            "target_result_id": "coef:treatment",
+            "status": "complete",
+            "classification": "NO_MATERIAL_CHANGE",
+        },
+        validation_status="complete",
+        integrity_findings=(),
+        logical_key=logical_key,
+        strategy_version="ols_clustered_v1",
+        schema_version="compare_packet_v1",
+    )
+
+
+def test_compare_store_reuses_terminal_and_rejects_overwrite(tmp_path: Path) -> None:
+    store = ComparePacketStore(tmp_path)
+    first = store.persist_terminal_packet(_compare_packet())
+
+    assert store.persist_terminal_packet(_compare_packet()) == first
+    assert store.get_terminal_packet(first.logical_key) == first
+    assert len(store.list_terminal_packets()) == 1
+
+    with pytest.raises(TerminalPacketConflictError):
+        store.persist_terminal_packet(
+            _compare_packet(logical_key=first.logical_key)
+            .__class__(
+                **{
+                    **_compare_packet(logical_key=first.logical_key).to_dict(),
+                    "validation_status": "blocked",
+                }
+            )
+        )
+
+
+def test_compare_store_records_transient_build_failures_without_terminal(tmp_path: Path) -> None:
+    store = ComparePacketStore(tmp_path)
+
+    def fail() -> ComparePacket:
+        raise ValueError("child artifact not ready")
+
+    with pytest.raises(ValueError):
+        store.build_packet(logical_key="compare:failed", builder=fail)
+
+    assert store.get_terminal_packet("compare:failed") is None
+    attempts = store.list_build_attempts(logical_key="compare:failed")
+    assert attempts[0]["status"] == "failed"
+    assert attempts[0]["error"]["message"] == "child artifact not ready"

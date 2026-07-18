@@ -358,11 +358,16 @@ def _result_map(run: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
         return {}
     if isinstance(values.get("result_id"), str):
         return {values["result_id"]: values}
-    return {
-        key: item
-        for key, item in values.items()
-        if type(key) is str and isinstance(item, Mapping)
-    }
+    result: dict[str, Mapping[str, Any]] = {}
+    for key, item in values.items():
+        if not isinstance(item, Mapping):
+            continue
+        stable_id = item.get("result_id")
+        if type(stable_id) is str and stable_id:
+            result[stable_id] = item
+        elif type(key) is str:
+            result[key] = item
+    return result
 
 
 def _run_field(run: Mapping[str, Any], name: str) -> Any:

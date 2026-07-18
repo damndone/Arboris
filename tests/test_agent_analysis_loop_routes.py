@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from workbench.analysis_loop.validation import ValidationCheck, ValidationPacket
@@ -281,6 +282,8 @@ def test_analysis_loop_proposal_route_resolves_persisted_source_without_executio
             "entity_col": "company_id",
         }
         assert body["proposal"]["preconditions"]["confirmed_payload_hash"]
+        assert body["timings_ms"]["node_operation_context_ms"] >= 0
+        assert body["timings_ms"]["plan_diff_ms"] >= 0
 
         proposals = client.get(
             f"/agent/sessions/{session_id}/proposals",
@@ -351,3 +354,132 @@ def test_analysis_loop_confirmation_rejects_tampered_canonical_payload(
 
     assert confirmed.status_code == 409
     assert confirmed.json()["error"]["code"] == "CONFIRMED_PAYLOAD_MISMATCH"
+
+
+def test_analysis_loop_packet_route_returns_bounded_source_facts_without_building_packets(
+    tmp_path: Path,
+) -> None:
+    from test_agent_analysis_loop_resolver import _write_source
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_source(project_root)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/analysis-loop/packets/run-source",
+            params={"project_root": str(project_root)},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "absent"
+    assert body["run"]["run_id"] == "run-source"
+    assert body["run"]["model"] == "ols"
+    assert body["run"]["contract_version"] == "ols_result_contract_v1"
+    assert body["run"]["covariance"] == "unadjusted"
+    assert body["packet"] is None
+    assert body["children"] == []
+    assert not (project_root / "workbench" / "analysis-packets").exists()
+
+
+def test_analysis_loop_packet_route_fails_closed_for_missing_run(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/analysis-loop/packets/missing-run",
+            params={"project_root": str(project_root)},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ANALYSIS_LOOP_RUN_NOT_FOUND"
+
+
+def test_analysis_loop_packet_route_reads_immutable_child_packets_and_source_facts(
+    tmp_path: Path,
+) -> None:
+    from test_agent_analysis_loop_observation import _write_run
+    from workbench.analysis_loop.observation import build_and_store_analysis_loop_packets
+    from workbench.analysis_loop.plan import build_plan_diff
+    from workbench.analysis_loop.resolver import (
+        resolve_analysis_loop_inputs,
+        resolve_analysis_loop_run,
+    )
+    from workbench.analysis_loop.storage import (
+        ComparePacketStore,
+        PlanDiffStore,
+        ValidationPacketStore,
+    )
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    frame = pd.DataFrame(
+        {
+            "y": [1.0, 2.0, 1.5, 3.0, 2.5, 4.0],
+            "x": [0.0, 1.0, 0.5, 2.0, 1.5, 3.0],
+            "company_id": ["a", "a", "b", "b", "c", "c"],
+        }
+    )
+    source_result = _write_run(project_root, "run-source", frame, covariance="unadjusted")
+    _write_run(
+        project_root,
+        "run-child",
+        frame,
+        covariance="clustered",
+        rerun_of="run-source",
+        workbench_context={
+            "confirmed_payload_hash": "payload-hash-1",
+        },
+    )
+    resolved = resolve_analysis_loop_inputs(
+        project_root,
+        run_id="run-source",
+        cluster_variable="company_id",
+    )
+    plan = build_plan_diff(
+        source=resolved.source,
+        intent={
+            "action_id": "ols.use_clustered_covariance_v1",
+            "patch": {"covariance": "clustered", "cluster_variable": "company_id"},
+        },
+        requested_result_id=source_result["stable_result_ids"][0],
+        cluster_values=resolved.cluster_values,
+        model_row_ids=resolved.model_row_ids,
+        source_context_fingerprint="ctx:source-v1",
+        source_identity={"run_id": "run-source"},
+    )
+    PlanDiffStore(project_root / "workbench").persist_terminal_plan(plan)
+    build_and_store_analysis_loop_packets(
+        source=resolved.source,
+        source_run=resolve_analysis_loop_run(project_root, run_id="run-source", require_result=True),
+        child_run=resolve_analysis_loop_run(project_root, run_id="run-child"),
+        plan=plan,
+        execution_evidence={
+            "confirmed_payload_hash": "payload-hash-1",
+            "executed_payload_hash": "payload-hash-1",
+            "executed_plan_hash": plan.plan_hash,
+            "executed_canonical_patch_hash": plan.canonical_patch_hash,
+            "effect_status": "committed",
+            "projection_status": "complete",
+            "child_terminal": True,
+        },
+        validation_store=ValidationPacketStore(project_root / "workbench"),
+        compare_store=ComparePacketStore(project_root / "workbench"),
+    )
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/analysis-loop/packets/run-child",
+            params={"project_root": str(project_root)},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "complete"
+    assert body["run"]["run_id"] == "run-child"
+    assert body["source_run"]["run_id"] == "run-source"
+    assert body["packet"]["validation_packet"]["status"] == "complete"
+    assert body["packet"]["compare_packet"]["source_run_id"] == "run-source"
+    assert body["packet"]["plan_diff"]["plan_hash"] == plan.plan_hash

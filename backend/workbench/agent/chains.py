@@ -77,6 +77,9 @@ class RerunExecutionRequest:
     child_chain_id: str
     child_session_id: str
     execution_key: str = ""
+    confirmed_payload_hash: str = ""
+    plan_hash: str = ""
+    canonical_patch_hash: str = ""
 
 
 @dataclass(frozen=True)

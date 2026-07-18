@@ -34,6 +34,17 @@ class ResolvedAnalysisLoopInputs:
     model_input_artifact: str
 
 
+@dataclass(frozen=True)
+class ResolvedAnalysisLoopRun:
+    """Read-only manifest, input, and optional OLS result facts."""
+
+    run_id: str
+    run_root: Path
+    manifest: dict[str, Any]
+    run_inputs: dict[str, Any]
+    result: dict[str, Any] | None
+
+
 def _run_root(project_root: Path | str, run_id: str) -> Path:
     root = Path(project_root).expanduser().resolve()
     runs_root = (root / "runs").resolve()
@@ -78,6 +89,72 @@ def _read_result(run_root: Path) -> dict[str, Any]:
             "source OLS result contract is unsupported",
             code="SOURCE_CONTRACT_UNSUPPORTED",
         ) from exc
+
+
+def resolve_analysis_loop_run(
+    project_root: Path | str,
+    *,
+    run_id: str,
+    require_result: bool = False,
+) -> ResolvedAnalysisLoopRun:
+    """Resolve persisted run facts for a terminal observation.
+
+    A failed child may have no result artifact.  In that case callers can
+    still build a failed ValidationPacket envelope by leaving
+    ``require_result`` false; deterministic validation records the missing
+    model evidence instead of fabricating a result.
+    """
+
+    run_root = _run_root(project_root, run_id)
+    try:
+        manifest = read_json(run_root / "run_manifest.json")
+        run_inputs = read_run_inputs(run_root)
+    except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AnalysisLoopSourceResolutionError(
+            "run is missing a required persisted manifest or input contract",
+            code="RUN_CONTRACT_UNSUPPORTED",
+        ) from exc
+    if not isinstance(manifest, dict) or not isinstance(run_inputs, dict):
+        raise AnalysisLoopSourceResolutionError(
+            "run manifest or inputs are malformed",
+            code="RUN_CONTRACT_UNSUPPORTED",
+        )
+
+    try:
+        candidates = [
+            item for item in read_model_results(run_root) if item.get("model") == "ols"
+        ]
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise AnalysisLoopSourceResolutionError(
+            "run result artifacts cannot be read",
+            code="RUN_RESULT_ARTIFACT_INVALID",
+        ) from exc
+    if len(candidates) > 1:
+        raise AnalysisLoopSourceResolutionError(
+            "run has more than one OLS result contract",
+            code="RUN_CONTRACT_UNSUPPORTED",
+        )
+    result = candidates[0] if candidates else None
+    if result is not None:
+        try:
+            result = validate_result_contract(result)
+        except (TypeError, ValueError) as exc:
+            raise AnalysisLoopSourceResolutionError(
+                "run OLS result contract is unsupported",
+                code="RUN_CONTRACT_UNSUPPORTED",
+            ) from exc
+    if require_result and result is None:
+        raise AnalysisLoopSourceResolutionError(
+            "run has no readable OLS result artifact",
+            code="RUN_RESULT_ARTIFACT_MISSING",
+        )
+    return ResolvedAnalysisLoopRun(
+        run_id=run_id,
+        run_root=run_root,
+        manifest=dict(manifest),
+        run_inputs=dict(run_inputs),
+        result=result,
+    )
 
 
 def _read_source_contract(project_root: Path | str, run_id: str) -> tuple[Path, SourceRunContract, dict[str, Any]]:
@@ -271,5 +348,7 @@ def resolve_analysis_loop_inputs(
 __all__ = [
     "AnalysisLoopSourceResolutionError",
     "ResolvedAnalysisLoopInputs",
+    "ResolvedAnalysisLoopRun",
+    "resolve_analysis_loop_run",
     "resolve_analysis_loop_inputs",
 ]

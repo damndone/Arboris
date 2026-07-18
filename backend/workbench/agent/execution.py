@@ -382,6 +382,25 @@ class WorkbenchOperationLifecycle:
                 effect_status=terminal_effect_status,
                 projection_status="complete",
             )
+            observe_terminal = getattr(handler, "observe_terminal", None)
+            if observe_terminal is not None and terminal.status in {"completed", "failed"}:
+                observation = observe_terminal(terminal)
+                if inspect.isawaitable(observation):
+                    observation = await observation
+                if observation:
+                    if not isinstance(observation, dict):
+                        raise TypeError("terminal observer must return a mapping")
+                    terminal = self.operation_store.append_status(
+                        terminal.record_id,
+                        terminal.status,
+                        outputs={**terminal.outputs, **observation},
+                        execution=terminal.execution,
+                        diff_ref=terminal.diff_ref,
+                        verification=terminal.verification,
+                        error=terminal.error,
+                        effect_status=terminal.effect_status,
+                        projection_status=terminal.projection_status,
+                    )
             if publish_state is not None:
                 published = publish_state(terminal, phase=terminal.status)
                 if inspect.isawaitable(published):

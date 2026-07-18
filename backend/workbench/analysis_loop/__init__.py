@@ -61,7 +61,7 @@ from .validation import (
     build_validation_packet,
     validation_packet_logical_key,
 )
-from .storage import ValidationPacketStore
+from .storage import ComparePacketStore, ValidationPacketStore
 from .compare import (
     ComparePacket,
     ConclusionClassification,
@@ -80,7 +80,14 @@ from .recovery import (
 from .resolver import (
     AnalysisLoopSourceResolutionError,
     ResolvedAnalysisLoopInputs,
+    ResolvedAnalysisLoopRun,
+    resolve_analysis_loop_run,
     resolve_analysis_loop_inputs,
+)
+from .observation import (
+    AnalysisLoopObservationError,
+    AnalysisLoopPacketObservation,
+    build_and_store_analysis_loop_packets,
 )
 
 __all__ = [
@@ -139,6 +146,7 @@ __all__ = [
     "build_validation_packet",
     "validation_packet_logical_key",
     "ValidationPacketStore",
+    "ComparePacketStore",
     "ConclusionClassification",
     "ComparePacket",
     "build_compare_packet",
@@ -146,5 +154,10 @@ __all__ = [
     "compare_logical_key",
     "AnalysisLoopSourceResolutionError",
     "ResolvedAnalysisLoopInputs",
+    "ResolvedAnalysisLoopRun",
+    "resolve_analysis_loop_run",
     "resolve_analysis_loop_inputs",
+    "AnalysisLoopObservationError",
+    "AnalysisLoopPacketObservation",
+    "build_and_store_analysis_loop_packets",
 ]
