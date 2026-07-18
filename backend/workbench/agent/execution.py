@@ -367,6 +367,24 @@ class WorkbenchOperationLifecycle:
                     projection_status="pending",
                 )
                 self.failpoint.hit("after_domain_commit", record)
+            if effect.status not in {"completed", "failed"}:
+                # Submission is a durable, non-terminal lifecycle state.  A
+                # child run may still be queued/running after the effect ids
+                # have been bound; recording that as a failed effect and a
+                # complete projection makes the UI lie and prevents the
+                # terminal observer from running during reconcile.
+                nonterminal = self.operation_store.append_status(
+                    record.record_id,
+                    effect.status,
+                    execution=record.execution,
+                    outputs=effect.outputs,
+                    diff_ref=effect.diff_ref,
+                    verification=effect.verification,
+                    error=effect.error,
+                    effect_status="pending",
+                    projection_status="pending",
+                )
+                return nonterminal
             self.failpoint.hit("before_terminal_reconcile", record)
             terminal_effect_status = (
                 "committed" if effect.status == "completed" else "failed"

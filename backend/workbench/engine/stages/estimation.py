@@ -170,6 +170,7 @@ def _fit_cs_did(ctx, env):
         anticipation=int(ctx.artifacts.get("_cs_anticipation") or 0),
         cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,
         honest_did=ctx.artifacts.get("_honest_did", False),
+        progress=lambda message: env.progress("honest_did", message),
     )
     ctx.artifacts["_cs_did_result"] = result          # Task 12 (diagnostics) reads this
     simple = result["aggregations"]["simple"]
@@ -206,6 +207,7 @@ def _fit_sa_did(ctx, env):
         norm,
         cluster_var=ctx.artifacts.get("_cs_cluster_var") or None,   # reuse the CS cluster channel
         honest_did=ctx.artifacts.get("_honest_did", False),
+        progress=lambda message: env.progress("honest_did", message),
     )
     ctx.artifacts["_sa_did_result"] = result
     simple = result["aggregations"]["simple"]

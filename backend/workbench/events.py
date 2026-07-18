@@ -33,6 +33,7 @@ class EventManager:
         self._sequence: dict[str, int] = {}
         self._history_paths: dict[str, Path] = {}
         self._active_runs: set[str] = set()
+        self._cancel_requested: set[str] = set()
         self._reserved_slots = 0
         self._max_workers = max_workers
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -56,10 +57,22 @@ class EventManager:
                 self._reserved_slots -= 1
             if run_id is not None:
                 self._active_runs.discard(run_id)
+                self._cancel_requested.discard(run_id)
 
     def is_active(self, run_id: str) -> bool:
         with self._lock:
             return run_id in self._active_runs
+
+    def request_cancel(self, run_id: str) -> bool:
+        with self._lock:
+            if run_id not in self._active_runs:
+                return False
+            self._cancel_requested.add(run_id)
+            return True
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        with self._lock:
+            return run_id in self._cancel_requested
 
     @property
     def executor(self) -> ThreadPoolExecutor:

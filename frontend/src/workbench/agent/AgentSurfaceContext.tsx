@@ -43,6 +43,7 @@ import type {
   AgentOperationRecord,
   AgentProposal,
 } from "./agentTypes";
+import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
 
 /** Terminal operation-record states — reconcile polling stops here. */
 const TERMINAL_OPERATION_STATUSES = new Set([
@@ -89,6 +90,39 @@ function toOperationStatus(
       : {},
     diffFocused,
   };
+}
+
+function runFocusModelNodeKey(
+  forest: { forest: ForestViewModel; activeRunId: string },
+  selectedKey: string | null,
+): string | null {
+  if (
+    selectedKey &&
+    forest.forest.nodes.some((node) => node.nodeKey === selectedKey)
+  ) {
+    return selectedKey;
+  }
+  // The run rail uses a `run:<id>` pseudo-selection.  It is a navigation
+  // focus, not an executable node identity; bind the Agent to the active
+  // model node before sending the session packet.
+  if (selectedKey !== null && !selectedKey.startsWith("run:")) return null;
+  const activeHead = forest.forest.heads.find(
+    (head) => head.runId === forest.activeRunId,
+  );
+  const headModel = activeHead
+    ? forest.forest.nodes.find(
+        (node) =>
+          node.nodeHash === activeHead.headNodeHash &&
+          (node.kind === "model" || node.stage === "model"),
+      )
+    : undefined;
+  if (headModel) return headModel.nodeKey;
+  const activeModel = forest.forest.nodes.find(
+    (node) =>
+      node.runs.includes(forest.activeRunId) &&
+      (node.kind === "model" || node.stage === "model"),
+  );
+  return activeModel?.nodeKey ?? null;
 }
 
 export interface AgentSurfaceContextValue {
@@ -172,10 +206,13 @@ export function AgentSurfaceProvider({
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
   const selectedNode = graphNodes.find((node) => node.nodeKey === selectedKey) ?? null;
   const contextPacket = useMemo<AgentContextPacket>(() => {
-    if (forest && selectedKey) {
+    const scopedSelection = forest
+      ? runFocusModelNodeKey(forest, selectedKey)
+      : null;
+    if (forest && scopedSelection) {
       const resolved = resolveNodeOperationContext({
         forest: forest.forest,
-        selected_forest_node_key: selectedKey,
+        selected_forest_node_key: scopedSelection,
         active_head_run_id: forest.activeRunId,
       });
       if (resolved.ok) return buildAskAIContextPacket(resolved.context);

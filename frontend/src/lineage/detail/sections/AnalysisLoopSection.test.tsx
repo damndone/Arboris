@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectRootProvider } from "../../../workbench/ProjectRootContext";
+import { ForestContext } from "../../../workbench/ForestContext";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 import { fetchAnalysisLoopPackets } from "../../api/analysisLoop";
 import { AnalysisLoopSection } from "./AnalysisLoopSection";
@@ -12,7 +13,9 @@ vi.mock("../../api/analysisLoop", () => ({
 
 const fetchPackets = vi.mocked(fetchAnalysisLoopPackets);
 
-function node(overrides: Partial<GraphViewNode> = {}): GraphViewNode {
+function node(
+  overrides: Partial<GraphViewNode> & { runs?: string[] } = {},
+): GraphViewNode {
   return {
     id: "node-child",
     nodeKey: "node-child",
@@ -113,6 +116,31 @@ function renderSection() {
   );
 }
 
+function renderSectionForActiveRun(activeRunId: string) {
+  const selected = node({ runs: ["run-older", activeRunId] });
+  return render(
+    <ProjectRootProvider projectRoot="/tmp/project">
+      <ForestContext.Provider
+        value={{
+          forest: {
+            schemaVersion: 4,
+            legacy: false,
+            nodes: [selected as never],
+            edges: [],
+            heads: [],
+            familyCount: 0,
+            familyRunCount: 2,
+          },
+          activeRunId,
+          setActiveRunId: vi.fn(),
+        }}
+      >
+        <AnalysisLoopSection node={selected} />
+      </ForestContext.Provider>
+    </ProjectRootProvider>,
+  );
+}
+
 describe("AnalysisLoopSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -156,6 +184,14 @@ describe("AnalysisLoopSection", () => {
       "Not selected",
     );
     expect(screen.queryByTestId("analysis-loop-compare")).toBeNull();
+  });
+
+  it("fetches the packet for the active run when a forest node is shared", async () => {
+    fetchPackets.mockResolvedValue(response() as never);
+    renderSectionForActiveRun("run-child");
+
+    expect(await screen.findByTestId("analysis-loop-section")).toBeInTheDocument();
+    expect(fetchPackets).toHaveBeenCalledWith("/tmp/project", "run-child");
   });
 
   it("shows a stable backend error instead of silently hiding the section", async () => {

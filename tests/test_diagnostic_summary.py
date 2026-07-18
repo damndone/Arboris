@@ -1,5 +1,8 @@
 import pytest
-from workbench.diagnostic_summary import build_diagnostic_summary
+from workbench.diagnostic_summary import (
+    build_diagnostic_summary,
+    finalize_diagnostic_summary,
+)
 
 
 # ---- existing 4 tests ----
@@ -132,6 +135,76 @@ def test_severity_none_falls_to_info():
     assert len(summary["diagnostics"]["blockers"]) == 0
     assert len(summary["diagnostics"]["warnings"]) == 0
     assert len(summary["diagnostics"]["cautions"]) == 0
+
+
+def test_finalize_report_status_matches_rendered_artifact_and_issues():
+    summary = build_diagnostic_summary(
+        issue_dicts=[],
+        model_results=[],
+        routing={"kind": "panel"},
+        normalized_y="y",
+        normalized_x=["x"],
+        profile={"row_count": 4, "column_count": 2},
+        categorical_vars=set(),
+        y_type="continuous",
+        primary_type="cs_did",
+        variable_roles={},
+    )
+    issues = [
+        {
+            "severity": "WARNING",
+            "code": "DID_DYNAMIC_THIN_SUPPORT",
+            "message": "thin support",
+        }
+    ]
+
+    finalized = finalize_diagnostic_summary(
+        summary,
+        issue_dicts=issues,
+        report_render_status="complete",
+        report_available=True,
+    )
+
+    assert finalized["run_status"] == {
+        **summary["run_status"],
+        "report_render_status": "complete",
+        "report_available": True,
+        "has_warnings": True,
+        "model_results_available": False,
+    }
+    assert finalized["diagnostics"]["warnings"] == issues
+
+
+def test_finalize_report_failure_is_visible_to_agent_contract():
+    summary = build_diagnostic_summary(
+        issue_dicts=[],
+        model_results=[{"model_id": "cs_did_1", "model_type": "cs_did"}],
+        routing={"kind": "panel"},
+        normalized_y="y",
+        normalized_x=[],
+        profile={"row_count": 4, "column_count": 2},
+        categorical_vars=set(),
+        y_type="continuous",
+        primary_type="cs_did",
+        variable_roles={},
+    )
+
+    finalized = finalize_diagnostic_summary(
+        summary,
+        issue_dicts=[
+            {
+                "severity": "WARNING",
+                "code": "REPORT_RENDER_FAILED",
+                "message": "renderer failed",
+            }
+        ],
+        report_render_status="failed",
+        report_available=False,
+    )
+
+    assert finalized["run_status"]["report_render_status"] == "failed"
+    assert finalized["run_status"]["report_available"] is False
+    assert finalized["run_status"]["has_warnings"] is True
 
 
 def test_c_encoded_treatment_var_detects_proxy_correlation():

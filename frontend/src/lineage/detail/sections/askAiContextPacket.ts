@@ -1,4 +1,9 @@
 import type { NodeOperationContextV1 } from "../../api/nodeOperationContext";
+import type {
+  AnalysisLoopPacketBundle,
+  AnalysisLoopPacketsResponse,
+  AnalysisLoopRunFacts,
+} from "../../api/analysisLoop";
 
 type ContextArtifact = NodeOperationContextV1["node_payload"]["artifacts"][number];
 type PreviewBudget = { remaining: number };
@@ -11,7 +16,25 @@ const MAX_TABLE_PREVIEW_ROWS = 10;
 const MAX_TABLE_PREVIEW_COLUMNS = 20;
 const TRUNCATION_SUFFIX = "...[truncated]";
 
-export function buildAskAIContextPacket(context: NodeOperationContextV1) {
+/**
+ * Deterministic post-rerun evidence that is safe to pass to Ask AI.
+ *
+ * This intentionally excludes the endpoint's `children` collection.  Ask AI
+ * is scoped to the selected run; the selected child gets its exact source,
+ * PlanDiff, ValidationPacket, and ComparePacket instead of guessing from the
+ * shared forest node's display values.
+ */
+export type AskAIAnalysisLoopContext = {
+  status: AnalysisLoopPacketsResponse["status"];
+  run: AnalysisLoopRunFacts;
+  source_run: AnalysisLoopPacketsResponse["source_run"];
+  packet: AnalysisLoopPacketBundle | null;
+};
+
+export function buildAskAIContextPacket(
+  context: NodeOperationContextV1,
+  analysisLoop?: AskAIAnalysisLoopContext | null,
+) {
   const previewBudget = { remaining: MAX_TOTAL_PREVIEW_CHARS };
   return {
     packet_version: "ask-ai-context/v1" as const,
@@ -40,6 +63,9 @@ export function buildAskAIContextPacket(context: NodeOperationContextV1) {
       metrics: context.node_payload.metrics,
       execution_diagnostics: context.node_payload.execution_diagnostics,
     },
+    ...(analysisLoop
+      ? { analysis_loop: analysisLoop }
+      : {}),
     artifacts: context.node_payload.artifacts.map((artifact) =>
       sanitizeArtifactForAskAI(artifact, previewBudget),
     ),

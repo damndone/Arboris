@@ -619,6 +619,7 @@ def honest_rm(
     mbar_grid,
     alpha: float = 0.05,
     grid_points: int = 1000,
+    progress=None,
 ) -> dict:
     """Robust ΔRM confidence sets across the Mbar grid + the breakdown Mbar.
 
@@ -663,6 +664,8 @@ def honest_rm(
 
     results = []
     for M in mbar_grid:
+        if progress is not None:
+            progress(f"ΔRM M={float(M):g}")
         lb, ub = arp_confidence_interval(
             betahat=betahat,
             sigma=sigma,
@@ -1068,6 +1071,7 @@ def honest_sd(
     m_grid,
     alpha: float = 0.05,
     num_points: int = 100,
+    progress=None,
 ) -> dict:
     """Robust ΔSD confidence sets across the M grid + the breakdown M.
 
@@ -1114,6 +1118,8 @@ def honest_sd(
 
     results = []
     for M in m_grid:
+        if progress is not None:
+            progress(f"ΔSD M={float(M):g}")
         r = flci(
             betahat=betahat,
             sigma=sigma,

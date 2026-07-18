@@ -26,6 +26,7 @@ import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
 import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
+import { renderMarkdown } from "../../report/markdown";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -230,7 +231,7 @@ function FigureAskAi({
             borderRadius: 6,
           }}
         >
-          {answer}
+          {renderMarkdown(answer)}
         </div>
       )}
     </div>
