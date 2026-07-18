@@ -27,6 +27,11 @@ from .fingerprints import (
     point_estimation_fingerprint,
 )
 from .policy import OLS_CLUSTER_POLICY_V1, ols_cluster_policy_v1
+from .lifecycle import (
+    AnalysisLoopProposalError,
+    AnalysisLoopProposalSpec,
+    build_analysis_loop_proposal,
+)
 from .plan import (
     ACTION_ID,
     PLAN_DIFF_SCHEMA_VERSION,
@@ -58,6 +63,8 @@ from .recovery import (
 __all__ = [
     "CanonicalJSONError",
     "ACTION_ID",
+    "AnalysisLoopProposalError",
+    "AnalysisLoopProposalSpec",
     "ClusterPreflightResult",
     "ComparePayload",
     "ComparisonTarget",
@@ -80,6 +87,7 @@ __all__ = [
     "SourceValidationResult",
     "analysis_sample_fingerprint",
     "build_plan_diff",
+    "build_analysis_loop_proposal",
     "canonicalize_intent",
     "canonical_json_v1",
     "coefficient_schema_fingerprint",

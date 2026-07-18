@@ -611,11 +611,19 @@ def _plan_target_hash(plan: PlanDiff) -> str | None:
 def _confirmation_preconditions(preconditions: Mapping[str, Any]) -> dict[str, Any]:
     """Remove the self-referential field before hashing or validating a payload."""
 
-    return {
+    filtered = {
         key: value
         for key, value in preconditions.items()
         if key != "confirmed_payload_hash"
     }
+    analysis_loop = filtered.get("analysis_loop")
+    if isinstance(analysis_loop, Mapping) and "confirmed_payload_hash" in analysis_loop:
+        filtered["analysis_loop"] = {
+            key: value
+            for key, value in analysis_loop.items()
+            if key != "confirmed_payload_hash"
+        }
+    return filtered
 
 
 def _confirmation_hash_payload(
@@ -737,6 +745,14 @@ def validate_confirmation_binding(
                 "plan": plan_fields[key],
                 "bound": filtered_preconditions[key],
             }
+    analysis_loop_binding = filtered_preconditions.get("analysis_loop")
+    if isinstance(analysis_loop_binding, Mapping):
+        for key in plan_fields:
+            if key in analysis_loop_binding and analysis_loop_binding[key] != plan_fields[key]:
+                stale_fields[key] = {
+                    "plan": plan_fields[key],
+                    "bound": analysis_loop_binding[key],
+                }
     if stale_fields:
         _raise_binding_error(
             "STALE_PLAN",
