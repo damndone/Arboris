@@ -93,26 +93,42 @@ def _canonical_float(value: float) -> str:
         return "0"
 
     magnitude = abs(value)
-    decimal_value = Decimal(repr(value))
+    sign, digits, decimal_position = _float_components(value)
     if 1e-6 <= magnitude < 1e21:
-        rendered = format(decimal_value, "f")
+        if decimal_position <= 0:
+            rendered = "0." + "0" * (-decimal_position) + digits
+        elif decimal_position >= len(digits):
+            rendered = digits + "0" * (decimal_position - len(digits))
+        else:
+            rendered = digits[:decimal_position] + "." + digits[decimal_position:]
         if "." in rendered:
             rendered = rendered.rstrip("0").rstrip(".")
-        return "0" if rendered in {"", "-0"} else rendered
+        return ("-" if sign else "") + (rendered or "0")
 
-    return _canonical_scientific(decimal_value)
+    mantissa = digits[0]
+    trailing_digits = digits[1:].rstrip("0")
+    if trailing_digits:
+        mantissa += "." + trailing_digits
+    return ("-" if sign else "") + mantissa + f"e{decimal_position - 1:+d}"
+
+
+def _float_components(value: float) -> tuple[bool, str, int]:
+    text = repr(value).lower()
+    sign = text.startswith("-")
+    if sign:
+        text = text[1:]
+    if "e" in text:
+        mantissa, exponent_text = text.split("e", 1)
+        exponent = int(exponent_text)
+    else:
+        mantissa = text
+        exponent = 0
+    integer_part, _, fractional_part = mantissa.partition(".")
+    return sign, integer_part + fractional_part, len(integer_part) + exponent
 
 
 def _canonical_int(value: int) -> str:
     return str(value)
-
-
-def _canonical_scientific(value: Decimal) -> str:
-    rendered = format(value.normalize(), "e")
-    mantissa, exponent = rendered.split("e")
-    if "." in mantissa:
-        mantissa = mantissa.rstrip("0").rstrip(".")
-    return f"{mantissa}e{int(exponent):+d}"
 
 
 def sha256_canonical(value: Any) -> str:

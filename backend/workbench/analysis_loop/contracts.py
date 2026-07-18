@@ -251,11 +251,12 @@ def ensure_packet_idempotent(
     existing: PacketEnvelope | None,
     incoming: PacketEnvelope,
 ) -> PacketEnvelope:
-    """Return the idempotent packet or reject a terminal packet conflict.
+    """Reconcile packets without replacing a conflicting packet silently.
 
-    Storage is intentionally outside this foundation. A pending packet may be
-    advanced by a later packet, while complete/blocked/failed packets are
-    immutable once observed.
+    Raises :class:`PacketConflictError` for identity mismatch, different
+    same-identity pending content, or any replacement of a terminal packet.
+    A same-identity pending packet may advance to a terminal packet; storage
+    is intentionally outside this foundation.
     """
 
     if existing is None:

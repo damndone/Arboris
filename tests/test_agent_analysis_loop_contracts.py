@@ -1,5 +1,5 @@
 import math
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -83,6 +83,20 @@ def test_canonical_json_v1_preserves_all_digits_for_huge_integer_paths():
     assert canonical_json_v1(first) == str(first)
     assert canonical_json_v1(second) == str(second)
     assert sha256_canonical(first) != sha256_canonical(second)
+
+
+def test_canonical_json_v1_float_scientific_format_ignores_low_decimal_precision():
+    first = 1.23456789e100
+    second = 1.23456889e100
+    expected_first = canonical_json_v1(first)
+    expected_second = canonical_json_v1(second)
+    assert expected_first != expected_second
+
+    with localcontext() as context:
+        context.prec = 5
+        assert canonical_json_v1(first) == expected_first
+        assert canonical_json_v1(second) == expected_second
+        assert sha256_canonical(first) != sha256_canonical(second)
 
 
 def test_numbers_equal_uses_absolute_relative_tolerance_and_special_values():
@@ -286,6 +300,14 @@ def test_pending_packet_can_advance_only_with_same_packet_identity():
         )
         with pytest.raises(PacketConflictError, match="identity"):
             ensure_packet_idempotent(existing, changed)
+
+
+def test_ensure_packet_idempotent_documents_identity_and_replacement_semantics():
+    doc = ensure_packet_idempotent.__doc__ or ""
+    assert "identity" in doc
+    assert "terminal" in doc
+    assert "pending" in doc
+    assert "content" in doc
 
 
 def test_packet_envelope_requires_every_field_and_preserves_empty_values():
