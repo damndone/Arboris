@@ -31,11 +31,14 @@ from .plan import (
     ACTION_ID,
     PLAN_DIFF_SCHEMA_VERSION,
     PLAN_STRATEGY_VERSION,
+    PlanBindingError,
     PlanDiff,
     PlanValidationError,
     build_plan_diff,
     canonicalize_intent,
     confirmed_payload_hash,
+    confirmed_payload_hash_for_plan,
+    validate_confirmation_binding,
 )
 from .preflight import (
     preflight_cluster_variable,
@@ -65,6 +68,7 @@ __all__ = [
     "PacketEnvelope",
     "PLAN_DIFF_SCHEMA_VERSION",
     "PLAN_STRATEGY_VERSION",
+    "PlanBindingError",
     "PlanDiff",
     "PlanValidationError",
     "ProposalRejection",
@@ -80,6 +84,7 @@ __all__ = [
     "canonical_json_v1",
     "coefficient_schema_fingerprint",
     "confirmed_payload_hash",
+    "confirmed_payload_hash_for_plan",
     "dataset_snapshot_fingerprint",
     "ensure_packet_idempotent",
     "inference_config_fingerprint",
@@ -92,5 +97,6 @@ __all__ = [
     "get_recovery_action",
     "sha256_canonical",
     "validate_clustered_intent",
+    "validate_confirmation_binding",
     "validate_source_contract",
 ]

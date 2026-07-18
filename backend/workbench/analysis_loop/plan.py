@@ -74,6 +74,10 @@ class PlanValidationError(ValueError):
 PlanBuildError = PlanValidationError
 
 
+class PlanBindingError(PlanValidationError):
+    """A confirmation no longer matches the immutable PlanDiff binding."""
+
+
 def _error(code: str, message: str, **details: Any) -> PlanValidationError:
     return PlanValidationError(message, code=code, details=details)
 
@@ -589,10 +593,185 @@ def confirmed_payload_hash(
             "operation_id": operation_id,
             "operation_version": operation_version,
             "target": target,
-            "preconditions": preconditions,
+            "preconditions": {
+                key: value
+                for key, value in preconditions.items()
+                if key != "confirmed_payload_hash"
+            },
             "changes": changes,
         }
     )
+
+
+def _plan_target_hash(plan: PlanDiff) -> str | None:
+    value = plan.target_identity.get("target_hash")
+    return value if isinstance(value, str) else None
+
+
+def _confirmation_preconditions(preconditions: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove the self-referential field before hashing or validating a payload."""
+
+    return {
+        key: value
+        for key, value in preconditions.items()
+        if key != "confirmed_payload_hash"
+    }
+
+
+def _confirmation_hash_payload(
+    plan: PlanDiff,
+    *,
+    proposal_id: str,
+    revision: int,
+    operation_version: str,
+    target: Mapping[str, Any],
+    preconditions: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the canonical hash input for a PlanDiff-bound proposal payload."""
+
+    return {
+        "plan": {
+            "logical_key": plan.logical_key,
+            "plan_hash": plan.plan_hash,
+            "canonical_patch_hash": plan.canonical_patch_hash,
+            "target_hash": _plan_target_hash(plan),
+            "source_context_fingerprint": plan.source_context_fingerprint,
+        },
+        "proposal": {
+            "proposal_id": proposal_id,
+            "revision": revision,
+            "operation_id": plan.operation_id,
+            "operation_version": operation_version,
+            "target": target,
+            "preconditions": _confirmation_preconditions(preconditions),
+            "changes": changes,
+        },
+    }
+
+
+def confirmed_payload_hash_for_plan(
+    plan: PlanDiff,
+    *,
+    proposal_id: str,
+    revision: int,
+    operation_version: str,
+    target: Mapping[str, Any],
+    preconditions: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> str:
+    """Compute the hash of the exact proposal payload bound to ``plan``."""
+
+    if not isinstance(plan, PlanDiff):
+        raise TypeError("plan must be a PlanDiff")
+    return sha256_canonical(
+        _confirmation_hash_payload(
+            plan,
+            proposal_id=proposal_id,
+            revision=revision,
+            operation_version=operation_version,
+            target=target,
+            preconditions=preconditions,
+            changes=changes,
+        )
+    )
+
+
+def _raise_binding_error(
+    code: str,
+    message: str,
+    **details: Any,
+) -> None:
+    raise PlanBindingError(message, code=code, details=details)
+
+
+def validate_confirmation_binding(
+    plan: PlanDiff,
+    *,
+    bound_plan_hash: str,
+    bound_canonical_patch_hash: str,
+    bound_target_hash: str,
+    bound_source_context_fingerprint: str,
+    current_source_context_fingerprint: str,
+    confirmed_payload_hash: str,
+    proposal_id: str,
+    revision: int,
+    operation_version: str,
+    target: Mapping[str, Any],
+    preconditions: Mapping[str, Any],
+    changes: Mapping[str, Any],
+) -> None:
+    """Fail closed unless a confirmation still matches its immutable PlanDiff.
+
+    The caller is responsible for resolving the current source run and active
+    head.  This pure check only validates the plan, source-context, and exact
+    confirmed-payload bindings needed before that execution path proceeds.
+    """
+
+    if not isinstance(plan, PlanDiff):
+        raise TypeError("plan must be a PlanDiff")
+
+    target_hash = _plan_target_hash(plan)
+    plan_fields = {
+        "plan_hash": plan.plan_hash,
+        "canonical_patch_hash": plan.canonical_patch_hash,
+        "target_hash": target_hash,
+        "source_context_fingerprint": plan.source_context_fingerprint,
+        "plan_logical_key": plan.logical_key,
+    }
+    bound_fields = {
+        "plan_hash": bound_plan_hash,
+        "canonical_patch_hash": bound_canonical_patch_hash,
+        "target_hash": bound_target_hash,
+        "source_context_fingerprint": bound_source_context_fingerprint,
+    }
+    stale_fields = {
+        key: {"plan": plan_fields[key], "bound": value}
+        for key, value in bound_fields.items()
+        if value != plan_fields[key]
+    }
+    filtered_preconditions = _confirmation_preconditions(preconditions)
+    for key in plan_fields:
+        if key in filtered_preconditions and filtered_preconditions[key] != plan_fields[key]:
+            stale_fields[key] = {
+                "plan": plan_fields[key],
+                "bound": filtered_preconditions[key],
+            }
+    if stale_fields:
+        _raise_binding_error(
+            "STALE_PLAN",
+            "confirmation is bound to a different PlanDiff",
+            fields=stale_fields,
+        )
+
+    if current_source_context_fingerprint != plan.source_context_fingerprint:
+        _raise_binding_error(
+            "CONTEXT_FINGERPRINT_MISMATCH",
+            "current source context fingerprint does not match the PlanDiff",
+            expected=plan.source_context_fingerprint,
+            actual=current_source_context_fingerprint,
+        )
+
+    expected_payload_hash = confirmed_payload_hash_for_plan(
+        plan,
+        proposal_id=proposal_id,
+        revision=revision,
+        operation_version=operation_version,
+        target=target,
+        preconditions=filtered_preconditions,
+        changes=changes,
+    )
+    if confirmed_payload_hash != expected_payload_hash:
+        _raise_binding_error(
+            "CONFIRMED_PAYLOAD_MISMATCH",
+            "confirmed payload hash does not match the PlanDiff-bound payload",
+            expected=expected_payload_hash,
+            actual=confirmed_payload_hash,
+        )
+
+
+compute_confirmed_payload_hash = confirmed_payload_hash_for_plan
+validate_plan_confirmation_binding = validate_confirmation_binding
 
 
 __all__ = [
@@ -603,10 +782,15 @@ __all__ = [
     "PLAN_STRATEGY_VERSION",
     "STRATEGY_VERSION",
     "PlanBuildError",
+    "PlanBindingError",
     "PlanDiff",
     "PlanValidationError",
     "build_plan_diff",
     "canonicalize_intent",
     "confirmed_payload_hash",
+    "confirmed_payload_hash_for_plan",
+    "compute_confirmed_payload_hash",
     "normalize_intent",
+    "validate_confirmation_binding",
+    "validate_plan_confirmation_binding",
 ]

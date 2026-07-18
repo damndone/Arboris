@@ -8,8 +8,11 @@ import pytest
 from workbench.analysis_loop.contracts import SourceRunContract
 from workbench.analysis_loop.plan import (
     PlanDiff,
+    PlanBindingError,
     PlanValidationError,
     build_plan_diff,
+    confirmed_payload_hash_for_plan,
+    validate_confirmation_binding,
 )
 from workbench.analysis_loop.storage import PlanDiffStore, TerminalPacketConflictError
 
@@ -221,3 +224,123 @@ def test_plan_diff_store_never_overwrites_a_terminal_packet(tmp_path: Path) -> N
     )
     with pytest.raises(TerminalPacketConflictError):
         store.persist_terminal_plan(conflicting)
+
+
+def _proposal_binding_payload(plan: PlanDiff) -> dict[str, object]:
+    return {
+        "proposal_id": "proposal-analysis-1",
+        "revision": 1,
+        "operation_version": "v1",
+        "target": {
+            "run_id": "run-source",
+            "node_ref": "model:ols",
+            "node_hash": "node-hash-source",
+            "forest_node_key": "node-hash-source",
+            "target_hash": plan.target_identity["target_hash"],
+        },
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": plan.source_context_fingerprint,
+            "active_head_run_id": "run-source",
+            "owner_resolution": "active_head_contains_node",
+            "plan_logical_key": plan.logical_key,
+            "plan_hash": plan.plan_hash,
+            "canonical_patch_hash": plan.canonical_patch_hash,
+            "target_hash": plan.target_identity["target_hash"],
+            "source_context_fingerprint": plan.source_context_fingerprint,
+        },
+        "changes": plan.wire_patch,
+    }
+
+
+def test_confirmed_payload_hash_is_derived_from_plan_and_exact_proposal_payload() -> None:
+    plan = _build_plan()
+    payload = _proposal_binding_payload(plan)
+
+    first = confirmed_payload_hash_for_plan(plan, **payload)
+    second = confirmed_payload_hash_for_plan(
+        plan,
+        **{**payload, "preconditions": {**payload["preconditions"], "confirmed_payload_hash": "ignored"}},
+    )
+
+    assert first == second
+    assert len(first) == 64
+
+
+def test_confirmation_binding_rejects_stale_plan_before_other_checks() -> None:
+    plan = _build_plan()
+    payload = _proposal_binding_payload(plan)
+    confirmed_hash = confirmed_payload_hash_for_plan(plan, **payload)
+
+    with pytest.raises(PlanBindingError) as exc_info:
+        validate_confirmation_binding(
+            plan,
+            bound_plan_hash="stale-plan-hash",
+            bound_canonical_patch_hash=plan.canonical_patch_hash,
+            bound_target_hash=plan.target_identity["target_hash"],
+            bound_source_context_fingerprint=plan.source_context_fingerprint,
+            current_source_context_fingerprint=plan.source_context_fingerprint,
+            confirmed_payload_hash=confirmed_hash,
+            **payload,
+        )
+
+    assert exc_info.value.code == "STALE_PLAN"
+
+
+def test_confirmation_binding_rejects_source_context_fingerprint_mismatch() -> None:
+    plan = _build_plan()
+    payload = _proposal_binding_payload(plan)
+    confirmed_hash = confirmed_payload_hash_for_plan(plan, **payload)
+
+    with pytest.raises(PlanBindingError) as exc_info:
+        validate_confirmation_binding(
+            plan,
+            bound_plan_hash=plan.plan_hash,
+            bound_canonical_patch_hash=plan.canonical_patch_hash,
+            bound_target_hash=plan.target_identity["target_hash"],
+            bound_source_context_fingerprint=plan.source_context_fingerprint,
+            current_source_context_fingerprint="ctx:changed",
+            confirmed_payload_hash=confirmed_hash,
+            **payload,
+        )
+
+    assert exc_info.value.code == "CONTEXT_FINGERPRINT_MISMATCH"
+
+
+def test_confirmation_binding_rejects_confirmed_payload_hash_mismatch() -> None:
+    plan = _build_plan()
+    payload = _proposal_binding_payload(plan)
+
+    with pytest.raises(PlanBindingError) as exc_info:
+        validate_confirmation_binding(
+            plan,
+            bound_plan_hash=plan.plan_hash,
+            bound_canonical_patch_hash=plan.canonical_patch_hash,
+            bound_target_hash=plan.target_identity["target_hash"],
+            bound_source_context_fingerprint=plan.source_context_fingerprint,
+            current_source_context_fingerprint=plan.source_context_fingerprint,
+            confirmed_payload_hash="wrong-confirmed-payload-hash",
+            **payload,
+        )
+
+    assert exc_info.value.code == "CONFIRMED_PAYLOAD_MISMATCH"
+
+
+def test_confirmation_binding_accepts_exact_plan_context_and_payload() -> None:
+    plan = _build_plan()
+    payload = _proposal_binding_payload(plan)
+    confirmed_hash = confirmed_payload_hash_for_plan(plan, **payload)
+
+    assert (
+        validate_confirmation_binding(
+            plan,
+            bound_plan_hash=plan.plan_hash,
+            bound_canonical_patch_hash=plan.canonical_patch_hash,
+            bound_target_hash=plan.target_identity["target_hash"],
+            bound_source_context_fingerprint=plan.source_context_fingerprint,
+            current_source_context_fingerprint=plan.source_context_fingerprint,
+            confirmed_payload_hash=confirmed_hash,
+            **payload,
+        )
+        is None
+    )
