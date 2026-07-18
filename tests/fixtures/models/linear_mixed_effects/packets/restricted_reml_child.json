@@ -1,0 +1,13 @@
+{
+  "contract": "analysis_loop.compare",
+  "contract_version": "1.0",
+  "payload": {
+    "child_run_id": "lmm-child-v1",
+    "compare_status": "restricted",
+    "fixture_id": "restricted_reml_child_v1",
+    "reason_code": "REML_FIXED_EFFECTS_DIFFER",
+    "source_run_id": "lmm-source-v1",
+    "user_safe_message": "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

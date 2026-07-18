@@ -1,0 +1,13 @@
+{
+  "contract": "analysis_loop.compare",
+  "contract_version": "1.0",
+  "payload": {
+    "child_run_id": "lmm-child-v1",
+    "compare_status": "complete",
+    "comparison_scope": "same_fixed_effects_ml",
+    "fixture_id": "comparable_child_v1",
+    "result_id": "group_time_interaction",
+    "source_run_id": "lmm-source-v1"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

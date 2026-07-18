@@ -1,0 +1,20 @@
+{
+  "contract": "linear_mixed_effects.diagnostic",
+  "contract_version": "1.0",
+  "payload": {
+    "diagnostics": [
+      {
+        "action_candidate": null,
+        "code": "LMM_SUBJECT_ID_MISSING",
+        "evidence": {
+          "column": "participant_id"
+        },
+        "severity": "error",
+        "status": "blocked"
+      }
+    ],
+    "fixture_id": "missing_subject_id_v1",
+    "status": "blocked"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

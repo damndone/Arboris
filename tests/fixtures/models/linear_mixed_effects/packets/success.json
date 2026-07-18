@@ -1,0 +1,13 @@
+{
+  "contract": "linear_mixed_effects.result",
+  "contract_version": "1.0",
+  "payload": {
+    "estimate": 0.9,
+    "fit_method": "reml",
+    "fixture_id": "known_truth_success_v1",
+    "inference_method": "asymptotic_wald_z_v1",
+    "result_id": "group_time_interaction",
+    "status": "complete"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

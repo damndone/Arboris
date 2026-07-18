@@ -1,0 +1,20 @@
+{
+  "contract": "linear_mixed_effects.diagnostic",
+  "contract_version": "1.0",
+  "payload": {
+    "diagnostics": [
+      {
+        "action_candidate": null,
+        "code": "LMM_CONVERGENCE_FAILED",
+        "evidence": {
+          "optimizer": "lbfgs"
+        },
+        "severity": "error",
+        "status": "failed"
+      }
+    ],
+    "fixture_id": "convergence_failure_v1",
+    "status": "failed"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

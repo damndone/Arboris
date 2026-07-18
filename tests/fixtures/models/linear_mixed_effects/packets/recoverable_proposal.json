@@ -1,0 +1,19 @@
+{
+  "contract": "linear_mixed_effects.recovery_proposal",
+  "contract_version": "1.0",
+  "payload": {
+    "action_candidate": {
+      "action_id": "lmm.simplify_random_effects_v1",
+      "operation_id": "model.rerun",
+      "patch": {
+        "model_options": {
+          "random_slope": false
+        }
+      },
+      "required_confirmation": true
+    },
+    "fixture_id": "recoverable_random_slope_v1",
+    "proposal_status": "pending_confirmation"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

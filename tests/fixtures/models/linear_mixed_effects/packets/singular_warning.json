@@ -1,0 +1,20 @@
+{
+  "contract": "linear_mixed_effects.diagnostic",
+  "contract_version": "1.0",
+  "payload": {
+    "diagnostics": [
+      {
+        "action_candidate": null,
+        "code": "LMM_RANDOM_EFFECTS_SINGULAR",
+        "evidence": {
+          "slope_variance": 0.0
+        },
+        "severity": "warning",
+        "status": "complete"
+      }
+    ],
+    "fixture_id": "singular_random_slope_v1",
+    "status": "complete"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}
