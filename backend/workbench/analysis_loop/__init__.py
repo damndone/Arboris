@@ -77,6 +77,11 @@ from .recovery import (
     RecoveryActionRegistry,
     get_recovery_action,
 )
+from .resolver import (
+    AnalysisLoopSourceResolutionError,
+    ResolvedAnalysisLoopInputs,
+    resolve_analysis_loop_inputs,
+)
 
 __all__ = [
     "CanonicalJSONError",
@@ -139,4 +144,7 @@ __all__ = [
     "build_compare_packet",
     "classify_primary_target",
     "compare_logical_key",
+    "AnalysisLoopSourceResolutionError",
+    "ResolvedAnalysisLoopInputs",
+    "resolve_analysis_loop_inputs",
 ]

@@ -26,8 +26,18 @@ from ..agent.chains import (
 from ..agent.context_tools import NodeOperationContextProvider
 from ..agent.context_tools import InspectNodeContextRequest
 from ..analysis_loop.compare import ComparePacket
-from ..analysis_loop.plan import PlanDiff
+from ..analysis_loop.lifecycle import (
+    AnalysisLoopProposalError,
+    confirm_analysis_loop_proposal,
+    create_analysis_loop_proposal,
+)
+from ..analysis_loop.plan import PlanBindingError, PlanDiff, PlanValidationError
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
+from ..analysis_loop.resolver import (
+    AnalysisLoopSourceResolutionError,
+    resolve_analysis_loop_inputs,
+)
+from ..analysis_loop.storage import PlanDiffStore
 from ..analysis_loop.validation import ValidationPacket
 from ..agent.core import AgentCore
 from ..agent.events import AgentEventStream
@@ -103,6 +113,7 @@ class AgentProposalConfirmRequest(BaseModel):
     revision: int = Field(gt=0)
     fingerprint: str = Field(min_length=1)
     active_head_run_id: str = Field(min_length=1)
+    confirmed_payload_hash: str | None = Field(default=None, min_length=1)
 
 
 class AgentProposalDeclineRequest(BaseModel):
@@ -154,6 +165,16 @@ class AnalysisLoopIntentRequest(BaseModel):
     # This is deliberately untrusted input. The route only classifies and
     # returns it; it never turns it into a proposal or operation record.
     intent: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnalysisLoopProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_run_id: str = Field(min_length=1, max_length=200)
+    source_node_ref: str = Field(min_length=1, max_length=300)
+    active_head_run_id: str = Field(min_length=1, max_length=200)
+    cluster_variable: str = Field(min_length=1, max_length=200)
+    result_id: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 def _project_root(raw: str) -> Path:
@@ -765,6 +786,158 @@ def submit_agent_analysis_loop_intent(
     }
 
 
+@router.post("/agent/sessions/{session_id}/analysis-loop/proposals")
+def create_agent_analysis_loop_proposal(
+    session_id: str,
+    project_root: str,
+    body: AnalysisLoopProposalRequest,
+) -> dict[str, Any]:
+    """Resolve persisted OLS facts and create one confirmation-gated proposal."""
+
+    root = _project_root(project_root)
+    repository, events, metadata = _get_session(root, session_id)
+    if metadata.get("role") != "chain":
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="ANALYSIS_LOOP_SCOPE_INVALID",
+            message="An analysis-loop proposal must belong to a Chain Agent session.",
+            details={"session_id": session_id},
+        )
+    chain_id = str(metadata.get("chain_id") or "")
+    authoritative_active_head_run_id = _authoritative_active_head(
+        root,
+        chain_id=chain_id,
+        requested_active_head_run_id=body.active_head_run_id,
+    )
+    provider = NodeOperationContextProvider(root)
+    try:
+        snapshot = provider.inspect_node_context(
+            InspectNodeContextRequest(
+                request_id=f"analysis-loop-proposal:{body.source_run_id}:{body.source_node_ref}",
+                owner_run_id=body.source_run_id,
+                op_node_id=body.source_node_ref,
+                active_head_run_id=authoritative_active_head_run_id,
+            )
+        )
+        resolved = resolve_analysis_loop_inputs(
+            root,
+            run_id=body.source_run_id,
+            cluster_variable=body.cluster_variable,
+        )
+    except AnalysisLoopSourceResolutionError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message=str(exc),
+            details={"run_id": body.source_run_id},
+        ) from exc
+    except (KeyError, OSError, ValueError) as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_STALE",
+            message="The selected OLS node or active head could not be verified.",
+            details={
+                "run_id": body.source_run_id,
+                "node_ref": body.source_node_ref,
+            },
+        ) from exc
+    if resolved.source.run_id != body.source_run_id:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="SOURCE_IDENTITY_MISMATCH",
+            message="The resolved source does not match the requested run.",
+            details={"run_id": body.source_run_id},
+        )
+    if snapshot.get("active_head_run_id") != authoritative_active_head_run_id:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_PROPOSAL_STALE",
+            message="The selected source is outside the current active head.",
+            details={"run_id": body.source_run_id},
+        )
+
+    orchestrator = WorkbenchOrchestrator(
+        repository,
+        events,
+        main_session_id=_ensure_main_session(repository, root),
+        context_provider=provider,
+    )
+    # Proposal creation needs a registered Chain identity but does not invoke
+    # an LLM. The adapter is constructed locally; this read/plan path makes no
+    # provider call.
+    agent = AgentCore(
+        repository,
+        events,
+        OpenAICompatibleModelAdapter(load_llm_config()),
+        session_id=session_id,
+    )
+    orchestrator.register_chain(chain_id, session_id, agent)
+    try:
+        proposal = create_analysis_loop_proposal(
+            orchestrator=orchestrator,
+            chain_id=chain_id,
+            plan_store=PlanDiffStore(repository.root, create=False),
+            source=resolved.source,
+            intent={
+                "action_id": "ols.use_clustered_covariance_v1",
+                "patch": {
+                    "covariance": "clustered",
+                    "cluster_variable": body.cluster_variable,
+                },
+            },
+            cluster_values=resolved.cluster_values,
+            model_row_ids=resolved.model_row_ids,
+            requested_result_id=body.result_id,
+            source_context_fingerprint=str(snapshot["context_fingerprint"]),
+            source_identity={
+                "run_id": body.source_run_id,
+                "node_ref": body.source_node_ref,
+                "node_hash": str(snapshot["node_hash"]),
+                "forest_node_key": str(snapshot["forest_node_key"]),
+            },
+            active_head_run_id=authoritative_active_head_run_id,
+            owner_resolution=str(snapshot["owner_resolution"]),
+        )
+    except AnalysisLoopProposalError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message=str(exc),
+            details=exc.details,
+        ) from exc
+    except PlanValidationError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message=str(exc),
+            details=exc.details,
+        ) from exc
+    except OperationValidationError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="ANALYSIS_LOOP_PROPOSAL_INVALID",
+            message="The canonical analysis-loop proposal was rejected by the operation registry.",
+            details={"reason": str(exc)},
+        ) from exc
+    plan_store = PlanDiffStore(repository.root, create=False)
+    logical_key = proposal.preconditions.get("plan_logical_key")
+    packet = plan_store.get_terminal_packet(str(logical_key)) if logical_key else None
+    if packet is None:
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="ANALYSIS_LOOP_PLAN_MISSING",
+            message="The analysis-loop proposal has no persisted PlanDiff.",
+            details={"proposal_id": proposal.proposal_id},
+        )
+    return {
+        "session_id": session_id,
+        "proposal": _public_proposal(orchestrator.proposal_store, proposal.proposal_id),
+        "plan_diff": packet.plan_diff.to_dict(),
+        "registered_action": RECOVERY_ACTIONS["ols.use_clustered_covariance_v1"].to_dict(),
+        "status": "pending",
+    }
+
+
 def _ensure_fork_source_session(
     root: Path,
     body: AgentForkProposalRequest,
@@ -1142,15 +1315,56 @@ async def confirm_agent_proposal(
         main_session_id=_ensure_main_session(repository, root),
         context_provider=NodeOperationContextProvider(root),
     )
+    is_analysis_loop = isinstance(proposal.preconditions.get("analysis_loop"), dict)
     try:
-        record = orchestrator.confirm_proposal(
-            proposal_id,
-            revision=body.revision,
-            fingerprint=body.fingerprint,
-            actor_type="user",
-            current_context_fingerprint=current_context_fingerprint,
-            current_active_head_run_id=authoritative_active_head_run_id,
-        )
+        if is_analysis_loop:
+            cluster_variable = proposal.changes.get("entity_col")
+            if type(cluster_variable) is not str or not cluster_variable:
+                raise PlanBindingError(
+                    "analysis-loop proposal has no exact cluster variable",
+                    code="STALE_PLAN",
+                )
+            resolved = resolve_analysis_loop_inputs(
+                root,
+                run_id=str(proposal.target["run_id"]),
+                cluster_variable=cluster_variable,
+            )
+            confirmed_payload_hash = (
+                body.confirmed_payload_hash
+                or proposal.preconditions.get("confirmed_payload_hash")
+            )
+            if type(confirmed_payload_hash) is not str or not confirmed_payload_hash:
+                raise PlanBindingError(
+                    "analysis-loop confirmation has no canonical payload hash",
+                    code="CONFIRMED_PAYLOAD_MISMATCH",
+                )
+            record = confirm_analysis_loop_proposal(
+                orchestrator=orchestrator,
+                plan_store=PlanDiffStore(repository.root, create=False),
+                proposal_id=proposal_id,
+                current_source=resolved.source,
+                current_source_context_fingerprint=current_context_fingerprint,
+                current_active_head_run_id=authoritative_active_head_run_id,
+                revision=body.revision,
+                fingerprint=body.fingerprint,
+                confirmed_payload_hash=confirmed_payload_hash,
+            )
+        else:
+            record = orchestrator.confirm_proposal(
+                proposal_id,
+                revision=body.revision,
+                fingerprint=body.fingerprint,
+                actor_type="user",
+                current_context_fingerprint=current_context_fingerprint,
+                current_active_head_run_id=authoritative_active_head_run_id,
+            )
+    except PlanBindingError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code=exc.code,
+            message=str(exc),
+            details=getattr(exc, "details", {"proposal_id": proposal_id}),
+        ) from exc
     except ProposalStaleError as exc:
         raise WorkbenchAPIError(
             status_code=409,

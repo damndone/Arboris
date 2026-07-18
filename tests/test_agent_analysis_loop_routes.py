@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import asyncio
+import json
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -219,3 +220,134 @@ def test_chain_tool_registry_exposes_typed_analysis_loop_tools_without_mutation(
     assert result.ok is True
     assert result.output["status"] == "accepted"
     assert not (tmp_path / "workbench" / "analysis-packets").exists()
+
+
+def test_analysis_loop_proposal_route_resolves_persisted_source_without_execution(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from test_agent_analysis_loop_resolver import _write_source
+    from workbench.http import agent_routes
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_source(project_root)
+    result = json.loads(
+        (project_root / "runs" / "run-source" / "model_results" / "ols_1.json").read_text()
+    )
+
+    class FakeProvider:
+        def __init__(self, root: Path) -> None:
+            self.project_root = root
+
+        def inspect_node_context(self, request) -> dict[str, object]:
+            return {
+                "node_hash": "node-hash-source",
+                "forest_node_key": "forest:source",
+                "context_version": "node-operation-context/v1",
+                "context_fingerprint": "ctx:source",
+                "active_head_run_id": request.active_head_run_id,
+                "owner_resolution": "active_head_contains_node",
+            }
+
+        def tool_definitions(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(agent_routes, "NodeOperationContextProvider", FakeProvider)
+    with TestClient(app) as client:
+        session_id = _create_session(client, project_root)
+        response = client.post(
+            f"/agent/sessions/{session_id}/analysis-loop/proposals",
+            params={"project_root": str(project_root)},
+            json={
+                "source_run_id": "run-source",
+                "source_node_ref": "model:ols_1",
+                "active_head_run_id": "run-source",
+                "cluster_variable": "company_id",
+                "result_id": result["stable_result_ids"][0],
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "pending"
+        assert body["proposal"]["status"] == "pending"
+        assert body["proposal"]["changes"] == {
+            "covariance": "clustered",
+            "entity_col": "company_id",
+        }
+        assert body["plan_diff"]["wire_patch"] == {
+            "covariance": "clustered",
+            "entity_col": "company_id",
+        }
+        assert body["proposal"]["preconditions"]["confirmed_payload_hash"]
+
+        proposals = client.get(
+            f"/agent/sessions/{session_id}/proposals",
+            params={"project_root": str(project_root)},
+        )
+        assert proposals.status_code == 200
+        assert len(proposals.json()["proposals"]) == 1
+        assert not (project_root / "workbench" / "operations").exists()
+
+
+def test_analysis_loop_confirmation_rejects_tampered_canonical_payload(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from test_agent_analysis_loop_resolver import _write_source
+    from workbench.http import agent_routes
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    _write_source(project_root)
+    result = json.loads(
+        (project_root / "runs" / "run-source" / "model_results" / "ols_1.json").read_text()
+    )
+
+    class FakeProvider:
+        def __init__(self, root: Path) -> None:
+            self.project_root = root
+
+        def inspect_node_context(self, request) -> dict[str, object]:
+            return {
+                "node_hash": "node-hash-source",
+                "forest_node_key": "forest:source",
+                "context_version": "node-operation-context/v1",
+                "context_fingerprint": "ctx:source",
+                "active_head_run_id": request.active_head_run_id,
+                "owner_resolution": "active_head_contains_node",
+            }
+
+        def tool_definitions(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(agent_routes, "NodeOperationContextProvider", FakeProvider)
+    with TestClient(app) as client:
+        session_id = _create_session(client, project_root)
+        created = client.post(
+            f"/agent/sessions/{session_id}/analysis-loop/proposals",
+            params={"project_root": str(project_root)},
+            json={
+                "source_run_id": "run-source",
+                "source_node_ref": "model:ols_1",
+                "active_head_run_id": "run-source",
+                "cluster_variable": "company_id",
+                "result_id": result["stable_result_ids"][0],
+            },
+        )
+        assert created.status_code == 200
+        proposal = created.json()["proposal"]
+        confirmed = client.post(
+            f"/agent/sessions/{session_id}/proposals/{proposal['proposal_id']}/confirm",
+            params={"project_root": str(project_root)},
+            json={
+                "revision": proposal["revision"],
+                "fingerprint": proposal["fingerprint"],
+                "active_head_run_id": "run-source",
+                "confirmed_payload_hash": "tampered",
+            },
+        )
+
+    assert confirmed.status_code == 409
+    assert confirmed.json()["error"]["code"] == "CONFIRMED_PAYLOAD_MISMATCH"
