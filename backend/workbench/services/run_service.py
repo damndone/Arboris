@@ -181,6 +181,31 @@ def _submit_run(
     sha = store_upload_bytes(root, upload_bytes, filename=upload_filename)
     run = create_run(root, mode=form.get("mode", "auto"))
 
+    model_type = form_for_persist.get("model_type", "auto")
+    requested_covariance = str(form_for_persist.get("covariance", "")).strip().lower()
+    wire_covariance = requested_covariance or "robust"
+    executable_payload = {
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+        "form": dict(form_for_persist),
+        "rerun_of": rerun_of,
+        "from_node": from_node,
+    }
+    contract_summary = {
+        "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
+        "model": "ols" if model_type == "ols" else model_type,
+        "model_type": model_type,
+        "covariance": wire_covariance,
+        "covariance_explicit": bool(requested_covariance),
+        "entity_col": form_for_persist.get("entity_col", ""),
+        "y": form_for_persist.get("y", ""),
+        "x": list(x_columns),
+        "source_eligible": model_type == "ols" and requested_covariance == "unadjusted",
+    }
+
     write_run_inputs(
         run.root,
         form=form_for_persist,
@@ -189,7 +214,21 @@ def _submit_run(
         override_hash=override_hash(op_overrides) if op_overrides else None,
         dag_hash=dag_hash(sha, form_for_persist),
         rerun_from=rerun_from,
+        source_lineage={
+            "source_run_id": rerun_of,
+            "from_node": from_node,
+            "rerun_from": rerun_from,
+        },
         workbench_context=workbench_context,
+        contract_summary=contract_summary,
+        executable_payload=executable_payload,
+        rerun_inputs={
+            "rerun_of": rerun_of,
+            "from_node": from_node,
+            "rerun_reason": rerun_reason,
+            "override_hash": override_hash(op_overrides) if op_overrides else None,
+        },
+        confirmed_payload=executable_payload if rerun_of is not None else None,
     )
 
     uploads_dir = run.root / "_uploads"

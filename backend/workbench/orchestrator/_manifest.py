@@ -43,6 +43,41 @@ def _primary_model_summary(run_root: Path) -> dict[str, str | None]:
     return {"model_id": None, "model_type": None}
 
 
+def _result_contract_summary(run_root: Path) -> dict[str, Any] | None:
+    """Expose persisted OLS contract metadata without deriving legacy fields."""
+    model_dir = run_root / "model_results"
+    if not model_dir.is_dir():
+        return None
+    for path in sorted(model_dir.glob("*.json")):
+        data = read_json(path)
+        if not isinstance(data, dict) or data.get("contract_version") is None:
+            continue
+        if data.get("model") != "ols":
+            continue
+        return {
+            key: data.get(key)
+            for key in (
+                "contract_version",
+                "model",
+                "model_type",
+                "covariance",
+                "covariance_wire",
+                "entity_col",
+                "source_eligible",
+                "stable_result_ids",
+                "candidate_result_ids",
+                "primary_estimand",
+                "dataset_snapshot_fingerprint",
+                "analysis_sample_fingerprint",
+                "point_estimation_fingerprint",
+                "coefficient_schema_fingerprint",
+                "inference_config_fingerprint",
+                "covariance_evidence",
+            )
+        }
+    return None
+
+
 def _lineage(input_files: list[Path]) -> list[dict[str, str]]:
     return [
         {"source": str(path), "artifact_id": f"raw_{Path(path).name}"}
@@ -113,6 +148,9 @@ def _write_manifest(
         payload["model_routing"] = model_routing
     if rerun_of is not None:
         payload["rerun_of"] = rerun_of
+    contract = _result_contract_summary(run_root)
+    if contract is not None:
+        payload["result_contract"] = contract
     write_json(
         run_root / "run_manifest.json",
         payload,

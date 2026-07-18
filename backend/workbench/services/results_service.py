@@ -9,11 +9,66 @@ Extracted verbatim from ``api.py`` in v1.6.10 (D1 decomposition, Phase 2).
 """
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from ..artifacts import read_json
 from ..domain import GuardrailIssue, Severity
 from ..term_parser import is_q_quoted_dummy, parse_term
+
+
+_OLS_RESULT_CONTRACT_RE = re.compile(r"^ols_result_contract_v(\d+)$")
+
+
+def validate_result_contract(result: Mapping[str, object]) -> dict[str, object]:
+    """Read and validate the additive OLS contract without label inference."""
+    if not isinstance(result, Mapping):
+        raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: result must be an object")
+    version = result.get("contract_version")
+    match = _OLS_RESULT_CONTRACT_RE.fullmatch(version) if isinstance(version, str) else None
+    if match is None or int(match.group(1)) < 1:
+        raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: missing or unsupported OLS contract")
+    if result.get("model") != "ols" or result.get("model_type") not in {
+        "ols",
+        "ols_robust",
+        "ols_clustered",
+    }:
+        raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: result is not an OLS result")
+    stable_ids = result.get("stable_result_ids")
+    candidates = result.get("candidate_result_ids")
+    coefficients = result.get("coefficients")
+    if (
+        not isinstance(stable_ids, list)
+        or not stable_ids
+        or any(not isinstance(item, str) or not item for item in stable_ids)
+        or len(set(stable_ids)) != len(stable_ids)
+        or candidates != stable_ids
+        or not isinstance(coefficients, Mapping)
+    ):
+        raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: unstable OLS result IDs")
+    coefficient_ids = {
+        coefficient.get("result_id")
+        for coefficient in coefficients.values()
+        if isinstance(coefficient, Mapping)
+    }
+    if coefficient_ids != set(stable_ids):
+        raise ValueError("SOURCE_CONTRACT_UNSUPPORTED: coefficient IDs do not match result IDs")
+    return dict(result)
+
+
+def read_coefficient_by_result_id(
+    result: Mapping[str, object], result_id: str
+) -> dict[str, object] | None:
+    """Resolve an OLS coefficient by its stored stable ID, never by display label."""
+    validated = validate_result_contract(result)
+    coefficients = validated["coefficients"]
+    if not isinstance(coefficients, Mapping) or not isinstance(result_id, str):
+        return None
+    for coefficient in coefficients.values():
+        if isinstance(coefficient, Mapping) and coefficient.get("result_id") == result_id:
+            return dict(coefficient)
+    return None
 
 
 def read_model_results(run_root: Path) -> list[dict]:

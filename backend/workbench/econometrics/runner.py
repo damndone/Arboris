@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pandas as pd
+import statsmodels
 import statsmodels.formula.api as smf
 
+from ..analysis_loop.canonical import sha256_canonical
+from ..analysis_loop.fingerprints import (
+    analysis_sample_fingerprint,
+    coefficient_schema_fingerprint,
+    dataset_snapshot_fingerprint,
+    inference_config_fingerprint,
+    point_estimation_fingerprint,
+)
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
@@ -112,39 +122,421 @@ def _root_cause_suffix(exc: Exception) -> str:
     return f" Root cause: {message[:200]}"
 
 
+def _python_scalar(value: Any) -> Any:
+    """Make pandas/numpy scalar values safe for the canonical JSON helpers."""
+    if hasattr(value, "item"):
+        try:
+            value = value.item()
+        except (TypeError, ValueError):
+            pass
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    try:
+        missing = pd.isna(value)
+        if type(missing) is bool and missing:
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _row_id_values(
+    frame: pd.DataFrame,
+    row_ids: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    if row_ids is None:
+        return [str(_python_scalar(value)) for value in frame.index]
+    if len(row_ids) != len(frame) or len(set(row_ids)) != len(row_ids):
+        raise ValueError(
+            "OLS_CLUSTER_ROW_ALIGNMENT: analysis row identifiers must be unique "
+            "and aligned to the input frame."
+        )
+    return [str(value) for value in row_ids]
+
+
+def _analysis_row_context(
+    frame: pd.DataFrame,
+    row_labels: Any,
+    *,
+    row_ids: list[str] | tuple[str, ...] | None,
+    cluster_row_ids: list[str] | tuple[str, ...] | None,
+) -> tuple[list[Any], list[str]]:
+    if not frame.index.is_unique:
+        raise ValueError(
+            "OLS_CLUSTER_ROW_ALIGNMENT: duplicate frame index prevents stable row alignment."
+        )
+    labels = list(row_labels) if row_labels is not None else list(frame.index)
+    source_ids = _row_id_values(frame, row_ids)
+    positions = {label: position for position, label in enumerate(frame.index)}
+    try:
+        selected_positions = [positions[label] for label in labels]
+    except KeyError as exc:
+        raise ValueError(
+            "OLS_CLUSTER_ROW_ALIGNMENT: model rows are not aligned to the input frame."
+        ) from exc
+    analysis_ids = [source_ids[position] for position in selected_positions]
+    if cluster_row_ids is not None:
+        observed_cluster_ids = [str(value) for value in cluster_row_ids]
+        if observed_cluster_ids != analysis_ids:
+            raise ValueError(
+                "OLS_CLUSTER_ROW_ALIGNMENT: cluster vector row identifiers do not "
+                "match the model analysis rows in order."
+            )
+    return labels, analysis_ids
+
+
+def _frame_snapshot(frame: pd.DataFrame) -> dict[str, Any]:
+    try:
+        values = json.loads(frame.to_json(orient="split", date_format="iso"))
+    except (TypeError, ValueError):
+        values = {
+            "columns": [str(column) for column in frame.columns],
+            "data": [
+                [_python_scalar(value) for value in row]
+                for row in frame.itertuples(index=False, name=None)
+            ],
+        }
+    return {
+        "columns": [str(column) for column in frame.columns],
+        "dtypes": {str(column): str(frame[column].dtype) for column in frame.columns},
+        "values": values,
+    }
+
+
+def _primary_estimand(
+    coefficients: dict[str, dict[str, Any]],
+    *,
+    focal_x: list[str] | tuple[str, ...] | str | None,
+    primary_estimand: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    stable_ids = {
+        coefficient.get("result_id")
+        for coefficient in coefficients.values()
+        if isinstance(coefficient, dict)
+    }
+    if isinstance(primary_estimand, dict):
+        explicit_id = primary_estimand.get("result_id")
+        if explicit_id in stable_ids:
+            return {
+                **primary_estimand,
+                "result_id": explicit_id,
+                "resolution_source": "explicit_primary_metadata",
+            }
+        return None
+    if isinstance(focal_x, str):
+        focal_values = [item.strip() for item in focal_x.split(",") if item.strip()]
+    elif isinstance(focal_x, (list, tuple)):
+        focal_values = [str(item) for item in focal_x]
+    else:
+        focal_values = []
+    if len(focal_values) != 1:
+        return None
+    focal_term = focal_values[0]
+    exact_matches = [
+        coefficient
+        for term, coefficient in coefficients.items()
+        if term == focal_term
+    ]
+    if len(exact_matches) != 1:
+        return None
+    return {
+        "result_id": exact_matches[0]["result_id"],
+        "role": "primary",
+        "focal_x": focal_term,
+        "resolution_source": "explicit_focal_x",
+    }
+
+
+def _attach_ols_result_contract(
+    result: dict[str, Any],
+    *,
+    fitted: Any,
+    original: Any,
+    frame: pd.DataFrame,
+    y: str,
+    x: list[str],
+    categorical_x: set[str],
+    model_id: str,
+    covariance: str,
+    covariance_explicit: bool,
+    cluster_col: str | None,
+    dataset_snapshot: Any,
+    row_ids: list[str] | tuple[str, ...] | None,
+    cluster_row_ids: list[str] | tuple[str, ...] | None,
+    focal_x: list[str] | tuple[str, ...] | str | None,
+    primary_estimand: dict[str, Any] | None,
+    weights: Any,
+    intercept: bool,
+    missing_policy: str,
+    solver_options: Any,
+) -> dict[str, Any]:
+    row_labels, analysis_ids = _analysis_row_context(
+        frame,
+        getattr(original.model.data, "row_labels", None),
+        row_ids=row_ids,
+        cluster_row_ids=cluster_row_ids,
+    )
+    if dataset_snapshot is None:
+        dataset_snapshot = _frame_snapshot(frame)
+    dataset_fp = dataset_snapshot_fingerprint(dataset_snapshot)
+    sample_fp = analysis_sample_fingerprint(
+        row_set=analysis_ids,
+        row_order=analysis_ids,
+    )
+    selected = frame.loc[row_labels, [y, *x]]
+    point_fp = point_estimation_fingerprint(
+        y=[_python_scalar(value) for value in selected[y]],
+        X={
+            column: [_python_scalar(value) for value in selected[column]]
+            for column in x
+        },
+        weights=weights,
+        intercept=intercept,
+        categorical_encoding={
+            column: ("categorical" if column in categorical_x else "numeric")
+            for column in x
+        },
+        missing_policy=missing_policy,
+        rows=analysis_ids,
+        solver_options=solver_options,
+    )
+
+    coefficients = result.get("coefficients", {})
+    result_id_by_source_id: dict[str, str] = {}
+    schema: list[dict[str, Any]] = []
+    for position, (term, coefficient) in enumerate(coefficients.items()):
+        identity = {
+            "model": "ols",
+            "model_id": model_id,
+            "term": term,
+        }
+        stable_id = "coef:" + sha256_canonical(identity)
+        coefficient["result_id"] = stable_id
+        coefficient["candidate_result_id"] = stable_id
+        coefficient["coefficient_id"] = stable_id
+        coefficient["coefficient_identity"] = f"ols:{model_id}:{term}"
+        coefficient["coefficient_term"] = term
+        source_id = coefficient.get("source_id")
+        if isinstance(source_id, str):
+            result_id_by_source_id[source_id] = stable_id
+        schema.append({"result_id": stable_id, "term": term, "position": position})
+    stable_result_ids = [entry["result_id"] for entry in schema]
+
+    group_vector: list[Any] | None = None
+    group_vector_fp: str | None = None
+    cluster_count = 0
+    if cluster_col is not None:
+        groups = frame.loc[row_labels, cluster_col]
+        group_vector = [_python_scalar(value) for value in groups]
+        missing_positions = [
+            position
+            for position, value in enumerate(group_vector)
+            if value is None
+        ]
+        if missing_positions:
+            raise ValueError(
+                "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
+                f"on analysis rows at positions {missing_positions}."
+            )
+        group_vector_fp = sha256_canonical(
+            {
+                "entity_col": cluster_col,
+                "row_order": analysis_ids,
+                "values": group_vector,
+            }
+        )
+        cluster_count = len({json.dumps(value, sort_keys=True) for value in group_vector})
+
+    use_t = False
+    effective_df = _json_safe_float(getattr(fitted, "df_resid", None))
+    evidence = {
+        "covariance": covariance,
+        "covariance_estimator": "cluster" if covariance == "clustered" else (
+            "HC1" if covariance == "robust" else "nonrobust"
+        ),
+        "engine": "statsmodels",
+        "library": "statsmodels",
+        "library_version": statsmodels.__version__,
+        "small_sample_correction": covariance == "clustered",
+        "degrees_of_freedom_correction": covariance == "clustered",
+        "use_t": use_t,
+        "inference_distribution": "normal",
+        "p_value_method": "normal_z",
+        "confidence_interval_method": "normal_z",
+        "effective_df": effective_df,
+        "cluster_variable": cluster_col,
+        "entity_col": cluster_col,
+        "cluster_count": cluster_count,
+        "group_vector_fingerprint": group_vector_fp,
+    }
+    inference_kwargs: dict[str, Any] = {
+        "covariance": covariance,
+        "cluster_var": cluster_col,
+        "cluster_count": cluster_count,
+        "corrections": {
+            "small_sample_correction": covariance == "clustered",
+            "degrees_of_freedom_correction": covariance == "clustered",
+        },
+        "df": effective_df,
+        "use_t": use_t,
+        "confidence_level": 0.95,
+        "engine": "statsmodels",
+        "version": statsmodels.__version__,
+        "inference_distribution": "normal",
+        "p_value_method": "normal_z",
+        "confidence_interval_method": "normal_z",
+    }
+    if group_vector_fp is not None:
+        inference_kwargs["cluster_group_vector_fingerprint"] = group_vector_fp
+    inference_fp = inference_config_fingerprint(**inference_kwargs)
+    result.update(
+        {
+            "contract_version": "ols_result_contract_v1",
+            "model": "ols",
+            "covariance": covariance,
+            "covariance_wire": covariance,
+            "covariance_explicit": covariance_explicit,
+            "covariance_estimator": evidence["covariance_estimator"],
+            "source_eligible": covariance == "unadjusted" and covariance_explicit,
+            "formula": original.model.formula,
+            "y_column": y,
+            "x_columns": list(x),
+            "intercept": intercept,
+            "weights": weights,
+            "missing_policy": missing_policy,
+            "analysis_sample": {
+                "row_set": sorted(analysis_ids),
+                "row_order": analysis_ids,
+                "fingerprint": sample_fp,
+            },
+            "dataset_snapshot_fingerprint": dataset_fp,
+            "analysis_sample_fingerprint": sample_fp,
+            "point_estimation_fingerprint": point_fp,
+            "coefficient_schema_fingerprint": coefficient_schema_fingerprint(schema),
+            "inference_config_fingerprint": inference_fp,
+            "stable_result_ids": stable_result_ids,
+            "candidate_result_ids": list(stable_result_ids),
+            "result_id_by_source_id": result_id_by_source_id,
+            "primary_estimand": _primary_estimand(
+                coefficients,
+                focal_x=focal_x,
+                primary_estimand=primary_estimand,
+            ),
+            "covariance_evidence": evidence,
+            "inference_config": evidence,
+            "entity_col": cluster_col,
+        }
+    )
+    return result
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
     cluster_col: str | None = None,
+    *,
+    covariance: str | None = None,
+    covariance_explicit: bool | None = None,
+    dataset_snapshot: Any = None,
+    row_ids: list[str] | tuple[str, ...] | None = None,
+    cluster_row_ids: list[str] | tuple[str, ...] | None = None,
+    focal_x: list[str] | tuple[str, ...] | str | None = None,
+    primary_estimand: dict[str, Any] | None = None,
+    weights: Any = None,
+    intercept: bool = True,
+    missing_policy: str = "statsmodels_patsy_drop_rows",
+    solver_options: Any = None,
 ) -> tuple[dict[str, Any], Any]:
     frame = _ensure_numeric_y(frame, y)
     frame = _ensure_numeric_x(frame, x)
     cat = categorical_x or set()
-    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
-    original = smf.ols(formula=formula, data=frame).fit()
-    if cluster_col is not None:
-        # Explicit cluster-robust request (v1.7): the cluster column must exist
-        # after cleaning, and groups must align to the rows patsy actually used.
-        if cluster_col not in frame.columns:
+    if cluster_col is not None and (cluster_col == y or cluster_col in x):
+        raise ValueError(
+            "OLS_CLUSTER_FIELD_CONFLICT: entity_col cannot be y or an OLS X/formula column."
+        )
+    if cluster_col is not None and cluster_col not in frame.columns:
+        raise ValueError(
+            "OLS_CLUSTER_FIELD_MISSING: clustered covariance for OLS requires "
+            f"an entity field naming an existing cluster column (got {cluster_col!r})."
+        )
+    if covariance is None:
+        covariance = "clustered" if cluster_col is not None else (
+            "robust" if robust else "unadjusted"
+        )
+        if covariance_explicit is None:
+            covariance_explicit = cluster_col is not None
+    else:
+        covariance = covariance.strip().lower()
+        if covariance not in {"robust", "unadjusted", "clustered"}:
+            raise ValueError(f"OLS_COVARIANCE_UNSUPPORTED: unsupported covariance {covariance!r}.")
+        if covariance_explicit is None:
+            covariance_explicit = True
+        if covariance == "clustered" and cluster_col is None:
             raise ValueError(
                 "OLS_CLUSTER_FIELD_MISSING: clustered covariance for OLS requires "
-                f"an entity field naming an existing cluster column (got {cluster_col!r})."
+                "an entity field naming the cluster column."
             )
+        robust = covariance == "robust"
+    if cluster_col is not None and covariance != "clustered":
+        raise ValueError(
+            "OLS_CLUSTER_COVARIANCE_CONFLICT: entity_col requires covariance=clustered."
+        )
+    if covariance == "clustered":
+        robust = False
+    formula = _ols_formula(y, [_formula_term(column, column in cat) for column in x])
+    original = smf.ols(formula=formula, data=frame).fit()
+    if covariance == "clustered":
         row_labels = getattr(original.model.data, "row_labels", None)
-        groups = frame[cluster_col]
         if row_labels is not None:
-            groups = groups.loc[row_labels]
-        codes = pd.factorize(groups)[0]
-        fitted = original.get_robustcov_results(cov_type="cluster", groups=codes)
+            groups = frame.loc[list(row_labels), cluster_col]
+        else:
+            groups = frame[cluster_col]
+        group_values = [_python_scalar(value) for value in groups]
+        if any(value is None for value in group_values):
+            raise ValueError(
+                "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
+                "on analysis rows."
+            )
+        fitted = original.get_robustcov_results(
+            cov_type="cluster",
+            groups=groups.to_numpy(copy=True),
+            use_correction=True,
+            df_correction=True,
+            use_t=False,
+        )
         model_type = "ols_clustered"
     elif robust:
-        fitted = original.get_robustcov_results(cov_type="HC1")
+        fitted = original.get_robustcov_results(cov_type="HC1", use_t=False)
         model_type = "ols_robust"
     else:
         fitted = original
         model_type = "ols"
     result = normalize_statsmodels_result(fitted, model_id)
     result["model_type"] = model_type
+    result = _attach_ols_result_contract(
+        result,
+        fitted=fitted,
+        original=original,
+        frame=frame,
+        y=y,
+        x=x,
+        categorical_x=cat,
+        model_id=model_id,
+        covariance=covariance,
+        covariance_explicit=bool(covariance_explicit),
+        cluster_col=cluster_col if covariance == "clustered" else None,
+        dataset_snapshot=dataset_snapshot,
+        row_ids=row_ids,
+        cluster_row_ids=cluster_row_ids,
+        focal_x=focal_x,
+        primary_estimand=primary_estimand,
+        weights=weights,
+        intercept=intercept,
+        missing_policy=missing_policy,
+        solver_options=solver_options or {"engine": "statsmodels", "method": "ols"},
+    )
     return _add_engine(result), original
 
 

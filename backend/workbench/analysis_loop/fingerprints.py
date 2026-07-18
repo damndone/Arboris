@@ -104,6 +104,9 @@ def inference_config_fingerprint(
     engine: Any,
     version: Any = _OMITTED,
     engine_version: Any = _OMITTED,
+    inference_distribution: Any = _OMITTED,
+    p_value_method: Any = _OMITTED,
+    confidence_interval_method: Any = _OMITTED,
 ) -> str:
     """Fingerprint inference settings with sentinel-preserved aliases.
 
@@ -139,6 +142,13 @@ def inference_config_fingerprint(
         value["cluster_group_vector"] = vector_value
     if version_value is not _OMITTED:
         value["version"] = version_value
+    for key, item in (
+        ("inference_distribution", inference_distribution),
+        ("p_value_method", p_value_method),
+        ("confidence_interval_method", confidence_interval_method),
+    ):
+        if item is not _OMITTED:
+            value[key] = item
     return _fingerprint(
         "inference_config_v1",
         value,
