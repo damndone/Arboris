@@ -667,3 +667,114 @@ def test_invalid_action_ids_fail_closed_with_safe_diagnostic_identity(
     assert isinstance(result.action_id, str)
     assert result.action_id
     assert all(value is False for value in result.side_effects.values())
+
+
+def test_cluster_preflight_accepts_numpy_pandas_one_dimensional_vectors() -> None:
+    source = _source()
+    row_ids = np.asarray(source.analysis_row_ids)
+
+    for values in (
+        np.asarray(["a", "a", "b", "b"], dtype=object),
+        pd.Series(["a", "a", "b", "b"], dtype="string"),
+        pd.Categorical(["a", "a", "b", "b"]),
+    ):
+        result = preflight_cluster_variable(
+            source,
+            cluster_variable="firm_id",
+            cluster_values=values,
+            model_row_ids=row_ids,
+        )
+
+        assert result.valid is True
+        assert result.cluster_count == 2
+        assert result.value_type == "string"
+
+
+@pytest.mark.parametrize(
+    "cluster_values",
+    [
+        None,
+        "aabb",
+        b"aabb",
+        bytearray(b"aabb"),
+        {"a": 1},
+        1,
+        np.asarray("aabb"),
+        np.asarray([["a", "b"]]),
+    ],
+)
+def test_cluster_preflight_rejects_non_vector_cluster_values(cluster_values: object) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=cluster_values,  # type: ignore[arg-type]
+        model_row_ids=np.asarray(["r1", "r2", "r3", "r4"]),
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VALUES_INVALID"
+    assert result.status == "fail"
+    assert "received_type" in result.evidence
+    assert result.invariants["cluster_field_is_group_vector_only"] is True
+
+
+@pytest.mark.parametrize(
+    "model_row_ids", [None, "r1r2r3r4", b"r1r2r3r4", {"r1": 1}, np.asarray("r1")]
+)
+def test_cluster_preflight_rejects_non_vector_row_ids(model_row_ids: object) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=np.asarray(["a", "a", "b", "b"]),
+        model_row_ids=model_row_ids,  # type: ignore[arg-type]
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_ROW_IDS_INVALID"
+    assert result.status == "fail"
+
+
+def test_cluster_preflight_accepts_numpy_string_scalars() -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=[np.str_("a"), np.str_("a"), np.str_("b"), np.str_("b")],
+        model_row_ids=np.asarray(["r1", "r2", "r3", "r4"]),
+    )
+
+    assert result.valid is True
+    assert result.value_type == "string"
+
+
+def test_cluster_preflight_requires_boolean_all_singleton_clusters() -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+    payload = result.to_dict()
+    payload["all_singleton_clusters"] = "false"
+
+    with pytest.raises(TypeError):
+        ClusterPreflightResult.from_dict(payload)
+    with pytest.raises(TypeError):
+        ClusterPreflightResult(**result.__dict__ | {"all_singleton_clusters": "false"})  # type: ignore[arg-type]
+
+
+def test_intent_validation_requires_string_message() -> None:
+    result = validate_clustered_intent(
+        _source(),
+        action_id="ols.use_clustered_covariance_v1",
+        patch={"covariance": "clustered", "cluster_variable": "firm_id"},
+        requested_result_id=None,
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+    payload = result.to_dict()
+    payload["message"] = 123
+
+    with pytest.raises(TypeError):
+        IntentValidationResult.from_dict(payload)
+    with pytest.raises(TypeError):
+        IntentValidationResult(**result.__dict__ | {"message": 123})  # type: ignore[arg-type]

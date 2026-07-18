@@ -319,6 +319,8 @@ class ClusterPreflightResult:
             raise TypeError("valid must be a bool")
         if self.status not in {"pass", "warning", "fail"}:
             raise ValueError(f"invalid cluster preflight status: {self.status}")
+        if type(self.all_singleton_clusters) is not bool:
+            raise TypeError("all_singleton_clusters must be a bool")
         _require_non_empty_string(self.severity, "severity")
         _require_non_empty_string(self.code, "code")
         _require_non_empty_string(self.cluster_variable, "cluster_variable")
@@ -428,6 +430,8 @@ class IntentValidationResult:
             raise TypeError("valid must be a bool")
         if self.status not in {"pass", "warning", "fail"}:
             raise ValueError(f"invalid intent validation status: {self.status}")
+        if type(self.message) is not str:
+            raise TypeError("message must be a string")
         _require_non_empty_string(self.severity, "severity")
         _require_non_empty_string(self.code, "code")
         _require_non_empty_string(self.action_id, "action_id")

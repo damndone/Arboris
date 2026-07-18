@@ -7,10 +7,11 @@ import numbers
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence, Sized
 from dataclasses import replace
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .contracts import (
@@ -324,11 +325,11 @@ def _is_missing(value: Any) -> bool:
 
 
 def _runtime_dtype(value: Any) -> str | None:
-    if type(value) is bool:
+    if type(value) is bool or isinstance(value, np.bool_):
         return "bool"
     if isinstance(value, numbers.Integral):
         return "integer"
-    if type(value) is str:
+    if isinstance(value, str):
         return "string"
     if isinstance(value, numbers.Real):
         return "float"
@@ -344,12 +345,37 @@ def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:
     return (runtime_type or type(value).__name__, value)
 
 
-def _is_non_scalar_sequence(value: Any) -> bool:
-    return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+def _is_vector_container(value: Any) -> bool:
+    """Accept ordered one-dimensional containers without splitting scalar text."""
+
+    if value is None or isinstance(value, (str, bytes, bytearray, Mapping)):
+        return False
+    if not isinstance(value, Sized) or not isinstance(value, Iterable):
+        return False
+    try:
+        len(value)
+        iter(value)
+    except (TypeError, ValueError):
+        return False
+    ndim = getattr(value, "ndim", None)
+    if ndim is not None:
+        try:
+            if ndim != 1:
+                return False
+        except (TypeError, ValueError):
+            return False
+    shape = getattr(value, "shape", None)
+    if shape is not None:
+        try:
+            if len(shape) != 1:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def _safe_sequence_length(value: Any) -> int:
-    return len(value) if _is_non_scalar_sequence(value) else 0
+    return len(value) if _is_vector_container(value) else 0
 
 
 def _cluster_result(
@@ -417,7 +443,7 @@ def preflight_cluster_variable(
             cluster_values=(),
             row_count=_safe_sequence_length(model_row_ids),
         )
-    if not _is_non_scalar_sequence(cluster_values):
+    if not _is_vector_container(cluster_values):
         return _cluster_result(
             source=source,
             cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
@@ -429,7 +455,7 @@ def preflight_cluster_variable(
             row_count=_safe_sequence_length(model_row_ids),
             evidence={"received_type": type(cluster_values).__name__},
         )
-    if not _is_non_scalar_sequence(model_row_ids):
+    if not _is_vector_container(model_row_ids):
         return _cluster_result(
             source=source,
             cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
