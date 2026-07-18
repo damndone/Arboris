@@ -21,7 +21,7 @@ from .contracts import (
     SourceRunContract,
     SourceValidationResult,
 )
-from .policy import OLSClusterPolicyV1, ols_cluster_policy_v1
+from .policy import OLSClusterPolicyV1, cluster_runtime_type, ols_cluster_policy_v1
 from .recovery import RECOVERY_ACTION_REGISTRY, RecoveryAction, get_recovery_action
 
 RECOVERY_ACTION_ID = "ols.use_clustered_covariance_v1"
@@ -385,15 +385,7 @@ def _is_missing(value: Any) -> bool:
 
 
 def _runtime_dtype(value: Any) -> str | None:
-    if type(value) is bool or isinstance(value, np.bool_):
-        return "bool"
-    if isinstance(value, numbers.Integral):
-        return "integer"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, numbers.Real):
-        return "float"
-    return None
+    return cluster_runtime_type(value)
 
 
 def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:

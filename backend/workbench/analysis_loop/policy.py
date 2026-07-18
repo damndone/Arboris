@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import numbers
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
+
+import numpy as np
 
 
 _EXPECTED_POLICY_VALUES: dict[str, Any] = {
@@ -31,6 +34,20 @@ _EXPECTED_POLICY_VALUES: dict[str, Any] = {
     "engine": "statsmodels",
     "minimum_engine_version": 0.14,
 }
+
+
+def cluster_runtime_type(value: Any) -> str | None:
+    """Return the v1 cluster value type without coercing the original value."""
+
+    if type(value) is bool or isinstance(value, np.bool_):
+        return "bool"
+    if isinstance(value, numbers.Integral):
+        return "integer"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, numbers.Real):
+        return "float"
+    return None
 
 
 @dataclass(frozen=True)

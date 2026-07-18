@@ -7,6 +7,8 @@ import pytest
 import statsmodels.formula.api as smf
 
 from workbench.analysis_loop.fingerprints import inference_config_fingerprint
+from workbench.analysis_loop.contracts import SourceRunContract
+from workbench.analysis_loop.preflight import preflight_cluster_variable
 from workbench.econometrics.runner import run_ols
 from workbench.lineage.run_inputs import read_run_inputs, write_run_inputs
 from workbench.orchestrator import run_workflow
@@ -49,6 +51,34 @@ def _cluster_fitted(frame: pd.DataFrame):
         use_correction=True,
         df_correction=True,
         use_t=False,
+    )
+
+
+def _cluster_preflight_source(*, dtype: str) -> SourceRunContract:
+    return SourceRunContract(
+        run_id="run-source",
+        status="completed",
+        model="ols",
+        covariance="unadjusted",
+        result_artifact={
+            "artifact_id": "ols-result",
+            "stable_result_ids": ["coef:x"],
+        },
+        run_inputs={"form": {"model_type": "ols", "covariance": "unadjusted"}},
+        lineage={"source_run_id": "run-source"},
+        contract_version="ols_result_contract_v1",
+        result_ids=("coef:x",),
+        dataset_schema={"firm": {"dtype": dtype}},
+        analysis_row_ids=tuple(_frame().index),
+    )
+
+
+def _cluster_preflight(frame: pd.DataFrame, *, dtype: str):
+    return preflight_cluster_variable(
+        _cluster_preflight_source(dtype=dtype),
+        cluster_variable="firm",
+        cluster_values=list(frame["firm"]),
+        model_row_ids=list(frame.index),
     )
 
 
@@ -372,6 +402,77 @@ def test_clustered_covariance_accepts_category_group_dtype():
     )
 
     assert result["covariance_evidence"]["cluster_count"] == 4
+
+
+def test_clustered_datetime_entity_matches_preflight_and_fails_closed():
+    frame = _frame().assign(firm=pd.date_range("2020-01-01", periods=8))
+
+    with pytest.raises(ValueError, match="OLS_CLUSTER_TYPE_UNSUPPORTED"):
+        _run(
+            frame,
+            robust=False,
+            covariance="clustered",
+            covariance_explicit=True,
+            cluster_col="firm",
+        )
+
+    preflight = _cluster_preflight(frame, dtype="datetime64[ns]")
+    assert preflight.valid is False
+    assert preflight.code == "CLUSTER_TYPE_UNSUPPORTED"
+
+
+def test_clustered_category_and_object_entity_preserve_dtype_in_fingerprint():
+    category_frame = _frame().assign(firm=lambda data: pd.Categorical(data["firm"]))
+    object_frame = _frame().assign(firm=lambda data: data["firm"].astype(object))
+
+    category_result, _ = _run(
+        category_frame,
+        robust=False,
+        covariance="clustered",
+        covariance_explicit=True,
+        cluster_col="firm",
+    )
+    object_result, _ = _run(
+        object_frame,
+        robust=False,
+        covariance="clustered",
+        covariance_explicit=True,
+        cluster_col="firm",
+    )
+
+    category_preflight = _cluster_preflight(category_frame, dtype="category")
+    object_preflight = _cluster_preflight(object_frame, dtype="object")
+    assert category_preflight.valid is True
+    assert object_preflight.valid is True
+    assert category_result["covariance_evidence"]["group_vector_dtype"] == "category"
+    assert object_result["covariance_evidence"]["group_vector_dtype"] == "object"
+    assert (
+        category_result["covariance_evidence"]["group_vector_fingerprint"]
+        != object_result["covariance_evidence"]["group_vector_fingerprint"]
+    )
+
+
+def test_clustered_object_entity_with_timestamp_values_matches_preflight_rejection():
+    frame = _frame().assign(
+        firm=pd.Series(
+            list(pd.date_range("2020-01-01", periods=8)),
+            index=_frame().index,
+            dtype=object,
+        )
+    )
+
+    with pytest.raises(ValueError, match="OLS_CLUSTER_TYPE_UNSUPPORTED"):
+        _run(
+            frame,
+            robust=False,
+            covariance="clustered",
+            covariance_explicit=True,
+            cluster_col="firm",
+        )
+
+    preflight = _cluster_preflight(frame, dtype="object")
+    assert preflight.valid is False
+    assert preflight.code == "CLUSTER_TYPE_UNSUPPORTED"
 
 
 def test_clustered_covariance_rejects_null_entity_on_dropped_y_x_row():

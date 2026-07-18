@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import numbers
 from typing import Any
 
 import numpy as np
@@ -17,7 +16,7 @@ from ..analysis_loop.fingerprints import (
     inference_config_fingerprint,
     point_estimation_fingerprint,
 )
-from ..analysis_loop.policy import ols_cluster_policy_v1
+from ..analysis_loop.policy import cluster_runtime_type, ols_cluster_policy_v1
 from .normalize import _json_safe_float, normalize_statsmodels_result
 from .optional_deps import require_optional_dependency
 
@@ -184,28 +183,38 @@ def _row_id_values(
     return [f"{value}#occurrence:{position}" for position, value in enumerate(values)]
 
 
-def _cluster_runtime_type(value: Any) -> str | None:
-    if isinstance(value, (bool, np.bool_)):
+def _cluster_declared_dtype(groups: pd.Series) -> str:
+    dtype = groups.dtype
+    if isinstance(dtype, pd.CategoricalDtype):
+        return "category"
+    if pd.api.types.is_datetime64_any_dtype(dtype):
+        return "datetime"
+    if pd.api.types.is_bool_dtype(dtype):
         return "bool"
-    if isinstance(value, (numbers.Integral, np.integer)):
+    if pd.api.types.is_integer_dtype(dtype):
         return "integer"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, (numbers.Real, np.floating)):
+    if pd.api.types.is_float_dtype(dtype):
         return "float"
-    return None
+    if pd.api.types.is_string_dtype(dtype):
+        return "string"
+    return str(dtype)
 
 
 def _validate_cluster_group_values(groups: pd.Series) -> None:
+    declared = _cluster_declared_dtype(groups)
     runtime_types: set[str | None] = set()
     for position, value in enumerate(groups):
-        safe_value = _python_scalar(value)
-        if safe_value is None:
+        try:
+            missing = pd.isna(value)
+            is_missing = type(missing) is bool and missing
+        except (TypeError, ValueError):
+            is_missing = False
+        if is_missing:
             raise ValueError(
                 "OLS_CLUSTER_VALUES_MISSING: entity_col contains null/NaN values "
                 f"on analysis rows at position {position}."
             )
-        runtime_types.add(_cluster_runtime_type(safe_value))
+        runtime_types.add(cluster_runtime_type(value))
 
     policy = ols_cluster_policy_v1
     if (
@@ -213,10 +222,14 @@ def _validate_cluster_group_values(groups: pd.Series) -> None:
         or "bool" in runtime_types and policy.reject_boolean
         or "float" in runtime_types and policy.reject_float
         or any(item not in policy.allowed_cluster_types for item in runtime_types)
+        or declared in {"bool", "float"}
+        or declared not in {None, "integer", "string", "category"}
     ):
         raise ValueError(
             "OLS_CLUSTER_TYPE_UNSUPPORTED: entity_col values violate "
-            f"ols_cluster_policy_v1 (runtime_types={sorted(str(item) for item in runtime_types)})."
+            "ols_cluster_policy_v1 "
+            f"(declared_dtype={declared!r}, "
+            f"runtime_types={sorted(str(item) for item in runtime_types)})."
         )
     if len(runtime_types) > 1 and policy.reject_mixed_object:
         raise ValueError(
@@ -398,10 +411,12 @@ def _attach_ols_result_contract(
     stable_result_ids = [entry["result_id"] for entry in schema]
 
     group_vector: list[Any] | None = None
+    group_vector_dtype: str | None = None
     group_vector_fp: str | None = None
     cluster_count = 0
     if cluster_col is not None:
         groups = frame.iloc[row_positions][cluster_col]
+        group_vector_dtype = str(groups.dtype)
         group_vector = [_python_scalar(value) for value in groups]
         missing_positions = [
             position
@@ -417,6 +432,7 @@ def _attach_ols_result_contract(
             {
                 "entity_col": cluster_col,
                 "row_order": analysis_ids,
+                "dtype": group_vector_dtype,
                 "values": group_vector,
             }
         )
@@ -450,6 +466,7 @@ def _attach_ols_result_contract(
         "cluster_variable": cluster_col,
         "entity_col": cluster_col,
         "cluster_count": cluster_count,
+        "group_vector_dtype": group_vector_dtype,
         "group_vector_fingerprint": group_vector_fp,
     }
     inference_kwargs: dict[str, Any] = {
