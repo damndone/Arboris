@@ -7,7 +7,7 @@ import numbers
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence, Sized
+from collections.abc import Iterable, Mapping, Sequence, Set, Sized
 from dataclasses import replace
 from typing import Any
 
@@ -112,13 +112,29 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
             code="SOURCE_MODEL_MISMATCH",
             evidence={"payload_model_type": payload_model},
         )
-    form_covariance = form.get("covariance") if isinstance(form, Mapping) else None
+    form_has_covariance = isinstance(form, Mapping) and "covariance" in form
+    form_covariance = form.get("covariance") if form_has_covariance else None
     top_level_present = "covariance" in source.run_inputs
     top_level_covariance = source.run_inputs.get("covariance")
-    if form_covariance is None and not top_level_present:
+    if form_has_covariance and form_covariance is None:
+        if top_level_present and top_level_covariance is not None:
+            return _source_result(
+                valid=False,
+                code="SOURCE_WIRE_COVARIANCE_CONFLICT",
+                evidence={
+                    "form_covariance": form_covariance,
+                    "top_level_covariance": top_level_covariance,
+                },
+            )
+        return _source_result(
+            valid=False,
+            code="SOURCE_WIRE_COVARIANCE_UNSUPPORTED",
+            evidence={"wire_covariance": form_covariance},
+        )
+    if not form_has_covariance and not top_level_present:
         return _source_result(valid=False, code="SOURCE_WIRE_COVARIANCE_MISSING")
     if (
-        form_covariance is not None
+        form_has_covariance
         and top_level_present
         and form_covariance != top_level_covariance
     ):
@@ -130,7 +146,7 @@ def validate_source_contract(source: SourceRunContract) -> SourceValidationResul
                 "top_level_covariance": top_level_covariance,
             },
         )
-    wire_covariance = form_covariance if form_covariance is not None else top_level_covariance
+    wire_covariance = form_covariance if form_has_covariance else top_level_covariance
     if wire_covariance != "unadjusted":
         return _source_result(
             valid=False,
@@ -348,7 +364,7 @@ def _canonical_cluster_identity(value: Any) -> tuple[str, Any]:
 def _is_vector_container(value: Any) -> bool:
     """Accept ordered one-dimensional containers without splitting scalar text."""
 
-    if value is None or isinstance(value, (str, bytes, bytearray, Mapping)):
+    if value is None or isinstance(value, (str, bytes, bytearray, Mapping, Set)):
         return False
     if not isinstance(value, Sized) or not isinstance(value, Iterable):
         return False

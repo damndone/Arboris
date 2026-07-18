@@ -161,6 +161,36 @@ def test_matching_top_level_and_form_wire_covariance_is_allowed() -> None:
     assert result.valid is True
 
 
+def test_explicit_null_form_covariance_never_falls_back_to_top_level() -> None:
+    result = validate_source_contract(
+        _source(
+            run_inputs={
+                "covariance": "unadjusted",
+                "form": {"model_type": "ols", "covariance": None},
+            }
+        )
+    )
+
+    assert result.valid is False
+    assert result.code in {
+        "SOURCE_WIRE_COVARIANCE_UNSUPPORTED",
+        "SOURCE_WIRE_COVARIANCE_CONFLICT",
+    }
+
+
+def test_explicit_null_form_covariance_is_not_treated_as_omitted() -> None:
+    result = validate_source_contract(
+        _source(
+            run_inputs={
+                "form": {"model_type": "ols", "covariance": None},
+            }
+        )
+    )
+
+    assert result.valid is False
+    assert result.code == "SOURCE_WIRE_COVARIANCE_UNSUPPORTED"
+
+
 @pytest.mark.parametrize(
     ("run_inputs", "code"),
     [
@@ -667,6 +697,50 @@ def test_invalid_action_ids_fail_closed_with_safe_diagnostic_identity(
     assert isinstance(result.action_id, str)
     assert result.action_id
     assert all(value is False for value in result.side_effects.values())
+
+
+@pytest.mark.parametrize(
+    "cluster_values",
+    [
+        {"a", "b", "c", "d"},
+        frozenset({"a", "b", "c", "d"}),
+        {"a": 1, "b": 1, "c": 1, "d": 1}.keys(),
+    ],
+)
+def test_cluster_preflight_rejects_unordered_cluster_containers(
+    cluster_values: object,
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=cluster_values,  # type: ignore[arg-type]
+        model_row_ids=["r1", "r2", "r3", "r4"],
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_VALUES_INVALID"
+
+
+@pytest.mark.parametrize(
+    "model_row_ids",
+    [
+        {"r1", "r2", "r3", "r4"},
+        frozenset({"r1", "r2", "r3", "r4"}),
+        {"r1": 1, "r2": 1, "r3": 1, "r4": 1}.keys(),
+    ],
+)
+def test_cluster_preflight_rejects_unordered_row_id_containers(
+    model_row_ids: object,
+) -> None:
+    result = preflight_cluster_variable(
+        _source(),
+        cluster_variable="firm_id",
+        cluster_values=["a", "a", "b", "b"],
+        model_row_ids=model_row_ids,  # type: ignore[arg-type]
+    )
+
+    assert result.valid is False
+    assert result.code == "CLUSTER_ROW_IDS_INVALID"
 
 
 def test_cluster_preflight_accepts_numpy_pandas_one_dimensional_vectors() -> None:
