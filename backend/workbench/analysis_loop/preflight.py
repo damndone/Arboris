@@ -1,0 +1,601 @@
+"""Pure source, target, cluster and intent validation for v1.7.2."""
+
+from __future__ import annotations
+
+import math
+import numbers
+import re
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from typing import Any
+
+from .contracts import (
+    ClusterPreflightResult,
+    ComparisonTarget,
+    IntentValidationResult,
+    SourceRunContract,
+    SourceValidationResult,
+)
+from .policy import OLSClusterPolicyV1, ols_cluster_policy_v1
+from .recovery import get_recovery_action
+
+RECOVERY_ACTION_ID = "ols.use_clustered_covariance_v1"
+OPERATION_ID = "model.rerun"
+_CONTRACT_VERSION_RE = re.compile(r"^ols_result_contract_v(\d+)$")
+_NO_SIDE_EFFECTS = {
+    "execution_key_created": False,
+    "effect_created": False,
+    "operation_record_created": False,
+    "child_created": False,
+}
+_INVARIANTS = {
+    "covariance_only": True,
+    "cluster_field_is_group_vector_only": True,
+    "wire_field": "entity_col",
+    "formula_unchanged": True,
+    "y_unchanged": True,
+    "X_unchanged": True,
+    "intercept_unchanged": True,
+    "weights_unchanged": True,
+    "analysis_row_set_unchanged": True,
+    "analysis_row_order_unchanged": True,
+    "point_estimation_unchanged": True,
+    "coefficient_schema_unchanged": True,
+}
+
+
+def _source_result(
+    *,
+    valid: bool,
+    code: str,
+    evidence: Mapping[str, Any] | None = None,
+) -> SourceValidationResult:
+    return SourceValidationResult(
+        valid=valid,
+        status="pass" if valid else "fail",
+        severity="info" if valid else "error",
+        code=code,
+        evidence=dict(evidence or {}),
+        reason_codes=() if valid else (code,),
+    )
+
+
+def validate_source_contract(source: SourceRunContract) -> SourceValidationResult:
+    """Validate source facts without reading or modifying any run state."""
+
+    if not isinstance(source, SourceRunContract):
+        return _source_result(valid=False, code="SOURCE_CONTRACT_UNSUPPORTED")
+    if source.status not in {"completed", "complete"}:
+        return _source_result(
+            valid=False,
+            code="SOURCE_NOT_COMPLETED",
+            evidence={"status": source.status},
+        )
+    if source.model != "ols":
+        return _source_result(
+            valid=False,
+            code="SOURCE_MODEL_UNSUPPORTED",
+            evidence={"model": source.model},
+        )
+    if source.covariance != "unadjusted":
+        return _source_result(
+            valid=False,
+            code="SOURCE_COVARIANCE_UNSUPPORTED",
+            evidence={"covariance": source.covariance},
+        )
+    if not source.result_artifact:
+        return _source_result(valid=False, code="SOURCE_RESULT_ARTIFACT_MISSING")
+    if not source.run_inputs:
+        return _source_result(valid=False, code="SOURCE_RUN_INPUTS_MISSING")
+    if not source.lineage:
+        return _source_result(valid=False, code="SOURCE_LINEAGE_MISSING")
+    if not source.contract_version:
+        return _source_result(valid=False, code="SOURCE_CONTRACT_UNSUPPORTED")
+    match = _CONTRACT_VERSION_RE.fullmatch(source.contract_version)
+    if match is None or int(match.group(1)) < 1:
+        return _source_result(
+            valid=False,
+            code="SOURCE_CONTRACT_UNSUPPORTED",
+            evidence={"contract_version": source.contract_version},
+        )
+    if not source.result_ids:
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_MISSING")
+    if any(type(result_id) is not str or not result_id for result_id in source.result_ids):
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    if len(set(source.result_ids)) != len(source.result_ids):
+        return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    artifact_ids = source.result_artifact.get("stable_result_ids")
+    if artifact_ids is not None:
+        if not isinstance(artifact_ids, (list, tuple)) or tuple(artifact_ids) != source.result_ids:
+            return _source_result(valid=False, code="SOURCE_RESULT_IDS_UNSTABLE")
+    return _source_result(
+        valid=True,
+        code="SOURCE_CONTRACT_SUPPORTED",
+        evidence={
+            "run_id": source.run_id,
+            "model": source.model,
+            "covariance": source.covariance,
+            "contract_version": source.contract_version,
+            "result_ids": list(source.result_ids),
+        },
+    )
+
+
+def _intent_result(
+    *,
+    valid: bool,
+    code: str,
+    action_id: str = RECOVERY_ACTION_ID,
+    operation_id: str = OPERATION_ID,
+    source_validation: SourceValidationResult | None = None,
+    cluster_preflight: ClusterPreflightResult | None = None,
+    comparison_target: ComparisonTarget | None = None,
+    canonical_patch: Mapping[str, Any] | None = None,
+    wire_patch: Mapping[str, Any] | None = None,
+    evidence: Mapping[str, Any] | None = None,
+    invariants: Mapping[str, Any] | None = None,
+    message: str = "",
+) -> IntentValidationResult:
+    return IntentValidationResult(
+        valid=valid,
+        status="pass" if valid else "fail",
+        severity="info" if valid else "error",
+        code=code,
+        action_id=action_id,
+        operation_id=operation_id,
+        canonical_patch=dict(canonical_patch or {}),
+        wire_patch=dict(wire_patch or {}),
+        comparison_target=comparison_target,
+        source_validation=source_validation,
+        cluster_preflight=cluster_preflight,
+        evidence=dict(evidence or {}),
+        invariants=dict(invariants or {}),
+        side_effects=dict(_NO_SIDE_EFFECTS),
+        reason_codes=() if valid else (code,),
+        message=message,
+    )
+
+
+def resolve_comparison_target(
+    source: SourceRunContract,
+    requested_result_id: str | None,
+) -> ComparisonTarget | IntentValidationResult:
+    """Resolve exactly one stable result ID; labels never participate in lookup."""
+
+    source_validation = validate_source_contract(source)
+    if not source_validation.valid:
+        return _intent_result(
+            valid=False,
+            code=source_validation.code,
+            source_validation=source_validation,
+        )
+
+    primary = source.primary_estimand
+    if primary is not None:
+        result_id = primary.get("result_id")
+        if type(result_id) is str and result_id in source.result_ids:
+            label = primary.get("label", source.result_labels.get(result_id))
+            role = primary.get("role", "primary")
+            if type(role) is str and role:
+                return ComparisonTarget(
+                    result_id=result_id,
+                    role=role,
+                    label=label if isinstance(label, str) else None,
+                    resolution_source="source_primary_estimand",
+                )
+        return _intent_result(
+            valid=False,
+            code="COMPARISON_TARGET_UNKNOWN",
+            source_validation=source_validation,
+            evidence={"primary_estimand": dict(primary)},
+        )
+
+    if requested_result_id is None:
+        return _intent_result(
+            valid=False,
+            code="COMPARISON_TARGET_REQUIRED",
+            source_validation=source_validation,
+        )
+    if type(requested_result_id) is not str or requested_result_id not in source.result_ids:
+        return _intent_result(
+            valid=False,
+            code="COMPARISON_TARGET_UNKNOWN",
+            source_validation=source_validation,
+            evidence={"requested_result_id": requested_result_id},
+        )
+    return ComparisonTarget(
+        result_id=requested_result_id,
+        role="coefficient",
+        label=source.result_labels.get(requested_result_id),
+        resolution_source="user_exact_result_id",
+    )
+
+
+def _schema_columns(schema: Mapping[str, Any]) -> Mapping[str, Any]:
+    columns = schema.get("columns")
+    if isinstance(columns, Mapping):
+        return columns
+    if isinstance(columns, (list, tuple)):
+        return {name: {} for name in columns if isinstance(name, str)}
+    fields = schema.get("fields")
+    if isinstance(fields, Mapping):
+        return fields
+    if isinstance(fields, (list, tuple)):
+        return {name: {} for name in fields if isinstance(name, str)}
+    return schema
+
+
+def _declared_dtype(metadata: Any) -> str | None:
+    if isinstance(metadata, Mapping):
+        for key in ("dtype", "data_type", "type", "kind"):
+            if key in metadata:
+                metadata = metadata[key]
+                break
+    if not isinstance(metadata, str):
+        return None
+    value = metadata.strip().lower()
+    if value in {"category", "categorical"}:
+        return "category"
+    if value in {"bool", "boolean"}:
+        return "bool"
+    if value in {"float", "float16", "float32", "float64", "double", "decimal"}:
+        return "float"
+    if value.startswith(("int", "uint")) or value in {"integer", "long"}:
+        return "integer"
+    if value in {"str", "string", "unicode", "object"}:
+        return "string"
+    return value
+
+
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float):
+        return math.isnan(value)
+    try:
+        return bool(value != value)
+    except (TypeError, ValueError):
+        return False
+
+
+def _runtime_dtype(value: Any) -> str | None:
+    if type(value) is bool:
+        return "bool"
+    if isinstance(value, numbers.Integral):
+        return "integer"
+    if type(value) is str:
+        return "string"
+    if isinstance(value, numbers.Real):
+        return "float"
+    return None
+
+
+def _cluster_result(
+    *,
+    source: SourceRunContract,
+    cluster_variable: str,
+    valid: bool,
+    status: str,
+    severity: str,
+    code: str,
+    cluster_values: Sequence[Any],
+    row_count: int,
+    missing_count: int = 0,
+    cluster_count: int = 0,
+    singleton_cluster_count: int = 0,
+    all_singleton_clusters: bool = False,
+    value_type: str | None = None,
+    reason_codes: Sequence[str] = (),
+    evidence: Mapping[str, Any] | None = None,
+) -> ClusterPreflightResult:
+    return ClusterPreflightResult(
+        valid=valid,
+        status=status,
+        severity=severity,
+        code=code,
+        cluster_variable=cluster_variable if cluster_variable else "<empty>",
+        wire_field="entity_col",
+        cluster_count=cluster_count,
+        row_count=row_count,
+        missing_count=missing_count,
+        singleton_cluster_count=singleton_cluster_count,
+        all_singleton_clusters=all_singleton_clusters,
+        value_type=value_type,
+        reason_codes=tuple(reason_codes) if reason_codes else ((code,) if not valid else ()),
+        evidence={
+            "cluster_variable": cluster_variable,
+            "wire_field": "entity_col",
+            "row_count": row_count,
+            "source_run_id": source.run_id,
+            **dict(evidence or {}),
+        },
+        invariants=dict(_INVARIANTS),
+    )
+
+
+def preflight_cluster_variable(
+    source: SourceRunContract,
+    *,
+    cluster_variable: str,
+    cluster_values: Sequence[Any],
+    model_row_ids: Sequence[str],
+    policy: OLSClusterPolicyV1 = ols_cluster_policy_v1,
+) -> ClusterPreflightResult:
+    """Check an exact, row-aligned one-way covariance group vector."""
+
+    source_validation = validate_source_contract(source)
+    if not source_validation.valid:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+            valid=False,
+            status="fail",
+            severity="error",
+            code=source_validation.code,
+            cluster_values=cluster_values,
+            row_count=len(model_row_ids),
+        )
+    if type(cluster_variable) is not str or not cluster_variable:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable if isinstance(cluster_variable, str) else "<invalid>",
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_VARIABLE_REQUIRED",
+            cluster_values=cluster_values,
+            row_count=len(model_row_ids),
+        )
+    columns = _schema_columns(source.dataset_schema)
+    if cluster_variable not in columns:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_VARIABLE_NOT_FOUND",
+            cluster_values=cluster_values,
+            row_count=len(model_row_ids),
+            evidence={"schema_columns": list(columns)},
+        )
+    expected_rows = tuple(source.analysis_row_ids)
+    actual_rows = tuple(model_row_ids)
+    if not expected_rows or actual_rows != expected_rows or len(cluster_values) != len(actual_rows):
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code=("SOURCE_ANALYSIS_ROWS_MISSING" if not expected_rows else "CLUSTER_ROW_ALIGNMENT_MISMATCH"),
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            evidence={"expected_row_ids": list(expected_rows), "actual_row_ids": list(actual_rows)},
+        )
+    missing_positions = [index for index, value in enumerate(cluster_values) if _is_missing(value)]
+    if missing_positions:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_VARIABLE_MISSING_VALUES",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            missing_count=len(missing_positions),
+            evidence={"missing_positions": missing_positions},
+        )
+    declared = _declared_dtype(columns[cluster_variable])
+    runtime_types = {_runtime_dtype(value) for value in cluster_values}
+    if None in runtime_types or "bool" in runtime_types or "float" in runtime_types:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_TYPE_UNSUPPORTED",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            value_type=declared,
+            evidence={"declared_dtype": declared, "runtime_types": sorted(str(item) for item in runtime_types)},
+        )
+    if len(runtime_types) > 1:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_TYPE_MIXED",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            value_type=declared,
+            evidence={"declared_dtype": declared, "runtime_types": sorted(runtime_types)},
+        )
+    runtime = next(iter(runtime_types))
+    if declared in {"bool", "float"} or declared not in {None, "integer", "string", "category"}:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_TYPE_UNSUPPORTED",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            value_type=declared,
+            evidence={"declared_dtype": declared, "runtime_type": runtime},
+        )
+    if declared in {"integer", "string"} and runtime != declared:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_TYPE_UNSUPPORTED",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            value_type=declared,
+            evidence={"declared_dtype": declared, "runtime_type": runtime},
+        )
+    value_type = "category" if declared == "category" else runtime
+    counts = Counter((type(value).__name__, value) for value in cluster_values)
+    cluster_count = len(counts)
+    singleton_count = sum(count == 1 for count in counts.values())
+    all_singleton = cluster_count > 0 and singleton_count == cluster_count
+    if cluster_count < policy.hard_min_cluster_count:
+        return _cluster_result(
+            source=source,
+            cluster_variable=cluster_variable,
+            valid=False,
+            status="fail",
+            severity="error",
+            code="CLUSTER_COUNT_TOO_LOW",
+            cluster_values=cluster_values,
+            row_count=len(actual_rows),
+            cluster_count=cluster_count,
+            singleton_cluster_count=singleton_count,
+            all_singleton_clusters=all_singleton,
+            value_type=value_type,
+            evidence={"hard_min_cluster_count": policy.hard_min_cluster_count},
+        )
+    reason_codes: list[str] = []
+    if cluster_count < policy.warning_cluster_count_below:
+        reason_codes.append("CLUSTER_COUNT_WARNING")
+    if all_singleton and policy.all_singleton_clusters == "warning":
+        reason_codes.append("CLUSTER_ALL_SINGLETONS")
+    if reason_codes:
+        status = "warning"
+        severity = "warning"
+        code = reason_codes[-1] if all_singleton and len(reason_codes) == 1 else "CLUSTER_PREFLIGHT_WARNING"
+    else:
+        status = "pass"
+        severity = "info"
+        code = "CLUSTER_PREFLIGHT_PASS"
+    return _cluster_result(
+        source=source,
+        cluster_variable=cluster_variable,
+        valid=True,
+        status=status,
+        severity=severity,
+        code=code,
+        cluster_values=cluster_values,
+        row_count=len(actual_rows),
+        cluster_count=cluster_count,
+        singleton_cluster_count=singleton_count,
+        all_singleton_clusters=all_singleton,
+        value_type=value_type,
+        reason_codes=reason_codes,
+        evidence={
+            "declared_dtype": declared,
+            "runtime_type": runtime,
+            "singleton_cluster_count": singleton_count,
+            "all_singleton_clusters": all_singleton,
+            "policy_version": "ols_cluster_policy_v1",
+            "one_way_only": policy.one_way_only,
+        },
+    )
+
+
+def validate_clustered_intent(
+    source: SourceRunContract,
+    *,
+    action_id: str,
+    patch: Mapping[str, Any],
+    requested_result_id: str | None,
+    cluster_values: Sequence[Any],
+    model_row_ids: Sequence[str],
+    policy: OLSClusterPolicyV1 = ols_cluster_policy_v1,
+) -> IntentValidationResult:
+    """Validate and canonicalize one untrusted covariance-only intent."""
+
+    action = get_recovery_action(action_id)
+    if action is None:
+        return _intent_result(valid=False, code="RECOVERY_ACTION_UNSUPPORTED", action_id=action_id)
+    if not isinstance(patch, Mapping):
+        return _intent_result(valid=False, code="INTENT_PATCH_NOT_COVARIANCE_ONLY", action_id=action_id)
+    allowed_fields = {"covariance", "cluster_variable"}
+    if set(patch) != allowed_fields:
+        return _intent_result(
+            valid=False,
+            code="INTENT_PATCH_NOT_COVARIANCE_ONLY",
+            action_id=action_id,
+            evidence={"received_fields": sorted(str(field) for field in patch)},
+        )
+    covariance_patch = patch.get("covariance")
+    if covariance_patch != action.target_covariance:
+        return _intent_result(
+            valid=False,
+            code="COVARIANCE_DIRECTION_UNSUPPORTED",
+            action_id=action_id,
+            evidence={"requested_covariance": covariance_patch, "target_covariance": action.target_covariance},
+        )
+    source_validation = validate_source_contract(source)
+    if not source_validation.valid:
+        return _intent_result(
+            valid=False,
+            code=source_validation.code,
+            action_id=action_id,
+            source_validation=source_validation,
+        )
+    if source.model != action.allowed_model or source.covariance != action.source_covariance:
+        return _intent_result(
+            valid=False,
+            code="RECOVERY_ACTION_SOURCE_MISMATCH",
+            action_id=action_id,
+            source_validation=source_validation,
+            evidence={"model": source.model, "covariance": source.covariance},
+        )
+    target = resolve_comparison_target(source, requested_result_id)
+    if isinstance(target, IntentValidationResult):
+        return replace(target, action_id=action_id)
+    cluster_variable = patch.get("cluster_variable")
+    if type(cluster_variable) is not str or not cluster_variable:
+        return _intent_result(
+            valid=False,
+            code="CLUSTER_VARIABLE_REQUIRED",
+            action_id=action_id,
+            source_validation=source_validation,
+            comparison_target=target,
+        )
+    cluster = preflight_cluster_variable(
+        source,
+        cluster_variable=cluster_variable,
+        cluster_values=cluster_values,
+        model_row_ids=model_row_ids,
+        policy=policy,
+    )
+    if not cluster.valid:
+        return _intent_result(
+            valid=False,
+            code=cluster.code,
+            action_id=action_id,
+            source_validation=source_validation,
+            comparison_target=target,
+            cluster_preflight=cluster,
+        )
+    canonical_patch = {"covariance": action.target_covariance, "cluster_variable": cluster_variable}
+    wire_patch = {
+        "covariance": action.target_covariance,
+        action.field_mapping["cluster_variable"]: cluster_variable,
+    }
+    return _intent_result(
+        valid=True,
+        code="INTENT_VALID",
+        action_id=action_id,
+        source_validation=source_validation,
+        comparison_target=target,
+        cluster_preflight=cluster,
+        canonical_patch=canonical_patch,
+        wire_patch=wire_patch,
+        invariants=cluster.invariants,
+        evidence={
+            "policy_version": "ols_cluster_policy_v1",
+            "field_mapping": dict(action.field_mapping),
+        },
+    )

@@ -8,9 +8,15 @@ from .canonical import (
     sha256_canonical,
 )
 from .contracts import (
+    ClusterPreflightResult,
     ComparePayload,
+    ComparisonTarget,
+    IntentValidationResult,
     PacketConflictError,
     PacketEnvelope,
+    ProposalRejection,
+    SourceRunContract,
+    SourceValidationResult,
     ensure_packet_idempotent,
 )
 from .fingerprints import (
@@ -21,13 +27,38 @@ from .fingerprints import (
     point_estimation_fingerprint,
 )
 from .policy import OLS_CLUSTER_POLICY_V1, ols_cluster_policy_v1
+from .preflight import (
+    preflight_cluster_variable,
+    resolve_comparison_target,
+    validate_clustered_intent,
+    validate_source_contract,
+)
+from .recovery import (
+    OLS_CLUSTERED_RECOVERY_ACTION,
+    RECOVERY_ACTION_REGISTRY,
+    RECOVERY_ACTIONS,
+    RecoveryAction,
+    RecoveryActionRegistry,
+    get_recovery_action,
+)
 
 __all__ = [
     "CanonicalJSONError",
+    "ClusterPreflightResult",
     "ComparePayload",
+    "ComparisonTarget",
+    "IntentValidationResult",
     "OLS_CLUSTER_POLICY_V1",
+    "OLS_CLUSTERED_RECOVERY_ACTION",
     "PacketConflictError",
     "PacketEnvelope",
+    "ProposalRejection",
+    "RECOVERY_ACTION_REGISTRY",
+    "RECOVERY_ACTIONS",
+    "RecoveryAction",
+    "RecoveryActionRegistry",
+    "SourceRunContract",
+    "SourceValidationResult",
     "analysis_sample_fingerprint",
     "canonical_json_v1",
     "coefficient_schema_fingerprint",
@@ -38,5 +69,10 @@ __all__ = [
     "numeric_equal",
     "ols_cluster_policy_v1",
     "point_estimation_fingerprint",
+    "preflight_cluster_variable",
+    "resolve_comparison_target",
+    "get_recovery_action",
     "sha256_canonical",
+    "validate_clustered_intent",
+    "validate_source_contract",
 ]
