@@ -98,9 +98,21 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function ownStringKeys(value: JsonRecord): string[] | null {
+  const keys = Reflect.ownKeys(value);
+  return keys.every((key) => typeof key === "string") ? keys as string[] : null;
+}
+
+function hasOwnKey(value: JsonRecord, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function hasExactKeys(value: JsonRecord, expected: readonly string[]): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expected.length && expected.every((key) => key in value);
+  const keys = ownStringKeys(value);
+  return keys !== null
+    && keys.length === expected.length
+    && expected.every((key) => hasOwnKey(value, key))
+    && keys.every((key) => expected.includes(key));
 }
 
 function hasAllowedKeys(
@@ -109,8 +121,10 @@ function hasAllowedKeys(
   optional: readonly string[] = [],
 ): boolean {
   const allowed = new Set([...required, ...optional]);
-  return required.every((key) => key in value)
-    && Object.keys(value).every((key) => allowed.has(key));
+  const keys = ownStringKeys(value);
+  return keys !== null
+    && required.every((key) => hasOwnKey(value, key))
+    && keys.every((key) => allowed.has(key));
 }
 
 function blocked(

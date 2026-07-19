@@ -72,6 +72,84 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it("fails closed when recovery envelope fields are inherited", () => {
+    const inheritedPayload = Object.assign(Object.create({
+      proposal_status: "pending_confirmation",
+      action_candidate: {
+        action_id: "lmm.simplify_random_effects_v1",
+        operation_id: "model.rerun",
+        patch: { model_options: { random_slope: false } },
+        required_confirmation: true,
+      },
+    }), { fixture_id: "prototype-forgery" });
+    const forgedPacket = Object.assign(Object.create({
+      contract: "linear_mixed_effects.recovery_proposal",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: inheritedPayload,
+    }), {
+      unrelated_one: true,
+      unrelated_two: true,
+      unrelated_three: true,
+      unrelated_four: true,
+    });
+
+    expect(buildRepeatedMeasuresViewModel(forgedPacket)).toMatchObject({
+      phase: "diagnostic",
+      proposal: null,
+      canExecute: false,
+      diagnostics: [{ code: "LMM_PACKET_UNRECOGNIZED", status: "blocked" }],
+    });
+  });
+
+  it("fails closed when recovery payload fields are inherited", () => {
+    const inheritedPayload = Object.assign(Object.create({
+      proposal_status: "pending_confirmation",
+      action_candidate: {
+        action_id: "lmm.simplify_random_effects_v1",
+        operation_id: "model.rerun",
+        patch: { model_options: { random_slope: false } },
+        required_confirmation: true,
+      },
+    }), { fixture_id: "prototype-forgery" });
+
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.recovery_proposal",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: inheritedPayload,
+    })).toMatchObject({
+      phase: "diagnostic",
+      proposal: null,
+      canExecute: false,
+      diagnostics: [{ code: "LMM_RECOVERY_PROPOSAL_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("fails closed when an otherwise valid envelope has a symbol field", () => {
+    const packet = Object.assign({
+      contract: "linear_mixed_effects.recovery_proposal",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        proposal_status: "pending_confirmation",
+        action_candidate: {
+          action_id: "lmm.simplify_random_effects_v1",
+          operation_id: "model.rerun",
+          patch: { model_options: { random_slope: false } },
+          required_confirmation: true,
+        },
+      },
+    }, { [Symbol("forged")]: true });
+
+    expect(buildRepeatedMeasuresViewModel(packet)).toMatchObject({
+      phase: "diagnostic",
+      proposal: null,
+      canExecute: false,
+      diagnostics: [{ code: "LMM_PACKET_UNRECOGNIZED", status: "blocked" }],
+    });
+  });
+
   it("keeps the locked recovery proposal confirmation-bound", () => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.recovery_proposal",
