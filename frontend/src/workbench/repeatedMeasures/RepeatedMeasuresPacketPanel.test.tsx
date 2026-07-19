@@ -36,6 +36,19 @@ describe("RepeatedMeasuresPacketPanel", () => {
     expect(onConfirm).toHaveBeenCalledWith(recoveryPacket.payload.action_candidate);
   });
 
+  it("shows a running state only after a valid proposal is confirmed", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        packet={recoveryPacket}
+        requestedState="running"
+        confirmed
+      />,
+    );
+
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.queryByText("运行成功")).toBeNull();
+  });
+
   it("shows a restricted comparison without a winner claim", () => {
     render(
       <RepeatedMeasuresPacketPanel
@@ -46,6 +59,8 @@ describe("RepeatedMeasuresPacketPanel", () => {
           payload: {
             compare_status: "restricted",
             reason_code: "REML_FIXED_EFFECTS_DIFFER",
+            source_run_id: "lmm-source-v1",
+            child_run_id: "lmm-child-v1",
             user_safe_message: "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。",
           },
         }}
@@ -53,6 +68,38 @@ describe("RepeatedMeasuresPacketPanel", () => {
     );
 
     expect(screen.getByText(/不作为有效的直接比较依据/)).toBeInTheDocument();
+    expect(screen.queryByText(/赢家|winner/i)).toBeNull();
+  });
+
+  it("renders complete server comparison layers without deriving a winner", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        packet={{
+          contract: "analysis_loop.compare",
+          contract_version: "1.0",
+          producer_version: "linear_mixed_effects@1.0",
+          payload: {
+            compare_status: "complete",
+            source_run_id: "lmm-source-v1",
+            child_run_id: "lmm-child-v1",
+            target: { result_id: "group_time_interaction" },
+            data_diff: { retained_rows: "unchanged" },
+            parameter_diff: { random_slope: "changed" },
+            result_diff: { group_time_interaction: "recorded" },
+            conclusion_diff: { classification: "recorded" },
+            validation_status: "pass",
+            integrity_findings: [],
+            logical_key: "compare:lmm-source-v1:lmm-child-v1",
+            strategy_version: "linear_mixed_effects_v1",
+            schema_version: "compare_packet_v1",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("比较事实")).toBeInTheDocument();
+    expect(screen.getByText("样本与数据")).toBeInTheDocument();
+    expect(screen.getByText("参数")).toBeInTheDocument();
     expect(screen.queryByText(/赢家|winner/i)).toBeNull();
   });
 
@@ -94,6 +141,7 @@ describe("RepeatedMeasuresPacketPanel", () => {
             result_id: "group_time_interaction",
             estimate: 0.9,
             fit_method: "reml",
+            inference_method: "asymptotic_wald_z_v1",
           },
         }}
       />,
@@ -103,14 +151,64 @@ describe("RepeatedMeasuresPacketPanel", () => {
     expect(screen.getByText("0.9")).toBeInTheDocument();
   });
 
+  it("renders only server-provided trajectory values from a complete result packet", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        packet={{
+          contract: "linear_mixed_effects.result",
+          contract_version: "1.0",
+          producer_version: "linear_mixed_effects@1.0",
+          payload: {
+            status: "complete",
+            result_id: "group_time_interaction",
+            estimate: 0.9,
+            fit_method: "reml",
+            inference_method: "asymptotic_wald_z_v1",
+            figure_context: {
+              chart_type: "lmm_group_trajectory",
+              time: [0, 1],
+              series: [{
+                group: "treated",
+                time: [0, 1],
+                observed_mean: [10, 3],
+                fitted_marginal_mean: [10, 3.2],
+              }],
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("组别轨迹数据表")).toBeInTheDocument();
+    expect(screen.getByText("3.2")).toBeInTheDocument();
+  });
+
   it.each([
     ["pending", "等待执行"],
     ["running", "运行中"],
-  ] as const)("renders the packet-free %s state without claiming success", (requestedState, label) => {
+  ] as const)("does not trust a packet-free %s state", (requestedState, label) => {
     render(<RepeatedMeasuresPacketPanel packet={null} requestedState={requestedState} />);
 
-    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(label)).toBeNull();
+    expect(screen.getByText("验证")).toBeInTheDocument();
     expect(screen.queryByText("运行成功")).toBeNull();
+  });
+
+  it("renders a blocked diagnostic instead of a caller-supplied running state for an empty diagnostic packet", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        requestedState="running"
+        packet={{
+          contract: "linear_mixed_effects.diagnostic",
+          contract_version: "1.0",
+          producer_version: "linear_mixed_effects@1.0",
+          payload: { status: "blocked", diagnostics: [] },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("诊断")).toBeInTheDocument();
+    expect(screen.queryByText("运行中")).toBeNull();
   });
 
   it("safely falls back for an unrecognized packet instead of displaying a requested running state", () => {

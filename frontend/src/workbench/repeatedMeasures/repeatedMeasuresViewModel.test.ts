@@ -39,6 +39,39 @@ describe("buildRepeatedMeasuresViewModel", () => {
     ]);
   });
 
+  it.each([
+    ["wrong contract version", { contract_version: "2.0" }],
+    ["wrong producer", { producer_version: "untrusted@1.0" }],
+    ["unexpected envelope field", { trace_id: "forged" }],
+    ["missing envelope field", { producer_version: undefined }],
+  ])("fails closed for a %s", (_label, override) => {
+    const packet = {
+      contract: "linear_mixed_effects.recovery_proposal",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        proposal_status: "pending_confirmation",
+        action_candidate: {
+          action_id: "lmm.simplify_random_effects_v1",
+          operation_id: "model.rerun",
+          patch: { model_options: { random_slope: false } },
+          required_confirmation: true,
+        },
+      },
+      ...override,
+    };
+    if ("producer_version" in override && override.producer_version === undefined) {
+      delete packet.producer_version;
+    }
+
+    expect(buildRepeatedMeasuresViewModel(packet)).toMatchObject({
+      phase: "diagnostic",
+      proposal: null,
+      canExecute: false,
+      diagnostics: [{ code: "LMM_PACKET_UNRECOGNIZED", status: "blocked" }],
+    });
+  });
+
   it("keeps the locked recovery proposal confirmation-bound", () => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.recovery_proposal",
@@ -94,6 +127,29 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it("rejects a recovery proposal outside the locked confirmation state", () => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.recovery_proposal",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        proposal_status: "executed",
+        action_candidate: {
+          action_id: "lmm.simplify_random_effects_v1",
+          operation_id: "model.rerun",
+          patch: { model_options: { random_slope: false } },
+          required_confirmation: true,
+        },
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      proposal: null,
+      diagnostics: [{ code: "LMM_RECOVERY_PROPOSAL_INVALID", status: "blocked" }],
+    });
+  });
+
   it("renders a restricted comparison without inventing a winner", () => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "analysis_loop.compare",
@@ -136,6 +192,32 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it.each([
+    ["a source run", { source_run_id: "" }],
+    ["a child run", { child_run_id: "" }],
+    ["a locked restriction reason", { reason_code: "FUTURE_REASON" }],
+  ])("fails closed when a restricted comparison lacks %s", (_label, override) => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "restricted",
+        reason_code: "REML_FIXED_EFFECTS_DIFFER",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        user_safe_message: "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。",
+        ...override,
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
   it("exposes a successful result only from a complete result packet", () => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.result",
@@ -146,6 +228,7 @@ describe("buildRepeatedMeasuresViewModel", () => {
         result_id: "group_time_interaction",
         estimate: 0.9,
         fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
       },
     });
 
@@ -156,6 +239,32 @@ describe("buildRepeatedMeasuresViewModel", () => {
         estimate: 0.9,
         fit_method: "reml",
       },
+    });
+  });
+
+  it.each([
+    ["an empty result id", { result_id: "" }],
+    ["an unknown fit method", { fit_method: "gls" }],
+    ["an unknown inference method", { inference_method: "invented" }],
+  ])("fails closed for a complete result with %s", (_label, override) => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        ...override,
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
     });
   });
 
@@ -180,6 +289,20 @@ describe("buildRepeatedMeasuresViewModel", () => {
         comparison_scope: "same_fixed_effects_ml",
         winner: null,
       },
+    });
+  });
+
+  it("fails closed when a diagnostic packet has no trusted diagnostics", () => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.diagnostic",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: { status: "blocked", diagnostics: [] },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      diagnostics: [{ code: "LMM_DIAGNOSTIC_PACKET_INVALID", status: "blocked" }],
     });
   });
 });
