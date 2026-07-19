@@ -34,10 +34,14 @@ from ..lineage.role_layer import canonicalize_focal_x
 from ..lineage.run_inputs import write_run_inputs
 from ..lineage.upload_store import resolve_upload, store_upload_bytes
 from ..model_options import (
+    ModelOptionsBinding,
     ModelOptionsError,
+    bind_new_model_options,
     canonicalize_model_options,
     merge_model_options,
     parse_model_options,
+    verify_binding_owner_for_model_type,
+    verify_bound_model_options,
 )
 from ..orchestrator import (
     _lineage,
@@ -127,27 +131,114 @@ def merge_form_overrides(
     level, and persisted as an object for the model handler.
     """
 
-    merged: dict[str, Any] = dict(source_form)
-    source_options = merged.pop("model_options", {})
-    if isinstance(source_options, str):
-        source_options = parse_model_options(source_options)
-    else:
-        source_options = canonicalize_model_options(source_options)
+    if "model_options_binding" in overrides:
+        raise ModelOptionsError(
+            "MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+            "model_options_binding is generated only by the server.",
+        )
 
+    has_replacement = "model_options" in overrides
     patch_options = overrides.get("model_options", {})
     if not isinstance(patch_options, Mapping):
         raise ModelOptionsError(
             "MODEL_OPTIONS_NOT_OBJECT", "model_options must be a JSON object."
         )
-    merged["model_options"] = merge_model_options(source_options, patch_options)
+
+    # Keep the ordinary form wire values, but never carry the server-owned
+    # binding forward from a parent. A new non-empty payload is bound again at
+    # submission time for the current target handler.
+    merged: dict[str, Any] = {
+        key: source_form[key]
+        for key in source_form
+        if key not in {"model_options", "model_options_binding"}
+    }
+    source_model_type = str(source_form.get("model_type", "auto"))
+    target_model_type = str(overrides.get("model_type", source_model_type))
+    target_changed = source_model_type != target_model_type
+
+    if target_changed and has_replacement:
+        # A cross-model replacement is target-owned input. Do not parse,
+        # hash, validate, or otherwise read the source options/binding: an old
+        # owner can be retired, malformed, or unavailable without contaminating
+        # a complete new target payload.
+        next_options = canonicalize_model_options(patch_options)
+    elif target_changed:
+        source_has_options = _has_nonempty_model_options(
+            source_form.get("model_options", {})
+        )
+        if source_has_options:
+            # A non-empty cross-model payload is never inherited. The only
+            # safe path is an explicit target-owned replacement.
+            raise ModelOptionsError(
+                "MODEL_OPTIONS_REPLACEMENT_REQUIRED",
+                "changing model_type requires an explicit model_options replacement.",
+            )
+        # Empty legacy source payloads retain v1.7.2 behavior.
+        next_options = canonicalize_model_options(patch_options)
+    else:
+        source_binding = source_form.get("model_options_binding")
+        if source_binding is not None:
+            # Compare owner metadata before reading the source payload. A
+            # resolved id/contract change is a model identity change, so a
+            # complete replacement must not be tainted by an old payload or
+            # its hash (even when the public model_type text is unchanged).
+            source_owner = ModelOptionsBinding.from_dict(source_binding)
+            try:
+                verify_binding_owner_for_model_type(source_owner, target_model_type)
+            except ModelOptionsError as exc:
+                if exc.code != "MODEL_OPTIONS_OWNER_MISMATCH":
+                    raise
+                if not has_replacement:
+                    raise ModelOptionsError(
+                        "MODEL_OPTIONS_REPLACEMENT_REQUIRED",
+                        "changing resolved model identity requires an explicit model_options replacement.",
+                    ) from exc
+                next_options = canonicalize_model_options(patch_options)
+            else:
+                # Same-owner reuse is the only path that reads source options,
+                # so it must first prove payload/hash integrity.
+                source_bound = verify_bound_model_options(
+                    source_form.get("model_options", {}), source_binding
+                )
+                assert source_bound.binding is not None
+                next_options = merge_model_options(source_bound.payload, patch_options)
+        else:
+            source_options_raw = source_form.get("model_options", {})
+            source_has_options = _has_nonempty_model_options(source_options_raw)
+            if source_has_options and not has_replacement:
+                raise ModelOptionsError(
+                    "MODEL_OPTIONS_OWNER_MISSING",
+                    "non-empty source model_options require an explicit replacement or migration.",
+                )
+            # An old, unbound payload can be discarded only by a complete
+            # replacement, which is validated by the current target below.
+            next_options = canonicalize_model_options(patch_options)
+
+    if next_options:
+        # A replacement is only meaningful when the target can fully validate
+        # it; this also prevents an unbound source patch from masquerading as
+        # a complete model input.
+        next_options = bind_new_model_options(target_model_type, next_options).payload
+
+    merged["model_options"] = next_options
     merged.update(
         {
             key: encode_form_override(key, value)
             for key, value in overrides.items()
-            if key != "model_options"
+            if key not in {"model_options", "model_options_binding"}
         }
     )
     return merged
+
+
+def _has_nonempty_model_options(value: object) -> bool:
+    """Check whether a persisted source carries options without normalizing it."""
+
+    if isinstance(value, str):
+        return value.strip() not in {"", "{}"}
+    if isinstance(value, Mapping):
+        return bool(value)
+    return value is not None
 
 
 def parse_column_selector(raw: str, field: str = "x") -> list[str]:
@@ -202,13 +293,27 @@ def _submit_run(
     pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
     can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
     raises without leaving a junk run behind."""
+    form = {
+        key: value for key, value in form.items() if key != "model_options_binding"
+    }
     raw_model_options = form.get("model_options", {})
     model_options = (
         parse_model_options(raw_model_options)
         if isinstance(raw_model_options, str)
         else canonicalize_model_options(raw_model_options)
     )
+    bound_model_options = bind_new_model_options(
+        form.get("model_type", "auto"), model_options
+    )
+    model_options = bound_model_options.payload
+    model_options_binding = (
+        bound_model_options.binding.to_dict()
+        if bound_model_options.binding is not None
+        else None
+    )
     form = {**form, "model_options": model_options}
+    if model_options_binding is not None:
+        form["model_options_binding"] = model_options_binding
 
     x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
@@ -253,6 +358,9 @@ def _submit_run(
         "x": list(x_columns),
         "model_options": model_options,
     }
+    if model_options_binding is not None:
+        executable_payload["model_options_binding"] = model_options_binding
+        confirmed_payload["model_options_binding"] = model_options_binding
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
         "model": "ols" if model_type == "ols" else model_type,
@@ -330,6 +438,7 @@ def _submit_run(
         form.get("cs_cluster_var", ""), _safe_int(str(form.get("cs_anticipation", "0"))),
         str(form.get("honest_did", "false")).lower() == "true",
         model_options,
+        model_options_binding,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -367,6 +476,7 @@ def _bg_run(
     cs_anticipation: int = 0,
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
+    model_options_binding: dict[str, str] | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -423,6 +533,7 @@ def _bg_run(
             cs_anticipation=cs_anticipation,
             honest_did=honest_did,
             model_options=model_options,
+            model_options_binding=model_options_binding,
             stop_reason=_stop_reason,
         )
         status = result["status"]

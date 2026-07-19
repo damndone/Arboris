@@ -12,7 +12,7 @@ _RERUN_AUTO: dict = {
     "key": "rerun_auto",
     "label": "Re-run with auto",
     "severity": "primary",
-    "form_overrides": {"model_type": "auto"},
+    "form_overrides": {"model_type": "auto", "model_options": {}},
 }
 
 _CHANGE_MODEL: dict = {

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Tuple, TYPE_CHECKING
 
+from ..model_options import ModelOptionsContract
+
 if TYPE_CHECKING:
     from .context import ModelingContext, RunEnv
 
@@ -39,6 +41,7 @@ class ModelHandler:
     serves_y_types: tuple[str, ...]
     fit: HandlerFn
     validate_model_options: ModelOptionsValidator | None = None
+    model_options_contract: ModelOptionsContract | None = None
 
 
 MODEL_REGISTRY: dict[str, ModelHandler] = {}

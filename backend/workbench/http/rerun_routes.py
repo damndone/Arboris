@@ -255,6 +255,9 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         )
         child_id = result["run_id"]
         return _response_for(child_id)
+    except ModelOptionsError as exc:
+        events.release_slot(child_id)
+        raise HTTPException(status_code=422, detail=exc.code) from exc
     except ValueError as exc:
         events.release_slot(child_id)
         raise HTTPException(status_code=422, detail=str(exc)) from exc

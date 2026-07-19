@@ -24,7 +24,10 @@ def test_explicit_logit_on_continuous_y_offers_rerun_auto():
     keys = [a["key"] for a in actions]
     assert "rerun_auto" in keys
     primary = next(a for a in actions if a["severity"] == "primary")
-    assert primary["form_overrides"] == {"model_type": "auto"}
+    assert primary["form_overrides"] == {
+        "model_type": "auto",
+        "model_options": {},
+    }
 
 
 def test_auto_failure_does_not_offer_rerun_auto():

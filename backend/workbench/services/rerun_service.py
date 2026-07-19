@@ -240,6 +240,9 @@ class RerunService:
             )
             child_id = result["run_id"]
             return RerunSubmissionResult(run_id=child_id, status=result["status"])
+        except ModelOptionsError as exc:
+            events.release_slot(child_id)
+            raise RerunServiceError(exc.code, str(exc)) from exc
         except Exception:
             events.release_slot(child_id)
             raise

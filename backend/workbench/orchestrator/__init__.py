@@ -206,11 +206,17 @@ def run_workflow(
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
     from ..lineage.upload_store import store_upload_bytes
-    from ..model_options import canonicalize_model_options
+    from ..model_options import bind_new_model_options
 
     project_root = Path(project_root)
-    normalized_model_options = canonicalize_model_options(
-        {} if model_options is None else model_options
+    bound_model_options = bind_new_model_options(
+        model_type, {} if model_options is None else model_options
+    )
+    normalized_model_options = bound_model_options.payload
+    model_options_binding = (
+        bound_model_options.binding.to_dict()
+        if bound_model_options.binding is not None
+        else None
     )
     config = load_config(project_root / "config.yml")
     run = create_run(project_root, mode=mode)
@@ -243,6 +249,8 @@ def run_workflow(
         "honest_did": str(honest_did).lower(),
         "model_options": normalized_model_options,
     }
+    if model_options_binding is not None:
+        direct_form["model_options_binding"] = model_options_binding
     upload_path = input_files[0] if input_files else None
     upload_bytes = upload_path.read_bytes() if upload_path is not None else b""
     upload_filename = upload_path.name if upload_path is not None else None
@@ -264,6 +272,8 @@ def run_workflow(
         "rerun_of": None,
         "from_node": None,
     }
+    if model_options_binding is not None:
+        executable_payload["model_options_binding"] = model_options_binding
     write_run_inputs(
         run.root,
         form=direct_form,
@@ -332,6 +342,7 @@ def run_workflow(
             cs_cluster_var=cs_cluster_var,
             honest_did=honest_did,
             model_options=normalized_model_options,
+            model_options_binding=model_options_binding,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -493,6 +504,7 @@ def _run_workflow(
     cs_cluster_var: str = "",
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
+    model_options_binding: dict[str, str] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
@@ -558,6 +570,7 @@ def _run_workflow(
     ctx.artifacts["_cs_cluster_var"] = normalize_column_name(cs_cluster_var) if cs_cluster_var else ""
     ctx.artifacts["_honest_did"] = bool(honest_did)
     ctx.artifacts["_model_options"] = normalized_model_options
+    ctx.artifacts["_model_options_binding"] = model_options_binding
 
     from .. import flags
     from ..lineage.incremental import run_pipeline_traced
@@ -584,6 +597,8 @@ def _run_workflow(
         "prediction_sampling_method": prediction_sampling_method,
         "model_options": normalized_model_options,
     }
+    if model_options_binding is not None:
+        form["model_options_binding"] = model_options_binding
     cfg = {
         "random_seed": getattr(config, "random_seed", 20260429),
         "imputation_method": getattr(config, "imputation_method", ""),

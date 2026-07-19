@@ -156,6 +156,8 @@ async def run_endpoint(
                 upload_filename=Path(file.filename or "upload.csv").name,
                 started_at=started_at, rerun_reason="initial",
             )
+        except ModelOptionsError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except ValueError as exc:  # bad imputation / iv request — no run created yet
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         run_id_for_cleanup = result["run_id"]

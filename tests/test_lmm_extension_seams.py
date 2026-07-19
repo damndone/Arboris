@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -14,6 +16,11 @@ from workbench.agent.orchestrator import _overrides_from_proposal_changes
 from workbench.analysis_loop.adapters import AnalysisLoopAdapter, AnalysisLoopAdapterRegistry
 from workbench.analysis_loop.compare import ComparePacket
 from workbench.artifacts import read_json
+from workbench.contracts.model.linear_mixed_effects import (
+    LMM_CONTRACT_VERSION,
+    LMM_MODEL_TYPE,
+    LmmModelInput,
+)
 from workbench.engine.capabilities import (
     CapabilityDeclaration,
     build_capabilities,
@@ -33,7 +40,11 @@ from workbench.lineage.manual_patch_validation import (
     validate_manual_patch,
 )
 from workbench.lineage.pipeline_drafts import _validate_control_value
-from workbench.model_options import ModelOptionsError
+from workbench.model_options import (
+    ModelOptionsContract,
+    ModelOptionsError,
+    bind_new_model_options,
+)
 from workbench.http.agent_routes import CHAIN_AGENT_PROTOCOL
 from workbench.orchestrator import run_workflow
 from workbench.orchestrator import _map_model_type, _validate_requested_model_type
@@ -430,9 +441,15 @@ def test_model_options_are_an_estimation_only_lineage_input() -> None:
     }
 
 
-@pytest.mark.parametrize("model_type", ("ols", "auto"))
-def test_legacy_model_fails_closed_for_nonempty_model_options(
-    tmp_path, model_type: str
+@pytest.mark.parametrize(
+    ("model_type", "code"),
+    (
+        ("ols", "MODEL_OPTIONS_UNSUPPORTED"),
+        ("auto", "MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED"),
+    ),
+)
+def test_legacy_model_fails_closed_before_creating_a_run_for_nonempty_model_options(
+    tmp_path, model_type: str, code: str
 ) -> None:
     source = tmp_path / "source.csv"
     pd.DataFrame(
@@ -443,19 +460,19 @@ def test_legacy_model_fails_closed_for_nonempty_model_options(
     ).to_csv(source, index=False)
     project = create_project(tmp_path, "model-options")
 
-    result = run_workflow(
-        project.root,
-        [source],
-        mode="auto",
-        y="y",
-        x=["x"],
-        model_type=model_type,
-        model_options={"future_option": True},
-    )
+    with pytest.raises(ModelOptionsError) as error:
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type=model_type,
+            model_options={"future_option": True},
+        )
 
-    assert result["status"] == "failed"
-    errors = read_json(project.root / "runs" / result["run_id"] / "errors.json")
-    assert errors["issues"][-1]["code"] == "MODEL_OPTIONS_UNSUPPORTED"
+    assert error.value.code == code
+    assert not list((project.root / "runs").iterdir())
 
 
 def test_ols_terminal_metadata_retains_empty_model_options(tmp_path) -> None:
@@ -487,19 +504,41 @@ def test_ols_terminal_metadata_retains_empty_model_options(tmp_path) -> None:
 
 def test_child_submission_persists_the_exact_one_level_model_options_merge(
     tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import workbench.services.run_service as run_service
 
     project = create_project(tmp_path, "child-model-options")
-    source_options = {"fit_method": "reml", "random_slope": True}
+    source_options = {
+        "subject_id": "participant_id",
+        "time": "week",
+        "group": "arm",
+        "fit_method": "reml",
+        "random_slope": True,
+    }
+    handler = ModelHandler(
+        model_type=LMM_MODEL_TYPE,
+        model_id="linear_mixed_effects_1",
+        serves_y_types=("continuous",),
+        fit=lambda _ctx, _env: ("linear_mixed_effects_1", {}, None),
+        validate_model_options=lambda value: LmmModelInput.from_dict(value),
+        model_options_contract=ModelOptionsContract(
+            producer_version="linear_mixed_effects@1.0",
+            input_contract_version=LMM_CONTRACT_VERSION,
+        ),
+    )
+    monkeypatch.setitem(MODEL_REGISTRY, LMM_MODEL_TYPE, handler)
+    source_binding = bind_new_model_options(LMM_MODEL_TYPE, source_options).binding
+    assert source_binding is not None
     child_form = run_service.merge_form_overrides(
         {
             "mode": "auto",
-            "model_type": "ols",
+            "model_type": LMM_MODEL_TYPE,
             "y": "y",
             "x": "x",
             "covariance": "robust",
             "model_options": source_options,
+            "model_options_binding": source_binding.to_dict(),
         },
         {"model_options": {"random_slope": False}},
     )
@@ -534,10 +573,17 @@ def test_child_submission_persists_the_exact_one_level_model_options_merge(
         )
 
     inputs = read_json(project.root / "runs" / submitted["run_id"] / "run_inputs.json")
-    expected_options = {"fit_method": "reml", "random_slope": False}
+    expected_options = {**source_options, "random_slope": False}
+    expected_binding = bind_new_model_options(
+        LMM_MODEL_TYPE, expected_options
+    ).binding
+    assert expected_binding is not None
     assert inputs["form"]["model_options"] == expected_options
     assert inputs["executable_payload"]["model_options"] == expected_options
     assert inputs["confirmed_payload"]["model_options"] == expected_options
+    assert inputs["form"]["model_options_binding"] == expected_binding.to_dict()
+    assert inputs["executable_payload"]["model_options_binding"] == expected_binding.to_dict()
+    assert inputs["confirmed_payload"]["model_options_binding"] == expected_binding.to_dict()
 
 
 def test_model_rerun_accepts_only_object_model_options() -> None:
@@ -701,3 +747,39 @@ def test_run_endpoint_rejects_invalid_model_options_before_execution(
 
     assert response.status_code == 422
     assert response.json()["detail"] == code
+
+
+def test_run_endpoint_rejects_unresolved_lmm_options_owner_before_creating_a_run(
+    tmp_path,
+) -> None:
+    from workbench.api import app
+
+    client = TestClient(app)
+    root = client.post(
+        "/projects", json={"parent": str(tmp_path), "name": "demo"}
+    ).json()["project_root"]
+
+    response = client.post(
+        "/runs",
+        data={
+            "project_root": root,
+            "mode": "auto",
+            "model_type": LMM_MODEL_TYPE,
+            "y": "y",
+            "x": "x",
+            "model_options": json.dumps(
+                {
+                    "subject_id": "participant_id",
+                    "time": "week",
+                    "group": "arm",
+                    "fit_method": "reml",
+                    "random_slope": True,
+                }
+            ),
+        },
+        files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "MODEL_OPTIONS_OWNER_UNRESOLVED"
+    assert not list((Path(root) / "runs").iterdir())

@@ -95,7 +95,7 @@ def test_iv_failure_offers_switch_to_ols(iv_frame, tmp_path):
         (a for a in actions if a["key"] == "iv_switch_to_ols"), None
     )
     assert switch is not None, f"iv_switch_to_ols not in {[a['key'] for a in actions]}"
-    assert switch["form_overrides"] == {"model_type": "ols"}
+    assert switch["form_overrides"] == {"model_type": "ols", "model_options": {}}
 
 
 def test_non_iv_run_has_no_iv_diagnostics(tmp_path):

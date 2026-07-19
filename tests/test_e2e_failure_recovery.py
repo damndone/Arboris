@@ -84,7 +84,10 @@ def test_explicit_logit_failure_offers_one_click_rerun_auto(tmp_path: Path):
     actions = blockers[0]["evidence"].get("recommended_actions", [])
     primary = next(a for a in actions if a["severity"] == "primary")
     assert primary["key"] == "rerun_auto"
-    assert primary["form_overrides"] == {"model_type": "auto"}
+    assert primary["form_overrides"] == {
+        "model_type": "auto",
+        "model_options": {},
+    }
 
     # 4. Apply the recovery (re-run with the primary action's form_overrides)
     #    and assert it completes.

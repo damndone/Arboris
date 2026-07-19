@@ -114,6 +114,11 @@ def execute_genesis_draft(
 
         tp = nodes["table_1"].get("params") or {}
         mp = dict(nodes["model_1"].get("params") or {})
+        if "model_options_binding" in mp:
+            raise HTTPException(
+                status_code=422,
+                detail="MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+            )
         x_val = mp.pop("x", "")
         focal = mp.pop("focal_x", "")
         merged_form = {
@@ -146,18 +151,24 @@ def execute_genesis_draft(
 
         def _record_snapshot_before_dispatch(new_run_id: str) -> None:
             run_dir = root / "runs" / new_run_id
+            resolved_binding = (read_run_inputs(run_dir).get("form") or {}).get(
+                "model_options_binding"
+            )
+            snapshot = {
+                "executed_at": utc_now(),
+                "source_draft_id": draft_id,
+                "executed_draft_hash": executed_hash,
+                "execution_request": {
+                    "execution_mode": "genesis",
+                    "validated_draft_hash": validated_draft_hash,
+                },
+                "draft": draft,
+            }
+            if isinstance(resolved_binding, dict):
+                snapshot["model_options_binding"] = resolved_binding
             (run_dir / "executed_pipeline_draft.json").write_text(
                 json.dumps(
-                    {
-                        "executed_at": utc_now(),
-                        "source_draft_id": draft_id,
-                        "executed_draft_hash": executed_hash,
-                        "execution_request": {
-                            "execution_mode": "genesis",
-                            "validated_draft_hash": validated_draft_hash,
-                        },
-                        "draft": draft,
-                    },
+                    snapshot,
                     sort_keys=True,
                     indent=2,
                     ensure_ascii=False,
@@ -318,18 +329,24 @@ def execute_rerun_child_draft(
 
         def _record_snapshot_before_dispatch(new_run_id: str) -> None:
             run_dir = root / "runs" / new_run_id
+            resolved_binding = (read_run_inputs(run_dir).get("form") or {}).get(
+                "model_options_binding"
+            )
+            snapshot = {
+                "executed_at": utc_now(),
+                "source_draft_id": draft_id,
+                "executed_draft_hash": executed_hash,
+                "execution_request": {
+                    "execution_mode": "rerun_child",
+                    "validated_draft_hash": validated_draft_hash,
+                },
+                "draft": draft,
+            }
+            if isinstance(resolved_binding, dict):
+                snapshot["model_options_binding"] = resolved_binding
             (run_dir / "executed_pipeline_draft.json").write_text(
                 json.dumps(
-                    {
-                        "executed_at": utc_now(),
-                        "source_draft_id": draft_id,
-                        "executed_draft_hash": executed_hash,
-                        "execution_request": {
-                            "execution_mode": "rerun_child",
-                            "validated_draft_hash": validated_draft_hash,
-                        },
-                        "draft": draft,
-                    },
+                    snapshot,
                     sort_keys=True,
                     indent=2,
                     ensure_ascii=False,
@@ -366,6 +383,9 @@ def execute_rerun_child_draft(
                 rerun_from=run_level_rerun_from,
                 before_dispatch=_record_snapshot_before_dispatch,
             )
+        except ModelOptionsError as exc:
+            events.release_slot(None)
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except Exception:
             events.release_slot(None)
             raise

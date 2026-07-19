@@ -337,6 +337,15 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
         if isinstance(persisted_form, dict)
         else None
     )
+    model_options_binding = (
+        existing_payload.get("model_options_binding")
+        if isinstance(existing_payload, dict)
+        else executable_payload.get("model_options_binding")
+        if isinstance(executable_payload, dict)
+        else persisted_form.get("model_options_binding")
+        if isinstance(persisted_form, dict)
+        else None
+    )
     executed_payload = {
         "model_type": "ols",
         "covariance": result.get("covariance_wire"),
@@ -346,6 +355,8 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
     }
     if isinstance(model_options, dict):
         executed_payload["model_options"] = model_options
+    if isinstance(model_options_binding, dict):
+        executed_payload["model_options_binding"] = model_options_binding
     update_run_inputs_metadata(
         run_root,
         executed_payload=executed_payload,
@@ -365,6 +376,50 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
             "covariance_evidence": result.get("covariance_evidence", {}),
         },
     )
+
+
+def _persist_model_options_execution_binding(
+    run_root,
+    *,
+    model_type: str,
+    model_options: dict[str, object],
+    model_options_binding: object,
+) -> None:
+    """Write generic terminal evidence for a successfully bound options payload."""
+
+    if not model_options or not isinstance(model_options_binding, dict):
+        return
+    from ...lineage.run_inputs import read_run_inputs, update_run_inputs_metadata
+
+    if not (run_root / "run_inputs.json").is_file():
+        return
+    run_inputs = read_run_inputs(run_root)
+    confirmed_payload = run_inputs.get("confirmed_payload")
+    existing = run_inputs.get("executed_payload")
+    # The analysis loop compares these two logical payloads by canonical hash.
+    # Start from the server-confirmed transport rather than a smaller generic
+    # subset, so a successful future model handler preserves covariance and
+    # selector facts as well as its bound model options.
+    has_confirmed_payload = isinstance(confirmed_payload, dict)
+    executed_payload = (
+        dict(confirmed_payload)
+        if has_confirmed_payload
+        else dict(existing)
+        if isinstance(existing, dict)
+        else {}
+    )
+    if not has_confirmed_payload:
+        # `model_type` is a wire-level fact. A confirmed payload (when
+        # present) may intentionally retain an alias such as glm:poisson,
+        # while the resolved handler uses the registry key glm.
+        executed_payload["model_type"] = model_type
+    executed_payload.update(
+        {
+            "model_options": model_options,
+            "model_options_binding": model_options_binding,
+        }
+    )
+    update_run_inputs_metadata(run_root, executed_payload=executed_payload)
 
 
 # ---- core pack registration (dogfood the registry) ----
@@ -398,19 +453,19 @@ CORE_PACK = AnalysisPack(
         RerunAction(
             key="iv_switch_to_ols",
             label="Switch to OLS",
-            param_overrides={"model_type": "ols"},
+            param_overrides={"model_type": "ols", "model_options": {}},
             applies_to=["iv_2sls"],
         ),
         RerunAction(
             key="did_switch_to_panel_ols",
             label="Switch to plain Panel FE",
-            param_overrides={"model_type": "panel_ols"},
+            param_overrides={"model_type": "panel_ols", "model_options": {}},
             applies_to=["did"],
         ),
         RerunAction(
             key="cs_did_switch_to_did",
             label="Switch to classic DID",
-            param_overrides={"model_type": "did"},
+            param_overrides={"model_type": "did", "model_options": {}},
             applies_to=["cs_did"],
         ),
     ],
@@ -521,6 +576,7 @@ class EstimationStage:
         recorder = env.recorder
         model_input_ids = [ctx.data.artifact_id]
         model_options = ctx.artifacts.get("_model_options", {})
+        model_options_binding = ctx.artifacts.get("_model_options_binding")
 
         # Build a resolve view: prediction model types fall through to the
         # y_type default identically to legacy behavior (they're dispatched
@@ -546,6 +602,29 @@ class EstimationStage:
                         },
                     )
                 try:
+                    from ...model_options import (
+                        ModelOptionsError,
+                        verify_binding_owner_for_model_type,
+                        verify_bound_model_options,
+                    )
+
+                    bound = verify_bound_model_options(
+                        model_options, model_options_binding
+                    )
+                    assert bound.binding is not None
+                    verify_binding_owner_for_model_type(
+                        bound.binding, handler.model_type
+                    )
+                except ModelOptionsError as exc:
+                    raise ModelOptionsValidationError(
+                        exc.code,
+                        str(exc),
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    ) from exc
+                try:
                     handler.validate_model_options(model_options)
                 except ModelOptionsValidationError:
                     raise
@@ -560,6 +639,12 @@ class EstimationStage:
                     ) from exc
             model_id, primary, fitted = handler.fit(ctx, env)
             _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            _persist_model_options_execution_binding(
+                run_root,
+                model_type=handler.model_type,
+                model_options=model_options,
+                model_options_binding=model_options_binding,
+            )
             if model_id == "ols_1":
                 _persist_ols_contract_metadata(run_root, primary)
             model_results.append((model_id, primary))
