@@ -4,6 +4,7 @@ release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
 c1_integration_base_commit: 1ee1484828f91403f098f36c4c63930c618706ef
 contract_lock_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
 branch_start_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
+receipt_commit: 2d356d3024570dbf55e7c3ecd2cff1ac5b4e85be
 supersedes:
   receipt_branch: release-train/v1.7.3-contract-receipts
   receipt_commit: e330341984b0f52b642f487d85714e66af0ad481
