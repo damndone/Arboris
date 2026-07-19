@@ -107,9 +107,21 @@ describe("RepeatedMeasuresPacketPanel", () => {
     ["pending", "等待执行"],
     ["running", "运行中"],
   ] as const)("renders the packet-free %s state without claiming success", (requestedState, label) => {
-    render(<RepeatedMeasuresPacketPanel packet={{}} requestedState={requestedState} />);
+    render(<RepeatedMeasuresPacketPanel packet={null} requestedState={requestedState} />);
 
     expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.queryByText("运行成功")).toBeNull();
+  });
+
+  it("safely falls back for an unrecognized packet instead of displaying a requested running state", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        requestedState="running"
+        packet={{ contract: "future.packet", payload: {} }}
+      />,
+    );
+
+    expect(screen.getByText("诊断")).toBeInTheDocument();
+    expect(screen.queryByText("运行中")).toBeNull();
   });
 });

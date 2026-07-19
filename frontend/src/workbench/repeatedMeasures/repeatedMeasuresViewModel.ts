@@ -145,6 +145,14 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
     };
   }
 
+  if (
+    envelope?.contract === "linear_mixed_effects.diagnostic"
+    && typeof payload?.status === "string"
+    && Array.isArray(payload.diagnostics)
+  ) {
+    return unknownDiagnosticView(payload);
+  }
+
   if (envelope?.contract === "analysis_loop.compare" && payload?.compare_status === "restricted") {
     if (
       typeof payload.reason_code !== "string"
@@ -229,5 +237,22 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
     };
   }
 
-  return unknownDiagnosticView(payload);
+  if (envelope !== null) {
+    return {
+      phase: "diagnostic",
+      diagnostics: [{
+        code: "LMM_PACKET_UNRECOGNIZED",
+        severity: "error",
+        status: "blocked",
+        message: "无法识别的模型数据包；未显示运行或比较结论。",
+        recovery: null,
+      }],
+      proposal: null,
+      comparison: null,
+      result: null,
+      canExecute: false,
+    };
+  }
+
+  return unknownDiagnosticView(null);
 }
