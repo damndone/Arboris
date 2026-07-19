@@ -19,6 +19,7 @@ from workbench.contracts.model.linear_mixed_effects import (
 from .diagnostics import classify_lmm_diagnostics
 from .figures import build_lmm_trajectory_context
 from .input import PreparedLmmInput
+from .packets import build_lmm_result_packet as build_lmm_result_envelope
 
 
 LMM_MODEL_ID = "linear_mixed_effects_1"
@@ -85,7 +86,23 @@ def _random_effects_summary(
     }
 
 
-def normalize_lmm_result(
+def _terminal_result_payload(
+    *, common: Mapping[str, Any], diagnostics: list[Any]
+) -> dict[str, Any]:
+    """Keep unsafe or non-converged fits from making substantive result claims."""
+
+    return {
+        **common,
+        "status": "failed",
+        "coefficients": {},
+        "random_effects": {},
+        "diagnostics": [diagnostic.to_dict() for diagnostic in diagnostics],
+        "figure_context": None,
+        "warnings": [],
+    }
+
+
+def _normalize_lmm_result_payload(
     *,
     dataset_fingerprint: str,
     source_row_count: int,
@@ -93,7 +110,7 @@ def normalize_lmm_result(
     prepared: PreparedLmmInput,
     fitted: Any,
 ) -> dict[str, Any]:
-    """Convert a fitted MixedLM object into JSON-safe, declared LMM facts."""
+    """Build pack-private normalized facts before their public envelope boundary."""
 
     observation_counts = prepared.frame.groupby(
         prepared.input.subject_id, sort=True
@@ -139,14 +156,27 @@ def normalize_lmm_result(
             covariance_matrix=[],
             residual_variance=0.0,
         )
-        return {
-            **common,
-            "coefficients": {},
-            "random_effects": {},
-            "diagnostics": [diagnostic.to_dict() for diagnostic in diagnostics],
-            "figure_context": None,
-            "warnings": [],
-        }
+        return _terminal_result_payload(common=common, diagnostics=diagnostics)
+
+    try:
+        covariance_matrix = fitted.cov_re.to_numpy(dtype=float).tolist()
+        residual_variance = float(fitted.scale)
+    except (AttributeError, TypeError, ValueError):
+        diagnostics = classify_lmm_diagnostics(
+            converged=False,
+            random_slope=prepared.input.random_slope,
+            covariance_matrix=[],
+            residual_variance=0.0,
+        )
+        return _terminal_result_payload(common=common, diagnostics=diagnostics)
+    diagnostics = classify_lmm_diagnostics(
+        converged=True,
+        random_slope=prepared.input.random_slope,
+        covariance_matrix=covariance_matrix,
+        residual_variance=residual_variance,
+    )
+    if any(diagnostic.status == "failed" for diagnostic in diagnostics):
+        return _terminal_result_payload(common=common, diagnostics=diagnostics)
 
     interaction = _interaction_term(prepared)
     interval = fitted.conf_int().loc[interaction]
@@ -169,13 +199,6 @@ def normalize_lmm_result(
         "n_groups": int(len(observation_counts)),
         "observations_per_group": observations_per_group,
     }
-    covariance_matrix = fitted.cov_re.to_numpy(dtype=float).tolist()
-    diagnostics = classify_lmm_diagnostics(
-        converged=True,
-        random_slope=prepared.input.random_slope,
-        covariance_matrix=covariance_matrix,
-        residual_variance=random_effects["residual_variance"] or 0.0,
-    )
     return {
         **common,
         "coefficients": {prepared.primary_result_id: primary},
@@ -192,3 +215,31 @@ def normalize_lmm_result(
             if diagnostic.severity == "warning"
         ],
     }
+
+
+def build_lmm_result_packet(
+    *,
+    dataset_fingerprint: str,
+    source_row_count: int,
+    outcome: str,
+    prepared: PreparedLmmInput,
+    fitted: Any,
+) -> dict[str, Any]:
+    """Produce the only public result boundary for a fitted LMM recipe."""
+
+    payload = _normalize_lmm_result_payload(
+        dataset_fingerprint=dataset_fingerprint,
+        source_row_count=source_row_count,
+        outcome=outcome,
+        prepared=prepared,
+        fitted=fitted,
+    )
+    primary = payload["coefficients"].get(prepared.primary_result_id)
+    if isinstance(primary, Mapping):
+        payload = {
+            **payload,
+            "result_id": primary["result_id"],
+            "estimate": primary["estimate"],
+            "inference_method": primary["inference_method"],
+        }
+    return build_lmm_result_envelope(payload)

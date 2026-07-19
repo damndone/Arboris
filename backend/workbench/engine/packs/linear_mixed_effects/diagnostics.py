@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 
 import numpy as np
@@ -13,6 +14,8 @@ from workbench.contracts.agent.repeated_measures import (
 )
 from workbench.contracts.model.linear_mixed_effects import LmmDiagnostic
 
+from .input import LmmInputError
+
 
 def _recovery_candidate() -> dict[str, object]:
     return {
@@ -21,6 +24,67 @@ def _recovery_candidate() -> dict[str, object]:
         "patch": LMM_RECOVERY_PATCH,
         "required_confirmation": True,
     }
+
+
+def _convergence_failure() -> list[LmmDiagnostic]:
+    """Use the existing locked terminal path for unsafe estimator facts."""
+
+    return [
+        LmmDiagnostic(
+            code="LMM_CONVERGENCE_FAILED",
+            severity="error",
+            status="failed",
+            evidence={"optimizer": "lbfgs"},
+            action_candidate=None,
+        )
+    ]
+
+
+def terminal_input_error_diagnostic(error: LmmInputError) -> LmmDiagnostic:
+    """Map an existing input error into its pack-local terminal diagnostic fact."""
+
+    return LmmDiagnostic(
+        code=error.code,
+        severity="error",
+        status="blocked",
+        evidence=error.evidence,
+        action_candidate=None,
+    )
+
+
+def _valid_covariance_matrix(
+    *,
+    covariance_matrix: Sequence[Sequence[float]],
+    residual_variance: float,
+    random_slope: bool,
+) -> np.ndarray | None:
+    """Require finite, symmetric covariance facts before any recovery proposal."""
+
+    try:
+        residual = float(residual_variance)
+        matrix = np.asarray(covariance_matrix, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    expected_shape = (2, 2) if random_slope else (1, 1)
+    if (
+        matrix.shape != expected_shape
+        or not math.isfinite(residual)
+        or residual < 0.0
+        or not np.isfinite(matrix).all()
+        or not np.array_equal(matrix, matrix.T)
+    ):
+        return None
+    try:
+        eigenvalues = np.linalg.eigvalsh(matrix)
+    except np.linalg.LinAlgError:
+        return None
+    if not np.isfinite(eigenvalues).all():
+        return None
+    largest_eigenvalue = float(eigenvalues[-1])
+    threshold = max(1e-8, 1e-6 * max(0.0, largest_eigenvalue))
+    if float(eigenvalues[0]) < -threshold:
+        return None
+    return matrix
 
 
 def classify_lmm_diagnostics(
@@ -33,7 +97,6 @@ def classify_lmm_diagnostics(
 ) -> list[LmmDiagnostic]:
     """Classify a recoverable random-slope covariance warning."""
 
-    del residual_variance
     if blocking_code is not None:
         return [
             LmmDiagnostic(
@@ -45,18 +108,17 @@ def classify_lmm_diagnostics(
             )
         ]
     if not converged:
-        return [
-            LmmDiagnostic(
-                code="LMM_CONVERGENCE_FAILED",
-                severity="error",
-                status="failed",
-                evidence={"optimizer": "lbfgs"},
-                action_candidate=None,
-            )
-        ]
-    matrix = np.asarray(covariance_matrix, dtype=float)
-    if random_slope and matrix.shape == (2, 2):
-        largest_eigenvalue = float(np.linalg.eigvalsh(matrix)[-1])
+        return _convergence_failure()
+    matrix = _valid_covariance_matrix(
+        covariance_matrix=covariance_matrix,
+        residual_variance=residual_variance,
+        random_slope=random_slope,
+    )
+    if matrix is None:
+        return _convergence_failure()
+    eigenvalues = np.linalg.eigvalsh(matrix)
+    largest_eigenvalue = float(eigenvalues[-1])
+    if random_slope:
         slope_threshold = max(1e-8, 1e-6 * largest_eigenvalue)
         if float(matrix[1, 1]) <= slope_threshold:
             return [
@@ -71,24 +133,21 @@ def classify_lmm_diagnostics(
                     action_candidate=_recovery_candidate(),
                 )
             ]
-    if matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1]:
-        eigenvalues = np.linalg.eigvalsh(matrix)
-        largest_eigenvalue = float(eigenvalues[-1])
-        threshold = max(1e-8, 1e-6 * largest_eigenvalue)
-        if float(eigenvalues[0]) <= threshold:
-            return [
-                LmmDiagnostic(
-                    code="LMM_RANDOM_EFFECTS_SINGULAR",
-                    severity="warning",
-                    status="complete",
-                    evidence={
-                        "smallest_eigenvalue": float(eigenvalues[0]),
-                        "largest_eigenvalue": largest_eigenvalue,
-                        "threshold": threshold,
-                    },
-                    action_candidate=(
-                        _recovery_candidate() if random_slope else None
-                    ),
-                )
-            ]
+    threshold = max(1e-8, 1e-6 * largest_eigenvalue)
+    if float(eigenvalues[0]) <= threshold:
+        return [
+            LmmDiagnostic(
+                code="LMM_RANDOM_EFFECTS_SINGULAR",
+                severity="warning",
+                status="complete",
+                evidence={
+                    "smallest_eigenvalue": float(eigenvalues[0]),
+                    "largest_eigenvalue": largest_eigenvalue,
+                    "threshold": threshold,
+                },
+                action_candidate=(
+                    _recovery_candidate() if random_slope else None
+                ),
+            )
+        ]
     return []

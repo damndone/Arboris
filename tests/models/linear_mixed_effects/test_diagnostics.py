@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from workbench.engine.packs.linear_mixed_effects.diagnostics import (
     classify_lmm_diagnostics,
 )
@@ -82,4 +86,31 @@ def test_singular_intercept_without_a_random_slope_has_no_action() -> None:
     assert diagnostics[0].code == "LMM_RANDOM_EFFECTS_SINGULAR"
     assert diagnostics[0].severity == "warning"
     assert diagnostics[0].status == "complete"
+    assert diagnostics[0].action_candidate is None
+
+
+@pytest.mark.parametrize(
+    ("covariance_matrix", "residual_variance"),
+    [
+        ([[0.0]], 0.5),
+        ([[0.7, math.nan], [math.nan, 0.1]], 0.5),
+        ([[0.7, 0.2], [0.1, 0.1]], 0.5),
+        ([[0.7, 0.0], [0.0, 0.1]], math.nan),
+    ],
+)
+def test_invalid_random_slope_covariance_or_residual_is_terminal_without_recovery(
+    covariance_matrix: list[list[float]], residual_variance: float
+) -> None:
+    diagnostics = classify_lmm_diagnostics(
+        converged=True,
+        random_slope=True,
+        covariance_matrix=covariance_matrix,
+        residual_variance=residual_variance,
+    )
+
+    assert [diagnostic.code for diagnostic in diagnostics] == [
+        "LMM_CONVERGENCE_FAILED"
+    ]
+    assert diagnostics[0].status == "failed"
+    assert diagnostics[0].severity == "error"
     assert diagnostics[0].action_candidate is None

@@ -11,8 +11,12 @@ from typing import Any
 import pandas as pd
 import statsmodels.formula.api as smf
 
-from .input import prepare_lmm_input
-from .result import dataset_fingerprint_for_csv, normalize_lmm_result
+from workbench.contracts.common.envelope import PacketEnvelope
+
+from .diagnostics import terminal_input_error_diagnostic
+from .input import LmmInputError, prepare_lmm_input
+from .packets import build_lmm_diagnostic_packet, build_lmm_recovery_packet
+from .result import build_lmm_result_packet, dataset_fingerprint_for_csv
 
 
 def _fit_prepared(prepared: Any) -> Any:
@@ -35,12 +39,54 @@ def _fit_prepared(prepared: Any) -> Any:
         )
 
 
-def _write_contract(run_root: Path, result: Mapping[str, Any]) -> None:
-    output_path = Path(run_root) / "linear_mixed_effects_contract.json"
+def _write_packet(run_root: Path, filename: str, packet: Mapping[str, Any]) -> None:
+    """Persist a C1 envelope only after validating its exact public wire shape."""
+
+    parsed = PacketEnvelope.from_dict(packet)
+    output_path = Path(run_root) / filename
     output_path.write_text(
-        json.dumps(result, ensure_ascii=False, sort_keys=True, allow_nan=False),
+        json.dumps(parsed.to_dict(), ensure_ascii=False, sort_keys=True, allow_nan=False),
         encoding="utf-8",
     )
+
+
+def _persist_result_packets(run_root: Path, result_packet: Mapping[str, Any]) -> None:
+    """Persist result and its C1 diagnostic/recovery companion packets."""
+
+    result = PacketEnvelope.from_dict(result_packet).to_dict()
+    payload = result["payload"]
+    diagnostics = payload["diagnostics"]
+    assert isinstance(payload["status"], str)
+    assert isinstance(diagnostics, list)
+    _write_packet(run_root, "linear_mixed_effects_contract.json", result)
+    diagnostic_packet = build_lmm_diagnostic_packet(
+        status=payload["status"],
+        diagnostics=diagnostics,
+    )
+    _write_packet(run_root, "linear_mixed_effects_diagnostic.json", diagnostic_packet)
+    for diagnostic in diagnostics:
+        if not isinstance(diagnostic, Mapping):
+            continue
+        candidate = diagnostic.get("action_candidate")
+        if isinstance(candidate, Mapping):
+            _write_packet(
+                run_root,
+                "linear_mixed_effects_recovery_proposal.json",
+                build_lmm_recovery_packet(candidate),
+            )
+            break
+
+
+def _persist_input_error_packet(run_root: Path, error: LmmInputError) -> dict[str, Any]:
+    """Persist the existing input error as a C1 diagnostic packet, then re-raise."""
+
+    diagnostic = terminal_input_error_diagnostic(error)
+    packet = build_lmm_diagnostic_packet(
+        status=diagnostic.status,
+        diagnostics=[diagnostic.to_dict()],
+    )
+    _write_packet(run_root, "linear_mixed_effects_diagnostic.json", packet)
+    return packet
 
 
 def fit_linear_mixed_effects(
@@ -55,22 +101,26 @@ def fit_linear_mixed_effects(
 
     source_path = Path(csv_path)
     source_frame = pd.read_csv(source_path, float_precision="round_trip")
-    prepared = prepare_lmm_input(
-        source_frame,
-        outcome=outcome,
-        controls=controls,
-        options=options,
-    )
+    try:
+        prepared = prepare_lmm_input(
+            source_frame,
+            outcome=outcome,
+            controls=controls,
+            options=options,
+        )
+    except LmmInputError as error:
+        _persist_input_error_packet(Path(run_root), error)
+        raise
     fitted = _fit_prepared(prepared)
 
-    result = normalize_lmm_result(
+    result = build_lmm_result_packet(
         dataset_fingerprint=dataset_fingerprint_for_csv(source_path),
         source_row_count=len(source_frame),
         outcome=outcome,
         prepared=prepared,
         fitted=fitted,
     )
-    _write_contract(run_root, result)
+    _persist_result_packets(run_root, result)
     return result, fitted
 
 
@@ -86,15 +136,21 @@ def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         raise ValueError("LMM_INVALID_CONFIGURATION: normalized controls must be a list of strings")
 
     env.progress("linear_mixed_effects", "Starting Linear Mixed Effects fit.")
-    prepared = prepare_lmm_input(
-        ctx.data.frame,
-        outcome=outcome,
-        controls=controls,
-        options=options,
-    )
+    try:
+        prepared = prepare_lmm_input(
+            ctx.data.frame,
+            outcome=outcome,
+            controls=controls,
+            options=options,
+        )
+    except LmmInputError as error:
+        ctx.artifacts["_linear_mixed_effects_diagnostic"] = _persist_input_error_packet(
+            env.run_root, error
+        )
+        raise
     fitted = _fit_prepared(prepared)
     fingerprint = ctx.artifacts.get("_upload_hash") or ctx.data.artifact_id
-    result = normalize_lmm_result(
+    result = build_lmm_result_packet(
         dataset_fingerprint=str(fingerprint),
         source_row_count=len(ctx.data.frame),
         outcome=outcome,
@@ -102,7 +158,7 @@ def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], Any]:
         fitted=fitted,
     )
     ctx.artifacts["_linear_mixed_effects_result"] = result
-    _write_contract(env.run_root, result)
+    _persist_result_packets(env.run_root, result)
     env.progress("linear_mixed_effects", "Linear Mixed Effects fit completed.")
     env.checkpoint()
     return "linear_mixed_effects_1", result, fitted

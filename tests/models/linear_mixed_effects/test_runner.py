@@ -10,6 +10,7 @@ from workbench.contracts.model.linear_mixed_effects import (
     LMM_CONTRACT_VERSION,
     LMM_MODEL_TYPE,
 )
+from workbench.contracts.common.envelope import PacketEnvelope
 from workbench.engine.context import DataHandle, ModelingContext, RunEnv
 from workbench.engine.packs.linear_mixed_effects.runner import (
     fit_from_context,
@@ -21,8 +22,14 @@ from workbench.engine.packs.linear_mixed_effects.input import LmmInputError
 ROOT = Path(__file__).parents[2] / "fixtures" / "models" / "linear_mixed_effects"
 
 
-def test_runner_normalizes_primary_interaction_and_result_identity(tmp_path: Path) -> None:
-    result, fitted = fit_linear_mixed_effects(
+def _packet_payload(packet: dict[str, object]) -> dict[str, object]:
+    return PacketEnvelope.from_dict(packet).to_dict()["payload"]
+
+
+def test_runner_persists_only_parsable_fixture_compatible_lmm_packets(
+    tmp_path: Path,
+) -> None:
+    packet, _ = fit_linear_mixed_effects(
         csv_path=ROOT / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
@@ -36,20 +43,74 @@ def test_runner_normalizes_primary_interaction_and_result_identity(tmp_path: Pat
         run_root=tmp_path,
     )
 
+    result = PacketEnvelope.from_dict(packet)
+    persisted_result = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_contract.json").read_text())
+    )
+    diagnostic = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_diagnostic.json").read_text())
+    )
+    recovery = PacketEnvelope.from_dict(
+        json.loads(
+            (tmp_path / "linear_mixed_effects_recovery_proposal.json").read_text()
+        )
+    )
+
+    assert result == persisted_result
+    assert (result.contract, result.contract_version, result.producer_version) == (
+        "linear_mixed_effects.result",
+        "1.0",
+        "linear_mixed_effects@1.0",
+    )
+    assert {
+        "status",
+        "result_id",
+        "estimate",
+        "fit_method",
+        "inference_method",
+        "figure_context",
+    }.issubset(result.payload)
+    assert diagnostic.contract == "linear_mixed_effects.diagnostic"
+    assert {
+        "status",
+        "diagnostics",
+    }.issubset(diagnostic.payload)
+    assert recovery.contract == "linear_mixed_effects.recovery_proposal"
+    assert recovery.payload["proposal_status"] == "pending_confirmation"
+
+
+def test_runner_normalizes_primary_interaction_and_result_identity(tmp_path: Path) -> None:
+    packet, fitted = fit_linear_mixed_effects(
+        csv_path=ROOT / "known_truth.csv",
+        outcome="score",
+        controls=["baseline_score"],
+        options={
+            "subject_id": "participant_id",
+            "time": "week",
+            "group": "arm",
+            "fit_method": "reml",
+            "random_slope": True,
+        },
+        run_root=tmp_path,
+    )
+
+    result = _packet_payload(packet)
     primary = result["coefficients"]["group_time_interaction"]
     assert abs(primary["estimate"] - 0.9) <= 0.35
     assert primary["inference_method"] == "asymptotic_wald_z_v1"
     assert result["primary_target_id"] == "group_time_interaction"
     assert len(result["result_identity"]) == 64
     assert fitted.converged is True
-    stored = json.loads((tmp_path / "linear_mixed_effects_contract.json").read_text())
+    stored = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_contract.json").read_text())
+    ).to_dict()["payload"]
     assert stored["result_identity"] == result["result_identity"]
 
 
 def test_runner_emits_complete_data_only_result_and_trajectory_context(
     tmp_path: Path,
 ) -> None:
-    result, _ = fit_linear_mixed_effects(
+    packet, _ = fit_linear_mixed_effects(
         csv_path=ROOT / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
@@ -63,6 +124,7 @@ def test_runner_emits_complete_data_only_result_and_trajectory_context(
         run_root=tmp_path,
     )
 
+    result = _packet_payload(packet)
     assert {
         "schema_version",
         "model_id",
@@ -151,12 +213,13 @@ def test_context_adapter_uses_bound_options_and_emits_progress(tmp_path: Path) -
         stop_reason=stop_reason,
     )
 
-    model_id, result, fitted = fit_from_context(context, env)
+    model_id, packet, fitted = fit_from_context(context, env)
+    result = _packet_payload(packet)
 
     assert model_id == "linear_mixed_effects_1"
     assert result["model_type"] == "linear_mixed_effects"
     assert fitted.converged is True
-    assert context.artifacts["_linear_mixed_effects_result"] == result
+    assert context.artifacts["_linear_mixed_effects_result"] == packet
     assert events == [
         ("linear_mixed_effects", "progress", "Starting Linear Mixed Effects fit."),
         ("linear_mixed_effects", "progress", "Linear Mixed Effects fit completed."),
@@ -199,10 +262,10 @@ def test_declaration_exposes_the_locked_options_owner(
     }
 
 
-def test_runner_converts_estimator_warnings_into_locked_diagnostics(
+def test_runner_keeps_estimator_warnings_internal_and_emits_covariance_diagnostics(
     tmp_path: Path, recwarn: pytest.WarningsRecorder
 ) -> None:
-    result, _ = fit_linear_mixed_effects(
+    packet, _ = fit_linear_mixed_effects(
         csv_path=ROOT / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
@@ -217,7 +280,7 @@ def test_runner_converts_estimator_warnings_into_locked_diagnostics(
     )
 
     assert not recwarn
-    assert result["warnings"] == ["LMM_RANDOM_EFFECTS_SINGULAR"]
+    assert _packet_payload(packet)["warnings"] == ["LMM_RANDOM_EFFECTS_SINGULAR"]
 
 
 def test_runner_honors_explicit_ml_and_changes_result_identity(tmp_path: Path) -> None:
@@ -227,7 +290,7 @@ def test_runner_honors_explicit_ml_and_changes_result_identity(tmp_path: Path) -
         "controls": ["baseline_score"],
         "run_root": tmp_path,
     }
-    reml, _ = fit_linear_mixed_effects(
+    reml_packet, _ = fit_linear_mixed_effects(
         **common,
         options={
             "subject_id": "participant_id",
@@ -237,7 +300,7 @@ def test_runner_honors_explicit_ml_and_changes_result_identity(tmp_path: Path) -
             "random_slope": True,
         },
     )
-    ml, fitted = fit_linear_mixed_effects(
+    ml_packet, fitted = fit_linear_mixed_effects(
         **common,
         options={
             "subject_id": "participant_id",
@@ -249,6 +312,8 @@ def test_runner_honors_explicit_ml_and_changes_result_identity(tmp_path: Path) -
     )
 
     assert fitted.reml is False
+    ml = _packet_payload(ml_packet)
+    reml = _packet_payload(reml_packet)
     assert ml["fit_method"] == "ml"
     assert ml["result_identity"] != reml["result_identity"]
 
@@ -264,7 +329,7 @@ def test_non_converged_fit_has_no_substantive_coefficient_claim(
 
     monkeypatch.setattr(runner, "_fit_prepared", lambda _prepared: NonConvergedFitted())
 
-    result, fitted = fit_linear_mixed_effects(
+    packet, fitted = fit_linear_mixed_effects(
         csv_path=ROOT / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
@@ -278,6 +343,7 @@ def test_non_converged_fit_has_no_substantive_coefficient_claim(
         run_root=tmp_path,
     )
 
+    result = _packet_payload(packet)
     assert fitted.converged is False
     assert result["status"] == "failed"
     assert result["coefficients"] == {}
@@ -291,6 +357,46 @@ def test_non_converged_fit_has_no_substantive_coefficient_claim(
         }
     ]
     assert result["figure_context"] is None
+
+
+def test_invalid_random_slope_covariance_fails_closed_as_a_terminal_packet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.engine.packs.linear_mixed_effects.runner as runner
+
+    class InvalidCovarianceFitted:
+        converged = True
+        nobs = 480
+        cov_re = pd.DataFrame([[0.0]])
+        scale = 0.5
+
+    monkeypatch.setattr(
+        runner, "_fit_prepared", lambda _prepared: InvalidCovarianceFitted()
+    )
+
+    packet, _ = fit_linear_mixed_effects(
+        csv_path=ROOT / "known_truth.csv",
+        outcome="score",
+        controls=["baseline_score"],
+        options={
+            "subject_id": "participant_id",
+            "time": "week",
+            "group": "arm",
+            "fit_method": "reml",
+            "random_slope": True,
+        },
+        run_root=tmp_path,
+    )
+
+    result = PacketEnvelope.from_dict(packet).payload
+    diagnostic = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_diagnostic.json").read_text())
+    ).payload
+    assert result["status"] == "failed"
+    assert result["coefficients"] == {}
+    assert result["figure_context"] is None
+    assert diagnostic["diagnostics"][0]["code"] == "LMM_CONVERGENCE_FAILED"
+    assert not (tmp_path / "linear_mixed_effects_recovery_proposal.json").exists()
 
 
 def test_runner_is_deterministic_for_the_same_locked_input(tmp_path: Path) -> None:
@@ -343,8 +449,57 @@ def test_runner_fails_closed_for_missing_subject_column(tmp_path: Path) -> None:
     assert not (tmp_path / "linear_mixed_effects_contract.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("csv_name", "random_slope", "expected_code"),
+    [
+        ("missing_subject_id.csv", False, "LMM_SUBJECT_ID_MISSING"),
+        (
+            "singular_random_slope.csv",
+            True,
+            "LMM_INVALID_RANDOM_SLOPE_CONFIGURATION",
+        ),
+    ],
+)
+def test_input_errors_persist_their_existing_terminal_diagnostic_facts(
+    tmp_path: Path,
+    csv_name: str,
+    random_slope: bool,
+    expected_code: str,
+) -> None:
+    with pytest.raises(LmmInputError) as error:
+        fit_linear_mixed_effects(
+            csv_path=ROOT / csv_name,
+            outcome="score",
+            controls=["baseline_score"],
+            options={
+                "subject_id": "participant_id",
+                "time": "week",
+                "group": "arm",
+                "fit_method": "reml",
+                "random_slope": random_slope,
+            },
+            run_root=tmp_path,
+        )
+
+    diagnostic = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_diagnostic.json").read_text())
+    )
+    diagnostic_payload = diagnostic.to_dict()["payload"]
+    fact = diagnostic_payload["diagnostics"][0]
+    assert diagnostic.contract == "linear_mixed_effects.diagnostic"
+    assert diagnostic_payload["status"] == "blocked"
+    assert fact == {
+        "code": expected_code,
+        "severity": "error",
+        "status": "blocked",
+        "evidence": error.value.evidence,
+        "action_candidate": None,
+    }
+    assert not (tmp_path / "linear_mixed_effects_contract.json").exists()
+
+
 def test_runner_supports_a_random_intercept_only_model(tmp_path: Path) -> None:
-    result, fitted = fit_linear_mixed_effects(
+    packet, fitted = fit_linear_mixed_effects(
         csv_path=ROOT / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
@@ -358,6 +513,7 @@ def test_runner_supports_a_random_intercept_only_model(tmp_path: Path) -> None:
         run_root=tmp_path,
     )
 
+    result = _packet_payload(packet)
     assert fitted.converged is True
     assert result["random_effects_specification"] == "1"
     assert result["random_effects"]["slope_variance"] is None
@@ -392,7 +548,8 @@ def test_context_adapter_supports_a_binary_numeric_group(tmp_path: Path) -> None
     )
     env = RunEnv(run_root=tmp_path, run_id="numeric-group", recorder=None)
 
-    _, result, fitted = fit_from_context(context, env)
+    _, packet, fitted = fit_from_context(context, env)
+    result = _packet_payload(packet)
 
     assert fitted.converged is True
     assert result["reference_group"] == "0"
