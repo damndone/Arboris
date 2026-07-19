@@ -7,8 +7,10 @@ const INVALID_JSON = Symbol("invalid-json");
 const MAX_PACKET_JSON_DEPTH = 32;
 const MAX_PACKET_JSON_NODES = 10_000;
 const MAX_PACKET_JSON_STRING_LENGTH = 64 * 1024;
+const MAX_PACKET_JSON_KEY_LENGTH = 4 * 1024;
+const MAX_PACKET_JSON_SERIALIZED_BYTES = 512 * 1024;
 
-type JsonCloneBudget = { nodes: number };
+type JsonCloneBudget = { nodes: number; serializedBytes: number };
 
 const LOCKED_CONTRACT_VERSION = "1.0";
 const LOCKED_PRODUCER_VERSION = "linear_mixed_effects@1.0";
@@ -145,6 +147,49 @@ function isJsonDataProperty(
 }
 
 /**
+ * Return a conservative upper bound for UTF-8 JSON bytes without allocating a
+ * second serialized copy of attacker-controlled packet content.
+ */
+function jsonStringSerializedBytes(value: string): number {
+  let bytes = 2;
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x1f) {
+      bytes += 6;
+    } else if (codeUnit === 0x22 || codeUnit === 0x5c) {
+      bytes += 2;
+    } else if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 6;
+      }
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      bytes += 6;
+    } else if (codeUnit <= 0x7f) {
+      bytes += 1;
+    } else if (codeUnit <= 0x7ff) {
+      bytes += 2;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+function reserveSerializedBytes(budget: JsonCloneBudget, bytes: number): boolean {
+  if (
+    !Number.isSafeInteger(bytes)
+    || bytes < 0
+    || budget.serializedBytes > MAX_PACKET_JSON_SERIALIZED_BYTES - bytes
+  ) return false;
+  budget.serializedBytes += bytes;
+  return true;
+}
+
+/**
  * Make the packet boundary explicit: only clone values representable by JSON.
  * Reading property descriptors rather than properties rejects accessors before
  * they can execute and keeps later rendering away from untrusted objects.
@@ -152,7 +197,7 @@ function isJsonDataProperty(
 function cloneJsonValue(
   value: unknown,
   seen: WeakSet<object> = new WeakSet<object>(),
-  budget: JsonCloneBudget = { nodes: 0 },
+  budget: JsonCloneBudget = { nodes: 0, serializedBytes: 0 },
   depth = 0,
 ): JsonValue | typeof INVALID_JSON {
   if (depth > MAX_PACKET_JSON_DEPTH || budget.nodes >= MAX_PACKET_JSON_NODES) {
@@ -160,14 +205,22 @@ function cloneJsonValue(
   }
   budget.nodes += 1;
 
-  if (value === null || typeof value === "boolean") {
-    return value;
+  if (value === null) {
+    return reserveSerializedBytes(budget, 4) ? value : INVALID_JSON;
+  }
+  if (typeof value === "boolean") {
+    return reserveSerializedBytes(budget, value ? 4 : 5) ? value : INVALID_JSON;
   }
   if (typeof value === "string") {
-    return value.length <= MAX_PACKET_JSON_STRING_LENGTH ? value : INVALID_JSON;
+    if (value.length > MAX_PACKET_JSON_STRING_LENGTH) return INVALID_JSON;
+    return reserveSerializedBytes(budget, jsonStringSerializedBytes(value))
+      ? value
+      : INVALID_JSON;
   }
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value : INVALID_JSON;
+    return Number.isFinite(value) && reserveSerializedBytes(budget, String(value).length)
+      ? value
+      : INVALID_JSON;
   }
   if (typeof value !== "object") return INVALID_JSON;
 
@@ -176,9 +229,9 @@ function cloneJsonValue(
     seen.add(value);
 
     if (Array.isArray(value)) {
+      if (!reserveSerializedBytes(budget, 2)) return INVALID_JSON;
       if (Object.getPrototypeOf(value) !== Array.prototype) return INVALID_JSON;
       const keys = Reflect.ownKeys(value);
-      if (!keys.every((key) => typeof key === "string")) return INVALID_JSON;
       const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
       if (
         !isJsonDataProperty(lengthDescriptor)
@@ -191,6 +244,7 @@ function cloneJsonValue(
 
       const copy: JsonValue[] = [];
       for (let index = 0; index < lengthDescriptor.value; index += 1) {
+        if (index > 0 && !reserveSerializedBytes(budget, 1)) return INVALID_JSON;
         const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
         if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
           return INVALID_JSON;
@@ -202,12 +256,17 @@ function cloneJsonValue(
       return copy;
     }
 
+    if (!reserveSerializedBytes(budget, 2)) return INVALID_JSON;
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return INVALID_JSON;
     const keys = Reflect.ownKeys(value);
     if (!keys.every((key) => typeof key === "string")) return INVALID_JSON;
     const copy = Object.create(null) as JsonRecord;
-    for (const key of keys) {
+    for (let index = 0; index < keys.length; index += 1) {
+      const key = keys[index] as string;
+      if (key.length > MAX_PACKET_JSON_KEY_LENGTH) return INVALID_JSON;
+      const propertyBytes = jsonStringSerializedBytes(key) + 1 + (index > 0 ? 1 : 0);
+      if (!reserveSerializedBytes(budget, propertyBytes)) return INVALID_JSON;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
         return INVALID_JSON;

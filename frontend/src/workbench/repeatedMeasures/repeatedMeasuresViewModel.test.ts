@@ -1163,6 +1163,12 @@ describe("buildRepeatedMeasuresViewModel", () => {
     ["a packet with an oversized string", () => ({
       text: "x".repeat(65_537),
     })],
+    ["a packet with an oversized key", () => ({
+      ["x".repeat(4_097)]: "bounded value",
+    })],
+    ["a packet beyond the aggregate serialization budget", () => ({
+      random_effects: Array.from({ length: 9 }, () => "x".repeat(65_536)),
+    })],
   ])("fails closed for %s", (_label, unrendered) => {
     expect(buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.result",
