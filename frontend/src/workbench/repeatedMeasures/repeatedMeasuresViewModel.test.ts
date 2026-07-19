@@ -320,10 +320,111 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it("accepts the locked data-only trajectory context", () => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        figure_context: {
+          chart_type: "lmm_group_trajectory",
+          time: [0, 1],
+          groups: [{
+            label: "treated",
+            observed_mean: [10, 3],
+            fitted_mean: [10, 3.2],
+          }],
+        },
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "success",
+      result: {
+        trajectory: {
+          chart_type: "lmm_group_trajectory",
+          groups: [{ label: "treated", fitted_mean: [10, 3.2] }],
+        },
+      },
+    });
+  });
+
+  it("fails closed for a sparse trajectory array", () => {
+    const time = [0, 1];
+    delete time[1];
+
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        figure_context: {
+          chart_type: "lmm_group_trajectory",
+          time,
+          groups: [{
+            label: "treated",
+            observed_mean: [10, 3],
+            fitted_mean: [10, 3.2],
+          }],
+        },
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("keeps a converged result with complete warning diagnostics", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        converged: true,
+        diagnostics: [{
+          code: "LMM_RANDOM_EFFECTS_SINGULAR",
+          severity: "warning",
+          status: "complete",
+          evidence: { slope_variance: 0 },
+          action_candidate: null,
+        }],
+      },
+    })).toMatchObject({
+      phase: "success",
+      result: { result_id: "group_time_interaction" },
+    });
+  });
+
   it.each([
     ["an empty result id", { result_id: "" }],
     ["an unknown fit method", { fit_method: "gls" }],
     ["an unknown inference method", { inference_method: "invented" }],
+    ["a non-converged full result", { converged: false }],
+    ["a full result with terminal diagnostics", {
+      diagnostics: [{
+        code: "LMM_CONVERGENCE_FAILED",
+        severity: "error",
+        status: "failed",
+        evidence: { optimizer: "lbfgs" },
+        action_candidate: null,
+      }],
+    }],
   ])("fails closed for a complete result with %s", (_label, override) => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.result",
@@ -340,6 +441,34 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
 
     expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it.each([
+    ["inherited result fields", Object.create({
+      status: "complete",
+      result_id: "group_time_interaction",
+      estimate: 0.9,
+      fit_method: "reml",
+      inference_method: "asymptotic_wald_z_v1",
+    })],
+    ["a symbol result field", Object.assign({
+      status: "complete",
+      result_id: "group_time_interaction",
+      estimate: 0.9,
+      fit_method: "reml",
+      inference_method: "asymptotic_wald_z_v1",
+    }, { [Symbol("forged")]: true })],
+  ])("fails closed for %s", (_label, payload) => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload,
+    })).toMatchObject({
       phase: "diagnostic",
       result: null,
       diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
@@ -367,6 +496,60 @@ describe("buildRepeatedMeasuresViewModel", () => {
         comparison_scope: "same_fixed_effects_ml",
         winner: null,
       },
+    });
+  });
+
+  it("fails closed when a full comparison target result id is inherited", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        target: Object.create({ result_id: "forged-result-id" }),
+        data_diff: {},
+        parameter_diff: {},
+        result_diff: {},
+        conclusion_diff: {},
+        validation_status: "pass",
+        integrity_findings: [],
+        logical_key: "compare:lmm-source-v1:lmm-child-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "1",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("fails closed when full comparison facts report failed validation", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        target: { result_id: "group_time_interaction" },
+        data_diff: {},
+        parameter_diff: {},
+        result_diff: {},
+        conclusion_diff: {},
+        validation_status: "fail",
+        integrity_findings: ["VALIDATION_NOT_COMPLETE"],
+        logical_key: "compare:lmm-source-v1:lmm-child-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "1",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
     });
   });
 

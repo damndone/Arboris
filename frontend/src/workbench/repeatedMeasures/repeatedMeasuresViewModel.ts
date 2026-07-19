@@ -24,17 +24,16 @@ export type RepeatedMeasuresRecoveryProposal = {
   required_confirmation: true;
 };
 
-export type TrajectorySeries = {
-  group: string;
-  time: number[];
+export type TrajectoryGroup = {
+  label: string;
   observed_mean: number[];
-  fitted_marginal_mean: number[];
+  fitted_mean: number[];
 };
 
 export type TrajectoryFigureContext = {
   chart_type: "lmm_group_trajectory";
   time: number[];
-  series: TrajectorySeries[];
+  groups: TrajectoryGroup[];
 };
 
 export type ComparisonFactLayers = {
@@ -105,6 +104,10 @@ function ownStringKeys(value: JsonRecord): string[] | null {
 
 function hasOwnKey(value: JsonRecord, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function hasRequiredOwnKeys(value: JsonRecord, required: readonly string[]): boolean {
+  return ownStringKeys(value) !== null && required.every((key) => hasOwnKey(value, key));
 }
 
 function hasExactKeys(value: JsonRecord, expected: readonly string[]): boolean {
@@ -218,6 +221,17 @@ function parseDiagnosticView(value: unknown): RepeatedMeasuresDiagnosticView | n
   };
 }
 
+function hasOnlySuccessfulDiagnostics(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  for (const diagnostic of value) {
+    const parsed = parseDiagnosticView(diagnostic);
+    if (parsed === null || parsed.status !== "complete" || parsed.severity === "error") {
+      return false;
+    }
+  }
+  return true;
+}
+
 function parseDiagnosticPayload(payload: JsonRecord): RepeatedMeasuresDiagnosticView[] | null {
   if (
     !hasAllowedKeys(payload, ["status", "diagnostics"], ["fixture_id"])
@@ -226,10 +240,13 @@ function parseDiagnosticPayload(payload: JsonRecord): RepeatedMeasuresDiagnostic
     || payload.diagnostics.length === 0
   ) return null;
 
-  const diagnostics = payload.diagnostics.map(parseDiagnosticView);
-  return diagnostics.every((diagnostic) => diagnostic !== null)
-    ? diagnostics as RepeatedMeasuresDiagnosticView[]
-    : null;
+  const diagnostics: RepeatedMeasuresDiagnosticView[] = [];
+  for (const value of payload.diagnostics) {
+    const diagnostic = parseDiagnosticView(value);
+    if (diagnostic === null) return null;
+    diagnostics.push(diagnostic);
+  }
+  return diagnostics;
 }
 
 function parseRecoveryPayload(payload: JsonRecord): RepeatedMeasuresRecoveryProposal | null {
@@ -320,14 +337,20 @@ function parseCompleteComparison(payload: JsonRecord): CompleteRepeatedMeasuresC
     || parameters === null
     || results === null
     || conclusion === null
+    || !hasRequiredOwnKeys(target, ["result_id"])
+    || ownStringKeys(data) === null
+    || ownStringKeys(parameters) === null
+    || ownStringKeys(results) === null
+    || ownStringKeys(conclusion) === null
     || !isNonEmptyString(target.result_id)
     || !isNonEmptyString(payload.source_run_id)
     || !isNonEmptyString(payload.child_run_id)
     || !isNonEmptyString(payload.logical_key)
-    || !isNonEmptyString(payload.validation_status)
+    || payload.validation_status !== "pass"
     || !isNonEmptyString(payload.strategy_version)
     || !isNonEmptyString(payload.schema_version)
     || !Array.isArray(payload.integrity_findings)
+    || payload.integrity_findings.length !== 0
   ) return null;
 
   return {
@@ -342,59 +365,68 @@ function parseCompleteComparison(payload: JsonRecord): CompleteRepeatedMeasuresC
 }
 
 function finiteNumberArray(value: unknown): number[] | null {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "number" && Number.isFinite(item))) {
-    return null;
+  if (!Array.isArray(value)) return null;
+  const values: number[] = [];
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isFinite(item)) return null;
+    values.push(item);
   }
-  return [...value];
+  return values;
 }
 
 function parseTrajectoryContext(value: unknown): TrajectoryFigureContext | null {
   const context = asRecord(value);
   if (
     context === null
-    || !hasExactKeys(context, ["chart_type", "time", "series"])
+    || !hasExactKeys(context, ["chart_type", "time", "groups"])
     || context.chart_type !== "lmm_group_trajectory"
   ) return null;
   const time = finiteNumberArray(context.time);
-  if (time === null || time.length === 0 || !Array.isArray(context.series) || context.series.length === 0) {
+  if (time === null || time.length === 0 || !Array.isArray(context.groups) || context.groups.length === 0) {
     return null;
   }
-  const series: TrajectorySeries[] = [];
-  for (const value of context.series) {
+  const groups: TrajectoryGroup[] = [];
+  for (const value of context.groups) {
     const entry = asRecord(value);
     if (
       entry === null
-      || !hasExactKeys(entry, ["group", "time", "observed_mean", "fitted_marginal_mean"])
-      || !isNonEmptyString(entry.group)
+      || !hasExactKeys(entry, ["label", "observed_mean", "fitted_mean"])
+      || !isNonEmptyString(entry.label)
     ) return null;
-    const entryTime = finiteNumberArray(entry.time);
     const observed = finiteNumberArray(entry.observed_mean);
-    const fitted = finiteNumberArray(entry.fitted_marginal_mean);
+    const fitted = finiteNumberArray(entry.fitted_mean);
     if (
-      entryTime === null
-      || observed === null
+      observed === null
       || fitted === null
-      || entryTime.length !== time.length
       || observed.length !== time.length
       || fitted.length !== time.length
-      || entryTime.some((item, index) => item !== time[index])
     ) return null;
-    series.push({ group: entry.group, time: entryTime, observed_mean: observed, fitted_marginal_mean: fitted });
+    groups.push({ label: entry.label, observed_mean: observed, fitted_mean: fitted });
   }
-  return { chart_type: "lmm_group_trajectory", time, series };
+  return { chart_type: "lmm_group_trajectory", time, groups };
 }
 
 function parseResult(payload: JsonRecord): RepeatedMeasuresResult | null {
+  const required = [
+    "status",
+    "result_id",
+    "estimate",
+    "fit_method",
+    "inference_method",
+  ];
   if (
-    payload.status !== "complete"
+    !hasRequiredOwnKeys(payload, required)
+    || payload.status !== "complete"
     || payload.result_id !== LOCKED_RESULT_ID
     || typeof payload.estimate !== "number"
     || !Number.isFinite(payload.estimate)
     || (payload.fit_method !== "reml" && payload.fit_method !== "ml")
     || payload.inference_method !== LOCKED_INFERENCE_METHOD
-    || ("result_identity" in payload && !isNonEmptyString(payload.result_identity))
+    || (hasOwnKey(payload, "converged") && payload.converged !== true)
+    || (hasOwnKey(payload, "diagnostics") && !hasOnlySuccessfulDiagnostics(payload.diagnostics))
+    || (hasOwnKey(payload, "result_identity") && !isNonEmptyString(payload.result_identity))
   ) return null;
-  const hasTrajectory = "figure_context" in payload;
+  const hasTrajectory = hasOwnKey(payload, "figure_context");
   const trajectory = hasTrajectory ? parseTrajectoryContext(payload.figure_context) : null;
   if (hasTrajectory && trajectory === null) return null;
   return {

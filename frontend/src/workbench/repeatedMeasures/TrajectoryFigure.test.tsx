@@ -10,18 +10,16 @@ describe("TrajectoryFigure", () => {
         context={{
           chart_type: "lmm_group_trajectory",
           time: [0, 1],
-          series: [
+          groups: [
             {
-              group: "control",
-              time: [0, 1],
+              label: "control",
               observed_mean: [10, 8],
-              fitted_marginal_mean: [10, 8.1],
+              fitted_mean: [10, 8.1],
             },
             {
-              group: "treated",
-              time: [0, 1],
+              label: "treated",
               observed_mean: [10, 3],
-              fitted_marginal_mean: [10, 3.2],
+              fitted_mean: [10, 3.2],
             },
           ],
         }}

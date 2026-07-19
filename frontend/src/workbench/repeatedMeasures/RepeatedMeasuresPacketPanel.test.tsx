@@ -167,11 +167,10 @@ describe("RepeatedMeasuresPacketPanel", () => {
             figure_context: {
               chart_type: "lmm_group_trajectory",
               time: [0, 1],
-              series: [{
-                group: "treated",
-                time: [0, 1],
+              groups: [{
+                label: "treated",
                 observed_mean: [10, 3],
-                fitted_marginal_mean: [10, 3.2],
+                fitted_mean: [10, 3.2],
               }],
             },
           },

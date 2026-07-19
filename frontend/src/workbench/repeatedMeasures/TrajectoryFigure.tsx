@@ -16,12 +16,12 @@ export function TrajectoryFigure(props: { context: TrajectoryFigureContext }) {
           </tr>
         </thead>
         <tbody>
-          {props.context.series.flatMap((series) => series.time.map((time, index) => (
-            <tr key={`${series.group}:${time}`}>
-              <td>{series.group}</td>
+          {props.context.groups.flatMap((group) => props.context.time.map((time, index) => (
+            <tr key={`${group.label}:${time}`}>
+              <td>{group.label}</td>
               <td>{time}</td>
-              <td>{series.observed_mean[index]}</td>
-              <td>{series.fitted_marginal_mean[index]}</td>
+              <td>{group.observed_mean[index]}</td>
+              <td>{group.fitted_mean[index]}</td>
             </tr>
           )))}
         </tbody>
