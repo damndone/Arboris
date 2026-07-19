@@ -4,28 +4,105 @@ from workbench.agent.recipes.repeated_measures import (
     build_repeated_measures_recipe,
     validate_recovery_patch,
 )
+from workbench.contracts.model.linear_mixed_effects import (
+    LMM_CONTRACT_VERSION,
+    LMM_MODEL_TYPE,
+    LmmModelInput,
+)
+from workbench.engine.registry import MODEL_REGISTRY, ModelHandler
+from workbench.model_options import ModelOptionsContract, bind_new_model_options
 
 
-def test_recovery_candidate_without_confirmation_is_rejected() -> None:
-    with pytest.raises(ValueError, match="confirmation"):
-        build_repeated_measures_recipe(
-            source={
-                "model_type": "linear_mixed_effects",
-                "model_options": {"random_slope": True},
-            },
-            diagnostics=[
-                {
-                    "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                    "status": "complete",
-                    "action_candidate": {
-                        "action_id": "lmm.simplify_random_effects_v1",
-                        "operation_id": "model.rerun",
-                        "patch": {"model_options": {"random_slope": False}},
-                        "required_confirmation": False,
-                    },
-                }
-            ],
-        )
+_NEUTRAL_EXPLANATION = "未提供可用于生成说明的受控 LMM 诊断。"
+
+
+def _register_lmm_owner(monkeypatch) -> None:
+    monkeypatch.setitem(
+        MODEL_REGISTRY,
+        LMM_MODEL_TYPE,
+        ModelHandler(
+            model_type=LMM_MODEL_TYPE,
+            model_id="linear_mixed_effects_1",
+            serves_y_types=("continuous",),
+            fit=lambda _ctx, _env: ("linear_mixed_effects_1", {}, None),
+            validate_model_options=lambda value: LmmModelInput.from_dict(value),
+            model_options_contract=ModelOptionsContract(
+                producer_version="linear_mixed_effects@1.0",
+                input_contract_version=LMM_CONTRACT_VERSION,
+            ),
+        ),
+    )
+
+
+def _bound_lmm_source(*, random_slope: bool = True) -> dict[str, object]:
+    bound = bind_new_model_options(
+        LMM_MODEL_TYPE,
+        {
+            "subject_id": "participant_id",
+            "time": "week",
+            "group": "arm",
+            "fit_method": "reml",
+            "random_slope": random_slope,
+        },
+    )
+    assert bound.binding is not None
+    return {
+        "model_type": LMM_MODEL_TYPE,
+        "model_options": bound.payload,
+        "model_options_binding": bound.binding.to_dict(),
+    }
+
+
+def _diagnostic(
+    *,
+    code: str,
+    severity: str,
+    status: str,
+    evidence: object,
+    action_candidate: object = None,
+) -> dict[str, object]:
+    return {
+        "code": code,
+        "severity": severity,
+        "status": status,
+        "evidence": evidence,
+        "action_candidate": action_candidate,
+    }
+
+
+def _recovery_diagnostic(
+    code: str = "LMM_RANDOM_SLOPE_NEAR_ZERO",
+) -> dict[str, object]:
+    return _diagnostic(
+        code=code,
+        severity="warning",
+        status="complete",
+        evidence={"slope_variance": 0.0},
+        action_candidate={
+            "action_id": "lmm.simplify_random_effects_v1",
+            "operation_id": "model.rerun",
+            "patch": {"model_options": {"random_slope": False}},
+            "required_confirmation": True,
+        },
+    )
+
+
+def test_recovery_candidate_without_confirmation_fails_closed(monkeypatch) -> None:
+    _register_lmm_owner(monkeypatch)
+    diagnostic = _recovery_diagnostic()
+    candidate = diagnostic["action_candidate"]
+    assert isinstance(candidate, dict)
+    candidate["required_confirmation"] = False
+
+    recipe = build_repeated_measures_recipe(
+        source=_bound_lmm_source(), diagnostics=[diagnostic]
+    )
+
+    assert recipe == {
+        "proposal": None,
+        "plan_diff": None,
+        "explanation": _NEUTRAL_EXPLANATION,
+    }
 
 
 @pytest.mark.parametrize(
@@ -40,67 +117,54 @@ def test_recovery_patch_cannot_change_any_other_model_fact(patch: object) -> Non
         validate_recovery_patch(patch)
 
 
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"model_options": {"random_slope": 0}},
+        {"model_options": {"random_slope": 0.0}},
+        {"model_options": {"random_slope": "false"}},
+        {"model_options": {"random_slope": False, "fit_method": "reml"}},
+    ],
+)
+def test_recovery_patch_requires_the_exact_boolean_false_literal(patch: object) -> None:
+    with pytest.raises(ValueError, match="unsupported LMM recovery patch"):
+        validate_recovery_patch(patch)
+
+
 def test_recovery_is_not_offered_for_a_non_lmm_source() -> None:
     recipe = build_repeated_measures_recipe(
         source={"model_type": "ordinary_least_squares", "model_options": {}},
-        diagnostics=[
-            {
-                "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                },
-            }
-        ],
+        diagnostics=[_recovery_diagnostic()],
     )
 
-    assert recipe["proposal"] is None
+    assert recipe == {
+        "proposal": None,
+        "plan_diff": None,
+        "explanation": _NEUTRAL_EXPLANATION,
+    }
 
 
-def test_recovery_requires_a_source_random_slope_to_remove() -> None:
+def test_recovery_requires_a_source_random_slope_to_remove(monkeypatch) -> None:
+    _register_lmm_owner(monkeypatch)
+
     recipe = build_repeated_measures_recipe(
-        source={
-            "model_type": "linear_mixed_effects",
-            "model_options": {"random_slope": False},
-        },
-        diagnostics=[
-            {
-                "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                },
-            }
-        ],
+        source=_bound_lmm_source(random_slope=False),
+        diagnostics=[_recovery_diagnostic()],
     )
 
-    assert recipe["proposal"] is None
+    assert recipe == {
+        "proposal": None,
+        "plan_diff": None,
+        "explanation": _NEUTRAL_EXPLANATION,
+    }
 
 
-def test_singular_random_effects_can_offer_the_locked_recovery() -> None:
+def test_singular_random_effects_can_offer_the_locked_recovery(monkeypatch) -> None:
+    _register_lmm_owner(monkeypatch)
+
     recipe = build_repeated_measures_recipe(
-        source={
-            "model_type": "linear_mixed_effects",
-            "model_options": {"random_slope": True},
-        },
-        diagnostics=[
-            {
-                "code": "LMM_RANDOM_EFFECTS_SINGULAR",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                },
-            }
-        ],
+        source=_bound_lmm_source(),
+        diagnostics=[_recovery_diagnostic("LMM_RANDOM_EFFECTS_SINGULAR")],
     )
 
     assert recipe["proposal"] == {
@@ -111,81 +175,63 @@ def test_singular_random_effects_can_offer_the_locked_recovery() -> None:
 
 
 @pytest.mark.parametrize(
-    ("code", "status"),
+    ("code", "severity", "status"),
     [
-        ("LMM_SUBJECT_ID_MISSING", "blocked"),
-        ("UNRECOGNIZED_LMM_DIAGNOSTIC", "complete"),
+        ("LMM_SUBJECT_ID_MISSING", "error", "blocked"),
+        ("UNRECOGNIZED_LMM_DIAGNOSTIC", "warning", "complete"),
     ],
 )
 def test_blocking_or_unknown_diagnostic_suppresses_recovery(
-    code: str, status: str
+    monkeypatch, code: str, severity: str, status: str
 ) -> None:
+    _register_lmm_owner(monkeypatch)
+
     recipe = build_repeated_measures_recipe(
-        source={
-            "model_type": "linear_mixed_effects",
-            "model_options": {"random_slope": True},
-        },
+        source=_bound_lmm_source(),
         diagnostics=[
-            {"code": code, "status": status, "action_candidate": None},
-            {
-                "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                },
-            },
+            _diagnostic(
+                code=code,
+                severity=severity,
+                status=status,
+                evidence={},
+            ),
+            _recovery_diagnostic(),
         ],
     )
 
     assert recipe["proposal"] is None
 
 
-def test_non_string_diagnostic_code_fails_closed_without_a_proposal() -> None:
+def test_non_string_diagnostic_code_fails_closed_without_a_proposal(monkeypatch) -> None:
+    _register_lmm_owner(monkeypatch)
+    invalid = _recovery_diagnostic()
+    invalid["code"] = ["LMM_RANDOM_SLOPE_NEAR_ZERO"]
+
     recipe = build_repeated_measures_recipe(
-        source={
-            "model_type": "linear_mixed_effects",
-            "model_options": {"random_slope": True},
-        },
-        diagnostics=[
-            {"code": ["LMM_RANDOM_SLOPE_NEAR_ZERO"], "status": "complete"},
-            {
-                "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                },
-            },
-        ],
+        source=_bound_lmm_source(),
+        diagnostics=[invalid, _recovery_diagnostic()],
     )
 
-    assert recipe["proposal"] is None
+    assert recipe == {
+        "proposal": None,
+        "plan_diff": None,
+        "explanation": _NEUTRAL_EXPLANATION,
+    }
 
 
-def test_recovery_candidate_with_an_unlocked_field_is_rejected() -> None:
+def test_recovery_candidate_with_an_unlocked_field_is_rejected(monkeypatch) -> None:
+    _register_lmm_owner(monkeypatch)
+    diagnostic = _recovery_diagnostic()
+    candidate = diagnostic["action_candidate"]
+    assert isinstance(candidate, dict)
+    candidate["auto_execute"] = True
+
     recipe = build_repeated_measures_recipe(
-        source={
-            "model_type": "linear_mixed_effects",
-            "model_options": {"random_slope": True},
-        },
-        diagnostics=[
-            {
-                "code": "LMM_RANDOM_SLOPE_NEAR_ZERO",
-                "status": "complete",
-                "action_candidate": {
-                    "action_id": "lmm.simplify_random_effects_v1",
-                    "operation_id": "model.rerun",
-                    "patch": {"model_options": {"random_slope": False}},
-                    "required_confirmation": True,
-                    "auto_execute": True,
-                },
-            }
-        ],
+        source=_bound_lmm_source(), diagnostics=[diagnostic]
     )
 
-    assert recipe["proposal"] is None
+    assert recipe == {
+        "proposal": None,
+        "plan_diff": None,
+        "explanation": _NEUTRAL_EXPLANATION,
+    }
