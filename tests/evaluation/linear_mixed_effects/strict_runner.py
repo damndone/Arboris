@@ -232,8 +232,13 @@ def _install_in_process_guards() -> None:
     os.system = blocked_process  # type: ignore[assignment]
     os.popen = blocked_process  # type: ignore[assignment]
     for name in (
+        "fork",
+        "forkpty",
         "posix_spawn",
         "posix_spawnp",
+        "setpgid",
+        "setpgrp",
+        "setsid",
         "spawnl",
         "spawnle",
         "spawnlp",

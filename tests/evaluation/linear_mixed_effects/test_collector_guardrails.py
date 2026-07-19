@@ -4,6 +4,8 @@ import importlib.util
 import hashlib
 import json
 import os
+import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -93,6 +95,64 @@ def _candidate_repo(tmp_path: Path) -> tuple[Path, str]:
     fixture.write_text("participant_id,score\nP1,1\n", encoding="utf-8")
     (root / "README.md").write_text("candidate\n", encoding="utf-8")
     return root, _commit(root, "C1 lock")
+
+
+def _run_strict_subprocess_in_isolated_python(
+    *,
+    child_source: str,
+    tmp_path: Path,
+    child_pid_path: Path,
+) -> subprocess.CompletedProcess[str]:
+    """Exercise parent cleanup under an outer watchdog without hanging pytest."""
+
+    runner_source = "\n".join(
+        (
+            "import importlib.util",
+            "import json",
+            "import os",
+            "import pathlib",
+            "import sys",
+            "spec = importlib.util.spec_from_file_location('collector', os.environ['COLLECTOR_PATH'])",
+            "module = importlib.util.module_from_spec(spec)",
+            "sys.modules[spec.name] = module",
+            "spec.loader.exec_module(module)",
+            "module.STRICT_SUBPROCESS_WALL_SECONDS = 0.1",
+            "module.STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS = 0.1",
+            "result = module._run_strict_subprocess(",
+            "    [sys.executable, '-c', os.environ['STRICT_CHILD_SOURCE']],",
+            "    cwd=pathlib.Path(os.environ['STRICT_WORKDIR']),",
+            "    env={",
+            "        'ESCAPED_CHILD_PID_PATH': os.environ['ESCAPED_CHILD_PID_PATH'],",
+            "        'PYTHONUNBUFFERED': '1',",
+            "    },",
+            ")",
+            "print(json.dumps({'returncode': result.returncode, 'capture_error_code': result.capture_error_code}))",
+        )
+    )
+    return subprocess.run(
+        [sys.executable, "-c", runner_source],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=3,
+        env={
+            "PATH": os.defpath,
+            "COLLECTOR_PATH": str(COLLECTOR_PATH),
+            "ESCAPED_CHILD_PID_PATH": str(child_pid_path),
+            "PYTHONUNBUFFERED": "1",
+            "STRICT_CHILD_SOURCE": child_source,
+            "STRICT_WORKDIR": str(tmp_path),
+        },
+    )
+
+
+def _kill_test_child_if_present(pid_path: Path) -> None:
+    if not pid_path.is_file():
+        return
+    try:
+        os.kill(int(pid_path.read_text(encoding="utf-8")), signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _sha256_text(value: str) -> str:
@@ -530,6 +590,64 @@ def test_candidate_preflight_uses_hermetic_git_and_detects_fsmonitor_hidden_chan
     assert "candidate-git-hook-sentinel" not in json.dumps(records)
 
 
+def test_candidate_preflight_pins_git_worktree_to_the_supplied_directory(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    alternate_worktree = tmp_path / "alternate-worktree"
+    shutil.copytree(root, alternate_worktree, ignore=shutil.ignore_patterns(".git"))
+    _git(root, "config", "core.worktree", str(alternate_worktree))
+    feature.write_text("FEATURE = False\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="dirty"):
+        collector._resolve_candidate(root, candidate, [])
+
+
+def test_candidate_preflight_pins_a_gitdir_file_worktree_to_the_supplied_directory(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    primary, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = (
+        primary
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "feature.py"
+    )
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(primary, "candidate feature")
+    linked_worktree = tmp_path / "linked-worktree"
+    _git(primary, "worktree", "add", "--detach", str(linked_worktree), candidate)
+    assert (linked_worktree / ".git").is_file()
+    alternate_worktree = tmp_path / "alternate-worktree"
+    shutil.copytree(linked_worktree, alternate_worktree, ignore=shutil.ignore_patterns(".git"))
+    _git(linked_worktree, "config", "core.worktree", str(alternate_worktree))
+    linked_feature = (
+        linked_worktree
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "feature.py"
+    )
+    linked_feature.write_text("FEATURE = False\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="dirty"):
+        collector._resolve_candidate(linked_worktree, candidate, [])
+
+
 def test_git_audit_discards_raw_stdout_and_stderr(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -565,6 +683,46 @@ def test_git_audit_discards_raw_stdout_and_stderr(
     assert "OPENAI_API_KEY" not in environment
     assert "GIT_DIR" not in environment
     assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert f"--work-tree={tmp_path.resolve()}" in observed["command"]
+
+
+def test_failed_manifest_uses_a_static_error_when_git_paths_are_candidate_controlled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    sentinel = "RAW_GIT_AUDIT_SENTINEL_NOT_FOR_MANIFEST"
+    (root / sentinel).write_text("candidate-controlled path\n", encoding="utf-8")
+    candidate = _commit(root, "candidate adds a forbidden path")
+    output = tmp_path / "failed-evidence.json"
+
+    monkeypatch.setattr(
+        collector,
+        "_preflight_evaluator",
+        lambda *_args, **_kwargs: {"evaluator_commit": "e" * 40},
+    )
+
+    assert collector.main(
+        [
+            "--candidate",
+            candidate,
+            "--candidate-worktree",
+            str(root),
+            "--output",
+            str(output),
+        ]
+    ) == 1
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["error"] == "EVIDENCE_COLLECTION_REJECTED"
+    assert sentinel not in output.read_text(encoding="utf-8")
+    artifact_root = collector._evidence_artifact_root(output)
+    assert all(
+        sentinel.encode("utf-8") not in path.read_bytes()
+        for path in artifact_root.rglob("*")
+        if path.is_file()
+    )
 
 
 def test_candidate_preflight_rejects_a_protected_fixture_change(tmp_path: Path) -> None:
@@ -700,10 +858,7 @@ def test_collector_runs_the_strict_subprocess_before_performance(
     assert records[0]["exit_code"] == 0
     assert (artifact_root / "strict-runner.output.json").is_file()
     metadata = json.loads((artifact_root / "strict-runner.output.json").read_text())
-    assert metadata["capture_policy"] == (
-        "raw strict-runner stdout and stderr are discarded; binary hashes cover complete "
-        "OS-level streams"
-    )
+    assert metadata["capture_policy"] == collector.COLLECTOR_BINARY_STREAM_CAPTURE_POLICY
     assert metadata["stdout_sha256"] == hashlib.sha256(
         b"simulated-parent-stream-secret"
     ).hexdigest()
@@ -732,8 +887,65 @@ def test_bounded_strict_subprocess_discards_invalid_bytes_and_stops_overflow(
 
     assert result.output_limit_exceeded is True
     assert result.stdout.hard_limit_exceeded is True
-    assert result.stdout.sha256 == hashlib.sha256(raw_output).hexdigest()
-    assert result.stdout.reported_bytes == len(raw_output)
+    assert result.stdout.sha256 == hashlib.sha256(raw_output[:16]).hexdigest()
+    assert result.stdout.reported_bytes == 16
+
+
+@pytest.mark.skipif(os.name != "posix", reason="escaped-session regression requires POSIX fork")
+def test_strict_subprocess_fails_closed_without_hanging_when_a_descendant_escapes_its_session(
+    tmp_path: Path,
+) -> None:
+    pid_path = tmp_path / "escaped-child.pid"
+    child_source = "\n".join(
+        (
+            "import os",
+            "import pathlib",
+            "import time",
+            "child = os.fork()",
+            "if child:",
+            "    os._exit(0)",
+            "os.setsid()",
+            "pathlib.Path(os.environ['ESCAPED_CHILD_PID_PATH']).write_text(str(os.getpid()), encoding='utf-8')",
+            "time.sleep(60)",
+        )
+    )
+
+    try:
+        completed = _run_strict_subprocess_in_isolated_python(
+            child_source=child_source,
+            tmp_path=tmp_path,
+            child_pid_path=pid_path,
+        )
+    finally:
+        _kill_test_child_if_present(pid_path)
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["capture_error_code"] == "PIPE_DRAIN_TIMEOUT"
+
+
+def test_strict_subprocess_fails_closed_at_its_wall_clock_deadline(tmp_path: Path) -> None:
+    pid_path = tmp_path / "silent-child.pid"
+    child_source = "\n".join(
+        (
+            "import os",
+            "import pathlib",
+            "import time",
+            "pathlib.Path(os.environ['ESCAPED_CHILD_PID_PATH']).write_text(str(os.getpid()), encoding='utf-8')",
+            "time.sleep(60)",
+        )
+    )
+
+    try:
+        completed = _run_strict_subprocess_in_isolated_python(
+            child_source=child_source,
+            tmp_path=tmp_path,
+            child_pid_path=pid_path,
+        )
+    finally:
+        _kill_test_child_if_present(pid_path)
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["capture_error_code"] == "WALL_CLOCK_TIMEOUT"
 
 
 def test_bounded_strict_subprocess_uses_an_isolated_binary_process_session(

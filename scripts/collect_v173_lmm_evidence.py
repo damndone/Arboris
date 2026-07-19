@@ -16,19 +16,18 @@ import json
 import math
 import os
 import re
+import selectors
 import shlex
 import signal
 import statistics
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO
 
 
 CONTRACT_LOCK_COMMIT = "0251f0a30d984bdbb2cfab404e6c646deab60cae"
@@ -44,14 +43,15 @@ COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_collector_output_metadata_v
 STRICT_JUNIT_SUMMARY_SCHEMA_VERSION = "v173_lmm_strict_junit_summary_v1"
 MAX_REPORTED_STREAM_BYTES = 65536
 MAX_STRICT_SUBPROCESS_STREAM_BYTES = 1024 * 1024
+STRICT_SUBPROCESS_WALL_SECONDS = 120.0
 STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS = 2.0
 RAW_STREAM_CAPTURE_POLICY = (
     "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
     "redirected text streams only"
 )
 COLLECTOR_BINARY_STREAM_CAPTURE_POLICY = (
-    "raw strict-runner stdout and stderr are discarded; binary hashes cover complete "
-    "OS-level streams"
+    "raw strict-runner stdout and stderr are discarded; binary hashes cover captured "
+    "OS-level bytes, and a non-null capture_error_code means completeness is not established"
 )
 GIT_OUTPUT_CAPTURE_POLICY = (
     "raw Git stdout and stderr are discarded; hashes cover complete streams"
@@ -246,7 +246,7 @@ class _BinaryStreamSummary:
 
 @dataclass(frozen=True)
 class _StrictSubprocessResult:
-    returncode: int
+    returncode: int | None
     stdout: _BinaryStreamSummary
     stderr: _BinaryStreamSummary
     capture_error_code: str | None
@@ -271,9 +271,13 @@ class _DigestingBinaryCapture:
         self._total_bytes += len(value)
         remaining = MAX_REPORTED_STREAM_BYTES - self._reported_bytes
         self._reported_bytes += min(len(value), max(remaining, 0))
-        if self._total_bytes > self._hard_limit_bytes:
+        if self._total_bytes >= self._hard_limit_bytes:
             self._hard_limit_exceeded = True
         return self._hard_limit_exceeded
+
+    @property
+    def remaining_capacity(self) -> int:
+        return max(self._hard_limit_bytes - self._total_bytes, 0)
 
     def summary(self) -> _BinaryStreamSummary:
         return _BinaryStreamSummary(
@@ -405,7 +409,7 @@ def _strict_subprocess_stream_metadata(
 def _run_strict_subprocess(
     command: list[str], *, cwd: Path, env: dict[str, str]
 ) -> _StrictSubprocessResult:
-    """Drain both child pipes as bytes and terminate a stream-flooding child."""
+    """Run strict evaluation with bounded stream capture and fail-closed cleanup."""
 
     try:
         process = subprocess.Popen(
@@ -430,23 +434,28 @@ def _run_strict_subprocess(
     stderr_capture = _DigestingBinaryCapture(
         hard_limit_bytes=MAX_STRICT_SUBPROCESS_STREAM_BYTES
     )
-    overflow = threading.Event()
-    drain_errors: list[OSError | ValueError] = []
+    capture_error_code: str | None = None
+    selector = selectors.DefaultSelector()
+    streams: dict[int, tuple[object, _DigestingBinaryCapture]] = {
+        process.stdout.fileno(): (process.stdout, stdout_capture),
+        process.stderr.fileno(): (process.stderr, stderr_capture),
+    }
+    for file_descriptor, (stream, _capture) in streams.items():
+        selector.register(file_descriptor, selectors.EVENT_READ, stream)
 
-    def drain(stream: BinaryIO, capture: _DigestingBinaryCapture) -> None:
-        try:
-            while True:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    return
-                if capture.write(chunk):
-                    overflow.set()
-        except (OSError, ValueError) as error:
-            drain_errors.append(error)
-        finally:
-            stream.close()
+    def close_streams() -> None:
+        for file_descriptor, (stream, _capture) in tuple(streams.items()):
+            try:
+                selector.unregister(file_descriptor)
+            except (KeyError, ValueError):
+                pass
+            try:
+                stream.close()
+            except OSError:
+                pass
+            del streams[file_descriptor]
 
-    def signal_process_group(signal_number: int) -> None:
+    def signal_process_group(signal_number: int) -> bool:
         try:
             if os.name == "posix":
                 os.killpg(process.pid, signal_number)
@@ -455,40 +464,135 @@ def _run_strict_subprocess(
             else:
                 process.kill()
         except ProcessLookupError:
-            return
-        except PermissionError as error:
-            if process.poll() is not None:
-                return
-            raise EvidenceCollectionError(
-                "strict candidate process group could not be signaled safely"
-            ) from error
+            return True
+        except PermissionError:
+            return process.poll() is not None
+        return True
 
-    threads = [
-        threading.Thread(target=drain, args=(process.stdout, stdout_capture), daemon=True),
-        threading.Thread(target=drain, args=(process.stderr, stderr_capture), daemon=True),
-    ]
-    for thread in threads:
-        thread.start()
-    while process.poll() is None:
-        if overflow.wait(timeout=0.01):
-            signal_process_group(signal.SIGTERM)
+    started = time.monotonic()
+    wall_deadline = started + STRICT_SUBPROCESS_WALL_SECONDS
+    leader_drain_deadline: float | None = None
+    termination_deadline: float | None = None
+    kill_deadline: float | None = None
+    output_limit_reached = False
+
+    def request_termination(now: float, error_code: str | None = None) -> None:
+        nonlocal capture_error_code, termination_deadline
+        if error_code is not None and capture_error_code is None:
+            capture_error_code = error_code
+        if termination_deadline is not None:
+            return
+        if not signal_process_group(signal.SIGTERM) and capture_error_code is None:
+            capture_error_code = "PROCESS_SIGNAL_ERROR"
+        termination_deadline = now + STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS
+
+    def request_kill(now: float) -> None:
+        nonlocal capture_error_code, kill_deadline
+        if kill_deadline is not None:
+            return
+        if not signal_process_group(signal.SIGKILL) and capture_error_code is None:
+            capture_error_code = "PROCESS_SIGNAL_ERROR"
+        kill_deadline = now + STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS
+
+    try:
+        while True:
+            now = time.monotonic()
+            process_exited = process.poll() is not None
+
+            if not process_exited and now >= wall_deadline:
+                request_termination(now, "WALL_CLOCK_TIMEOUT")
+            if output_limit_reached:
+                request_termination(now)
+                close_streams()
+            if capture_error_code is not None and capture_error_code not in {
+                "WALL_CLOCK_TIMEOUT",
+                "PROCESS_TERMINATION_TIMEOUT",
+            }:
+                request_termination(now)
+                close_streams()
+            if process_exited and streams and leader_drain_deadline is None:
+                leader_drain_deadline = now + STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS
+
+            if (
+                leader_drain_deadline is not None
+                and now >= leader_drain_deadline
+                and streams
+            ):
+                if kill_deadline is None:
+                    request_kill(now)
+                elif now >= kill_deadline:
+                    if capture_error_code is None:
+                        capture_error_code = "PIPE_DRAIN_TIMEOUT"
+                    close_streams()
+            if termination_deadline is not None and now >= termination_deadline:
+                request_kill(now)
+            if kill_deadline is not None and now >= kill_deadline:
+                if process.poll() is None and capture_error_code is None:
+                    capture_error_code = "PROCESS_TERMINATION_TIMEOUT"
+                if streams:
+                    if capture_error_code is None:
+                        capture_error_code = "PIPE_DRAIN_TIMEOUT"
+                    close_streams()
+
+            if process.poll() is not None and not streams:
+                break
+            if kill_deadline is not None and now >= kill_deadline:
+                break
+
+            deadlines = [wall_deadline]
+            if leader_drain_deadline is not None:
+                deadlines.append(leader_drain_deadline)
+            if termination_deadline is not None:
+                deadlines.append(termination_deadline)
+            if kill_deadline is not None:
+                deadlines.append(kill_deadline)
+            timeout = min(0.05, max(0.0, min(deadlines) - now))
+            if not streams:
+                time.sleep(timeout)
+                continue
             try:
-                process.wait(timeout=STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                signal_process_group(signal.SIGKILL)
-            break
-    returncode = process.wait()
-    for thread in threads:
-        thread.join(timeout=STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
-    if any(thread.is_alive() for thread in threads):
-        signal_process_group(signal.SIGKILL)
-        for thread in threads:
-            thread.join()
+                events = selector.select(timeout)
+            except OSError:
+                capture_error_code = capture_error_code or "PIPE_DRAIN_ERROR"
+                continue
+            for key, _events in events:
+                file_descriptor = key.fd
+                stream_entry = streams.get(file_descriptor)
+                if stream_entry is None:
+                    continue
+                stream, capture = stream_entry
+                if capture.remaining_capacity == 0:
+                    output_limit_reached = True
+                    continue
+                try:
+                    chunk = os.read(file_descriptor, min(64 * 1024, capture.remaining_capacity))
+                except (BlockingIOError, InterruptedError):
+                    continue
+                except OSError:
+                    capture_error_code = capture_error_code or "PIPE_DRAIN_ERROR"
+                    continue
+                if not chunk:
+                    try:
+                        selector.unregister(file_descriptor)
+                    except (KeyError, ValueError):
+                        pass
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+                    del streams[file_descriptor]
+                    continue
+                if capture.write(chunk):
+                    output_limit_reached = True
+    finally:
+        close_streams()
+        selector.close()
+
     return _StrictSubprocessResult(
-        returncode=returncode,
+        returncode=process.poll(),
         stdout=stdout_capture.summary(),
         stderr=stderr_capture.summary(),
-        capture_error_code="PIPE_DRAIN_ERROR" if drain_errors else None,
+        capture_error_code=capture_error_code,
     )
 
 
@@ -561,6 +665,7 @@ def _run_git(
     artifact_root: Path | None = None,
     require_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    resolved_root = root.resolve()
     command = [
         "git",
         "--no-pager",
@@ -573,7 +678,8 @@ def _run_git(
         "-c",
         "core.hooksPath=/dev/null",
         "-C",
-        str(root),
+        str(resolved_root),
+        f"--work-tree={resolved_root}",
         *arguments,
     ]
     started = time.perf_counter()
@@ -690,6 +796,17 @@ def _resolve_candidate(
         raise EvidenceCollectionError(f"candidate worktree does not exist: {root}")
     if not (root / ".git").exists():
         raise EvidenceCollectionError(f"candidate worktree is not a Git checkout: {root}")
+    supplied_worktree = root.resolve()
+    git_worktree = Path(
+        _git_output(
+            root,
+            ["rev-parse", "--show-toplevel"],
+            command_records,
+            artifact_root=artifact_root,
+        )
+    ).resolve()
+    if git_worktree != supplied_worktree:
+        raise EvidenceCollectionError("candidate Git worktree does not match the supplied directory")
 
     resolved_command = _run_git(
         root,
@@ -1626,7 +1743,7 @@ def main(argv: list[str] | None = None) -> int:
     except EvidenceCollectionError as error:
         failure = build_failure_payload(
             requested_candidate=args.candidate,
-            error=str(error),
+            error="EVIDENCE_COLLECTION_REJECTED",
             duration_seconds=time.perf_counter() - started,
             command_records=command_records,
             candidate_mode=args.candidate_mode,
