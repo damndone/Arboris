@@ -1,6 +1,8 @@
 # WO-B — Linear Mixed Effects Model Pack completion report
 
-Status: local remediation candidate complete; not integrated, evaluated independently, or released.
+Status: `BLOCKED_PENDING_INTEGRATION_CONTRACT`. The package-local versioned
+artifact remediation and strict negative-covariance closure are verified, but
+this Lane is not approved, not mechanically integrable, and not released.
 
 ## Provenance and boundaries
 
@@ -12,11 +14,13 @@ Status: local remediation candidate complete; not integrated, evaluated independ
 - Initial implementation candidate: `211f3addf42034015b06d2e07bf89fad344f99e3`
 - Envelope/fail-closed remediation code candidate:
   `e77bc3c0bee1b24af7a1c7f86990baa3102ca008`
+- Strict negative-covariance closure code candidate:
+  `3e5b9c9d66efc50df074b5548fdbc3940dbd3203`
 
-The candidate changes only the owned pack directory and the three owned model
-tests. This report is the Work Order's sole metadata exception. It changes no
-public LMM contract, fixture, central registration, Agent/UI code, gate script,
-or protected Honest-DiD test.
+The code candidates change only the owned pack directory and the three owned
+model tests. This report is the Work Order's sole metadata exception. It
+changes no public LMM contract, fixture, central registration, Agent/UI code,
+gate script, or protected Honest-DiD test.
 
 ## Candidate contents
 
@@ -54,7 +58,8 @@ dict:
 
 The declaration carries the locked `linear_mixed_effects@1.0` / contract `1.0`
 owner facts, but it is intentionally not added to the central builtin loader.
-That is an Integration-owned mechanical step.
+Registration is **not** a mechanical Integration step: the required
+cross-Lane packet adapter has not yet been specified or approved.
 
 ## RED → GREEN evidence
 
@@ -76,13 +81,22 @@ That is an Integration-owned mechanical step.
    invalid group/repeated-observation/random-slope designs, absent trajectory
    series time, and a fake non-converged fit with no `conf_int`. Each was made
    green with the smallest pack-local implementation change.
-4. The remediation was also test-first. RED evidence was: a real known-truth
+4. The envelope remediation was also test-first. RED evidence was: a real known-truth
    runner result rejected by `PacketEnvelope.from_dict()` as a bare dict;
    one-row, NaN, asymmetric, or non-finite-residual random-slope diagnostics
    failed to use the locked terminal path; and missing-subject/invalid-slope
    errors did not create a diagnostic artifact. Their corresponding pack-local
    assertions passed after the remediation.
-5. Final remediation verification command:
+5. The strict-negative-covariance closure was test-first. RED evidence was
+   `[[1.0, 0.0], [0.0, -1e-9]]` being accepted under the former tolerance as a
+   near-zero recovery candidate. GREEN requires every negative diagonal
+   variance or negative covariance eigenvalue to fail before the near-zero
+   threshold is considered. A direct diagnostics assertion and a runner probe
+   that persists the result and diagnostic assert `failed/error`, no action
+   candidate, empty coefficients, no figure context, and no recovery artifact.
+   Existing zero and positive near-zero covariance recovery assertions remain
+   green.
+6. Final locked verification command:
 
    ```bash
    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest -q \
@@ -97,13 +111,13 @@ That is an Integration-owned mechanical step.
      tests/test_lmm_extension_seams.py
    ```
 
-   Result: `125 passed, 7 warnings in 12.77s`. The feasibility spike's direct
+   Result: `127 passed, 7 warnings in 12.60s`. The feasibility spike's direct
    statsmodels calls account for the LMM covariance/boundary warnings; the
    extension seam also emits existing FastAPI deprecation warnings. The pack
    suppresses estimator warnings from its caller, but does not parse warning
    text: its diagnostic facts are determined from explicit convergence and
    finite/symmetric/shape-checked covariance and residual facts.
-6. `git diff --cached --check` was silent before the remediation code commit. A staged
+7. `git diff --cached --check` was silent before the remediation code commit. A staged
    protected-file audit over all read-only and forbidden paths was also silent.
 
 ## Statistical and runtime observations
@@ -122,6 +136,10 @@ That is an Integration-owned mechanical step.
   envelopes.
 - Non-convergence emits `LMM_CONVERGENCE_FAILED`, `failed/error`, no recovery
   candidate, no coefficient claim, and no trajectory context.
+- The new persisted negative-variance probe uses
+  `[[1.0, 0.0], [0.0, -1e-9]]` and emits that same terminal outcome before any
+  coefficient, figure, or recovery construction. Exact zero and nonnegative
+  near-zero matrices remain eligible for the existing singular/recovery path.
 
 ## Protected-file audit
 
@@ -138,7 +156,43 @@ The candidate has no diff in:
 No provider, API key, browser calculation, push, PR, merge, tag, or release
 action was used.
 
-## Known limits and integration risks
+## Integration contract blocker
+
+The attempted P1-1 lifecycle probe established a cross-Lane public boundary:
+
+- `EstimationStage` writes its returned primary value into `model_results`.
+- `http/runs_routes.py` returns `model_results` over HTTP.
+- `agent/context_tools.py` and `analysis_loop/resolver.py` consume
+  `read_model_results`.
+
+Therefore `model_results` is not a pack-private legacy sink. Returning a bare
+`legacy_primary_payload` there would make an unversioned value available to
+HTTP, Agent, and analysis-loop/Compare consumers; returning the C1 envelope
+there is dropped by the legacy reader because it lacks top-level
+`coefficients`. C1 defines versioned LMM packets but no versioned adapter for
+this public transport. The tentative bare-payload workaround and its test were
+discarded; no central, contract, or fixture change is present in this Lane.
+
+Integration must make and implement a separately reviewed decision before this
+pack can be enabled:
+
+1. Define the public source of truth and an end-to-end versioned adapter for
+   the EstimationStage → model-results → HTTP/Agent/analysis-loop path (or a
+   distinct public versioned artifact/reader); it may not merely relabel
+   `model_results` as internal.
+2. Specify any legacy compatibility representation, ownership, and atomic
+   correspondence to the packet, including how old readers avoid dropping
+   coefficients without becoming public consumers of an unversioned payload.
+3. Add central contract and integration acceptance tests for that chosen
+   transport, then wire the builtin loader/capability registry only after the
+   adapter is approved.
+
+Until those decisions exist, the package's result, diagnostic, and recovery
+files are versioned pack artifacts with local evidence only. They do not make
+the Lane ready for Agent, UI, Compare, lifecycle, independent evaluation, or
+release approval.
+
+## Known package limits
 
 - Scope is intentionally limited to a continuous outcome, numeric continuous
   time, exactly two retained groups, random intercept plus optional random time
@@ -152,21 +206,20 @@ action was used.
   deterministic diagnostics function.
 - A standalone `linear_mixed_effects.figure` public contract is intentionally
   absent from C1. The data-only trajectory remains in the versioned result
-  payload; Integration must not invent a second figure contract while wiring
-  lifecycle ownership.
-- Integration must handle the versioned result packet as the cross-Lane value;
-  the pack-private normalization dict is never persisted or exposed as a UI or
-  Agent contract.
-- Integration must mechanically add the declaration to the builtin loader and
-  capability registry, then connect only the approved adapters. It must not
-  change this pack's formula, result mapping, diagnostics, or fixtures.
-- The candidate has lane-local and immutable-contract evidence, but still needs
-  WO-D's independent evaluation against the exact integration SHA.
+  payload; Integration must not invent a second figure contract while defining
+  the missing lifecycle adapter.
+- The package has lane-local and immutable-contract evidence, but is blocked
+  before WO-D evaluation until an Integration contract and exact integration
+  SHA exist.
 
 ## Rollback
 
-Before Integration, omit this declaration from the central builtin list. After
-Integration, revert remediation `e77bc3c0bee1b24af7a1c7f86990baa3102ca008`,
-then the initial candidate `211f3addf42034015b06d2e07bf89fad344f99e3` (and
-their report receipts) as normal Git reverts; no data migration or external
-resource cleanup is required.
+Before Integration, omit this declaration from the central builtin list and do
+not introduce a Lane-local workaround for `model_results`. The standalone
+negative-covariance closure can be rolled back independently by reverting
+`3e5b9c9d66efc50df074b5548fdbc3940dbd3203`; removing the package candidates entirely then reverts
+`e77bc3c0bee1b24af7a1c7f86990baa3102ca008` and
+`211f3addf42034015b06d2e07bf89fad344f99e3` (plus their report receipts) in
+reverse order. Any future Integration adapter must be a separate, reversible
+commit and be rolled back before these package commits. No data migration or
+external resource cleanup is required.
