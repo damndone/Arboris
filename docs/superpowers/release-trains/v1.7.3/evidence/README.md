@@ -1,21 +1,28 @@
 # v1.7.3 LMM 独立评估证据规则
 
-此目录只保存针对真实、干净候选提交生成的不可变证据；当前没有候选时，不得提交占位 manifest。性能记录由 `scripts/collect_v173_lmm_evidence.py` 在明确 `--candidate`、候选 worktree 和新 `--output` 路径下生成。
+此目录只保存针对真实、干净 candidate commit 生成的不可变证据；当前没有 supplied candidate，禁止提交占位 manifest。性能记录由 `scripts/collect_v173_lmm_evidence.py` 在明确 `--candidate`、candidate worktree 和新的 worktree 外 `--output` 路径下生成。
 
-收集器只接受小写 40 位完整 SHA，且它必须精确等于干净 candidate worktree 的 `HEAD`、不是 C1.1 本身并且是 C1.1 后代。它在执行前和执行后都重新检查 `HEAD`、worktree 状态、C1 contracts/fixtures/central adapter protected diff，以及所有 LMM fixture 的 SHA-256。独立 Feature candidate 还必须满足严格路径 allowlist；中央 Integration adapter 的变更不能借此收集器静默放行。
+收集器只接受小写 40 位完整 SHA，且它必须精确等于干净 candidate worktree 的 `HEAD`、不是 C1.1 本身并且是 C1.1 后代。执行前后都会审计 candidate 的 `HEAD`、worktree status、C1 contracts/fixtures/central adapter protected diff、Feature allowlist 与全部 LMM fixture SHA-256；同时审计 evaluator 自己的 clean status 与固定 `HEAD`。candidate fixture 的 `known_truth.csv` hash 必须与 strict runner 实际使用并写入 performance evidence 的文件相同。
 
-收集器本身绝不 import candidate code。它先启动唯一的 `tests/evaluation/linear_mixed_effects/strict_runner.py` 子进程；该进程只接收最小环境、在任何 candidate import 前清空 provider/key 环境并拦截 socket 网络连接，要求每个 candidate module 的 `__file__` 位于 supplied candidate root。该子进程运行完整 candidate evaluation suite；只有 suite 的每个 required result 都通过后，才在同一隔离进程内执行 2 次 warmup、7 次 cold 和 7 次 hot local fit。所有 stdout/stderr、JUnit、fit contract 和 command receipt 都保存在与输出 JSON 同级的 `<output-stem>.artifacts/` 目录，永不使用会在结束时删除的性能临时目录。
+父收集器绝不 import candidate code。它启动唯一的 `tests/evaluation/linear_mixed_effects/strict_runner.py` 子进程；该进程在 candidate import 前清空 provider-bearing environment、切换隔离 HOME，并安装 scoped、进程内 Python guard：socket connect 路径以及 `subprocess`/常见 `os` process-spawn 路径被阻断。它不是 OS-level sandbox，也不构成“所有网络均不可用”或“绝无 provider 调用”的证明。
 
-`status: passed` 仅表示这一轮严格本地 candidate evaluation、性能测量和 post-execution audit 全部通过。它仍会写入 `acceptance.accepted: false` 与 `browser_acceptance: not_run`，直到独立浏览器场景和截图证据实际完成；没有 supplied candidate 或浏览器 acceptance 时，任何候选都不得接受。
+strict runner 只显式运行六个 candidate-facing test 文件：contract validation、known truth、fault injection、Agent boundaries、compare restrictions、deterministic overclaim checks。meta/guardrail 测试不进入 strict command。JUnit 必须存在、可解析、无 skip、无非 candidate testcase，并且六个结果类别各至少有一个 testcase；否则 strict evaluation 失败。只有这些结果全部通过后，才在同一进程执行 2 次 warmup、7 次 cold 与 7 次 hot local fit。
 
-每个 `eval-v173-lmm-XXX.yaml`（JSON 也是合法 YAML）必须只包含实际观察值，并包含以下 schema：
+runner result 必须是 C1 `PacketEnvelope`，并固定为 `linear_mixed_effects.result` / `1.0` / `linear_mixed_effects@1.0`；performance 和 known-truth 均只从已解析 payload 读取事实，且 run-root 的 JSON 必须与返回 envelope 完全相同。fault fixtures 使用完整 versioned diagnostic envelope；Agent fixture 使用 C1.1 server-owned `model_options_binding` 和完整 `LmmDiagnostic`，缺失/篡改/错误 owner binding 或畸形 diagnostic 都必须 fail closed。
+
+runner-owned stdout/stderr/JSON 以原子写入完成；JUnit 及全部 inner artifact 在 parent 接受前都会被重新校验 path、hash、JSON/schema 与 JUnit 内容。外层 manifest 直接保留 inner pytest command、exit code、duration 和 stdout/stderr/JUnit hashes。所有 evidence 保存在与输出 JSON 同级的 `<output-stem>.artifacts/` 目录，永不使用结束时删除的性能临时目录。
+
+`status: passed` 仅表示一轮严格本地 candidate evaluation、performance、candidate/evaluator post-audit 都通过。它仍写入 `acceptance.accepted: false` 与 `browser_acceptance: not_run`，直到独立 browser scenario 和 screenshot evidence 实际完成；没有 supplied candidate 或 browser acceptance 时，任何 candidate 都不得接受。
+
+每个 `eval-v173-lmm-XXX.yaml`（JSON 也是合法 YAML）必须只包含实际观察值，并至少包含：
 
 ```yaml
 schema_version: v173_lmm_performance_evidence_v2
 evaluation_id: actual unique id
 evaluated_commit: exact clean candidate commit
+candidate_worktree: actual clean candidate worktree
 contract_lock_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
-evaluation_harness_commit: exact harness commit
+evaluation_harness_commit: exact clean evaluator commit
 supersedes: []
 environment:
   python_version: observed
@@ -23,14 +30,8 @@ environment:
   node_version: observed or not_run
   os_family: observed
   dependency_lock_hash: observed hash
-commands:
-  - command: exact command
-    exit_code: observed integer
-    duration_seconds: observed number
-    output_artifact: non-secret actual path
-    output_sha256: actual SHA-256
 fixtures:
-  - path: every locked LMM fixture actually hashed
+  - path: candidate fixture actually hashed and used
     sha256: actual SHA-256
 results:
   contract_validation: passed | failed | not_run
@@ -41,9 +42,23 @@ results:
   deterministic_overclaim_checks: passed | failed | not_run
   performance_collection: passed | failed | not_run
   browser_acceptance: passed | failed | not_run
+inner_pytest:
+  command: exact inner pytest command
+  exit_code: observed integer
+  duration_seconds: observed number
+  stdout_sha256: actual SHA-256
+  stderr_sha256: actual SHA-256
+  junit_sha256: actual SHA-256
+commands:
+  - command: exact outer command
+    exit_code: observed integer
+    duration_seconds: observed number
+    output_sha256: actual SHA-256
 strict_isolation:
-  network_guard: observed strict guard description
+  network_guard: observed scoped Python guard description
+  process_spawn_guard: observed scoped Python guard description
   provider_environment: observed clean-environment description
+  limitations: no OS-level sandbox or all-network/no-provider proof
 acceptance:
   accepted: false until browser acceptance is actually recorded
   reason: actual non-secret reason
@@ -53,4 +68,4 @@ artifacts:
 generated_at: actual UTC timestamp
 ```
 
-没有 protected-file verification、没有本地/fake provider 证明、或任何 required result 不是 `passed` 的候选不得接受。新的 candidate 行为变更必须生成新的 manifest，并在新文件的 `supersedes` 中引用旧 evaluation id；绝不回写旧证据。
+没有完整 protected/evaluator/candidate audit、没有可校验 JUnit 或 inner artifacts、任何 required result 不是 `passed`，或没有 browser acceptance 的 candidate 都不得接受。新 candidate 行为变更必须生成新的 manifest，并在新文件的 `supersedes` 中引用旧 evaluation id；绝不回写旧证据。
