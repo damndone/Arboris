@@ -1,4 +1,9 @@
-type JsonRecord = Record<string, unknown>;
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonRecord | JsonValue[];
+interface JsonRecord {
+  [key: string]: JsonValue;
+}
+const INVALID_JSON = Symbol("invalid-json");
 
 const LOCKED_CONTRACT_VERSION = "1.0";
 const LOCKED_PRODUCER_VERSION = "linear_mixed_effects@1.0";
@@ -77,6 +82,8 @@ export type RepeatedMeasuresResult = {
   fit_method: "reml" | "ml";
   trajectory: TrajectoryFigureContext | null;
   diagnostics: RepeatedMeasuresDiagnosticView[];
+  /** A cloned record of server facts; the UI must never calculate replacements. */
+  serverFacts: JsonRecord;
 };
 
 export type RepeatedMeasuresViewModel = {
@@ -90,7 +97,7 @@ export type RepeatedMeasuresViewModel = {
 
 type LockedEnvelope = {
   contract: string;
-  payload: JsonRecord;
+  payload: JsonRecord | null;
 };
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -101,6 +108,108 @@ function asRecord(value: unknown): JsonRecord | null {
   } catch {
     return null;
   }
+}
+
+/** Read a JSON-object-shaped boundary without invoking its accessors. */
+function readOwnPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const keys = Reflect.ownKeys(value);
+    if (!keys.every((key) => typeof key === "string")) return null;
+    const copy = Object.create(null) as Record<string, unknown>;
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) return null;
+      copy[key] = descriptor.value;
+    }
+    return copy;
+  } catch {
+    return null;
+  }
+}
+
+function isJsonDataProperty(
+  descriptor: PropertyDescriptor | undefined,
+): descriptor is PropertyDescriptor & { value: unknown } {
+  return descriptor !== undefined
+    && Object.prototype.hasOwnProperty.call(descriptor, "value")
+    && !Object.prototype.hasOwnProperty.call(descriptor, "get")
+    && !Object.prototype.hasOwnProperty.call(descriptor, "set");
+}
+
+/**
+ * Make the packet boundary explicit: only clone values representable by JSON.
+ * Reading property descriptors rather than properties rejects accessors before
+ * they can execute and keeps later rendering away from untrusted objects.
+ */
+function cloneJsonValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet<object>(),
+): JsonValue | typeof INVALID_JSON {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : INVALID_JSON;
+  }
+  if (typeof value !== "object") return INVALID_JSON;
+
+  try {
+    if (seen.has(value)) return INVALID_JSON;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) return INVALID_JSON;
+      const keys = Reflect.ownKeys(value);
+      if (!keys.every((key) => typeof key === "string")) return INVALID_JSON;
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+      if (
+        !isJsonDataProperty(lengthDescriptor)
+        || typeof lengthDescriptor.value !== "number"
+        || !Number.isSafeInteger(lengthDescriptor.value)
+        || lengthDescriptor.value < 0
+        || keys.length !== lengthDescriptor.value + 1
+        || !keys.includes("length")
+      ) return INVALID_JSON;
+
+      const copy: JsonValue[] = [];
+      for (let index = 0; index < lengthDescriptor.value; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
+          return INVALID_JSON;
+        }
+        const item = cloneJsonValue(descriptor.value, seen);
+        if (item === INVALID_JSON) return INVALID_JSON;
+        copy.push(item);
+      }
+      return copy;
+    }
+
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return INVALID_JSON;
+    const keys = Reflect.ownKeys(value);
+    if (!keys.every((key) => typeof key === "string")) return INVALID_JSON;
+    const copy = Object.create(null) as JsonRecord;
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
+        return INVALID_JSON;
+      }
+      const item = cloneJsonValue(descriptor.value, seen);
+      if (item === INVALID_JSON) return INVALID_JSON;
+      copy[key] = item;
+    }
+    return copy;
+  } catch {
+    return INVALID_JSON;
+  }
+}
+
+function cloneJsonRecord(value: unknown): JsonRecord | null {
+  const cloned = cloneJsonValue(value);
+  return cloned === INVALID_JSON ? null : asRecord(cloned);
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -196,17 +305,20 @@ function emptyView(): RepeatedMeasuresViewModel {
 }
 
 function parseLockedEnvelope(packet: unknown): LockedEnvelope | null {
-  const envelope = asRecord(packet);
+  const envelope = readOwnPlainRecord(packet);
   if (
     envelope === null
-    || !hasExactKeys(envelope, ["contract", "contract_version", "producer_version", "payload"])
+    || !hasExactKeys(envelope as JsonRecord, ["contract", "contract_version", "producer_version", "payload"])
     || !isNonEmptyString(envelope.contract)
     || envelope.contract_version !== LOCKED_CONTRACT_VERSION
     || envelope.producer_version !== LOCKED_PRODUCER_VERSION
   ) return null;
 
-  const payload = asRecord(envelope.payload);
-  return payload === null ? null : { contract: envelope.contract, payload };
+  if (asRecord(envelope.payload) === null) return null;
+  return {
+    contract: envelope.contract,
+    payload: cloneJsonRecord(envelope.payload),
+  };
 }
 
 function lockedRecoveryProposal(value: unknown): RepeatedMeasuresRecoveryProposal | null {
@@ -314,6 +426,7 @@ function parseRestrictedComparison(payload: JsonRecord): RestrictedRepeatedMeasu
     || !isNonEmptyString(payload.user_safe_message)
     || !isNonEmptyString(payload.source_run_id)
     || !isNonEmptyString(payload.child_run_id)
+    || payload.source_run_id === payload.child_run_id
   ) return null;
 
   return {
@@ -375,6 +488,7 @@ function parseCompleteComparison(payload: JsonRecord): CompleteRepeatedMeasuresC
     && payload.result_id === LOCKED_RESULT_ID
     && isNonEmptyString(payload.source_run_id)
     && isNonEmptyString(payload.child_run_id)
+    && payload.source_run_id !== payload.child_run_id
   ) {
     return {
       status: "complete",
@@ -421,8 +535,9 @@ function parseCompleteComparison(payload: JsonRecord): CompleteRepeatedMeasuresC
     || ownStringKeys(conclusion) === null
     || !isNonEmptyString(payload.source_run_id)
     || !isNonEmptyString(payload.child_run_id)
+    || payload.source_run_id === payload.child_run_id
     || !isNonEmptyString(payload.logical_key)
-    || payload.validation_status !== "pass"
+    || payload.validation_status !== "complete"
     || !isNonEmptyString(payload.strategy_version)
     || !isNonEmptyString(payload.schema_version)
     || !isDenseJsonArray(payload.integrity_findings)
@@ -496,6 +611,18 @@ function parseTrajectoryContext(value: unknown): TrajectoryFigureContext | null 
   return { chart_type: "lmm_group_trajectory", time, groups };
 }
 
+function hasConsistentPrimaryCoefficient(payload: JsonRecord): boolean {
+  if (!hasOwnKey(payload, "coefficients")) return true;
+  const coefficients = asRecord(payload.coefficients);
+  const primary = coefficients === null ? null : asRecord(coefficients[LOCKED_RESULT_ID]);
+  return primary !== null
+    && primary.result_id === LOCKED_RESULT_ID
+    && typeof primary.estimate === "number"
+    && Number.isFinite(primary.estimate)
+    && primary.estimate === payload.estimate
+    && primary.inference_method === LOCKED_INFERENCE_METHOD;
+}
+
 function parseResult(payload: JsonRecord): RepeatedMeasuresResult | null {
   const required = [
     "status",
@@ -517,6 +644,7 @@ function parseResult(payload: JsonRecord): RepeatedMeasuresResult | null {
     || payload.inference_method !== LOCKED_INFERENCE_METHOD
     || (hasOwnKey(payload, "converged") && payload.converged !== true)
     || (hasOwnKey(payload, "primary_target_id") && payload.primary_target_id !== LOCKED_RESULT_ID)
+    || !hasConsistentPrimaryCoefficient(payload)
     || diagnostics === null
     || (hasOwnKey(payload, "result_identity") && !isNonEmptyString(payload.result_identity))
   ) return null;
@@ -529,6 +657,7 @@ function parseResult(payload: JsonRecord): RepeatedMeasuresResult | null {
     fit_method: payload.fit_method,
     trajectory,
     diagnostics,
+    serverFacts: payload,
   };
 }
 
@@ -540,7 +669,7 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
   }
 
   if (envelope.contract === "linear_mixed_effects.recovery_proposal") {
-    const proposal = parseRecoveryPayload(envelope.payload);
+    const proposal = envelope.payload === null ? null : parseRecoveryPayload(envelope.payload);
     return proposal
       ? {
         phase: "confirmation",
@@ -554,7 +683,7 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
   }
 
   if (envelope.contract === "linear_mixed_effects.diagnostic") {
-    const diagnostics = parseDiagnosticPayload(envelope.payload);
+    const diagnostics = envelope.payload === null ? null : parseDiagnosticPayload(envelope.payload);
     return diagnostics === null
       ? blocked("LMM_DIAGNOSTIC_PACKET_INVALID", "诊断数据不完整；未显示运行状态或恢复建议。")
       : {
@@ -568,7 +697,7 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
   }
 
   if (envelope.contract === "analysis_loop.compare") {
-    const restricted = parseRestrictedComparison(envelope.payload);
+    const restricted = envelope.payload === null ? null : parseRestrictedComparison(envelope.payload);
     if (restricted !== null) {
       return {
         phase: "compare",
@@ -579,7 +708,7 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
         canExecute: false,
       };
     }
-    const complete = parseCompleteComparison(envelope.payload);
+    const complete = envelope.payload === null ? null : parseCompleteComparison(envelope.payload);
     return complete !== null
       ? {
         phase: "compare",
@@ -593,7 +722,7 @@ export function buildRepeatedMeasuresViewModel(packet: unknown): RepeatedMeasure
   }
 
   if (envelope.contract === "linear_mixed_effects.result") {
-    const result = parseResult(envelope.payload);
+    const result = envelope.payload === null ? null : parseResult(envelope.payload);
     return result !== null
       ? {
         phase: "success",

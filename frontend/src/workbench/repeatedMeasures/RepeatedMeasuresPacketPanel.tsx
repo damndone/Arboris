@@ -14,6 +14,15 @@ type RepeatedMeasuresPacketPanelProps = {
   onConfirm?: (proposal: RepeatedMeasuresRecoveryProposal) => void;
 };
 
+function formatServerFact(value: unknown): string {
+  if (value === undefined) return "未提供";
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value) ?? "未提供";
+}
+
 function ServerFactLayers(props: { facts: ComparisonFactLayers }) {
   const rows: Array<[string, Record<string, unknown>]> = [
     ["样本与数据", props.facts.data],
@@ -28,7 +37,48 @@ function ServerFactLayers(props: { facts: ComparisonFactLayers }) {
         {rows.map(([label, fact]) => (
           <div key={label}>
             <dt>{label}</dt>
-            <dd>{Object.keys(fact).join(", ") || "已提供"}</dd>
+            <dd><code>{formatServerFact(fact)}</code></dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function LmmServerFacts(props: { facts: Record<string, unknown> }) {
+  const rows: Array<[string, unknown]> = [
+    ["合同版本", props.facts.contract_version],
+    ["估计器版本", props.facts.estimator_version],
+    ["模型标识", props.facts.model_id],
+    ["模型类型", props.facts.model_type],
+    ["引擎", props.facts.engine],
+    ["收敛", props.facts.converged],
+    ["优化器", props.facts.optimizer],
+    ["观测数", props.facts.nobs],
+    ["组数", props.facts.n_groups],
+    ["每组观测数", props.facts.observations_per_group],
+    ["排除行数", props.facts.excluded_rows],
+    ["排除计数", props.facts.exclusion_counts],
+    ["固定效应公式", props.facts.fixed_effects_formula],
+    ["随机效应设定", props.facts.random_effects_specification],
+    ["参考组", props.facts.reference_group],
+    ["比较组", props.facts.comparison_group],
+    ["结果身份", props.facts.result_identity],
+    ["主目标", props.facts.primary_target_id],
+    ["主结果系数", props.facts.coefficients],
+    ["随机效应", props.facts.random_effects],
+    ["服务端诊断", props.facts.diagnostics],
+    ["服务端警告", props.facts.warnings],
+    ["图形上下文", props.facts.figure_context],
+  ];
+  return (
+    <section aria-label="Repeated measures result facts">
+      <h3>服务端模型事实</h3>
+      <dl>
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd><code>{formatServerFact(value)}</code></dd>
           </div>
         ))}
       </dl>
@@ -99,6 +149,7 @@ export function RepeatedMeasuresPacketPanel(props: RepeatedMeasuresPacketPanelPr
           <dt>估计值</dt><dd>{viewModel.result!.estimate}</dd>
           <dt>拟合方法</dt><dd>{viewModel.result!.fit_method}</dd>
         </dl>
+        <LmmServerFacts facts={viewModel.result!.serverFacts} />
         {viewModel.result!.diagnostics.length > 0 && (
           <section aria-label="Repeated measures result warnings">
             <h3>模型警告</h3>

@@ -71,7 +71,7 @@ describe("RepeatedMeasuresPacketPanel", () => {
     expect(screen.queryByText(/赢家|winner/i)).toBeNull();
   });
 
-  it("renders complete server comparison layers without deriving a winner", () => {
+  it("renders all complete server comparison values without deriving a winner", () => {
     render(
       <RepeatedMeasuresPacketPanel
         packet={{
@@ -101,7 +101,7 @@ describe("RepeatedMeasuresPacketPanel", () => {
               reason_code: null,
               evidence: {},
             },
-            validation_status: "pass",
+            validation_status: "complete",
             integrity_findings: [],
             logical_key: "compare:lmm-source-v1:lmm-child-v1",
             strategy_version: "linear_mixed_effects_v1",
@@ -114,7 +114,53 @@ describe("RepeatedMeasuresPacketPanel", () => {
     expect(screen.getByText("比较事实")).toBeInTheDocument();
     expect(screen.getByText("样本与数据")).toBeInTheDocument();
     expect(screen.getByText("参数")).toBeInTheDocument();
+    expect(screen.getByText(/retained_rows/)).toBeInTheDocument();
+    expect(screen.getByText(/unchanged/)).toBeInTheDocument();
+    expect(screen.getByText(/random_slope/)).toBeInTheDocument();
+    expect(screen.getAllByText(/changed/)).not.toHaveLength(0);
     expect(screen.queryByText(/赢家|winner/i)).toBeNull();
+  });
+
+  it("renders supplied LMM facts and marks absent facts as unavailable", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        packet={{
+          contract: "linear_mixed_effects.result",
+          contract_version: "1.0",
+          producer_version: "linear_mixed_effects@1.0",
+          payload: {
+            status: "complete",
+            result_id: "group_time_interaction",
+            estimate: 0.9,
+            fit_method: "reml",
+            inference_method: "asymptotic_wald_z_v1",
+            converged: true,
+            optimizer: "lbfgs",
+            nobs: 480,
+            n_groups: 80,
+            observations_per_group: { subject_1: 6 },
+            coefficients: {
+              group_time_interaction: {
+                result_id: "group_time_interaction",
+                estimate: 0.9,
+                inference_method: "asymptotic_wald_z_v1",
+                source_id: "model_results.linear_mixed_effects_1.coefficients.group_time_interaction",
+              },
+            },
+            random_effects: { intercept_variance: 0.7, residual_variance: 0.5 },
+            warnings: ["LMM_RANDOM_EFFECTS_SINGULAR"],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("服务端模型事实")).toBeInTheDocument();
+    expect(screen.getByText("lbfgs")).toBeInTheDocument();
+    expect(screen.getByText("480")).toBeInTheDocument();
+    expect(screen.getByText(/subject_1/)).toBeInTheDocument();
+    expect(screen.getByText(/model_results\.linear_mixed_effects_1\.coefficients\.group_time_interaction/)).toBeInTheDocument();
+    expect(screen.getByText(/intercept_variance/)).toBeInTheDocument();
+    expect(screen.getAllByText("未提供")).not.toHaveLength(0);
   });
 
   it("renders a terminal diagnostic instead of a success claim", () => {

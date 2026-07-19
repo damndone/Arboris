@@ -295,6 +295,25 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it("fails closed when a restricted comparison reuses the source run as its child", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "restricted",
+        reason_code: "REML_FIXED_EFFECTS_DIFFER",
+        source_run_id: "same-run-v1",
+        child_run_id: "same-run-v1",
+        user_safe_message: "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
   it.each([
     ["a source run", { source_run_id: "" }],
     ["a child run", { child_run_id: "" }],
@@ -430,6 +449,35 @@ describe("buildRepeatedMeasuresViewModel", () => {
             label: "treated",
             observed_mean: [10, 3],
             fitted_mean: [10, 3.2],
+          }],
+        },
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("continues to reject B's private trajectory series shape", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        figure_context: {
+          chart_type: "lmm_group_trajectory",
+          time: [0, 1],
+          series: [{
+            group: "treated",
+            time: [0, 1],
+            observed_mean: [10, 3],
+            fitted_marginal_mean: [10, 3.2],
           }],
         },
       },
@@ -603,6 +651,347 @@ describe("buildRepeatedMeasuresViewModel", () => {
         comparison_scope: "same_fixed_effects_ml",
         winner: null,
       },
+    });
+  });
+
+  it("fails closed when a canonical complete comparison reuses a run id", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        comparison_scope: "same_fixed_effects_ml",
+        source_run_id: "same-run-v1",
+        child_run_id: "same-run-v1",
+        result_id: "group_time_interaction",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("accepts the actual complete four-layer ComparePacket shape", () => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        target: {
+          result_id: "group_time_interaction",
+          role: "primary",
+          label: "treated group × time",
+          resolution_source: "explicit_result_id",
+          target_hash: "a".repeat(64),
+        },
+        data_diff: { dataset_snapshot: { changed: false, retained_rows: 480 } },
+        parameter_diff: { random_slope_changed: true },
+        result_diff: {
+          group_time_interaction: {
+            status: "complete",
+            changed: true,
+            fields: { estimate: { source: 0.9, child: 0.8 } },
+          },
+        },
+        conclusion_diff: {
+          target_result_id: "group_time_interaction",
+          status: "complete",
+          classification: "UNCERTAINTY_INCREASED",
+          reason_code: null,
+          evidence: { confidence_interval_width: { source: 0.4, child: 0.7 } },
+        },
+        validation_status: "complete",
+        integrity_findings: [],
+        logical_key: "compare:lmm-source-v1:lmm-child-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "compare_packet_v1",
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "compare",
+      comparison: {
+        status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        facts: {
+          data: { dataset_snapshot: { changed: false, retained_rows: 480 } },
+          parameters: { random_slope_changed: true },
+        },
+        winner: null,
+      },
+    });
+  });
+
+  it("fails closed for the legacy pass full-comparison validation state", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        target: {
+          result_id: "group_time_interaction",
+          role: "primary",
+          label: "treated group × time",
+          resolution_source: "explicit_result_id",
+          target_hash: "a".repeat(64),
+        },
+        data_diff: {},
+        parameter_diff: {},
+        result_diff: {
+          group_time_interaction: { status: "complete", changed: false, fields: {} },
+        },
+        conclusion_diff: {
+          target_result_id: "group_time_interaction",
+          status: "complete",
+          classification: "NO_MATERIAL_CHANGE",
+          reason_code: null,
+          evidence: {},
+        },
+        validation_status: "pass",
+        integrity_findings: [],
+        logical_key: "compare:lmm-source-v1:lmm-child-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "compare_packet_v1",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("fails closed when a full comparison uses the same source and child run", () => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "same-run-v1",
+        child_run_id: "same-run-v1",
+        target: {
+          result_id: "group_time_interaction",
+          role: "primary",
+          label: "treated group × time",
+          resolution_source: "explicit_result_id",
+          target_hash: "a".repeat(64),
+        },
+        data_diff: {},
+        parameter_diff: {},
+        result_diff: {
+          group_time_interaction: { status: "complete", changed: false, fields: {} },
+        },
+        conclusion_diff: {
+          target_result_id: "group_time_interaction",
+          status: "complete",
+          classification: "NO_MATERIAL_CHANGE",
+          reason_code: null,
+          evidence: {},
+        },
+        validation_status: "complete",
+        integrity_findings: [],
+        logical_key: "compare:same-run-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "compare_packet_v1",
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it.each([
+    ["a symbol-bearing nested comparison record", () => ({
+      data_diff: {
+        dataset_snapshot: Object.assign({ changed: false }, { [Symbol("forged")]: true }),
+      },
+    })],
+    ["a sparse nested comparison array", () => {
+      const rows = [480, 479];
+      delete rows[1];
+      return { parameter_diff: { retained_rows: rows } };
+    }],
+    ["a nested comparison getter", () => {
+      const evidence: Record<string, unknown> = {};
+      Object.defineProperty(evidence, "forged", {
+        enumerable: true,
+        get: () => {
+          throw new Error("must-not-run");
+        },
+      });
+      return { conclusion_diff: {
+        target_result_id: "group_time_interaction",
+        status: "complete",
+        classification: "NO_MATERIAL_CHANGE",
+        reason_code: null,
+        evidence,
+      } };
+    }],
+  ])("fails closed for %s", (_label, override) => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "analysis_loop.compare",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        compare_status: "complete",
+        source_run_id: "lmm-source-v1",
+        child_run_id: "lmm-child-v1",
+        target: {
+          result_id: "group_time_interaction",
+          role: "primary",
+          label: "treated group × time",
+          resolution_source: "explicit_result_id",
+          target_hash: "a".repeat(64),
+        },
+        data_diff: {},
+        parameter_diff: {},
+        result_diff: {
+          group_time_interaction: { status: "complete", changed: false, fields: {} },
+        },
+        conclusion_diff: {
+          target_result_id: "group_time_interaction",
+          status: "complete",
+          classification: "NO_MATERIAL_CHANGE",
+          reason_code: null,
+          evidence: {},
+        },
+        validation_status: "complete",
+        integrity_findings: [],
+        logical_key: "compare:lmm-source-v1:lmm-child-v1",
+        strategy_version: "linear_mixed_effects_v1",
+        schema_version: "compare_packet_v1",
+        ...override(),
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      comparison: null,
+      diagnostics: [{ code: "LMM_COMPARE_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it("preserves complete LMM server facts without deriving replacements", () => {
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        schema_version: 1,
+        contract_version: "1.0",
+        estimator_version: "statsmodels_mixedlm_v1",
+        model_id: "linear_mixed_effects_1",
+        model_type: "linear_mixed_effects",
+        engine: "statsmodels",
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        converged: true,
+        optimizer: "lbfgs",
+        nobs: 480,
+        n_groups: 80,
+        observations_per_group: { subject_1: 6, subject_2: 6 },
+        excluded_rows: 0,
+        fixed_effects_formula: "score ~ group * week",
+        random_effects_specification: "1 + week",
+        reference_group: "control",
+        comparison_group: "treated",
+        result_identity: "a".repeat(64),
+        primary_target_id: "group_time_interaction",
+        coefficients: {
+          group_time_interaction: {
+            result_id: "group_time_interaction",
+            estimate: 0.9,
+            std_error: 0.1,
+            p_value: 0.01,
+            confidence_interval: [0.7, 1.1],
+            confidence_level: 0.95,
+            inference_method: "asymptotic_wald_z_v1",
+            source_id: "model_results.linear_mixed_effects_1.coefficients.group_time_interaction",
+          },
+        },
+        random_effects: {
+          intercept_variance: 0.7,
+          slope_variance: 0.1,
+          covariance: 0.02,
+          intercept_slope_covariance: 0.02,
+          residual_variance: 0.5,
+          n_groups: 80,
+          observations_per_group: { subject_1: 6, subject_2: 6 },
+        },
+        diagnostics: [],
+        warnings: ["LMM_RANDOM_EFFECTS_SINGULAR"],
+        figure_context: {
+          chart_type: "lmm_group_trajectory",
+          time: [0, 1],
+          groups: [{
+            label: "treated",
+            observed_mean: [10, 3],
+            fitted_mean: [10, 3.2],
+          }],
+        },
+      },
+    });
+
+    expect(viewModel).toMatchObject({
+      phase: "success",
+      result: {
+        serverFacts: {
+          converged: true,
+          optimizer: "lbfgs",
+          nobs: 480,
+          n_groups: 80,
+          observations_per_group: { subject_1: 6, subject_2: 6 },
+          coefficients: {
+            group_time_interaction: {
+              result_id: "group_time_interaction",
+              estimate: 0.9,
+            },
+          },
+          warnings: ["LMM_RANDOM_EFFECTS_SINGULAR"],
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["a mismatched primary coefficient id", {
+      result_id: "other_target",
+      estimate: 0.9,
+      inference_method: "asymptotic_wald_z_v1",
+    }],
+    ["a mismatched primary coefficient estimate", {
+      result_id: "group_time_interaction",
+      estimate: 0.8,
+      inference_method: "asymptotic_wald_z_v1",
+    }],
+  ])("fails closed for %s", (_label, primaryCoefficient) => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        coefficients: { group_time_interaction: primaryCoefficient },
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
     });
   });
 
