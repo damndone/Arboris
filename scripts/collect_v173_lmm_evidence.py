@@ -43,6 +43,9 @@ MAX_REPORTED_STREAM_BYTES = 65536
 RAW_STREAM_CAPTURE_POLICY = (
     "raw pytest stdout and stderr are discarded; hashes cover complete streams"
 )
+GIT_OUTPUT_CAPTURE_POLICY = (
+    "raw Git stdout and stderr are discarded; hashes cover complete streams"
+)
 WARMUP_FIT_COUNT = 2
 COLD_FIT_COUNT = 7
 HOT_FIT_COUNT = 7
@@ -364,10 +367,19 @@ def _validate_full_sha(candidate: str) -> None:
         )
 
 
-def _command_output_path(artifact_root: Path | None, ordinal: int) -> Path | None:
-    if artifact_root is None:
-        return None
-    return artifact_root / "commands" / f"{ordinal:03d}.txt"
+def _hermetic_git_environment() -> dict[str, str]:
+    """Run repository audits without host secrets, Git variables, or user config."""
+
+    return {
+        "PATH": os.defpath,
+        "LC_ALL": "C",
+        "LANG": "C",
+        "TZ": "UTC",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
 
 
 def _run_git(
@@ -378,23 +390,41 @@ def _run_git(
     artifact_root: Path | None = None,
     require_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    command = ["git", "-C", str(root), *arguments]
+    command = [
+        "git",
+        "--no-pager",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.useBuiltinFSMonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-C",
+        str(root),
+        *arguments,
+    ]
     started = time.perf_counter()
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_hermetic_git_environment(),
+        stdin=subprocess.DEVNULL,
+    )
     duration = time.perf_counter() - started
     output = completed.stdout + completed.stderr
-    output_path = _command_output_path(artifact_root, len(command_records) + 1)
-    if output_path is not None:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(output, encoding="utf-8")
     record: dict[str, object] = {
         "command": _command_text(command),
         "exit_code": completed.returncode,
         "duration_seconds": duration,
+        "capture_policy": GIT_OUTPUT_CAPTURE_POLICY,
         "output_sha256": _sha256_bytes(output.encode("utf-8")),
+        "stdout_bytes_observed": len(completed.stdout.encode("utf-8")),
+        "stderr_bytes_observed": len(completed.stderr.encode("utf-8")),
     }
-    if output_path is not None:
-        record["output_artifact"] = str(output_path)
     command_records.append(record)
     if require_success and completed.returncode != 0:
         raise EvidenceCollectionError(

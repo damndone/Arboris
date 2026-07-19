@@ -464,6 +464,82 @@ def test_candidate_preflight_rejects_a_dirty_worktree(tmp_path: Path) -> None:
         collector._resolve_candidate(root, candidate, [])
 
 
+def test_candidate_preflight_uses_hermetic_git_and_detects_fsmonitor_hidden_changes(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    marker = tmp_path / "fsmonitor-ran.txt"
+    hook = tmp_path / "candidate-fsmonitor.sh"
+    hook.write_text(
+        "#!/bin/sh\n"
+        f"printf hook-ran > {str(marker)!r}\n"
+        "printf candidate-git-hook-sentinel >&2\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    _git(root, "config", "core.fsmonitor", str(hook))
+    feature.write_text("FEATURE = False\n", encoding="utf-8")
+    artifact_root = tmp_path / "evidence-artifacts"
+    artifact_root.mkdir()
+    records: list[dict[str, object]] = []
+
+    with pytest.raises(collector.EvidenceCollectionError, match="dirty"):
+        collector._resolve_candidate(
+            root,
+            candidate,
+            records,
+            artifact_root=artifact_root,
+        )
+
+    assert not marker.exists()
+    assert not (artifact_root / "commands").exists()
+    assert "candidate-git-hook-sentinel" not in json.dumps(records)
+
+
+def test_git_audit_discards_raw_stdout_and_stderr(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    artifact_root = tmp_path / "evidence-artifacts"
+    artifact_root.mkdir()
+    sentinel = "candidate-git-output-sentinel"
+    monkeypatch.setenv("OPENAI_API_KEY", "host-provider-secret")
+    monkeypatch.setenv("GIT_DIR", "/host-controlled/git-dir")
+    observed: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed["command"] = command
+        observed.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, sentinel, sentinel)
+
+    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    records: list[dict[str, object]] = []
+    completed = collector._run_git(
+        tmp_path,
+        ["rev-parse", "HEAD"],
+        records,
+        artifact_root=artifact_root,
+    )
+
+    assert completed.stdout == sentinel
+    assert not (artifact_root / "commands").exists()
+    assert "output_artifact" not in records[0]
+    assert sentinel not in json.dumps(records)
+    assert "core.fsmonitor=false" in observed["command"]
+    environment = observed["env"]
+    assert isinstance(environment, dict)
+    assert "OPENAI_API_KEY" not in environment
+    assert "GIT_DIR" not in environment
+    assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+
+
 def test_candidate_preflight_rejects_a_protected_fixture_change(tmp_path: Path) -> None:
     collector = _load_collector()
     root, contract_lock = _candidate_repo(tmp_path)

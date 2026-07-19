@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -113,3 +114,17 @@ def test_strict_junit_rejects_missing_invalid_or_skipped_evidence(
 
     with pytest.raises(runner.StrictEvaluationError, match=error):
         runner._summarize_strict_junit(junit)
+
+
+def test_private_junit_directory_is_not_traversable_by_other_users() -> None:
+    runner = _load_runner()
+    directory = runner._create_private_junit_directory()
+    try:
+        junit = directory / "strict-suite.junit.xml"
+        junit.write_text("candidate-controlled-failure-text", encoding="utf-8")
+
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+        assert junit.parent == directory
+    finally:
+        junit.unlink(missing_ok=True)
+        directory.rmdir()

@@ -528,6 +528,20 @@ def _junit_summary_payload(
     }
 
 
+def _create_private_junit_directory() -> Path:
+    """Create a 0700 parent so transient raw JUnit is never public in /tmp."""
+
+    directory = Path(tempfile.mkdtemp(prefix="v173-lmm-strict-junit-"))
+    try:
+        directory.chmod(0o700)
+        if os.name == "posix" and (directory.stat().st_mode & 0o777) != 0o700:
+            raise StrictEvaluationError("strict JUnit temporary directory is not private")
+    except Exception:
+        directory.rmdir()
+        raise
+    return directory
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-root", type=Path, required=True)
@@ -545,12 +559,8 @@ def main(argv: list[str] | None = None) -> int:
     suite_root = evaluator_root / "tests" / "evaluation" / "linear_mixed_effects"
     started = time.perf_counter()
     artifact_dir.mkdir(parents=True, exist_ok=False)
-    raw_junit_descriptor, raw_junit_name = tempfile.mkstemp(
-        prefix="v173-lmm-strict-", suffix=".junit.xml"
-    )
-    os.close(raw_junit_descriptor)
-    raw_junit_path = Path(raw_junit_name)
-    raw_junit_path.unlink()
+    raw_junit_dir = _create_private_junit_directory()
+    raw_junit_path = raw_junit_dir / "strict-suite.junit.xml"
     junit_summary_path = artifact_dir / "strict-suite.junit.summary.json"
     output_metadata_path = artifact_dir / "strict-suite.output.json"
     suite_command = [
@@ -609,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
         suite_error = _safe_error_code(error)
     finally:
         raw_junit_path.unlink(missing_ok=True)
+        raw_junit_dir.rmdir()
 
     if not junit_summary_path.exists():
         _write_json(
