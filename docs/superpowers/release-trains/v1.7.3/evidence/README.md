@@ -4,7 +4,7 @@
 
 ## 输入、模式与未来集成政策
 
-收集器只接受小写 40 位完整 SHA。该 SHA 必须精确等于干净 candidate worktree 的 `HEAD`、不是 C1.1 本身并且是 C1.1 后代。执行前后都会审计 candidate 的 `HEAD`、worktree status、允许 diff、全部 LMM fixture SHA-256，以及 evaluator 自己的 clean status 与固定 `HEAD`。candidate fixture 的 `known_truth.csv` hash 必须与 strict runner 实际使用并写入 performance evidence 的文件相同。
+收集器只接受小写 40 位完整 SHA。该 SHA 必须精确等于干净 candidate worktree 的 `HEAD`、不是 C1.1 本身并且是 C1.1 后代。执行前后都会审计 candidate 的 `HEAD`、worktree status、允许 diff、全部 LMM fixture SHA-256，以及 evaluator 自己的 clean status 与固定 `HEAD`。所有 Git 审计使用最小、hermetic 环境：不继承 provider/Git 环境变量或用户/系统 Git config，明确禁用 fsmonitor、untracked cache 与 hooks。candidate fixture 的 `known_truth.csv` hash 必须与 strict runner 实际使用并写入 performance evidence 的文件相同。
 
 - 默认 `feature_lane` 只接受 standalone Feature Lane allowlist 中的变更，C1 contracts、canonical fixtures 和 central adapter protected paths 均不可变。
 - `integration_tip` 是给未来 Integration Release Train 的可审计候选模式，不是当前 candidate acceptance。它必须显式传入 `--candidate-mode integration_tip`；所给完整 SHA 必须精确等于干净 `integration/v1.7.3` worktree 的 `HEAD`，并且 diff 只能落在 collector 的窄 `INTEGRATION_ALLOWED_CANDIDATE_PREFIXES`。C1 contracts、canonical fixtures、collector/evaluator、`scripts/gate.sh` 与 Honest-DiD adversarial tests 在此模式下仍受保护。
@@ -24,11 +24,11 @@ runner result 必须是 C1 `PacketEnvelope`，并固定为 `linear_mixed_effects
 
 ## 非原始流证据
 
-raw candidate-facing pytest stdout/stderr 不会写入 durable artifact 或 outer manifest。strict runner 仅写入 `strict-suite.output.json`，父收集器仅写入 `strict-runner.output.json`：两者都记录完整 stream 的 SHA-256、最多 65,536 bytes 的计数和 truncation flag，不记录 stream 文本。outer manifest 仅抄录这些 hashes 与 inner pytest command、exit code、duration。
+raw candidate-facing pytest stdout/stderr、以及所有 Git audit stdout/stderr，都不会写入 durable artifact 或 outer manifest。strict runner 仅写入 `strict-suite.output.json`，父收集器仅写入 `strict-runner.output.json`；Git command records 也只保留命令、exit code、duration、capture policy、全量 stream SHA-256 和 byte count，不记录 stream 文本。outer manifest 仅抄录这些 hashes 与 inner pytest command、exit code、duration。
 
-原始 JUnit XML 仅在系统临时目录中供 strict runner 解析；无论成功或异常都会在 `finally` 中删除。durable evidence 只保留 `strict-suite.junit.summary.json` 的结构化结果和 testcase counts；raw XML 缺失或不可解析时也只落下安全的零计数 summary，再由 parent 拒绝。parent 会重新校验 metadata/summary 的 path、hash、strict JSON/schema 和结果一致性。guardrail 测试用模拟 secret 验证它不会进入 artifact tree 或 manifest。
+原始 JUnit XML 仅在唯一的 `0700` 私有临时目录中供 strict runner 解析；无论成功或异常都会在 `finally` 中删除 XML 和空目录。durable evidence 只保留 `strict-suite.junit.summary.json` 的结构化结果和 testcase counts；raw XML 缺失或不可解析时也只落下安全的零计数 summary，再由 parent 拒绝。parent 会重新校验 metadata/summary 的 path、hash、strict JSON/schema 和结果一致性。guardrail 测试用模拟 secret、hostile `core.fsmonitor` 与权限检查验证原始内容不会进入 artifact tree、manifest 或可遍历临时位置。
 
-这不是全盘 secret 扫描或所有 evidence 内容均无敏感信息的承诺：candidate 生成的结果/性能 JSON 仍应按受控本地证据处理。这里的保证仅限于收集器和 strict runner 不持久化其捕获的 raw candidate stdout/stderr，也不会把候选控制的异常文本写入 strict suite result。
+这不是全盘 secret 扫描或所有 evidence 内容均无敏感信息的承诺：candidate 生成的结果/性能 JSON 仍应按受控本地证据处理。这里的保证仅限于收集器和 strict runner 不持久化其捕获的 raw candidate/Git stdout/stderr，也不会把候选控制的异常文本写入 durable strict suite result。
 
 ## 写入排他性与 P2 残余
 
@@ -81,7 +81,10 @@ commands:
   - command: exact outer command
     exit_code: observed integer
     duration_seconds: observed number
+    capture_policy: raw Git stdout and stderr are discarded
     output_sha256: actual SHA-256
+    stdout_bytes_observed: observed integer
+    stderr_bytes_observed: observed integer
 strict_isolation:
   network_guard: observed scoped Python guard description
   process_spawn_guard: observed scoped Python guard description
