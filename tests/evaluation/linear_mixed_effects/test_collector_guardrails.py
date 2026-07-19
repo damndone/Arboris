@@ -1,0 +1,312 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+
+if os.environ.get("WORKBENCH_EVALUATION_REQUIRE_CANDIDATE") == "1":
+    pytest.skip(
+        "strict entrypoint meta-tests run outside the candidate evaluation suite",
+        allow_module_level=True,
+    )
+
+
+REPO_ROOT = Path(__file__).parents[3]
+COLLECTOR_PATH = REPO_ROOT / "scripts" / "collect_v173_lmm_evidence.py"
+
+
+def _load_collector() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("v173_lmm_collector_guardrails", COLLECTOR_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _git(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
+
+
+def _commit(root: Path, message: str) -> str:
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", message)
+    return _git(root, "rev-parse", "HEAD")
+
+
+def _candidate_repo(tmp_path: Path) -> tuple[Path, str]:
+    root = tmp_path / "candidate"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "evaluation@example.test")
+    _git(root, "config", "user.name", "Evaluation Test")
+    fixture = root / "tests" / "fixtures" / "models" / "linear_mixed_effects" / "known_truth.csv"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_text("participant_id,score\nP1,1\n", encoding="utf-8")
+    (root / "README.md").write_text("candidate\n", encoding="utf-8")
+    return root, _commit(root, "C1 lock")
+
+
+def test_candidate_preflight_rejects_non_full_sha_before_touching_a_worktree(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+
+    with pytest.raises(collector.EvidenceCollectionError, match="40-character full SHA"):
+        collector._resolve_candidate(tmp_path / "missing", "deadbeef", [])
+
+
+def test_candidate_preflight_rejects_a_wrong_full_sha(tmp_path: Path) -> None:
+    collector = _load_collector()
+    root, _contract_lock = _candidate_repo(tmp_path)
+
+    with pytest.raises(collector.EvidenceCollectionError, match="does not resolve to a commit"):
+        collector._resolve_candidate(root, "a" * 40, [])
+
+
+def test_candidate_preflight_rejects_the_contract_lock_itself(tmp_path: Path) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+
+    with pytest.raises(collector.EvidenceCollectionError, match="must be after contract lock"):
+        collector._resolve_candidate(root, contract_lock, [])
+
+
+def test_candidate_preflight_rejects_a_dirty_worktree(tmp_path: Path) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    (root / "uncommitted.txt").write_text("dirty\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="dirty"):
+        collector._resolve_candidate(root, candidate, [])
+
+
+def test_candidate_preflight_rejects_a_protected_fixture_change(tmp_path: Path) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    fixture = root / "tests" / "fixtures" / "models" / "linear_mixed_effects" / "known_truth.csv"
+    fixture.write_text("participant_id,score\nP1,999\n", encoding="utf-8")
+    candidate = _commit(root, "mutate locked fixture")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="protected paths"):
+        collector._resolve_candidate(root, candidate, [])
+
+
+def test_protected_paths_cover_c1_contracts_fixtures_and_central_adapters() -> None:
+    collector = _load_collector()
+
+    required = {
+        "backend/workbench/contracts",
+        "tests/fixtures/models/linear_mixed_effects",
+        "backend/workbench/analysis_loop/adapters.py",
+        "backend/workbench/analysis_loop/compare.py",
+        "backend/workbench/analysis_loop/validation.py",
+        "backend/workbench/narrative",
+        "backend/workbench/validation.py",
+    }
+
+    assert required.issubset(set(collector.PROTECTED_PATHS))
+
+
+def test_post_execution_audit_rejects_fixture_mutation(tmp_path: Path) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    feature = (
+        root
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "feature.py"
+    )
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    records: list[dict[str, object]] = []
+    preflight = collector._preflight_candidate(root, candidate, records)
+    fixture = root / "tests" / "fixtures" / "models" / "linear_mixed_effects" / "known_truth.csv"
+    fixture.write_text("participant_id,score\nP1,mutated-after-evaluation\n", encoding="utf-8")
+
+    with pytest.raises(collector.EvidenceCollectionError, match="fixture content changed"):
+        collector._post_execution_audit(root, candidate, preflight, records)
+
+
+def test_collector_runs_the_strict_subprocess_before_performance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root = tmp_path / "candidate"
+    root.mkdir()
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    observed: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        observed.append(command)
+        artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "strict-suite.json").write_text(
+            json.dumps({"status": "passed", "suite_exit_code": 0}), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+
+    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    records: list[dict[str, object]] = []
+
+    payload = collector._run_strict_candidate_evaluation(
+        root=root,
+        candidate_sha="a" * 40,
+        evaluator_root=REPO_ROOT,
+        artifact_root=artifact_root,
+        command_records=records,
+    )
+
+    assert payload["status"] == "passed"
+    assert observed and Path(observed[0][1]).name == "strict_runner.py"
+    assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") not in observed[0]
+    assert records[0]["exit_code"] == 0
+    assert (artifact_root / "strict-runner.stdout.txt").is_file()
+
+
+def test_collector_rejects_a_claimed_pass_with_a_nonzero_full_suite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root = tmp_path / "candidate"
+    root.mkdir()
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / "strict-suite.json").write_text(
+            json.dumps({"status": "passed", "suite_exit_code": 1}), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+
+    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+
+    with pytest.raises(collector.EvidenceCollectionError, match="nonzero pytest exit"):
+        collector._run_strict_candidate_evaluation(
+            root=root,
+            candidate_sha="a" * 40,
+            evaluator_root=REPO_ROOT,
+            artifact_root=artifact_root,
+            command_records=[],
+        )
+
+
+def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    candidate_sha = "c" * 40
+    required_results = {
+        "contract_validation": "passed",
+        "known_truth": "passed",
+        "fault_injection": "passed",
+        "agent_boundaries": "passed",
+        "compare_restrictions": "passed",
+        "deterministic_overclaim_checks": "passed",
+    }
+    strict_payload = {
+        "status": "passed",
+        "suite_exit_code": 0,
+        "results": required_results,
+        "performance": {
+            "status": "passed",
+            "environment": {
+                "python_version": "3.test",
+                "statsmodels_version": "test",
+                "node_version": "not_run",
+                "os_family": "TestOS",
+                "dependency_lock_hash": "d" * 64,
+            },
+        },
+        "strict_isolation": {"network_guard": "blocked", "provider_environment": "cleared"},
+    }
+    preflight = {
+        "candidate_commit": candidate_sha,
+        "fixture_hashes": {"tests/fixtures/models/linear_mixed_effects/known_truth.csv": "f" * 64},
+    }
+    monkeypatch.setattr(collector, "_preflight_candidate", lambda *_args, **_kwargs: preflight)
+    monkeypatch.setattr(
+        collector, "_run_strict_candidate_evaluation", lambda **_kwargs: strict_payload
+    )
+    monkeypatch.setattr(collector, "_post_execution_audit", lambda *_args, **_kwargs: preflight)
+    monkeypatch.setattr(collector, "_git_output", lambda *_args, **_kwargs: "h" * 40)
+
+    payload = collector._collect(
+        root=tmp_path / "candidate",
+        candidate=candidate_sha,
+        output=tmp_path / "evidence.json",
+        command_records=[],
+    )
+
+    assert payload["status"] == "passed"
+    assert payload["evaluated_commit"] == candidate_sha
+    assert payload["environment"]["dependency_lock_hash"] == "d" * 64
+    assert payload["results"]["performance_collection"] == "passed"
+    assert payload["results"]["browser_acceptance"] == "not_run"
+    assert payload["acceptance"] == {
+        "accepted": False,
+        "reason": "browser acceptance has not been supplied; strict evidence alone cannot accept a candidate",
+    }
+    assert datetime.fromisoformat(payload["generated_at"]).tzinfo is not None
+
+
+def test_collector_runs_the_real_full_suite_before_it_can_fail_a_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    monkeypatch.setattr(collector, "CONTRACT_LOCK_COMMIT", contract_lock)
+    feature = root / "backend" / "workbench" / "engine" / "packs" / "linear_mixed_effects" / "feature.py"
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "candidate feature")
+    output = tmp_path / "evidence.json"
+
+    with pytest.raises(collector.EvidenceCollectionError, match="strict candidate evaluation failed"):
+        collector._collect(
+            root=root,
+            candidate=candidate,
+            output=output,
+            command_records=[],
+        )
+
+    strict_result = json.loads(
+        (tmp_path / "evidence.artifacts" / "strict-suite" / "strict-suite.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert strict_result["status"] == "failed"
+    assert strict_result["suite_exit_code"] != 0
+    assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") in strict_result[
+        "suite_command"
+    ]
+    assert (tmp_path / "evidence.artifacts" / "strict-suite" / "strict-suite.junit.xml").is_file()

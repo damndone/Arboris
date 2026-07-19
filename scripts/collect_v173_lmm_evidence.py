@@ -1,54 +1,86 @@
 #!/usr/bin/env python3
-"""Collect non-secret, repeatable LMM performance evidence for one candidate.
+"""Collect strict, non-secret LMM evidence for one supplied candidate commit.
 
-This script deliberately evaluates only the checked-out, supplied candidate.
-It never creates a worktree, reads another Lane's uncommitted files, calls a
-provider, or overwrites an existing evidence artifact.
+This parent process never imports candidate code.  It verifies a clean,
+full-SHA candidate before launching the unique strict evaluation subprocess,
+then repeats the same Git and fixture audits afterwards.  A passed manifest
+therefore means the full strict suite and persistent local performance run
+completed against that exact unchanged candidate; it is not browser acceptance.
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
-import importlib
 import json
 import os
-import platform
+import re
 import shlex
-import socket
-import statistics
 import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 
 CONTRACT_LOCK_COMMIT = "0251f0a30d984bdbb2cfab404e6c646deab60cae"
+FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+FIXTURE_ROOT_RELATIVE_PATH = Path("tests/fixtures/models/linear_mixed_effects")
+STRICT_RUNNER_RELATIVE_PATH = Path(
+    "tests/evaluation/linear_mixed_effects/strict_runner.py"
+)
+
+# These are immutable C1 contracts or central paths whose change would make an
+# independent feature-candidate result meaningless.  The strict feature
+# allowlist below additionally rejects every unlisted change.
 PROTECTED_PATHS = (
     "backend/workbench/agent/orchestrator.py",
     "backend/workbench/agent/operations.py",
     "backend/workbench/analysis_loop/contracts.py",
     "backend/workbench/analysis_loop/storage.py",
+    "backend/workbench/analysis_loop/adapters.py",
+    "backend/workbench/analysis_loop/compare.py",
+    "backend/workbench/analysis_loop/validation.py",
+    "backend/workbench/contracts",
+    "backend/workbench/diagnostic_preview/contract_validation.py",
+    "backend/workbench/engine/capabilities.py",
     "backend/workbench/engine/pack.py",
     "backend/workbench/engine/registry.py",
-    "backend/workbench/engine/capabilities.py",
+    "backend/workbench/engine/stages/validation.py",
     "backend/workbench/graph_store.py",
+    "backend/workbench/lineage/manual_patch_validation.py",
+    "backend/workbench/lineage/node_write_validation.py",
+    "backend/workbench/narrative",
+    "backend/workbench/validation.py",
     "frontend/src/workbench/AgentSurfaceContext.tsx",
     "scripts/gate.sh",
+    "tests/contracts/test_lmm_canonical_packets.py",
+    "tests/contracts/test_lmm_contracts.py",
+    "tests/contracts/test_lmm_error_contract.py",
+    "tests/fixtures/models/linear_mixed_effects",
     "tests/test_honest_did_adversarial.py",
     "tests/test_honest_did_sd_adversarial.py",
 )
-FIXTURE_RELATIVE_PATH = Path("tests/fixtures/models/linear_mixed_effects/known_truth.csv")
-RUNNER_MODULE = "workbench.engine.packs.linear_mixed_effects.runner"
+
+# The evaluator accepts only standalone Feature Lane changes.  Integration
+# changes to central adapters need their own approved candidate/evidence run,
+# rather than silently broadening this evaluation boundary.
+ALLOWED_CANDIDATE_PREFIXES = (
+    "backend/workbench/agent/recipes/lmm_explanation.py",
+    "backend/workbench/agent/recipes/repeated_measures.py",
+    "backend/workbench/engine/packs/linear_mixed_effects/",
+    "frontend/src/runForm/RepeatedMeasuresControls.test.tsx",
+    "frontend/src/runForm/RepeatedMeasuresControls.tsx",
+    "frontend/src/workbench/repeatedMeasures/",
+    "tests/agent/test_repeated_measures_recovery.py",
+    "tests/agent/test_repeated_measures_recipe.py",
+    "tests/models/linear_mixed_effects/",
+)
 
 
 class EvidenceCollectionError(RuntimeError):
-    """Raised for an unacceptably supplied candidate or a failed local fit."""
+    """Raised for rejected input or a non-passing strict candidate evaluation."""
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -67,11 +99,25 @@ def _command_text(command: list[str]) -> str:
     return shlex.join(command)
 
 
+def _validate_full_sha(candidate: str) -> None:
+    if not FULL_SHA_PATTERN.fullmatch(candidate):
+        raise EvidenceCollectionError(
+            "candidate SHA must be a 40-character full SHA in lowercase hexadecimal"
+        )
+
+
+def _command_output_path(artifact_root: Path | None, ordinal: int) -> Path | None:
+    if artifact_root is None:
+        return None
+    return artifact_root / "commands" / f"{ordinal:03d}.txt"
+
+
 def _run_git(
     root: Path,
     arguments: list[str],
     command_records: list[dict[str, object]],
     *,
+    artifact_root: Path | None = None,
     require_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = ["git", "-C", str(root), *arguments]
@@ -79,47 +125,126 @@ def _run_git(
     completed = subprocess.run(command, check=False, capture_output=True, text=True)
     duration = time.perf_counter() - started
     output = completed.stdout + completed.stderr
-    command_records.append(
-        {
-            "command": _command_text(command),
-            "exit_code": completed.returncode,
-            "duration_seconds": duration,
-            "output_sha256": _sha256_bytes(output.encode("utf-8")),
-        }
-    )
+    output_path = _command_output_path(artifact_root, len(command_records) + 1)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output, encoding="utf-8")
+    record: dict[str, object] = {
+        "command": _command_text(command),
+        "exit_code": completed.returncode,
+        "duration_seconds": duration,
+        "output_sha256": _sha256_bytes(output.encode("utf-8")),
+    }
+    if output_path is not None:
+        record["output_artifact"] = str(output_path)
+    command_records.append(record)
     if require_success and completed.returncode != 0:
         raise EvidenceCollectionError(
-            f"Git preflight failed: {_command_text(command)} (exit {completed.returncode})"
+            f"Git audit failed: {_command_text(command)} (exit {completed.returncode})"
         )
     return completed
 
 
 def _git_output(
-    root: Path, arguments: list[str], command_records: list[dict[str, object]]
+    root: Path,
+    arguments: list[str],
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
 ) -> str:
-    return _run_git(root, arguments, command_records).stdout.strip()
+    return _run_git(
+        root,
+        arguments,
+        command_records,
+        artifact_root=artifact_root,
+    ).stdout.strip()
+
+
+def _changed_paths(
+    root: Path,
+    candidate: str,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+) -> list[str]:
+    output = _git_output(
+        root,
+        ["diff", "--name-only", f"{CONTRACT_LOCK_COMMIT}..{candidate}"],
+        command_records,
+        artifact_root=artifact_root,
+    )
+    return [path for path in output.splitlines() if path]
+
+
+def _is_allowed_candidate_path(path: str) -> bool:
+    return any(
+        path == allowed or path.startswith(allowed)
+        for allowed in ALLOWED_CANDIDATE_PREFIXES
+    )
+
+
+def _assert_candidate_diff_is_allowed(changed_paths: list[str]) -> None:
+    disallowed = [path for path in changed_paths if not _is_allowed_candidate_path(path)]
+    if disallowed:
+        raise EvidenceCollectionError(
+            "candidate changes outside the strict Feature path allowlist: "
+            + ", ".join(disallowed)
+        )
 
 
 def _resolve_candidate(
-    root: Path, candidate: str, command_records: list[dict[str, object]]
+    root: Path,
+    candidate: str,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
 ) -> str:
+    """Verify that ``candidate`` is exactly the clean, allowed checkout HEAD."""
+
+    _validate_full_sha(candidate)
     if not root.is_dir():
         raise EvidenceCollectionError(f"candidate worktree does not exist: {root}")
     if not (root / ".git").exists():
         raise EvidenceCollectionError(f"candidate worktree is not a Git checkout: {root}")
 
-    resolved = _git_output(root, ["rev-parse", "--verify", f"{candidate}^{{commit}}"], command_records)
-    head = _git_output(root, ["rev-parse", "HEAD"], command_records)
+    resolved_command = _run_git(
+        root,
+        ["rev-parse", "--verify", f"{candidate}^{{commit}}"],
+        command_records,
+        artifact_root=artifact_root,
+        require_success=False,
+    )
+    if resolved_command.returncode != 0:
+        raise EvidenceCollectionError(
+            f"candidate SHA does not resolve to a commit in supplied worktree: {candidate}"
+        )
+    resolved = resolved_command.stdout.strip()
+    if resolved != candidate:
+        raise EvidenceCollectionError(
+            "candidate SHA did not resolve exactly to the supplied full SHA: "
+            f"supplied {candidate}, resolved {resolved}"
+        )
+    head = _git_output(
+        root,
+        ["rev-parse", "HEAD"],
+        command_records,
+        artifact_root=artifact_root,
+    )
     if resolved != head:
         raise EvidenceCollectionError(
             "candidate SHA must be exactly the clean candidate worktree HEAD; "
             f"requested {resolved}, found {head}"
+        )
+    if resolved == CONTRACT_LOCK_COMMIT:
+        raise EvidenceCollectionError(
+            "candidate must be after contract lock; evaluating C1 itself is forbidden"
         )
 
     status = _git_output(
         root,
         ["status", "--porcelain=v1", "--untracked-files=all"],
         command_records,
+        artifact_root=artifact_root,
     )
     if status:
         raise EvidenceCollectionError(
@@ -130,6 +255,7 @@ def _resolve_candidate(
         root,
         ["merge-base", "--is-ancestor", CONTRACT_LOCK_COMMIT, resolved],
         command_records,
+        artifact_root=artifact_root,
         require_success=False,
     )
     if ancestor.returncode != 0:
@@ -139,119 +265,181 @@ def _resolve_candidate(
 
     protected = _git_output(
         root,
-        ["diff", "--name-only", f"{CONTRACT_LOCK_COMMIT}..{resolved}", "--", *PROTECTED_PATHS],
+        [
+            "diff",
+            "--name-only",
+            f"{CONTRACT_LOCK_COMMIT}..{resolved}",
+            "--",
+            *PROTECTED_PATHS,
+        ],
         command_records,
+        artifact_root=artifact_root,
     )
     if protected:
         raise EvidenceCollectionError(
             "candidate changes protected paths: " + ", ".join(protected.splitlines())
         )
+    _assert_candidate_diff_is_allowed(
+        _changed_paths(
+            root,
+            resolved,
+            command_records,
+            artifact_root=artifact_root,
+        )
+    )
     return resolved
 
 
-@contextmanager
-def _block_network() -> Iterator[None]:
-    """Make an accidental provider/network call a deterministic local failure."""
-
-    original_connect = socket.socket.connect
-    original_create_connection = socket.create_connection
-
-    def blocked(*_args: object, **_kwargs: object) -> object:
-        raise EvidenceCollectionError(
-            "network access is forbidden during independent local evidence collection"
-        )
-
-    socket.socket.connect = blocked  # type: ignore[assignment]
-    socket.create_connection = blocked  # type: ignore[assignment]
-    try:
-        yield
-    finally:
-        socket.socket.connect = original_connect  # type: ignore[assignment]
-        socket.create_connection = original_create_connection  # type: ignore[assignment]
+def _snapshot_fixtures(root: Path) -> dict[str, str]:
+    fixture_root = root / FIXTURE_ROOT_RELATIVE_PATH
+    if not fixture_root.is_dir():
+        raise EvidenceCollectionError(f"candidate is missing canonical fixture root: {fixture_root}")
+    snapshot = {
+        path.relative_to(root).as_posix(): _sha256_file(path)
+        for path in sorted(fixture_root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts
+    }
+    if not snapshot:
+        raise EvidenceCollectionError(f"candidate fixture root is empty: {fixture_root}")
+    known_truth = (FIXTURE_ROOT_RELATIVE_PATH / "known_truth.csv").as_posix()
+    if known_truth not in snapshot:
+        raise EvidenceCollectionError("candidate is missing canonical fixture: " + known_truth)
+    return snapshot
 
 
-def _fixture_shape(path: Path) -> tuple[int, int]:
-    with path.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    return len(rows), len({row["participant_id"] for row in rows})
-
-
-def _percentile_95(values: list[float]) -> float:
-    ordered = sorted(values)
-    if not ordered:
-        raise EvidenceCollectionError("cannot calculate a percentile with no measurements")
-    if len(ordered) == 1:
-        return ordered[0]
-    position = 0.95 * (len(ordered) - 1)
-    lower = int(position)
-    upper = min(lower + 1, len(ordered) - 1)
-    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
-
-
-def _load_fit(root: Path) -> tuple[Callable[..., object], str]:
-    candidate_backend = str(root / "backend")
-    if candidate_backend not in sys.path:
-        sys.path.insert(0, candidate_backend)
-    try:
-        module = importlib.import_module(RUNNER_MODULE)
-    except ModuleNotFoundError as error:
-        missing = error.name or RUNNER_MODULE
-        raise EvidenceCollectionError(
-            f"supplied candidate does not provide required module: {missing}"
-        ) from error
-    try:
-        fit = getattr(module, "fit_linear_mixed_effects")
-    except AttributeError as error:
-        raise EvidenceCollectionError(
-            "supplied candidate runner has no fit_linear_mixed_effects helper"
-        ) from error
-    if not callable(fit):
-        raise EvidenceCollectionError("fit_linear_mixed_effects is not callable")
-    return fit, candidate_backend
-
-
-def _fit_once(
-    fit: Callable[..., object],
-    fixture: Path,
-    run_root: Path,
+def _preflight_candidate(
+    root: Path,
+    candidate: str,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
 ) -> dict[str, object]:
-    run_root.mkdir(parents=True, exist_ok=True)
-    started = time.perf_counter()
-    outcome = fit(
-        csv_path=fixture,
-        outcome="score",
-        controls=["baseline_score"],
-        options={
-            "subject_id": "participant_id",
-            "time": "week",
-            "group": "arm",
-            "fit_method": "reml",
-            "random_slope": True,
-        },
-        run_root=run_root,
+    resolved = _resolve_candidate(
+        root,
+        candidate,
+        command_records,
+        artifact_root=artifact_root,
     )
-    duration = time.perf_counter() - started
-    if not isinstance(outcome, tuple) or len(outcome) != 2:
-        raise EvidenceCollectionError("runner must return exactly (result, fitted)")
-    result, fitted = outcome
-    if not isinstance(result, Mapping):
-        raise EvidenceCollectionError("runner result must be a mapping")
-    if result.get("model_type") != "linear_mixed_effects":
-        raise EvidenceCollectionError("runner result does not identify linear_mixed_effects")
-    if getattr(fitted, "converged", None) is not True:
-        raise EvidenceCollectionError("measured LMM fit did not converge")
-
-    artifact = run_root / "linear_mixed_effects_contract.json"
-    if not artifact.is_file():
-        raise EvidenceCollectionError("runner did not write linear_mixed_effects_contract.json")
     return {
-        "duration_seconds": duration,
-        "artifact_path": str(artifact),
-        "artifact_sha256": _sha256_file(artifact),
+        "candidate_commit": resolved,
+        "fixture_hashes": _snapshot_fixtures(root),
     }
 
 
-def _write_json(path: Path, value: Mapping[str, object]) -> None:
+def _post_execution_audit(
+    root: Path,
+    candidate: str,
+    preflight: dict[str, object],
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+) -> dict[str, object]:
+    """Repeat the preflight after candidate code has run in a child process."""
+
+    fixture_hashes = _snapshot_fixtures(root)
+    candidate_error: EvidenceCollectionError | None = None
+    try:
+        resolved = _resolve_candidate(
+            root,
+            candidate,
+            command_records,
+            artifact_root=artifact_root,
+        )
+    except EvidenceCollectionError as error:
+        candidate_error = error
+        resolved = ""
+    if fixture_hashes != preflight["fixture_hashes"]:
+        raise EvidenceCollectionError("fixture content changed during strict evaluation")
+    if candidate_error is not None:
+        raise candidate_error
+    if resolved != preflight["candidate_commit"]:
+        raise EvidenceCollectionError("candidate HEAD changed during strict evaluation")
+    return {"candidate_commit": resolved, "fixture_hashes": fixture_hashes}
+
+
+def _strict_child_environment() -> dict[str, str]:
+    """Do not even inherit provider configuration into the strict subprocess."""
+
+    return {"PYTHONUNBUFFERED": "1"}
+
+
+def _run_strict_candidate_evaluation(
+    *,
+    root: Path,
+    candidate_sha: str,
+    evaluator_root: Path,
+    artifact_root: Path,
+    command_records: list[dict[str, object]],
+) -> dict[str, object]:
+    strict_runner = evaluator_root / STRICT_RUNNER_RELATIVE_PATH
+    if not strict_runner.is_file():
+        raise EvidenceCollectionError(f"strict evaluation entrypoint is missing: {strict_runner}")
+    strict_artifact_dir = artifact_root / "strict-suite"
+    command = [
+        sys.executable,
+        str(strict_runner),
+        "--candidate-root",
+        str(root),
+        "--candidate-sha",
+        candidate_sha,
+        "--evaluator-root",
+        str(evaluator_root),
+        "--artifact-dir",
+        str(strict_artifact_dir),
+    ]
+    started = time.perf_counter()
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=artifact_root,
+        env=_strict_child_environment(),
+    )
+    duration = time.perf_counter() - started
+    stdout_path = artifact_root / "strict-runner.stdout.txt"
+    stderr_path = artifact_root / "strict-runner.stderr.txt"
+    stdout_path.write_text(completed.stdout, encoding="utf-8")
+    stderr_path.write_text(completed.stderr, encoding="utf-8")
+    combined_output = completed.stdout + completed.stderr
+    command_records.append(
+        {
+            "command": _command_text(command),
+            "exit_code": completed.returncode,
+            "duration_seconds": duration,
+            "output_sha256": _sha256_bytes(combined_output.encode("utf-8")),
+            "output_artifact": str(stdout_path),
+            "stderr_artifact": str(stderr_path),
+        }
+    )
+    result_path = strict_artifact_dir / "strict-suite.json"
+    if not result_path.is_file():
+        raise EvidenceCollectionError(
+            "strict candidate evaluation did not persist strict-suite.json"
+        )
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise EvidenceCollectionError("strict-suite.json is not valid JSON") from error
+    if completed.returncode != 0 or payload.get("status") != "passed":
+        raise EvidenceCollectionError(
+            "strict candidate evaluation failed; see persistent artifacts under "
+            f"{strict_artifact_dir}"
+        )
+    if payload.get("suite_exit_code") != 0:
+        raise EvidenceCollectionError("strict candidate evaluation reported a nonzero pytest exit")
+    return payload
+
+
+def _artifact_manifest(artifact_root: Path) -> list[dict[str, str]]:
+    return [
+        {"path": str(path), "sha256": _sha256_file(path)}
+        for path in sorted(artifact_root.rglob("*"))
+        if path.is_file()
+    ]
+
+
+def _write_json(path: Path, value: dict[str, object]) -> None:
     if path.exists():
         raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,75 +452,92 @@ def _write_json(path: Path, value: Mapping[str, object]) -> None:
     os.replace(temporary, path)
 
 
+def _evaluation_id(candidate_sha: str) -> str:
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"eval-v173-lmm-{candidate_sha[:12]}-{timestamp}"
+
+
 def _collect(
-    *, root: Path, candidate: str, output: Path, command_records: list[dict[str, object]]
+    *,
+    root: Path,
+    candidate: str,
+    output: Path,
+    command_records: list[dict[str, object]],
 ) -> dict[str, object]:
-    candidate_commit = _resolve_candidate(root, candidate, command_records)
-    fixture = root / FIXTURE_RELATIVE_PATH
-    if not fixture.is_file():
-        raise EvidenceCollectionError(f"candidate is missing canonical fixture: {fixture}")
-    rows, subjects = _fixture_shape(fixture)
-    fit, _candidate_backend = _load_fit(root)
-
-    try:
-        import statsmodels
-    except ModuleNotFoundError as error:
-        raise EvidenceCollectionError("existing local statsmodels dependency is unavailable") from error
-
-    with tempfile.TemporaryDirectory(prefix="v173-lmm-evidence-") as temporary_dir:
-        working_root = Path(temporary_dir)
-        with _block_network():
-            warmups = [
-                _fit_once(fit, fixture, working_root / "warmups" / str(index))
-                for index in range(2)
-            ]
-            cold = [
-                _fit_once(fit, fixture, working_root / "cold" / str(index))
-                for index in range(7)
-            ]
-            hot_root = working_root / "hot"
-            hot = [_fit_once(fit, fixture, hot_root) for _ in range(7)]
-        artifact_count = sum(1 for path in working_root.rglob("*") if path.is_file())
-
-    collector_root = Path(__file__).resolve().parents[1]
-    collector_commit = _git_output(
-        collector_root, ["rev-parse", "HEAD"], command_records
+    if output.exists():
+        raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {output}")
+    artifact_root = output.parent / f"{output.stem}.artifacts"
+    if artifact_root.exists():
+        raise EvidenceCollectionError(
+            f"refusing to overwrite existing strict evaluation artifacts: {artifact_root}"
+        )
+    artifact_root.mkdir(parents=True, exist_ok=False)
+    evaluator_root = Path(__file__).resolve().parents[1]
+    preflight = _preflight_candidate(
+        root,
+        candidate,
+        command_records,
+        artifact_root=artifact_root,
     )
-    cold_durations = [float(item["duration_seconds"]) for item in cold]
-    hot_durations = [float(item["duration_seconds"]) for item in hot]
+    strict = _run_strict_candidate_evaluation(
+        root=root,
+        candidate_sha=str(preflight["candidate_commit"]),
+        evaluator_root=evaluator_root,
+        artifact_root=artifact_root,
+        command_records=command_records,
+    )
+    performance = strict.get("performance")
+    if not isinstance(performance, dict) or performance.get("status") != "passed":
+        raise EvidenceCollectionError("strict candidate evaluation did not complete performance")
+    results = strict.get("results")
+    if not isinstance(results, dict) or any(value != "passed" for value in results.values()):
+        raise EvidenceCollectionError("strict candidate evaluation did not pass every required suite result")
+    _post_execution_audit(
+        root,
+        candidate,
+        preflight,
+        command_records,
+        artifact_root=artifact_root,
+    )
+    collector_commit = _git_output(
+        evaluator_root,
+        ["rev-parse", "HEAD"],
+        command_records,
+        artifact_root=artifact_root,
+    )
+    environment = performance.get("environment")
+    if not isinstance(environment, dict):
+        raise EvidenceCollectionError("strict performance evidence is missing environment metadata")
+    fixture_hashes = preflight["fixture_hashes"]
+    if not isinstance(fixture_hashes, dict):
+        raise EvidenceCollectionError("internal preflight fixture snapshot is invalid")
+    final_results = {str(name): str(value) for name, value in results.items()}
+    final_results["performance_collection"] = "passed"
+    final_results["browser_acceptance"] = "not_run"
     return {
-        "schema_version": "v173_lmm_performance_evidence_v1",
+        "schema_version": "v173_lmm_performance_evidence_v2",
         "status": "passed",
-        "evaluated_commit": candidate_commit,
+        "evaluation_id": _evaluation_id(str(preflight["candidate_commit"])),
+        "evaluated_commit": preflight["candidate_commit"],
+        "candidate_worktree": str(root),
         "contract_lock_commit": CONTRACT_LOCK_COMMIT,
         "evaluation_harness_commit": collector_commit,
-        "environment": {
-            "python_version": sys.version.split()[0],
-            "statsmodels_version": statsmodels.__version__,
-            "os_family": platform.system(),
+        "supersedes": [],
+        "environment": environment,
+        "fixtures": [
+            {"path": path, "sha256": digest}
+            for path, digest in sorted(fixture_hashes.items())
+        ],
+        "results": final_results,
+        "strict_isolation": strict.get("strict_isolation"),
+        "acceptance": {
+            "accepted": False,
+            "reason": "browser acceptance has not been supplied; strict evidence alone cannot accept a candidate",
         },
-        "fixture": {
-            "path": str(FIXTURE_RELATIVE_PATH),
-            "sha256": _sha256_file(fixture),
-            "rows": rows,
-            "subjects": subjects,
-        },
-        "warmups": warmups,
-        "cold_fits": cold,
-        "hot_fits": hot,
-        "summary": {
-            "cold_p50_seconds": statistics.median(cold_durations),
-            "cold_p95_seconds": _percentile_95(cold_durations),
-            "hot_p50_seconds": statistics.median(hot_durations),
-            "hot_p95_seconds": _percentile_95(hot_durations),
-            "failure_count": 0,
-            "artifact_count": artifact_count,
-            "full_forest_refetch": False,
-            "full_forest_refetch_basis": "direct local runner invocation; no graph-store path",
-            "real_provider_calls": False,
-            "real_provider_calls_basis": "socket connections were blocked during every fit",
-        },
+        "performance": performance,
         "commands": command_records,
+        "artifacts": _artifact_manifest(artifact_root),
+        "generated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -341,7 +546,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate",
         required=True,
-        help="exact candidate commit SHA to evaluate (must equal candidate worktree HEAD)",
+        help="exact 40-character lowercase candidate commit SHA (must equal clean HEAD)",
     )
     parser.add_argument(
         "--candidate-worktree",
@@ -353,7 +558,7 @@ def _parser() -> argparse.ArgumentParser:
         "--output",
         required=True,
         type=Path,
-        help="new JSON evidence path; an existing artifact is never overwritten",
+        help="new JSON evidence path; existing evidence and artifact directories are never overwritten",
     )
     return parser
 
@@ -368,13 +573,15 @@ def build_failure_payload(
     """Keep a rejected candidate attributable without ever accepting it."""
 
     return {
-        "schema_version": "v173_lmm_performance_evidence_v1",
+        "schema_version": "v173_lmm_performance_evidence_v2",
         "status": "failed",
         "requested_candidate": requested_candidate,
         "error": error,
         "contract_lock_commit": CONTRACT_LOCK_COMMIT,
         "collector_duration_seconds": duration_seconds,
+        "acceptance": {"accepted": False},
         "commands": command_records,
+        "generated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -382,15 +589,17 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     command_records: list[dict[str, object]] = []
     started = time.perf_counter()
+    output = args.output.resolve()
+    artifact_root = output.parent / f"{output.stem}.artifacts"
     try:
         payload = _collect(
             root=args.candidate_worktree.resolve(),
             candidate=args.candidate,
-            output=args.output,
+            output=output,
             command_records=command_records,
         )
         payload["collector_duration_seconds"] = time.perf_counter() - started
-        _write_json(args.output, payload)
+        _write_json(output, payload)
     except EvidenceCollectionError as error:
         failure = build_failure_payload(
             requested_candidate=args.candidate,
@@ -398,14 +607,17 @@ def main(argv: list[str] | None = None) -> int:
             duration_seconds=time.perf_counter() - started,
             command_records=command_records,
         )
+        if artifact_root.is_dir():
+            failure["artifact_root"] = str(artifact_root)
+            failure["artifacts"] = _artifact_manifest(artifact_root)
         try:
-            _write_json(args.output, failure)
+            _write_json(output, failure)
         except EvidenceCollectionError:
             pass
         print(str(error), file=sys.stderr)
         return 1
 
-    print(json.dumps({"status": "passed", "output": str(args.output)}))
+    print(json.dumps({"status": "passed", "output": str(output)}))
     return 0
 
 
