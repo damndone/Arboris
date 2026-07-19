@@ -16,9 +16,9 @@ export function TrajectoryFigure(props: { context: TrajectoryFigureContext }) {
           </tr>
         </thead>
         <tbody>
-          {props.context.groups.flatMap((group) => props.context.time.map((time, index) => (
-            <tr key={`${group.label}:${time}`}>
-              <td>{group.label}</td>
+          {props.context.groups.flatMap((group, groupIndex) => props.context.time.map((time, index) => (
+            <tr key={`${groupIndex}:${index}`}>
+              {index === 0 ? <td rowSpan={props.context.time.length}>{group.label}</td> : null}
               <td>{time}</td>
               <td>{group.observed_mean[index]}</td>
               <td>{group.fitted_mean[index]}</td>

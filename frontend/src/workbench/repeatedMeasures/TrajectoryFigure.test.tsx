@@ -29,5 +29,7 @@ describe("TrajectoryFigure", () => {
     expect(screen.getByText("组别轨迹")).toBeInTheDocument();
     expect(screen.getByLabelText("组别轨迹数据表")).toBeInTheDocument();
     expect(screen.getByText("3.2")).toBeInTheDocument();
+    expect(screen.getAllByText("control")).toHaveLength(1);
+    expect(screen.getByText("control")).toHaveAttribute("rowspan", "2");
   });
 });
