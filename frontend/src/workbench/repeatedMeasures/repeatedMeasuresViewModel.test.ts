@@ -1109,6 +1109,80 @@ describe("buildRepeatedMeasuresViewModel", () => {
     });
   });
 
+  it("rejects a nested getter without invoking it", () => {
+    let reads = 0;
+    const unrendered = {};
+    Object.defineProperty(unrendered, "must_not_execute", {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return "forged";
+      },
+    });
+
+    const viewModel = buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        unrendered,
+      },
+    });
+
+    expect(reads).toBe(0);
+    expect(viewModel).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
+  it.each([
+    ["a cyclic nested record", () => {
+      const cycle: Record<string, unknown> = {};
+      cycle.self = cycle;
+      return cycle;
+    }],
+    ["a shared nested alias", () => {
+      const shared = { stable: true };
+      return { first: shared, second: shared };
+    }],
+    ["a packet beyond the node budget", () => ({
+      bulk: Array.from({ length: 10_001 }, (_value, index) => index),
+    })],
+    ["a packet beyond the nesting-depth budget", () => {
+      let nested: unknown = 0;
+      for (let index = 0; index < 33; index += 1) nested = { nested };
+      return nested;
+    }],
+    ["a packet with an oversized string", () => ({
+      text: "x".repeat(65_537),
+    })],
+  ])("fails closed for %s", (_label, unrendered) => {
+    expect(buildRepeatedMeasuresViewModel({
+      contract: "linear_mixed_effects.result",
+      contract_version: "1.0",
+      producer_version: "linear_mixed_effects@1.0",
+      payload: {
+        status: "complete",
+        result_id: "group_time_interaction",
+        estimate: 0.9,
+        fit_method: "reml",
+        inference_method: "asymptotic_wald_z_v1",
+        unrendered: unrendered(),
+      },
+    })).toMatchObject({
+      phase: "diagnostic",
+      result: null,
+      diagnostics: [{ code: "LMM_RESULT_PACKET_INVALID", status: "blocked" }],
+    });
+  });
+
   it("fails closed when a diagnostic packet has no trusted diagnostics", () => {
     const viewModel = buildRepeatedMeasuresViewModel({
       contract: "linear_mixed_effects.diagnostic",

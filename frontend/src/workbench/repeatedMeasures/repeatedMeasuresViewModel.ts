@@ -4,6 +4,11 @@ interface JsonRecord {
   [key: string]: JsonValue;
 }
 const INVALID_JSON = Symbol("invalid-json");
+const MAX_PACKET_JSON_DEPTH = 32;
+const MAX_PACKET_JSON_NODES = 10_000;
+const MAX_PACKET_JSON_STRING_LENGTH = 64 * 1024;
+
+type JsonCloneBudget = { nodes: number };
 
 const LOCKED_CONTRACT_VERSION = "1.0";
 const LOCKED_PRODUCER_VERSION = "linear_mixed_effects@1.0";
@@ -147,9 +152,19 @@ function isJsonDataProperty(
 function cloneJsonValue(
   value: unknown,
   seen: WeakSet<object> = new WeakSet<object>(),
+  budget: JsonCloneBudget = { nodes: 0 },
+  depth = 0,
 ): JsonValue | typeof INVALID_JSON {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+  if (depth > MAX_PACKET_JSON_DEPTH || budget.nodes >= MAX_PACKET_JSON_NODES) {
+    return INVALID_JSON;
+  }
+  budget.nodes += 1;
+
+  if (value === null || typeof value === "boolean") {
     return value;
+  }
+  if (typeof value === "string") {
+    return value.length <= MAX_PACKET_JSON_STRING_LENGTH ? value : INVALID_JSON;
   }
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : INVALID_JSON;
@@ -180,7 +195,7 @@ function cloneJsonValue(
         if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
           return INVALID_JSON;
         }
-        const item = cloneJsonValue(descriptor.value, seen);
+        const item = cloneJsonValue(descriptor.value, seen, budget, depth + 1);
         if (item === INVALID_JSON) return INVALID_JSON;
         copy.push(item);
       }
@@ -197,7 +212,7 @@ function cloneJsonValue(
       if (!isJsonDataProperty(descriptor) || descriptor.enumerable !== true) {
         return INVALID_JSON;
       }
-      const item = cloneJsonValue(descriptor.value, seen);
+      const item = cloneJsonValue(descriptor.value, seen, budget, depth + 1);
       if (item === INVALID_JSON) return INVALID_JSON;
       copy[key] = item;
     }
