@@ -192,6 +192,19 @@ files are versioned pack artifacts with local evidence only. They do not make
 the Lane ready for Agent, UI, Compare, lifecycle, independent evaluation, or
 release approval.
 
+### Additional FigureContext compatibility boundary
+
+The later WO-C contract review also established that this candidate's
+pack-local FigureContext spelling is not the frozen UI packet shape. The frozen
+implementation plan requires
+`{chart_type, time, groups: [{label, observed_mean, fitted_mean}]}`; this
+candidate currently produces
+`{chart_type, time, series: [{group, time, observed_mean, fitted_marginal_mean}]}`.
+This report records the discrepancy rather than changing a frozen public shape
+inside a blocked Lane. A future, separately approved Integration contract
+decision must select and test the one versioned FigureContext shape end to end;
+the current B candidate must not be treated as UI-compatible before then.
+
 ## Known package limits
 
 - Scope is intentionally limited to a continuous outcome, numeric continuous
