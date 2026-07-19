@@ -96,8 +96,53 @@ def test_strict_entrypoint_rejects_a_non_full_sha_before_candidate_import(tmp_pa
 
     payload = json.loads((artifact_dir / "strict-suite.json").read_text())
     assert completed.returncode == 1
-    assert "40-character full lowercase SHA" in payload["suite_error"]
+    assert payload["suite_error"] == "INVALID_CANDIDATE_SHA"
     assert payload["suite_exit_code"] == 1
+
+
+def test_strict_entrypoint_discards_raw_candidate_streams_from_durable_artifacts(
+    tmp_path,
+) -> None:
+    candidate_root = tmp_path / "candidate"
+    shutil.copytree(
+        REPO_ROOT / "backend" / "workbench",
+        candidate_root / "backend" / "workbench",
+    )
+    runner = (
+        candidate_root
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "runner.py"
+    )
+    runner.parent.mkdir(parents=True)
+    (runner.parent / "__init__.py").write_text("", encoding="utf-8")
+    sentinel = "candidate-stream-sentinel"
+    runner.write_text(
+        f"print({sentinel!r})\n"
+        f"raise RuntimeError({sentinel!r})\n",
+        encoding="utf-8",
+    )
+    artifact_dir = tmp_path / "strict-artifacts"
+
+    completed = _run_strict_entrypoint(candidate_root, artifact_dir, "e" * 40)
+
+    assert completed.returncode == 1
+    metadata = json.loads((artifact_dir / "strict-suite.output.json").read_text())
+    assert metadata["capture_policy"] == (
+        "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+    )
+    assert metadata["stdout_bytes_observed"] > 0
+    assert not (artifact_dir / "strict-suite.stdout.txt").exists()
+    assert not (artifact_dir / "strict-suite.stderr.txt").exists()
+    assert not (artifact_dir / "strict-suite.junit.xml").exists()
+    assert all(
+        sentinel.encode("utf-8") not in path.read_bytes()
+        for path in artifact_dir.rglob("*")
+        if path.is_file()
+    )
 
 
 def test_strict_entrypoint_blocks_network_and_clears_keys_before_import(
@@ -138,13 +183,19 @@ def test_strict_entrypoint_blocks_network_and_clears_keys_before_import(
     )
 
     payload = json.loads((artifact_dir / "strict-suite.json").read_text())
-    output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
+    metadata = json.loads((artifact_dir / "strict-suite.output.json").read_text())
     assert completed.returncode == 1
     assert payload["strict_isolation"]["provider_environment"] == "cleared before candidate imports"
     assert "no OS-level sandbox" in payload["strict_isolation"]["limitations"]
-    assert "network access is forbidden before and during strict candidate evaluation" in output
-    assert "provider canary leaked" not in output
-    assert "sentinel-provider-key" not in output
+    assert metadata["stdout_bytes_observed"] > 0
+    assert not (artifact_dir / "strict-suite.stdout.txt").exists()
+    assert not (artifact_dir / "strict-suite.stderr.txt").exists()
+    assert all(
+        b"provider canary leaked" not in path.read_bytes()
+        and b"sentinel-provider-key" not in path.read_bytes()
+        for path in artifact_dir.rglob("*")
+        if path.is_file()
+    )
 
 
 def test_strict_entrypoint_blocks_process_spawning_before_candidate_import(
@@ -176,9 +227,10 @@ def test_strict_entrypoint_blocks_process_spawning_before_candidate_import(
     completed = _run_strict_entrypoint(candidate_root, artifact_dir, "c" * 40)
 
     payload = json.loads((artifact_dir / "strict-suite.json").read_text())
-    output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
+    metadata = json.loads((artifact_dir / "strict-suite.output.json").read_text())
     assert completed.returncode == 1
-    assert "process spawning is forbidden before and during strict candidate evaluation" in output
+    assert metadata["stdout_bytes_observed"] > 0
+    assert not (artifact_dir / "strict-suite.stdout.txt").exists()
     assert payload["strict_isolation"]["process_spawn_guard"].startswith(
         "Python-level"
     )
@@ -210,6 +262,7 @@ def test_strict_entrypoint_blocks_os_system_before_candidate_import(tmp_path) ->
 
     completed = _run_strict_entrypoint(candidate_root, artifact_dir, "d" * 40)
 
-    output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
+    metadata = json.loads((artifact_dir / "strict-suite.output.json").read_text())
     assert completed.returncode == 1
-    assert "process spawning is forbidden before and during strict candidate evaluation" in output
+    assert metadata["stdout_bytes_observed"] > 0
+    assert not (artifact_dir / "strict-suite.stdout.txt").exists()

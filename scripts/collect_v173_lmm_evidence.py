@@ -22,8 +22,8 @@ import subprocess
 import sys
 import tempfile
 import time
-import xml.etree.ElementTree as element_tree
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,10 +34,27 @@ FIXTURE_ROOT_RELATIVE_PATH = Path("tests/fixtures/models/linear_mixed_effects")
 STRICT_RUNNER_RELATIVE_PATH = Path(
     "tests/evaluation/linear_mixed_effects/strict_runner.py"
 )
-STRICT_SCHEMA_VERSION = "v173_lmm_strict_candidate_evaluation_v3"
+EVIDENCE_SCHEMA_VERSION = "v173_lmm_performance_evidence_v3"
+STRICT_SCHEMA_VERSION = "v173_lmm_strict_candidate_evaluation_v4"
+STRICT_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_strict_output_metadata_v1"
+COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_collector_output_metadata_v1"
+STRICT_JUNIT_SUMMARY_SCHEMA_VERSION = "v173_lmm_strict_junit_summary_v1"
+MAX_REPORTED_STREAM_BYTES = 65536
+RAW_STREAM_CAPTURE_POLICY = (
+    "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+)
 WARMUP_FIT_COUNT = 2
 COLD_FIT_COUNT = 7
 HOT_FIT_COUNT = 7
+FEATURE_LANE_CANDIDATE_MODE = "feature_lane"
+INTEGRATION_TIP_CANDIDATE_MODE = "integration_tip"
+INTEGRATION_TIP_BRANCH = "integration/v1.7.3"
+CANDIDATE_MODES = (FEATURE_LANE_CANDIDATE_MODE, INTEGRATION_TIP_CANDIDATE_MODE)
+INTEGRATION_EVIDENCE_OWNER = "v1.7.3 Integration Release Train owner"
+INTEGRATION_EVIDENCE_TRIGGER = (
+    "after the Integration Release Train assembles a clean integration/v1.7.3 tip "
+    "from merge-queue entries with independent lane evidence"
+)
 STRICT_RESULT_NAMES = (
     "contract_validation",
     "known_truth",
@@ -105,6 +122,20 @@ PERFORMANCE_SUMMARY_FIELDS = frozenset(
         "provider_call_observation_basis",
     }
 )
+OUTPUT_METADATA_FIELDS = frozenset(
+    {
+        "schema_version",
+        "capture_policy",
+        "max_reported_bytes",
+        "stdout_sha256",
+        "stderr_sha256",
+        "stdout_bytes_observed",
+        "stderr_bytes_observed",
+        "stdout_truncated",
+        "stderr_truncated",
+    }
+)
+JUNIT_SUMMARY_FIELDS = frozenset({"schema_version", "results", "test_counts"})
 
 # These are immutable C1 contracts or central paths whose change would make an
 # independent feature-candidate result meaningless.  The strict feature
@@ -153,6 +184,40 @@ ALLOWED_CANDIDATE_PREFIXES = (
     "tests/models/linear_mixed_effects/",
 )
 
+# This is deliberately narrow: an integration-tip evidence run may verify only
+# the mechanical adapters and declarations assigned to the Integration Release
+# Train. C1 contracts, canonical fixtures, evaluator code, gates, and unrelated
+# central behavior remain protected in every candidate mode.
+INTEGRATION_ALLOWED_CANDIDATE_PREFIXES = (
+    *ALLOWED_CANDIDATE_PREFIXES,
+    "backend/workbench/agent/recipes/builtin_declarations.py",
+    "backend/workbench/analysis_loop/compare.py",
+    "backend/workbench/analysis_loop/validation.py",
+    "backend/workbench/engine/capabilities.py",
+    "backend/workbench/engine/packs/builtin_declarations.py",
+    "backend/workbench/http/agent_routes.py",
+    "backend/workbench/narrative/claims.py",
+    "frontend/src/runForm/RunForm.test.tsx",
+    "frontend/src/runForm/RunForm.tsx",
+    "frontend/src/workbench/agent/builtinFeatureViews.ts",
+    "tests/test_agent_analysis_loop_compare.py",
+    "tests/test_engine_pack.py",
+    "tests/test_lmm_extension_seams.py",
+)
+
+INTEGRATION_ALWAYS_PROTECTED_PATHS = (
+    "backend/workbench/contracts",
+    "scripts/collect_v173_lmm_evidence.py",
+    "scripts/gate.sh",
+    "tests/contracts/test_lmm_canonical_packets.py",
+    "tests/contracts/test_lmm_contracts.py",
+    "tests/contracts/test_lmm_error_contract.py",
+    "tests/evaluation/linear_mixed_effects",
+    "tests/fixtures/models/linear_mixed_effects",
+    "tests/test_honest_did_adversarial.py",
+    "tests/test_honest_did_sd_adversarial.py",
+)
+
 
 class EvidenceCollectionError(RuntimeError):
     """Raised for rejected input or a non-passing strict candidate evaluation."""
@@ -164,6 +229,93 @@ def _evaluator_root() -> Path:
 
 def _evidence_artifact_root(output: Path) -> Path:
     return output.parent / f"{output.stem}.artifacts"
+
+
+def _output_reservation_path(output: Path) -> Path:
+    resolved = output.resolve()
+    return resolved.parent / f".{resolved.name}.reservation"
+
+
+@dataclass
+class _OutputReservation:
+    path: Path
+    descriptor: os.stat_result
+    file_descriptor: int
+
+    def release(self) -> None:
+        try:
+            try:
+                current = os.stat(self.path, follow_symlinks=False)
+            except FileNotFoundError:
+                current = None
+            if (
+                current is not None
+                and current.st_dev == self.descriptor.st_dev
+                and current.st_ino == self.descriptor.st_ino
+            ):
+                self.path.unlink()
+        finally:
+            os.close(self.file_descriptor)
+
+
+def _reserve_output(output: Path) -> _OutputReservation:
+    """Create a cooperative, exclusive reservation before any evaluation writes."""
+
+    resolved = output.resolve()
+    reservation_path = _output_reservation_path(resolved)
+    reservation_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        file_descriptor = os.open(
+            reservation_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+        )
+    except FileExistsError as error:
+        raise EvidenceCollectionError(
+            f"evidence output is already reserved: {resolved}"
+        ) from error
+    reservation = _OutputReservation(
+        path=reservation_path,
+        descriptor=os.fstat(file_descriptor),
+        file_descriptor=file_descriptor,
+    )
+    try:
+        os.lstat(resolved)
+    except FileNotFoundError:
+        return reservation
+    reservation.release()
+    raise EvidenceCollectionError(
+        f"refusing to overwrite existing evidence artifact: {resolved}"
+    )
+
+
+def _bounded_stream_metadata(
+    stdout: str,
+    stderr: str,
+    *,
+    schema_version: str,
+) -> dict[str, object]:
+    def summarize(value: str) -> tuple[str, int, bool]:
+        encoded = value.encode("utf-8", errors="backslashreplace")
+        return (
+            _sha256_bytes(encoded),
+            min(len(encoded), MAX_REPORTED_STREAM_BYTES),
+            len(encoded) > MAX_REPORTED_STREAM_BYTES,
+        )
+
+    stdout_sha256, stdout_bytes, stdout_truncated = summarize(stdout)
+    stderr_sha256, stderr_bytes, stderr_truncated = summarize(stderr)
+    return {
+        "schema_version": schema_version,
+        "capture_policy": RAW_STREAM_CAPTURE_POLICY,
+        "max_reported_bytes": MAX_REPORTED_STREAM_BYTES,
+        "stdout_sha256": stdout_sha256,
+        "stderr_sha256": stderr_sha256,
+        "stdout_bytes_observed": stdout_bytes,
+        "stderr_bytes_observed": stderr_bytes,
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
+    }
 
 
 def _validate_output_locations(
@@ -282,18 +434,40 @@ def _changed_paths(
     return [path for path in output.splitlines() if path]
 
 
-def _is_allowed_candidate_path(path: str) -> bool:
+def _candidate_allowlist(candidate_mode: str) -> tuple[str, ...]:
+    if candidate_mode == FEATURE_LANE_CANDIDATE_MODE:
+        return ALLOWED_CANDIDATE_PREFIXES
+    if candidate_mode == INTEGRATION_TIP_CANDIDATE_MODE:
+        return INTEGRATION_ALLOWED_CANDIDATE_PREFIXES
+    raise EvidenceCollectionError(f"unsupported candidate mode: {candidate_mode}")
+
+
+def _protected_paths_for_mode(candidate_mode: str) -> tuple[str, ...]:
+    if candidate_mode == FEATURE_LANE_CANDIDATE_MODE:
+        return PROTECTED_PATHS
+    if candidate_mode == INTEGRATION_TIP_CANDIDATE_MODE:
+        return INTEGRATION_ALWAYS_PROTECTED_PATHS
+    raise EvidenceCollectionError(f"unsupported candidate mode: {candidate_mode}")
+
+
+def _is_allowed_candidate_path(path: str, candidate_mode: str) -> bool:
     return any(
         path == allowed or path.startswith(allowed)
-        for allowed in ALLOWED_CANDIDATE_PREFIXES
+        for allowed in _candidate_allowlist(candidate_mode)
     )
 
 
-def _assert_candidate_diff_is_allowed(changed_paths: list[str]) -> None:
-    disallowed = [path for path in changed_paths if not _is_allowed_candidate_path(path)]
+def _assert_candidate_diff_is_allowed(
+    changed_paths: list[str], candidate_mode: str
+) -> None:
+    disallowed = [
+        path
+        for path in changed_paths
+        if not _is_allowed_candidate_path(path, candidate_mode)
+    ]
     if disallowed:
         raise EvidenceCollectionError(
-            "candidate changes outside the strict Feature path allowlist: "
+            f"candidate changes outside the strict {candidate_mode} path allowlist: "
             + ", ".join(disallowed)
         )
 
@@ -304,10 +478,13 @@ def _resolve_candidate(
     command_records: list[dict[str, object]],
     *,
     artifact_root: Path | None = None,
+    candidate_mode: str = FEATURE_LANE_CANDIDATE_MODE,
 ) -> str:
     """Verify that ``candidate`` is exactly the clean, allowed checkout HEAD."""
 
     _validate_full_sha(candidate)
+    if candidate_mode not in CANDIDATE_MODES:
+        raise EvidenceCollectionError(f"unsupported candidate mode: {candidate_mode}")
     if not root.is_dir():
         raise EvidenceCollectionError(f"candidate worktree does not exist: {root}")
     if not (root / ".git").exists():
@@ -357,6 +534,19 @@ def _resolve_candidate(
             "candidate worktree is dirty; independent evaluation refuses uncommitted input"
         )
 
+    if candidate_mode == INTEGRATION_TIP_CANDIDATE_MODE:
+        branch = _git_output(
+            root,
+            ["branch", "--show-current"],
+            command_records,
+            artifact_root=artifact_root,
+        )
+        if branch != INTEGRATION_TIP_BRANCH:
+            raise EvidenceCollectionError(
+                "integration_tip candidate must be checked out on "
+                f"{INTEGRATION_TIP_BRANCH}; found {branch or 'detached HEAD'}"
+            )
+
     ancestor = _run_git(
         root,
         ["merge-base", "--is-ancestor", CONTRACT_LOCK_COMMIT, resolved],
@@ -376,7 +566,7 @@ def _resolve_candidate(
             "--name-only",
             f"{CONTRACT_LOCK_COMMIT}..{resolved}",
             "--",
-            *PROTECTED_PATHS,
+            *_protected_paths_for_mode(candidate_mode),
         ],
         command_records,
         artifact_root=artifact_root,
@@ -391,7 +581,8 @@ def _resolve_candidate(
             resolved,
             command_records,
             artifact_root=artifact_root,
-        )
+        ),
+        candidate_mode,
     )
     return resolved
 
@@ -419,12 +610,14 @@ def _preflight_candidate(
     command_records: list[dict[str, object]],
     *,
     artifact_root: Path | None = None,
+    candidate_mode: str = FEATURE_LANE_CANDIDATE_MODE,
 ) -> dict[str, object]:
     resolved = _resolve_candidate(
         root,
         candidate,
         command_records,
         artifact_root=artifact_root,
+        candidate_mode=candidate_mode,
     )
     return {
         "candidate_commit": resolved,
@@ -485,6 +678,7 @@ def _post_execution_audit(
     command_records: list[dict[str, object]],
     *,
     artifact_root: Path | None = None,
+    candidate_mode: str = FEATURE_LANE_CANDIDATE_MODE,
 ) -> dict[str, object]:
     """Repeat the preflight after candidate code has run in a child process."""
 
@@ -496,6 +690,7 @@ def _post_execution_audit(
             candidate,
             command_records,
             artifact_root=artifact_root,
+            candidate_mode=candidate_mode,
         )
     except EvidenceCollectionError as error:
         candidate_error = error
@@ -554,39 +749,6 @@ def _validate_artifact_descriptor(
     return {"path": path_value, "sha256": digest}
 
 
-def _validate_strict_junit(
-    junit_path: Path, expected_counts: Mapping[str, object]
-) -> None:
-    try:
-        root = element_tree.parse(junit_path).getroot()
-    except element_tree.ParseError as error:
-        raise EvidenceCollectionError("strict JUnit artifact is not parseable") from error
-    module_to_result = {
-        filename.removesuffix(".py"): result_name
-        for result_name, filename in STRICT_TEST_FILES.items()
-    }
-    observed_counts = {name: 0 for name in STRICT_RESULT_NAMES}
-    testcases = list(root.iter("testcase"))
-    if not testcases:
-        raise EvidenceCollectionError("strict JUnit artifact has zero testcases")
-    for testcase in testcases:
-        classname = testcase.get("classname", "")
-        result_name = module_to_result.get(classname.rsplit(".", 1)[-1])
-        if result_name is None:
-            raise EvidenceCollectionError("strict JUnit includes a non-candidate testcase")
-        if testcase.find("skipped") is not None:
-            raise EvidenceCollectionError("strict JUnit reports a skipped testcase")
-        if testcase.find("failure") is not None or testcase.find("error") is not None:
-            raise EvidenceCollectionError("strict JUnit reports a failed testcase")
-        observed_counts[result_name] += 1
-    if any(count == 0 for count in observed_counts.values()):
-        raise EvidenceCollectionError("strict JUnit has zero expected test results")
-    if {
-        name: expected_counts[name] for name in STRICT_RESULT_NAMES
-    } != observed_counts:
-        raise EvidenceCollectionError("strict JUnit testcase counts do not match strict payload")
-
-
 def _load_json_mapping(path: Path, name: str) -> dict[str, object]:
     def reject_non_finite(value: str) -> object:
         raise ValueError(f"non-finite JSON constant: {value}")
@@ -612,6 +774,53 @@ def _load_json_mapping(path: Path, name: str) -> dict[str, object]:
     if not isinstance(parsed, dict):
         raise EvidenceCollectionError(f"strict {name} artifact must be a JSON object")
     return parsed
+
+
+def _validate_stream_metadata(path: Path) -> dict[str, object]:
+    wire = _require_exact_mapping_keys(
+        _load_json_mapping(path, "output metadata"),
+        OUTPUT_METADATA_FIELDS,
+        "output metadata",
+    )
+    if (
+        wire["schema_version"] != STRICT_OUTPUT_METADATA_SCHEMA_VERSION
+        or wire["capture_policy"] != RAW_STREAM_CAPTURE_POLICY
+        or wire["max_reported_bytes"] != MAX_REPORTED_STREAM_BYTES
+    ):
+        raise EvidenceCollectionError("strict output metadata policy is invalid")
+    for stream_name in ("stdout", "stderr"):
+        digest = wire[f"{stream_name}_sha256"]
+        byte_count = wire[f"{stream_name}_bytes_observed"]
+        truncated = wire[f"{stream_name}_truncated"]
+        if type(digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise EvidenceCollectionError("strict output metadata hash is invalid")
+        if type(byte_count) is not int or not 0 <= byte_count <= MAX_REPORTED_STREAM_BYTES:
+            raise EvidenceCollectionError("strict output metadata byte count is invalid")
+        if type(truncated) is not bool:
+            raise EvidenceCollectionError("strict output metadata truncation flag is invalid")
+    return dict(wire)
+
+
+def _validate_strict_junit_summary(
+    path: Path,
+    expected_results: Mapping[str, object],
+    expected_counts: Mapping[str, object],
+) -> None:
+    wire = _require_exact_mapping_keys(
+        _load_json_mapping(path, "JUnit summary"),
+        JUNIT_SUMMARY_FIELDS,
+        "JUnit summary",
+    )
+    if wire["schema_version"] != STRICT_JUNIT_SUMMARY_SCHEMA_VERSION:
+        raise EvidenceCollectionError("strict JUnit summary schema is unsupported")
+    results = _require_exact_mapping_keys(
+        wire["results"], frozenset(STRICT_RESULT_NAMES), "JUnit summary results"
+    )
+    counts = _require_exact_mapping_keys(
+        wire["test_counts"], frozenset(STRICT_RESULT_NAMES), "JUnit summary counts"
+    )
+    if dict(results) != dict(expected_results) or dict(counts) != dict(expected_counts):
+        raise EvidenceCollectionError("strict JUnit summary does not match strict payload")
 
 
 def _percentile_95(values: list[float]) -> float:
@@ -835,21 +1044,27 @@ def _validate_strict_payload(
         raise EvidenceCollectionError("strict payload has zero expected test results")
 
     artifacts = _require_exact_mapping_keys(
-        wire["artifacts"], frozenset({"stdout", "stderr", "junit", "performance"}), "artifacts"
+        wire["artifacts"],
+        frozenset({"output_metadata", "junit_summary", "performance"}),
+        "artifacts",
     )
-    _validate_artifact_descriptor(
-        artifacts["stdout"], name="stdout", expected_path=strict_artifact_dir / "strict-suite.stdout.txt"
+    output_metadata_descriptor = _validate_artifact_descriptor(
+        artifacts["output_metadata"],
+        name="output_metadata",
+        expected_path=strict_artifact_dir / "strict-suite.output.json",
     )
-    _validate_artifact_descriptor(
-        artifacts["stderr"], name="stderr", expected_path=strict_artifact_dir / "strict-suite.stderr.txt"
-    )
-    junit_descriptor = _validate_artifact_descriptor(
-        artifacts["junit"], name="junit", expected_path=strict_artifact_dir / "strict-suite.junit.xml"
+    junit_summary_descriptor = _validate_artifact_descriptor(
+        artifacts["junit_summary"],
+        name="junit_summary",
+        expected_path=strict_artifact_dir / "strict-suite.junit.summary.json",
     )
     performance_descriptor = _validate_artifact_descriptor(
         artifacts["performance"], name="performance", expected_path=strict_artifact_dir / "performance" / "performance.json"
     )
-    _validate_strict_junit(Path(junit_descriptor["path"]), junit_counts)
+    _validate_stream_metadata(Path(output_metadata_descriptor["path"]))
+    _validate_strict_junit_summary(
+        Path(junit_summary_descriptor["path"]), results, junit_counts
+    )
     _validate_performance_payload(
         _require_exact_mapping_keys(wire["performance"], PERFORMANCE_FIELDS, "performance"),
         strict_artifact_dir=strict_artifact_dir,
@@ -894,10 +1109,15 @@ def _run_strict_candidate_evaluation(
         env=_strict_child_environment(),
     )
     duration = time.perf_counter() - started
-    stdout_path = artifact_root / "strict-runner.stdout.txt"
-    stderr_path = artifact_root / "strict-runner.stderr.txt"
-    stdout_path.write_text(completed.stdout, encoding="utf-8")
-    stderr_path.write_text(completed.stderr, encoding="utf-8")
+    output_metadata_path = artifact_root / "strict-runner.output.json"
+    _write_json(
+        output_metadata_path,
+        _bounded_stream_metadata(
+            completed.stdout,
+            completed.stderr,
+            schema_version=COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION,
+        ),
+    )
     combined_output = completed.stdout + completed.stderr
     command_records.append(
         {
@@ -907,8 +1127,7 @@ def _run_strict_candidate_evaluation(
             "output_sha256": _sha256_bytes(combined_output.encode("utf-8")),
             "stdout_sha256": _sha256_bytes(completed.stdout.encode("utf-8")),
             "stderr_sha256": _sha256_bytes(completed.stderr.encode("utf-8")),
-            "output_artifact": str(stdout_path),
-            "stderr_artifact": str(stderr_path),
+            "output_metadata_artifact": str(output_metadata_path),
         }
     )
     result_path = strict_artifact_dir / "strict-suite.json"
@@ -945,25 +1164,24 @@ def _inner_pytest_record(strict: Mapping[str, object]) -> dict[str, object]:
 
     artifacts = strict["artifacts"]
     assert isinstance(artifacts, Mapping)
-    stdout = artifacts["stdout"]
-    stderr = artifacts["stderr"]
-    junit = artifacts["junit"]
-    assert isinstance(stdout, Mapping)
-    assert isinstance(stderr, Mapping)
-    assert isinstance(junit, Mapping)
+    output_metadata_descriptor = artifacts["output_metadata"]
+    junit_summary = artifacts["junit_summary"]
+    assert isinstance(output_metadata_descriptor, Mapping)
+    assert isinstance(junit_summary, Mapping)
+    metadata_path = output_metadata_descriptor["path"]
+    assert isinstance(metadata_path, str)
+    metadata = _validate_stream_metadata(Path(metadata_path))
     return {
         "command": strict["suite_command"],
         "exit_code": strict["suite_exit_code"],
         "duration_seconds": strict["suite_duration_seconds"],
-        "stdout_sha256": stdout["sha256"],
-        "stderr_sha256": stderr["sha256"],
-        "junit_sha256": junit["sha256"],
+        "stdout_sha256": metadata["stdout_sha256"],
+        "stderr_sha256": metadata["stderr_sha256"],
+        "junit_summary_sha256": junit_summary["sha256"],
     }
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:
-    if path.exists():
-        raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=path.parent, delete=False
@@ -971,7 +1189,20 @@ def _write_json(path: Path, value: dict[str, object]) -> None:
         temporary = Path(handle.name)
         json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
-    os.replace(temporary, path)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.link(temporary, path)
+    except FileExistsError as error:
+        raise EvidenceCollectionError(
+            f"refusing to overwrite existing evidence artifact: {path}"
+        ) from error
+    except OSError as error:
+        raise EvidenceCollectionError(
+            f"could not atomically create evidence artifact: {path}"
+        ) from error
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _evaluation_id(candidate_sha: str) -> str:
@@ -985,6 +1216,7 @@ def _collect(
     candidate: str,
     output: Path,
     command_records: list[dict[str, object]],
+    candidate_mode: str = FEATURE_LANE_CANDIDATE_MODE,
 ) -> dict[str, object]:
     evaluator_root = _evaluator_root()
     output, artifact_root = _validate_output_locations(
@@ -992,8 +1224,6 @@ def _collect(
         candidate_root=root,
         evaluator_root=evaluator_root,
     )
-    if output.exists():
-        raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {output}")
     if artifact_root.exists():
         raise EvidenceCollectionError(
             f"refusing to overwrite existing strict evaluation artifacts: {artifact_root}"
@@ -1009,6 +1239,7 @@ def _collect(
         candidate,
         command_records,
         artifact_root=artifact_root,
+        candidate_mode=candidate_mode,
     )
     strict = _run_strict_candidate_evaluation(
         root=root,
@@ -1036,6 +1267,7 @@ def _collect(
         preflight,
         command_records,
         artifact_root=artifact_root,
+        candidate_mode=candidate_mode,
     )
     _post_execution_evaluator_audit(
         evaluator_root,
@@ -1053,11 +1285,20 @@ def _collect(
     final_results["performance_collection"] = "passed"
     final_results["browser_acceptance"] = "not_run"
     return {
-        "schema_version": "v173_lmm_performance_evidence_v2",
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
         "status": "passed",
         "evaluation_id": _evaluation_id(str(preflight["candidate_commit"])),
         "evaluated_commit": preflight["candidate_commit"],
         "candidate_worktree": str(root),
+        "candidate_mode": candidate_mode,
+        "integration_evidence_policy": (
+            {
+                "owner": INTEGRATION_EVIDENCE_OWNER,
+                "trigger": INTEGRATION_EVIDENCE_TRIGGER,
+            }
+            if candidate_mode == INTEGRATION_TIP_CANDIDATE_MODE
+            else None
+        ),
         "contract_lock_commit": CONTRACT_LOCK_COMMIT,
         "evaluation_harness_commit": evaluator_preflight["evaluator_commit"],
         "supersedes": [],
@@ -1094,6 +1335,15 @@ def _parser() -> argparse.ArgumentParser:
         help="clean checked-out candidate worktree; defaults to the current directory",
     )
     parser.add_argument(
+        "--candidate-mode",
+        choices=CANDIDATE_MODES,
+        default=FEATURE_LANE_CANDIDATE_MODE,
+        help=(
+            "feature_lane for a standalone lane, or the owner-triggered "
+            "integration_tip mode for a clean integration/v1.7.3 HEAD"
+        ),
+    )
+    parser.add_argument(
         "--output",
         required=True,
         type=Path,
@@ -1108,13 +1358,23 @@ def build_failure_payload(
     error: str,
     duration_seconds: float,
     command_records: list[dict[str, object]],
+    candidate_mode: str = FEATURE_LANE_CANDIDATE_MODE,
 ) -> dict[str, object]:
     """Keep a rejected candidate attributable without ever accepting it."""
 
     return {
-        "schema_version": "v173_lmm_performance_evidence_v2",
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
         "status": "failed",
         "requested_candidate": requested_candidate,
+        "candidate_mode": candidate_mode,
+        "integration_evidence_policy": (
+            {
+                "owner": INTEGRATION_EVIDENCE_OWNER,
+                "trigger": INTEGRATION_EVIDENCE_TRIGGER,
+            }
+            if candidate_mode == INTEGRATION_TIP_CANDIDATE_MODE
+            else None
+        ),
         "error": error,
         "contract_lock_commit": CONTRACT_LOCK_COMMIT,
         "collector_duration_seconds": duration_seconds,
@@ -1139,11 +1399,17 @@ def main(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 1
     try:
+        reservation = _reserve_output(output)
+    except EvidenceCollectionError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    try:
         payload = _collect(
             root=candidate_root,
             candidate=args.candidate,
             output=output,
             command_records=command_records,
+            candidate_mode=args.candidate_mode,
         )
         payload["collector_duration_seconds"] = time.perf_counter() - started
         _write_json(output, payload)
@@ -1153,6 +1419,7 @@ def main(argv: list[str] | None = None) -> int:
             error=str(error),
             duration_seconds=time.perf_counter() - started,
             command_records=command_records,
+            candidate_mode=args.candidate_mode,
         )
         if artifact_root.is_dir():
             failure["artifact_root"] = str(artifact_root)
@@ -1163,6 +1430,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
         print(str(error), file=sys.stderr)
         return 1
+    finally:
+        reservation.release()
 
     print(json.dumps({"status": "passed", "output": str(output)}))
     return 0

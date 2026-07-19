@@ -106,30 +106,31 @@ def _write_passing_strict_payload(
     junit_contents: str | None = None,
 ) -> None:
     artifact_dir.mkdir(parents=True)
-    stdout = artifact_dir / "strict-suite.stdout.txt"
-    stderr = artifact_dir / "strict-suite.stderr.txt"
-    junit = artifact_dir / "strict-suite.junit.xml"
+    output_metadata = artifact_dir / "strict-suite.output.json"
+    junit = artifact_dir / "strict-suite.junit.summary.json"
     performance = artifact_dir / "performance" / "performance.json"
     performance.parent.mkdir(parents=True)
-    stdout.write_text("pytest output\n", encoding="utf-8")
-    stderr.write_text("", encoding="utf-8")
+    output_metadata_payload = {
+        "schema_version": "v173_lmm_strict_output_metadata_v1",
+        "capture_policy": "raw pytest stdout and stderr are discarded; hashes cover complete streams",
+        "max_reported_bytes": 65536,
+        "stdout_sha256": _sha256_text("pytest output\n"),
+        "stderr_sha256": _sha256_text(""),
+        "stdout_bytes_observed": len("pytest output\n".encode("utf-8")),
+        "stderr_bytes_observed": 0,
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+    }
+    output_metadata.write_text(json.dumps(output_metadata_payload), encoding="utf-8")
+    junit_payload = {
+        "schema_version": "v173_lmm_strict_junit_summary_v1",
+        "results": {name: "passed" for name in STRICT_RESULTS},
+        "test_counts": {name: 1 for name in STRICT_RESULTS},
+    }
     junit.write_text(
         junit_contents
         if junit_contents is not None
-        else "<testsuite>"
-        + "".join(
-            "<testcase classname=\"tests.evaluation.linear_mixed_effects."
-            f"test_{name}\" name=\"candidate_case\"/>"
-            for name in (
-                "contract_compatibility",
-                "known_truth",
-                "fault_injection",
-                "agent_boundaries",
-                "compare_restrictions",
-                "report_claims",
-            )
-        )
-        + "</testsuite>",
+        else json.dumps(junit_payload),
         encoding="utf-8",
     )
 
@@ -189,16 +190,21 @@ def _write_passing_strict_payload(
     }
     performance.write_text(json.dumps(performance_payload), encoding="utf-8")
     artifacts = {
-        "stdout": {"path": str(stdout), "sha256": _sha256_text("pytest output\n")},
-        "stderr": {"path": str(stderr), "sha256": _sha256_text("")},
-        "junit": {"path": str(junit), "sha256": hashlib.sha256(junit.read_bytes()).hexdigest()},
+        "output_metadata": {
+            "path": str(output_metadata),
+            "sha256": hashlib.sha256(output_metadata.read_bytes()).hexdigest(),
+        },
+        "junit_summary": {
+            "path": str(junit),
+            "sha256": hashlib.sha256(junit.read_bytes()).hexdigest(),
+        },
         "performance": {
             "path": str(performance),
             "sha256": hashlib.sha256(performance.read_bytes()).hexdigest(),
         },
     }
     payload = {
-        "schema_version": "v173_lmm_strict_candidate_evaluation_v3",
+        "schema_version": "v173_lmm_strict_candidate_evaluation_v4",
         "status": "passed",
         "candidate_root": str(candidate_root.resolve()),
         "candidate_sha": candidate_sha,
@@ -352,6 +358,57 @@ def test_main_rejects_a_derived_artifact_root_inside_the_candidate_before_writes
     assert not (candidate_root / "evidence.artifacts").exists()
 
 
+def test_main_reserves_output_before_collecting_and_releases_it_after_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    candidate_root = tmp_path / "candidate"
+    evaluator_root = tmp_path / "evaluator"
+    output = tmp_path / "outside" / "evidence.json"
+    candidate_root.mkdir()
+    evaluator_root.mkdir()
+    monkeypatch.setattr(collector, "_evaluator_root", lambda: evaluator_root)
+    observed_reservations: list[bool] = []
+
+    def fail_collect(**_kwargs: object) -> dict[str, object]:
+        observed_reservations.append(collector._output_reservation_path(output).is_file())
+        raise collector.EvidenceCollectionError("simulated collection failure")
+
+    monkeypatch.setattr(collector, "_collect", fail_collect)
+
+    assert collector.main(
+        [
+            "--candidate",
+            "a" * 40,
+            "--candidate-worktree",
+            str(candidate_root),
+            "--output",
+            str(output),
+        ]
+    ) == 1
+    assert observed_reservations == [True]
+    assert not collector._output_reservation_path(output).exists()
+    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_output_reservation_and_manifest_writer_do_not_clobber_existing_evidence(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    output = tmp_path / "evidence.json"
+    reservation = collector._reserve_output(output)
+    try:
+        with pytest.raises(collector.EvidenceCollectionError, match="already reserved"):
+            collector._reserve_output(output)
+    finally:
+        reservation.release()
+
+    output.write_text("existing evidence\n", encoding="utf-8")
+    with pytest.raises(collector.EvidenceCollectionError, match="overwrite"):
+        collector._write_json(output, {"status": "passed"})
+    assert output.read_text(encoding="utf-8") == "existing evidence\n"
+
+
 def test_failed_evidence_records_the_supplied_candidate_sha() -> None:
     collector = _load_collector()
 
@@ -435,6 +492,43 @@ def test_protected_paths_cover_c1_contracts_fixtures_and_central_adapters() -> N
     assert required.issubset(set(collector.PROTECTED_PATHS))
 
 
+def test_integration_tip_mode_requires_the_clean_named_integration_head(
+    tmp_path: Path,
+) -> None:
+    collector = _load_collector()
+    root, contract_lock = _candidate_repo(tmp_path)
+    collector.CONTRACT_LOCK_COMMIT = contract_lock
+    _git(root, "branch", "-M", "integration/v1.7.3")
+    feature = (
+        root
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "feature.py"
+    )
+    feature.parent.mkdir(parents=True)
+    feature.write_text("FEATURE = True\n", encoding="utf-8")
+    candidate = _commit(root, "integration candidate")
+
+    assert collector._resolve_candidate(
+        root,
+        candidate,
+        [],
+        candidate_mode=collector.INTEGRATION_TIP_CANDIDATE_MODE,
+    ) == candidate
+
+    _git(root, "branch", "-M", "feature/not-an-integration-tip")
+    with pytest.raises(collector.EvidenceCollectionError, match="integration/v1.7.3"):
+        collector._resolve_candidate(
+            root,
+            candidate,
+            [],
+            candidate_mode=collector.INTEGRATION_TIP_CANDIDATE_MODE,
+        )
+
+
 def test_post_execution_audit_rejects_fixture_mutation(tmp_path: Path) -> None:
     collector = _load_collector()
     root, contract_lock = _candidate_repo(tmp_path)
@@ -480,7 +574,12 @@ def test_collector_runs_the_strict_subprocess_before_performance(
             candidate_sha="a" * 40,
             fixture_sha256=fixture_sha256,
         )
-        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "simulated-parent-stream-secret",
+            "simulated-parent-stream-secret",
+        )
 
     monkeypatch.setattr(collector.subprocess, "run", fake_run)
     records: list[dict[str, object]] = []
@@ -497,7 +596,14 @@ def test_collector_runs_the_strict_subprocess_before_performance(
     assert observed and Path(observed[0][1]).name == "strict_runner.py"
     assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") not in observed[0]
     assert records[0]["exit_code"] == 0
-    assert (artifact_root / "strict-runner.stdout.txt").is_file()
+    assert (artifact_root / "strict-runner.output.json").is_file()
+    assert not (artifact_root / "strict-runner.stdout.txt").exists()
+    assert not (artifact_root / "strict-runner.stderr.txt").exists()
+    assert all(
+        b"simulated-parent-stream-secret" not in path.read_bytes()
+        for path in artifact_root.rglob("*")
+        if path.is_file()
+    )
 
 
 @pytest.mark.parametrize(
@@ -628,7 +734,7 @@ def test_collector_rejects_a_passing_strict_payload_with_unparseable_junit(
 
     monkeypatch.setattr(collector.subprocess, "run", fake_run)
 
-    with pytest.raises(collector.EvidenceCollectionError, match="JUnit"):
+    with pytest.raises(collector.EvidenceCollectionError, match="JUnit summary"):
         collector._run_strict_candidate_evaluation(
             root=root,
             candidate_sha="a" * 40,
@@ -686,6 +792,19 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
         "compare_restrictions": "passed",
         "deterministic_overclaim_checks": "passed",
     }
+    output_metadata_path = tmp_path / "strict-suite.output.json"
+    output_metadata = {
+        "schema_version": "v173_lmm_strict_output_metadata_v1",
+        "capture_policy": "raw pytest stdout and stderr are discarded; hashes cover complete streams",
+        "max_reported_bytes": 65536,
+        "stdout_sha256": "a" * 64,
+        "stderr_sha256": "b" * 64,
+        "stdout_bytes_observed": 0,
+        "stderr_bytes_observed": 0,
+        "stdout_truncated": False,
+        "stderr_truncated": False,
+    }
+    output_metadata_path.write_text(json.dumps(output_metadata), encoding="utf-8")
     strict_payload = {
         "status": "passed",
         "suite_exit_code": 0,
@@ -704,9 +823,11 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
         },
         "strict_isolation": {"network_guard": "blocked", "provider_environment": "cleared"},
         "artifacts": {
-            "stdout": {"sha256": "a" * 64},
-            "stderr": {"sha256": "b" * 64},
-            "junit": {"sha256": "c" * 64},
+            "output_metadata": {
+                "path": str(output_metadata_path),
+                "sha256": hashlib.sha256(output_metadata_path.read_bytes()).hexdigest(),
+            },
+            "junit_summary": {"sha256": "c" * 64},
         },
     }
     preflight = {
@@ -740,6 +861,8 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
 
     assert payload["status"] == "passed"
     assert payload["evaluated_commit"] == candidate_sha
+    assert payload["candidate_mode"] == "feature_lane"
+    assert payload["integration_evidence_policy"] is None
     assert payload["environment"]["dependency_lock_hash"] == "d" * 64
     assert payload["evaluation_harness_commit"] == "h" * 40
     assert audit_calls == ["pre", "post"]
@@ -755,7 +878,7 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
         "duration_seconds": 0.25,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,
-        "junit_sha256": "c" * 64,
+        "junit_summary_sha256": "c" * 64,
     }
     assert datetime.fromisoformat(payload["generated_at"]).tzinfo is not None
 
@@ -804,4 +927,9 @@ def test_collector_runs_the_real_full_suite_before_it_can_fail_a_candidate(
         / "linear_mixed_effects"
         / "test_contract_compatibility.py"
     ) in strict_result["suite_command"]
-    assert (tmp_path / "evidence.artifacts" / "strict-suite" / "strict-suite.junit.xml").is_file()
+    assert (
+        tmp_path
+        / "evidence.artifacts"
+        / "strict-suite"
+        / "strict-suite.junit.summary.json"
+    ).is_file()

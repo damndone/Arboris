@@ -14,7 +14,6 @@ import contextlib
 import csv
 import hashlib
 import importlib
-import io
 import json
 import os
 import platform
@@ -65,6 +64,12 @@ STRICT_TEST_FILES = {
 LMM_RESULT_CONTRACT = "linear_mixed_effects.result"
 LMM_RESULT_CONTRACT_VERSION = "1.0"
 LMM_RESULT_PRODUCER_VERSION = "linear_mixed_effects@1.0"
+STRICT_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_strict_output_metadata_v1"
+STRICT_JUNIT_SUMMARY_SCHEMA_VERSION = "v173_lmm_strict_junit_summary_v1"
+MAX_REPORTED_STREAM_BYTES = 65536
+RAW_STREAM_CAPTURE_POLICY = (
+    "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+)
 
 
 class StrictEvaluationError(RuntimeError):
@@ -104,6 +109,68 @@ def _write_text(path: Path, value: str) -> None:
         temporary = Path(handle.name)
         handle.write(value)
     os.replace(temporary, path)
+
+
+class _DigestingTextCapture:
+    """Stream candidate-facing text into a digest without retaining its content."""
+
+    encoding = "utf-8"
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+        self._reported_bytes = 0
+        self._truncated = False
+
+    def write(self, value: str) -> int:
+        encoded = value.encode("utf-8", errors="backslashreplace")
+        self._digest.update(encoded)
+        remaining = MAX_REPORTED_STREAM_BYTES - self._reported_bytes
+        if len(encoded) > remaining:
+            self._truncated = True
+        self._reported_bytes += min(len(encoded), max(remaining, 0))
+        return len(value)
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+    def metadata(self) -> tuple[str, int, bool]:
+        return self._digest.hexdigest(), self._reported_bytes, self._truncated
+
+
+def _stream_output_metadata(
+    stdout: _DigestingTextCapture,
+    stderr: _DigestingTextCapture,
+) -> dict[str, object]:
+    stdout_sha256, stdout_bytes, stdout_truncated = stdout.metadata()
+    stderr_sha256, stderr_bytes, stderr_truncated = stderr.metadata()
+    return {
+        "schema_version": STRICT_OUTPUT_METADATA_SCHEMA_VERSION,
+        "capture_policy": RAW_STREAM_CAPTURE_POLICY,
+        "max_reported_bytes": MAX_REPORTED_STREAM_BYTES,
+        "stdout_sha256": stdout_sha256,
+        "stderr_sha256": stderr_sha256,
+        "stdout_bytes_observed": stdout_bytes,
+        "stderr_bytes_observed": stderr_bytes,
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
+    }
+
+
+def _safe_error_code(error: BaseException) -> str:
+    """Do not persist candidate-controlled exception text in strict evidence."""
+
+    if isinstance(error, StrictEvaluationError) and str(error).startswith("candidate SHA"):
+        return "INVALID_CANDIDATE_SHA"
+    if isinstance(error, StrictEvaluationError):
+        return "STRICT_EVALUATION_ERROR"
+    return "UNEXPECTED_STRICT_ERROR"
+
+
+def _artifact_descriptor(path: Path) -> dict[str, str | None]:
+    return {"path": str(path), "sha256": _sha256(path)}
 
 
 def _validate_full_sha(candidate_sha: str) -> None:
@@ -449,6 +516,18 @@ def _summarize_strict_junit(junit_path: Path) -> tuple[dict[str, str], dict[str,
     return states, counts
 
 
+def _junit_summary_payload(
+    results: Mapping[str, str], counts: Mapping[str, int]
+) -> dict[str, object]:
+    """Persist structural JUnit facts without retaining raw candidate-facing XML."""
+
+    return {
+        "schema_version": STRICT_JUNIT_SUMMARY_SCHEMA_VERSION,
+        "results": {name: results[name] for name in RESULT_NAMES},
+        "test_counts": {name: counts[name] for name in RESULT_NAMES},
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate-root", type=Path, required=True)
@@ -464,6 +543,16 @@ def main(argv: list[str] | None = None) -> int:
     evaluator_root = args.evaluator_root.resolve()
     artifact_dir = args.artifact_dir.resolve()
     suite_root = evaluator_root / "tests" / "evaluation" / "linear_mixed_effects"
+    started = time.perf_counter()
+    artifact_dir.mkdir(parents=True, exist_ok=False)
+    raw_junit_descriptor, raw_junit_name = tempfile.mkstemp(
+        prefix="v173-lmm-strict-", suffix=".junit.xml"
+    )
+    os.close(raw_junit_descriptor)
+    raw_junit_path = Path(raw_junit_name)
+    raw_junit_path.unlink()
+    junit_summary_path = artifact_dir / "strict-suite.junit.summary.json"
+    output_metadata_path = artifact_dir / "strict-suite.output.json"
     suite_command = [
         sys.executable,
         "-m",
@@ -475,12 +564,10 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         "pythonpath=",
         "--junitxml",
-        str(artifact_dir / "strict-suite.junit.xml"),
+        str(raw_junit_path),
     ]
-    started = time.perf_counter()
-    artifact_dir.mkdir(parents=True, exist_ok=False)
-    stdout_path = artifact_dir / "strict-suite.stdout.txt"
-    stderr_path = artifact_dir / "strict-suite.stderr.txt"
+    captured_stdout = _DigestingTextCapture()
+    captured_stderr = _DigestingTextCapture()
     suite_exit_code = 1
     suite_duration_seconds = 0.0
     suite_error: str | None = None
@@ -494,8 +581,6 @@ def main(argv: list[str] | None = None) -> int:
         _prepare_import_path(candidate_root, evaluator_root)
         import pytest
 
-        captured_stdout = io.StringIO()
-        captured_stderr = io.StringIO()
         suite_started = time.perf_counter()
         with (
             contextlib.redirect_stdout(captured_stdout),
@@ -503,31 +588,49 @@ def main(argv: list[str] | None = None) -> int:
         ):
             suite_exit_code = pytest.main(suite_command[3:])
         suite_duration_seconds = time.perf_counter() - suite_started
-        _write_text(stdout_path, captured_stdout.getvalue())
-        _write_text(stderr_path, captured_stderr.getvalue())
-        results, junit_test_counts = _summarize_strict_junit(
-            artifact_dir / "strict-suite.junit.xml"
+        results, junit_test_counts = _summarize_strict_junit(raw_junit_path)
+        _write_json(
+            junit_summary_path,
+            _junit_summary_payload(results, junit_test_counts),
         )
-        if suite_exit_code == 0 and suite_error is None:
+        if (
+            suite_exit_code == 0
+            and suite_error is None
+            and all(state == "passed" for state in results.values())
+        ):
             try:
                 performance = _collect_performance(candidate_root, artifact_dir)
-            except Exception as error:  # preserve a precise failure artifact
+            except Exception as error:
                 performance = {
                     "status": "failed",
-                    "error": f"{type(error).__name__}: {error}",
+                    "error_code": _safe_error_code(error),
                 }
     except Exception as error:  # strict failures must become a durable artifact
-        suite_error = f"{type(error).__name__}: {error}"
-        if not stdout_path.exists():
-            _write_text(stdout_path, "")
-        if not stderr_path.exists():
-            _write_text(stderr_path, suite_error + "\n")
+        suite_error = _safe_error_code(error)
+    finally:
+        raw_junit_path.unlink(missing_ok=True)
 
-    suite_status = "passed" if suite_exit_code == 0 and suite_error is None else "failed"
+    if not junit_summary_path.exists():
+        _write_json(
+            junit_summary_path,
+            _junit_summary_payload(results, junit_test_counts),
+        )
+    _write_json(
+        output_metadata_path,
+        _stream_output_metadata(captured_stdout, captured_stderr),
+    )
+    suite_status = (
+        "passed"
+        if (
+            suite_exit_code == 0
+            and suite_error is None
+            and all(state == "passed" for state in results.values())
+        )
+        else "failed"
+    )
     status = "passed" if suite_status == "passed" and performance["status"] == "passed" else "failed"
-    junit_path = artifact_dir / "strict-suite.junit.xml"
     payload: dict[str, object] = {
-        "schema_version": "v173_lmm_strict_candidate_evaluation_v3",
+        "schema_version": "v173_lmm_strict_candidate_evaluation_v4",
         "status": status,
         "candidate_root": str(candidate_root),
         "candidate_sha": args.candidate_sha,
@@ -558,13 +661,11 @@ def main(argv: list[str] | None = None) -> int:
             ),
         },
         "artifacts": {
-            "stdout": {"path": str(stdout_path), "sha256": _sha256(stdout_path)},
-            "stderr": {"path": str(stderr_path), "sha256": _sha256(stderr_path)},
-            "junit": {"path": str(junit_path), "sha256": _sha256(junit_path)},
-            "performance": {
-                "path": str(artifact_dir / "performance" / "performance.json"),
-                "sha256": _sha256(artifact_dir / "performance" / "performance.json"),
-            },
+            "output_metadata": _artifact_descriptor(output_metadata_path),
+            "junit_summary": _artifact_descriptor(junit_summary_path),
+            "performance": _artifact_descriptor(
+                artifact_dir / "performance" / "performance.json"
+            ),
         },
         "generated_at": datetime.now(UTC).isoformat(),
     }
