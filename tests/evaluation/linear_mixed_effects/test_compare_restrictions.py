@@ -7,9 +7,9 @@ import pytest
 
 from workbench.analysis_loop.compare import ComparePacket
 from workbench.contracts.common.envelope import PacketEnvelope
+from tests.evaluation.linear_mixed_effects._fixtures import lmm_fixture_root
 
 
-ROOT = Path(__file__).parents[2] / "fixtures" / "models" / "linear_mixed_effects" / "packets"
 RESTRICTED_MESSAGE = (
     "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。"
 )
@@ -17,7 +17,7 @@ RESTRICTED_MESSAGE = (
 
 def _payload(name: str) -> dict[str, object]:
     packet = PacketEnvelope.from_dict(
-        json.loads((ROOT / name).read_text(encoding="utf-8"))
+        json.loads((lmm_fixture_root() / "packets" / name).read_text(encoding="utf-8"))
     )
     payload = packet.to_dict()["payload"]
     assert isinstance(payload, dict)

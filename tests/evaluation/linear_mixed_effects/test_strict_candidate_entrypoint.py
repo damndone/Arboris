@@ -62,10 +62,29 @@ def test_strict_entrypoint_runs_the_full_suite_and_persists_a_rejection(tmp_path
     assert payload["status"] == "failed"
     assert payload["candidate_sha"] == "a" * 40
     assert payload["suite_exit_code"] != 0
-    assert payload["unexpected_skips"] == []
-    assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") in payload[
-        "suite_command"
-    ]
+    assert set(payload["results"]) == {
+        "contract_validation",
+        "known_truth",
+        "fault_injection",
+        "agent_boundaries",
+        "compare_restrictions",
+        "deterministic_overclaim_checks",
+    }
+    assert set(payload["junit_test_counts"]) == set(payload["results"])
+    suite_command = set(payload["suite_command"])
+    assert {
+        str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects" / filename)
+        for filename in (
+            "test_contract_compatibility.py",
+            "test_known_truth.py",
+            "test_fault_injection.py",
+            "test_agent_boundaries.py",
+            "test_compare_restrictions.py",
+            "test_report_claims.py",
+        )
+    }.issubset(suite_command)
+    assert not any("test_collector_guardrails" in item for item in suite_command)
+    assert not any("test_strict_candidate_entrypoint" in item for item in suite_command)
 
 
 def test_strict_entrypoint_rejects_a_non_full_sha_before_candidate_import(tmp_path) -> None:
@@ -122,6 +141,75 @@ def test_strict_entrypoint_blocks_network_and_clears_keys_before_import(
     output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
     assert completed.returncode == 1
     assert payload["strict_isolation"]["provider_environment"] == "cleared before candidate imports"
+    assert "no OS-level sandbox" in payload["strict_isolation"]["limitations"]
     assert "network access is forbidden before and during strict candidate evaluation" in output
     assert "provider canary leaked" not in output
     assert "sentinel-provider-key" not in output
+
+
+def test_strict_entrypoint_blocks_process_spawning_before_candidate_import(
+    tmp_path,
+) -> None:
+    candidate_root = tmp_path / "candidate"
+    shutil.copytree(
+        REPO_ROOT / "backend" / "workbench",
+        candidate_root / "backend" / "workbench",
+    )
+    runner = (
+        candidate_root
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "runner.py"
+    )
+    runner.parent.mkdir(parents=True)
+    (runner.parent / "__init__.py").write_text("", encoding="utf-8")
+    runner.write_text(
+        "import subprocess\n"
+        "subprocess.Popen(['definitely-not-a-real-child-process'])\n",
+        encoding="utf-8",
+    )
+    artifact_dir = tmp_path / "strict-artifacts"
+
+    completed = _run_strict_entrypoint(candidate_root, artifact_dir, "c" * 40)
+
+    payload = json.loads((artifact_dir / "strict-suite.json").read_text())
+    output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
+    assert completed.returncode == 1
+    assert "process spawning is forbidden before and during strict candidate evaluation" in output
+    assert payload["strict_isolation"]["process_spawn_guard"].startswith(
+        "Python-level"
+    )
+
+
+def test_strict_entrypoint_blocks_os_system_before_candidate_import(tmp_path) -> None:
+    candidate_root = tmp_path / "candidate"
+    shutil.copytree(
+        REPO_ROOT / "backend" / "workbench",
+        candidate_root / "backend" / "workbench",
+    )
+    runner = (
+        candidate_root
+        / "backend"
+        / "workbench"
+        / "engine"
+        / "packs"
+        / "linear_mixed_effects"
+        / "runner.py"
+    )
+    runner.parent.mkdir(parents=True)
+    (runner.parent / "__init__.py").write_text("", encoding="utf-8")
+    runner.write_text(
+        "import os\n"
+        "os.system('definitely-not-a-real-child-process')\n",
+        encoding="utf-8",
+    )
+    artifact_dir = tmp_path / "strict-artifacts"
+
+    completed = _run_strict_entrypoint(candidate_root, artifact_dir, "d" * 40)
+
+    output = (artifact_dir / "strict-suite.stdout.txt").read_text(encoding="utf-8")
+    assert completed.returncode == 1
+    assert "process spawning is forbidden before and during strict candidate evaluation" in output

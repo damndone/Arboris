@@ -21,7 +21,9 @@ import platform
 import re
 import socket
 import statistics
+import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as element_tree
 from collections.abc import Callable, Mapping
@@ -52,11 +54,17 @@ RESULT_NAMES = (
     "compare_restrictions",
     "deterministic_overclaim_checks",
 )
-_ALLOWED_META_SKIPS = (
-    "test_candidate_import_boundary",
-    "test_collector_guardrails",
-    "test_strict_candidate_entrypoint",
-)
+STRICT_TEST_FILES = {
+    "contract_validation": "test_contract_compatibility.py",
+    "known_truth": "test_known_truth.py",
+    "fault_injection": "test_fault_injection.py",
+    "agent_boundaries": "test_agent_boundaries.py",
+    "compare_restrictions": "test_compare_restrictions.py",
+    "deterministic_overclaim_checks": "test_report_claims.py",
+}
+LMM_RESULT_CONTRACT = "linear_mixed_effects.result"
+LMM_RESULT_CONTRACT_VERSION = "1.0"
+LMM_RESULT_PRODUCER_VERSION = "linear_mixed_effects@1.0"
 
 
 class StrictEvaluationError(RuntimeError):
@@ -78,10 +86,24 @@ def _sha256(path: Path) -> str | None:
 
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
-    path.write_text(
+    _write_text(
+        path,
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
     )
+
+
+def _write_text(path: Path, value: str) -> None:
+    """Atomically finalize runner-owned evidence artifacts."""
+
+    if path.exists():
+        raise StrictEvaluationError(f"refusing to overwrite strict evidence artifact: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(value)
+    os.replace(temporary, path)
 
 
 def _validate_full_sha(candidate_sha: str) -> None:
@@ -113,8 +135,12 @@ def _clean_environment(artifact_dir: Path, candidate_root: Path, evaluator_root:
     os.chdir(isolated_home)
 
 
-def _install_network_guard() -> None:
-    """Block socket connections before pytest imports a candidate module."""
+def _install_in_process_guards() -> None:
+    """Block common Python egress and process-spawn paths before candidate imports.
+
+    This is deliberately a scoped in-process guard, not an operating-system
+    sandbox or proof that every possible egress route is unavailable.
+    """
 
     def blocked(*_args: object, **_kwargs: object) -> object:
         raise StrictEvaluationError(
@@ -124,6 +150,33 @@ def _install_network_guard() -> None:
     socket.socket.connect = blocked  # type: ignore[assignment]
     socket.socket.connect_ex = blocked  # type: ignore[assignment]
     socket.create_connection = blocked  # type: ignore[assignment]
+
+    def blocked_process(*_args: object, **_kwargs: object) -> object:
+        raise StrictEvaluationError(
+            "process spawning is forbidden before and during strict candidate evaluation"
+        )
+
+    subprocess.Popen = blocked_process  # type: ignore[assignment]
+    subprocess.run = blocked_process  # type: ignore[assignment]
+    subprocess.call = blocked_process  # type: ignore[assignment]
+    subprocess.check_call = blocked_process  # type: ignore[assignment]
+    subprocess.check_output = blocked_process  # type: ignore[assignment]
+    os.system = blocked_process  # type: ignore[assignment]
+    os.popen = blocked_process  # type: ignore[assignment]
+    for name in (
+        "posix_spawn",
+        "posix_spawnp",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+    ):
+        if hasattr(os, name):
+            setattr(os, name, blocked_process)
 
 
 def _prepare_import_path(candidate_root: Path, evaluator_root: Path) -> None:
@@ -226,15 +279,41 @@ def _fit_once(
         raise StrictEvaluationError("runner must return exactly (result, fitted)")
     result, fitted = outcome
     if not isinstance(result, Mapping):
-        raise StrictEvaluationError("runner result must be a mapping")
-    if result.get("model_type") != "linear_mixed_effects":
-        raise StrictEvaluationError("runner result does not identify linear_mixed_effects")
+        raise StrictEvaluationError("runner result must be a C1 PacketEnvelope mapping")
+    try:
+        from workbench.contracts.common.envelope import ContractError, PacketEnvelope
+
+        envelope = PacketEnvelope.from_dict(result)
+    except (ContractError, TypeError, ValueError) as error:
+        raise StrictEvaluationError("runner result must be a valid C1 PacketEnvelope") from error
+    if (
+        envelope.contract != LMM_RESULT_CONTRACT
+        or envelope.contract_version != LMM_RESULT_CONTRACT_VERSION
+        or envelope.producer_version != LMM_RESULT_PRODUCER_VERSION
+    ):
+        raise StrictEvaluationError("runner result has an unexpected C1 packet identity")
+    payload = envelope.to_dict()["payload"]
+    if not isinstance(payload, Mapping):
+        raise StrictEvaluationError("runner C1 packet payload must be an object")
+    if payload.get("model_type") != "linear_mixed_effects":
+        raise StrictEvaluationError("runner C1 packet payload does not identify linear_mixed_effects")
     if getattr(fitted, "converged", None) is not True:
         raise StrictEvaluationError("measured LMM fit did not converge")
 
     artifact = run_root / "linear_mixed_effects_contract.json"
     if not artifact.is_file():
         raise StrictEvaluationError("runner did not write linear_mixed_effects_contract.json")
+    try:
+        stored = json.loads(artifact.read_text(encoding="utf-8"))
+        stored_envelope = PacketEnvelope.from_dict(stored)
+    except (ContractError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise StrictEvaluationError(
+            "runner artifact must contain the exact C1 packet returned by the runner"
+        ) from error
+    if stored_envelope.to_dict() != envelope.to_dict():
+        raise StrictEvaluationError(
+            "runner artifact must contain the exact C1 packet returned by the runner"
+        )
     return {
         "duration_seconds": duration,
         "artifact_path": str(artifact),
@@ -312,31 +391,62 @@ def _collect_performance(candidate_root: Path, artifact_dir: Path) -> dict[str, 
             "artifact_count": artifact_count,
             "full_forest_refetch": False,
             "full_forest_refetch_basis": "direct local runner invocation; no graph-store path",
-            "real_provider_calls": False,
-            "real_provider_calls_basis": "socket connections were blocked before every candidate import",
+            "provider_call_observation": "not_proven",
+            "provider_call_observation_basis": (
+                "provider-bearing environment was cleared and scoped Python guards "
+                "were installed before candidate imports; this is not OS-level egress proof"
+            ),
         },
     }
     _write_json(performance_dir / "performance.json", payload)
     return payload
 
 
-def _unexpected_skips(junit_path: Path) -> list[str]:
+def _failed_result_states() -> dict[str, str]:
+    return {name: "failed" for name in RESULT_NAMES}
+
+
+def _summarize_strict_junit(junit_path: Path) -> tuple[dict[str, str], dict[str, int]]:
+    """Derive each required result from durable, complete JUnit evidence."""
+
     if not junit_path.is_file():
-        return []
-    root = element_tree.parse(junit_path).getroot()
-    unexpected: list[str] = []
-    for testcase in root.iter("testcase"):
-        if testcase.find("skipped") is None:
-            continue
-        identifier = f"{testcase.get('classname', '')}::{testcase.get('name', '')}"
-        if not any(allowed in identifier for allowed in _ALLOWED_META_SKIPS):
-            unexpected.append(identifier)
-    return unexpected
+        raise StrictEvaluationError("strict suite JUnit artifact is missing")
+    try:
+        root = element_tree.parse(junit_path).getroot()
+    except element_tree.ParseError as error:
+        raise StrictEvaluationError("strict suite JUnit artifact is not parseable") from error
 
-
-def _result_states(status: str) -> dict[str, str]:
-    state = "passed" if status == "passed" else "failed"
-    return {name: state for name in RESULT_NAMES}
+    module_to_result = {
+        filename.removesuffix(".py"): result_name
+        for result_name, filename in STRICT_TEST_FILES.items()
+    }
+    states = {name: "passed" for name in RESULT_NAMES}
+    counts = {name: 0 for name in RESULT_NAMES}
+    testcases = list(root.iter("testcase"))
+    if not testcases:
+        raise StrictEvaluationError("strict suite JUnit artifact has zero testcases")
+    for testcase in testcases:
+        classname = testcase.get("classname", "")
+        module_name = classname.rsplit(".", 1)[-1]
+        result_name = module_to_result.get(module_name)
+        identifier = f"{classname}::{testcase.get('name', '')}"
+        if result_name is None:
+            raise StrictEvaluationError(
+                "strict suite JUnit includes a non-candidate test: " + identifier
+            )
+        counts[result_name] += 1
+        if testcase.find("skipped") is not None:
+            raise StrictEvaluationError(
+                "strict suite JUnit reports a skip: " + identifier
+            )
+        if testcase.find("failure") is not None or testcase.find("error") is not None:
+            states[result_name] = "failed"
+    missing = [name for name, count in counts.items() if count == 0]
+    if missing:
+        raise StrictEvaluationError(
+            "strict suite JUnit has zero test results for: " + ", ".join(missing)
+        )
+    return states, counts
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -358,7 +468,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.executable,
         "-m",
         "pytest",
-        str(suite_root),
+        *[str(suite_root / filename) for filename in STRICT_TEST_FILES.values()],
         "-q",
         "-p",
         "no:cacheprovider",
@@ -372,28 +482,32 @@ def main(argv: list[str] | None = None) -> int:
     stdout_path = artifact_dir / "strict-suite.stdout.txt"
     stderr_path = artifact_dir / "strict-suite.stderr.txt"
     suite_exit_code = 1
+    suite_duration_seconds = 0.0
     suite_error: str | None = None
-    unexpected_skips: list[str] = []
+    results = _failed_result_states()
+    junit_test_counts = {name: 0 for name in RESULT_NAMES}
     performance: dict[str, object] = {"status": "not_run"}
     try:
         _validate_full_sha(args.candidate_sha)
         _clean_environment(artifact_dir, candidate_root, evaluator_root)
-        _install_network_guard()
+        _install_in_process_guards()
         _prepare_import_path(candidate_root, evaluator_root)
         import pytest
 
         captured_stdout = io.StringIO()
         captured_stderr = io.StringIO()
+        suite_started = time.perf_counter()
         with (
             contextlib.redirect_stdout(captured_stdout),
             contextlib.redirect_stderr(captured_stderr),
         ):
             suite_exit_code = pytest.main(suite_command[3:])
-        stdout_path.write_text(captured_stdout.getvalue(), encoding="utf-8")
-        stderr_path.write_text(captured_stderr.getvalue(), encoding="utf-8")
-        unexpected_skips = _unexpected_skips(artifact_dir / "strict-suite.junit.xml")
-        if unexpected_skips:
-            suite_error = "strict suite reported unexpected skips: " + ", ".join(unexpected_skips)
+        suite_duration_seconds = time.perf_counter() - suite_started
+        _write_text(stdout_path, captured_stdout.getvalue())
+        _write_text(stderr_path, captured_stderr.getvalue())
+        results, junit_test_counts = _summarize_strict_junit(
+            artifact_dir / "strict-suite.junit.xml"
+        )
         if suite_exit_code == 0 and suite_error is None:
             try:
                 performance = _collect_performance(candidate_root, artifact_dir)
@@ -405,15 +519,15 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as error:  # strict failures must become a durable artifact
         suite_error = f"{type(error).__name__}: {error}"
         if not stdout_path.exists():
-            stdout_path.write_text("", encoding="utf-8")
+            _write_text(stdout_path, "")
         if not stderr_path.exists():
-            stderr_path.write_text(suite_error + "\n", encoding="utf-8")
+            _write_text(stderr_path, suite_error + "\n")
 
     suite_status = "passed" if suite_exit_code == 0 and suite_error is None else "failed"
     status = "passed" if suite_status == "passed" and performance["status"] == "passed" else "failed"
     junit_path = artifact_dir / "strict-suite.junit.xml"
     payload: dict[str, object] = {
-        "schema_version": "v173_lmm_strict_candidate_evaluation_v2",
+        "schema_version": "v173_lmm_strict_candidate_evaluation_v3",
         "status": status,
         "candidate_root": str(candidate_root),
         "candidate_sha": args.candidate_sha,
@@ -421,15 +535,27 @@ def main(argv: list[str] | None = None) -> int:
         "suite_exit_code": suite_exit_code,
         "suite_status": suite_status,
         "suite_error": suite_error,
-        "unexpected_skips": unexpected_skips,
+        "suite_duration_seconds": suite_duration_seconds,
         "duration_seconds": time.perf_counter() - started,
-        "results": _result_states(suite_status),
+        "results": results,
+        "junit_test_counts": junit_test_counts,
         "performance": performance,
         "strict_isolation": {
-            "network_guard": "socket connect/connect_ex/create_connection blocked before pytest collection",
+            "network_guard": (
+                "Python-level socket connect/connect_ex/create_connection guard "
+                "installed before pytest collection"
+            ),
+            "process_spawn_guard": (
+                "Python-level subprocess and common os process-spawn guards "
+                "installed before pytest collection"
+            ),
             "provider_environment": "cleared before candidate imports",
             "blocked_environment_names": list(BLOCKED_ENV_NAMES),
             "candidate_module_provenance": "required candidate modules assert __file__ under candidate root",
+            "limitations": (
+                "scoped process-level Python guards with cleared environment; no "
+                "OS-level sandbox or proof of all-network or no-provider behavior"
+            ),
         },
         "artifacts": {
             "stdout": {"path": str(stdout_path), "sha256": _sha256(stdout_path)},

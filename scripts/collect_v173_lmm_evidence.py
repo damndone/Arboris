@@ -20,6 +20,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as element_tree
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +31,44 @@ FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 FIXTURE_ROOT_RELATIVE_PATH = Path("tests/fixtures/models/linear_mixed_effects")
 STRICT_RUNNER_RELATIVE_PATH = Path(
     "tests/evaluation/linear_mixed_effects/strict_runner.py"
+)
+STRICT_SCHEMA_VERSION = "v173_lmm_strict_candidate_evaluation_v3"
+STRICT_RESULT_NAMES = (
+    "contract_validation",
+    "known_truth",
+    "fault_injection",
+    "agent_boundaries",
+    "compare_restrictions",
+    "deterministic_overclaim_checks",
+)
+STRICT_TEST_FILES = {
+    "contract_validation": "test_contract_compatibility.py",
+    "known_truth": "test_known_truth.py",
+    "fault_injection": "test_fault_injection.py",
+    "agent_boundaries": "test_agent_boundaries.py",
+    "compare_restrictions": "test_compare_restrictions.py",
+    "deterministic_overclaim_checks": "test_report_claims.py",
+}
+FIXTURE_RELATIVE_PATH = FIXTURE_ROOT_RELATIVE_PATH / "known_truth.csv"
+STRICT_PAYLOAD_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "candidate_root",
+        "candidate_sha",
+        "suite_command",
+        "suite_exit_code",
+        "suite_status",
+        "suite_error",
+        "suite_duration_seconds",
+        "duration_seconds",
+        "results",
+        "junit_test_counts",
+        "performance",
+        "strict_isolation",
+        "artifacts",
+        "generated_at",
+    }
 )
 
 # These are immutable C1 contracts or central paths whose change would make an
@@ -326,6 +366,52 @@ def _preflight_candidate(
     }
 
 
+def _preflight_evaluator(
+    root: Path,
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+) -> dict[str, str]:
+    """Require the evaluator itself to stay clean and pinned during evidence work."""
+
+    if not root.is_dir() or not (root / ".git").exists():
+        raise EvidenceCollectionError(f"evaluator root is not a Git checkout: {root}")
+    commit = _git_output(
+        root,
+        ["rev-parse", "HEAD"],
+        command_records,
+        artifact_root=artifact_root,
+    )
+    status = _git_output(
+        root,
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+        command_records,
+        artifact_root=artifact_root,
+    )
+    if status:
+        raise EvidenceCollectionError(
+            "evaluator worktree is dirty; strict evidence requires a clean evaluator"
+        )
+    return {"evaluator_commit": commit}
+
+
+def _post_execution_evaluator_audit(
+    root: Path,
+    preflight: dict[str, str],
+    command_records: list[dict[str, object]],
+    *,
+    artifact_root: Path | None = None,
+) -> dict[str, str]:
+    observed = _preflight_evaluator(
+        root,
+        command_records,
+        artifact_root=artifact_root,
+    )
+    if observed != preflight:
+        raise EvidenceCollectionError("evaluator HEAD changed during strict evaluation")
+    return observed
+
+
 def _post_execution_audit(
     root: Path,
     candidate: str,
@@ -363,6 +449,159 @@ def _strict_child_environment() -> dict[str, str]:
     return {"PYTHONUNBUFFERED": "1"}
 
 
+def _require_exact_mapping_keys(
+    value: object, expected: frozenset[str], name: str
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise EvidenceCollectionError(f"strict payload {name} has an invalid schema")
+    return value
+
+
+def _require_nonnegative_number(value: object, name: str) -> None:
+    if type(value) not in {int, float} or float(value) < 0:
+        raise EvidenceCollectionError(f"strict payload {name} must be nonnegative")
+
+
+def _validate_artifact_descriptor(
+    value: object, *, name: str, expected_path: Path
+) -> dict[str, str]:
+    descriptor = _require_exact_mapping_keys(value, frozenset({"path", "sha256"}), name)
+    path_value = descriptor["path"]
+    digest = descriptor["sha256"]
+    if type(path_value) is not str or Path(path_value).resolve() != expected_path.resolve():
+        raise EvidenceCollectionError(f"strict payload artifact {name} has an unexpected path")
+    if (
+        type(digest) is not str
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not expected_path.is_file()
+        or _sha256_file(expected_path) != digest
+    ):
+        raise EvidenceCollectionError(f"strict payload artifact {name} is incomplete or tampered")
+    return {"path": path_value, "sha256": digest}
+
+
+def _validate_strict_junit(
+    junit_path: Path, expected_counts: Mapping[str, object]
+) -> None:
+    try:
+        root = element_tree.parse(junit_path).getroot()
+    except element_tree.ParseError as error:
+        raise EvidenceCollectionError("strict JUnit artifact is not parseable") from error
+    module_to_result = {
+        filename.removesuffix(".py"): result_name
+        for result_name, filename in STRICT_TEST_FILES.items()
+    }
+    observed_counts = {name: 0 for name in STRICT_RESULT_NAMES}
+    testcases = list(root.iter("testcase"))
+    if not testcases:
+        raise EvidenceCollectionError("strict JUnit artifact has zero testcases")
+    for testcase in testcases:
+        classname = testcase.get("classname", "")
+        result_name = module_to_result.get(classname.rsplit(".", 1)[-1])
+        if result_name is None:
+            raise EvidenceCollectionError("strict JUnit includes a non-candidate testcase")
+        if testcase.find("skipped") is not None:
+            raise EvidenceCollectionError("strict JUnit reports a skipped testcase")
+        if testcase.find("failure") is not None or testcase.find("error") is not None:
+            raise EvidenceCollectionError("strict JUnit reports a failed testcase")
+        observed_counts[result_name] += 1
+    if any(count == 0 for count in observed_counts.values()):
+        raise EvidenceCollectionError("strict JUnit has zero expected test results")
+    if {
+        name: expected_counts[name] for name in STRICT_RESULT_NAMES
+    } != observed_counts:
+        raise EvidenceCollectionError("strict JUnit testcase counts do not match strict payload")
+
+
+def _validate_strict_payload(
+    payload: object,
+    *,
+    root: Path,
+    candidate_sha: str,
+    evaluator_root: Path,
+    strict_artifact_dir: Path,
+    expected_fixture_sha256: str | None = None,
+) -> dict[str, object]:
+    """Reject a claimed strict pass unless every inner fact is self-consistent."""
+
+    wire = _require_exact_mapping_keys(payload, STRICT_PAYLOAD_FIELDS, "root")
+    if wire["schema_version"] != STRICT_SCHEMA_VERSION:
+        raise EvidenceCollectionError("strict payload schema_version is unsupported")
+    if wire["status"] != "passed" or wire["suite_status"] != "passed":
+        raise EvidenceCollectionError("strict payload does not report a passed suite")
+    if wire["candidate_root"] != str(root.resolve()):
+        raise EvidenceCollectionError("strict payload candidate_root does not match candidate")
+    if wire["candidate_sha"] != candidate_sha:
+        raise EvidenceCollectionError("strict payload candidate_sha does not match candidate")
+    if expected_fixture_sha256 is None:
+        candidate_fixture = root / FIXTURE_RELATIVE_PATH
+        if not candidate_fixture.is_file():
+            raise EvidenceCollectionError("candidate is missing canonical fixture used by strict evaluation")
+        expected_fixture_sha256 = _sha256_file(candidate_fixture)
+    if wire["suite_exit_code"] != 0 or wire["suite_error"] is not None:
+        raise EvidenceCollectionError("strict payload reports a non-passing pytest suite")
+    _require_nonnegative_number(wire["suite_duration_seconds"], "suite_duration_seconds")
+    _require_nonnegative_number(wire["duration_seconds"], "duration_seconds")
+    if not isinstance(wire["suite_command"], list) or not all(
+        type(item) is str for item in wire["suite_command"]
+    ):
+        raise EvidenceCollectionError("strict payload suite_command is invalid")
+    expected_test_paths = [
+        str(
+            (evaluator_root / "tests" / "evaluation" / "linear_mixed_effects" / filename).resolve()
+        )
+        for filename in STRICT_TEST_FILES.values()
+    ]
+    observed_test_paths = [
+        item for item in wire["suite_command"] if item.endswith(".py")
+    ]
+    if observed_test_paths != expected_test_paths:
+        raise EvidenceCollectionError("strict payload suite_command does not select exactly the candidate tests")
+
+    results = _require_exact_mapping_keys(
+        wire["results"], frozenset(STRICT_RESULT_NAMES), "results"
+    )
+    if any(results[name] != "passed" for name in STRICT_RESULT_NAMES):
+        raise EvidenceCollectionError("strict payload did not pass every required result")
+    junit_counts = _require_exact_mapping_keys(
+        wire["junit_test_counts"], frozenset(STRICT_RESULT_NAMES), "junit_test_counts"
+    )
+    if any(type(junit_counts[name]) is not int or junit_counts[name] <= 0 for name in STRICT_RESULT_NAMES):
+        raise EvidenceCollectionError("strict payload has zero expected test results")
+
+    performance = _require_exact_mapping_keys(
+        wire["performance"], frozenset({"status", "environment", "fixture", "warmups", "cold_fits", "hot_fits", "summary"}), "performance"
+    )
+    if performance["status"] != "passed":
+        raise EvidenceCollectionError("strict payload performance did not pass")
+    fixture = _require_exact_mapping_keys(
+        performance["fixture"], frozenset({"path", "sha256", "rows", "subjects"}), "performance.fixture"
+    )
+    if (
+        fixture["path"] != FIXTURE_RELATIVE_PATH.as_posix()
+        or fixture["sha256"] != expected_fixture_sha256
+    ):
+        raise EvidenceCollectionError("strict payload fixture hash does not match the candidate fixture used")
+
+    artifacts = _require_exact_mapping_keys(
+        wire["artifacts"], frozenset({"stdout", "stderr", "junit", "performance"}), "artifacts"
+    )
+    _validate_artifact_descriptor(
+        artifacts["stdout"], name="stdout", expected_path=strict_artifact_dir / "strict-suite.stdout.txt"
+    )
+    _validate_artifact_descriptor(
+        artifacts["stderr"], name="stderr", expected_path=strict_artifact_dir / "strict-suite.stderr.txt"
+    )
+    junit_descriptor = _validate_artifact_descriptor(
+        artifacts["junit"], name="junit", expected_path=strict_artifact_dir / "strict-suite.junit.xml"
+    )
+    _validate_artifact_descriptor(
+        artifacts["performance"], name="performance", expected_path=strict_artifact_dir / "performance" / "performance.json"
+    )
+    _validate_strict_junit(Path(junit_descriptor["path"]), junit_counts)
+    return dict(wire)
+
+
 def _run_strict_candidate_evaluation(
     *,
     root: Path,
@@ -370,6 +609,7 @@ def _run_strict_candidate_evaluation(
     evaluator_root: Path,
     artifact_root: Path,
     command_records: list[dict[str, object]],
+    expected_fixture_sha256: str | None = None,
 ) -> dict[str, object]:
     strict_runner = evaluator_root / STRICT_RUNNER_RELATIVE_PATH
     if not strict_runner.is_file():
@@ -408,6 +648,8 @@ def _run_strict_candidate_evaluation(
             "exit_code": completed.returncode,
             "duration_seconds": duration,
             "output_sha256": _sha256_bytes(combined_output.encode("utf-8")),
+            "stdout_sha256": _sha256_bytes(completed.stdout.encode("utf-8")),
+            "stderr_sha256": _sha256_bytes(completed.stderr.encode("utf-8")),
             "output_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
         }
@@ -421,14 +663,19 @@ def _run_strict_candidate_evaluation(
         payload = json.loads(result_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise EvidenceCollectionError("strict-suite.json is not valid JSON") from error
-    if completed.returncode != 0 or payload.get("status") != "passed":
+    if completed.returncode != 0:
         raise EvidenceCollectionError(
             "strict candidate evaluation failed; see persistent artifacts under "
             f"{strict_artifact_dir}"
         )
-    if payload.get("suite_exit_code") != 0:
-        raise EvidenceCollectionError("strict candidate evaluation reported a nonzero pytest exit")
-    return payload
+    return _validate_strict_payload(
+        payload,
+        root=root,
+        candidate_sha=candidate_sha,
+        evaluator_root=evaluator_root,
+        strict_artifact_dir=strict_artifact_dir,
+        expected_fixture_sha256=expected_fixture_sha256,
+    )
 
 
 def _artifact_manifest(artifact_root: Path) -> list[dict[str, str]]:
@@ -437,6 +684,27 @@ def _artifact_manifest(artifact_root: Path) -> list[dict[str, str]]:
         for path in sorted(artifact_root.rglob("*"))
         if path.is_file()
     ]
+
+
+def _inner_pytest_record(strict: Mapping[str, object]) -> dict[str, object]:
+    """Copy the inner pytest facts into the outer manifest without inference."""
+
+    artifacts = strict["artifacts"]
+    assert isinstance(artifacts, Mapping)
+    stdout = artifacts["stdout"]
+    stderr = artifacts["stderr"]
+    junit = artifacts["junit"]
+    assert isinstance(stdout, Mapping)
+    assert isinstance(stderr, Mapping)
+    assert isinstance(junit, Mapping)
+    return {
+        "command": strict["suite_command"],
+        "exit_code": strict["suite_exit_code"],
+        "duration_seconds": strict["suite_duration_seconds"],
+        "stdout_sha256": stdout["sha256"],
+        "stderr_sha256": stderr["sha256"],
+        "junit_sha256": junit["sha256"],
+    }
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:
@@ -464,15 +732,24 @@ def _collect(
     output: Path,
     command_records: list[dict[str, object]],
 ) -> dict[str, object]:
+    evaluator_root = Path(__file__).resolve().parents[1]
+    if output.is_relative_to(evaluator_root):
+        raise EvidenceCollectionError(
+            "strict evidence output must be outside the evaluator worktree so its audit stays clean"
+        )
     if output.exists():
         raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {output}")
     artifact_root = output.parent / f"{output.stem}.artifacts"
     if artifact_root.exists():
         raise EvidenceCollectionError(
             f"refusing to overwrite existing strict evaluation artifacts: {artifact_root}"
-        )
+    )
     artifact_root.mkdir(parents=True, exist_ok=False)
-    evaluator_root = Path(__file__).resolve().parents[1]
+    evaluator_preflight = _preflight_evaluator(
+        evaluator_root,
+        command_records,
+        artifact_root=artifact_root,
+    )
     preflight = _preflight_candidate(
         root,
         candidate,
@@ -485,12 +762,19 @@ def _collect(
         evaluator_root=evaluator_root,
         artifact_root=artifact_root,
         command_records=command_records,
+        expected_fixture_sha256=str(
+            preflight["fixture_hashes"][FIXTURE_RELATIVE_PATH.as_posix()]
+        ),
     )
     performance = strict.get("performance")
     if not isinstance(performance, dict) or performance.get("status") != "passed":
         raise EvidenceCollectionError("strict candidate evaluation did not complete performance")
     results = strict.get("results")
-    if not isinstance(results, dict) or any(value != "passed" for value in results.values()):
+    if (
+        not isinstance(results, dict)
+        or set(results) != set(STRICT_RESULT_NAMES)
+        or any(value != "passed" for value in results.values())
+    ):
         raise EvidenceCollectionError("strict candidate evaluation did not pass every required suite result")
     _post_execution_audit(
         root,
@@ -499,9 +783,9 @@ def _collect(
         command_records,
         artifact_root=artifact_root,
     )
-    collector_commit = _git_output(
+    _post_execution_evaluator_audit(
         evaluator_root,
-        ["rev-parse", "HEAD"],
+        evaluator_preflight,
         command_records,
         artifact_root=artifact_root,
     )
@@ -521,7 +805,7 @@ def _collect(
         "evaluated_commit": preflight["candidate_commit"],
         "candidate_worktree": str(root),
         "contract_lock_commit": CONTRACT_LOCK_COMMIT,
-        "evaluation_harness_commit": collector_commit,
+        "evaluation_harness_commit": evaluator_preflight["evaluator_commit"],
         "supersedes": [],
         "environment": environment,
         "fixtures": [
@@ -535,6 +819,7 @@ def _collect(
             "reason": "browser acceptance has not been supplied; strict evidence alone cannot accept a candidate",
         },
         "performance": performance,
+        "inner_pytest": _inner_pytest_record(strict),
         "commands": command_records,
         "artifacts": _artifact_manifest(artifact_root),
         "generated_at": datetime.now(UTC).isoformat(),

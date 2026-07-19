@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
 
 import pandas as pd
 import pytest
 
+from workbench.contracts.common.envelope import PacketEnvelope
+from workbench.contracts.model.linear_mixed_effects import LmmDiagnostic
+
 from tests.evaluation.linear_mixed_effects._candidate import require_candidate_module
+from tests.evaluation.linear_mixed_effects._fixtures import lmm_fixture_root
 
 
-ROOT = Path(__file__).parents[2] / "fixtures" / "models" / "linear_mixed_effects"
 OPTIONS = {
     "subject_id": "participant_id",
     "time": "week",
@@ -16,6 +19,36 @@ OPTIONS = {
     "fit_method": "reml",
     "random_slope": True,
 }
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_code", "expected_status"),
+    [
+        ("invalid_random_slope_blocked.json", "LMM_INVALID_RANDOM_SLOPE_CONFIGURATION", "blocked"),
+        ("missing_subject_id_blocked.json", "LMM_SUBJECT_ID_MISSING", "blocked"),
+        ("convergence_failed.json", "LMM_CONVERGENCE_FAILED", "failed"),
+        ("singular_warning.json", "LMM_RANDOM_EFFECTS_SINGULAR", "complete"),
+    ],
+)
+def test_canonical_fault_packets_are_versioned_diagnostic_envelopes(
+    fixture_name: str, expected_code: str, expected_status: str
+) -> None:
+    packet = PacketEnvelope.from_dict(
+        json.loads(
+            (lmm_fixture_root() / "packets" / fixture_name).read_text(encoding="utf-8")
+        )
+    )
+
+    assert packet.contract == "linear_mixed_effects.diagnostic"
+    assert packet.contract_version == "1.0"
+    assert packet.producer_version == "linear_mixed_effects@1.0"
+    payload = packet.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    diagnostics = payload["diagnostics"]
+    assert isinstance(diagnostics, list) and len(diagnostics) == 1
+    diagnostic = LmmDiagnostic(**diagnostics[0])
+    assert diagnostic.code == expected_code
+    assert diagnostic.status == expected_status
 
 
 def _prepare(frame: pd.DataFrame) -> object:
@@ -62,7 +95,7 @@ def _prepare(frame: pd.DataFrame) -> object:
 def test_invalid_input_fails_with_the_locked_code(
     fixture_name: str, mutate, expected_code: str
 ) -> None:
-    frame = mutate(pd.read_csv(ROOT / fixture_name))
+    frame = mutate(pd.read_csv(lmm_fixture_root() / fixture_name))
     module = require_candidate_module("workbench.engine.packs.linear_mixed_effects.input")
 
     with pytest.raises(module.LmmInputError, match=expected_code):
@@ -113,7 +146,10 @@ def test_diagnostic_faults_have_exact_code_and_status(
 
     diagnostics = module.classify_lmm_diagnostics(**kwargs)
 
-    assert diagnostics[0].code == expected_code
-    assert diagnostics[0].status == expected_status
+    diagnostic = diagnostics[0]
+    wire = diagnostic.to_dict()
+    assert LmmDiagnostic(**wire).to_dict() == wire
+    assert diagnostic.code == expected_code
+    assert diagnostic.status == expected_status
     if expected_status in {"blocked", "failed"}:
-        assert diagnostics[0].action_candidate is None
+        assert diagnostic.action_candidate is None

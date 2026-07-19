@@ -1,24 +1,32 @@
 from __future__ import annotations
 
 import json
-import importlib.util
-import subprocess
-import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from workbench.contracts.common.envelope import PacketEnvelope
 
 from tests.evaluation.linear_mixed_effects._candidate import require_candidate_module
+from tests.evaluation.linear_mixed_effects._fixtures import lmm_fixture_root
 
 
-REPO_ROOT = Path(__file__).parents[3]
-PACKETS = (
-    REPO_ROOT / "tests" / "fixtures" / "models" / "linear_mixed_effects" / "packets"
-)
+def _packets() -> Path:
+    return lmm_fixture_root() / "packets"
+
+
+def _lmm_result_payload(result: object) -> dict[str, object]:
+    assert isinstance(result, Mapping)
+    envelope = PacketEnvelope.from_dict(result)
+    assert envelope.contract == "linear_mixed_effects.result"
+    assert envelope.contract_version == "1.0"
+    assert envelope.producer_version == "linear_mixed_effects@1.0"
+    payload = envelope.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    return payload
 
 
 def test_canonical_packets_round_trip_through_the_locked_envelope() -> None:
-    for path in sorted(PACKETS.glob("*.json")):
+    for path in sorted(_packets().glob("*.json")):
         packet = json.loads(path.read_text(encoding="utf-8"))
 
         assert PacketEnvelope.from_dict(packet).to_dict() == packet
@@ -29,7 +37,7 @@ def test_runtime_result_round_trips_as_a_versioned_packet(tmp_path) -> None:
         "workbench.engine.packs.linear_mixed_effects.runner"
     )
     result, _ = runner.fit_linear_mixed_effects(
-        csv_path=PACKETS.parent / "known_truth.csv",
+        csv_path=_packets().parent / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
         options={
@@ -41,49 +49,9 @@ def test_runtime_result_round_trips_as_a_versioned_packet(tmp_path) -> None:
         },
         run_root=tmp_path,
     )
-    envelope = PacketEnvelope(
-        contract="linear_mixed_effects.result",
-        contract_version="1.0",
-        producer_version="linear_mixed_effects@1.0",
-        payload=result,
-    )
+    payload = _lmm_result_payload(result)
     stored = json.loads((tmp_path / "linear_mixed_effects_contract.json").read_text())
 
-    assert PacketEnvelope.from_dict(envelope.to_dict()).to_dict() == envelope.to_dict()
-    assert stored == result
-    assert result["model_type"] == "linear_mixed_effects"
-    assert result["primary_target_id"] == "group_time_interaction"
-
-
-def test_evidence_collector_requires_an_explicit_candidate_sha(tmp_path) -> None:
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "collect_v173_lmm_evidence.py"),
-            "--output",
-            str(tmp_path / "performance.json"),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert completed.returncode != 0
-    assert "--candidate" in completed.stderr
-
-
-def test_failed_evidence_records_the_supplied_candidate_sha() -> None:
-    path = REPO_ROOT / "scripts" / "collect_v173_lmm_evidence.py"
-    spec = importlib.util.spec_from_file_location("v173_lmm_collector", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    payload = module.build_failure_payload(
-        requested_candidate="candidate-sha",
-        error="candidate rejected",
-        duration_seconds=1.25,
-        command_records=[],
-    )
-
-    assert payload["requested_candidate"] == "candidate-sha"
+    assert stored == PacketEnvelope.from_dict(result).to_dict()
+    assert payload["model_type"] == "linear_mixed_effects"
+    assert payload["primary_target_id"] == "group_time_interaction"

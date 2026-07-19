@@ -1,18 +1,20 @@
-from pathlib import Path
 from collections.abc import Mapping, Sequence
+import json
+from pathlib import Path
+
+from workbench.contracts.common.envelope import PacketEnvelope
 
 from tests.evaluation.linear_mixed_effects._candidate import require_candidate_module
-
-
-ROOT = Path(__file__).parents[2] / "fixtures" / "models" / "linear_mixed_effects"
+from tests.evaluation.linear_mixed_effects._fixtures import lmm_fixture_root
 
 
 def _fit_known_truth(tmp_path, *, run_name: str) -> tuple[dict[str, object], object]:
     runner = require_candidate_module(
         "workbench.engine.packs.linear_mixed_effects.runner"
     )
+    run_root = tmp_path / run_name
     outcome = runner.fit_linear_mixed_effects(
-        csv_path=ROOT / "known_truth.csv",
+        csv_path=lmm_fixture_root() / "known_truth.csv",
         outcome="score",
         controls=["baseline_score"],
         options={
@@ -22,12 +24,22 @@ def _fit_known_truth(tmp_path, *, run_name: str) -> tuple[dict[str, object], obj
             "fit_method": "reml",
             "random_slope": True,
         },
-        run_root=tmp_path / run_name,
+        run_root=run_root,
     )
     assert isinstance(outcome, tuple) and len(outcome) == 2
     result, fitted = outcome
-    assert isinstance(result, dict)
-    return result, fitted
+    assert isinstance(result, Mapping)
+    envelope = PacketEnvelope.from_dict(result)
+    assert envelope.contract == "linear_mixed_effects.result"
+    assert envelope.contract_version == "1.0"
+    assert envelope.producer_version == "linear_mixed_effects@1.0"
+    payload = envelope.to_dict()["payload"]
+    assert isinstance(payload, dict)
+    stored = json.loads(
+        (run_root / "linear_mixed_effects_contract.json").read_text(encoding="utf-8")
+    )
+    assert stored == envelope.to_dict()
+    return payload, fitted
 
 
 def test_known_truth_interaction_is_within_locked_tolerance(tmp_path) -> None:
