@@ -399,6 +399,52 @@ def test_invalid_random_slope_covariance_fails_closed_as_a_terminal_packet(
     assert not (tmp_path / "linear_mixed_effects_recovery_proposal.json").exists()
 
 
+def test_negative_random_slope_variance_fails_before_recovery_and_persists_no_proposal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.engine.packs.linear_mixed_effects.runner as runner
+
+    class NegativeVarianceFitted:
+        converged = True
+        nobs = 480
+        cov_re = pd.DataFrame([[1.0, 0.0], [0.0, -1e-9]])
+        scale = 0.5
+
+    monkeypatch.setattr(
+        runner, "_fit_prepared", lambda _prepared: NegativeVarianceFitted()
+    )
+
+    packet, _ = fit_linear_mixed_effects(
+        csv_path=ROOT / "known_truth.csv",
+        outcome="score",
+        controls=["baseline_score"],
+        options={
+            "subject_id": "participant_id",
+            "time": "week",
+            "group": "arm",
+            "fit_method": "reml",
+            "random_slope": True,
+        },
+        run_root=tmp_path,
+    )
+
+    result = _packet_payload(packet)
+    diagnostic = PacketEnvelope.from_dict(
+        json.loads((tmp_path / "linear_mixed_effects_diagnostic.json").read_text())
+    ).to_dict()["payload"]
+    assert result["status"] == "failed"
+    assert result["coefficients"] == {}
+    assert result["figure_context"] is None
+    assert diagnostic["diagnostics"][0] == {
+        "code": "LMM_CONVERGENCE_FAILED",
+        "severity": "error",
+        "status": "failed",
+        "evidence": {"optimizer": "lbfgs"},
+        "action_candidate": None,
+    }
+    assert not (tmp_path / "linear_mixed_effects_recovery_proposal.json").exists()
+
+
 def test_runner_is_deterministic_for_the_same_locked_input(tmp_path: Path) -> None:
     options = {
         "subject_id": "participant_id",

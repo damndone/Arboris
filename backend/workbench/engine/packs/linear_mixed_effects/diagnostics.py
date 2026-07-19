@@ -80,9 +80,7 @@ def _valid_covariance_matrix(
         return None
     if not np.isfinite(eigenvalues).all():
         return None
-    largest_eigenvalue = float(eigenvalues[-1])
-    threshold = max(1e-8, 1e-6 * max(0.0, largest_eigenvalue))
-    if float(eigenvalues[0]) < -threshold:
+    if np.any(np.diag(matrix) < 0.0) or float(eigenvalues[0]) < 0.0:
         return None
     return matrix
 

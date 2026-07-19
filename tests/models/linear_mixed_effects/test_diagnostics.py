@@ -96,6 +96,7 @@ def test_singular_intercept_without_a_random_slope_has_no_action() -> None:
         ([[0.7, math.nan], [math.nan, 0.1]], 0.5),
         ([[0.7, 0.2], [0.1, 0.1]], 0.5),
         ([[0.7, 0.0], [0.0, 0.1]], math.nan),
+        ([[1.0, 0.0], [0.0, -1e-9]], 0.5),
     ],
 )
 def test_invalid_random_slope_covariance_or_residual_is_terminal_without_recovery(
