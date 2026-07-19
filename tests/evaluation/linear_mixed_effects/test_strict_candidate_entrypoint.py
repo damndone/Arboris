@@ -132,7 +132,8 @@ def test_strict_entrypoint_discards_raw_candidate_streams_from_durable_artifacts
     assert completed.returncode == 1
     metadata = json.loads((artifact_dir / "strict-suite.output.json").read_text())
     assert metadata["capture_policy"] == (
-        "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+        "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
+        "redirected text streams only"
     )
     assert metadata["stdout_bytes_observed"] > 0
     assert not (artifact_dir / "strict-suite.stdout.txt").exists()

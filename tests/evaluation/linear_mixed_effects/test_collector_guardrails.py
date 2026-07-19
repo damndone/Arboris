@@ -42,6 +42,30 @@ def _load_collector() -> ModuleType:
     return module
 
 
+def _strict_subprocess_result(
+    collector: ModuleType,
+    *,
+    returncode: int = 0,
+    stdout: bytes = b"",
+    stderr: bytes = b"",
+    capture_error_code: str | None = None,
+) -> object:
+    stdout_capture = collector._DigestingBinaryCapture(
+        hard_limit_bytes=collector.MAX_STRICT_SUBPROCESS_STREAM_BYTES
+    )
+    stderr_capture = collector._DigestingBinaryCapture(
+        hard_limit_bytes=collector.MAX_STRICT_SUBPROCESS_STREAM_BYTES
+    )
+    stdout_capture.write(stdout)
+    stderr_capture.write(stderr)
+    return collector._StrictSubprocessResult(
+        returncode=returncode,
+        stdout=stdout_capture.summary(),
+        stderr=stderr_capture.summary(),
+        capture_error_code=capture_error_code,
+    )
+
+
 def _git(root: Path, *arguments: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(root), *arguments],
@@ -112,7 +136,10 @@ def _write_passing_strict_payload(
     performance.parent.mkdir(parents=True)
     output_metadata_payload = {
         "schema_version": "v173_lmm_strict_output_metadata_v1",
-        "capture_policy": "raw pytest stdout and stderr are discarded; hashes cover complete streams",
+        "capture_policy": (
+            "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
+            "redirected text streams only"
+        ),
         "max_reported_bytes": 65536,
         "stdout_sha256": _sha256_text("pytest output\n"),
         "stderr_sha256": _sha256_text(""),
@@ -641,7 +668,7 @@ def test_collector_runs_the_strict_subprocess_before_performance(
     artifact_root.mkdir()
     observed: list[list[str]] = []
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **_kwargs: object) -> object:
         observed.append(command)
         artifact_dir = Path(command[command.index("--artifact-dir") + 1])
         _write_passing_strict_payload(
@@ -650,14 +677,13 @@ def test_collector_runs_the_strict_subprocess_before_performance(
             candidate_sha="a" * 40,
             fixture_sha256=fixture_sha256,
         )
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            "simulated-parent-stream-secret",
-            "simulated-parent-stream-secret",
+        return _strict_subprocess_result(
+            collector,
+            stdout=b"simulated-parent-stream-secret",
+            stderr=b"simulated-parent-stream-secret",
         )
 
-    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
     records: list[dict[str, object]] = []
 
     payload = collector._run_strict_candidate_evaluation(
@@ -673,10 +699,138 @@ def test_collector_runs_the_strict_subprocess_before_performance(
     assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") not in observed[0]
     assert records[0]["exit_code"] == 0
     assert (artifact_root / "strict-runner.output.json").is_file()
+    metadata = json.loads((artifact_root / "strict-runner.output.json").read_text())
+    assert metadata["capture_policy"] == (
+        "raw strict-runner stdout and stderr are discarded; binary hashes cover complete "
+        "OS-level streams"
+    )
+    assert metadata["stdout_sha256"] == hashlib.sha256(
+        b"simulated-parent-stream-secret"
+    ).hexdigest()
+    assert metadata["capture_error_code"] is None
     assert not (artifact_root / "strict-runner.stdout.txt").exists()
     assert not (artifact_root / "strict-runner.stderr.txt").exists()
     assert all(
         b"simulated-parent-stream-secret" not in path.read_bytes()
+        for path in artifact_root.rglob("*")
+        if path.is_file()
+    )
+
+
+def test_bounded_strict_subprocess_discards_invalid_bytes_and_stops_overflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    monkeypatch.setattr(collector, "MAX_STRICT_SUBPROCESS_STREAM_BYTES", 16)
+    raw_output = b"\xff" * 32
+
+    result = collector._run_strict_subprocess(
+        [sys.executable, "-c", "import os; os.write(1, b'\\xff' * 32)"],
+        cwd=tmp_path,
+        env={"PYTHONUNBUFFERED": "1"},
+    )
+
+    assert result.output_limit_exceeded is True
+    assert result.stdout.hard_limit_exceeded is True
+    assert result.stdout.sha256 == hashlib.sha256(raw_output).hexdigest()
+    assert result.stdout.reported_bytes == len(raw_output)
+
+
+def test_bounded_strict_subprocess_uses_an_isolated_binary_process_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    observed: dict[str, object] = {}
+    real_popen = collector.subprocess.Popen
+
+    def capturing_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        observed.update(kwargs)
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(collector.subprocess, "Popen", capturing_popen)
+
+    result = collector._run_strict_subprocess(
+        [sys.executable, "-c", "pass"],
+        cwd=tmp_path,
+        env={"PYTHONUNBUFFERED": "1"},
+    )
+
+    assert result.returncode == 0
+    assert observed["start_new_session"] is True
+    assert observed["close_fds"] is True
+    assert observed["text"] is False
+
+
+def test_collector_records_a_binary_capture_failure_without_raw_streams(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    root = tmp_path / "candidate"
+    root.mkdir()
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    sentinel = b"candidate-fd-stream-sentinel"
+
+    def fake_run(_command: list[str], **_kwargs: object) -> object:
+        return _strict_subprocess_result(
+            collector,
+            stdout=sentinel,
+            capture_error_code="PIPE_DRAIN_ERROR",
+        )
+
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
+    records: list[dict[str, object]] = []
+
+    with pytest.raises(collector.EvidenceCollectionError, match="output could not be drained safely"):
+        collector._run_strict_candidate_evaluation(
+            root=root,
+            candidate_sha="a" * 40,
+            evaluator_root=REPO_ROOT,
+            artifact_root=artifact_root,
+            command_records=records,
+        )
+
+    metadata = json.loads((artifact_root / "strict-runner.output.json").read_text())
+    assert metadata["capture_error_code"] == "PIPE_DRAIN_ERROR"
+    assert records[0]["capture_error_code"] == "PIPE_DRAIN_ERROR"
+    assert all(
+        sentinel not in path.read_bytes()
+        for path in artifact_root.rglob("*")
+        if path.is_file()
+    )
+
+
+def test_collector_rejects_a_strict_stream_that_exceeds_the_hard_limit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    monkeypatch.setattr(collector, "MAX_STRICT_SUBPROCESS_STREAM_BYTES", 16)
+    root = tmp_path / "candidate"
+    root.mkdir()
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    sentinel = b"x" * 32
+
+    def fake_run(_command: list[str], **_kwargs: object) -> object:
+        return _strict_subprocess_result(collector, stdout=sentinel)
+
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
+    records: list[dict[str, object]] = []
+
+    with pytest.raises(collector.EvidenceCollectionError, match="raw stream safety limit"):
+        collector._run_strict_candidate_evaluation(
+            root=root,
+            candidate_sha="a" * 40,
+            evaluator_root=REPO_ROOT,
+            artifact_root=artifact_root,
+            command_records=records,
+        )
+
+    metadata = json.loads((artifact_root / "strict-runner.output.json").read_text())
+    assert metadata["stdout_hard_limit_exceeded"] is True
+    assert records[0]["stdout_hard_limit_exceeded"] is True
+    assert all(
+        sentinel not in path.read_bytes()
         for path in artifact_root.rglob("*")
         if path.is_file()
     )
@@ -732,7 +886,7 @@ def test_collector_rejects_incomplete_or_incoherent_performance_evidence(
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **_kwargs: object) -> object:
         artifact_dir = Path(command[command.index("--artifact-dir") + 1])
         _write_passing_strict_payload(
             artifact_dir,
@@ -741,9 +895,11 @@ def test_collector_rejects_incomplete_or_incoherent_performance_evidence(
             fixture_sha256=fixture_sha256,
         )
         _rewrite_performance_evidence(artifact_dir, mutate)
-        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+        return _strict_subprocess_result(
+            collector, stdout=b"strict stdout", stderr=b"strict stderr"
+        )
 
-    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match=error):
         collector._run_strict_candidate_evaluation(
@@ -765,7 +921,7 @@ def test_collector_rejects_a_passing_strict_payload_from_the_wrong_candidate_roo
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **_kwargs: object) -> object:
         artifact_dir = Path(command[command.index("--artifact-dir") + 1])
         _write_passing_strict_payload(
             artifact_dir,
@@ -773,9 +929,11 @@ def test_collector_rejects_a_passing_strict_payload_from_the_wrong_candidate_roo
             candidate_sha="a" * 40,
             fixture_sha256=fixture_sha256,
         )
-        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+        return _strict_subprocess_result(
+            collector, stdout=b"strict stdout", stderr=b"strict stderr"
+        )
 
-    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="candidate_root"):
         collector._run_strict_candidate_evaluation(
@@ -797,7 +955,7 @@ def test_collector_rejects_a_passing_strict_payload_with_unparseable_junit(
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **_kwargs: object) -> object:
         artifact_dir = Path(command[command.index("--artifact-dir") + 1])
         _write_passing_strict_payload(
             artifact_dir,
@@ -806,9 +964,11 @@ def test_collector_rejects_a_passing_strict_payload_with_unparseable_junit(
             fixture_sha256=fixture_sha256,
             junit_contents="<testsuite>",
         )
-        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+        return _strict_subprocess_result(
+            collector, stdout=b"strict stdout", stderr=b"strict stderr"
+        )
 
-    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="JUnit summary"):
         collector._run_strict_candidate_evaluation(
@@ -830,7 +990,7 @@ def test_collector_rejects_a_claimed_pass_with_a_nonzero_full_suite(
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(command: list[str], **_kwargs: object) -> object:
         artifact_dir = Path(command[command.index("--artifact-dir") + 1])
         _write_passing_strict_payload(
             artifact_dir,
@@ -841,9 +1001,11 @@ def test_collector_rejects_a_claimed_pass_with_a_nonzero_full_suite(
         strict_payload = json.loads((artifact_dir / "strict-suite.json").read_text())
         strict_payload["suite_exit_code"] = 1
         (artifact_dir / "strict-suite.json").write_text(json.dumps(strict_payload), encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+        return _strict_subprocess_result(
+            collector, stdout=b"strict stdout", stderr=b"strict stderr"
+        )
 
-    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+    monkeypatch.setattr(collector, "_run_strict_subprocess", fake_run)
 
     with pytest.raises(collector.EvidenceCollectionError, match="non-passing pytest suite"):
         collector._run_strict_candidate_evaluation(
@@ -871,7 +1033,10 @@ def test_passed_manifest_keeps_strict_provenance_but_not_acceptance(
     output_metadata_path = tmp_path / "strict-suite.output.json"
     output_metadata = {
         "schema_version": "v173_lmm_strict_output_metadata_v1",
-        "capture_policy": "raw pytest stdout and stderr are discarded; hashes cover complete streams",
+        "capture_policy": (
+            "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
+            "redirected text streams only"
+        ),
         "max_reported_bytes": 65536,
         "stdout_sha256": "a" * 64,
         "stderr_sha256": "b" * 64,

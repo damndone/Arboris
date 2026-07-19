@@ -17,15 +17,18 @@ import math
 import os
 import re
 import shlex
+import signal
 import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import BinaryIO
 
 
 CONTRACT_LOCK_COMMIT = "0251f0a30d984bdbb2cfab404e6c646deab60cae"
@@ -37,11 +40,18 @@ STRICT_RUNNER_RELATIVE_PATH = Path(
 EVIDENCE_SCHEMA_VERSION = "v173_lmm_performance_evidence_v3"
 STRICT_SCHEMA_VERSION = "v173_lmm_strict_candidate_evaluation_v4"
 STRICT_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_strict_output_metadata_v1"
-COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_collector_output_metadata_v1"
+COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_collector_output_metadata_v2"
 STRICT_JUNIT_SUMMARY_SCHEMA_VERSION = "v173_lmm_strict_junit_summary_v1"
 MAX_REPORTED_STREAM_BYTES = 65536
+MAX_STRICT_SUBPROCESS_STREAM_BYTES = 1024 * 1024
+STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS = 2.0
 RAW_STREAM_CAPTURE_POLICY = (
-    "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+    "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
+    "redirected text streams only"
+)
+COLLECTOR_BINARY_STREAM_CAPTURE_POLICY = (
+    "raw strict-runner stdout and stderr are discarded; binary hashes cover complete "
+    "OS-level streams"
 )
 GIT_OUTPUT_CAPTURE_POLICY = (
     "raw Git stdout and stderr are discarded; hashes cover complete streams"
@@ -226,6 +236,54 @@ class EvidenceCollectionError(RuntimeError):
     """Raised for rejected input or a non-passing strict candidate evaluation."""
 
 
+@dataclass(frozen=True)
+class _BinaryStreamSummary:
+    sha256: str
+    reported_bytes: int
+    truncated: bool
+    hard_limit_exceeded: bool
+
+
+@dataclass(frozen=True)
+class _StrictSubprocessResult:
+    returncode: int
+    stdout: _BinaryStreamSummary
+    stderr: _BinaryStreamSummary
+    capture_error_code: str | None
+
+    @property
+    def output_limit_exceeded(self) -> bool:
+        return self.stdout.hard_limit_exceeded or self.stderr.hard_limit_exceeded
+
+
+class _DigestingBinaryCapture:
+    """Hash a pipe incrementally without retaining untrusted output in memory."""
+
+    def __init__(self, *, hard_limit_bytes: int) -> None:
+        self._digest = hashlib.sha256()
+        self._reported_bytes = 0
+        self._total_bytes = 0
+        self._hard_limit_bytes = hard_limit_bytes
+        self._hard_limit_exceeded = False
+
+    def write(self, value: bytes) -> bool:
+        self._digest.update(value)
+        self._total_bytes += len(value)
+        remaining = MAX_REPORTED_STREAM_BYTES - self._reported_bytes
+        self._reported_bytes += min(len(value), max(remaining, 0))
+        if self._total_bytes > self._hard_limit_bytes:
+            self._hard_limit_exceeded = True
+        return self._hard_limit_exceeded
+
+    def summary(self) -> _BinaryStreamSummary:
+        return _BinaryStreamSummary(
+            sha256=self._digest.hexdigest(),
+            reported_bytes=self._reported_bytes,
+            truncated=self._total_bytes > MAX_REPORTED_STREAM_BYTES,
+            hard_limit_exceeded=self._hard_limit_exceeded,
+        )
+
+
 def _evaluator_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -319,6 +377,119 @@ def _bounded_stream_metadata(
         "stdout_truncated": stdout_truncated,
         "stderr_truncated": stderr_truncated,
     }
+
+
+def _strict_subprocess_stream_metadata(
+    stdout: _BinaryStreamSummary,
+    stderr: _BinaryStreamSummary,
+    *,
+    capture_error_code: str | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION,
+        "capture_policy": COLLECTOR_BINARY_STREAM_CAPTURE_POLICY,
+        "max_reported_bytes": MAX_REPORTED_STREAM_BYTES,
+        "hard_stream_limit_bytes": MAX_STRICT_SUBPROCESS_STREAM_BYTES,
+        "stdout_sha256": stdout.sha256,
+        "stderr_sha256": stderr.sha256,
+        "stdout_bytes_observed": stdout.reported_bytes,
+        "stderr_bytes_observed": stderr.reported_bytes,
+        "stdout_truncated": stdout.truncated,
+        "stderr_truncated": stderr.truncated,
+        "stdout_hard_limit_exceeded": stdout.hard_limit_exceeded,
+        "stderr_hard_limit_exceeded": stderr.hard_limit_exceeded,
+        "capture_error_code": capture_error_code,
+    }
+
+
+def _run_strict_subprocess(
+    command: list[str], *, cwd: Path, env: dict[str, str]
+) -> _StrictSubprocessResult:
+    """Drain both child pipes as bytes and terminate a stream-flooding child."""
+
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,
+            text=False,
+        )
+    except OSError as error:
+        raise EvidenceCollectionError("strict candidate evaluation could not start") from error
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    stdout_capture = _DigestingBinaryCapture(
+        hard_limit_bytes=MAX_STRICT_SUBPROCESS_STREAM_BYTES
+    )
+    stderr_capture = _DigestingBinaryCapture(
+        hard_limit_bytes=MAX_STRICT_SUBPROCESS_STREAM_BYTES
+    )
+    overflow = threading.Event()
+    drain_errors: list[OSError | ValueError] = []
+
+    def drain(stream: BinaryIO, capture: _DigestingBinaryCapture) -> None:
+        try:
+            while True:
+                chunk = stream.read(64 * 1024)
+                if not chunk:
+                    return
+                if capture.write(chunk):
+                    overflow.set()
+        except (OSError, ValueError) as error:
+            drain_errors.append(error)
+        finally:
+            stream.close()
+
+    def signal_process_group(signal_number: int) -> None:
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal_number)
+            elif signal_number == signal.SIGTERM:
+                process.terminate()
+            else:
+                process.kill()
+        except ProcessLookupError:
+            return
+        except PermissionError as error:
+            if process.poll() is not None:
+                return
+            raise EvidenceCollectionError(
+                "strict candidate process group could not be signaled safely"
+            ) from error
+
+    threads = [
+        threading.Thread(target=drain, args=(process.stdout, stdout_capture), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, stderr_capture), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    while process.poll() is None:
+        if overflow.wait(timeout=0.01):
+            signal_process_group(signal.SIGTERM)
+            try:
+                process.wait(timeout=STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                signal_process_group(signal.SIGKILL)
+            break
+    returncode = process.wait()
+    for thread in threads:
+        thread.join(timeout=STRICT_SUBPROCESS_TERMINATION_GRACE_SECONDS)
+    if any(thread.is_alive() for thread in threads):
+        signal_process_group(signal.SIGKILL)
+        for thread in threads:
+            thread.join()
+    return _StrictSubprocessResult(
+        returncode=returncode,
+        stdout=stdout_capture.summary(),
+        stderr=stderr_capture.summary(),
+        capture_error_code="PIPE_DRAIN_ERROR" if drain_errors else None,
+    )
 
 
 def _validate_output_locations(
@@ -1130,11 +1301,8 @@ def _run_strict_candidate_evaluation(
         str(strict_artifact_dir),
     ]
     started = time.perf_counter()
-    completed = subprocess.run(
+    completed = _run_strict_subprocess(
         command,
-        check=False,
-        capture_output=True,
-        text=True,
         cwd=artifact_root,
         env=_strict_child_environment(),
     )
@@ -1142,24 +1310,36 @@ def _run_strict_candidate_evaluation(
     output_metadata_path = artifact_root / "strict-runner.output.json"
     _write_json(
         output_metadata_path,
-        _bounded_stream_metadata(
+        _strict_subprocess_stream_metadata(
             completed.stdout,
             completed.stderr,
-            schema_version=COLLECTOR_OUTPUT_METADATA_SCHEMA_VERSION,
+            capture_error_code=completed.capture_error_code,
         ),
     )
-    combined_output = completed.stdout + completed.stderr
     command_records.append(
         {
             "command": _command_text(command),
             "exit_code": completed.returncode,
             "duration_seconds": duration,
-            "output_sha256": _sha256_bytes(combined_output.encode("utf-8")),
-            "stdout_sha256": _sha256_bytes(completed.stdout.encode("utf-8")),
-            "stderr_sha256": _sha256_bytes(completed.stderr.encode("utf-8")),
+            "capture_policy": COLLECTOR_BINARY_STREAM_CAPTURE_POLICY,
+            "stdout_sha256": completed.stdout.sha256,
+            "stderr_sha256": completed.stderr.sha256,
+            "stdout_bytes_observed": completed.stdout.reported_bytes,
+            "stderr_bytes_observed": completed.stderr.reported_bytes,
+            "stdout_truncated": completed.stdout.truncated,
+            "stderr_truncated": completed.stderr.truncated,
+            "stdout_hard_limit_exceeded": completed.stdout.hard_limit_exceeded,
+            "stderr_hard_limit_exceeded": completed.stderr.hard_limit_exceeded,
+            "capture_error_code": completed.capture_error_code,
             "output_metadata_artifact": str(output_metadata_path),
         }
     )
+    if completed.capture_error_code is not None:
+        raise EvidenceCollectionError("strict candidate output could not be drained safely")
+    if completed.output_limit_exceeded:
+        raise EvidenceCollectionError(
+            "strict candidate evaluation exceeded the raw stream safety limit"
+        )
     result_path = strict_artifact_dir / "strict-suite.json"
     if not result_path.is_file():
         raise EvidenceCollectionError(

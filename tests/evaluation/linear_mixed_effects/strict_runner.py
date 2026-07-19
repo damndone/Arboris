@@ -68,7 +68,8 @@ STRICT_OUTPUT_METADATA_SCHEMA_VERSION = "v173_lmm_strict_output_metadata_v1"
 STRICT_JUNIT_SUMMARY_SCHEMA_VERSION = "v173_lmm_strict_junit_summary_v1"
 MAX_REPORTED_STREAM_BYTES = 65536
 RAW_STREAM_CAPTURE_POLICY = (
-    "raw pytest stdout and stderr are discarded; hashes cover complete streams"
+    "raw redirected Python pytest stdout and stderr are discarded; hashes cover "
+    "redirected text streams only"
 )
 
 
