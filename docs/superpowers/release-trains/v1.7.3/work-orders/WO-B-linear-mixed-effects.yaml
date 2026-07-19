@@ -1,0 +1,69 @@
+work_package: WO-B-linear-mixed-effects
+lane: feat/v173-model-linear-mixed-effects
+receipt_branch: release-train/v1.7.3-c1.1-contract-receipts
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+contract_lock_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
+branch_start_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
+branch_start_rule: >-
+  Create this worktree from the literal branch_start_commit above, never from
+  the receipt commit or a moving integration/v1.7.3 ref.
+metadata_output:
+  path: docs/superpowers/release-trains/v1.7.3/completion-reports/WO-B-linear-mixed-effects.md
+  purpose: completion-report
+  rule: >-
+    This is the sole non-owned metadata path this Lane may create or modify.
+owned_files:
+  - backend/workbench/engine/packs/linear_mixed_effects/**
+  - tests/models/linear_mixed_effects/test_input.py
+  - tests/models/linear_mixed_effects/test_runner.py
+  - tests/models/linear_mixed_effects/test_diagnostics.py
+read_only_contracts:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects
+  - tests/models/linear_mixed_effects/test_feasibility.py
+forbidden_files:
+  - backend/workbench/agent/orchestrator.py
+  - backend/workbench/agent/operations.py
+  - backend/workbench/analysis_loop/contracts.py
+  - backend/workbench/analysis_loop/storage.py
+  - backend/workbench/engine/pack.py
+  - backend/workbench/engine/registry.py
+  - backend/workbench/engine/capabilities.py
+  - backend/workbench/graph_store.py
+  - frontend/src/workbench/agent/AgentSurfaceContext.tsx
+  - scripts/gate.sh
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
+consumes:
+  - "C1 LMM contracts and C1.1 owner-binding transport as immutable inputs."
+  - "Canonical deterministic fixtures and packet JSON as read-only sources."
+produces:
+  - "A declaration-driven deterministic Linear Mixed Effects pack."
+  - "Input, runner, diagnostic, result, and figure packet facts within locked LMM scope."
+preimplementation_acceptance_evidence:
+  command: "$WORKBENCH_PYTHON -m pytest tests/models/linear_mixed_effects/test_input.py -q"
+  expected_before_implementation: "Collection failure because the Model Pack module does not exist."
+acceptance:
+  - "Input validation, canonical formula, fit method, identity, diagnostics, and result packets obey locked contracts."
+  - "Known-truth interaction is evaluated within the locked tolerance; invalid, singular, and non-converged cases fail safely."
+  - "The Lane gate passes feasibility, input, runner, and diagnostic tests with a clean diff check."
+completion_report_must_record:
+  - branch_start_commit
+  - contract_lock_commit
+  - candidate_commit
+  - exact_modified_files
+  - exact_test_commands_and_results
+  - protected_file_audit
+  - known_limits
+  - integration_risks
+  - rollback_method
+non_goals:
+  - "No public-contract or central-file change."
+  - "No GLMM, categorical time, more than two groups, nested/crossed effects, arbitrary selection, or custom code."
+  - "No UI/Agent registration, browser calculations, real-provider call, or release action."

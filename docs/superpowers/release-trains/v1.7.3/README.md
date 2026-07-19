@@ -1,36 +1,50 @@
 # v1.7.3 Release Train
 
-状态：C1 Contract Sprint 进行中；未发布。
+状态：C1.1 owner-binding 已锁定；未发布。
 
-## 基线与职责
+## 不可变起点
 
-- 发布基线：`origin/main` / `v1.7.2` / `4b2e6c1d9ddd289005b84c186255fec2e9cbd86a`。
-- Integration：`integration/v1.7.3`，初始提交与发布基线相同。
-- C1 只能在 Integration worktree 进行；Feature、Evaluation 和 receipt worktree 必须等待实际 C1 lock。
+- 发布基线：`v1.7.2` / `4b2e6c1d9ddd289005b84c186255fec2e9cbd86a`。
+- C1.1 合同锁：`0251f0a30d984bdbb2cfab404e6c646deab60cae`。
+- receipt 分支：`release-train/v1.7.3-c1.1-contract-receipts`，仅保存治理文本，不是任何功能 Lane 的祖先。
 - 两份 `honest-DiD` adversarial 测试是受保护文件，不得修改。
 
-## 已批准的范围决定
+四条 Lane 必须用 Work Order 中的固定 `branch_start_commit` 创建：
 
-v1.7.3 是一个 release train，包含两个独立工作包，并各自持有完成声明和证据：
+```text
+git worktree add -b <lane> <path> 0251f0a30d984bdbb2cfab404e6c646deab60cae
+```
 
-1. **Report/Operations closeout**：对 v1.7.2 报告与运行运维能力的收口；其已有证据不证明 LMM 已完成。
-2. **Repeated Measures / Linear Mixed Effects**：当前仅进入 C1 Contract Sprint；尚未实现、独立评估或发布。
+不得使用执行时的 `git rev-parse integration/v1.7.3`，也不得从 receipt commit 创建功能分支。后者两个引用都会破坏同一 wave 共享不可变起点的要求。
 
-LMM 的初始 run 是用户通过普通 RunForm / `POST /runs` 创建的显式 run。Agent 不创建初始 LMM run；仅可在一个已完成 LMM run 的确定性事实支持下，提出须用户确认的 child `model.rerun` recovery。该 recovery 扩展既有通用 `model.rerun`，不新增 executable operation type。
+## C1.1 锁定范围
 
-## C1 目标
+C1.1 是 Integration/Contract 修复，不是 LMM Model Pack、Agent recipe、UI 或 Evaluation 的完成声明。它为非空 `model_options` 建立服务端 owner binding，且要求：
 
-C1 锁定版本化 LMM packet contract、canonical fixtures、真实 MixedLM feasibility 证据、薄的 Integration seams 与 OLS 回归保护。C1 不是 LMM Model Pack、Agent recipe、UI 或独立 Evaluation 的完成声明。
+- 同一已验证 owner 才能进行一层 merge；
+- public `model_type`、resolved `model_id` 或合同身份变化时，必须给出完整目标 replacement，且不读取 source payload；
+- hash 在 source payload 被实际复用前验证；
+- Draft、executable、confirmed、successful executed audit 使用同一服务端 binding；
+- 调用方不得写入 `model_options_binding`；
+- 由于 `run_inputs` 会 redact secret-bearing keys，generic `model_options` 拒绝这类嵌套键，避免持久化后 hash 失真。该规则是审计一致性约束，不把 hash 表述为安全签名。
 
-每个后续 lane 必须从同一个 `contract_lock_commit` 创建，且 Work Order 必须记录：发布基线、Integration base、C1、branch start、owned/read-only/forbidden paths、输入输出合同和验收命令。
+生产环境仍没有 LMM runtime/pack/声明、Agent recipe 或 UI 注册。测试中的临时 handler/mapping 只用于验证 generic seam，不能解释为功能已经接入。
+
+## Receipt 与 Lane 治理
+
+本 receipt 的两步提交语义为：
+
+1. R1 为 docs-only payload，记录精确 C1.1 lock 和四个 Work Order；
+2. R2 是 R1 的直接子提交，只把 R1 SHA 写入 `receipt_commit` 字段。
+
+`receipt_commit` 是治理引用，不改变 `contract_lock_commit` 或 `branch_start_commit`。每条 Lane 的唯一非 owned metadata 输出是其 `metadata_output` 指定的 Completion Report；Lane 不得修改 README、lock manifest、Work Order 或其他 Lane 的 receipt。
 
 ## 不可做的动作
 
-- 不调用真实 DeepSeek 或其他真实 provider；
-- 不读取真实 API key；
+- 不调用真实 provider、不读取真实 API key；
 - 不安装、卸载或修改共享依赖，也不创建 worktree-local `.venv`；
-- 不创建 Feature/Evaluation lane，直到 C1 receipt 已完成；
-- 不 push、PR、merge、tag 或发布，除非另获明确授权。
+- 不 push、PR、merge、tag 或发布；
+- 不在 Feature/Evaluation Lane 中修改受保护测试、公共 C1.1 contract 或中央 receipt。
 
 ## 依据
 

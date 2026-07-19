@@ -1,0 +1,129 @@
+release: v1.7.3
+receipt_branch: release-train/v1.7.3-c1.1-contract-receipts
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+c1_integration_base_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+contract_lock_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
+branch_start_commit: 0251f0a30d984bdbb2cfab404e6c646deab60cae
+supersedes:
+  receipt_branch: release-train/v1.7.3-contract-receipts
+  receipt_commit: e330341984b0f52b642f487d85714e66af0ad481
+  contract_lock_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+contract_lock_semantics: >-
+  The C1.1 code commit is the immutable contract lock and the only permitted
+  branch start for this wave. Receipt commits are docs-only governance evidence
+  and must never be used as a Feature or Evaluation Lane ancestor.
+receipt_binding_semantics: >-
+  R1 is the docs-only receipt payload. R2, a direct child of R1, adds the R1
+  SHA as receipt_commit to this manifest and each Work Order. That reference
+  does not change contract_lock_commit or branch_start_commit.
+contract_versions:
+  packet_envelope: "1.0"
+  linear_mixed_effects: "1.0"
+  repeated_measures_agent: "1.0"
+  model_options_owner_binding: "1.0"
+owner_binding_contract:
+  storage: >-
+    Non-empty model_options remain a model-owned flat payload. The server writes
+    a sibling model_options_binding with owner_model_type, owner_model_id,
+    producer_version, input_contract_version, and normalized_options_hash.
+  server_authority: >-
+    Clients may submit model_type and payload only. Binding facts are generated
+    from the resolved handler and any client-supplied binding is rejected or
+    overwritten at the submit boundary.
+  same_identity: >-
+    Only matching owner_model_type, owner_model_id, producer_version, and input
+    contract version allow a one-level source payload merge; hash is verified
+    before that source payload is read.
+  identity_change: >-
+    A public model_type, resolved model_id, or producer/input-contract change
+    requires an explicit complete target replacement. That path never reads or
+    inherits source model_options payload.
+  empty_options: >-
+    Empty options keep v1.7.2 behavior and carry no binding. A cross-model clear
+    is explicit with model_options: {}.
+  secret_key_policy: >-
+    Generic model_options reject nested keys matched by the run_inputs secret
+    redaction policy. This prevents redaction from changing a persisted payload
+    after its canonical hash is computed; it is an audit-consistency guard, not
+    a cryptographic signature claim.
+audit_chain:
+  required_surfaces:
+    - form.model_options_binding
+    - executable_payload.model_options_binding
+    - confirmed_payload.model_options_binding
+    - executed_payload.model_options_binding on successful bound handlers
+  draft_rule: >-
+    Pipeline Draft inputs reject model_options_binding. Genesis and rerun-child
+    snapshots use only the resolved server-owned binding.
+immutable_contract_paths:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects
+c1_1_transport_paths:
+  - backend/workbench/model_options.py
+  - backend/workbench/services/run_service.py
+  - backend/workbench/services/rerun_service.py
+  - backend/workbench/http/runs_routes.py
+  - backend/workbench/http/rerun_routes.py
+  - backend/workbench/services/draft_service.py
+  - backend/workbench/lineage/pipeline_drafts.py
+  - backend/workbench/engine/stages/estimation.py
+  - backend/workbench/orchestrator/__init__.py
+verification:
+  c1_contract_command: >-
+    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest
+    tests/contracts/test_lmm_contracts.py
+    tests/contracts/test_lmm_error_contract.py
+    tests/contracts/test_lmm_canonical_packets.py
+    tests/models/linear_mixed_effects/test_feasibility.py
+    tests/test_lmm_extension_seams.py -q
+  c1_contract_result: "69 passed, 7 warnings"
+  c1_1_owner_command: >-
+    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest
+    tests/contracts/test_lmm_contracts.py
+    tests/contracts/test_lmm_error_contract.py
+    tests/contracts/test_lmm_canonical_packets.py
+    tests/models/linear_mixed_effects/test_feasibility.py
+    tests/test_lmm_extension_seams.py
+    tests/test_model_options_owner_binding.py -q
+  c1_1_owner_result: "81 passed, 7 warnings in 11.38s"
+  rerun_draft_api_command: >-
+    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest
+    tests/test_model_options_owner_binding.py
+    tests/test_lmm_extension_seams.py
+    tests/test_pipeline_drafts_genesis.py
+    tests/test_rerun_endpoint.py
+    tests/test_rerun_service.py -q
+  rerun_draft_api_result: "112 passed, 9 warnings in 27.96s"
+  core_regression_command: >-
+    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest
+    tests/test_engine_pack.py
+    tests/test_pack_rerun_actions.py
+    tests/test_capabilities_op_schema.py
+    tests/test_recommended_actions.py
+    tests/contracts/test_schema_recommended_actions.py
+    tests/test_engine_iv.py
+    tests/test_e2e_failure_recovery.py -q
+  core_regression_result: "35 passed, 3 warnings in 11.86s"
+  additional_isolated_results:
+    - "tests/test_api_run_params.py: 13 passed, 3 warnings"
+    - "tests/test_run_inputs_persisted.py: 1 passed, 3 warnings"
+    - "tests/test_rerun_endpoint.py: 16 passed, 4 warnings"
+  compileall: "PYTHONPATH=backend .venv/bin/python -m compileall -q backend/workbench: passed"
+  diff_check_clean: true
+  protected_file_diff_clean: true
+  real_provider_calls: false
+  real_api_key_reads: false
+  public_dependency_changes: false
+  frontend_vitest: "Not obtained: no usable local frontend dependency environment; no dependency was installed or changed."
+  full_gate: "Not run; no full-gate success claim."
+known_limits:
+  - "C1.1 deliberately does not register or execute a production LMM runtime."
+  - "Browser acceptance and performance evidence remain final release-train gates."
+protected_files:
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
