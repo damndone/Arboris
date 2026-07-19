@@ -1,6 +1,6 @@
 # WO-B — Linear Mixed Effects Model Pack completion report
 
-Status: local candidate complete; not integrated, evaluated independently, or released.
+Status: local remediation candidate complete; not integrated, evaluated independently, or released.
 
 ## Provenance and boundaries
 
@@ -9,7 +9,9 @@ Status: local candidate complete; not integrated, evaluated independently, or re
 - Governance receipt (read-only): `f25ffd119df91479aabfcebcb549a47a1153e227`
 - Work package receipt recorded by that governance commit: `2d356d3024570dbf55e7c3ecd2cff1ac5b4e85be`
 - Lane / worktree: `feat/v173-model-linear-mixed-effects` / `.worktrees/v173-model-linear-mixed-effects`
-- Implementation candidate commit: `211f3addf42034015b06d2e07bf89fad344f99e3`
+- Initial implementation candidate: `211f3addf42034015b06d2e07bf89fad344f99e3`
+- Envelope/fail-closed remediation code candidate:
+  `e77bc3c0bee1b24af7a1c7f86990baa3102ca008`
 
 The candidate changes only the owned pack directory and the three owned model
 tests. This report is the Work Order's sole metadata exception. It changes no
@@ -18,7 +20,7 @@ or protected Honest-DiD test.
 
 ## Candidate contents
 
-Candidate commit `211f3addf42034015b06d2e07bf89fad344f99e3` adds:
+Initial candidate commit `211f3addf42034015b06d2e07bf89fad344f99e3` adds:
 
 - `backend/workbench/engine/packs/linear_mixed_effects/__init__.py`
 - `backend/workbench/engine/packs/linear_mixed_effects/declaration.py`
@@ -30,6 +32,25 @@ Candidate commit `211f3addf42034015b06d2e07bf89fad344f99e3` adds:
 - `tests/models/linear_mixed_effects/test_input.py`
 - `tests/models/linear_mixed_effects/test_runner.py`
 - `tests/models/linear_mixed_effects/test_diagnostics.py`
+
+Remediation commit `e77bc3c0bee1b24af7a1c7f86990baa3102ca008` adds the
+pack-local `packets.py` boundary and changes only owned pack/test files. It
+returns and persists C1 `PacketEnvelope` wire values rather than a bare result
+dict:
+
+- successful fits return and persist `linear_mixed_effects.result@1.0`, whose
+  payload contains the canonical success facts (`status`, `result_id`,
+  `estimate`, `fit_method`, `inference_method`) plus the locked data-only
+  `figure_context` member;
+- every normalized result also persists a
+  `linear_mixed_effects.diagnostic@1.0` packet; a recovery packet is persisted
+  only when the existing locked confirmation-required candidate exists;
+- no standalone figure packet or new public contract was created: C1 defines
+  `figure_context` only as a result-payload member;
+- invalid covariance/residual facts are terminal
+  `LMM_CONVERGENCE_FAILED` facts, never recovery candidates; and existing
+  `LmmInputError` code/evidence is persisted as a terminal diagnostic before
+  being re-raised to the lifecycle owner.
 
 The declaration carries the locked `linear_mixed_effects@1.0` / contract `1.0`
 owner facts, but it is intentionally not added to the central builtin loader.
@@ -55,7 +76,13 @@ That is an Integration-owned mechanical step.
    invalid group/repeated-observation/random-slope designs, absent trajectory
    series time, and a fake non-converged fit with no `conf_int`. Each was made
    green with the smallest pack-local implementation change.
-4. Final candidate verification command:
+4. The remediation was also test-first. RED evidence was: a real known-truth
+   runner result rejected by `PacketEnvelope.from_dict()` as a bare dict;
+   one-row, NaN, asymmetric, or non-finite-residual random-slope diagnostics
+   failed to use the locked terminal path; and missing-subject/invalid-slope
+   errors did not create a diagnostic artifact. Their corresponding pack-local
+   assertions passed after the remediation.
+5. Final remediation verification command:
 
    ```bash
    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest -q \
@@ -66,13 +93,17 @@ That is an Integration-owned mechanical step.
      tests/contracts/test_lmm_contracts.py \
      tests/contracts/test_lmm_error_contract.py \
      tests/contracts/test_lmm_canonical_packets.py \
-     tests/test_model_options_owner_binding.py
+     tests/test_model_options_owner_binding.py \
+     tests/test_lmm_extension_seams.py
    ```
 
-   Result: `78 passed, 4 warnings in 12.15s`. The four warnings are emitted by
-   the immutable feasibility spike's direct statsmodels calls; the pack captures
-   estimator warnings and emits deterministic diagnostics instead.
-5. `git diff --cached --check` was silent before candidate commit. A staged
+   Result: `125 passed, 7 warnings in 12.77s`. The feasibility spike's direct
+   statsmodels calls account for the LMM covariance/boundary warnings; the
+   extension seam also emits existing FastAPI deprecation warnings. The pack
+   suppresses estimator warnings from its caller, but does not parse warning
+   text: its diagnostic facts are determined from explicit convergence and
+   finite/symmetric/shape-checked covariance and residual facts.
+6. `git diff --cached --check` was silent before the remediation code commit. A staged
    protected-file audit over all read-only and forbidden paths was also silent.
 
 ## Statistical and runtime observations
@@ -86,7 +117,9 @@ That is an Integration-owned mechanical step.
   is an observation, not a release performance claim.
 - The known-truth covariance is classified as
   `LMM_RANDOM_EFFECTS_SINGULAR`, complete/warning, with the only locked,
-  confirmation-required simplify-random-effects candidate.
+  confirmation-required simplify-random-effects candidate. The associated
+  result, diagnostic, and recovery artifacts are individually parsable C1
+  envelopes.
 - Non-convergence emits `LMM_CONVERGENCE_FAILED`, `failed/error`, no recovery
   candidate, no coefficient claim, and no trajectory context.
 
@@ -117,6 +150,13 @@ action was used.
   `LMM_INVALID_RANDOM_SLOPE_CONFIGURATION` because time is constant within
   each subject. Covariance singularity is separately classified by the
   deterministic diagnostics function.
+- A standalone `linear_mixed_effects.figure` public contract is intentionally
+  absent from C1. The data-only trajectory remains in the versioned result
+  payload; Integration must not invent a second figure contract while wiring
+  lifecycle ownership.
+- Integration must handle the versioned result packet as the cross-Lane value;
+  the pack-private normalization dict is never persisted or exposed as a UI or
+  Agent contract.
 - Integration must mechanically add the declaration to the builtin loader and
   capability registry, then connect only the approved adapters. It must not
   change this pack's formula, result mapping, diagnostics, or fixtures.
@@ -126,6 +166,7 @@ action was used.
 ## Rollback
 
 Before Integration, omit this declaration from the central builtin list. After
-Integration, revert candidate `211f3addf42034015b06d2e07bf89fad344f99e3` (and
-its receipt commit) as a normal Git revert; no data migration or external
+Integration, revert remediation `e77bc3c0bee1b24af7a1c7f86990baa3102ca008`,
+then the initial candidate `211f3addf42034015b06d2e07bf89fad344f99e3` (and
+their report receipts) as normal Git reverts; no data migration or external
 resource cleanup is required.
