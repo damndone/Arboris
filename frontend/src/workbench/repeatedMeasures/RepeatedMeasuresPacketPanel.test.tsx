@@ -82,11 +82,25 @@ describe("RepeatedMeasuresPacketPanel", () => {
             compare_status: "complete",
             source_run_id: "lmm-source-v1",
             child_run_id: "lmm-child-v1",
-            target: { result_id: "group_time_interaction" },
+            target: {
+              result_id: "group_time_interaction",
+              role: "primary",
+              label: "treated group × time",
+              resolution_source: "explicit_result_id",
+              target_hash: "a".repeat(64),
+            },
             data_diff: { retained_rows: "unchanged" },
             parameter_diff: { random_slope: "changed" },
-            result_diff: { group_time_interaction: "recorded" },
-            conclusion_diff: { classification: "recorded" },
+            result_diff: {
+              group_time_interaction: { status: "complete", changed: true, fields: {} },
+            },
+            conclusion_diff: {
+              target_result_id: "group_time_interaction",
+              status: "complete",
+              classification: "recorded",
+              reason_code: null,
+              evidence: {},
+            },
             validation_status: "pass",
             integrity_findings: [],
             logical_key: "compare:lmm-source-v1:lmm-child-v1",
@@ -149,6 +163,36 @@ describe("RepeatedMeasuresPacketPanel", () => {
 
     expect(screen.getByText("运行成功")).toBeInTheDocument();
     expect(screen.getByText("0.9")).toBeInTheDocument();
+  });
+
+  it("renders trusted complete warning diagnostics with a successful result", () => {
+    render(
+      <RepeatedMeasuresPacketPanel
+        packet={{
+          contract: "linear_mixed_effects.result",
+          contract_version: "1.0",
+          producer_version: "linear_mixed_effects@1.0",
+          payload: {
+            status: "complete",
+            result_id: "group_time_interaction",
+            estimate: 0.9,
+            fit_method: "reml",
+            inference_method: "asymptotic_wald_z_v1",
+            diagnostics: [{
+              code: "LMM_RANDOM_EFFECTS_SINGULAR",
+              severity: "warning",
+              status: "complete",
+              evidence: { slope_variance: 0 },
+              action_candidate: null,
+            }],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("运行成功")).toBeInTheDocument();
+    expect(screen.getByLabelText("Repeated measures result warnings")).toBeInTheDocument();
+    expect(screen.getByText("LMM_RANDOM_EFFECTS_SINGULAR")).toBeInTheDocument();
   });
 
   it("renders only server-provided trajectory values from a complete result packet", () => {

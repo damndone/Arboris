@@ -99,6 +99,16 @@ export function RepeatedMeasuresPacketPanel(props: RepeatedMeasuresPacketPanelPr
           <dt>估计值</dt><dd>{viewModel.result!.estimate}</dd>
           <dt>拟合方法</dt><dd>{viewModel.result!.fit_method}</dd>
         </dl>
+        {viewModel.result!.diagnostics.length > 0 && (
+          <section aria-label="Repeated measures result warnings">
+            <h3>模型警告</h3>
+            <ul>
+              {viewModel.result!.diagnostics.map((diagnostic) => (
+                <li key={diagnostic.code}>{diagnostic.code}</li>
+              ))}
+            </ul>
+          </section>
+        )}
         {viewModel.result!.trajectory !== null && <TrajectoryFigure context={viewModel.result!.trajectory} />}
       </section>
     );
