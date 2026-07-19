@@ -1,0 +1,54 @@
+work_package: WO-B-linear-mixed-effects
+lane: feat/v173-model-linear-mixed-effects
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+contract_lock_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+branch_start_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+owned_files:
+  - backend/workbench/engine/packs/linear_mixed_effects/**
+  - tests/models/linear_mixed_effects/test_input.py
+  - tests/models/linear_mixed_effects/test_runner.py
+  - tests/models/linear_mixed_effects/test_diagnostics.py
+read_only_contracts:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects
+  - tests/models/linear_mixed_effects/test_feasibility.py
+forbidden_files:
+  - backend/workbench/agent/orchestrator.py
+  - backend/workbench/agent/operations.py
+  - backend/workbench/analysis_loop/contracts.py
+  - backend/workbench/analysis_loop/storage.py
+  - backend/workbench/engine/pack.py
+  - backend/workbench/engine/registry.py
+  - backend/workbench/engine/capabilities.py
+  - backend/workbench/graph_store.py
+  - frontend/src/workbench/agent/AgentSurfaceContext.tsx
+  - scripts/gate.sh
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
+consumes:
+  - "C1 LMM model, input, result, diagnostic, compare, and error packet contracts."
+  - "Canonical deterministic fixtures and packet JSON as read-only sources."
+  - "C1 pack loader and model-options validation seam without changing either."
+produces:
+  - "A declaration-driven, deterministic Linear Mixed Effects pack."
+  - "Input, runner, diagnostic, result, and figure packet facts within the locked LMM scope."
+  - "Tests and a completion report at docs/superpowers/release-trains/v1.7.3/completion-reports/WO-B-linear-mixed-effects.md."
+preimplementation_acceptance_evidence:
+  command: "$WORKBENCH_PYTHON -m pytest tests/models/linear_mixed_effects/test_input.py -q"
+  expected_before_implementation: "Collection failure because the Model Pack module does not exist."
+  recording_rule: "Record the actual command, exit code, and output in the completion report; do not repair a public contract or central file."
+acceptance:
+  - "Input validation, canonical formula, fit method, identity, diagnostics, and result packets obey the locked contracts."
+  - "The known-truth interaction is evaluated within the locked tolerance and invalid/singular/non-converged cases fail safely."
+  - "The model lane gate passes its feasibility, input, runner, and diagnostic tests with a clean diff check."
+  - "The completion report records actual branch/C1/commit hashes and states that both protected honest-DiD tests were not modified."
+non_goals:
+  - "No public-contract or central-file change."
+  - "No GLMM, categorical time, more than two groups, nested/crossed effects, arbitrary selection, or custom code."
+  - "No UI/Agent registration, browser calculations, real-provider call, or release action."

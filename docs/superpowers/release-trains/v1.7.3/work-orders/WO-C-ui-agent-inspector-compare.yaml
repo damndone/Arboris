@@ -1,0 +1,55 @@
+work_package: WO-C-ui-agent-inspector-compare
+lane: feat/v173-ui-agent-inspector-compare
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+contract_lock_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+branch_start_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+owned_files:
+  - frontend/src/runForm/RepeatedMeasuresControls.tsx
+  - frontend/src/runForm/RepeatedMeasuresControls.test.tsx
+  - frontend/src/workbench/repeatedMeasures/**
+read_only_contracts:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects/packets
+forbidden_files:
+  - backend/workbench/agent/orchestrator.py
+  - backend/workbench/agent/operations.py
+  - backend/workbench/analysis_loop/contracts.py
+  - backend/workbench/analysis_loop/storage.py
+  - backend/workbench/engine/pack.py
+  - backend/workbench/engine/registry.py
+  - backend/workbench/engine/capabilities.py
+  - backend/workbench/graph_store.py
+  - frontend/src/workbench/agent/AgentSurfaceContext.tsx
+  - scripts/gate.sh
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
+consumes:
+  - "Canonical JSON packets and C1 TypeScript transport types as read-only mocks."
+  - "C1 feature registry seam without modifying the registry or bootstrap."
+  - "The C1 direct one-level model_options transport contract."
+produces:
+  - "Typed repeated-measures controls without browser-side statistical derivation."
+  - "Packet-only proposal, inspector, compare, trajectory figure, and view-model components."
+  - "Tests and a completion report at docs/superpowers/release-trains/v1.7.3/completion-reports/WO-C-ui-agent-inspector-compare.md."
+preimplementation_acceptance_evidence:
+  command: |-
+    cd frontend && npx vitest run \
+      src/runForm/RepeatedMeasuresControls.test.tsx \
+      src/workbench/repeatedMeasures/repeatedMeasuresViewModel.test.ts
+  expected_before_implementation: "Module-resolution failure because the components do not exist."
+  recording_rule: "Record the actual command, exit code, and output in the completion report; do not add a browser-test dependency."
+acceptance:
+  - "The UI renders packet states without recalculating model facts or naming an invalid comparison winner."
+  - "Controls emit typed options only; canonical JSON mocks are the test source, not a Model Lane artifact."
+  - "The UI lane gate passes its focused Vitest tests and TypeScript check."
+  - "The completion report records actual branch/C1/commit hashes and states that both protected honest-DiD tests were not modified."
+non_goals:
+  - "No model fitting, statistical inference, source-data mutation, or automatic rerun in the browser."
+  - "No changes to public contracts, C1 seams, central Agent surface, or backend routes."
+  - "No real provider, new public dependency, push, PR, merge, tag, or release."

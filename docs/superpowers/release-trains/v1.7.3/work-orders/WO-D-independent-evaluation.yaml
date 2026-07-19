@@ -1,0 +1,54 @@
+work_package: WO-D-independent-evaluation
+lane: test/v173-evaluation-harness
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+contract_lock_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+branch_start_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+owned_files:
+  - tests/evaluation/linear_mixed_effects/**
+  - scripts/collect_v173_lmm_evidence.py
+  - docs/superpowers/release-trains/v1.7.3/evaluation/browser-scenario.md
+  - docs/superpowers/release-trains/v1.7.3/golden-change-approvals/README.md
+  - docs/superpowers/release-trains/v1.7.3/evidence/**
+read_only_contracts:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects
+  - docs/superpowers/release-trains/v1.7.3/contract-lock.yaml
+forbidden_files:
+  - backend/workbench/agent/orchestrator.py
+  - backend/workbench/agent/operations.py
+  - backend/workbench/analysis_loop/contracts.py
+  - backend/workbench/analysis_loop/storage.py
+  - backend/workbench/engine/pack.py
+  - backend/workbench/engine/registry.py
+  - backend/workbench/engine/capabilities.py
+  - backend/workbench/graph_store.py
+  - frontend/src/workbench/agent/AgentSurfaceContext.tsx
+  - scripts/gate.sh
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
+consumes:
+  - "The C1 lock receipt and immutable canonical contracts/fixtures."
+  - "Candidate commits supplied after independent feature lanes have committed; no uncommitted feature-lane files."
+  - "Canonical packet mocks and a permitted local test environment only."
+produces:
+  - "Independent contract-compatibility, known-truth, fault-injection, Agent-boundary, compare-restriction, and report-claim tests."
+  - "A performance/evidence collector, browser scenario, golden-approval guide, and non-secret evidence manifests."
+preimplementation_acceptance_evidence:
+  command: "$WORKBENCH_PYTHON -m pytest tests/evaluation/linear_mixed_effects -q"
+  expected_before_implementation: "Collection failure until candidate feature commits are evaluated."
+  recording_rule: "Record the failure as the preimplementation evidence; do not write a product fix."
+acceptance:
+  - "Evaluation independently checks packets, known truth, fault injection, Agent boundaries, restricted comparisons, report claims, performance, and browser evidence."
+  - "Evidence manifests contain actual candidate hashes, commands, exit codes, durations, artifact hashes, and no secrets."
+  - "No candidate is accepted without protected-file verification and no real-provider use."
+  - "The evaluation record states that both protected honest-DiD tests were not modified."
+non_goals:
+  - "No product implementation or repair of a Feature Lane failure."
+  - "No mutation of public contracts, C1 seams, central files, fixtures, or release-ledger claims without evidence."
+  - "No real provider, push, PR, merge, tag, or release."

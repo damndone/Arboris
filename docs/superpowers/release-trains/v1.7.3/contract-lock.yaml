@@ -1,0 +1,46 @@
+release: v1.7.3
+receipt_branch: release-train/v1.7.3-contract-receipts
+release_baseline_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+integration_base_commit: 4b2e6c1d9ddd289005b84c186255fec2e9cbd86a
+contract_lock_commit: 1ee1484828f91403f098f36c4c63930c618706ef
+contract_versions:
+  packet_envelope: "1.0"
+  linear_mixed_effects: "1.0"
+  repeated_measures_agent: "1.0"
+immutable_contract_paths:
+  - backend/workbench/contracts/common/envelope.py
+  - backend/workbench/contracts/model/linear_mixed_effects.py
+  - backend/workbench/contracts/agent/repeated_measures.py
+  - tests/contracts/test_lmm_contracts.py
+  - tests/contracts/test_lmm_error_contract.py
+  - tests/contracts/test_lmm_canonical_packets.py
+  - tests/fixtures/models/linear_mixed_effects
+c1_thin_seams:
+  - backend/workbench/analysis_loop/adapters.py
+  - backend/workbench/engine/packs/loader.py
+  - backend/workbench/agent/recipes/registry.py
+  - frontend/src/workbench/agent/featureRegistry.ts
+generic_model_options_transport:
+  - backend/workbench/http/runs_routes.py
+  - backend/workbench/services/run_service.py
+  - backend/workbench/services/rerun_service.py
+  - backend/workbench/orchestrator/__init__.py
+  - backend/workbench/lineage/op_spec.py
+  - frontend/src/api.ts
+verification:
+  command: >-
+    PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest
+    tests/contracts/test_lmm_contracts.py
+    tests/contracts/test_lmm_error_contract.py
+    tests/contracts/test_lmm_canonical_packets.py
+    tests/models/linear_mixed_effects/test_feasibility.py
+    tests/test_lmm_extension_seams.py -q
+  result: "68 passed, 7 warnings in 11.42s"
+  worktree_clean: true
+  diff_check_clean: true
+  real_provider_calls: false
+  public_dependency_changes: false
+  push_pr_merge_tag_release: false
+protected_files:
+  - tests/test_honest_did_adversarial.py
+  - tests/test_honest_did_sd_adversarial.py
