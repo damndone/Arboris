@@ -14,6 +14,8 @@ from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from ..model_options import ModelOptionsError, canonicalize_model_options
+
 DRAFT_SCHEMA_VERSION = "pipeline_draft.v1"
 EXECUTED_DRAFT_FILENAME = "executed_pipeline_draft.json"
 
@@ -561,6 +563,22 @@ def _validate_control_value(
     kind = control.get("kind")
     options = _option_values(control.get("options"))
 
+    if kind == "object":
+        if not isinstance(value, dict):
+            return [
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {key!r} must be an object.",
+                    node_id=node_id,
+                )
+            ]
+        if key == "model_options":
+            try:
+                canonicalize_model_options(value)
+            except ModelOptionsError as exc:
+                return [check(exc.code, str(exc), node_id=node_id)]
+        return checks
+
     if kind in {"columns", "multiselect"}:
         if not isinstance(value, list):
             return [
@@ -806,6 +824,15 @@ def _validate_genesis_for_execution(
             check(
                 "GENESIS_MODEL_INCOMPLETE",
                 f"Genesis model node is missing {missing} (configure the wizard model step).",
+                node_id="model_1",
+            )
+        )
+    if "model_options" in model_params:
+        checks.extend(
+            _validate_control_value(
+                "model_options",
+                model_params["model_options"],
+                {"key": "model_options", "kind": "object"},
                 node_id="model_1",
             )
         )

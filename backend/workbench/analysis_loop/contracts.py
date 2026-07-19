@@ -11,7 +11,13 @@ from typing import Any, Literal
 from .canonical import sha256_canonical
 
 PacketStatus = Literal["pending", "complete", "blocked", "failed"]
-CompareStatus = Literal["complete", "partial", "not_comparable", "blocked_by_integrity"]
+CompareStatus = Literal[
+    "complete",
+    "partial",
+    "not_comparable",
+    "blocked_by_integrity",
+    "restricted",
+]
 ValidationStatus = Literal["pass", "warning", "fail"]
 TERMINAL_PACKET_STATUSES = frozenset({"complete", "blocked", "failed"})
 
@@ -749,6 +755,7 @@ class ComparePayload:
             "partial",
             "not_comparable",
             "blocked_by_integrity",
+            "restricted",
         }:
             raise ValueError(f"invalid compare_status: {self.compare_status}")
         if "compare_status" in self.payload:

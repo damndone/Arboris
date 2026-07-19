@@ -104,11 +104,45 @@ _PREDICTION_MODEL_TYPES = {
 
 
 def _map_model_type(model_type: str) -> str | None:
-    return _MODEL_TYPE_MAP.get(model_type)
+    mapped = _MODEL_TYPE_MAP.get(model_type)
+    if mapped is not None:
+        return mapped
+    handler = _registered_model_handler(model_type)
+    if handler is None or len(handler.serves_y_types) != 1:
+        # A multi-family pack keeps the existing data-driven y-type choice.
+        return None
+    return handler.serves_y_types[0]
+
+
+def _registered_model_registry():
+    """Return declared future pack handlers available for public execution.
+
+    Future pack declarations are loaded through the same idempotent bootstrap
+    used by capabilities and estimation. This keeps the pre-estimation model
+    allowlist aligned with the public capability manifest, without making
+    internal core aliases accidental public model types.
+    """
+
+    from ..engine.capabilities import registered_declared_model_types
+    from ..engine.registry import MODEL_REGISTRY
+
+    return {
+        model_type: MODEL_REGISTRY[model_type]
+        for model_type in registered_declared_model_types()
+    }
+
+
+def _registered_model_handler(model_type: str):
+    return _registered_model_registry().get(model_type)
 
 
 def _validate_requested_model_type(model_type: str) -> str | None:
-    if model_type == "auto" or model_type in _MODEL_TYPE_MAP or model_type in _PREDICTION_MODEL_TYPES:
+    if (
+        model_type == "auto"
+        or model_type in _MODEL_TYPE_MAP
+        or model_type in _PREDICTION_MODEL_TYPES
+        or _registered_model_handler(model_type) is not None
+    ):
         return None
     if not model_type.startswith("glm:"):
         raise WorkflowValidationError(
@@ -117,9 +151,10 @@ def _validate_requested_model_type(model_type: str) -> str | None:
             {
                 "model_type": model_type,
                 "supported_types": sorted(
-                    list(_MODEL_TYPE_MAP.keys())
-                    + list(_PREDICTION_MODEL_TYPES)
-                    + ["glm:<family>"]
+                    set(_MODEL_TYPE_MAP)
+                    | _PREDICTION_MODEL_TYPES
+                    | {"glm:<family>"}
+                    | set(_registered_model_registry())
                 ),
             },
         )

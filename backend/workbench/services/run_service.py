@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +33,12 @@ from ..lineage.hashing import dag_hash, override_hash
 from ..lineage.role_layer import canonicalize_focal_x
 from ..lineage.run_inputs import write_run_inputs
 from ..lineage.upload_store import resolve_upload, store_upload_bytes
+from ..model_options import (
+    ModelOptionsError,
+    canonicalize_model_options,
+    merge_model_options,
+    parse_model_options,
+)
 from ..orchestrator import (
     _lineage,
     _run_workflow,
@@ -110,6 +117,39 @@ def encode_form_override(key: str, value: object) -> str:
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
+def merge_form_overrides(
+    source_form: Mapping[str, Any], overrides: Mapping[str, object]
+) -> dict[str, Any]:
+    """Merge a rerun patch while keeping model_options one level deep.
+
+    Existing form keys retain their historical wire encoding. ``model_options``
+    is deliberately the sole structured value: it is canonicalized, merged one
+    level, and persisted as an object for the model handler.
+    """
+
+    merged: dict[str, Any] = dict(source_form)
+    source_options = merged.pop("model_options", {})
+    if isinstance(source_options, str):
+        source_options = parse_model_options(source_options)
+    else:
+        source_options = canonicalize_model_options(source_options)
+
+    patch_options = overrides.get("model_options", {})
+    if not isinstance(patch_options, Mapping):
+        raise ModelOptionsError(
+            "MODEL_OPTIONS_NOT_OBJECT", "model_options must be a JSON object."
+        )
+    merged["model_options"] = merge_model_options(source_options, patch_options)
+    merged.update(
+        {
+            key: encode_form_override(key, value)
+            for key, value in overrides.items()
+            if key != "model_options"
+        }
+    )
+    return merged
+
+
 def parse_column_selector(raw: str, field: str = "x") -> list[str]:
     """Parse a column-selector form field.
 
@@ -143,7 +183,7 @@ def parse_column_selector(raw: str, field: str = "x") -> list[str]:
 def _submit_run(
     root: Path,
     *,
-    form: dict[str, str],
+    form: dict[str, Any],
     upload_bytes: bytes,
     upload_filename: str,
     started_at: str,
@@ -162,6 +202,14 @@ def _submit_run(
     pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
     can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
     raises without leaving a junk run behind."""
+    raw_model_options = form.get("model_options", {})
+    model_options = (
+        parse_model_options(raw_model_options)
+        if isinstance(raw_model_options, str)
+        else canonicalize_model_options(raw_model_options)
+    )
+    form = {**form, "model_options": model_options}
+
     x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
@@ -192,6 +240,7 @@ def _submit_run(
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),
         "x": list(x_columns),
+        "model_options": model_options,
         "form": dict(form_for_persist),
         "rerun_of": rerun_of,
         "from_node": from_node,
@@ -202,6 +251,7 @@ def _submit_run(
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),
         "x": list(x_columns),
+        "model_options": model_options,
     }
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
@@ -279,6 +329,7 @@ def _submit_run(
         form.get("cs_control_group", ""), form.get("cs_est_method", ""), form.get("cs_base_period", ""),
         form.get("cs_cluster_var", ""), _safe_int(str(form.get("cs_anticipation", "0"))),
         str(form.get("honest_did", "false")).lower() == "true",
+        model_options,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -315,6 +366,7 @@ def _bg_run(
     cs_cluster_var: str = "",
     cs_anticipation: int = 0,
     honest_did: bool = False,
+    model_options: dict[str, object] | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -370,6 +422,7 @@ def _bg_run(
             cs_cluster_var=cs_cluster_var,
             cs_anticipation=cs_anticipation,
             honest_did=honest_did,
+            model_options=model_options,
             stop_reason=_stop_reason,
         )
         status = result["status"]

@@ -236,7 +236,9 @@ def classify_primary_target(
 
 COMPARE_PACKET_SCHEMA_VERSION = "compare_packet_v1"
 COMPARE_STRATEGY_VERSION = "ols_clustered_v1"
-_COMPARE_STATUSES = frozenset({"complete", "partial", "not_comparable", "blocked_by_integrity"})
+_COMPARE_STATUSES = frozenset(
+    {"complete", "partial", "not_comparable", "blocked_by_integrity", "restricted"}
+)
 
 
 def compare_logical_key(
@@ -277,6 +279,8 @@ class ComparePacket:
     logical_key: str
     strategy_version: str
     schema_version: str
+    reason_code: str | None = None
+    user_safe_message: str | None = None
 
     def __post_init__(self) -> None:
         if self.compare_status not in _COMPARE_STATUSES:
@@ -293,12 +297,24 @@ class ComparePacket:
                 raise ValueError(f"{field} must be a non-empty string")
         if any(type(item) is not str or not item for item in self.integrity_findings):
             raise TypeError("integrity_findings must contain strings")
+        if self.compare_status == "restricted":
+            if type(self.reason_code) is not str or not self.reason_code:
+                raise ValueError("restricted compare packet requires a non-empty reason_code")
+            if type(self.user_safe_message) is not str or not self.user_safe_message:
+                raise ValueError(
+                    "restricted compare packet requires a non-empty user_safe_message"
+                )
+        else:
+            for field in ("reason_code", "user_safe_message"):
+                value = getattr(self, field)
+                if value is not None and (type(value) is not str or not value):
+                    raise ValueError(f"{field} must be a non-empty string when provided")
         object.__setattr__(self, "integrity_findings", tuple(self.integrity_findings))
         for field in ("target", "data_diff", "parameter_diff", "result_diff", "conclusion_diff"):
             object.__setattr__(self, field, _freeze(getattr(self, field), field))
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "compare_status": self.compare_status,
             "source_run_id": self.source_run_id,
             "child_run_id": self.child_run_id,
@@ -313,6 +329,13 @@ class ComparePacket:
             "strategy_version": self.strategy_version,
             "schema_version": self.schema_version,
         }
+        # Omit absent optional fields so every existing OLS packet remains
+        # byte-for-byte wire-compatible.
+        if self.reason_code is not None:
+            payload["reason_code"] = self.reason_code
+        if self.user_safe_message is not None:
+            payload["user_safe_message"] = self.user_safe_message
+        return payload
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ComparePacket":
@@ -333,13 +356,18 @@ class ComparePacket:
             "strategy_version",
             "schema_version",
         }
-        extra = set(value) - required
+        optional = {"reason_code", "user_safe_message"}
+        extra = set(value) - required - optional
         missing = required - set(value)
         if extra:
             raise ValueError("extra compare packet field(s): " + ", ".join(sorted(extra)))
         if missing:
             raise KeyError("missing compare packet field(s): " + ", ".join(sorted(missing)))
-        return cls(**{key: value[key] for key in required})
+        return cls(
+            **{key: value[key] for key in required},
+            reason_code=value.get("reason_code"),
+            user_safe_message=value.get("user_safe_message"),
+        )
 
 
 def _run_id(run: Mapping[str, Any]) -> str:

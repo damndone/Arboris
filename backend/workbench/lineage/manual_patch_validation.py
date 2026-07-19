@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from ..model_options import ModelOptionsError, canonicalize_model_options
+
 
 class ManualPatchValidationError(ValueError):
     pass
@@ -74,6 +76,13 @@ def validate_manual_patch(
         field_schema = schema_by_key.get(change.field_id)
         if not field_schema or field_schema.get("editable") is False:
             raise ManualPatchValidationError("FIELD_NOT_EDITABLE")
+        if field_schema.get("kind") == "object" and not isinstance(change.new_value, dict):
+            raise ManualPatchValidationError("INVALID_FIELD_VALUE")
+        if change.field_id == "model_options":
+            try:
+                canonicalize_model_options(change.new_value)
+            except ModelOptionsError as exc:
+                raise ManualPatchValidationError(exc.code) from exc
         current_value = current_values.get(change.field_id)
         if normalize_for_compare(change.old_value, field_schema) != normalize_for_compare(
             current_value, field_schema

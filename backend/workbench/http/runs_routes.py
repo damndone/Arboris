@@ -13,6 +13,7 @@ import asyncio
 import queue
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -27,6 +28,7 @@ from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
+from ..model_options import ModelOptionsError, parse_model_options
 from ..orchestrator import run_batch_y_workflow
 from ..repository.run_repository import (
     _artifact_counts,
@@ -109,11 +111,16 @@ async def run_endpoint(
     cs_anticipation: int = Form(0),
     honest_did: bool = Form(False),
     focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
+    model_options: str = Form("{}"),
 ) -> dict[str, str]:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
+    try:
+        parsed_model_options = parse_model_options(model_options)
+    except ModelOptionsError as exc:
+        raise HTTPException(status_code=422, detail=exc.code) from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -125,7 +132,7 @@ async def run_endpoint(
     run_id_for_cleanup: str | None = None
     try:
         data = await _read_upload_bytes(file, max_upload_bytes)
-        form: dict[str, str] = {
+        form: dict[str, Any] = {
             "mode": mode, "model_type": model_type, "y": y, "x": x,
             "sheet_name": sheet_name, "transpose": transpose, "imputation": imputation,
             "entity_col": entity_col, "time_col": time_col, "covariance": covariance,
@@ -140,6 +147,7 @@ async def run_endpoint(
             "cs_base_period": cs_base_period, "cs_cluster_var": cs_cluster_var,
             "cs_anticipation": str(cs_anticipation), "honest_did": str(honest_did).lower(),
             "focal_x": focal_x,
+            "model_options": parsed_model_options,
         }
         started_at = datetime.now(timezone.utc).isoformat()
         try:

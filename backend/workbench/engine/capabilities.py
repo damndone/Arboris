@@ -1,7 +1,66 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from .imputation_registry import IMPUTATION_REGISTRY
 from .registry import MODEL_REGISTRY
+
+
+@dataclass(frozen=True)
+class CapabilityDeclaration:
+    """Metadata a future model pack may expose after its handler is registered."""
+
+    model_type: str
+    label: str
+    group: str
+    description: str
+    requires: Sequence[str]
+    params: Sequence[dict[str, object]]
+
+
+_DECLARED_CAPABILITIES: dict[str, CapabilityDeclaration] = {}
+_RESERVED_DECLARATION_MODEL_TYPES = frozenset({"auto", "glm", "poisson_rate"})
+
+
+def register_capability_declaration(declaration: CapabilityDeclaration) -> None:
+    """Register non-legacy capability metadata without mutating central lists.
+
+    Legacy entries remain intentionally centralized for their current wire
+    compatibility. New declarations are rejected if they would shadow one.
+    """
+
+    if declaration.model_type in _RESERVED_DECLARATION_MODEL_TYPES:
+        raise ValueError(
+            f"capability declaration uses reserved model type: "
+            f"{declaration.model_type}"
+        )
+    if declaration.model_type in MODEL_UI_META:
+        raise ValueError(
+            f"capability declaration conflicts with legacy model type: "
+            f"{declaration.model_type}"
+        )
+    if declaration.model_type in _DECLARED_CAPABILITIES:
+        raise ValueError(
+            f"duplicate capability declaration: {declaration.model_type}"
+        )
+    _DECLARED_CAPABILITIES[declaration.model_type] = declaration
+
+
+def registered_declared_model_types() -> tuple[str, ...]:
+    """Return future model types that have both declaration and handler.
+
+    This is intentionally narrower than ``MODEL_REGISTRY``: core-only aliases
+    remain internal unless a future pack explicitly declares public capability
+    metadata for them.
+    """
+
+    from .packs.loader import bootstrap_builtin_packs
+
+    bootstrap_builtin_packs()
+    return tuple(
+        key for key in sorted(_DECLARED_CAPABILITIES) if key in MODEL_REGISTRY
+    )
 
 
 MODEL_UI_META: dict[str, dict[str, object]] = {
@@ -173,6 +232,12 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
 
 def build_capabilities() -> dict:
     """Build the UI capability manifest from registered backend handlers."""
+    # A process can query /capabilities before the first estimation. Future
+    # declarations must therefore get the same idempotent pack bootstrap as
+    # estimation itself rather than depend on a prior run having imported it.
+    from .packs.loader import bootstrap_builtin_packs
+
+    bootstrap_builtin_packs()
     model_types = [{
         "key": "auto",
         "label": "Auto (infer from y)",
@@ -192,6 +257,23 @@ def build_capabilities() -> dict:
         entry = {"key": key, **MODEL_UI_META[key]}
         entry["schema_id"] = f"{key}@v1"
         entry["params"] = _MODEL_PARAMS.get(key, list(_COMMON_MODEL_PARAMS))
+        model_types.append(entry)
+
+    # New model packs contribute metadata declaratively. A declaration alone is
+    # never enough to expose a selectable model: the real handler must be
+    # present, otherwise the UI could offer a model the engine cannot resolve.
+    for key in registered_declared_model_types():
+        declaration = _DECLARED_CAPABILITIES[key]
+        entry: dict[str, object] = {
+            "key": declaration.model_type,
+            "label": declaration.label,
+            "group": declaration.group,
+            "description": declaration.description,
+            "schema_id": f"{declaration.model_type}@v1",
+            "params": [dict(param) for param in declaration.params],
+        }
+        if declaration.requires:
+            entry["requires"] = list(declaration.requires)
         model_types.append(entry)
 
     imputation_methods = [

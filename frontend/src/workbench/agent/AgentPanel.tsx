@@ -65,7 +65,13 @@ function castLine(entry: unknown): string | null {
 
 function changeSummary(changes: Record<string, unknown>): string {
   return Object.entries(changes).map(([key, value]) => {
-    if (value && typeof value === "object" && "old" in value && "new" in value) {
+    if (
+      key !== "model_options"
+      && value
+      && typeof value === "object"
+      && "old" in value
+      && "new" in value
+    ) {
       const pair = value as { old?: unknown; new?: unknown };
       return `${key}: ${String(pair.old)} → ${String(pair.new)}`;
     }

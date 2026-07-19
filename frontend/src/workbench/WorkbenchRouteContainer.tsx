@@ -74,6 +74,7 @@ import {
   AgentNavigationContext,
   applyAgentNavigationRef,
 } from "./agent/agentNavigation";
+import { registerBuiltinFeatureViews } from "./agent/builtinFeatureViews";
 
 type PendingFocusTarget = {
   runId: string;
@@ -113,6 +114,12 @@ interface WorkbenchHomeProps {
 /** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
  *  projectRoot alone; runId is only an optional focus hint. */
 export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
+  // This is the live project-home mount path. The bootstrap itself is
+  // idempotent so React StrictMode and route remounts cannot duplicate a view.
+  useEffect(() => {
+    registerBuiltinFeatureViews();
+  }, []);
+
   // v1.6.8 — the project home renders the project forest. A run deep link is
   // only a focus hint; if that run is absent from the project forest, probe the
   // old run-keyed headset once so true legacy runs can still use the legacy

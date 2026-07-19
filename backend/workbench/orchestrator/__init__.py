@@ -200,13 +200,18 @@ def run_workflow(
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
     honest_did: bool = False,
+    model_options: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
     from ..lineage.upload_store import store_upload_bytes
+    from ..model_options import canonicalize_model_options
 
     project_root = Path(project_root)
+    normalized_model_options = canonicalize_model_options(
+        {} if model_options is None else model_options
+    )
     config = load_config(project_root / "config.yml")
     run = create_run(project_root, mode=mode)
     started_at = datetime.now(timezone.utc).isoformat()
@@ -236,6 +241,7 @@ def run_workflow(
         "cs_anticipation": str(cs_anticipation),
         "cs_cluster_var": cs_cluster_var,
         "honest_did": str(honest_did).lower(),
+        "model_options": normalized_model_options,
     }
     upload_path = input_files[0] if input_files else None
     upload_bytes = upload_path.read_bytes() if upload_path is not None else b""
@@ -253,6 +259,7 @@ def run_workflow(
         "entity_col": entity_col,
         "y": y,
         "x": list(x),
+        "model_options": normalized_model_options,
         "form": direct_form,
         "rerun_of": None,
         "from_node": None,
@@ -324,6 +331,7 @@ def run_workflow(
             cs_anticipation=cs_anticipation,
             cs_cluster_var=cs_cluster_var,
             honest_did=honest_did,
+            model_options=normalized_model_options,
             stop_reason=stop_reason,
         )
     except OptionalDependencyNotInstalled as exc:
@@ -484,6 +492,7 @@ def _run_workflow(
     cs_anticipation: int = 0,
     cs_cluster_var: str = "",
     honest_did: bool = False,
+    model_options: dict[str, object] | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
@@ -492,6 +501,11 @@ def _run_workflow(
     final status.
     """
     from ..engine.stages import PIPELINE
+    from ..model_options import canonicalize_model_options
+
+    normalized_model_options = canonicalize_model_options(
+        {} if model_options is None else model_options
+    )
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
@@ -543,6 +557,7 @@ def _run_workflow(
     ctx.artifacts["_cs_anticipation"] = cs_anticipation
     ctx.artifacts["_cs_cluster_var"] = normalize_column_name(cs_cluster_var) if cs_cluster_var else ""
     ctx.artifacts["_honest_did"] = bool(honest_did)
+    ctx.artifacts["_model_options"] = normalized_model_options
 
     from .. import flags
     from ..lineage.incremental import run_pipeline_traced
@@ -567,6 +582,7 @@ def _run_workflow(
         "prediction_model_type": prediction_model_type,
         "prediction_cv_folds": prediction_cv_folds,
         "prediction_sampling_method": prediction_sampling_method,
+        "model_options": normalized_model_options,
     }
     cfg = {
         "random_seed": getattr(config, "random_seed", 20260429),

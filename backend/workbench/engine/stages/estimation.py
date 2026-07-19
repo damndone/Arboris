@@ -6,6 +6,7 @@ from ..context import ModelingContext, RunEnv
 from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
     ModelHandler,
+    ModelOptionsValidationError,
     resolve,
 )
 
@@ -312,7 +313,7 @@ def _fit_ols(ctx, env):
 
 def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
     """Append terminal OLS evidence while leaving executable payload immutable."""
-    from ...lineage.run_inputs import update_run_inputs_metadata
+    from ...lineage.run_inputs import read_run_inputs, update_run_inputs_metadata
 
     if not (run_root / "run_inputs.json").is_file():
         return
@@ -323,15 +324,31 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
         "coefficient_schema_fingerprint",
         "inference_config_fingerprint",
     )
+    inputs = read_run_inputs(run_root)
+    existing_payload = inputs.get("executed_payload")
+    executable_payload = inputs.get("executable_payload")
+    persisted_form = inputs.get("form")
+    model_options = (
+        existing_payload.get("model_options")
+        if isinstance(existing_payload, dict)
+        else executable_payload.get("model_options")
+        if isinstance(executable_payload, dict)
+        else persisted_form.get("model_options")
+        if isinstance(persisted_form, dict)
+        else None
+    )
+    executed_payload = {
+        "model_type": "ols",
+        "covariance": result.get("covariance_wire"),
+        "entity_col": result.get("entity_col"),
+        "y": result.get("y_column"),
+        "x": result.get("x_columns", []),
+    }
+    if isinstance(model_options, dict):
+        executed_payload["model_options"] = model_options
     update_run_inputs_metadata(
         run_root,
-        executed_payload={
-            "model_type": "ols",
-            "covariance": result.get("covariance_wire"),
-            "entity_col": result.get("entity_col"),
-            "y": result.get("y_column"),
-            "x": result.get("x_columns", []),
-        },
+        executed_payload=executed_payload,
         contract_metadata={
             "contract_version": result.get("contract_version"),
             "model": result.get("model"),
@@ -419,6 +436,12 @@ class EstimationStage:
     name = "estimation"
 
     def run(self, ctx: ModelingContext, env: RunEnv) -> ModelingContext:
+        # Future model packs are declared explicitly and loaded idempotently.
+        # Keep this immediately before handler resolution rather than relying on
+        # process import order (the capability endpoint bootstraps separately).
+        from ..packs.loader import bootstrap_builtin_packs
+
+        bootstrap_builtin_packs()
         # Lazy imports to avoid circular deps with orchestrator helpers/state.
         from ...orchestrator import (
             _model_failure_details,
@@ -497,6 +520,7 @@ class EstimationStage:
         run_id = env.run_id
         recorder = env.recorder
         model_input_ids = [ctx.data.artifact_id]
+        model_options = ctx.artifacts.get("_model_options", {})
 
         # Build a resolve view: prediction model types fall through to the
         # y_type default identically to legacy behavior (they're dispatched
@@ -511,6 +535,29 @@ class EstimationStage:
 
         try:
             handler = resolve(resolve_ctx)
+            if model_options:
+                if handler.validate_model_options is None:
+                    raise ModelOptionsValidationError(
+                        "MODEL_OPTIONS_UNSUPPORTED",
+                        f"Model type {handler.model_type} does not declare model_options.",
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    )
+                try:
+                    handler.validate_model_options(model_options)
+                except ModelOptionsValidationError:
+                    raise
+                except (TypeError, ValueError) as exc:
+                    raise ModelOptionsValidationError(
+                        "MODEL_OPTIONS_INVALID_VALUE",
+                        f"Model type {handler.model_type} rejected model_options: {exc}",
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    ) from exc
             model_id, primary, fitted = handler.fit(ctx, env)
             _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
             if model_id == "ols_1":
@@ -524,36 +571,46 @@ class EstimationStage:
         except ValueError as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
-            failure_evidence = _model_failure_details(
-                model_type=(
-                    model_type
-                    if model_type != "auto"
-                    else _Y_TYPE_TO_ATTEMPTED_MODEL.get(ctx.y_type, ctx.y_type)
-                ),
-                y=normalized_y,
-                x=normalized_x,
-                root_cause=str(exc),
-                step="estimation",
-            )
-            failure_evidence["y_type"] = ctx.y_type
-            if model_type != "auto":
-                failure_evidence["requested_model_type"] = model_type
-            from ..recommended_actions import actions_for_model_fit_failure
-            failure_evidence["recommended_actions"] = actions_for_model_fit_failure(
-                requested_model_type=model_type,
-                y_type=ctx.y_type,
-            )
+            is_model_options_error = isinstance(exc, ModelOptionsValidationError)
+            if is_model_options_error:
+                failure_evidence = {
+                    **exc.evidence,
+                    "y_type": ctx.y_type,
+                    "requested_model_type": model_type,
+                }
+                issue_code = exc.error_code
+            else:
+                failure_evidence = _model_failure_details(
+                    model_type=(
+                        model_type
+                        if model_type != "auto"
+                        else _Y_TYPE_TO_ATTEMPTED_MODEL.get(ctx.y_type, ctx.y_type)
+                    ),
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(exc),
+                    step="estimation",
+                )
+                failure_evidence["y_type"] = ctx.y_type
+                if model_type != "auto":
+                    failure_evidence["requested_model_type"] = model_type
+                from ..recommended_actions import actions_for_model_fit_failure
+                failure_evidence["recommended_actions"] = actions_for_model_fit_failure(
+                    requested_model_type=model_type,
+                    y_type=ctx.y_type,
+                )
+                issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
-                "MODEL_FIT_FAILED",
+                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                issue_code,
                 str(exc),
                 failure_evidence,
             ).to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto":
+            if model_type != "auto" or is_model_options_error:
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(

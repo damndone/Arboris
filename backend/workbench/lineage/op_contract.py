@@ -129,6 +129,8 @@ def validate_overrides(contract: OperationContract, op_overrides: dict) -> None:
                 f"Unknown field {key!r} for op {contract.op_type!r} ({contract.schema_id})"
             )
         spec = by_key[key]
+        if spec.get("kind") == "object" and not isinstance(value, dict):
+            raise OpOverrideError(f"Value for {key!r} must be an object")
         options = spec.get("options")
         allowed = [o if not isinstance(o, dict) else o.get("value") for o in options or []]
         if options and spec.get("kind") in {"columns", "multiselect"} and isinstance(value, list):

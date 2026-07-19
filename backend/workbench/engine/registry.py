@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Tuple, TYPE_CHECKING
 
@@ -11,6 +12,24 @@ if TYPE_CHECKING:
 # (panel_ols needs entity/time, poisson needs exposure_col/poisson_x, etc.).
 # Returns (model_id, primary_result_dict, primary_fitted_or_None).
 HandlerFn = Callable[["ModelingContext", "RunEnv"], Tuple[str, dict[str, Any], Any]]
+# Validators must raise ModelOptionsValidationError for semantic rejections.
+# Estimation also wraps ordinary ValueError/TypeError at this boundary so an
+# invalid option can never fall through to the auto-model fallback path.
+ModelOptionsValidator = Callable[[Mapping[str, Any]], None]
+
+
+class ModelOptionsValidationError(ValueError):
+    """A model-specific options contract rejected before fit execution."""
+
+    def __init__(
+        self,
+        error_code: str,
+        message: str,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.evidence = dict(evidence or {})
 
 
 @dataclass
@@ -19,6 +38,7 @@ class ModelHandler:
     model_id: str              # default written model_id
     serves_y_types: tuple[str, ...]
     fit: HandlerFn
+    validate_model_options: ModelOptionsValidator | None = None
 
 
 MODEL_REGISTRY: dict[str, ModelHandler] = {}

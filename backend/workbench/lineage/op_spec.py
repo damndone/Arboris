@@ -46,6 +46,7 @@ STAGE_FORM_KEYS: dict[str, list[str]] = {
         "time_col",
         "y",
         "x",
+        "model_options",
     ],
     "diagnostics": [
         "prediction_model_type",

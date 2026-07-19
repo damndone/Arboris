@@ -24,8 +24,9 @@ from ..lineage.node_write_validation import (
 )
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
+from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_run_root
-from .run_service import _submit_run, encode_form_override
+from .run_service import _submit_run, merge_form_overrides
 
 
 TERMINAL_RUN_STATUSES = frozenset(
@@ -214,13 +215,10 @@ class RerunService:
         except (OSError, ValueError) as exc:
             raise RerunServiceError("unusable_parent_upload", str(exc)) from exc
 
-        merged_form = {
-            **inputs["form"],
-            **{
-                key: encode_form_override(key, value)
-                for key, value in request.op_overrides.items()
-            },
-        }
+        try:
+            merged_form = merge_form_overrides(inputs["form"], request.op_overrides)
+        except ModelOptionsError as exc:
+            raise RerunServiceError(exc.code, str(exc)) from exc
         events = get_event_manager()
         if not events.try_acquire_slot():
             raise RerunBusyError()

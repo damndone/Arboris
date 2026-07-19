@@ -413,7 +413,11 @@ def _overrides_from_proposal_changes(changes: dict[str, Any]) -> dict[str, Any]:
 
     return {
         key: value["new"]
-        if isinstance(value, dict) and "new" in value
+        if (
+            key != "model_options"
+            and isinstance(value, dict)
+            and {"old", "new"}.issubset(value)
+        )
         else value
         for key, value in changes.items()
     }

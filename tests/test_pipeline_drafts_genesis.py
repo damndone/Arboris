@@ -359,6 +359,32 @@ def test_validate_genesis_ok(tmp_path):
     assert body["validated_draft_hash"] == current["draft_hash"]
 
 
+def test_validate_genesis_rejects_nonobject_model_options_before_execution(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": "ols",
+            "y": "y",
+            "x": ["x"],
+            "model_options": ["not", "an", "object"],
+        },
+    )
+
+    response = _validate(root, draft_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["executable"] is False
+    assert any(
+        item["code"] == "INVALID_PARAM_TYPE" and item["node_id"] == "model_1"
+        for item in body["checks"]
+    )
+
+
 def test_validate_genesis_defaults_to_draft_mode(tmp_path):
     """No execution_mode in body -> default_execution_mode ('genesis') is used."""
     root = _mkproject(tmp_path)

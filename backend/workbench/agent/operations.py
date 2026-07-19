@@ -93,6 +93,14 @@ class OperationRegistry:
                 editable_schema={
                     "type": "object",
                     "description": "Field-level model rerun changes.",
+                    "properties": {
+                        "model_options": {
+                            "type": "object",
+                            "description": (
+                                "A one-level model-options patch, not an old/new field-diff wrapper."
+                            ),
+                        },
+                    },
                     "additionalProperties": True,
                 },
                 executor_key="model.rerun",
@@ -504,7 +512,18 @@ def _proposal_schema(
 def _model_rerun_proposal_schema() -> dict[str, Any]:
     return _proposal_schema(
         target_required=["run_id", "node_ref", "node_hash", "forest_node_key"],
-        changes={"type": "object", "additionalProperties": True},
+        changes={
+            "type": "object",
+            "properties": {
+                "model_options": {
+                    "type": "object",
+                    "description": (
+                        "A one-level model-options patch, not an old/new field-diff wrapper."
+                    ),
+                }
+            },
+            "additionalProperties": True,
+        },
     )
 
 
@@ -718,6 +737,14 @@ def _validate_model_rerun(
         )
     if not changes:
         raise OperationValidationError("model.rerun changes must not be empty")
+    if "model_options" in changes:
+        model_options = changes["model_options"]
+        # Unlike legacy scalar changes, model_options is itself a generic
+        # object-valued patch. Treating an ``old``/``new`` pair as a diff wrapper
+        # would silently corrupt a future handler whose legitimate option keys
+        # happen to use those names.
+        if not isinstance(model_options, dict):
+            raise OperationValidationError("model.rerun model_options must be an object")
 
 
 def _validate_graph_fork(
