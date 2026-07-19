@@ -4,6 +4,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import statistics
 import subprocess
 import sys
 from datetime import datetime
@@ -74,6 +75,14 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _percentile_95(values: list[float]) -> float:
+    ordered = sorted(values)
+    position = 0.95 * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
 def _write_candidate_fixture(root: Path) -> str:
     fixture = (
         root
@@ -101,6 +110,7 @@ def _write_passing_strict_payload(
     stderr = artifact_dir / "strict-suite.stderr.txt"
     junit = artifact_dir / "strict-suite.junit.xml"
     performance = artifact_dir / "performance" / "performance.json"
+    performance.parent.mkdir(parents=True)
     stdout.write_text("pytest output\n", encoding="utf-8")
     stderr.write_text("", encoding="utf-8")
     junit.write_text(
@@ -122,8 +132,62 @@ def _write_passing_strict_payload(
         + "</testsuite>",
         encoding="utf-8",
     )
-    performance.parent.mkdir(parents=True)
-    performance.write_text("{}\n", encoding="utf-8")
+
+    def write_fit(group: str, index: int, duration: float) -> dict[str, object]:
+        artifact = (
+            performance.parent
+            / group
+            / str(index)
+            / "linear_mixed_effects_contract.json"
+        )
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("{}\n", encoding="utf-8")
+        return {
+            "duration_seconds": duration,
+            "artifact_path": str(artifact),
+            "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        }
+
+    warmups = [write_fit("warmups", index, 0.01 + index / 100) for index in range(2)]
+    cold_fits = [write_fit("cold", index, 1.0 + index) for index in range(7)]
+    hot_fits = [write_fit("hot", index, 0.1 + index / 10) for index in range(7)]
+    cold_durations = [float(item["duration_seconds"]) for item in cold_fits]
+    hot_durations = [float(item["duration_seconds"]) for item in hot_fits]
+    performance_payload = {
+        "status": "passed",
+        "environment": {
+            "python_version": "3.test",
+            "statsmodels_version": "test",
+            "node_version": "not_run",
+            "os_family": "TestOS",
+            "dependency_lock_hash": "d" * 64,
+        },
+        "fixture": {
+            "path": "tests/fixtures/models/linear_mixed_effects/known_truth.csv",
+            "sha256": fixture_sha256,
+            "rows": 1,
+            "subjects": 1,
+        },
+        "warmups": warmups,
+        "cold_fits": cold_fits,
+        "hot_fits": hot_fits,
+        "summary": {
+            "cold_p50_seconds": statistics.median(cold_durations),
+            "cold_p95_seconds": _percentile_95(cold_durations),
+            "hot_p50_seconds": statistics.median(hot_durations),
+            "hot_p95_seconds": _percentile_95(hot_durations),
+            "failure_count": 0,
+            "artifact_count": len(warmups) + len(cold_fits) + len(hot_fits),
+            "full_forest_refetch": False,
+            "full_forest_refetch_basis": "direct local runner invocation; no graph-store path",
+            "provider_call_observation": "not_proven",
+            "provider_call_observation_basis": (
+                "provider-bearing environment was cleared and scoped Python guards "
+                "were installed before candidate imports; this is not OS-level egress proof"
+            ),
+        },
+    }
+    performance.write_text(json.dumps(performance_payload), encoding="utf-8")
     artifacts = {
         "stdout": {"path": str(stdout), "sha256": _sha256_text("pytest output\n")},
         "stderr": {"path": str(stderr), "sha256": _sha256_text("")},
@@ -168,20 +232,7 @@ def _write_passing_strict_payload(
         "duration_seconds": 0.5,
         "results": {name: "passed" for name in STRICT_RESULTS},
         "junit_test_counts": {name: 1 for name in STRICT_RESULTS},
-        "performance": {
-            "status": "passed",
-            "environment": {},
-            "fixture": {
-                "path": "tests/fixtures/models/linear_mixed_effects/known_truth.csv",
-                "sha256": fixture_sha256,
-                "rows": 1,
-                "subjects": 1,
-            },
-            "warmups": [],
-            "cold_fits": [],
-            "hot_fits": [],
-            "summary": {},
-        },
+        "performance": performance_payload,
         "strict_isolation": {"limitations": "scoped guard"},
         "artifacts": artifacts,
         "generated_at": "2026-07-19T00:00:00+00:00",
@@ -189,6 +240,28 @@ def _write_passing_strict_payload(
     (artifact_dir / "strict-suite.json").write_text(
         json.dumps(payload), encoding="utf-8"
     )
+
+
+def _rewrite_performance_evidence(
+    artifact_dir: Path,
+    mutate: object,
+) -> None:
+    payload_path = artifact_dir / "strict-suite.json"
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    performance = payload["performance"]
+    assert isinstance(performance, dict)
+    assert callable(mutate)
+    mutate(performance)
+    performance_path = artifact_dir / "performance" / "performance.json"
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    artifacts = payload["artifacts"]
+    assert isinstance(artifacts, dict)
+    performance_descriptor = artifacts["performance"]
+    assert isinstance(performance_descriptor, dict)
+    performance_descriptor["sha256"] = hashlib.sha256(
+        performance_path.read_bytes()
+    ).hexdigest()
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_candidate_preflight_rejects_non_full_sha_before_touching_a_worktree(
@@ -215,6 +288,68 @@ def test_evidence_collector_requires_an_explicit_candidate_sha(tmp_path: Path) -
 
     assert completed.returncode != 0
     assert "--candidate" in completed.stderr
+
+
+@pytest.mark.parametrize("forbidden_root", ("candidate", "evaluator"))
+def test_main_rejects_forbidden_output_before_any_failure_manifest_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, forbidden_root: str
+) -> None:
+    collector = _load_collector()
+    candidate_root = tmp_path / "candidate"
+    evaluator_root = tmp_path / "evaluator"
+    candidate_root.mkdir()
+    evaluator_root.mkdir()
+    monkeypatch.setattr(collector, "_evaluator_root", lambda: evaluator_root)
+    output_root = candidate_root if forbidden_root == "candidate" else evaluator_root
+    output = output_root / "evidence.json"
+    artifact_root = output.parent / "evidence.artifacts"
+
+    exit_code = collector.main(
+        [
+            "--candidate",
+            "a" * 40,
+            "--candidate-worktree",
+            str(candidate_root),
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 1
+    assert not output.exists()
+    assert not artifact_root.exists()
+
+
+def test_main_rejects_a_derived_artifact_root_inside_the_candidate_before_writes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    collector = _load_collector()
+    candidate_root = tmp_path / "candidate"
+    evaluator_root = tmp_path / "evaluator"
+    output = tmp_path / "outside" / "evidence.json"
+    candidate_root.mkdir()
+    evaluator_root.mkdir()
+    monkeypatch.setattr(collector, "_evaluator_root", lambda: evaluator_root)
+    monkeypatch.setattr(
+        collector,
+        "_evidence_artifact_root",
+        lambda _output: candidate_root / "evidence.artifacts",
+    )
+
+    exit_code = collector.main(
+        [
+            "--candidate",
+            "a" * 40,
+            "--candidate-worktree",
+            str(candidate_root),
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert exit_code == 1
+    assert not output.exists()
+    assert not (candidate_root / "evidence.artifacts").exists()
 
 
 def test_failed_evidence_records_the_supplied_candidate_sha() -> None:
@@ -363,6 +498,79 @@ def test_collector_runs_the_strict_subprocess_before_performance(
     assert str(REPO_ROOT / "tests" / "evaluation" / "linear_mixed_effects") not in observed[0]
     assert records[0]["exit_code"] == 0
     assert (artifact_root / "strict-runner.stdout.txt").is_file()
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        (lambda performance: performance.clear(), "invalid schema"),
+        (lambda performance: performance.update({"warmups": []}), "warmups"),
+        (
+            lambda performance: performance["cold_fits"][0].update(
+                {"duration_seconds": float("nan")}
+            ),
+            "strict JSON",
+        ),
+        (
+            lambda performance: performance["hot_fits"][0].update(
+                {"duration_seconds": float("inf")}
+            ),
+            "strict JSON",
+        ),
+        (
+            lambda performance: performance["cold_fits"][0].update(
+                {"artifact_path": "/tmp/foreign-contract.json"}
+            ),
+            "artifact path",
+        ),
+        (
+            lambda performance: performance["hot_fits"][0].update(
+                {"artifact_sha256": "0" * 64}
+            ),
+            "artifact is incomplete",
+        ),
+        (
+            lambda performance: performance["summary"].update(
+                {"cold_p50_seconds": 999.0}
+            ),
+            "summary",
+        ),
+    ],
+)
+def test_collector_rejects_incomplete_or_incoherent_performance_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutate: object,
+    error: str,
+) -> None:
+    collector = _load_collector()
+    root = tmp_path / "candidate"
+    root.mkdir()
+    fixture_sha256 = _write_candidate_fixture(root)
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        artifact_dir = Path(command[command.index("--artifact-dir") + 1])
+        _write_passing_strict_payload(
+            artifact_dir,
+            candidate_root=root,
+            candidate_sha="a" * 40,
+            fixture_sha256=fixture_sha256,
+        )
+        _rewrite_performance_evidence(artifact_dir, mutate)
+        return subprocess.CompletedProcess(command, 0, "strict stdout", "strict stderr")
+
+    monkeypatch.setattr(collector.subprocess, "run", fake_run)
+
+    with pytest.raises(collector.EvidenceCollectionError, match=error):
+        collector._run_strict_candidate_evaluation(
+            root=root,
+            candidate_sha="a" * 40,
+            evaluator_root=REPO_ROOT,
+            artifact_root=artifact_root,
+            command_records=[],
+        )
 
 
 def test_collector_rejects_a_passing_strict_payload_from_the_wrong_candidate_root(

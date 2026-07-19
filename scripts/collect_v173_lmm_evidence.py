@@ -13,9 +13,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -33,6 +35,9 @@ STRICT_RUNNER_RELATIVE_PATH = Path(
     "tests/evaluation/linear_mixed_effects/strict_runner.py"
 )
 STRICT_SCHEMA_VERSION = "v173_lmm_strict_candidate_evaluation_v3"
+WARMUP_FIT_COUNT = 2
+COLD_FIT_COUNT = 7
+HOT_FIT_COUNT = 7
 STRICT_RESULT_NAMES = (
     "contract_validation",
     "known_truth",
@@ -68,6 +73,36 @@ STRICT_PAYLOAD_FIELDS = frozenset(
         "strict_isolation",
         "artifacts",
         "generated_at",
+    }
+)
+PERFORMANCE_FIELDS = frozenset(
+    {"status", "environment", "fixture", "warmups", "cold_fits", "hot_fits", "summary"}
+)
+PERFORMANCE_ENVIRONMENT_FIELDS = frozenset(
+    {
+        "python_version",
+        "statsmodels_version",
+        "node_version",
+        "os_family",
+        "dependency_lock_hash",
+    }
+)
+PERFORMANCE_FIXTURE_FIELDS = frozenset({"path", "sha256", "rows", "subjects"})
+PERFORMANCE_FIT_FIELDS = frozenset(
+    {"duration_seconds", "artifact_path", "artifact_sha256"}
+)
+PERFORMANCE_SUMMARY_FIELDS = frozenset(
+    {
+        "cold_p50_seconds",
+        "cold_p95_seconds",
+        "hot_p50_seconds",
+        "hot_p95_seconds",
+        "failure_count",
+        "artifact_count",
+        "full_forest_refetch",
+        "full_forest_refetch_basis",
+        "provider_call_observation",
+        "provider_call_observation_basis",
     }
 )
 
@@ -121,6 +156,37 @@ ALLOWED_CANDIDATE_PREFIXES = (
 
 class EvidenceCollectionError(RuntimeError):
     """Raised for rejected input or a non-passing strict candidate evaluation."""
+
+
+def _evaluator_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _evidence_artifact_root(output: Path) -> Path:
+    return output.parent / f"{output.stem}.artifacts"
+
+
+def _validate_output_locations(
+    *, output: Path, candidate_root: Path, evaluator_root: Path
+) -> tuple[Path, Path]:
+    """Reject evaluator/candidate-owned destinations before creating any evidence."""
+
+    resolved_output = output.resolve()
+    artifact_root = _evidence_artifact_root(resolved_output).resolve()
+    forbidden_roots = (
+        ("candidate worktree", candidate_root.resolve()),
+        ("evaluator worktree", evaluator_root.resolve()),
+    )
+    for label, forbidden_root in forbidden_roots:
+        for path, path_label in (
+            (resolved_output, "strict evidence output"),
+            (artifact_root, "derived strict artifact root"),
+        ):
+            if path.is_relative_to(forbidden_root):
+                raise EvidenceCollectionError(
+                    f"{path_label} must be outside the {label}: {path}"
+                )
+    return resolved_output, artifact_root
 
 
 def _sha256_bytes(value: bytes) -> str:
@@ -457,9 +523,17 @@ def _require_exact_mapping_keys(
     return value
 
 
-def _require_nonnegative_number(value: object, name: str) -> None:
-    if type(value) not in {int, float} or float(value) < 0:
-        raise EvidenceCollectionError(f"strict payload {name} must be nonnegative")
+def _require_nonnegative_number(value: object, name: str) -> float:
+    if type(value) not in {int, float}:
+        raise EvidenceCollectionError(
+            f"strict payload {name} must be a finite nonnegative number"
+        )
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized < 0:
+        raise EvidenceCollectionError(
+            f"strict payload {name} must be a finite nonnegative number"
+        )
+    return normalized
 
 
 def _validate_artifact_descriptor(
@@ -511,6 +585,197 @@ def _validate_strict_junit(
         name: expected_counts[name] for name in STRICT_RESULT_NAMES
     } != observed_counts:
         raise EvidenceCollectionError("strict JUnit testcase counts do not match strict payload")
+
+
+def _load_json_mapping(path: Path, name: str) -> dict[str, object]:
+    def reject_non_finite(value: str) -> object:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    try:
+        parsed = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=reject_non_finite,
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (OSError, ValueError) as error:
+        raise EvidenceCollectionError(
+            f"strict {name} artifact is not strict JSON"
+        ) from error
+    if not isinstance(parsed, dict):
+        raise EvidenceCollectionError(f"strict {name} artifact must be a JSON object")
+    return parsed
+
+
+def _percentile_95(values: list[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        raise EvidenceCollectionError("strict performance has no measurements")
+    if len(ordered) == 1:
+        return ordered[0]
+    position = 0.95 * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def _require_positive_int(value: object, name: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise EvidenceCollectionError(f"strict payload {name} must be a positive integer")
+    return value
+
+
+def _validate_performance_fit_series(
+    value: object,
+    *,
+    name: str,
+    expected_count: int,
+    strict_artifact_dir: Path,
+    observed_paths: set[Path],
+) -> list[float]:
+    if not isinstance(value, list) or len(value) != expected_count:
+        raise EvidenceCollectionError(
+            f"strict payload performance {name} must contain exactly {expected_count} fits"
+        )
+    durations: list[float] = []
+    for index, fit in enumerate(value):
+        fit_wire = _require_exact_mapping_keys(
+            fit, PERFORMANCE_FIT_FIELDS, f"performance.{name}[{index}]"
+        )
+        duration = _require_nonnegative_number(
+            fit_wire["duration_seconds"], f"performance.{name}[{index}].duration_seconds"
+        )
+        artifact_path = fit_wire["artifact_path"]
+        artifact_sha256 = fit_wire["artifact_sha256"]
+        expected_path = (
+            strict_artifact_dir
+            / "performance"
+            / name
+            / str(index)
+            / "linear_mixed_effects_contract.json"
+        ).resolve()
+        if type(artifact_path) is not str or Path(artifact_path).resolve() != expected_path:
+            raise EvidenceCollectionError(
+                f"strict payload performance {name}[{index}] has an unexpected artifact path"
+            )
+        if (
+            type(artifact_sha256) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact_sha256)
+            or not expected_path.is_file()
+            or _sha256_file(expected_path) != artifact_sha256
+        ):
+            raise EvidenceCollectionError(
+                f"strict payload performance {name}[{index}] artifact is incomplete or tampered"
+            )
+        if expected_path in observed_paths:
+            raise EvidenceCollectionError("strict performance reuses a per-fit artifact path")
+        observed_paths.add(expected_path)
+        durations.append(duration)
+    return durations
+
+
+def _validate_performance_payload(
+    performance: Mapping[str, object],
+    *,
+    strict_artifact_dir: Path,
+    performance_artifact_path: Path,
+    expected_fixture_sha256: str,
+) -> dict[str, object]:
+    wire = _require_exact_mapping_keys(performance, PERFORMANCE_FIELDS, "performance")
+    if wire["status"] != "passed":
+        raise EvidenceCollectionError("strict payload performance did not pass")
+
+    environment = _require_exact_mapping_keys(
+        wire["environment"], PERFORMANCE_ENVIRONMENT_FIELDS, "performance.environment"
+    )
+    if any(type(value) is not str or not value for value in environment.values()):
+        raise EvidenceCollectionError("strict payload performance environment is incomplete")
+    if not re.fullmatch(r"[0-9a-f]{64}", str(environment["dependency_lock_hash"])):
+        raise EvidenceCollectionError("strict payload performance dependency lock hash is invalid")
+
+    fixture = _require_exact_mapping_keys(
+        wire["fixture"], PERFORMANCE_FIXTURE_FIELDS, "performance.fixture"
+    )
+    if (
+        fixture["path"] != FIXTURE_RELATIVE_PATH.as_posix()
+        or fixture["sha256"] != expected_fixture_sha256
+    ):
+        raise EvidenceCollectionError("strict payload fixture hash does not match the candidate fixture used")
+    _require_positive_int(fixture["rows"], "performance.fixture.rows")
+    _require_positive_int(fixture["subjects"], "performance.fixture.subjects")
+
+    observed_paths: set[Path] = set()
+    _validate_performance_fit_series(
+        wire["warmups"],
+        name="warmups",
+        expected_count=WARMUP_FIT_COUNT,
+        strict_artifact_dir=strict_artifact_dir,
+        observed_paths=observed_paths,
+    )
+    cold = _validate_performance_fit_series(
+        wire["cold_fits"],
+        name="cold",
+        expected_count=COLD_FIT_COUNT,
+        strict_artifact_dir=strict_artifact_dir,
+        observed_paths=observed_paths,
+    )
+    hot = _validate_performance_fit_series(
+        wire["hot_fits"],
+        name="hot",
+        expected_count=HOT_FIT_COUNT,
+        strict_artifact_dir=strict_artifact_dir,
+        observed_paths=observed_paths,
+    )
+    summary = _require_exact_mapping_keys(
+        wire["summary"], PERFORMANCE_SUMMARY_FIELDS, "performance.summary"
+    )
+    expected_summary = {
+        "cold_p50_seconds": statistics.median(cold),
+        "cold_p95_seconds": _percentile_95(cold),
+        "hot_p50_seconds": statistics.median(hot),
+        "hot_p95_seconds": _percentile_95(hot),
+    }
+    for name, expected in expected_summary.items():
+        observed = _require_nonnegative_number(summary[name], f"performance.summary.{name}")
+        if observed != expected:
+            raise EvidenceCollectionError(
+                f"strict payload performance summary {name} does not match measured fits"
+            )
+    if type(summary["failure_count"]) is not int or summary["failure_count"] != 0:
+        raise EvidenceCollectionError("strict payload performance summary failure_count is invalid")
+    actual_artifact_count = sum(
+        1
+        for path in performance_artifact_path.parent.rglob("*")
+        if path.is_file() and path != performance_artifact_path
+    )
+    if type(summary["artifact_count"]) is not int or summary["artifact_count"] != actual_artifact_count:
+        raise EvidenceCollectionError("strict payload performance summary artifact_count is invalid")
+    if summary["full_forest_refetch"] is not False:
+        raise EvidenceCollectionError("strict payload performance summary full_forest_refetch is invalid")
+    if summary["full_forest_refetch_basis"] != "direct local runner invocation; no graph-store path":
+        raise EvidenceCollectionError("strict payload performance summary refetch basis is invalid")
+    if summary["provider_call_observation"] != "not_proven":
+        raise EvidenceCollectionError("strict payload performance summary provider observation is invalid")
+    if (
+        summary["provider_call_observation_basis"]
+        != "provider-bearing environment was cleared and scoped Python guards "
+        "were installed before candidate imports; this is not OS-level egress proof"
+    ):
+        raise EvidenceCollectionError("strict payload performance summary provider basis is invalid")
+
+    persisted = _load_json_mapping(performance_artifact_path, "performance")
+    if persisted != dict(wire):
+        raise EvidenceCollectionError(
+            "strict performance artifact does not exactly match the strict payload"
+        )
+    return dict(wire)
 
 
 def _validate_strict_payload(
@@ -569,20 +834,6 @@ def _validate_strict_payload(
     if any(type(junit_counts[name]) is not int or junit_counts[name] <= 0 for name in STRICT_RESULT_NAMES):
         raise EvidenceCollectionError("strict payload has zero expected test results")
 
-    performance = _require_exact_mapping_keys(
-        wire["performance"], frozenset({"status", "environment", "fixture", "warmups", "cold_fits", "hot_fits", "summary"}), "performance"
-    )
-    if performance["status"] != "passed":
-        raise EvidenceCollectionError("strict payload performance did not pass")
-    fixture = _require_exact_mapping_keys(
-        performance["fixture"], frozenset({"path", "sha256", "rows", "subjects"}), "performance.fixture"
-    )
-    if (
-        fixture["path"] != FIXTURE_RELATIVE_PATH.as_posix()
-        or fixture["sha256"] != expected_fixture_sha256
-    ):
-        raise EvidenceCollectionError("strict payload fixture hash does not match the candidate fixture used")
-
     artifacts = _require_exact_mapping_keys(
         wire["artifacts"], frozenset({"stdout", "stderr", "junit", "performance"}), "artifacts"
     )
@@ -595,10 +846,16 @@ def _validate_strict_payload(
     junit_descriptor = _validate_artifact_descriptor(
         artifacts["junit"], name="junit", expected_path=strict_artifact_dir / "strict-suite.junit.xml"
     )
-    _validate_artifact_descriptor(
+    performance_descriptor = _validate_artifact_descriptor(
         artifacts["performance"], name="performance", expected_path=strict_artifact_dir / "performance" / "performance.json"
     )
     _validate_strict_junit(Path(junit_descriptor["path"]), junit_counts)
+    _validate_performance_payload(
+        _require_exact_mapping_keys(wire["performance"], PERFORMANCE_FIELDS, "performance"),
+        strict_artifact_dir=strict_artifact_dir,
+        performance_artifact_path=Path(performance_descriptor["path"]),
+        expected_fixture_sha256=expected_fixture_sha256,
+    )
     return dict(wire)
 
 
@@ -659,10 +916,7 @@ def _run_strict_candidate_evaluation(
         raise EvidenceCollectionError(
             "strict candidate evaluation did not persist strict-suite.json"
         )
-    try:
-        payload = json.loads(result_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise EvidenceCollectionError("strict-suite.json is not valid JSON") from error
+    payload = _load_json_mapping(result_path, "suite result")
     if completed.returncode != 0:
         raise EvidenceCollectionError(
             "strict candidate evaluation failed; see persistent artifacts under "
@@ -732,14 +986,14 @@ def _collect(
     output: Path,
     command_records: list[dict[str, object]],
 ) -> dict[str, object]:
-    evaluator_root = Path(__file__).resolve().parents[1]
-    if output.is_relative_to(evaluator_root):
-        raise EvidenceCollectionError(
-            "strict evidence output must be outside the evaluator worktree so its audit stays clean"
-        )
+    evaluator_root = _evaluator_root()
+    output, artifact_root = _validate_output_locations(
+        output=output,
+        candidate_root=root,
+        evaluator_root=evaluator_root,
+    )
     if output.exists():
         raise EvidenceCollectionError(f"refusing to overwrite existing evidence artifact: {output}")
-    artifact_root = output.parent / f"{output.stem}.artifacts"
     if artifact_root.exists():
         raise EvidenceCollectionError(
             f"refusing to overwrite existing strict evaluation artifacts: {artifact_root}"
@@ -874,11 +1128,19 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     command_records: list[dict[str, object]] = []
     started = time.perf_counter()
-    output = args.output.resolve()
-    artifact_root = output.parent / f"{output.stem}.artifacts"
+    candidate_root = args.candidate_worktree.resolve()
+    try:
+        output, artifact_root = _validate_output_locations(
+            output=args.output,
+            candidate_root=candidate_root,
+            evaluator_root=_evaluator_root(),
+        )
+    except EvidenceCollectionError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     try:
         payload = _collect(
-            root=args.candidate_worktree.resolve(),
+            root=candidate_root,
             candidate=args.candidate,
             output=output,
             command_records=command_records,
