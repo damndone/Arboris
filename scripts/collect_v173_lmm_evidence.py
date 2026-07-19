@@ -358,6 +358,26 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_failure_payload(
+    *,
+    requested_candidate: str,
+    error: str,
+    duration_seconds: float,
+    command_records: list[dict[str, object]],
+) -> dict[str, object]:
+    """Keep a rejected candidate attributable without ever accepting it."""
+
+    return {
+        "schema_version": "v173_lmm_performance_evidence_v1",
+        "status": "failed",
+        "requested_candidate": requested_candidate,
+        "error": error,
+        "contract_lock_commit": CONTRACT_LOCK_COMMIT,
+        "collector_duration_seconds": duration_seconds,
+        "commands": command_records,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     command_records: list[dict[str, object]] = []
@@ -372,14 +392,12 @@ def main(argv: list[str] | None = None) -> int:
         payload["collector_duration_seconds"] = time.perf_counter() - started
         _write_json(args.output, payload)
     except EvidenceCollectionError as error:
-        failure = {
-            "schema_version": "v173_lmm_performance_evidence_v1",
-            "status": "failed",
-            "error": str(error),
-            "contract_lock_commit": CONTRACT_LOCK_COMMIT,
-            "collector_duration_seconds": time.perf_counter() - started,
-            "commands": command_records,
-        }
+        failure = build_failure_payload(
+            requested_candidate=args.candidate,
+            error=str(error),
+            duration_seconds=time.perf_counter() - started,
+            command_records=command_records,
+        )
         try:
             _write_json(args.output, failure)
         except EvidenceCollectionError:

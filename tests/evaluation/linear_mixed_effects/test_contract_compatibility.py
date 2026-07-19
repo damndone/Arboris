@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -69,3 +70,20 @@ def test_evidence_collector_requires_an_explicit_candidate_sha(tmp_path) -> None
 
     assert completed.returncode != 0
     assert "--candidate" in completed.stderr
+
+
+def test_failed_evidence_records_the_supplied_candidate_sha() -> None:
+    path = REPO_ROOT / "scripts" / "collect_v173_lmm_evidence.py"
+    spec = importlib.util.spec_from_file_location("v173_lmm_collector", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    payload = module.build_failure_payload(
+        requested_candidate="candidate-sha",
+        error="candidate rejected",
+        duration_seconds=1.25,
+        command_records=[],
+    )
+
+    assert payload["requested_candidate"] == "candidate-sha"
