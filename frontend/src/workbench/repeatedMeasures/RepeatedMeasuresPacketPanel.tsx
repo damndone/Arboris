@@ -47,6 +47,7 @@ function ServerFactLayers(props: { facts: ComparisonFactLayers }) {
 
 function LmmServerFacts(props: { facts: Record<string, unknown> }) {
   const rows: Array<[string, unknown]> = [
+    ["模式结构版本", props.facts.schema_version],
     ["合同版本", props.facts.contract_version],
     ["估计器版本", props.facts.estimator_version],
     ["模型标识", props.facts.model_id],
@@ -65,6 +66,7 @@ function LmmServerFacts(props: { facts: Record<string, unknown> }) {
     ["比较组", props.facts.comparison_group],
     ["结果身份", props.facts.result_identity],
     ["主目标", props.facts.primary_target_id],
+    ["推断方法", props.facts.inference_method],
     ["主结果系数", props.facts.coefficients],
     ["随机效应", props.facts.random_effects],
     ["服务端诊断", props.facts.diagnostics],

@@ -129,6 +129,7 @@ describe("RepeatedMeasuresPacketPanel", () => {
           contract_version: "1.0",
           producer_version: "linear_mixed_effects@1.0",
           payload: {
+            schema_version: 1,
             status: "complete",
             result_id: "group_time_interaction",
             estimate: 0.9,
@@ -155,6 +156,10 @@ describe("RepeatedMeasuresPacketPanel", () => {
     );
 
     expect(screen.getByText("服务端模型事实")).toBeInTheDocument();
+    expect(screen.getByText("模式结构版本")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("推断方法")).toBeInTheDocument();
+    expect(screen.getAllByText("asymptotic_wald_z_v1")).not.toHaveLength(0);
     expect(screen.getByText("lbfgs")).toBeInTheDocument();
     expect(screen.getByText("480")).toBeInTheDocument();
     expect(screen.getByText(/subject_1/)).toBeInTheDocument();
