@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": ".agent/development-control/schemas/event-v1.json",
+  "title": "Development control event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "timestamp",
+    "type",
+    "subtype",
+    "stage",
+    "cause_status",
+    "cause",
+    "evidence",
+    "impact",
+    "preventability",
+    "resolution",
+    "lesson",
+    "incident_id",
+    "lesson_key",
+    "links",
+    "prev_event_sha256",
+    "event_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "event_id": {"type": "string", "format": "uuid"},
+    "timestamp": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"},
+    "type": {"enum": ["FAILURE", "ERROR", "GAP", "WASTE", "REVIEW", "GATE", "STATE_CHANGE"]},
+    "subtype": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+    "stage": {"enum": ["design", "implementation", "review", "gate", "integration", "release"]},
+    "cause_status": {"enum": ["known", "suspected", "unknown", "external", "not_applicable"]},
+    "cause": {"type": "string", "minLength": 1},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref", "sha256", "observed_at"],
+      "properties": {
+        "kind": {"type": "string"},
+        "ref": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "observed_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"}
+      }
+    },
+    "impact": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "object", "minProperties": 1}]},
+    "preventability": {"enum": ["preventable", "partially_preventable", "not_preventable", "unknown"]},
+    "resolution": {"enum": ["open", "mitigated", "resolved", "accepted", "not_applicable"]},
+    "lesson": {"type": "string", "minLength": 1},
+    "incident_id": {"type": "string", "format": "uuid"},
+    "lesson_key": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,127}$"},
+    "links": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "prev_event_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "event_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "state_from": {"type": "string", "minLength": 1},
+    "state_to": {"type": "string", "minLength": 1},
+    "gate_fingerprint": {"type": "string", "minLength": 1},
+    "review_round": {"type": "integer", "minimum": 1},
+    "artifact_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "resource_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "tool_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "tags": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,127}$"}}
+  }
+}

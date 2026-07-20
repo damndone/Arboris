@@ -138,6 +138,12 @@ run_gate_script_tests() {
   run_pytest tests/test_gate_script.py -q
 }
 
+run_devline_control_verify() {
+  resolve_pytest_python || return 1
+  PYTHONPATH="backend${PYTHONPATH:+:$PYTHONPATH}" \
+    "$PYTHON" scripts/devline_control.py verify --all
+}
+
 run_backend_agent_llm() {
   run_pytest -q \
     tests/test_agent_*.py \
@@ -164,6 +170,8 @@ run_quick() {
   local has_frontend=0
   local has_gate_script=0
   local has_pyproject=0
+  local has_dev_control_surface=0
+  local devline_directory
   local path
 
   while IFS= read -r path; do
@@ -179,6 +187,20 @@ run_quick() {
         ;;
       scripts/gate.sh|tests/test_gate_script.py)
         has_gate_script=1
+        ;;
+      backend/workbench/development_control/*|tests/test_devline_control_*.py|scripts/devline_control.py|AGENTS.md|.agent/development-control/*)
+        has_dev_control_surface=1
+        ;;
+      .agent/devlines/*/context-pack.md|.agent/devlines/*/context-pack.manifest.json|.agent/devlines/*/events.jsonl.anchor)
+        has_dev_control_surface=1
+        ;;
+      .agent/devlines/*/events.jsonl|.agent/devlines/*/RETROSPECTIVE.md)
+        devline_directory="${path%/*}"
+        if [ -f "$devline_directory/events.jsonl.anchor" ]; then
+          has_dev_control_surface=1
+        else
+          has_backend_other=1
+        fi
         ;;
       pyproject.toml)
         has_pyproject=1
@@ -204,6 +226,13 @@ run_quick() {
   fi
 
   run_stage "QUICK diff check" run_diff_check
+
+  # Formal development-control artifacts are the only change surface that
+  # replays all existing FMS history in quick mode.  The verifier is read-only
+  # and fail-closed; product-only work must not pay this historical-gate cost.
+  if [ "$has_dev_control_surface" -eq 1 ]; then
+    run_stage "QUICK formal development-control verification" run_devline_control_verify
+  fi
 
   if [ "$has_backend_other" -eq 1 ]; then
     run_stage "QUICK backend full fallback" run_backend_full

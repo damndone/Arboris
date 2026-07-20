@@ -8,7 +8,6 @@ from types import SimpleNamespace
 import pytest
 
 from workbench.contracts.model.linear_mixed_effects import (
-    LMM_CONTRACT_VERSION,
     LMM_MODEL_TYPE,
     LmmModelInput,
 )
@@ -47,30 +46,13 @@ def _lmm_options(*, random_slope: bool = True) -> dict[str, object]:
 
 
 @pytest.fixture
-def lmm_handler(monkeypatch: pytest.MonkeyPatch) -> ModelHandler:
-    """Exercise the future handler contract without registering an LMM pack."""
+def lmm_handler() -> ModelHandler:
+    """Use the production-owned declaration rather than a competing test pack."""
 
-    handler = ModelHandler(
-        model_type=LMM_MODEL_TYPE,
-        model_id="linear_mixed_effects_1",
-        serves_y_types=("continuous",),
-        fit=lambda ctx, _env: (
-            "linear_mixed_effects_1",
-            {
-                "model_type": LMM_MODEL_TYPE,
-                "nobs": len(ctx.data.frame),
-                "coefficients": {},
-            },
-            None,
-        ),
-        validate_model_options=lambda value: LmmModelInput.from_dict(value),
-        model_options_contract=ModelOptionsContract(
-            producer_version="linear_mixed_effects@1.0",
-            input_contract_version=LMM_CONTRACT_VERSION,
-        ),
-    )
-    monkeypatch.setitem(MODEL_REGISTRY, LMM_MODEL_TYPE, handler)
-    return handler
+    from workbench.engine.packs.loader import bootstrap_builtin_packs
+
+    bootstrap_builtin_packs()
+    return MODEL_REGISTRY[LMM_MODEL_TYPE]
 
 
 def _source_form(*, binding: dict[str, object] | None) -> dict[str, object]:
@@ -289,7 +271,7 @@ def test_same_model_owner_contract_change_requires_replacement(
     assert replacement["model_options"] == _lmm_options(random_slope=False)
 
 
-def test_submission_overwrites_forged_binding_and_persists_child_audit_chain(
+def test_submission_refuses_lmm_before_materializing_a_run(
     tmp_path: Path,
     lmm_handler: ModelHandler,
     monkeypatch: pytest.MonkeyPatch,
@@ -306,73 +288,35 @@ def test_submission_overwrites_forged_binding_and_persists_child_audit_chain(
         "input_contract_version": "0",
         "normalized_options_hash": "0" * 64,
     }
-    submitted = _submit_run(
-        project.root,
-        form={
-            "mode": "auto",
-            "model_type": LMM_MODEL_TYPE,
-            "y": "y",
-            "x": "x",
-            "model_options": _lmm_options(),
-            "model_options_binding": forged,
-        },
-        upload_bytes=b"y,x\n1,2\n3,4\n",
-        upload_filename="source.csv",
-        started_at="2026-07-18T00:00:00+00:00",
-    )
-    source_inputs = json.loads(
-        (project.root / "runs" / submitted["run_id"] / "run_inputs.json").read_text()
-    )
-    expected_binding = bind_new_model_options(LMM_MODEL_TYPE, _lmm_options()).binding
-    assert expected_binding is not None
-    for payload in (source_inputs["form"], source_inputs["executable_payload"]):
-        assert payload["model_options_binding"] == expected_binding.to_dict()
-        assert payload["model_options_binding"] != forged
-
-    child_form = merge_form_overrides(
-        source_inputs["form"],
-        {"model_options": {"random_slope": False}},
-    )
-    child = _submit_run(
-        project.root,
-        form=child_form,
-        upload_bytes=b"y,x\n1,2\n3,4\n",
-        upload_filename="source.csv",
-        started_at="2026-07-18T00:01:00+00:00",
-        rerun_of=submitted["run_id"],
-        from_node="model:source",
-        rerun_reason="owner_binding_test",
-        op_overrides={"model_options": {"random_slope": False}},
-    )
-    child_inputs = json.loads(
-        (project.root / "runs" / child["run_id"] / "run_inputs.json").read_text()
-    )
-    expected_child = bind_new_model_options(
-        LMM_MODEL_TYPE, _lmm_options(random_slope=False)
-    ).binding
-    assert expected_child is not None
-    for payload in (
-        child_inputs["form"],
-        child_inputs["executable_payload"],
-        child_inputs["confirmed_payload"],
-    ):
-        assert payload["model_options"] == _lmm_options(random_slope=False)
-        assert payload["model_options_binding"] == expected_child.to_dict()
+    with pytest.raises(ModelOptionsError) as error:
+        _submit_run(
+            project.root,
+            form={
+                "mode": "auto",
+                "model_type": LMM_MODEL_TYPE,
+                "y": "y",
+                "x": "x",
+                "model_options": _lmm_options(),
+                "model_options_binding": forged,
+            },
+            upload_bytes=b"y,x\n1,2\n3,4\n",
+            upload_filename="source.csv",
+            started_at="2026-07-18T00:00:00+00:00",
+        )
+    assert error.value.code == "LMM_FROZEN_CONTAINMENT_REQUIRED"
+    assert not list((project.root / "runs").iterdir())
 
 
-def test_rerun_service_keeps_parent_immutable_and_audits_bound_child(
+def test_rerun_service_keeps_parent_immutable_when_lmm_execution_is_refused(
     tmp_path: Path,
     lmm_handler: ModelHandler,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Exercise the public rerun boundary without adding an LMM runtime pack."""
+    """The public rerun boundary must not turn C1 binding into C2 execution."""
 
     del lmm_handler
     import workbench.orchestrator as orchestrator
 
-    # Test-only execution seam: production C1.1 still has no LMM pack,
-    # declaration, or public model-type mapping.
-    monkeypatch.setitem(orchestrator._MODEL_TYPE_MAP, LMM_MODEL_TYPE, "continuous")
     source = tmp_path / "source.csv"
     source.write_bytes(
         (
@@ -414,37 +358,17 @@ def test_rerun_service_keeps_parent_immutable_and_audits_bound_child(
         for node_id, node in graph.nodes.items()
         if getattr(node.stage, "value", node.stage) == "model"
     )
-    child = RerunService(project.root).submit(
-        RerunSubmissionRequest(
-            source_run_id=parent["run_id"],
-            from_node=model_node_id,
-            op_overrides={"model_options": {"random_slope": False}},
+    with pytest.raises(RerunServiceError) as error:
+        RerunService(project.root).submit(
+            RerunSubmissionRequest(
+                source_run_id=parent["run_id"],
+                from_node=model_node_id,
+                op_overrides={"model_options": {"random_slope": False}},
+            )
         )
-    )
+    assert error.value.code == "LMM_FROZEN_CONTAINMENT_REQUIRED"
     assert parent_inputs_path.read_text(encoding="utf-8") == source_before
-
-    child_root = project.root / "runs" / child.run_id
-    expected = bind_new_model_options(
-        LMM_MODEL_TYPE, _lmm_options(random_slope=False)
-    )
-    assert expected.binding is not None
-    child_inputs = json.loads((child_root / "run_inputs.json").read_text(encoding="utf-8"))
-    for payload in (
-        child_inputs["form"],
-        child_inputs["executable_payload"],
-        child_inputs["confirmed_payload"],
-    ):
-        assert payload["model_options"] == expected.payload
-        assert payload["model_options_binding"] == expected.binding.to_dict()
-
-    for _ in range(100):
-        manifest = json.loads((child_root / "run_manifest.json").read_text(encoding="utf-8"))
-        if manifest["status"] in {"completed", "failed", "cancelled", "interrupted", "partial"}:
-            break
-        time.sleep(0.05)
-    assert manifest["status"] == "completed"
-    child_inputs = json.loads((child_root / "run_inputs.json").read_text(encoding="utf-8"))
-    assert child_inputs["confirmed_payload"] == child_inputs["executed_payload"]
+    assert [entry.name for entry in (project.root / "runs").iterdir()] == [parent["run_id"]]
 
 
 def test_rerun_service_maps_second_submit_owner_error_to_stable_code(
@@ -550,7 +474,7 @@ def test_successful_generic_options_execution_matches_confirmed_payload(
     )
 
 
-def test_direct_workflow_and_lineage_form_include_server_binding(
+def test_direct_workflow_refuses_lmm_without_frozen_containment(
     tmp_path: Path,
     lmm_handler: ModelHandler,
     monkeypatch: pytest.MonkeyPatch,
@@ -561,36 +485,23 @@ def test_direct_workflow_and_lineage_form_include_server_binding(
     source = tmp_path / "source.csv"
     source.write_bytes(b"y,x\n1,2\n3,4\n")
     project = create_project(tmp_path, "direct-owner-binding")
-    captured: dict[str, object] = {}
-
-    def _fake_workflow(*args: object, **kwargs: object) -> dict[str, str]:
-        captured.update(kwargs)
-        return {"run_id": str(args[1]), "status": "completed"}
-
-    monkeypatch.setattr(orchestrator, "_run_workflow", _fake_workflow)
-    result = orchestrator.run_workflow(
-        project.root,
-        [source],
-        mode="auto",
-        y="y",
-        x=["x"],
-        model_type=LMM_MODEL_TYPE,
-        model_options=_lmm_options(),
-    )
-    inputs = json.loads(
-        (project.root / "runs" / result["run_id"] / "run_inputs.json").read_text()
-    )
-
-    assert captured["model_options_binding"] == inputs["form"]["model_options_binding"]
-    assert inputs["executable_payload"]["model_options_binding"] == inputs["form"]["model_options_binding"]
-    assert op_spec_for_stage("estimation", form=inputs["form"], config={})[
-        "model_options_binding"
-    ] == inputs["form"]["model_options_binding"]
+    with pytest.raises(ModelOptionsError) as error:
+        orchestrator.run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="y",
+            x=["x"],
+            model_type=LMM_MODEL_TYPE,
+            model_options=_lmm_options(),
+        )
+    assert error.value.code == "LMM_FROZEN_CONTAINMENT_REQUIRED"
+    assert not list((project.root / "runs").iterdir())
 
 
 def test_nonempty_options_fail_closed_without_an_explicit_supported_owner() -> None:
     with pytest.raises(ModelOptionsError) as unresolved:
-        bind_new_model_options(LMM_MODEL_TYPE, _lmm_options())
+        bind_new_model_options("unregistered_model", {"future_option": True})
     assert unresolved.value.code == "MODEL_OPTIONS_OWNER_UNRESOLVED"
 
     with pytest.raises(ModelOptionsError) as automatic:

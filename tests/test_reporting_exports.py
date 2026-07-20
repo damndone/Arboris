@@ -118,6 +118,30 @@ def test_render_and_export_reports(tmp_path: Path):
     assert artifact_inputs["report_pdf"] == []
 
 
+def test_lmm_export_rows_are_excel_scalar_safe() -> None:
+    """Versioned LMM coefficients include CI arrays that XLSX cannot store raw."""
+
+    from workbench.engine.stages.report import _xlsx_export_rows
+
+    rows = _xlsx_export_rows([
+        {
+            "model_id": "linear_mixed_effects_1",
+            "term": "group_time_interaction",
+            "estimate": 0.94,
+            "confidence_interval": [0.88, 1.00],
+        }
+    ])
+
+    assert rows == [
+        {
+            "model_id": "linear_mixed_effects_1",
+            "term": "group_time_interaction",
+            "estimate": 0.94,
+            "confidence_interval": "[0.88,1.0]",
+        }
+    ]
+
+
 def test_render_html_report_escapes_untrusted_content(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     run = create_run(project.root, mode="auto")

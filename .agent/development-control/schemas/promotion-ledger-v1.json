@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Development-control promotion ledger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ledger_id", "lesson_key", "decision", "occurrence_count", "trigger_event_ids", "sources", "candidate_id", "rule_id", "proposal_target", "block_reason", "ledger_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "ledger_id": {"type": "string", "minLength": 1},
+    "lesson_key": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["candidate_created", "mechanical_rule_enabled", "mechanical_rule_blocked_missing_test_marker", "behavior_rule_proposed"]},
+    "occurrence_count": {"type": "integer", "minimum": 2},
+    "trigger_event_ids": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
+    "sources": {"type": "array", "minItems": 2},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "rule_id": {"type": ["string", "null"]},
+    "proposal_target": {"type": ["string", "null"]},
+    "block_reason": {"type": ["string", "null"]},
+    "ledger_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -56,6 +56,49 @@ RESTRICTED_MESSAGE = (
     "两个模型使用 REML 且固定效应结构不同；似然、AIC 和似然比检验不作为有效的直接比较依据。"
 )
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _source_mentions(root: Path, term: str) -> bool:
+    return any(
+        term in path.read_text(encoding="utf-8")
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix in {".py", ".ts", ".tsx"}
+    )
+
+
+def test_lmm_pack_is_explicitly_declared_and_available_only_through_the_pack_loader() -> None:
+    """Integration enables LMM by one auditable built-in declaration."""
+
+    import workbench.engine.stages.estimation  # noqa: F401
+
+    assert BUILTIN_PACK_DECLARATIONS == (
+        PackDeclaration(
+            "workbench.engine.packs.linear_mixed_effects.declaration",
+            LMM_MODEL_TYPE,
+        ),
+    )
+    bootstrap_builtin_packs()
+    assert LMM_MODEL_TYPE in MODEL_REGISTRY
+    capability_keys = {entry["key"] for entry in build_capabilities()["model_types"]}
+    assert LMM_MODEL_TYPE in capability_keys
+
+    backend = _REPOSITORY_ROOT / "backend" / "workbench"
+    # The only Agent surface remains an inert direct-import-only read-time view;
+    # it does not register a recipe, route, operation, or execute a rerun.
+    assert not _source_mentions(backend / "agent" / "orchestrator.py", "linear_mixed_effects")
+    assert not _source_mentions(backend / "agent" / "operations.py", "linear_mixed_effects")
+    assert not _source_mentions(backend / "http", "linear_mixed_effects")
+    assert not _source_mentions(backend / "analysis_loop", "linear_mixed_effects")
+
+    frontend = _REPOSITORY_ROOT / "frontend" / "src"
+    assert not (frontend / "features" / "repeated-measures").exists()
+    assert any(
+        "workbench/repeatedMeasures/PacketPanel" in path.read_text(encoding="utf-8")
+        for path in frontend.rglob("*.ts*")
+        if "workbench/repeatedMeasures" not in path.as_posix()
+    )
+
 
 def _csv() -> bytes:
     return pd.DataFrame(
@@ -335,13 +378,14 @@ def test_restricted_compare_requires_both_nonempty_safe_fields(
         ComparePacket(**_compare_packet_kwargs("restricted"), **kwargs)
 
 
-def test_empty_builtin_pack_declarations_do_not_change_current_capabilities() -> None:
+def test_builtin_lmm_declaration_is_idempotent_for_capabilities() -> None:
     import workbench.engine.stages.estimation  # noqa: F401
 
     before = build_capabilities()
     bootstrap_builtin_packs()
 
-    assert BUILTIN_PACK_DECLARATIONS == ()
+    assert len(BUILTIN_PACK_DECLARATIONS) == 1
+    assert any(item["key"] == LMM_MODEL_TYPE for item in before["model_types"])
     assert build_capabilities() == before
 
 
@@ -475,6 +519,34 @@ def test_legacy_model_fails_closed_before_creating_a_run_for_nonempty_model_opti
     assert not list((project.root / "runs").iterdir())
 
 
+def test_sync_workflow_rejects_lmm_before_creating_a_run(tmp_path) -> None:
+    """No synchronous path can substitute for C2 frozen containment."""
+
+    source = tmp_path / "source.csv"
+    source.write_text("score,week,arm,participant_id\n1,1,a,p1\n")
+    project = create_project(tmp_path, "sync-lmm-rejection")
+
+    with pytest.raises(ModelOptionsError) as error:
+        run_workflow(
+            project.root,
+            [source],
+            mode="auto",
+            y="score",
+            x=[],
+            model_type=LMM_MODEL_TYPE,
+            model_options={
+                "subject_id": "participant_id",
+                "time": "week",
+                "group": "arm",
+                "fit_method": "reml",
+                "random_slope": True,
+            },
+        )
+
+    assert error.value.code == "LMM_FROZEN_CONTAINMENT_REQUIRED"
+    assert not list((project.root / "runs").iterdir())
+
+
 def test_ols_terminal_metadata_retains_empty_model_options(tmp_path) -> None:
     source = tmp_path / "source.csv"
     pd.DataFrame(
@@ -502,7 +574,7 @@ def test_ols_terminal_metadata_retains_empty_model_options(tmp_path) -> None:
     assert inputs["executed_payload"]["model_options"] == {}
 
 
-def test_child_submission_persists_the_exact_one_level_model_options_merge(
+def test_child_submission_refuses_lmm_after_the_exact_one_level_model_options_merge(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -516,18 +588,7 @@ def test_child_submission_persists_the_exact_one_level_model_options_merge(
         "fit_method": "reml",
         "random_slope": True,
     }
-    handler = ModelHandler(
-        model_type=LMM_MODEL_TYPE,
-        model_id="linear_mixed_effects_1",
-        serves_y_types=("continuous",),
-        fit=lambda _ctx, _env: ("linear_mixed_effects_1", {}, None),
-        validate_model_options=lambda value: LmmModelInput.from_dict(value),
-        model_options_contract=ModelOptionsContract(
-            producer_version="linear_mixed_effects@1.0",
-            input_contract_version=LMM_CONTRACT_VERSION,
-        ),
-    )
-    monkeypatch.setitem(MODEL_REGISTRY, LMM_MODEL_TYPE, handler)
+    bootstrap_builtin_packs()
     source_binding = bind_new_model_options(LMM_MODEL_TYPE, source_options).binding
     assert source_binding is not None
     child_form = run_service.merge_form_overrides(
@@ -543,24 +604,8 @@ def test_child_submission_persists_the_exact_one_level_model_options_merge(
         {"model_options": {"random_slope": False}},
     )
 
-    class FakeExecutor:
-        def submit(self, *_args: object, **_kwargs: object) -> None:
-            return None
-
-    class FakeEvents:
-        executor = FakeExecutor()
-
-        def register_run(self, *_args: object, **_kwargs: object) -> None:
-            return None
-
-        def mark_active(self, *_args: object, **_kwargs: object) -> None:
-            return None
-
-    with patch(
-        "workbench.services.run_service.get_event_manager",
-        return_value=FakeEvents(),
-    ):
-        submitted = run_service._submit_run(
+    with pytest.raises(ModelOptionsError) as error:
+        run_service._submit_run(
             project.root,
             form=child_form,
             upload_bytes=_csv(),
@@ -571,19 +616,14 @@ def test_child_submission_persists_the_exact_one_level_model_options_merge(
             rerun_reason="model_options_test",
             op_overrides={"model_options": {"random_slope": False}},
         )
-
-    inputs = read_json(project.root / "runs" / submitted["run_id"] / "run_inputs.json")
+    assert error.value.code == "LMM_FROZEN_CONTAINMENT_REQUIRED"
     expected_options = {**source_options, "random_slope": False}
     expected_binding = bind_new_model_options(
         LMM_MODEL_TYPE, expected_options
     ).binding
     assert expected_binding is not None
-    assert inputs["form"]["model_options"] == expected_options
-    assert inputs["executable_payload"]["model_options"] == expected_options
-    assert inputs["confirmed_payload"]["model_options"] == expected_options
-    assert inputs["form"]["model_options_binding"] == expected_binding.to_dict()
-    assert inputs["executable_payload"]["model_options_binding"] == expected_binding.to_dict()
-    assert inputs["confirmed_payload"]["model_options_binding"] == expected_binding.to_dict()
+    assert child_form["model_options"] == expected_options
+    assert not list((project.root / "runs").iterdir())
 
 
 def test_model_rerun_accepts_only_object_model_options() -> None:
@@ -749,7 +789,7 @@ def test_run_endpoint_rejects_invalid_model_options_before_execution(
     assert response.json()["detail"] == code
 
 
-def test_run_endpoint_rejects_unresolved_lmm_options_owner_before_creating_a_run(
+def test_run_endpoint_refuses_lmm_before_creating_a_run(
     tmp_path,
 ) -> None:
     from workbench.api import app
@@ -781,5 +821,5 @@ def test_run_endpoint_rejects_unresolved_lmm_options_owner_before_creating_a_run
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "MODEL_OPTIONS_OWNER_UNRESOLVED"
+    assert response.json()["detail"] == "LMM_FROZEN_CONTAINMENT_REQUIRED"
     assert not list((Path(root) / "runs").iterdir())

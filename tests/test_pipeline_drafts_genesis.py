@@ -7,13 +7,9 @@ from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.contracts.model.linear_mixed_effects import (
-    LMM_CONTRACT_VERSION,
     LMM_MODEL_TYPE,
-    LmmModelInput,
 )
-from workbench.engine.registry import MODEL_REGISTRY, ModelHandler
 from workbench.lineage.pipeline_drafts import _validate_graph_shape
-from workbench.model_options import ModelOptionsContract
 
 client = TestClient(app)
 
@@ -806,20 +802,7 @@ def test_execute_genesis_writes_snapshot(tmp_path):
 
 def test_execute_genesis_snapshot_carries_server_owned_model_options_binding(
     tmp_path,
-    monkeypatch,
 ):
-    handler = ModelHandler(
-        model_type=LMM_MODEL_TYPE,
-        model_id="linear_mixed_effects_1",
-        serves_y_types=("continuous",),
-        fit=lambda _ctx, _env: ("linear_mixed_effects_1", {}, None),
-        validate_model_options=lambda value: LmmModelInput.from_dict(value),
-        model_options_contract=ModelOptionsContract(
-            producer_version="linear_mixed_effects@1.0",
-            input_contract_version=LMM_CONTRACT_VERSION,
-        ),
-    )
-    monkeypatch.setitem(MODEL_REGISTRY, LMM_MODEL_TYPE, handler)
     root = _mkproject(tmp_path)
     draft = _genesis_rich(root)
     draft_id = draft["draft"]["draft_id"]
@@ -847,19 +830,12 @@ def test_execute_genesis_snapshot_carries_server_owned_model_options_binding(
             "validated_draft_hash": validated["validated_draft_hash"],
         },
     )
-    assert response.status_code == 200, response.text
-    run_id = response.json()["run_id"]
-    run_root = Path(root) / "runs" / run_id
-    snapshot = json.loads(
-        (run_root / "executed_pipeline_draft.json").read_text(encoding="utf-8")
-    )
-    inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
-
-    assert snapshot["model_options_binding"] == inputs["form"]["model_options_binding"]
-    assert inputs["executable_payload"]["model_options_binding"] == inputs["form"]["model_options_binding"]
-    # C1.1 deliberately has no LMM runtime; the snapshot is written before
-    # execution, then the unregistered model path must remain fail-closed.
-    assert _wait_terminal(root, run_id) == "failed"
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "LMM_FROZEN_CONTAINMENT_REQUIRED"
+    # C1 validates and binds LMM inputs, but C2 has not yet admitted a real
+    # OS-contained evaluator.  Refusal is before draft snapshots, uploads,
+    # or runs are materialized, so no ordinary executor can bypass C2.
+    assert not list((Path(root) / "runs").iterdir())
 
 
 # --- Task 7 (F6): reclaim unreferenced upload on genesis draft discard ---

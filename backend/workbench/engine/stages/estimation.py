@@ -11,6 +11,29 @@ from ..registry import (
 )
 
 
+def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Return the result shape consumed by the pre-packet engine stages.
+
+    LMM owns a versioned PacketEnvelope on disk.  Diagnostics, recording, and
+    report stages predate packets and consume the public result payload shape.
+    Passing the envelope through silently made those stages default to OLS
+    labels even though the LMM fit itself had succeeded.
+    """
+
+    if model_type != "linear_mixed_effects":
+        return result
+
+    from ...contracts.common.envelope import PacketEnvelope
+
+    packet = PacketEnvelope.from_dict(result)
+    if packet.contract != "linear_mixed_effects.result":
+        raise RuntimeError("LMM_RESULT_CONTRACT_INVALID")
+    payload = packet.to_dict()["payload"]
+    if payload.get("model_type") != "linear_mixed_effects":
+        raise RuntimeError("LMM_RESULT_PAYLOAD_INVALID")
+    return payload
+
+
 # ---- handler adapters (each builds its model-specific kwargs from ctx) ----
 # NB: every runner call goes through the orchestrator module (`_orch.run_X`)
 # so existing tests that monkeypatch `workbench.orchestrator.run_panel_ols`,
@@ -422,6 +445,39 @@ def _persist_model_options_execution_binding(
     update_run_inputs_metadata(run_root, executed_payload=executed_payload)
 
 
+def _seal_lmm_executed_input_before_fit(
+    *, run_root, run_id: str, model_options: object, model_options_binding: object
+):
+    """Create LMM's immutable pre-fit input proof, never a post-fit repair."""
+
+    from ...services.pinned_run_directory import (
+        open_pinned_run_directory,
+        seal_executed_input_v1,
+    )
+    from ...contracts.model.linear_mixed_effects import validate_lmm_executed_options_v1
+
+    if run_root.name != run_id:
+        raise ModelOptionsValidationError(
+            "LMM_EXECUTION_BINDING_REQUIRED",
+            "LMM run root does not match its trusted run identifier.",
+        )
+    # The sealed artifact is the dedicated LMM execution record.  Do not use
+    # generic run-input metadata mutation here or after fitting.
+    model_input = validate_lmm_executed_options_v1(model_options, model_options_binding)
+    pinned = open_pinned_run_directory(run_root.parent, run_id)
+    try:
+        representation = {
+            "schema_version": 1,
+            "model_type": "linear_mixed_effects",
+            "model_options": model_input.to_dict(),
+            "model_options_binding": dict(model_options_binding),
+        }
+        return pinned, seal_executed_input_v1(pinned, representation)
+    except BaseException:
+        pinned.close()
+        raise
+
+
 # ---- core pack registration (dogfood the registry) ----
 # Built-in handlers reach MODEL_REGISTRY via the SAME AnalysisPack mechanism
 # that third-party / future packs (Panel / DID / RDD / TimeSeries / ML) use.
@@ -510,6 +566,8 @@ class EstimationStage:
         )
         from ...artifacts import write_json
         from ...domain import GuardrailIssue, Severity
+        from ...services.pinned_run_directory import LmmPersistenceError
+        from ..packs.linear_mixed_effects.input import LmmInputError
 
         model_type = ctx.requested_model_type or "auto"
         normalized_y = ctx.artifacts["_normalized_y"]
@@ -637,22 +695,50 @@ class EstimationStage:
                             "provided_option_keys": sorted(model_options),
                         },
                     ) from exc
+            if handler.model_type == "linear_mixed_effects":
+                if env.lmm_execution_admission is None:
+                    raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
             model_id, primary, fitted = handler.fit(ctx, env)
-            _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
-            _persist_model_options_execution_binding(
-                run_root,
-                model_type=handler.model_type,
-                model_options=model_options,
-                model_options_binding=model_options_binding,
-            )
+            # LMM's registered PacketEnvelope is its sole model-result source;
+            # never create a competing legacy ``model_results/*.json`` copy.
+            if handler.model_type != "linear_mixed_effects":
+                _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            if handler.model_type != "linear_mixed_effects":
+                _persist_model_options_execution_binding(
+                    run_root,
+                    model_type=handler.model_type,
+                    model_options=model_options,
+                    model_options_binding=model_options_binding,
+                )
             if model_id == "ols_1":
                 _persist_ols_contract_metadata(run_root, primary)
-            model_results.append((model_id, primary))
+            model_results.append(
+                (model_id, _result_for_downstream(handler.model_type, primary))
+            )
             if fitted is not None:
                 fitted_models[model_id] = fitted
             # OLS path (auto-continuous OR explicit `ols`) records robust SE DP.
             if model_id == "ols_1":
                 _robust_se_dp = _ols_robust_se_decision(ctx)
+        except LmmInputError:
+            if (
+                handler.model_type == "linear_mixed_effects"
+                and "_linear_mixed_effects_diagnostic" in ctx.artifacts
+            ):
+                # The runner has already durably recorded the sole
+                # tombstone-bound blocked diagnostic.  Do not duplicate it in
+                # generic lifecycle files.
+                env.step("estimation", "blocked", "Linear Mixed Effects input blocked.")
+                ctx.terminal_status = "blocked"
+                ctx.artifacts["_model_results"] = model_results
+                ctx.artifacts["_fitted_models"] = fitted_models
+                ctx.artifacts["_robust_se_dp"] = _robust_se_dp
+                return ctx
+            raise
+        except LmmPersistenceError:
+            # The admitted worker owns the private lifecycle sink.  This stage
+            # must never use generic errors.json/manifest fallback.
+            raise
         except ValueError as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.

@@ -23,10 +23,10 @@
 `docs/releases/v1.7.2-release-notes.md`。
 
 **当前开发线 = v1.7.3 release train（未发版）**。它包含两个独立工作包，并须独立记账：
-（A）Report/Operations closeout：对 v1.7.2 报告/运行运维能力做真实 DeepSeek 验收、provider
-citation shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measures / LMM：当前只进入
-C1 Contract Sprint，尚未实现、尚未独立评估、尚未发布。A 的完成不得被表述为 B 已完成，反之亦然；
-不得把未 commit/未 tag 的工作称为已发布能力。
+（A）Report/Operations closeout：对 v1.7.2 报告/运行运维能力做真实 provider 验收、citation
+shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measures / LMM：本机组装、完整 gate
+和浏览器运行已通过，但正式发布仍需要精确提交、C2 原生隔离、性能与独立 Evaluation。A 的完成不得
+被表述为 B 已完成，反之亦然；不得把未 tag 的工作称为已发布能力。
 
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
@@ -35,9 +35,9 @@ C1 Contract Sprint，尚未实现、尚未独立评估、尚未发布。A 的完
 
 - v1.7.1：已发布。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
-- v1.7.3：尚未发布；开发基线应从 `origin/main` 开始，是含 Report/Operations closeout 与
-  Repeated Measures/LMM C1 Contract Sprint 的单一 release train；两者证据独立。
-- v1.8+：沿 `data.column.cast` 模式扩展更多受控数据 operation，再评估更高自治和算法扩张。
+- v1.7.3：尚未发布；LMM 已通过本机开发验收，但 Report/Operations、精确提交复验、C2 与性能
+  仍是独立放行条件。
+- v1.8：先完成 Time Series Diagnostics C1；在诊断运行时稳定前，不接入预测模型或预测库。
 
 ---
 
@@ -51,7 +51,8 @@ C1 Contract Sprint，尚未实现、尚未独立评估、尚未发布。A 的完
 | 优先级 | ID | 债务（一句话） | 类别 | 修法 / 下一步 | 阻塞 | 详情 |
 |---|---|---|---|---|---|---|
 | 🟡 版本收口 | V1.7.3-R | v1.7.3 Report/Operations closeout：真实 DeepSeek `cs_did_staggered` 报告、8 图展开/导出、citation shorthand 与 timeout regression | 独立版本工作包 | 依独立计划与证据收口；不得据此宣称 LMM 已完成 | 否 | `plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
-| 🟡 合同冲刺 | V1.7.3-LMM-C1 | Repeated Measures / LMM：仅 C1 Contract Sprint（严格合同、canonical fixture、可行性 spike、薄接缝），不是模型实现、独立评估或发布 | 独立版本工作包 | 先锁定 C1，Feature/Evaluation lane 才可从同一 lock 开始；不得用 Report/Operations 证据替代 | 是，C1 尚未锁定 | `plans/2026-07-18-v1.7.3-repeated-measures-implementation-plan.md` |
+| 🟡 发布保证 | V1.7.3-LMM-RELEASE | LMM 已完成本机组装与浏览器/完整 gate 验收；尚缺精确提交复验、C2 原生冻结隔离、性能和独立 Evaluation | 独立发布工作包 | 对同一精确 SHA 依序记录 C2、性能、浏览器复验与 release signoff；本机使用不受阻塞 | 否 | `release-trains/v1.7.3/release-ledger.json` |
+| 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |
 | 🟡 工程 | W2 | 全量孤儿 upload/draft GC（项目级后台回收未做） | 后端 | 单独设计 GC；本版只回收 discard 创世链的无引用 upload | 否 | §2-W2 |

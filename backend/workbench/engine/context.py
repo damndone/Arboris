@@ -69,6 +69,7 @@ class RunEnv:
     recorder: Any
     on_step: Callable[[str, str, str], None] | None = None
     stop_reason: Callable[[], str | None] | None = None
+    lmm_execution_admission: object | None = None
 
     def checkpoint(self, message: str = "") -> None:
         if self.stop_reason is not None:

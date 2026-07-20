@@ -186,6 +186,51 @@ describe("AnalysisLoopSection", () => {
     expect(screen.queryByTestId("analysis-loop-compare")).toBeNull();
   });
 
+  it("does not mislabel a non-OLS run as an OLS contract", async () => {
+    fetchPackets.mockResolvedValue({
+      ...(response() as object),
+      status: "absent",
+      run: {
+        ...(response() as { run: object }).run,
+        model: "linear_mixed_effects",
+        contract_version: null,
+      },
+      packet: null,
+      children: [],
+    } as never);
+    renderSection();
+
+    expect(await screen.findByTestId("analysis-loop-run-facts")).toHaveTextContent(
+      "linear_mixed_effects contract —",
+    );
+    expect(screen.getByTestId("analysis-loop-run-facts")).not.toHaveTextContent(
+      "OLS contract",
+    );
+  });
+
+  it("uses the selected graph model label when no analysis-loop contract exists", async () => {
+    fetchPackets.mockResolvedValue({
+      ...(response() as object),
+      status: "absent",
+      run: {
+        ...(response() as { run: object }).run,
+        model: null,
+        contract_version: null,
+      },
+      packet: null,
+      children: [],
+    } as never);
+    render(
+      <ProjectRootProvider projectRoot="/tmp/project">
+        <AnalysisLoopSection node={node({ title: "linear_mixed_effects (primary)" })} />
+      </ProjectRootProvider>,
+    );
+
+    expect(await screen.findByTestId("analysis-loop-run-facts")).toHaveTextContent(
+      "linear_mixed_effects (primary) contract —",
+    );
+  });
+
   it("fetches the packet for the active run when a forest node is shared", async () => {
     fetchPackets.mockResolvedValue(response() as never);
     renderSectionForActiveRun("run-child");

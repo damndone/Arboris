@@ -154,9 +154,12 @@ child `data-casts:cf5ed865…`「Cast 2 columns」、sidecar 里 wage/education 
 
 ## 当前排序建议（2026-07-18）
 
-- v1.7.3：作为一个 release train，独立完成 Report/Operations 的报告 marker/export 真实 DeepSeek
-  acceptance、timeout regression 和 release closeout；同时仅开展 Repeated Measures/LMM 的 C1
-  Contract Sprint（合同、fixture、真实 fit feasibility 与薄接缝）。LMM 尚未实现、评估或发布，
-  且任何一个工作包的证据都不能替另一个宣布完成。
-- v1.8+：沿 G1 的 batch/投影模式扩展更多 typed data operations；继续保持 durable graph 不合并、只在 projection 层折叠。
+- v1.7.3：LMM 的本地组装、真实浏览器流程与完整本地 gate 已通过；它仍需以精确 Integration
+  SHA 重验、完成 C2 原生冻结隔离、性能证据和独立 Report/Operations closeout，才能对外发布。
+  这些是发布保证，不得反向阻塞本机使用。
+- v1.8：先做 Time Series Diagnostics 的 C1 合同锁——时间语义、平稳性/季节性/趋势评估、
+  “结论不充分”统一呈现及受条件约束的差分/去趋势建议。C1 后才可并行启动 Pack、Agent、UI/UX
+  和独立 Evaluation；预测不与诊断混做。
+- v1.8 后续：仅在诊断 Pack、公共结果合同和评估基线稳定后，再接入 pmdarima、arch、Prophet
+  等预测能力；每个库必须经过受控依赖、统一结果适配器、回测和失败边界验证后才进入公共运行时。
 - G2 provider-gated 真·看图、P-SBX2 sandbox self-test、P-CE1 `code.execute` preview 缓存：独立立项，不作为 v1.7.3 隐式范围。

@@ -44,6 +44,7 @@ from ..repository.run_repository import (
     _summarize_manifest,
 )
 from ..report_export import ReportExportError, export_report
+from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
 from ..services.run_service import (
     _mark_interrupted_if_dead,
@@ -258,7 +259,20 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     summary = _summarize_manifest(manifest, run_id=run_id)
     errors_path = run_root / "errors.json"
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
-    model_results = _model_results(run_root)
+    try:
+        model_results = _model_results(run_root)
+    except VersionedResultReadError as exc:
+        details = (
+            {"artifact_path": exc.artifact_path}
+            if exc.artifact_path is not None
+            else {}
+        )
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message="The versioned model result cannot be read.",
+            details=details,
+        ) from exc
     errors = _normalize_issue_stream(errors, model_results)
     preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
     return {

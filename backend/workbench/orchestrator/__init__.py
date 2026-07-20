@@ -206,9 +206,23 @@ def run_workflow(
     from ..lineage.hashing import dag_hash
     from ..lineage.run_inputs import write_run_inputs
     from ..lineage.upload_store import store_upload_bytes
-    from ..model_options import bind_new_model_options
+    from ..model_options import ModelOptionsError, bind_new_model_options
 
     project_root = Path(project_root)
+    if model_type == "linear_mixed_effects":
+        from ..services.execution_profile import (
+            ExecutionProfileError,
+            current_execution_profile,
+        )
+
+        try:
+            current_execution_profile().require_lmm_admission()
+        except ExecutionProfileError as error:
+            raise ModelOptionsError(
+                error.code,
+                "Linear mixed-effects execution is unavailable until explicit "
+                "local containment is admitted.",
+            ) from None
     bound_model_options = bind_new_model_options(
         model_type, {} if model_options is None else model_options
     )
@@ -505,6 +519,7 @@ def _run_workflow(
     honest_did: bool = False,
     model_options: dict[str, object] | None = None,
     model_options_binding: dict[str, str] | None = None,
+    lmm_execution_admission: object | None = None,
     stop_reason: Callable[[], str | None] | None = None,
 ) -> dict[str, str]:
     """Thin pipeline driver: build env+ctx, iterate PIPELINE, short-circuit on
@@ -528,6 +543,7 @@ def _run_workflow(
         recorder=_recorder,
         on_step=on_step,
         stop_reason=stop_reason,
+        lmm_execution_admission=lmm_execution_admission,
     )
     ctx = ModelingContext(
         data=DataHandle(

@@ -6,7 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from workbench.analysis_loop.canonical import sha256_canonical
+from workbench.canonical import sha256_canonical
+from workbench.model_options import ModelOptionsBinding, ModelOptionsError, verify_bound_model_options
 from workbench.contracts.agent.repeated_measures import (
     LMM_BLOCKING_CODES,
     LMM_RECOVERY_ACTION_ID,
@@ -133,7 +134,9 @@ class LmmDiagnostic:
             if self.action_candidate is not None:
                 raise ContractError("blocking diagnostic must not include an action_candidate")
             expected_status = (
-                "failed" if self.code == "LMM_CONVERGENCE_FAILED" else "blocked"
+                "failed"
+                if self.code in {"LMM_CONVERGENCE_FAILED", "LMM_UNEXPECTED_FIT_EXCEPTION"}
+                else "blocked"
             )
             if self.status != expected_status or self.severity != "error":
                 raise ContractError("blocking diagnostic must be an error at its locked status")
@@ -184,3 +187,57 @@ def build_lmm_result_identity(value: Mapping[str, object]) -> str:
 
     require_exact_keys(value, _LMM_RESULT_IDENTITY_FIELDS, "LMM result identity")
     return sha256_canonical(freeze_json(value, "LMM result identity"))
+
+
+def validate_lmm_executed_options_v1(
+    model_options: object, model_options_binding: object
+) -> LmmModelInput:
+    """Validate the persisted LMM option pair without resolving or loading a Pack.
+
+    This is intentionally a direct-literal contract check.  The public Agent
+    view must never turn a read into implicit registry bootstrap.
+    """
+
+    try:
+        bound = verify_bound_model_options(model_options, model_options_binding)
+    except ModelOptionsError as exc:
+        raise ContractError("LMM executed options binding is invalid") from exc
+    if bound.binding is None or not bound.payload:
+        raise ContractError("LMM executed options binding is required")
+    expected = (
+        LMM_MODEL_TYPE,
+        "linear_mixed_effects_1",
+        "linear_mixed_effects@1.0",
+        LMM_CONTRACT_VERSION,
+    )
+    actual = (
+        bound.binding.owner_model_type,
+        bound.binding.owner_model_id,
+        bound.binding.producer_version,
+        bound.binding.input_contract_version,
+    )
+    if actual != expected:
+        raise ContractError("LMM executed options owner mismatch")
+    return LmmModelInput.from_dict(bound.payload)
+
+
+def lookup_registered_lmm_contract_without_bootstrap() -> bool:
+    """Inspect only the existing registry map; never import a loader or stage."""
+
+    from workbench.engine.registry import MODEL_REGISTRY, ModelHandler
+    from workbench.model_options import ModelOptionsContract
+
+    handler = MODEL_REGISTRY.get(LMM_MODEL_TYPE)
+    if (
+        not isinstance(handler, ModelHandler)
+        or handler.model_type != LMM_MODEL_TYPE
+        or handler.model_id != "linear_mixed_effects_1"
+        or not callable(handler.validate_model_options)
+    ):
+        return False
+    contract = handler.model_options_contract
+    return bool(
+        isinstance(contract, ModelOptionsContract)
+        and contract.producer_version == "linear_mixed_effects@1.0"
+        and contract.input_contract_version == LMM_CONTRACT_VERSION
+    )

@@ -57,6 +57,99 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 # Estimator families whose focal/treatment variable is structural (not user-declared
 # via focal_x). For these, persisted focal_x MUST be empty (spec §5).
 _STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
+_LMM_MODEL_TYPE = "linear_mixed_effects"
+
+
+class LmmExecutionAdmissionError(RuntimeError):
+    """Closed pre-fit LMM admission failure with no path or parser detail."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _require_lmm_frozen_containment(model_type: object) -> dict[str, object] | None:
+    """Require the explicit local profile before any LMM materialisation.
+
+    The default keeps the prior early rejection.  A deliberately selected
+    local profile is admitted only after its real OS-sandbox canary succeeds;
+    it is local-development execution, not C2 candidate-evaluation evidence.
+    """
+
+    if model_type == _LMM_MODEL_TYPE:
+        from .execution_profile import ExecutionProfileError, current_execution_profile
+
+        try:
+            current_execution_profile().require_lmm_admission()
+        except ExecutionProfileError as error:
+            message = (
+                "Linear mixed-effects execution is unavailable until explicit "
+                "local containment is admitted."
+            )
+            raise ModelOptionsError(error.code, message) from None
+        return {
+            "execution_profile": "local_contained",
+            "containment_evidence": "local_startup_canary",
+            "release_evaluation_eligible": False,
+        }
+    return None
+
+
+def _record_lmm_persistence_failure(*, admission: object, code: str, retryable: bool) -> None:
+    """Use the admission-bound sink; generic lifecycle files are forbidden."""
+
+    from ..services.pinned_run_directory import _persist_lmm_lifecycle_failure
+
+    _persist_lmm_lifecycle_failure(
+        admission=admission, code=code, retryable=retryable
+    )
+
+
+def _safe_lmm_lifecycle_failure(exc: Exception) -> tuple[str, bool]:
+    """Normalize every admitted LMM failure without examining exception text."""
+
+    from ..services.pinned_run_directory import LmmPersistenceError, PinnedRunError
+
+    if isinstance(exc, LmmPersistenceError):
+        return exc.code, exc.retryable
+    if isinstance(exc, (PinnedRunError, LmmExecutionAdmissionError)):
+        code = exc.code
+        return (code if code.startswith("LMM_") else "LMM_LIFECYCLE_FAILED", False)
+    return "LMM_LIFECYCLE_FAILED", False
+
+
+def _admit_lmm_execution_for_bg_run(
+    *, run_root: Path, run_id: str, model_type: str,
+    model_options: dict[str, object] | None, model_options_binding: dict[str, str] | None,
+) -> object | None:
+    """Create the one pre-fit LMM handoff from a pinned, matching input snapshot."""
+
+    if model_type != "linear_mixed_effects":
+        return None
+    from ..canonical import canonical_json_v1
+    from ..services.pinned_run_directory import _new_lmm_execution_admission, open_pinned_run_directory, seal_executed_input_v1
+
+    if run_root.name != run_id or not isinstance(model_options, dict) or not isinstance(model_options_binding, dict):
+        raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+    pinned = open_pinned_run_directory(run_root.parent, run_id)
+    lmm_execution_admission: _BgLmmExecutionAdmission | None = None
+    try:
+        snapshot = pinned.read_run_inputs_snapshot().value
+        form = snapshot.get("form")
+        if not isinstance(form, dict) or form.get("model_type") != "linear_mixed_effects":
+            raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+        if canonical_json_v1(form.get("model_options")) != canonical_json_v1(model_options) or canonical_json_v1(form.get("model_options_binding")) != canonical_json_v1(model_options_binding):
+            raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+        seal = seal_executed_input_v1(pinned, {
+            "schema_version": 1,
+            "model_type": "linear_mixed_effects",
+            "model_options": model_options,
+            "model_options_binding": model_options_binding,
+        })
+        return _new_lmm_execution_admission(pinned, seal)
+    except BaseException:
+        pinned.close()
+        raise
 
 
 def _safe_int(value: str) -> int:
@@ -311,6 +404,10 @@ def _submit_run(
         if bound_model_options.binding is not None
         else None
     )
+    # This must happen before uploads or runs are materialized.  A rejected
+    # LMM request therefore leaves neither executable evidence nor a run that
+    # another boundary could later mistake for a C2-approved candidate.
+    execution_profile = _require_lmm_frozen_containment(form.get("model_type", "auto"))
     form = {**form, "model_options": model_options}
     if model_options_binding is not None:
         form["model_options_binding"] = model_options_binding
@@ -415,6 +512,7 @@ def _submit_run(
         source_lineage=source_lineage if rerun_of is not None else None,
         rerun_from=rerun_from,
         source_run_id=rerun_of,
+        execution_profile=execution_profile,
     )
     if before_dispatch is not None:
         before_dispatch(run.run_id)
@@ -503,7 +601,12 @@ def _bg_run(
             "status": status if status not in ("start", "complete") else None,
         })
 
+    lmm_execution_admission: object | None = None
     try:
+        lmm_execution_admission = _admit_lmm_execution_for_bg_run(
+            run_root=run_root, run_id=run_id, model_type=model_type,
+            model_options=model_options, model_options_binding=model_options_binding,
+        )
         result = _run_workflow(
             run_root, run_id, [saved_path],
             mode, y, x_columns, config, started_at,
@@ -534,6 +637,7 @@ def _bg_run(
             honest_did=honest_did,
             model_options=model_options,
             model_options_binding=model_options_binding,
+            lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )
         status = result["status"]
@@ -541,6 +645,31 @@ def _bg_run(
     except RunInterruptionRequested as exc:
         reason = exc.reason
         code = "WORKFLOW_CANCELLED" if reason == "cancelled" else "WORKFLOW_TIMEOUT"
+        if model_type == "linear_mixed_effects" and lmm_execution_admission is not None:
+            # An admitted LMM owns its lifecycle persistence.  A cooperative
+            # interruption is not allowed to escape into legacy manifest or
+            # errors.json writers, because those writers are not bound to the
+            # sealed input/admission capability.
+            lmm_code = (
+                "LMM_EXECUTION_CANCELLED"
+                if reason == "cancelled"
+                else "LMM_EXECUTION_TIMEOUT"
+            )
+            try:
+                _record_lmm_persistence_failure(
+                    admission=lmm_execution_admission,
+                    code=lmm_code,
+                    retryable=False,
+                )
+            except Exception:
+                # A failed private sink cannot authorize generic fallback.
+                pass
+            events.emit_terminal(
+                run_id,
+                "PERSISTENCE_INCOMPLETE",
+                f"LMM persistence incomplete: {lmm_code}",
+            )
+            return
         message = (
             "Workflow interrupted by user cancellation."
             if reason == "cancelled"
@@ -557,6 +686,25 @@ def _bg_run(
         })
         events.emit_terminal(run_id, "interrupted", message)
     except Exception as exc:
+        if model_type == "linear_mixed_effects":
+            code, retryable = _safe_lmm_lifecycle_failure(exc)
+            if lmm_execution_admission is not None:
+                try:
+                    _record_lmm_persistence_failure(
+                        admission=lmm_execution_admission,
+                        code=code,
+                        retryable=retryable,
+                    )
+                except Exception:
+                    # No generic fallback is authorized when the private sink
+                    # is itself unavailable; the event remains incomplete.
+                    pass
+            events.emit_terminal(
+                run_id,
+                "PERSISTENCE_INCOMPLETE",
+                f"LMM persistence incomplete: {code}",
+            )
+            return
         _write_manifest(
             run_root, run_id, mode, "failed",
             _lineage([saved_path]),
@@ -571,6 +719,9 @@ def _bg_run(
         })
         events.emit_terminal(run_id, "failed", f"Workflow failed: {exc}")
     finally:
+        close = getattr(lmm_execution_admission, "_close_for_test", None)
+        if callable(close):
+            close()
         events.release_slot(run_id)
 
 

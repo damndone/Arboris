@@ -187,6 +187,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         "inspect_operation_contract",
         "inspect_diagnostics",
         "inspect_result_summary",
+        "inspect_repeated_measures_recipe",
         "inspect_artifact_preview",
     } <= tool_ids
     descriptors = {
@@ -198,6 +199,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
             "inspect_operation_contract",
             "inspect_diagnostics",
             "inspect_result_summary",
+            "inspect_repeated_measures_recipe",
             "inspect_artifact_preview",
         }
     }
@@ -206,6 +208,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         "inspect_operation_contract",
         "inspect_diagnostics",
         "inspect_result_summary",
+        "inspect_repeated_measures_recipe",
         "inspect_artifact_preview",
     }
     for descriptor in descriptors.values():

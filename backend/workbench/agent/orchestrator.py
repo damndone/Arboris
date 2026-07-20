@@ -1846,7 +1846,7 @@ class WorkbenchOrchestrator:
             # storage module depends on the Agent persistence package, whose
             # package initializer also exposes this orchestrator.
             from ..analysis_loop.observation import build_and_store_analysis_loop_packets
-            from ..analysis_loop.canonical import sha256_canonical
+            from ..canonical import sha256_canonical
             from ..analysis_loop.resolver import (
                 resolve_analysis_loop_inputs,
                 resolve_analysis_loop_run,

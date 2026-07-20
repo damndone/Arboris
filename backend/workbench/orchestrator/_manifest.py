@@ -137,6 +137,7 @@ def _write_manifest(
     source_lineage: dict[str, Any] | None = None,
     rerun_from: dict[str, Any] | None = None,
     source_run_id: str | None = None,
+    execution_profile: dict[str, object] | None = None,
 ) -> None:
     existing_lineage: dict[str, Any] = {}
     existing_path = run_root / "run_manifest.json"
@@ -153,6 +154,9 @@ def _write_manifest(
                 "source_lineage",
                 "rerun_from",
                 "source_run_id",
+                "execution_profile",
+                "containment_evidence",
+                "release_evaluation_eligible",
             ):
                 if field in existing:
                     existing_lineage[field] = existing[field]
@@ -170,6 +174,8 @@ def _write_manifest(
         payload["requested_model_type"] = requested_model_type
     if model_routing is not None:
         payload["model_routing"] = model_routing
+    if execution_profile is not None:
+        payload.update(execution_profile)
     if rerun_of is not None:
         payload["rerun_of"] = rerun_of
     for field, value in (

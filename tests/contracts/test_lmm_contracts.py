@@ -22,6 +22,7 @@ from workbench.contracts.model.linear_mixed_effects import (
     LmmDiagnostic,
     LmmModelInput,
     build_lmm_result_identity,
+    lookup_registered_lmm_contract_without_bootstrap,
 )
 
 
@@ -135,6 +136,7 @@ def test_lmm_contract_constants_lock_the_initial_recipe() -> None:
             "LMM_GROUP_VARIES_WITHIN_SUBJECT",
             "LMM_INSUFFICIENT_REPEATED_OBSERVATIONS",
             "LMM_CONVERGENCE_FAILED",
+            "LMM_UNEXPECTED_FIT_EXCEPTION",
         }
     )
 
@@ -149,6 +151,24 @@ def test_blocking_missing_subject_has_no_action_candidate() -> None:
     )
 
     assert diagnostic.to_dict()["action_candidate"] is None
+
+
+def test_unexpected_fit_exception_is_a_closed_terminal_diagnostic() -> None:
+    diagnostic = LmmDiagnostic(
+        code="LMM_UNEXPECTED_FIT_EXCEPTION",
+        severity="error",
+        status="failed",
+        evidence={},
+        action_candidate=None,
+    )
+
+    assert diagnostic.to_dict() == {
+        "code": "LMM_UNEXPECTED_FIT_EXCEPTION",
+        "severity": "error",
+        "status": "failed",
+        "evidence": {},
+        "action_candidate": None,
+    }
 
 
 def test_random_slope_candidate_is_exact_and_confirmation_bound() -> None:
@@ -171,3 +191,15 @@ def test_random_slope_candidate_is_exact_and_confirmation_bound() -> None:
         "patch": {"model_options": {"random_slope": False}},
         "required_confirmation": True,
     }
+
+
+def test_non_loading_lmm_registry_lookup_rejects_malformed_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    from workbench.engine.registry import MODEL_REGISTRY, ModelHandler
+    from workbench.model_options import ModelOptionsContract
+
+    monkeypatch.setitem(MODEL_REGISTRY, LMM_MODEL_TYPE, ModelHandler(
+        model_type="wrong", model_id="linear_mixed_effects_1", serves_y_types=(),
+        fit=lambda *_: None, validate_model_options=None,
+        model_options_contract=ModelOptionsContract("linear_mixed_effects@1.0", "1.0"),
+    ))
+    assert lookup_registered_lmm_contract_without_bootstrap() is False

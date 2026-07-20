@@ -38,6 +38,7 @@ import {
   PredictionResultCard,
   type PredictionResultData,
 } from "./runResult/PredictionResultCard";
+import { PacketPanel } from "./workbench/repeatedMeasures/PacketPanel";
 
 type Props = {
   projectRoot: string;
@@ -525,6 +526,11 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       <CSDiagnosticsCard diagnostics={csDiagnostics} />
       <DCDHResultCard result={dcdhResult} />
+      {(detail.model_results ?? [])
+        .filter((result) => result.model_type === "linear_mixed_effects")
+        .map((result) => (
+          <PacketPanel key={result.model_id} result={result} />
+        ))}
       {isLive && (
         <section className="progress-panel" aria-label="run progress">
           <h3 className="subhead">Progress</h3>
