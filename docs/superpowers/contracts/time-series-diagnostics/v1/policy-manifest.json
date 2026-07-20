@@ -1,0 +1,23 @@
+{
+  "policy_version": "time_series_diagnostics_c1_v1",
+  "minimums": {
+    "hard_input_min": 20,
+    "adf_min": 20,
+    "kpss_min": 20,
+    "acf_min": 20,
+    "pacf_min": 20,
+    "trend_min": 8,
+    "minimum_effective_lag": 5,
+    "minimum_complete_cycles": 2
+  },
+  "conclusion_values": [
+    "suitable_with_caveats",
+    "not_suitable",
+    "inconclusive"
+  ],
+  "null_test_outcomes": [
+    "reject",
+    "fail_to_reject",
+    "undetermined"
+  ]
+}
