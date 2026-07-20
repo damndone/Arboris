@@ -19,5 +19,40 @@
     "reject",
     "fail_to_reject",
     "undetermined"
+  ],
+  "alpha": 0.05,
+  "adf": {
+    "regression": "c",
+    "p_value_statuses": [
+      "approximate",
+      "unavailable"
+    ]
+  },
+  "kpss": {
+    "null": "level_stationarity",
+    "p_value_statuses": [
+      "approximate",
+      "lower_bound",
+      "upper_bound",
+      "unavailable"
+    ]
+  },
+  "acf": {
+    "method": "standard",
+    "lag_zero": "included",
+    "confidence_level": 0.95
+  },
+  "pacf": {
+    "method": "ywm",
+    "lag_zero": "included",
+    "confidence_level": 0.95
+  },
+  "mandatory_caveat_codes": [
+    "RAW_LEVEL_CORRELATION_ONLY",
+    "NO_MODEL_ORDER_INFERENCE",
+    "LEVEL_STATIONARITY_ONLY",
+    "NO_FORECAST_ELIGIBILITY",
+    "NO_MODEL_SELECTION",
+    "STRUCTURAL_BREAKS_NOT_ASSESSED"
   ]
 }
