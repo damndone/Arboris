@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import re
 from typing import Any, Literal
 
+from workbench.canonical import CanonicalJSONError, sha256_canonical
 from workbench.contracts.common.envelope import (
     ContractError,
     freeze_json,
@@ -86,6 +89,86 @@ KPSS_P_VALUE_STATUSES = frozenset(
 LAG_ZERO_POLICIES = frozenset({"included"})
 ACF_METHODS = frozenset({"standard"})
 PACF_METHODS = frozenset({"ywm"})
+
+FACTS_PACKET_CONTRACT = "time_series_diagnostics.facts"
+ASSESSMENT_PACKET_CONTRACT = "time_series_diagnostics.assessment"
+ASSESSMENT_SCOPE = "first_slice_diagnostic_evidence"
+
+TIME_SERIES_CAVEAT_CODES = frozenset(
+    {
+        "RAW_LEVEL_CORRELATION_ONLY",
+        "NO_MODEL_ORDER_INFERENCE",
+        "LEVEL_STATIONARITY_ONLY",
+        "NO_FORECAST_ELIGIBILITY",
+        "NO_MODEL_SELECTION",
+        "STRUCTURAL_BREAKS_NOT_ASSESSED",
+    }
+)
+TIME_SERIES_PACKET_REASON_CODES = frozenset(
+    {
+        "TIME_VALUE_MISSING",
+        "TIME_PARSE_FAILED",
+        "IRREGULAR_SPACING",
+        "EXPECTED_TIME_POINT_ABSENT",
+        "FREQUENCY_DECLARATION_MISMATCH",
+        "TREND_NOT_ASSESSED",
+        "NO_DECLARED_CANDIDATE_PERIOD",
+        *TIME_SERIES_CAVEAT_CODES,
+        *TIME_SERIES_ADVISORY_CODES,
+        *OPERATION_REASON_CODES,
+        "UNSUPPORTED_DEPENDENCY_MANIFEST",
+    }
+)
+
+_FACTS_PACKET_FIELDS = {
+    "contract",
+    "contract_version",
+    "packet_id",
+    "producer_version",
+    "policy_version",
+    "run_id",
+    "execution_timestamp",
+    "input_identity",
+    "configuration",
+    "numeric_runtime_manifest_digest",
+    "facts",
+    "facts_content_digest",
+}
+_ASSESSMENT_PACKET_FIELDS = {
+    "contract",
+    "contract_version",
+    "packet_id",
+    "producer_version",
+    "run_id",
+    "execution_timestamp",
+    "facts_packet_id",
+    "facts_content_digest",
+    "decision_policy_version",
+    "assessment_scope",
+    "conclusion",
+    "caveat_codes",
+    "caveat_fact_refs",
+    "advisories",
+    "assessment_content_digest",
+}
+_ADVISORY_FIELDS = {
+    "advisory_code",
+    "advisory_version",
+    "evidence_fact_refs",
+    "precondition_results",
+    "source_facts_content_digest",
+    "decision_policy_version",
+    "effects_summary",
+    "incompatibility_codes",
+    "input_identity",
+    "effect",
+    "execution_available",
+}
+_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_FACT_PATH_PATTERN = re.compile(r"^facts(?:\.[A-Za-z_][A-Za-z0-9_-]*)+$")
+_UTC_TIMESTAMP_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"
+)
 
 _TIME_SERIES_DIAGNOSTIC_PROPOSAL_FIELDS = {
     "grid_regularity",
@@ -523,3 +606,409 @@ def derive_assessment(facts: TimeSeriesDiagnosticFacts) -> TimeSeriesDiagnosticA
     ):
         advisories = (_advisory("REVIEW_TREND_HANDLING"),)
     return TimeSeriesDiagnosticAssessment("suitable_with_caveats", advisories)
+
+
+def _require_non_empty_packet_string(value: Any, field_name: str) -> None:
+    if type(value) is not str or not value:
+        raise ContractError(f"{field_name} must be a non-empty string")
+
+
+def _require_digest(value: Any, field_name: str) -> None:
+    if type(value) is not str or _DIGEST_PATTERN.fullmatch(value) is None:
+        raise ContractError(f"{field_name} must be a lowercase SHA-256 digest")
+
+
+def _require_utc_timestamp(value: Any) -> None:
+    if type(value) is not str or _UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        raise ContractError(
+            "execution_timestamp must be an RFC 3339 UTC timestamp ending in Z"
+        )
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ContractError("execution_timestamp must be a valid UTC timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(None):
+        raise ContractError("execution_timestamp must be a UTC timestamp")
+
+
+def _freeze_required_mapping(value: Any, field_name: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ContractError(f"{field_name} must be a mapping")
+    frozen = freeze_json(value, field_name)
+    if not isinstance(frozen, Mapping):  # pragma: no cover - guarded above
+        raise ContractError(f"{field_name} must be a mapping")
+    return frozen
+
+
+def _normalize_fact_refs(value: Any, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ContractError(f"{field_name} must be an array")
+    refs: list[str] = []
+    for ref in value:
+        if type(ref) is not str or _FACT_PATH_PATTERN.fullmatch(ref) is None:
+            raise ContractError(f"{field_name} contains a malformed fact reference")
+        refs.append(ref)
+    return tuple(sorted(refs))
+
+
+def _normalize_closed_codes(
+    value: Any, allowed: frozenset[str], field_name: str
+) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ContractError(f"{field_name} must be an array")
+    codes: list[str] = []
+    for code in value:
+        _require_closed_string(code, allowed, field_name)
+        codes.append(code)
+    if len(set(codes)) != len(codes):
+        raise ContractError(f"{field_name} must not contain duplicates")
+    return tuple(sorted(codes))
+
+
+def _normalize_advisory(
+    value: Any, *, facts_content_digest_value: str
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ContractError("advisory must be a mapping")
+    require_exact_keys(value, _ADVISORY_FIELDS, "advisory")
+    _require_closed_string(value["advisory_code"], TIME_SERIES_ADVISORY_CODES, "advisory_code")
+    _require_non_empty_packet_string(value["advisory_version"], "advisory_version")
+    evidence_refs = _normalize_fact_refs(value["evidence_fact_refs"], "evidence_fact_refs")
+    preconditions = _freeze_required_mapping(
+        value["precondition_results"], "precondition_results"
+    )
+    for name, result in preconditions.items():
+        if (
+            type(name) is not str
+            or type(result) is not str
+            or result not in TREND_ADVISORY_PRECONDITIONS
+        ):
+            raise ContractError("precondition_results values must be true, false, or unknown")
+    if any(result != "true" for result in preconditions.values()):
+        raise ContractError("advisory preconditions must all be true")
+    _require_digest(value["source_facts_content_digest"], "source_facts_content_digest")
+    if value["source_facts_content_digest"] != facts_content_digest_value:
+        raise ContractError("advisory source_facts_content_digest does not match Facts")
+    _require_non_empty_packet_string(
+        value["decision_policy_version"], "decision_policy_version"
+    )
+    effects_summary = freeze_json(value["effects_summary"], "effects_summary")
+    incompatibility_codes = _normalize_closed_codes(
+        value["incompatibility_codes"],
+        TIME_SERIES_PACKET_REASON_CODES,
+        "incompatibility_codes",
+    )
+    input_identity = _freeze_required_mapping(value["input_identity"], "input_identity")
+    if value["effect"] != "advisory_only":
+        raise ContractError("advisory effect must be advisory_only")
+    if value["execution_available"] is not False:
+        raise ContractError("advisory execution_available must be false")
+    return freeze_json(
+        {
+            "advisory_code": value["advisory_code"],
+            "advisory_version": value["advisory_version"],
+            "evidence_fact_refs": list(evidence_refs),
+            "precondition_results": preconditions,
+            "source_facts_content_digest": value["source_facts_content_digest"],
+            "decision_policy_version": value["decision_policy_version"],
+            "effects_summary": effects_summary,
+            "incompatibility_codes": list(incompatibility_codes),
+            "input_identity": input_identity,
+            "effect": value["effect"],
+            "execution_available": value["execution_available"],
+        },
+        "advisory",
+    )
+
+
+def _facts_projection_from_normalized(value: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: thaw_json(value[key])
+        for key in (
+            "contract",
+            "contract_version",
+            "producer_version",
+            "policy_version",
+            "input_identity",
+            "configuration",
+            "numeric_runtime_manifest_digest",
+            "facts",
+        )
+    }
+
+
+def _packet_canonical_digest(value: Any, packet_name: str) -> str:
+    try:
+        return sha256_canonical(value)
+    except CanonicalJSONError as exc:
+        raise ContractError(f"{packet_name} contains invalid canonical JSON") from exc
+
+
+def _normalize_facts_packet(
+    value: Mapping[str, object], *, verify_digest: bool
+) -> dict[str, object]:
+    require_exact_keys(value, _FACTS_PACKET_FIELDS, "facts packet")
+    if value["contract"] != FACTS_PACKET_CONTRACT:
+        raise ContractError("facts packet contract is not declared")
+    if value["contract_version"] != TIME_SERIES_DIAGNOSTICS_CONTRACT_VERSION:
+        raise ContractError("facts packet contract_version is not declared")
+    for field_name in ("packet_id", "producer_version", "policy_version", "run_id"):
+        _require_non_empty_packet_string(value[field_name], field_name)
+    _require_utc_timestamp(value["execution_timestamp"])
+    input_identity = _freeze_required_mapping(value["input_identity"], "input_identity")
+    configuration = _freeze_required_mapping(value["configuration"], "configuration")
+    facts = _freeze_required_mapping(value["facts"], "facts")
+    _require_digest(
+        value["numeric_runtime_manifest_digest"],
+        "numeric_runtime_manifest_digest",
+    )
+    _require_digest(value["facts_content_digest"], "facts_content_digest")
+    normalized = {
+        "contract": value["contract"],
+        "contract_version": value["contract_version"],
+        "packet_id": value["packet_id"],
+        "producer_version": value["producer_version"],
+        "policy_version": value["policy_version"],
+        "run_id": value["run_id"],
+        "execution_timestamp": value["execution_timestamp"],
+        "input_identity": input_identity,
+        "configuration": configuration,
+        "numeric_runtime_manifest_digest": value["numeric_runtime_manifest_digest"],
+        "facts": facts,
+        "facts_content_digest": value["facts_content_digest"],
+    }
+    if verify_digest:
+        expected_digest = _packet_canonical_digest(
+            _facts_projection_from_normalized(normalized), "facts packet"
+        )
+        if value["facts_content_digest"] != expected_digest:
+            raise ContractError("facts_content_digest does not match Facts content")
+    return normalized
+
+
+@dataclass(frozen=True)
+class TimeSeriesDiagnosticFactsPacket:
+    """Strict, immutable D06 Facts packet; this type performs no diagnostics."""
+
+    contract: str
+    contract_version: str
+    packet_id: str
+    producer_version: str
+    policy_version: str
+    run_id: str
+    execution_timestamp: str
+    input_identity: Mapping[str, object]
+    configuration: Mapping[str, object]
+    numeric_runtime_manifest_digest: str
+    facts: Mapping[str, object]
+    facts_content_digest: str
+
+    def __post_init__(self) -> None:
+        normalized = _normalize_facts_packet(self.to_dict(), verify_digest=True)
+        for field_name, field_value in normalized.items():
+            object.__setattr__(self, field_name, field_value)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            field_name: thaw_json(getattr(self, field_name))
+            for field_name in _FACTS_PACKET_FIELDS
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "TimeSeriesDiagnosticFactsPacket":
+        normalized = _normalize_facts_packet(value, verify_digest=False)
+        return cls(**normalized)
+
+
+def facts_content_projection(packet: Mapping[str, object] | TimeSeriesDiagnosticFactsPacket) -> dict[str, object]:
+    value = packet.to_dict() if isinstance(packet, TimeSeriesDiagnosticFactsPacket) else packet
+    normalized = _normalize_facts_packet(value, verify_digest=False)
+    return _facts_projection_from_normalized(normalized)
+
+
+def facts_content_digest(packet: Mapping[str, object] | TimeSeriesDiagnosticFactsPacket) -> str:
+    return _packet_canonical_digest(facts_content_projection(packet), "facts packet")
+
+
+def _assessment_projection_from_normalized(value: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: thaw_json(value[key])
+        for key in (
+            "facts_content_digest",
+            "decision_policy_version",
+            "assessment_scope",
+            "conclusion",
+            "caveat_codes",
+            "caveat_fact_refs",
+            "advisories",
+        )
+    }
+
+
+def _normalize_assessment_packet(
+    value: Mapping[str, object], *, verify_digest: bool
+) -> dict[str, object]:
+    require_exact_keys(value, _ASSESSMENT_PACKET_FIELDS, "assessment packet")
+    if value["contract"] != ASSESSMENT_PACKET_CONTRACT:
+        raise ContractError("assessment packet contract is not declared")
+    if value["contract_version"] != TIME_SERIES_DIAGNOSTICS_CONTRACT_VERSION:
+        raise ContractError("assessment packet contract_version is not declared")
+    for field_name in (
+        "packet_id",
+        "producer_version",
+        "run_id",
+        "facts_packet_id",
+        "decision_policy_version",
+    ):
+        _require_non_empty_packet_string(value[field_name], field_name)
+    _require_utc_timestamp(value["execution_timestamp"])
+    _require_digest(value["facts_content_digest"], "facts_content_digest")
+    if value["assessment_scope"] != ASSESSMENT_SCOPE:
+        raise ContractError("assessment_scope is not declared")
+    _require_closed_string(value["conclusion"], TIME_SERIES_DIAGNOSTIC_CONCLUSIONS, "conclusion")
+    caveat_codes = _normalize_closed_codes(
+        value["caveat_codes"], TIME_SERIES_CAVEAT_CODES, "caveat_codes"
+    )
+    caveat_fact_refs = _normalize_fact_refs(value["caveat_fact_refs"], "caveat_fact_refs")
+    if not isinstance(value["advisories"], (list, tuple)):
+        raise ContractError("advisories must be an array")
+    advisories = tuple(
+        _normalize_advisory(
+            advisory,
+            facts_content_digest_value=value["facts_content_digest"],
+        )
+        for advisory in value["advisories"]
+    )
+    advisory_keys = [
+        (advisory["advisory_code"], advisory["advisory_version"])
+        for advisory in advisories
+    ]
+    if len(set(advisory_keys)) != len(advisory_keys):
+        raise ContractError("advisories must not contain duplicate identities")
+    advisories = tuple(sorted(advisories, key=lambda item: (item["advisory_code"], item["advisory_version"])))
+    _require_digest(value["assessment_content_digest"], "assessment_content_digest")
+    normalized = {
+        "contract": value["contract"],
+        "contract_version": value["contract_version"],
+        "packet_id": value["packet_id"],
+        "producer_version": value["producer_version"],
+        "run_id": value["run_id"],
+        "execution_timestamp": value["execution_timestamp"],
+        "facts_packet_id": value["facts_packet_id"],
+        "facts_content_digest": value["facts_content_digest"],
+        "decision_policy_version": value["decision_policy_version"],
+        "assessment_scope": value["assessment_scope"],
+        "conclusion": value["conclusion"],
+        "caveat_codes": list(caveat_codes),
+        "caveat_fact_refs": list(caveat_fact_refs),
+        "advisories": list(advisories),
+        "assessment_content_digest": value["assessment_content_digest"],
+    }
+    normalized = dict(freeze_json(normalized, "assessment packet"))
+    if verify_digest:
+        expected_digest = _packet_canonical_digest(
+            _assessment_projection_from_normalized(normalized), "assessment packet"
+        )
+        if value["assessment_content_digest"] != expected_digest:
+            raise ContractError("assessment_content_digest does not match Assessment content")
+    return normalized
+
+
+@dataclass(frozen=True)
+class TimeSeriesDiagnosticAssessmentPacket:
+    """Strict, immutable D06 Assessment packet derived from Facts identity."""
+
+    contract: str
+    contract_version: str
+    packet_id: str
+    producer_version: str
+    run_id: str
+    execution_timestamp: str
+    facts_packet_id: str
+    facts_content_digest: str
+    decision_policy_version: str
+    assessment_scope: str
+    conclusion: str
+    caveat_codes: tuple[str, ...]
+    caveat_fact_refs: tuple[str, ...]
+    advisories: tuple[Mapping[str, object], ...]
+    assessment_content_digest: str
+    facts_packet: TimeSeriesDiagnosticFactsPacket
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.facts_packet, TimeSeriesDiagnosticFactsPacket):
+            raise ContractError("facts_packet must be a TimeSeriesDiagnosticFactsPacket")
+        if (
+            self.facts_packet_id != self.facts_packet.packet_id
+            or self.facts_content_digest != self.facts_packet.facts_content_digest
+        ):
+            raise ContractError("assessment facts_content_digest does not match Facts packet")
+        normalized = _normalize_assessment_packet(self.to_dict(), verify_digest=True)
+        for field_name, field_value in normalized.items():
+            object.__setattr__(self, field_name, field_value)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            field_name: thaw_json(getattr(self, field_name))
+            for field_name in _ASSESSMENT_PACKET_FIELDS
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        value: Mapping[str, object],
+        *,
+        facts_packet: Mapping[str, object] | TimeSeriesDiagnosticFactsPacket | None = None,
+    ) -> "TimeSeriesDiagnosticAssessmentPacket":
+        if facts_packet is None:
+            raise ContractError("assessment packet requires a bound Facts packet")
+        facts = (
+            facts_packet
+            if isinstance(facts_packet, TimeSeriesDiagnosticFactsPacket)
+            else TimeSeriesDiagnosticFactsPacket.from_dict(facts_packet)
+        )
+        normalized = _normalize_assessment_packet(value, verify_digest=False)
+        return cls(**normalized, facts_packet=facts)
+
+
+def assessment_content_projection(
+    packet: Mapping[str, object] | TimeSeriesDiagnosticAssessmentPacket,
+) -> dict[str, object]:
+    value = packet.to_dict() if isinstance(packet, TimeSeriesDiagnosticAssessmentPacket) else packet
+    normalized = _normalize_assessment_packet(value, verify_digest=False)
+    return _assessment_projection_from_normalized(normalized)
+
+
+def assessment_content_digest(
+    packet: Mapping[str, object] | TimeSeriesDiagnosticAssessmentPacket,
+) -> str:
+    return _packet_canonical_digest(
+        assessment_content_projection(packet), "assessment packet"
+    )
+
+
+def envelope_digest(packet: Mapping[str, object]) -> str:
+    """Hash every envelope field except the non-self-referential digest field."""
+
+    if not isinstance(packet, Mapping):
+        raise ContractError("execution envelope must be a mapping")
+    try:
+        return sha256_canonical(
+            {key: value for key, value in packet.items() if key != "envelope_digest"}
+        )
+    except (TypeError, ValueError) as exc:
+        raise ContractError("execution envelope contains invalid canonical JSON") from exc
+
+
+def parse_time_series_diagnostic_facts_packet(
+    value: Mapping[str, object],
+) -> TimeSeriesDiagnosticFactsPacket:
+    return TimeSeriesDiagnosticFactsPacket.from_dict(value)
+
+
+def parse_time_series_diagnostic_assessment_packet(
+    value: Mapping[str, object],
+    *,
+    facts_packet: Mapping[str, object] | TimeSeriesDiagnosticFactsPacket | None = None,
+) -> TimeSeriesDiagnosticAssessmentPacket:
+    return TimeSeriesDiagnosticAssessmentPacket.from_dict(value, facts_packet=facts_packet)
