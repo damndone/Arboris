@@ -33,6 +33,7 @@ def test_run_endpoint_forwards_new_params(tmp_path):
             "entity_col": "firm", "time_col": "yr", "covariance": "robust",
             "prediction_model_type": "prediction_ridge", "prediction_cv_folds": "3",
             "prediction_sampling_method": "smote",
+            "model_options": "{}",
         }, files={"file": ("d.csv", io.BytesIO(_csv()), "text/csv")})
         # _bg_run runs on the executor thread — poll until _run_workflow is called.
         for _ in range(100):
@@ -48,6 +49,8 @@ def test_run_endpoint_forwards_new_params(tmp_path):
     assert kw["prediction_model_type"] == "prediction_ridge"
     assert kw["prediction_cv_folds"] == 3  # parsed to int
     assert kw["prediction_sampling_method"] == "smote"
+    assert kw["model_options"] == {}
+    assert kw["model_options_binding"] is None
 
 
 def test_run_endpoint_forwards_cs_params(tmp_path):

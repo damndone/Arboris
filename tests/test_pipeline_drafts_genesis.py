@@ -6,6 +6,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from workbench.api import app
+from workbench.contracts.model.linear_mixed_effects import (
+    LMM_MODEL_TYPE,
+)
 from workbench.lineage.pipeline_drafts import _validate_graph_shape
 
 client = TestClient(app)
@@ -357,6 +360,64 @@ def test_validate_genesis_ok(tmp_path):
     # hash pins the draft content the way execute (Task 5) will check it
     current = client.get(f"/pipeline-drafts/{did}?project_root={root}").json()
     assert body["validated_draft_hash"] == current["draft_hash"]
+
+
+def test_validate_genesis_rejects_nonobject_model_options_before_execution(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": "ols",
+            "y": "y",
+            "x": ["x"],
+            "model_options": ["not", "an", "object"],
+        },
+    )
+
+    response = _validate(root, draft_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["executable"] is False
+    assert any(
+        item["code"] == "INVALID_PARAM_TYPE" and item["node_id"] == "model_1"
+        for item in body["checks"]
+    )
+
+
+def test_genesis_draft_rejects_client_owned_model_options_binding(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(root, draft_id)
+
+    response = client.patch(
+        f"/pipeline-drafts/{draft_id}/nodes/model_1?project_root={root}",
+        json={
+            "params": {
+                "model_options_binding": {
+                    "owner_model_type": "forged",
+                    "owner_model_id": "forged",
+                    "producer_version": "forged",
+                    "input_contract_version": "0",
+                    "normalized_options_hash": "0" * 64,
+                }
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "MODEL_OPTIONS_BINDING_CLIENT_MANAGED"
+    current = client.get(f"/pipeline-drafts/{draft_id}?project_root={root}").json()
+    model = next(
+        node
+        for node in current["draft"]["graph"]["nodes"]
+        if node["node_id"] == "model_1"
+    )
+    assert "model_options_binding" not in model["params"]
 
 
 def test_validate_genesis_defaults_to_draft_mode(tmp_path):
@@ -737,6 +798,44 @@ def test_execute_genesis_writes_snapshot(tmp_path):
     assert snap["execution_request"]["execution_mode"] == "genesis"
     assert snap["draft"]["created_from"]["source_type"] == "genesis"
     _wait_terminal(root, r["run_id"])
+
+
+def test_execute_genesis_snapshot_carries_server_owned_model_options_binding(
+    tmp_path,
+):
+    root = _mkproject(tmp_path)
+    draft = _genesis_rich(root)
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": LMM_MODEL_TYPE,
+            "y": "y",
+            "x": ["x"],
+            "model_options": {
+                "subject_id": "participant_id",
+                "time": "week",
+                "group": "arm",
+                "fit_method": "reml",
+                "random_slope": True,
+            },
+        },
+    )
+    validated = _validate(root, draft_id).json()
+    response = client.post(
+        f"/pipeline-drafts/{draft_id}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": validated["validated_draft_hash"],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == "LMM_FROZEN_CONTAINMENT_REQUIRED"
+    # C1 validates and binds LMM inputs, but C2 has not yet admitted a real
+    # OS-contained evaluator.  Refusal is before draft snapshots, uploads,
+    # or runs are materialized, so no ordinary executor can bypass C2.
+    assert not list((Path(root) / "runs").iterdir())
 
 
 # --- Task 7 (F6): reclaim unreferenced upload on genesis draft discard ---

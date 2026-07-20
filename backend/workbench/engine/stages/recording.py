@@ -5,6 +5,14 @@ from typing import Any
 from ..context import ModelingContext, RunEnv
 
 
+def _primary_payload_ref(model_id: str, primary_result: dict[str, Any]) -> str:
+    """Point each graph model node at its single authoritative result file."""
+
+    if primary_result.get("model_type") == "linear_mixed_effects":
+        return f"artifacts/model_results/{model_id}.result.json"
+    return f"model_results/{model_id}.json"
+
+
 class RecordingStage:
     """Compute dropped-variable DecisionPoints and record the lineage graph
     nodes (cleaned stage, per-variable nodes, primary model, report).
@@ -140,7 +148,7 @@ class RecordingStage:
             _recorder.record_model(
                 node_id=f"model:{primary_model_id}",
                 display_label=f"{primary_model_type} (primary)",
-                payload_ref=f"model_results/{primary_model_id}.json",
+                payload_ref=_primary_payload_ref(primary_model_id, primary_result),
                 decision_points=_dps_for_model,
                 summary=_model_summary(
                     primary_model_type,

@@ -32,8 +32,7 @@ test("clicking an action calls onAction with the action object", () => {
   render(<FailureCard evidence={sampleEvidence} onAction={onAction} />);
   fireEvent.click(screen.getByRole("button", { name: "Re-run with auto" }));
   expect(onAction).toHaveBeenCalledTimes(1);
-  expect(onAction.mock.calls[0][0].key).toBe("rerun_auto");
-  expect(onAction.mock.calls[0][0].form_overrides).toEqual({ model_type: "auto" });
+  expect(onAction.mock.calls[0][0]).toBe(sampleActions[0]);
 });
 
 test("primary action has different visual styling than secondary", () => {

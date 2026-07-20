@@ -1,0 +1,11 @@
+[
+  {
+    "fingerprint": "REVIEW|persistence_capability_bypass|filesystem persistence capability bypass",
+    "occurrences": 3,
+    "lines": [
+      "wo-a"
+    ],
+    "lesson": "A sealed input is insufficient when packet and index writes retain a raw-path escape.",
+    "resolution": "define admission-gated FD-only writer"
+  }
+]

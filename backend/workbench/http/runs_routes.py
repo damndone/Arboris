@@ -13,6 +13,7 @@ import asyncio
 import queue
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -27,6 +28,7 @@ from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
+from ..model_options import ModelOptionsError, parse_model_options
 from ..orchestrator import run_batch_y_workflow
 from ..repository.run_repository import (
     _artifact_counts,
@@ -42,6 +44,7 @@ from ..repository.run_repository import (
     _summarize_manifest,
 )
 from ..report_export import ReportExportError, export_report
+from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
 from ..services.run_service import (
     _mark_interrupted_if_dead,
@@ -109,11 +112,16 @@ async def run_endpoint(
     cs_anticipation: int = Form(0),
     honest_did: bool = Form(False),
     focal_x: str = Form(""),  # v1.6.5 role layer: comma-joined focal columns
+    model_options: str = Form("{}"),
 ) -> dict[str, str]:
     _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
     root = Path(project_root)
     config = load_config(root / "config.yml")
     max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
+    try:
+        parsed_model_options = parse_model_options(model_options)
+    except ModelOptionsError as exc:
+        raise HTTPException(status_code=422, detail=exc.code) from exc
 
     events = get_event_manager()
     if not events.try_acquire_slot():
@@ -125,7 +133,7 @@ async def run_endpoint(
     run_id_for_cleanup: str | None = None
     try:
         data = await _read_upload_bytes(file, max_upload_bytes)
-        form: dict[str, str] = {
+        form: dict[str, Any] = {
             "mode": mode, "model_type": model_type, "y": y, "x": x,
             "sheet_name": sheet_name, "transpose": transpose, "imputation": imputation,
             "entity_col": entity_col, "time_col": time_col, "covariance": covariance,
@@ -140,6 +148,7 @@ async def run_endpoint(
             "cs_base_period": cs_base_period, "cs_cluster_var": cs_cluster_var,
             "cs_anticipation": str(cs_anticipation), "honest_did": str(honest_did).lower(),
             "focal_x": focal_x,
+            "model_options": parsed_model_options,
         }
         started_at = datetime.now(timezone.utc).isoformat()
         try:
@@ -148,6 +157,8 @@ async def run_endpoint(
                 upload_filename=Path(file.filename or "upload.csv").name,
                 started_at=started_at, rerun_reason="initial",
             )
+        except ModelOptionsError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except ValueError as exc:  # bad imputation / iv request — no run created yet
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         run_id_for_cleanup = result["run_id"]
@@ -248,7 +259,20 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
     summary = _summarize_manifest(manifest, run_id=run_id)
     errors_path = run_root / "errors.json"
     errors = read_json(errors_path) if errors_path.is_file() else {"issues": []}
-    model_results = _model_results(run_root)
+    try:
+        model_results = _model_results(run_root)
+    except VersionedResultReadError as exc:
+        details = (
+            {"artifact_path": exc.artifact_path}
+            if exc.artifact_path is not None
+            else {}
+        )
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message="The versioned model result cannot be read.",
+            details=details,
+        ) from exc
     errors = _normalize_issue_stream(errors, model_results)
     preview = build_diagnostic_summary_preview(run_root, manifest, model_results)
     return {

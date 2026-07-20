@@ -19,6 +19,7 @@ import { useCapabilities } from "../../capabilities/useCapabilities";
 import { ModelTypeSelect } from "../../runForm/ModelTypeSelect";
 import { ImputationControls } from "../../runForm/ImputationControls";
 import { PanelControls } from "../../runForm/PanelControls";
+import { LmmControls, type LmmControlValue } from "../../runForm/LmmControls";
 import { PredictionControls } from "../../runForm/PredictionControls";
 import { FocalSelect } from "../../runForm/FocalSelect";
 import { IVControls, type IVRoleValue } from "../../runForm/IVControls";
@@ -117,6 +118,13 @@ export function GenesisWizard({
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  const [lmmValue, setLmmValue] = useState<LmmControlValue>({
+    subject_id: "",
+    time: "",
+    group: "",
+    fit_method: "reml",
+    random_slope: true,
+  });
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
     instruments: [],
@@ -226,6 +234,25 @@ export function GenesisWizard({
     // patches while the user is still mid-edit.
     const savedCovariance = firstString(modelParams.covariance);
     if (savedCovariance) setCovariance(savedCovariance);
+    if (savedType === "linear_mixed_effects") {
+      const savedOptions = modelParams.model_options;
+      if (savedOptions && typeof savedOptions === "object" && !Array.isArray(savedOptions)) {
+        const options = savedOptions as Record<string, unknown>;
+        setLmmValue((current) => ({
+          subject_id: firstString(options.subject_id) || current.subject_id,
+          time: firstString(options.time) || current.time,
+          group: firstString(options.group) || current.group,
+          fit_method:
+            options.fit_method === "ml" || options.fit_method === "reml"
+              ? options.fit_method
+              : current.fit_method,
+          random_slope:
+            typeof options.random_slope === "boolean"
+              ? options.random_slope
+              : current.random_slope,
+        }));
+      }
+    }
     const savedImputation = firstString(modelParams.imputation);
     if (savedImputation) {
       try {
@@ -365,7 +392,10 @@ export function GenesisWizard({
           ? previewColumns(nextPreview)
           : columnNames;
       const response = await patchDraftNode(projectRoot, draft.draft_id, "table_1", {
-        params: { sheet_name: sheetName, transpose },
+        // CSV sources have no worksheet name.  Keep that fact explicit rather
+        // than forcing users to choose a meaningless value before they can
+        // continue the genesis flow.
+        params: { sheet_name: sheetName || undefined, transpose },
         columns,
       });
       setValidation(null);
@@ -424,6 +454,9 @@ export function GenesisWizard({
       if (entityCol) params.entity_col = entityCol;
       if (timeCol) params.time_col = timeCol;
     }
+    if (modelType === "linear_mixed_effects") {
+      params.model_options = lmmValue;
+    }
     if (isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
       if (ivRole.instruments.length > 0) params.iv_instruments = ivRole.instruments;
@@ -478,8 +511,15 @@ export function GenesisWizard({
 
   async function saveModel() {
     if (!draft) return;
-    if (!y.trim() || xColumns.length === 0) {
+    if (!y.trim() || (modelType !== "linear_mixed_effects" && xColumns.length === 0)) {
       setError("请选择 y，并至少选择一个 x。");
+      return;
+    }
+    if (
+      modelType === "linear_mixed_effects" &&
+      (!lmmValue.subject_id || !lmmValue.time || !lmmValue.group)
+    ) {
+      setError("LMM 需要指定受试者、时间和组别列。");
       return;
     }
     if (modelType === "panel_ols" && entityCol && timeCol && entityCol === timeCol) {
@@ -539,8 +579,17 @@ export function GenesisWizard({
   }
 
   const draftId = draft?.draft_id ?? null;
-  const canSaveTable = Boolean(draftId && sheetName);
-  const canSaveModel = Boolean(draftId && tableConfigured && y.trim() && xColumns.length > 0);
+  const sourceSheetNames = findNode(draft, "input.upload")?.sheet_names ?? [];
+  // An empty sheet list is the normal CSV case, not an incomplete table
+  // configuration.  Spreadsheet uploads still require their selected sheet.
+  const canSaveTable = Boolean(draftId && (sheetName || sourceSheetNames.length === 0));
+  const lmmRolesConfigured = Boolean(lmmValue.subject_id && lmmValue.time && lmmValue.group);
+  const canSaveModel = Boolean(
+    draftId &&
+      tableConfigured &&
+      y.trim() &&
+      (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0),
+  );
   const canRun = Boolean(draftId && modelConfigured);
 
   return (
@@ -663,6 +712,13 @@ export function GenesisWizard({
               onEntity={setEntityCol}
               onTime={setTimeCol}
               onCovariance={setCovariance}
+            />
+          )}
+          {modelType === "linear_mixed_effects" && (
+            <LmmControls
+              columns={columnNames}
+              value={lmmValue}
+              onChange={setLmmValue}
             />
           )}
           {modelType === "iv_2sls" && (

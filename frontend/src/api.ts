@@ -347,6 +347,62 @@ export interface RunExtraParams {
   /** v1.6.5 — user-declared focal explanatory columns (role layer). Posted
    *  comma-joined; the backend clears it for structural-focal families. */
   focalX?: string[];
+  /** Model-pack-specific options. The backend treats this as a typed JSON
+   * object and leaves semantic validation to the registered model handler. */
+  modelOptions?: Record<string, unknown>;
+}
+
+function serializeModelOptions(value: Record<string, unknown>): string {
+  const activeObjects = new WeakSet<object>();
+
+  const visit = (candidate: unknown, path: string): void => {
+    if (
+      candidate === null
+      || typeof candidate === "string"
+      || typeof candidate === "boolean"
+    ) {
+      return;
+    }
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) {
+        throw new TypeError(`${path} must contain only finite JSON numbers`);
+      }
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      if (activeObjects.has(candidate)) {
+        throw new TypeError(`${path} must not contain circular JSON values`);
+      }
+      activeObjects.add(candidate);
+      candidate.forEach((item, index) => visit(item, `${path}[${index}]`));
+      activeObjects.delete(candidate);
+      return;
+    }
+    if (typeof candidate !== "object") {
+      throw new TypeError(`${path} must contain only JSON values`);
+    }
+
+    const prototype = Object.getPrototypeOf(candidate);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError(`${path} must contain only plain JSON objects`);
+    }
+    if (Object.getOwnPropertySymbols(candidate).length > 0) {
+      throw new TypeError(`${path} must not contain symbol keys`);
+    }
+    if (activeObjects.has(candidate)) {
+      throw new TypeError(`${path} must not contain circular JSON values`);
+    }
+    activeObjects.add(candidate);
+    Object.entries(candidate).forEach(([key, item]) => visit(item, `${path}.${key}`));
+    activeObjects.delete(candidate);
+  };
+
+  visit(value, "modelOptions");
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== "string") {
+    throw new TypeError("modelOptions must serialize to a JSON object");
+  }
+  return serialized;
 }
 
 export async function runWorkflow(
@@ -391,6 +447,9 @@ export async function runWorkflow(
   if (extra?.predictionModelType) form.append("prediction_model_type", extra.predictionModelType);
   if (extra?.predictionCvFolds) form.append("prediction_cv_folds", String(extra.predictionCvFolds));
   if (extra?.predictionSamplingMethod) form.append("prediction_sampling_method", extra.predictionSamplingMethod);
+  if (extra?.modelOptions !== undefined) {
+    form.append("model_options", serializeModelOptions(extra.modelOptions));
+  }
   form.append("file", file);
   const response = await fetch(apiUrl("/runs"), { method: "POST", body: form });
   return readResponse<RunResponse>(response);

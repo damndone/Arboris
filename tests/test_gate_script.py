@@ -26,6 +26,10 @@ if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "pytest" ]; then
   printf '%s:%s\\n' '{name}' "$*" >> "$GATE_PYTHON_LOG"
   exit {pytest_exit}
 fi
+if [ "${{1:-}}" = "scripts/devline_control.py" ] && [ "${{2:-}}" = "verify" ] && [ "${{3:-}}" = "--all" ]; then
+  printf '%s:%s\\n' '{name}' "$*" >> "$GATE_PYTHON_LOG"
+  exit "${{GATE_DEVLINE_CONTROL_EXIT:-0}}"
+fi
 exit 0
 """,
     )
@@ -37,6 +41,9 @@ def _run_gate(
     local_has_pytest: bool,
     common_has_pytest: bool,
     override_has_pytest: bool | None = None,
+    mode: str = "--full",
+    changed_files: tuple[str, ...] = (),
+    devline_control_exit: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], dict[str, Path]]:
     worktree = tmp_path / "worktree"
     common_checkout = tmp_path / "common"
@@ -64,6 +71,9 @@ def _run_gate(
 if [ "${{1:-}} ${{2:-}}" = "rev-parse --git-common-dir" ]; then
   printf '%s\\n' '{common_checkout / ".git"}'
 fi
+if [ "${{1:-}} ${{2:-}}" = "diff --name-only" ] || [ "${{1:-}} ${{2:-}} ${{3:-}}" = "diff --cached --name-only" ] || [ "${{1:-}} ${{2:-}}" = "ls-files --others" ]; then
+  printf '%s' "${{GATE_CHANGED_FILES:-}}"
+fi
 exit 0
 """,
     )
@@ -72,13 +82,15 @@ exit 0
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["GATE_PYTHON_LOG"] = str(python_log)
+    env["GATE_CHANGED_FILES"] = "\n".join(changed_files)
+    env["GATE_DEVLINE_CONTROL_EXIT"] = str(devline_control_exit)
     if override_has_pytest is not None:
         env["WORKBENCH_PYTHON"] = str(override_python)
     else:
         env.pop("WORKBENCH_PYTHON", None)
 
     result = subprocess.run(
-        ["bash", "scripts/gate.sh", "--full"],
+        ["bash", "scripts/gate.sh", mode],
         cwd=worktree,
         env=env,
         text=True,
@@ -215,6 +227,53 @@ def test_quick_mode_runs_gate_contract_tests_when_the_gate_changes() -> None:
     source = GATE_SCRIPT.read_text()
 
     assert "run_gate_script_tests" in source
+
+
+def test_quick_mode_verifies_formal_fms_changes_and_fails_closed(tmp_path: Path) -> None:
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        mode="--quick",
+        changed_files=("backend/workbench/development_control/events.py",),
+        devline_control_exit=2,
+    )
+
+    assert result.returncode == 1
+    assert any(
+        line.startswith("local:scripts/devline_control.py verify --all")
+        for line in invocations
+    )
+    assert "QUICK formal development-control verification" in result.stdout
+
+
+def test_quick_mode_verifies_formal_agent_control_files(tmp_path: Path) -> None:
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        mode="--quick",
+        changed_files=(".agent/development-control/global-rules.json",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert any(
+        line.startswith("local:scripts/devline_control.py verify --all")
+        for line in invocations
+    )
+
+
+def test_quick_mode_does_not_replay_fms_history_for_product_only_change(tmp_path: Path) -> None:
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        mode="--quick",
+        changed_files=("backend/workbench/engine/context.py",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not any("scripts/devline_control.py verify --all" in line for line in invocations)
 
 
 def test_vite_proxy_defaults_to_the_documented_backend_port() -> None:

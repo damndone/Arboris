@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": ".agent/development-control/schemas/global-rule-v1.json",
+  "title": "Development control global rule v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rules"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version", "rule_id", "lesson_key", "status", "occurrence_count",
+          "trigger_event_ids", "sources", "scope", "enforcement_point", "test_marker",
+          "false_positive_risk", "verification_method", "source_candidate_sha256", "rule_sha256"
+        ],
+        "properties": {
+          "schema_version": {"const": 1},
+          "rule_id": {"type": "string", "minLength": 1},
+          "lesson_key": {"type": "string", "minLength": 1},
+          "status": {"const": "enabled"},
+          "occurrence_count": {"type": "integer", "minimum": 3},
+          "trigger_event_ids": {"type": "array", "minItems": 3, "items": {"type": "string", "format": "uuid"}},
+          "sources": {"type": "array", "minItems": 3, "items": {"type": "object"}},
+          "scope": {"type": "string", "minLength": 1},
+          "enforcement_point": {"type": "string", "minLength": 1},
+          "test_marker": {"type": "string", "minLength": 1},
+          "false_positive_risk": {"type": "string", "minLength": 1},
+          "verification_method": {"type": "string", "minLength": 1},
+          "source_candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "rule_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

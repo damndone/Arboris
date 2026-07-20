@@ -57,6 +57,14 @@ class InspectResultSummaryRequest:
 
 
 @dataclass(frozen=True)
+class InspectRepeatedMeasuresRecipeRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+
+
+@dataclass(frozen=True)
 class InspectArtifactPreviewRequest:
     request_id: str
     owner_run_id: str
@@ -191,6 +199,23 @@ class NodeOperationContextProvider:
             return self.inspect_result_summary(
                 InspectResultSummaryRequest(
                     request_id=str(arguments.get("request_id") or "inspect-result-summary"),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                )
+            )
+
+        def inspect_repeated_measures_recipe(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_repeated_measures_recipe(
+                InspectRepeatedMeasuresRecipeRequest(
+                    request_id=str(arguments.get("request_id") or "inspect-repeated-measures-recipe"),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
                     active_head_run_id=self._tool_active_head(
@@ -455,6 +480,29 @@ class NodeOperationContextProvider:
                 handler=inspect_result_summary,
             ),
             ToolDefinition(
+                tool_id="inspect_repeated_measures_recipe",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_repeated_measures_recipe,
+            ),
+            ToolDefinition(
                 tool_id="inspect_artifact_preview",
                 version="v1",
                 input_schema={
@@ -615,6 +663,38 @@ class NodeOperationContextProvider:
             "node": _bounded_node(node),
             "result_summary": result_summary,
             "omitted_sections": omitted_sections,
+        }
+
+    def inspect_repeated_measures_recipe(
+        self,
+        request: InspectRepeatedMeasuresRecipeRequest,
+    ) -> dict[str, Any]:
+        """Return only the sealed, read-only LMM explanation/recovery view."""
+
+        canonical, node, manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        neutral = {
+            "proposal": None,
+            "plan_diff": None,
+            "explanation": "未提供可用于生成说明的受控 LMM 诊断。",
+        }
+        if manifest.get("requested_model_type") != "linear_mixed_effects":
+            recipe = neutral
+        else:
+            from .recipes.lmm_public_result_view import build_repeated_measures_recipe_from_run
+
+            recipe = build_repeated_measures_recipe_from_run(
+                self.project_root / "runs", request.owner_run_id
+            )
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "repeated_measures_recipe": recipe,
+            "omitted_sections": ["raw_model_results", "persistence_capability"],
         }
 
     def inspect_artifact_preview(

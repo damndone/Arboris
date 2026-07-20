@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -32,6 +33,16 @@ from ..lineage.hashing import dag_hash, override_hash
 from ..lineage.role_layer import canonicalize_focal_x
 from ..lineage.run_inputs import write_run_inputs
 from ..lineage.upload_store import resolve_upload, store_upload_bytes
+from ..model_options import (
+    ModelOptionsBinding,
+    ModelOptionsError,
+    bind_new_model_options,
+    canonicalize_model_options,
+    merge_model_options,
+    parse_model_options,
+    verify_binding_owner_for_model_type,
+    verify_bound_model_options,
+)
 from ..orchestrator import (
     _lineage,
     _run_workflow,
@@ -46,6 +57,99 @@ UPLOAD_CHUNK_BYTES = 1024 * 1024
 # Estimator families whose focal/treatment variable is structural (not user-declared
 # via focal_x). For these, persisted focal_x MUST be empty (spec §5).
 _STRUCTURAL_FOCAL_FAMILIES = {"iv_2sls", "did", "cs_did", "sa_did", "dcdh"}
+_LMM_MODEL_TYPE = "linear_mixed_effects"
+
+
+class LmmExecutionAdmissionError(RuntimeError):
+    """Closed pre-fit LMM admission failure with no path or parser detail."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _require_lmm_frozen_containment(model_type: object) -> dict[str, object] | None:
+    """Require the explicit local profile before any LMM materialisation.
+
+    The default keeps the prior early rejection.  A deliberately selected
+    local profile is admitted only after its real OS-sandbox canary succeeds;
+    it is local-development execution, not C2 candidate-evaluation evidence.
+    """
+
+    if model_type == _LMM_MODEL_TYPE:
+        from .execution_profile import ExecutionProfileError, current_execution_profile
+
+        try:
+            current_execution_profile().require_lmm_admission()
+        except ExecutionProfileError as error:
+            message = (
+                "Linear mixed-effects execution is unavailable until explicit "
+                "local containment is admitted."
+            )
+            raise ModelOptionsError(error.code, message) from None
+        return {
+            "execution_profile": "local_contained",
+            "containment_evidence": "local_startup_canary",
+            "release_evaluation_eligible": False,
+        }
+    return None
+
+
+def _record_lmm_persistence_failure(*, admission: object, code: str, retryable: bool) -> None:
+    """Use the admission-bound sink; generic lifecycle files are forbidden."""
+
+    from ..services.pinned_run_directory import _persist_lmm_lifecycle_failure
+
+    _persist_lmm_lifecycle_failure(
+        admission=admission, code=code, retryable=retryable
+    )
+
+
+def _safe_lmm_lifecycle_failure(exc: Exception) -> tuple[str, bool]:
+    """Normalize every admitted LMM failure without examining exception text."""
+
+    from ..services.pinned_run_directory import LmmPersistenceError, PinnedRunError
+
+    if isinstance(exc, LmmPersistenceError):
+        return exc.code, exc.retryable
+    if isinstance(exc, (PinnedRunError, LmmExecutionAdmissionError)):
+        code = exc.code
+        return (code if code.startswith("LMM_") else "LMM_LIFECYCLE_FAILED", False)
+    return "LMM_LIFECYCLE_FAILED", False
+
+
+def _admit_lmm_execution_for_bg_run(
+    *, run_root: Path, run_id: str, model_type: str,
+    model_options: dict[str, object] | None, model_options_binding: dict[str, str] | None,
+) -> object | None:
+    """Create the one pre-fit LMM handoff from a pinned, matching input snapshot."""
+
+    if model_type != "linear_mixed_effects":
+        return None
+    from ..canonical import canonical_json_v1
+    from ..services.pinned_run_directory import _new_lmm_execution_admission, open_pinned_run_directory, seal_executed_input_v1
+
+    if run_root.name != run_id or not isinstance(model_options, dict) or not isinstance(model_options_binding, dict):
+        raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+    pinned = open_pinned_run_directory(run_root.parent, run_id)
+    lmm_execution_admission: _BgLmmExecutionAdmission | None = None
+    try:
+        snapshot = pinned.read_run_inputs_snapshot().value
+        form = snapshot.get("form")
+        if not isinstance(form, dict) or form.get("model_type") != "linear_mixed_effects":
+            raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+        if canonical_json_v1(form.get("model_options")) != canonical_json_v1(model_options) or canonical_json_v1(form.get("model_options_binding")) != canonical_json_v1(model_options_binding):
+            raise LmmExecutionAdmissionError("LMM_EXECUTION_BINDING_REQUIRED")
+        seal = seal_executed_input_v1(pinned, {
+            "schema_version": 1,
+            "model_type": "linear_mixed_effects",
+            "model_options": model_options,
+            "model_options_binding": model_options_binding,
+        })
+        return _new_lmm_execution_admission(pinned, seal)
+    except BaseException:
+        pinned.close()
+        raise
 
 
 def _safe_int(value: str) -> int:
@@ -110,6 +214,126 @@ def encode_form_override(key: str, value: object) -> str:
     return json.dumps(value) if isinstance(value, (list, dict)) else str(value)
 
 
+def merge_form_overrides(
+    source_form: Mapping[str, Any], overrides: Mapping[str, object]
+) -> dict[str, Any]:
+    """Merge a rerun patch while keeping model_options one level deep.
+
+    Existing form keys retain their historical wire encoding. ``model_options``
+    is deliberately the sole structured value: it is canonicalized, merged one
+    level, and persisted as an object for the model handler.
+    """
+
+    if "model_options_binding" in overrides:
+        raise ModelOptionsError(
+            "MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+            "model_options_binding is generated only by the server.",
+        )
+
+    has_replacement = "model_options" in overrides
+    patch_options = overrides.get("model_options", {})
+    if not isinstance(patch_options, Mapping):
+        raise ModelOptionsError(
+            "MODEL_OPTIONS_NOT_OBJECT", "model_options must be a JSON object."
+        )
+
+    # Keep the ordinary form wire values, but never carry the server-owned
+    # binding forward from a parent. A new non-empty payload is bound again at
+    # submission time for the current target handler.
+    merged: dict[str, Any] = {
+        key: source_form[key]
+        for key in source_form
+        if key not in {"model_options", "model_options_binding"}
+    }
+    source_model_type = str(source_form.get("model_type", "auto"))
+    target_model_type = str(overrides.get("model_type", source_model_type))
+    target_changed = source_model_type != target_model_type
+
+    if target_changed and has_replacement:
+        # A cross-model replacement is target-owned input. Do not parse,
+        # hash, validate, or otherwise read the source options/binding: an old
+        # owner can be retired, malformed, or unavailable without contaminating
+        # a complete new target payload.
+        next_options = canonicalize_model_options(patch_options)
+    elif target_changed:
+        source_has_options = _has_nonempty_model_options(
+            source_form.get("model_options", {})
+        )
+        if source_has_options:
+            # A non-empty cross-model payload is never inherited. The only
+            # safe path is an explicit target-owned replacement.
+            raise ModelOptionsError(
+                "MODEL_OPTIONS_REPLACEMENT_REQUIRED",
+                "changing model_type requires an explicit model_options replacement.",
+            )
+        # Empty legacy source payloads retain v1.7.2 behavior.
+        next_options = canonicalize_model_options(patch_options)
+    else:
+        source_binding = source_form.get("model_options_binding")
+        if source_binding is not None:
+            # Compare owner metadata before reading the source payload. A
+            # resolved id/contract change is a model identity change, so a
+            # complete replacement must not be tainted by an old payload or
+            # its hash (even when the public model_type text is unchanged).
+            source_owner = ModelOptionsBinding.from_dict(source_binding)
+            try:
+                verify_binding_owner_for_model_type(source_owner, target_model_type)
+            except ModelOptionsError as exc:
+                if exc.code != "MODEL_OPTIONS_OWNER_MISMATCH":
+                    raise
+                if not has_replacement:
+                    raise ModelOptionsError(
+                        "MODEL_OPTIONS_REPLACEMENT_REQUIRED",
+                        "changing resolved model identity requires an explicit model_options replacement.",
+                    ) from exc
+                next_options = canonicalize_model_options(patch_options)
+            else:
+                # Same-owner reuse is the only path that reads source options,
+                # so it must first prove payload/hash integrity.
+                source_bound = verify_bound_model_options(
+                    source_form.get("model_options", {}), source_binding
+                )
+                assert source_bound.binding is not None
+                next_options = merge_model_options(source_bound.payload, patch_options)
+        else:
+            source_options_raw = source_form.get("model_options", {})
+            source_has_options = _has_nonempty_model_options(source_options_raw)
+            if source_has_options and not has_replacement:
+                raise ModelOptionsError(
+                    "MODEL_OPTIONS_OWNER_MISSING",
+                    "non-empty source model_options require an explicit replacement or migration.",
+                )
+            # An old, unbound payload can be discarded only by a complete
+            # replacement, which is validated by the current target below.
+            next_options = canonicalize_model_options(patch_options)
+
+    if next_options:
+        # A replacement is only meaningful when the target can fully validate
+        # it; this also prevents an unbound source patch from masquerading as
+        # a complete model input.
+        next_options = bind_new_model_options(target_model_type, next_options).payload
+
+    merged["model_options"] = next_options
+    merged.update(
+        {
+            key: encode_form_override(key, value)
+            for key, value in overrides.items()
+            if key not in {"model_options", "model_options_binding"}
+        }
+    )
+    return merged
+
+
+def _has_nonempty_model_options(value: object) -> bool:
+    """Check whether a persisted source carries options without normalizing it."""
+
+    if isinstance(value, str):
+        return value.strip() not in {"", "{}"}
+    if isinstance(value, Mapping):
+        return bool(value)
+    return value is not None
+
+
 def parse_column_selector(raw: str, field: str = "x") -> list[str]:
     """Parse a column-selector form field.
 
@@ -143,7 +367,7 @@ def parse_column_selector(raw: str, field: str = "x") -> list[str]:
 def _submit_run(
     root: Path,
     *,
-    form: dict[str, str],
+    form: dict[str, Any],
     upload_bytes: bytes,
     upload_filename: str,
     started_at: str,
@@ -162,6 +386,32 @@ def _submit_run(
     pipeline via _bg_run. The caller MUST already hold the run slot. Input parsing that
     can fail (imputation / iv arrays) happens BEFORE any run is created, so a bad request
     raises without leaving a junk run behind."""
+    form = {
+        key: value for key, value in form.items() if key != "model_options_binding"
+    }
+    raw_model_options = form.get("model_options", {})
+    model_options = (
+        parse_model_options(raw_model_options)
+        if isinstance(raw_model_options, str)
+        else canonicalize_model_options(raw_model_options)
+    )
+    bound_model_options = bind_new_model_options(
+        form.get("model_type", "auto"), model_options
+    )
+    model_options = bound_model_options.payload
+    model_options_binding = (
+        bound_model_options.binding.to_dict()
+        if bound_model_options.binding is not None
+        else None
+    )
+    # This must happen before uploads or runs are materialized.  A rejected
+    # LMM request therefore leaves neither executable evidence nor a run that
+    # another boundary could later mistake for a C2-approved candidate.
+    execution_profile = _require_lmm_frozen_containment(form.get("model_type", "auto"))
+    form = {**form, "model_options": model_options}
+    if model_options_binding is not None:
+        form["model_options_binding"] = model_options_binding
+
     x_columns = parse_column_selector(form.get("x", ""), "x")
     imputation_request = parse_imputation_request(form.get("imputation", ""))
     iv_endog_list = _parse_json_str_array(form.get("iv_endog", ""), "iv_endog")
@@ -192,6 +442,7 @@ def _submit_run(
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),
         "x": list(x_columns),
+        "model_options": model_options,
         "form": dict(form_for_persist),
         "rerun_of": rerun_of,
         "from_node": from_node,
@@ -202,7 +453,11 @@ def _submit_run(
         "entity_col": form_for_persist.get("entity_col", ""),
         "y": form_for_persist.get("y", ""),
         "x": list(x_columns),
+        "model_options": model_options,
     }
+    if model_options_binding is not None:
+        executable_payload["model_options_binding"] = model_options_binding
+        confirmed_payload["model_options_binding"] = model_options_binding
     contract_summary = {
         "contract_version": "ols_result_contract_v1" if model_type == "ols" else None,
         "model": "ols" if model_type == "ols" else model_type,
@@ -257,6 +512,7 @@ def _submit_run(
         source_lineage=source_lineage if rerun_of is not None else None,
         rerun_from=rerun_from,
         source_run_id=rerun_of,
+        execution_profile=execution_profile,
     )
     if before_dispatch is not None:
         before_dispatch(run.run_id)
@@ -279,6 +535,8 @@ def _submit_run(
         form.get("cs_control_group", ""), form.get("cs_est_method", ""), form.get("cs_base_period", ""),
         form.get("cs_cluster_var", ""), _safe_int(str(form.get("cs_anticipation", "0"))),
         str(form.get("honest_did", "false")).lower() == "true",
+        model_options,
+        model_options_binding,
     )
     return {"run_id": run.run_id, "status": "running"}
 
@@ -315,6 +573,8 @@ def _bg_run(
     cs_cluster_var: str = "",
     cs_anticipation: int = 0,
     honest_did: bool = False,
+    model_options: dict[str, object] | None = None,
+    model_options_binding: dict[str, str] | None = None,
 ) -> None:
     events = get_event_manager()
     config = load_config(_resolve_project_root(run_root) / "config.yml")
@@ -341,7 +601,12 @@ def _bg_run(
             "status": status if status not in ("start", "complete") else None,
         })
 
+    lmm_execution_admission: object | None = None
     try:
+        lmm_execution_admission = _admit_lmm_execution_for_bg_run(
+            run_root=run_root, run_id=run_id, model_type=model_type,
+            model_options=model_options, model_options_binding=model_options_binding,
+        )
         result = _run_workflow(
             run_root, run_id, [saved_path],
             mode, y, x_columns, config, started_at,
@@ -370,6 +635,9 @@ def _bg_run(
             cs_cluster_var=cs_cluster_var,
             cs_anticipation=cs_anticipation,
             honest_did=honest_did,
+            model_options=model_options,
+            model_options_binding=model_options_binding,
+            lmm_execution_admission=lmm_execution_admission,
             stop_reason=_stop_reason,
         )
         status = result["status"]
@@ -377,6 +645,31 @@ def _bg_run(
     except RunInterruptionRequested as exc:
         reason = exc.reason
         code = "WORKFLOW_CANCELLED" if reason == "cancelled" else "WORKFLOW_TIMEOUT"
+        if model_type == "linear_mixed_effects" and lmm_execution_admission is not None:
+            # An admitted LMM owns its lifecycle persistence.  A cooperative
+            # interruption is not allowed to escape into legacy manifest or
+            # errors.json writers, because those writers are not bound to the
+            # sealed input/admission capability.
+            lmm_code = (
+                "LMM_EXECUTION_CANCELLED"
+                if reason == "cancelled"
+                else "LMM_EXECUTION_TIMEOUT"
+            )
+            try:
+                _record_lmm_persistence_failure(
+                    admission=lmm_execution_admission,
+                    code=lmm_code,
+                    retryable=False,
+                )
+            except Exception:
+                # A failed private sink cannot authorize generic fallback.
+                pass
+            events.emit_terminal(
+                run_id,
+                "PERSISTENCE_INCOMPLETE",
+                f"LMM persistence incomplete: {lmm_code}",
+            )
+            return
         message = (
             "Workflow interrupted by user cancellation."
             if reason == "cancelled"
@@ -393,6 +686,25 @@ def _bg_run(
         })
         events.emit_terminal(run_id, "interrupted", message)
     except Exception as exc:
+        if model_type == "linear_mixed_effects":
+            code, retryable = _safe_lmm_lifecycle_failure(exc)
+            if lmm_execution_admission is not None:
+                try:
+                    _record_lmm_persistence_failure(
+                        admission=lmm_execution_admission,
+                        code=code,
+                        retryable=retryable,
+                    )
+                except Exception:
+                    # No generic fallback is authorized when the private sink
+                    # is itself unavailable; the event remains incomplete.
+                    pass
+            events.emit_terminal(
+                run_id,
+                "PERSISTENCE_INCOMPLETE",
+                f"LMM persistence incomplete: {code}",
+            )
+            return
         _write_manifest(
             run_root, run_id, mode, "failed",
             _lineage([saved_path]),
@@ -407,6 +719,9 @@ def _bg_run(
         })
         events.emit_terminal(run_id, "failed", f"Workflow failed: {exc}")
     finally:
+        close = getattr(lmm_execution_admission, "_close_for_test", None)
+        if callable(close):
+            close()
         events.release_slot(run_id)
 
 

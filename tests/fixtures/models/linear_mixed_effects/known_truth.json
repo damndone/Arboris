@@ -1,0 +1,10 @@
+{
+  "fit_method": "reml",
+  "group_time_interaction": 0.9,
+  "interaction_tolerance": 0.35,
+  "n_obs": 480,
+  "n_subjects": 80,
+  "n_timepoints_per_subject": 6,
+  "primary_result_id": "group_time_interaction",
+  "seed": 20260718
+}

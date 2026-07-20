@@ -133,6 +133,9 @@ export function AnalysisLoopSection({ node }: { node: GraphViewNode }) {
   const compare = record(packet?.compare_packet);
   const conclusion = record(compare?.conclusion_diff);
   const invariants = record(plan?.invariants);
+  const modelLabel = run.model === "ols"
+    ? "OLS"
+    : textValue(run.model ?? node.title ?? "Model");
 
   return (
     <section aria-label="Agent analysis loop" data-testid="analysis-loop-section" style={{ marginTop: 18 }}>
@@ -154,7 +157,7 @@ export function AnalysisLoopSection({ node }: { node: GraphViewNode }) {
           Status: <strong>{data.status}</strong>
         </div>
         <div data-testid="analysis-loop-run-facts">
-          OLS contract {textValue(run.contract_version)} · run {textValue(run.status)} · covariance {textValue(run.covariance)}
+          {modelLabel} contract {textValue(run.contract_version)} · run {textValue(run.status)} · covariance {textValue(run.covariance)}
         </div>
         <div data-testid="analysis-loop-source-facts">
           Source {textValue(source.run_id)} · {textValue(source.status)} · covariance {textValue(source.covariance_product ?? source.covariance)}

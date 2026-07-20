@@ -276,6 +276,47 @@ describe("AgentPanel", () => {
     expect(screen.getByRole("button", { name: "Confirm proposal proposal-1" })).toBeInTheDocument();
   });
 
+  it("renders object-valued model options literally instead of mistaking them for a diff", () => {
+    const withProposal = value();
+    withProposal.proposals = [{
+      record_type: "revision",
+      proposal_id: "proposal-model-options",
+      operation_id: "model.rerun",
+      operation_version: "v1",
+      revision: 1,
+      session_id: "session-1",
+      chain_id: "chain-a",
+      command_id: null,
+      target: { run_id: "run-a", node_ref: "model:future_1" },
+      preconditions: { active_head_run_id: "run-a" },
+      changes: {
+        model_options: {
+          old: { nested: true },
+          new: ["a legitimate future option value"],
+          additional_option: true,
+        },
+      },
+      evidence_refs: [],
+      expected_effect: ["future model option patch"],
+      risks: ["semantic validation remains model-owned"],
+      created_at: "2026-07-18T00:00:00Z",
+      fingerprint: "fp-model-options",
+      status: "pending",
+    }];
+
+    render(
+      <AgentSurfaceContext.Provider value={withProposal}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const card = screen.getByTestId("agent-proposal-proposal-model-options");
+    expect(card).toHaveTextContent(
+      'model_options: {"old":{"nested":true},"new":["a legitimate future option value"],"additional_option":true}',
+    );
+    expect(card).not.toHaveTextContent("→");
+  });
+
   it("renders an NL data-cast proposal as readable intent, not raw JSON", () => {
     const withProposal = value();
     withProposal.proposals = [{

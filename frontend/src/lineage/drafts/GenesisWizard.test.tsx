@@ -12,6 +12,7 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "auto", label: "Auto", group: "auto" },
         { key: "ols", label: "OLS", group: "Linear" },
         { key: "panel_ols", label: "Panel OLS", group: "Panel" },
+        { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel" },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
       ],
@@ -248,6 +249,64 @@ describe("GenesisWizard", () => {
     );
   });
 
+  it("patches bound LMM options from the genesis model step", async () => {
+    const lmmPreview: api.FilePreview = {
+      ...preview(),
+      columnCount: 5,
+      columns: [
+        { name: "participant_id", dtype: "string", missingRate: 0, uniqueCount: 3, suggestedRole: "id" },
+        { name: "week", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "time" },
+        { name: "arm", dtype: "string", missingRate: 0, uniqueCount: 2, suggestedRole: "x" },
+        { name: "baseline_score", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "x" },
+        { name: "score", dtype: "numeric", missingRate: 0, uniqueCount: 3, suggestedRole: "y" },
+      ],
+      previewRows: [{ participant_id: "p1", week: 1, arm: "control", baseline_score: 10, score: 11 }],
+      suggestedY: "score",
+      suggestedX: ["baseline_score"],
+    };
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(lmmPreview);
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "data.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(draftResponse("h1"));
+    vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(draftResponse("h2", "configured", "pending"))
+      .mockResolvedValueOnce(draftResponse("h3", "configured", "configured"));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["score\n11"], "data.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(api.patchDraftNode).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "linear_mixed_effects" },
+    });
+    fireEvent.change(screen.getByLabelText("LMM subject"), { target: { value: "participant_id" } });
+    fireEvent.change(screen.getByLabelText("LMM time"), { target: { value: "week" } });
+    fireEvent.change(screen.getByLabelText("LMM group"), { target: { value: "arm" } });
+    fireEvent.click(screen.getByLabelText("LMM random slope"));
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() =>
+      expect(api.patchDraftNode).toHaveBeenNthCalledWith(2, "/proj", "draft_g1", "model_1", {
+        params: {
+          model_type: "linear_mixed_effects",
+          y: "score",
+          x: ["baseline_score"],
+          covariance: "robust",
+          model_options: {
+            subject_id: "participant_id",
+            time: "week",
+            group: "arm",
+            fit_method: "reml",
+            random_slope: false,
+          },
+        },
+      }),
+    );
+  });
+
   it("renders IV role controls and patches structural IV params into the genesis model node", async () => {
     const ivPreview: api.FilePreview = {
       ...preview(),
@@ -391,6 +450,45 @@ describe("GenesisWizard", () => {
           iv_endog: ["educ"],
           iv_instruments: ["distance_college"],
         },
+      }),
+    );
+  });
+
+  it("lets a resumed CSV genesis draft save its table without inventing a sheet name", async () => {
+    const base = draftResponse("h1");
+    const csvDraft: api.PipelineDraftResponse = {
+      ...base,
+      draft: {
+        ...base.draft,
+        graph: {
+          ...base.draft.graph,
+          nodes: base.draft.graph.nodes.map((node) =>
+            node.node_type === "input.upload"
+              ? { ...node, sheet_names: [] }
+              : node.node_type === "table"
+                ? { ...node, params: { sheet_name: undefined, transpose: false } }
+                : node,
+          ),
+        },
+      },
+    };
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([
+      { draft_id: "draft_g1", status: "draft", draft_hash: "h1" },
+    ]);
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(csvDraft);
+    const patchSpy = vi.spyOn(api, "patchDraftNode").mockResolvedValue(csvDraft);
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "继续" }));
+    const saveTable = await screen.findByTestId("genesis-save-table");
+    expect(saveTable).toBeEnabled();
+    fireEvent.click(saveTable);
+
+    await waitFor(() =>
+      expect(patchSpy).toHaveBeenCalledWith("/proj", "draft_g1", "table_1", {
+        params: { sheet_name: undefined, transpose: false },
+        columns: ["y", "x"],
       }),
     );
   });

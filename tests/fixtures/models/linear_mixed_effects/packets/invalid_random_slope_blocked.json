@@ -1,0 +1,21 @@
+{
+  "contract": "linear_mixed_effects.diagnostic",
+  "contract_version": "1.0",
+  "payload": {
+    "diagnostics": [
+      {
+        "action_candidate": null,
+        "code": "LMM_INVALID_RANDOM_SLOPE_CONFIGURATION",
+        "evidence": {
+          "random_slope": true,
+          "time": "week"
+        },
+        "severity": "error",
+        "status": "blocked"
+      }
+    ],
+    "fixture_id": "invalid_random_slope_v1",
+    "status": "blocked"
+  },
+  "producer_version": "linear_mixed_effects@1.0"
+}

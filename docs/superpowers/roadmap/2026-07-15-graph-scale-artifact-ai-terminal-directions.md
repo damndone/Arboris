@@ -1,7 +1,11 @@
 # 三个产品方向拍板草案：图规模化 · artifact AI 解读 · terminal 权限模型
 
 > 2026-07-15 用户提出三个问题,本文档固化设计讨论结论,供后续版本圈定时取用。
-> 状态:方向已讨论,**未拍板、未排版本**。对应 BACKLOG §1 指针行 G1/G2/G3。
+> 状态同步 2026-07-18：G1/G2/G3 的基础能力已随 v1.7.2 发布；v1.7.3 是一个双工作包 release
+> train：Report/Operations closeout 与 Repeated Measures/LMM。两条线现已完成本机产品组装和
+> 验收；C2 敌对候选认证不再属于本机版本，转入事件触发的长期路线图。P-SBX2、P-CE1 以及 G2 provider-gated
+> 真·看图仍未排入本版本。
+> 本文保留为长期方向文档；对应 live backlog 见 `docs/superpowers/followups/BACKLOG.md`。
 
 ## G1 · 图爆炸:合并"投影",不合并"谱系"
 
@@ -148,8 +152,14 @@ child `data-casts:cf5ed865…`「Cast 2 columns」、sidecar 里 wage/education 
 **新增只读工具 `inspect_data_schema`**:给 Agent 看列名+dtype(没有它,模型只能从显示文本猜列名);
 **故意不返回 artifact_id** —— 那是 canonicalization 时绑定的后端事实。
 
-## 排序建议
+## 当前排序建议（2026-07-18）
 
-- G1 投影折叠 + batch spec → V12(数据操作自然下一步,且是 NL proposal 的最佳目标形态)。
-- G2 第一步 → 独立小切片,随时可插。
-- G3 输入框去重 → 小改先做;`code.execute` 沙箱 → 大工程,沙箱基建就位后单独立版。
+- v1.7.3：Report/Operations 与 LMM 的本地组装、真实 macOS canary、HTTP/浏览器流程和
+  完整本地 gate 已收口；未使用的 C2 产品原型已删除。未来公共部署、App 封装、插件或
+  第三方模型包出现时，再按新的信任边界重新立项 C2。
+- v1.8：先做 Time Series Diagnostics 的 C1 合同锁——时间语义、平稳性/季节性/趋势评估、
+  “结论不充分”统一呈现及受条件约束的差分/去趋势建议。C1 后才可并行启动 Pack、Agent、UI/UX
+  和独立 Evaluation；预测不与诊断混做。
+- v1.8 后续：仅在诊断 Pack、公共结果合同和评估基线稳定后，再接入 pmdarima、arch、Prophet
+  等预测能力；每个库必须经过受控依赖、统一结果适配器、回测和失败边界验证后才进入公共运行时。
+- G2 provider-gated 真·看图、P-SBX2 sandbox self-test、P-CE1 `code.execute` preview 缓存：独立立项，不作为 v1.7.3 隐式范围。

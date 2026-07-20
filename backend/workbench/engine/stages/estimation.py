@@ -6,8 +6,32 @@ from ..context import ModelingContext, RunEnv
 from ..pack import AnalysisPack, RerunAction, register_pack
 from ..registry import (
     ModelHandler,
+    ModelOptionsValidationError,
     resolve,
 )
+
+
+def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Return the result shape consumed by the pre-packet engine stages.
+
+    LMM owns a versioned PacketEnvelope on disk.  Diagnostics, recording, and
+    report stages predate packets and consume the public result payload shape.
+    Passing the envelope through silently made those stages default to OLS
+    labels even though the LMM fit itself had succeeded.
+    """
+
+    if model_type != "linear_mixed_effects":
+        return result
+
+    from ...contracts.common.envelope import PacketEnvelope
+
+    packet = PacketEnvelope.from_dict(result)
+    if packet.contract != "linear_mixed_effects.result":
+        raise RuntimeError("LMM_RESULT_CONTRACT_INVALID")
+    payload = packet.to_dict()["payload"]
+    if payload.get("model_type") != "linear_mixed_effects":
+        raise RuntimeError("LMM_RESULT_PAYLOAD_INVALID")
+    return payload
 
 
 # ---- handler adapters (each builds its model-specific kwargs from ctx) ----
@@ -312,7 +336,7 @@ def _fit_ols(ctx, env):
 
 def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
     """Append terminal OLS evidence while leaving executable payload immutable."""
-    from ...lineage.run_inputs import update_run_inputs_metadata
+    from ...lineage.run_inputs import read_run_inputs, update_run_inputs_metadata
 
     if not (run_root / "run_inputs.json").is_file():
         return
@@ -323,15 +347,42 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
         "coefficient_schema_fingerprint",
         "inference_config_fingerprint",
     )
+    inputs = read_run_inputs(run_root)
+    existing_payload = inputs.get("executed_payload")
+    executable_payload = inputs.get("executable_payload")
+    persisted_form = inputs.get("form")
+    model_options = (
+        existing_payload.get("model_options")
+        if isinstance(existing_payload, dict)
+        else executable_payload.get("model_options")
+        if isinstance(executable_payload, dict)
+        else persisted_form.get("model_options")
+        if isinstance(persisted_form, dict)
+        else None
+    )
+    model_options_binding = (
+        existing_payload.get("model_options_binding")
+        if isinstance(existing_payload, dict)
+        else executable_payload.get("model_options_binding")
+        if isinstance(executable_payload, dict)
+        else persisted_form.get("model_options_binding")
+        if isinstance(persisted_form, dict)
+        else None
+    )
+    executed_payload = {
+        "model_type": "ols",
+        "covariance": result.get("covariance_wire"),
+        "entity_col": result.get("entity_col"),
+        "y": result.get("y_column"),
+        "x": result.get("x_columns", []),
+    }
+    if isinstance(model_options, dict):
+        executed_payload["model_options"] = model_options
+    if isinstance(model_options_binding, dict):
+        executed_payload["model_options_binding"] = model_options_binding
     update_run_inputs_metadata(
         run_root,
-        executed_payload={
-            "model_type": "ols",
-            "covariance": result.get("covariance_wire"),
-            "entity_col": result.get("entity_col"),
-            "y": result.get("y_column"),
-            "x": result.get("x_columns", []),
-        },
+        executed_payload=executed_payload,
         contract_metadata={
             "contract_version": result.get("contract_version"),
             "model": result.get("model"),
@@ -348,6 +399,83 @@ def _persist_ols_contract_metadata(run_root, result: dict[str, Any]) -> None:
             "covariance_evidence": result.get("covariance_evidence", {}),
         },
     )
+
+
+def _persist_model_options_execution_binding(
+    run_root,
+    *,
+    model_type: str,
+    model_options: dict[str, object],
+    model_options_binding: object,
+) -> None:
+    """Write generic terminal evidence for a successfully bound options payload."""
+
+    if not model_options or not isinstance(model_options_binding, dict):
+        return
+    from ...lineage.run_inputs import read_run_inputs, update_run_inputs_metadata
+
+    if not (run_root / "run_inputs.json").is_file():
+        return
+    run_inputs = read_run_inputs(run_root)
+    confirmed_payload = run_inputs.get("confirmed_payload")
+    existing = run_inputs.get("executed_payload")
+    # The analysis loop compares these two logical payloads by canonical hash.
+    # Start from the server-confirmed transport rather than a smaller generic
+    # subset, so a successful future model handler preserves covariance and
+    # selector facts as well as its bound model options.
+    has_confirmed_payload = isinstance(confirmed_payload, dict)
+    executed_payload = (
+        dict(confirmed_payload)
+        if has_confirmed_payload
+        else dict(existing)
+        if isinstance(existing, dict)
+        else {}
+    )
+    if not has_confirmed_payload:
+        # `model_type` is a wire-level fact. A confirmed payload (when
+        # present) may intentionally retain an alias such as glm:poisson,
+        # while the resolved handler uses the registry key glm.
+        executed_payload["model_type"] = model_type
+    executed_payload.update(
+        {
+            "model_options": model_options,
+            "model_options_binding": model_options_binding,
+        }
+    )
+    update_run_inputs_metadata(run_root, executed_payload=executed_payload)
+
+
+def _seal_lmm_executed_input_before_fit(
+    *, run_root, run_id: str, model_options: object, model_options_binding: object
+):
+    """Create LMM's immutable pre-fit input proof, never a post-fit repair."""
+
+    from ...services.pinned_run_directory import (
+        open_pinned_run_directory,
+        seal_executed_input_v1,
+    )
+    from ...contracts.model.linear_mixed_effects import validate_lmm_executed_options_v1
+
+    if run_root.name != run_id:
+        raise ModelOptionsValidationError(
+            "LMM_EXECUTION_BINDING_REQUIRED",
+            "LMM run root does not match its trusted run identifier.",
+        )
+    # The sealed artifact is the dedicated LMM execution record.  Do not use
+    # generic run-input metadata mutation here or after fitting.
+    model_input = validate_lmm_executed_options_v1(model_options, model_options_binding)
+    pinned = open_pinned_run_directory(run_root.parent, run_id)
+    try:
+        representation = {
+            "schema_version": 1,
+            "model_type": "linear_mixed_effects",
+            "model_options": model_input.to_dict(),
+            "model_options_binding": dict(model_options_binding),
+        }
+        return pinned, seal_executed_input_v1(pinned, representation)
+    except BaseException:
+        pinned.close()
+        raise
 
 
 # ---- core pack registration (dogfood the registry) ----
@@ -381,19 +509,19 @@ CORE_PACK = AnalysisPack(
         RerunAction(
             key="iv_switch_to_ols",
             label="Switch to OLS",
-            param_overrides={"model_type": "ols"},
+            param_overrides={"model_type": "ols", "model_options": {}},
             applies_to=["iv_2sls"],
         ),
         RerunAction(
             key="did_switch_to_panel_ols",
             label="Switch to plain Panel FE",
-            param_overrides={"model_type": "panel_ols"},
+            param_overrides={"model_type": "panel_ols", "model_options": {}},
             applies_to=["did"],
         ),
         RerunAction(
             key="cs_did_switch_to_did",
             label="Switch to classic DID",
-            param_overrides={"model_type": "did"},
+            param_overrides={"model_type": "did", "model_options": {}},
             applies_to=["cs_did"],
         ),
     ],
@@ -419,6 +547,12 @@ class EstimationStage:
     name = "estimation"
 
     def run(self, ctx: ModelingContext, env: RunEnv) -> ModelingContext:
+        # Future model packs are declared explicitly and loaded idempotently.
+        # Keep this immediately before handler resolution rather than relying on
+        # process import order (the capability endpoint bootstraps separately).
+        from ..packs.loader import bootstrap_builtin_packs
+
+        bootstrap_builtin_packs()
         # Lazy imports to avoid circular deps with orchestrator helpers/state.
         from ...orchestrator import (
             _model_failure_details,
@@ -432,6 +566,8 @@ class EstimationStage:
         )
         from ...artifacts import write_json
         from ...domain import GuardrailIssue, Severity
+        from ...services.pinned_run_directory import LmmPersistenceError
+        from ..packs.linear_mixed_effects.input import LmmInputError
 
         model_type = ctx.requested_model_type or "auto"
         normalized_y = ctx.artifacts["_normalized_y"]
@@ -497,6 +633,8 @@ class EstimationStage:
         run_id = env.run_id
         recorder = env.recorder
         model_input_ids = [ctx.data.artifact_id]
+        model_options = ctx.artifacts.get("_model_options", {})
+        model_options_binding = ctx.artifacts.get("_model_options_binding")
 
         # Build a resolve view: prediction model types fall through to the
         # y_type default identically to legacy behavior (they're dispatched
@@ -511,49 +649,139 @@ class EstimationStage:
 
         try:
             handler = resolve(resolve_ctx)
+            if model_options:
+                if handler.validate_model_options is None:
+                    raise ModelOptionsValidationError(
+                        "MODEL_OPTIONS_UNSUPPORTED",
+                        f"Model type {handler.model_type} does not declare model_options.",
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    )
+                try:
+                    from ...model_options import (
+                        ModelOptionsError,
+                        verify_binding_owner_for_model_type,
+                        verify_bound_model_options,
+                    )
+
+                    bound = verify_bound_model_options(
+                        model_options, model_options_binding
+                    )
+                    assert bound.binding is not None
+                    verify_binding_owner_for_model_type(
+                        bound.binding, handler.model_type
+                    )
+                except ModelOptionsError as exc:
+                    raise ModelOptionsValidationError(
+                        exc.code,
+                        str(exc),
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    ) from exc
+                try:
+                    handler.validate_model_options(model_options)
+                except ModelOptionsValidationError:
+                    raise
+                except (TypeError, ValueError) as exc:
+                    raise ModelOptionsValidationError(
+                        "MODEL_OPTIONS_INVALID_VALUE",
+                        f"Model type {handler.model_type} rejected model_options: {exc}",
+                        {
+                            "model_type": handler.model_type,
+                            "provided_option_keys": sorted(model_options),
+                        },
+                    ) from exc
+            if handler.model_type == "linear_mixed_effects":
+                if env.lmm_execution_admission is None:
+                    raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
             model_id, primary, fitted = handler.fit(ctx, env)
-            _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            # LMM's registered PacketEnvelope is its sole model-result source;
+            # never create a competing legacy ``model_results/*.json`` copy.
+            if handler.model_type != "linear_mixed_effects":
+                _write_model_result(run_root, model_id, primary, inputs=model_input_ids)
+            if handler.model_type != "linear_mixed_effects":
+                _persist_model_options_execution_binding(
+                    run_root,
+                    model_type=handler.model_type,
+                    model_options=model_options,
+                    model_options_binding=model_options_binding,
+                )
             if model_id == "ols_1":
                 _persist_ols_contract_metadata(run_root, primary)
-            model_results.append((model_id, primary))
+            model_results.append(
+                (model_id, _result_for_downstream(handler.model_type, primary))
+            )
             if fitted is not None:
                 fitted_models[model_id] = fitted
             # OLS path (auto-continuous OR explicit `ols`) records robust SE DP.
             if model_id == "ols_1":
                 _robust_se_dp = _ols_robust_se_decision(ctx)
+        except LmmInputError:
+            if (
+                handler.model_type == "linear_mixed_effects"
+                and "_linear_mixed_effects_diagnostic" in ctx.artifacts
+            ):
+                # The runner has already durably recorded the sole
+                # tombstone-bound blocked diagnostic.  Do not duplicate it in
+                # generic lifecycle files.
+                env.step("estimation", "blocked", "Linear Mixed Effects input blocked.")
+                ctx.terminal_status = "blocked"
+                ctx.artifacts["_model_results"] = model_results
+                ctx.artifacts["_fitted_models"] = fitted_models
+                ctx.artifacts["_robust_se_dp"] = _robust_se_dp
+                return ctx
+            raise
+        except LmmPersistenceError:
+            # The admitted worker owns the private lifecycle sink.  This stage
+            # must never use generic errors.json/manifest fallback.
+            raise
         except ValueError as exc:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
-            failure_evidence = _model_failure_details(
-                model_type=(
-                    model_type
-                    if model_type != "auto"
-                    else _Y_TYPE_TO_ATTEMPTED_MODEL.get(ctx.y_type, ctx.y_type)
-                ),
-                y=normalized_y,
-                x=normalized_x,
-                root_cause=str(exc),
-                step="estimation",
-            )
-            failure_evidence["y_type"] = ctx.y_type
-            if model_type != "auto":
-                failure_evidence["requested_model_type"] = model_type
-            from ..recommended_actions import actions_for_model_fit_failure
-            failure_evidence["recommended_actions"] = actions_for_model_fit_failure(
-                requested_model_type=model_type,
-                y_type=ctx.y_type,
-            )
+            is_model_options_error = isinstance(exc, ModelOptionsValidationError)
+            if is_model_options_error:
+                failure_evidence = {
+                    **exc.evidence,
+                    "y_type": ctx.y_type,
+                    "requested_model_type": model_type,
+                }
+                issue_code = exc.error_code
+            else:
+                failure_evidence = _model_failure_details(
+                    model_type=(
+                        model_type
+                        if model_type != "auto"
+                        else _Y_TYPE_TO_ATTEMPTED_MODEL.get(ctx.y_type, ctx.y_type)
+                    ),
+                    y=normalized_y,
+                    x=normalized_x,
+                    root_cause=str(exc),
+                    step="estimation",
+                )
+                failure_evidence["y_type"] = ctx.y_type
+                if model_type != "auto":
+                    failure_evidence["requested_model_type"] = model_type
+                from ..recommended_actions import actions_for_model_fit_failure
+                failure_evidence["recommended_actions"] = actions_for_model_fit_failure(
+                    requested_model_type=model_type,
+                    y_type=ctx.y_type,
+                )
+                issue_code = "MODEL_FIT_FAILED"
 
             issue_dicts.append(GuardrailIssue(
-                Severity.BLOCKER if model_type != "auto" else Severity.WARNING,
-                "MODEL_FIT_FAILED",
+                Severity.BLOCKER if (model_type != "auto" or is_model_options_error) else Severity.WARNING,
+                issue_code,
                 str(exc),
                 failure_evidence,
             ).to_dict())
             write_json(run_root / "errors.json", {"issues": issue_dicts})
             env.step("estimation", "blocked", f"Model fit failed: {exc}")
 
-            if model_type != "auto":
+            if model_type != "auto" or is_model_options_error:
                 # 1.5.3.2 CONTRACT: explicit failure => structured `failed`.
                 # NO silent OLS fallback.
                 _write_manifest(

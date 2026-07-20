@@ -25,8 +25,9 @@ from ..lineage.pipeline_drafts import PipelineDraftStore, StoredDraft, compute_e
 from ..lineage.rerun_provenance import run_rerun_from_from_context
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
+from ..model_options import ModelOptionsError, canonicalize_model_options, parse_model_options
 from ..repository.run_repository import _resolve_run_root
-from .run_service import _submit_run, encode_form_override
+from .run_service import _submit_run, merge_form_overrides
 
 
 def execute_genesis_draft(
@@ -113,6 +114,11 @@ def execute_genesis_draft(
 
         tp = nodes["table_1"].get("params") or {}
         mp = dict(nodes["model_1"].get("params") or {})
+        if "model_options_binding" in mp:
+            raise HTTPException(
+                status_code=422,
+                detail="MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+            )
         x_val = mp.pop("x", "")
         focal = mp.pop("focal_x", "")
         merged_form = {
@@ -131,23 +137,38 @@ def execute_genesis_draft(
                 for k, v in mp.items()
             },
         }
+        try:
+            raw_model_options = merged_form.get("model_options", "{}")
+            merged_form["model_options"] = (
+                parse_model_options(raw_model_options)
+                if isinstance(raw_model_options, str)
+                else canonicalize_model_options(raw_model_options)
+            )
+        except ModelOptionsError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
 
         executed_hash = compute_executable_draft_hash(draft)
 
         def _record_snapshot_before_dispatch(new_run_id: str) -> None:
             run_dir = root / "runs" / new_run_id
+            resolved_binding = (read_run_inputs(run_dir).get("form") or {}).get(
+                "model_options_binding"
+            )
+            snapshot = {
+                "executed_at": utc_now(),
+                "source_draft_id": draft_id,
+                "executed_draft_hash": executed_hash,
+                "execution_request": {
+                    "execution_mode": "genesis",
+                    "validated_draft_hash": validated_draft_hash,
+                },
+                "draft": draft,
+            }
+            if isinstance(resolved_binding, dict):
+                snapshot["model_options_binding"] = resolved_binding
             (run_dir / "executed_pipeline_draft.json").write_text(
                 json.dumps(
-                    {
-                        "executed_at": utc_now(),
-                        "source_draft_id": draft_id,
-                        "executed_draft_hash": executed_hash,
-                        "execution_request": {
-                            "execution_mode": "genesis",
-                            "validated_draft_hash": validated_draft_hash,
-                        },
-                        "draft": draft,
-                    },
+                    snapshot,
                     sort_keys=True,
                     indent=2,
                     ensure_ascii=False,
@@ -180,6 +201,9 @@ def execute_genesis_draft(
                 rerun_reason="initial",
                 before_dispatch=_record_snapshot_before_dispatch,
             )
+        except ModelOptionsError as exc:
+            events.release_slot(None)
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except Exception:
             events.release_slot(None)
             raise
@@ -290,10 +314,10 @@ def execute_rerun_child_draft(
             if (model.get("source_params") or {}).get(key) != value
         }
 
-        merged_form = {
-            **inputs["form"],
-            **{key: encode_form_override(key, value) for key, value in op_overrides.items()},
-        }
+        try:
+            merged_form = merge_form_overrides(inputs["form"], op_overrides)
+        except ModelOptionsError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         run_level_rerun_from = run_rerun_from_from_context(
             request_id=f"draft:{draft_id}",
             owner_run_id=source["source_run_id"],
@@ -305,18 +329,24 @@ def execute_rerun_child_draft(
 
         def _record_snapshot_before_dispatch(new_run_id: str) -> None:
             run_dir = root / "runs" / new_run_id
+            resolved_binding = (read_run_inputs(run_dir).get("form") or {}).get(
+                "model_options_binding"
+            )
+            snapshot = {
+                "executed_at": utc_now(),
+                "source_draft_id": draft_id,
+                "executed_draft_hash": executed_hash,
+                "execution_request": {
+                    "execution_mode": "rerun_child",
+                    "validated_draft_hash": validated_draft_hash,
+                },
+                "draft": draft,
+            }
+            if isinstance(resolved_binding, dict):
+                snapshot["model_options_binding"] = resolved_binding
             (run_dir / "executed_pipeline_draft.json").write_text(
                 json.dumps(
-                    {
-                        "executed_at": utc_now(),
-                        "source_draft_id": draft_id,
-                        "executed_draft_hash": executed_hash,
-                        "execution_request": {
-                            "execution_mode": "rerun_child",
-                            "validated_draft_hash": validated_draft_hash,
-                        },
-                        "draft": draft,
-                    },
+                    snapshot,
                     sort_keys=True,
                     indent=2,
                     ensure_ascii=False,
@@ -353,6 +383,9 @@ def execute_rerun_child_draft(
                 rerun_from=run_level_rerun_from,
                 before_dispatch=_record_snapshot_before_dispatch,
             )
+        except ModelOptionsError as exc:
+            events.release_slot(None)
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         except Exception:
             events.release_slot(None)
             raise

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..engine.capabilities import build_capabilities
+from ..model_options import ModelOptionsError, canonicalize_model_options
 
 EDITABLE_STAGE_MODEL = "model"
 
@@ -124,11 +125,26 @@ def validate_overrides(contract: OperationContract, op_overrides: dict) -> None:
     in the pipeline."""
     by_key = {p["key"]: p for p in contract.editable_schema}
     for key, value in op_overrides.items():
+        # model_options is a generic, server-normalized rerun transport. It
+        # intentionally stays out of legacy UI editable schemas until a model
+        # pack declares an actual object control for it.
+        if key == "model_options":
+            if not isinstance(value, dict):
+                raise OpOverrideError("Value for 'model_options' must be an object")
+            try:
+                canonicalize_model_options(value)
+            except ModelOptionsError as exc:
+                raise OpOverrideError(exc.code) from exc
+            continue
+        if key == "model_options_binding":
+            raise OpOverrideError("model_options_binding is server-managed")
         if key not in by_key:
             raise OpOverrideError(
                 f"Unknown field {key!r} for op {contract.op_type!r} ({contract.schema_id})"
             )
         spec = by_key[key]
+        if spec.get("kind") == "object" and not isinstance(value, dict):
+            raise OpOverrideError(f"Value for {key!r} must be an object")
         options = spec.get("options")
         allowed = [o if not isinstance(o, dict) else o.get("value") for o in options or []]
         if options and spec.get("kind") in {"columns", "multiselect"} and isinstance(value, list):

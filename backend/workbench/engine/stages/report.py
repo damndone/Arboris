@@ -1,8 +1,32 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
+
+
+def _xlsx_export_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Serialize structured public-result fields before handing them to XLSX.
+
+    The result contract legitimately carries lists such as an LMM confidence
+    interval.  Excel cells accept scalar values only; this conversion is for
+    the export view and never mutates the authoritative model result packet.
+    """
+
+    safe_rows: list[dict[str, Any]] = []
+    for row in rows:
+        safe_rows.append(
+            {
+                key: (
+                    json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    if isinstance(value, (dict, list, tuple))
+                    else value
+                )
+                for key, value in row.items()
+            }
+        )
+    return safe_rows
 
 
 def _refresh_artifact_checksum(run_root, artifact_id: str, path) -> None:
@@ -246,7 +270,7 @@ class ReportStage:
         try:
             export_pdf(report, run_root)
             export_xlsx(
-                {"coefficients": _coefficient_rows_for_models(model_results)},
+                {"coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results))},
                 run_root,
             )
             env.step("export", "complete", "Exported PDF and XLSX")

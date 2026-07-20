@@ -9,7 +9,7 @@ import pandas as pd
 import statsmodels
 import statsmodels.formula.api as smf
 
-from ..analysis_loop.canonical import sha256_canonical
+from ..canonical import sha256_canonical
 from ..analysis_loop.fingerprints import (
     analysis_sample_fingerprint,
     coefficient_schema_fingerprint,

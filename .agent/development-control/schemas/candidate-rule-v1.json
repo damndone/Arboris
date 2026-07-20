@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Development-control candidate rule v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate_id", "lesson_key", "status", "occurrence_count", "trigger_event_ids", "sources", "scope", "enforcement_point", "test_marker", "false_positive_risk", "verification_method", "candidate_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "lesson_key": {"type": "string", "minLength": 1},
+    "status": {"const": "candidate"},
+    "occurrence_count": {"const": 2},
+    "trigger_event_ids": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
+    "sources": {"type": "array", "minItems": 2},
+    "scope": {"type": "string", "minLength": 1},
+    "enforcement_point": {"type": "string", "minLength": 1},
+    "test_marker": {"type": ["string", "null"]},
+    "false_positive_risk": {"type": "string", "minLength": 1},
+    "verification_method": {"type": "string", "minLength": 1},
+    "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

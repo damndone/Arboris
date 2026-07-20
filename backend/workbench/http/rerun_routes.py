@@ -20,8 +20,9 @@ from ..lineage.op_contract import OpOverrideError, resolve_operation_contract, r
 from ..lineage.rerun_provenance import pending_produced_lineage, run_rerun_from_from_context
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
+from ..model_options import ModelOptionsError
 from ..repository.run_repository import _read_manifest, _resolve_project_runs_dir, _resolve_run_root
-from ..services.run_service import _submit_run, encode_form_override
+from ..services.run_service import _submit_run, merge_form_overrides
 from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
 
 router = APIRouter()
@@ -169,10 +170,10 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             status_code=422, detail=f"Parent upload unusable: {exc}"
         ) from exc
 
-    merged_form = {
-        **inputs["form"],
-        **{k: encode_form_override(k, v) for k, v in body.op_overrides.items()},
-    }
+    try:
+        merged_form = merge_form_overrides(inputs["form"], body.op_overrides)
+    except ModelOptionsError as exc:
+        raise HTTPException(status_code=422, detail=exc.code) from exc
 
     manual_patch_result: dict[str, Any] | None = None
     if manual_patch is not None:
@@ -191,10 +192,10 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
             )
         except ManualPatchValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        merged_form = {
-            **inputs["form"],
-            **{k: encode_form_override(k, v) for k, v in patch_overrides.items()},
-        }
+        try:
+            merged_form = merge_form_overrides(inputs["form"], patch_overrides)
+        except ModelOptionsError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
         effective_op_overrides = patch_overrides
         manual_patch_result = _manual_patch_idempotency_result(
             root=root,
@@ -254,6 +255,9 @@ def rerun_endpoint(run_id: str, project_root: str, body: RerunRequest) -> dict[s
         )
         child_id = result["run_id"]
         return _response_for(child_id)
+    except ModelOptionsError as exc:
+        events.release_slot(child_id)
+        raise HTTPException(status_code=422, detail=exc.code) from exc
     except ValueError as exc:
         events.release_slot(child_id)
         raise HTTPException(status_code=422, detail=str(exc)) from exc

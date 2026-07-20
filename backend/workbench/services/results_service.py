@@ -9,6 +9,7 @@ Extracted verbatim from ``api.py`` in v1.6.10 (D1 decomposition, Phase 2).
 """
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 from ..artifacts import read_json
 from ..domain import GuardrailIssue, Severity
 from ..term_parser import is_q_quoted_dummy, parse_term
+from .lmm_result_adapter import read_lmm_public_results
 
 
 _OLS_RESULT_CONTRACT_RE = re.compile(r"^ols_result_contract_v(\d+)$")
@@ -73,13 +75,17 @@ def read_coefficient_by_result_id(
 
 def read_model_results(run_root: Path) -> list[dict]:
     model_dir = run_root / "model_results"
-    if not model_dir.is_dir():
-        return []
     results: list[dict] = []
-    for path in sorted(model_dir.glob("*.json")):
-        data = read_json(path)
-        if isinstance(data, dict) and isinstance(data.get("coefficients"), dict):
-            results.append(data)
+    if model_dir.is_dir():
+        for path in sorted(model_dir.glob("*.json")):
+            data = read_json(path)
+            if isinstance(data, dict) and isinstance(data.get("coefficients"), dict):
+                results.append(data)
+    # ``exists()`` follows links and returns False for a dangling index
+    # symlink.  A lexical entry is an untrusted versioned-result boundary and
+    # must reach the pinned reader, which rejects it fail-closed.
+    if os.path.lexists(run_root / "artifacts_index.json"):
+        results.extend(read_lmm_public_results(run_root))
     return results
 
 

@@ -14,6 +14,7 @@ import { validatePanelPrediction } from "../App";
 import { ModelTypeSelect } from "./ModelTypeSelect";
 import { ImputationControls } from "./ImputationControls";
 import { PanelControls } from "./PanelControls";
+import { LmmControls, type LmmControlValue } from "./LmmControls";
 import { PredictionControls } from "./PredictionControls";
 import { IVControls, type IVRoleValue } from "./IVControls";
 import { DIDControls, type DIDRoleValue } from "./DIDControls";
@@ -62,6 +63,13 @@ export function RunForm(props: RunFormProps) {
   const [entityCol, setEntityCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariance, setCovariance] = useState("");
+  const [lmmValue, setLmmValue] = useState<LmmControlValue>({
+    subject_id: "",
+    time: "",
+    group: "",
+    fit_method: "reml",
+    random_slope: true,
+  });
   // V1.5.4.4: IV role assignment (endog / instruments) over the X selection.
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
@@ -154,7 +162,12 @@ export function RunForm(props: RunFormProps) {
   const runErrors: Record<string, string> = {};
   if (projectRoot.trim() === "") runErrors.projectRoot = "Create a project first";
   if (y.trim() === "") runErrors.y = "Required";
-  if (xColumns.length === 0) runErrors.x = "Provide at least one column";
+  if (modelType !== "linear_mixed_effects" && xColumns.length === 0) runErrors.x = "Provide at least one column";
+  if (modelType === "linear_mixed_effects") {
+    for (const key of ["subject_id", "time", "group"] as const) {
+      if (!lmmValue[key]) runErrors[key] = "Required";
+    }
+  }
   if (!file) runErrors.file = "Select a CSV or Excel file";
 
   const canRun =
@@ -302,6 +315,7 @@ export function RunForm(props: RunFormProps) {
               : undefined,
           honestDid: usesCsParams ? csValue.honestDid : undefined,
           didTreatmentPath: isDcdh ? dcdhValue.treatmentPath : undefined,
+          modelOptions: modelType === "linear_mixed_effects" ? lmmValue : undefined,
           // v1.6.5 role layer: declare focal only for user-focal families and
           // only over the columns actually posted as x. Structural families
           // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
@@ -428,6 +442,9 @@ export function RunForm(props: RunFormProps) {
               onTime={setTimeCol}
               onCovariance={setCovariance}
             />
+          )}
+          {modelType === "linear_mixed_effects" && (
+            <LmmControls columns={columnNames} value={lmmValue} onChange={setLmmValue} />
           )}
           {modelType === "iv_2sls" && (
             <div className="ios-group" aria-label="IV controls">

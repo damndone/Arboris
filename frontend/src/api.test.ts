@@ -890,6 +890,7 @@ describe("runWorkflow panel+prediction params", () => {
       entityCol: "firm", timeCol: "yr", covariance: "robust",
       predictionModelType: "prediction_ridge", predictionCvFolds: 3,
       predictionSamplingMethod: "smote",
+      modelOptions: { random_slope: false, fit_method: "reml" },
     });
     expect(sent!.get("entity_col")).toBe("firm");
     expect(sent!.get("time_col")).toBe("yr");
@@ -897,6 +898,23 @@ describe("runWorkflow panel+prediction params", () => {
     expect(sent!.get("prediction_model_type")).toBe("prediction_ridge");
     expect(sent!.get("prediction_cv_folds")).toBe("3");
     expect(sent!.get("prediction_sampling_method")).toBe("smote");
+    expect(sent!.get("model_options")).toBe(
+      '{"random_slope":false,"fit_method":"reml"}',
+    );
     vi.unstubAllGlobals();
+  });
+
+  it("fails closed instead of silently dropping non-JSON model options", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["y,x\n1,2"], "d.csv", { type: "text/csv" });
+
+    await expect(
+      runWorkflow("/proj", "auto", "y", "x", file, "ols", undefined, false, undefined, {
+        modelOptions: { random_slope: undefined },
+      }),
+    ).rejects.toThrow("modelOptions");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

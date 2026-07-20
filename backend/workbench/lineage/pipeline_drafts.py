@@ -14,6 +14,8 @@ from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
+from ..model_options import ModelOptionsError, canonicalize_model_options
+
 DRAFT_SCHEMA_VERSION = "pipeline_draft.v1"
 EXECUTED_DRAFT_FILENAME = "executed_pipeline_draft.json"
 
@@ -281,6 +283,8 @@ class PipelineDraftStore:
         base_draft_hash: str,
         params: dict[str, Any],
     ) -> StoredDraft:
+        if "model_options_binding" in params:
+            raise DraftValidationFailure("MODEL_OPTIONS_BINDING_CLIENT_MANAGED")
         lock = self._lock_for(draft_id)
         if not lock.acquire(blocking=False):
             raise DraftLockedForExecution("draft is locked for execution")
@@ -331,6 +335,8 @@ class PipelineDraftStore:
         Merge-only contract: keys cannot be removed by omission; send an
         explicit null/empty value to unset a param.
         """
+        if "model_options_binding" in params:
+            raise DraftValidationFailure("MODEL_OPTIONS_BINDING_CLIENT_MANAGED")
         lock = self._lock_for(draft_id)
         if not lock.acquire(blocking=False):
             raise DraftLockedForExecution("draft is locked for execution")
@@ -561,6 +567,22 @@ def _validate_control_value(
     kind = control.get("kind")
     options = _option_values(control.get("options"))
 
+    if kind == "object":
+        if not isinstance(value, dict):
+            return [
+                check(
+                    "INVALID_PARAM_TYPE",
+                    f"Param {key!r} must be an object.",
+                    node_id=node_id,
+                )
+            ]
+        if key == "model_options":
+            try:
+                canonicalize_model_options(value)
+            except ModelOptionsError as exc:
+                return [check(exc.code, str(exc), node_id=node_id)]
+        return checks
+
     if kind in {"columns", "multiselect"}:
         if not isinstance(value, list):
             return [
@@ -634,6 +656,14 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
     controls = _editable_controls(model)
     allowed = set(controls)
     params = model.get("params", {})
+    if "model_options_binding" in params:
+        checks.append(
+            check(
+                "MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+                "model_options_binding is generated only by the server.",
+                node_id=model.get("node_id"),
+            )
+        )
     # P1 (v1.6.10): the inherited source values came from a real executed run and
     # are trusted as-is. A param whose value is byte-identical to its source value
     # is NOT re-validated against the (possibly narrower) editable_schema options —
@@ -652,6 +682,8 @@ def _validate_params(model: dict[str, Any]) -> list[dict[str, Any]]:
             )
         )
     for key in params:
+        if key == "model_options_binding":
+            continue
         if key not in allowed:
             checks.append(
                 check(
@@ -791,6 +823,14 @@ def _validate_genesis_for_execution(
             )
         )
     model_params = model.get("params") or {}
+    if "model_options_binding" in model_params:
+        checks.append(
+            check(
+                "MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
+                "model_options_binding is generated only by the server.",
+                node_id="model_1",
+            )
+        )
     model_type = model_params.get("model_type") or model.get("model_type")
     missing = [
         key
@@ -806,6 +846,15 @@ def _validate_genesis_for_execution(
             check(
                 "GENESIS_MODEL_INCOMPLETE",
                 f"Genesis model node is missing {missing} (configure the wizard model step).",
+                node_id="model_1",
+            )
+        )
+    if "model_options" in model_params:
+        checks.extend(
+            _validate_control_value(
+                "model_options",
+                model_params["model_options"],
+                {"key": "model_options", "kind": "object"},
                 node_id="model_1",
             )
         )

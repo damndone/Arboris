@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "release_train": "v1.7.3",
+  "scope": "local_macos_workbench",
+  "overall_status": "LOCAL_MACOS_V1_7_3_ACCEPTED",
+  "final_product_commit": "730ebfc21840fa801d3d0dfc093899ae376b8b01",
+  "branch": "integration/v1.7.3",
+  "acceptance_evidence": "docs/superpowers/release-trains/v1.7.3/evidence/local-v173-closeout.md",
+  "topology": {
+    "contract_lock_commit": "0251f0a30d984bdbb2cfab404e6c646deab60cae",
+    "assembly_owner": "Integration",
+    "lane_commits_merged_as_ancestry": [],
+    "meaning": "WO-A, WO-B, WO-C and the retained WO-D safety decisions were reviewed and assembled under Integration ownership. The durable product baseline is the Integration commit, not any individual lane worktree."
+  },
+  "gates": [
+    {
+      "id": "c1_1_contract_lock",
+      "owner": "Integration",
+      "status": "PASS",
+      "evidence": "0251f0a30d984bdbb2cfab404e6c646deab60cae"
+    },
+    {
+      "id": "parallel_development_control",
+      "owner": "Integration",
+      "status": "PASS",
+      "evidence": "Formal Context Packs, append-only events, line retrospectives and promotion controls are present under .agent/devlines; Integration recorded the visible-reader and fixture-parity assembly failures."
+    },
+    {
+      "id": "c2_hostile_extension_containment",
+      "owner": "Future security work package",
+      "status": "NOT_APPLICABLE_TO_LOCAL_PRODUCT_FUTURE_ROADMAP",
+      "evidence": "Unused C2 product prototypes and tests were deleted. A future hostile or third-party extension boundary remains in architecture-debt.md and the v1.7.3 C2 objective is roadmap-only."
+    },
+    {
+      "id": "local_execution_profile",
+      "owner": "Integration",
+      "status": "PASS",
+      "evidence": "scripts/run-local-contained.sh explicitly selects local_contained on every start; application startup executes the real macOS sandbox canary; /health reported execution_profile=local_contained, lmm_admitted=true, high_risk_code_admitted=true and canary_status=passed."
+    },
+    {
+      "id": "wo_a_agent",
+      "owner": "WO-A / Agent",
+      "status": "PASS_ASSEMBLED",
+      "evidence": "The exact local browser session executed read-only result, diagnostics, node-context, repeated-measures-recipe and analysis-loop capabilities; it returned the 0.9405 interaction estimate and created no proposal or mutation. Initial tool-argument retries remain efficiency evidence, not a functional blocker."
+    },
+    {
+      "id": "wo_b_lmm_model_pack",
+      "owner": "WO-B / Model Pack",
+      "status": "PASS_ASSEMBLED",
+      "evidence": "A real 480-observation / 80-group LMM run completed and persisted the sole versioned result packet. The group-by-time estimate was 0.9404735706546966, SE 0.030871151514025686, 95% CI [0.8799672255259271, 1.000979915783466], p=7.703447077524316e-204."
+    },
+    {
+      "id": "wo_c_ui",
+      "owner": "WO-C / UI",
+      "status": "PASS_ASSEMBLED_AND_BROWSER_ACCEPTED",
+      "evidence": "On final commit 730ebfc, Graph, Table and Report loaded the exact run. Table visibly rendered group_time_interaction 0.9405 / 0.03087 / 7.703e-204 and LMM_RANDOM_EFFECTS_SINGULAR. Report exposed 113/113 facts and its c3 coefficient fact."
+    },
+    {
+      "id": "wo_d_local_evaluation",
+      "owner": "WO-D / Evaluation",
+      "status": "PASS_LOCAL_SCOPE",
+      "evidence": "C1 static safety boundaries remain. C2 product runtime was removed as unused for a trusted local Workbench; future hostile-code isolation is explicitly separated into a later work package. Local launch remains explicit and startup-canary gated."
+    },
+    {
+      "id": "integration_assembly",
+      "owner": "Integration",
+      "status": "PASS",
+      "evidence": "Final product commit 730ebfc includes local startup admission, LMM Model Pack, Agent capabilities, UI consumers, Failure Memory controls and the canonical execution_binding parity fix discovered by browser acceptance."
+    },
+    {
+      "id": "local_known_truth_smoke_and_performance",
+      "owner": "Integration",
+      "status": "PASS_LOCAL_BASELINE",
+      "evidence": "Run 20260720_170211_106313_8f12dd67 completed the full workflow in approximately 0.679 seconds for 480 observations and 80 groups, generated six figures, HTML/PDF reports and XLSX export. This is a local smoke baseline, not a deployment SLA."
+    },
+    {
+      "id": "automated_full_gate",
+      "owner": "Integration",
+      "status": "PASS_LAYERED_FINAL_TREE",
+      "evidence": "Exact parent 290c35e full gate: backend 2503 passed / 8 skipped, golden and invariants 23 passed, frontend 137 files / 1217 tests, TypeScript passed, diff check passed. Final 730ebfc changes only the frontend public-projection validator/fixture and FMS metadata; its complete frontend suite repeated at 137 files / 1217 tests and TypeScript passed before the byte-identical commit."
+    },
+    {
+      "id": "report_operations_closeout",
+      "owner": "Report / Operations",
+      "status": "PASS_INDEPENDENT_EVIDENCE_LINE",
+      "evidence": "The independent closeout records 91 focused backend tests, 132 frontend files / 1168 tests, 2126 backend passes / 8 skips, a 604.89-second honest-DiD baseline, and a real DeepSeek report with eight rendered figures, 39 verified cite chips, zero raw markers and HTTP 200 export."
+    },
+    {
+      "id": "local_release_signoff",
+      "owner": "Release owner",
+      "status": "PASS_LOCAL_MACOS_SCOPE",
+      "evidence": "The requested local macOS Workbench scope is accepted on Integration commit 730ebfc. No push, pull request, merge, tag, packaged-app claim or deployment claim is included."
+    }
+  ],
+  "future_non_blocking_work": [
+    "Hostile or third-party extension containment with a separately supported OS boundary",
+    "Packaged-app notarization, deployment and multi-host acceptance",
+    "Agent tool-schema guidance to reduce same-turn argument retries",
+    "Time-series diagnostics first, then forecasting; Prophet, pmdarima and arch remain roadmap candidates"
+  ]
+}

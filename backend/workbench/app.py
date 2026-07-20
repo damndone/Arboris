@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .api_errors import register_error_handlers
 from .control_plane import control_plane_capability, validate_control_plane
+from .services.execution_profile import current_execution_profile
 from .http.agent_routes import router as agent_router
 from .http.drafts_routes import router as drafts_router
 from .http.data_operation_routes import router as data_operation_router
@@ -30,11 +31,21 @@ register_error_handlers(app)
 @app.on_event("startup")
 def _validate_supported_deployment() -> None:
     validate_control_plane()
+    current_execution_profile()
 
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    return {"status": "ok", **control_plane_capability()}
+    return {
+        "status": "ok",
+        **control_plane_capability(),
+        "execution_profile": current_execution_profile().profile,
+        **{
+            key: value
+            for key, value in current_execution_profile().public_status().items()
+            if key != "profile"
+        },
+    }
 
 app.include_router(projects_router)
 app.include_router(runs_router)

@@ -226,6 +226,36 @@ def test_compare_packet_does_not_fuzzy_match_missing_primary_target() -> None:
     assert "PRIMARY_TARGET_MISSING" in packet.integrity_findings
 
 
+@pytest.mark.parametrize(
+    "compare_status",
+    ("complete", "partial", "not_comparable", "blocked_by_integrity"),
+)
+def test_existing_compare_statuses_preserve_their_legacy_wire_shape(
+    compare_status: str,
+) -> None:
+    packet = ComparePacket(
+        compare_status=compare_status,
+        source_run_id="run-source",
+        child_run_id="run-child",
+        target={"result_id": "coef:treatment"},
+        data_diff={},
+        parameter_diff={},
+        result_diff={},
+        conclusion_diff={},
+        validation_status="pass",
+        integrity_findings=(),
+        logical_key=f"compare:{compare_status}",
+        strategy_version="ols_clustered_v1",
+        schema_version="compare_packet_v1",
+    )
+
+    serialized = packet.to_dict()
+
+    assert "reason_code" not in serialized
+    assert "user_safe_message" not in serialized
+    assert ComparePacket.from_dict(serialized) == packet
+
+
 def test_compare_packet_blocks_when_analysis_fingerprint_changes() -> None:
     packet = build_compare_packet(
         source=_run(),
