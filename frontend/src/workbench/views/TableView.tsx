@@ -23,6 +23,7 @@ import {
   fetchRunDetail,
 } from "../../api";
 import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
+import { buildRepeatedMeasuresViewModel } from "../repeatedMeasures/repeatedMeasuresViewModel";
 import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
@@ -47,7 +48,13 @@ function humanize(id: string): string {
 }
 
 function CoefficientTable({ model }: { model: ModelResult }) {
-  const rows = Object.entries(model.coefficients ?? {});
+  const repeatedMeasures = buildRepeatedMeasuresViewModel(model);
+  const rows = repeatedMeasures.kind === "complete"
+    ? [[repeatedMeasures.primaryCoefficient.result_id, repeatedMeasures.primaryCoefficient] as const]
+    : Object.entries(model.coefficients ?? {});
+  const diagnostics = repeatedMeasures.kind === "complete"
+    ? repeatedMeasures.diagnostics.map((diagnostic) => diagnostic.code)
+    : [];
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--label)", marginBottom: 4 }}>
@@ -73,11 +80,21 @@ function CoefficientTable({ model }: { model: ModelResult }) {
               <td style={{ padding: "2px 8px", fontFamily: "var(--font-mono, monospace)" }}>{term}</td>
               <td style={{ padding: "2px 8px" }}>{fmt(c.estimate)}</td>
               <td style={{ padding: "2px 8px" }}>{fmt(c.std_error)}</td>
-              <td style={{ padding: "2px 8px" }}>{c.p_value_display ?? fmt(c.p_value)}</td>
+              <td style={{ padding: "2px 8px" }}>
+                {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {diagnostics.length > 0 && (
+        <div
+          data-testid="table-view-lmm-diagnostics"
+          style={{ marginTop: 8, fontSize: 11, color: "var(--orange, #b35c00)" }}
+        >
+          Diagnostic: {diagnostics.join(", ")}
+        </div>
+      )}
     </div>
   );
 }

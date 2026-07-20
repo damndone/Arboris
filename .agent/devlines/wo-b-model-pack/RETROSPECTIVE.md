@@ -6,11 +6,11 @@ Keep the LMM Model Pack inert until the reviewed versioned public-result contrac
 
 ## Final status
 
-STARTED
+CLOSED
 
 ## Metrics
 
-- Failure frequency: 1/2 (50.0%; 50.0 per 100 events)
+- Failure frequency: 1/3 (33.3%; 33.3 per 100 events)
 - Repeat rate: 0/1 (0.0%)
 - Recurrence rate: 0/1 (0.0%)
 - MTTR: N/A (sample=0; unresolved=1)
@@ -57,3 +57,4 @@ STARTED
 
 - #1: `d92a2188-a7a6-4537-bc7c-f3b03a7008e4` | 2026-07-19T23:45:18.870Z | STATE_CHANGE/line_started | incident=`1ffb8e0b-c07c-43a4-87be-6c871baef68c` | lesson_key=`frozen-context-before-start` | event_sha256=`7839f1e54055bcb82cc5ee9b1f20179fe9b3e62009f14ef57fb149b41933e6ac`
 - #2: `10000000-0000-4000-8000-000000000002` | 2026-07-19T19:05:00.000Z | GAP/public_result_contract_pending | incident=`20000000-0000-4000-8000-000000000002` | lesson_key=`versioned-public-result-contract` | event_sha256=`5cd972d5a3ade56a4f82fec77968a3a751c18167e7102cd5a719ff7df22ca769`
+- #3: `adedd942-bcf0-48c6-aaad-c240426b1212` | 2026-07-20T17:44:54.000Z | STATE_CHANGE/wo_b_model_pack_accepted | incident=`1b2ccf14-a026-4d8a-a1ae-e61822f3cd34` | lesson_key=`assembled-line-state-closeout` | event_sha256=`7378aaf3d1909bc2170b2cca182e8e6142c4daeeb2b9f15c2b74517b52a74bc8`

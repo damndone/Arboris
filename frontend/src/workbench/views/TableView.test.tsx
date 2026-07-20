@@ -6,6 +6,7 @@ import type { LineageContextValue } from "../../lineage/LineageContext";
 import { ForestContext } from "../ForestContext";
 import type { GraphViewModel } from "../../lineage/api/graphViewTypes";
 import type { ArtifactsResponse, RunDetail } from "../../api";
+import { completePublicModelResult } from "../repeatedMeasures/__fixtures__/publicModelResults";
 import { TableView } from "./TableView";
 
 const mockDetail = vi.hoisted(() => ({ current: null as unknown }));
@@ -131,6 +132,21 @@ describe("TableView", () => {
     expect(screen.getByText("education")).toBeTruthy();
     expect(screen.getByText("age")).toBeTruthy();
     expect(screen.getByText("0.08")).toBeTruthy();
+  });
+
+  it("renders the canonical LMM packet coefficient and diagnostic", async () => {
+    mockDetail.current = {
+      model_results: [completePublicModelResult()],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+
+    renderTable();
+
+    await waitFor(() => expect(screen.getByTestId("table-view-coefficients")).toBeTruthy());
+    expect(screen.getByText("group_time_interaction")).toBeTruthy();
+    expect(screen.getByText("0.8")).toBeTruthy();
+    expect(screen.getByTestId("table-view-lmm-diagnostics"))
+      .toHaveTextContent("LMM_RANDOM_SLOPE_NEAR_ZERO");
   });
 
   it("renders every figure artifact as an <img> pointing at the artifact download URL", async () => {

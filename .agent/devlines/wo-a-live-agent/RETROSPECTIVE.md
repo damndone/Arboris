@@ -6,7 +6,7 @@
 
 ## Final status
 
-STARTED
+CLOSED
 
 ## Metrics
 
@@ -56,3 +56,4 @@ STARTED
 ## Event index
 
 - #1: `96afca5f-75eb-4a11-9f7b-3ac2f4549299` | 2026-07-20T05:21:16.490Z | STATE_CHANGE/line_started | incident=`b1f50758-4bf8-42c3-bfd6-42a263e97faa` | lesson_key=`frozen-context-before-start` | event_sha256=`0ad154aeb7c07544a2ade3334a3ba73023c3f0e5bb6999b00281298a95cadfc8`
+- #2: `dc16536d-b9ee-4417-a48a-3ec1481477dd` | 2026-07-20T17:44:54.000Z | STATE_CHANGE/wo_a_live_agent_accepted | incident=`bcd4dcd6-63d5-4085-98a1-ba27664cb275` | lesson_key=`assembled-line-state-closeout` | event_sha256=`37b0a826beb4c9615f7bcaf9d91a397b5267104af3d0b524e62c21bb507fd3a9`

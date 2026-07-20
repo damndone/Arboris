@@ -19,11 +19,26 @@ workbench create /tmp workbench-demo
 workbench run /tmp/workbench-demo examples/datasets/cross_section.csv wage --x education
 ```
 
-Start the local API:
+Start the local API in the default fail-closed profile:
 
 ```bash
 uvicorn workbench.api:app --reload
 ```
+
+For local LMM and sandboxed `code.execute`, explicitly opt in on every backend
+start. The launcher runs the native macOS sandbox canary before the server is
+accepted and does not persist the opt-in:
+
+```bash
+./scripts/run-local-contained.sh
+```
+
+When the server is ready, `GET /health` reports
+`execution_profile: local_contained`, `lmm_admitted: true`,
+`high_risk_code_admitted: true`, and `canary_status: passed`. Closing the
+server removes the capability; the next start must opt in again. This local
+profile runs only reviewed Workbench code and is not hostile-plugin or public
+deployment certification.
 
 Agent-confirmed operation state currently uses a project-local JSONL/file-lock
 control plane and therefore has an explicit `single_worker` deployment

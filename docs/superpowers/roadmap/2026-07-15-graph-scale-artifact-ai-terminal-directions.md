@@ -2,8 +2,8 @@
 
 > 2026-07-15 用户提出三个问题,本文档固化设计讨论结论,供后续版本圈定时取用。
 > 状态同步 2026-07-18：G1/G2/G3 的基础能力已随 v1.7.2 发布；v1.7.3 是一个双工作包 release
-> train：Report/Operations closeout 与 Repeated Measures/LMM。LMM 当前仅 C1 Contract Sprint，尚未
-> 实现、独立评估或发布；两个工作包不共用完成声明。P-SBX2、P-CE1 以及 G2 provider-gated
+> train：Report/Operations closeout 与 Repeated Measures/LMM。两条线现已完成本机产品组装和
+> 验收；C2 敌对候选认证不再属于本机版本，转入事件触发的长期路线图。P-SBX2、P-CE1 以及 G2 provider-gated
 > 真·看图仍未排入本版本。
 > 本文保留为长期方向文档；对应 live backlog 见 `docs/superpowers/followups/BACKLOG.md`。
 
@@ -154,9 +154,9 @@ child `data-casts:cf5ed865…`「Cast 2 columns」、sidecar 里 wage/education 
 
 ## 当前排序建议（2026-07-18）
 
-- v1.7.3：LMM 的本地组装、真实浏览器流程与完整本地 gate 已通过；它仍需以精确 Integration
-  SHA 重验、完成 C2 原生冻结隔离、性能证据和独立 Report/Operations closeout，才能对外发布。
-  这些是发布保证，不得反向阻塞本机使用。
+- v1.7.3：Report/Operations 与 LMM 的本地组装、真实 macOS canary、HTTP/浏览器流程和
+  完整本地 gate 已收口；未使用的 C2 产品原型已删除。未来公共部署、App 封装、插件或
+  第三方模型包出现时，再按新的信任边界重新立项 C2。
 - v1.8：先做 Time Series Diagnostics 的 C1 合同锁——时间语义、平稳性/季节性/趋势评估、
   “结论不充分”统一呈现及受条件约束的差分/去趋势建议。C1 后才可并行启动 Pack、Agent、UI/UX
   和独立 Evaluation；预测不与诊断混做。

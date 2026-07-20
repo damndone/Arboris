@@ -52,8 +52,14 @@ const OUTER_FIELDS = new Set([
   "source_contract_version",
   "source_producer_version",
   "source_packet_digest",
+  "execution_binding",
   "payload",
   "legacy_compatibility",
+]);
+const EXECUTION_BINDING_FIELDS = new Set([
+  "schema_version",
+  "run_id",
+  "executed_input_digest",
 ]);
 const RECOVERABLE_CODES = new Set([
   "LMM_RANDOM_SLOPE_NEAR_ZERO",
@@ -135,6 +141,13 @@ function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function validateExecutionBinding(value: unknown): JsonRecord | null {
+  if (!plainRecord(value) || !hasExactKeys(value, EXECUTION_BINDING_FIELDS)) return null;
+  if (value.schema_version !== 1 || !nonEmptyString(value.run_id)) return null;
+  if (typeof value.executed_input_digest !== "string" || !DIGEST.test(value.executed_input_digest)) return null;
+  return value;
+}
+
 function validateOuter(value: unknown): JsonRecord | null {
   if (!plainRecord(value) || !hasExactKeys(value, OUTER_FIELDS)) return null;
   if (!nonEmptyString(value.artifact_id) || !nonEmptyString(value.artifact_path)) return null;
@@ -143,6 +156,7 @@ function validateOuter(value: unknown): JsonRecord | null {
   if (value.source_contract !== "linear_mixed_effects.result" || value.source_contract_version !== "1.0") return null;
   if (!nonEmptyString(value.source_producer_version)) return null;
   if (typeof value.source_packet_digest !== "string" || !DIGEST.test(value.source_packet_digest)) return null;
+  if (validateExecutionBinding(value.execution_binding) === null) return null;
   if (value.legacy_compatibility !== "projected_from_versioned_packet") return null;
   return plainRecord(value.payload) ? value : null;
 }
@@ -279,6 +293,11 @@ export function buildRepeatedMeasuresViewModel(value: unknown): RepeatedMeasures
   const outer = validateOuter(value);
   if (outer === null) return { kind: "rejected" };
   const payload = outer.payload as JsonRecord;
+  const outerBinding = validateExecutionBinding(outer.execution_binding);
+  const payloadBinding = validateExecutionBinding(payload.execution_binding);
+  if (outerBinding === null || payloadBinding === null
+    || outerBinding.run_id !== payloadBinding.run_id
+    || outerBinding.executed_input_digest !== payloadBinding.executed_input_digest) return { kind: "rejected" };
   if (payload.schema_version !== 1 || payload.contract_version !== "1.0"
     || !nonEmptyString(payload.estimator_version) || payload.model_id !== "linear_mixed_effects_1"
     || payload.model_type !== "linear_mixed_effects" || payload.primary_target_id !== "group_time_interaction"

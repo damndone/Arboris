@@ -2,7 +2,7 @@
 
 ## Status and decision
 
-**Approved for planning; not implemented yet.**
+**Implemented for the v1.7.3 local macOS boundary.**
 
 The target macOS host has now demonstrated that Seatbelt is usable from its
 native Terminal: `sandbox-exec` launched successfully, the sandbox and
@@ -131,10 +131,12 @@ Each admitted local LMM run writes an immutable manifest fact:
 }
 ```
 
-The health response exposes the profile status.  The frontend shows a persistent
-non-dismissable local-development banner when the profile is active, explaining
-that LMM is locally enabled and the run is not C2/release evidence.  It shows
-no banner in the default profile.
+The health response exposes the profile status. The checked-in launcher is the
+only supported convenience entry point and makes the opt-in visible in the
+Terminal on every start. A browser-side enable switch is intentionally absent.
+The earlier banner proposal was dropped during the lean local closeout because
+it would add a second health-fetch/state surface without changing admission;
+`/health` and immutable run-manifest facts remain the machine-readable truth.
 
 ## Errors and safety invariants
 
