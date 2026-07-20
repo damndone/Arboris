@@ -6,8 +6,10 @@
 敌对候选认证原型已经删除，其未来需求只保留在长期路线图。
 
 本机验收基线为 `730ebfc21840fa801d3d0dfc093899ae376b8b01`；完整证据见
-[`evidence/local-v173-closeout.md`](evidence/local-v173-closeout.md)。本轮未执行 push、PR、
-merge、tag、App 封装或公共部署。
+[`evidence/local-v173-closeout.md`](evidence/local-v173-closeout.md)。本机验收阶段没有把
+push、PR、merge、tag、App 封装或公共部署混入产品通过声明；正式发布另由唯一 Integration
+PR 和其合并提交上的 `v1.7.3` tag 定义。七工作树的发布/归档边界见
+[`worktree-archive-audit.md`](worktree-archive-audit.md)。
 
 当前唯一的发布状态入口是 [`release-ledger.json`](release-ledger.json)。它逐项记录 owner、证据、状态和放行条件；任何单一 Lane 或局部测试通过均不等于 v1.7.3 可发布。
 

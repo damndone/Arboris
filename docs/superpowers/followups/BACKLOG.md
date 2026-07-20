@@ -22,11 +22,12 @@
 导出、run heartbeat/cancel/timeout 以及 CS-DiD 变量语义修复；发布说明见
 `docs/releases/v1.7.2-release-notes.md`。
 
-**当前开发线 = v1.7.3 本机 release train（已收尾）**。两个独立工作包均已完成产品
+**v1.7.3 release train 已收尾并进入正式发布流程**。两个独立工作包均已完成产品
 实现与本机验收：Report/Operations 完成真实 provider、citation、timeout 和导出验收；
 Repeated Measures/LMM 完成组装、真实 macOS `local_contained` canary、HTTP/浏览器运行、
-Agent 和导出。C2 敌对候选认证不属于本机产品，已从代码删除并进入长期路线图；未 tag
-仍不得称为已公开发布。
+Agent 和导出。C2 敌对候选认证不属于本机产品，已从代码删除并进入长期路线图。公开
+发布事实以远端 `v1.7.3` tag 是否指向 release PR 的 `main` 合并提交为唯一判断，不从
+worktree 名称、Lane 分支或本机验收记录推断。
 
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
@@ -35,8 +36,8 @@ Agent 和导出。C2 敌对候选认证不属于本机产品，已从代码删�
 
 - v1.7.1：已发布。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
-- v1.7.3：本机版本已在 Integration 提交 `730ebfc` 收尾；Report/Operations 与 LMM 已完成，本机性能烟测取代未落地的
-  C2 collector。公共部署/App/插件安全留到出现对应信任边界时重新立项。
+- v1.7.3：本机版本已在 Integration 提交 `730ebfc` 收尾；Report/Operations 与 LMM 已完成，正式 release PR/merge/tag
+  采用唯一 Integration 分支；本机性能烟测取代未落地的 C2 collector。公共部署/App/插件安全留到出现对应信任边界时重新立项。
 - v1.8：先完成 Time Series Diagnostics C1；在诊断运行时稳定前，不接入预测模型或预测库。
 
 ---
