@@ -7,8 +7,8 @@ Baseline SHA: `0251f0a30d984bdbb2cfab404e6c646deab60cae`
 Assemble one evidence-bound v1.7.3 Integration candidate without treating control-plane, lane-local, browser, performance, or containment evidence as interchangeable.
 
 ## Boundary
-- Affected paths: `frontend/src/workbench/views/TableView.tsx`, `frontend/src/workbench/views/TableView.test.tsx`
-- Allowed paths: `frontend/src/workbench/views/TableView.tsx`, `frontend/src/workbench/views/TableView.test.tsx`
+- Affected paths: `frontend/src/workbench/views/TableView.tsx`, `frontend/src/workbench/views/TableView.test.tsx`, `frontend/src/workbench/repeatedMeasures/repeatedMeasuresViewModel.ts`, `frontend/src/workbench/repeatedMeasures/__fixtures__/publicModelResults.ts`
+- Allowed paths: `frontend/src/workbench/views/TableView.tsx`, `frontend/src/workbench/views/TableView.test.tsx`, `frontend/src/workbench/repeatedMeasures/repeatedMeasuresViewModel.ts`, `frontend/src/workbench/repeatedMeasures/__fixtures__/publicModelResults.ts`
 - Protected paths: `scripts/gate.sh`
 - Dependencies: none
 - Tests: none

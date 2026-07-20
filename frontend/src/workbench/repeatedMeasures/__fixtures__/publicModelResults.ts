@@ -13,6 +13,11 @@ export function completePublicModelResult(): JsonRecord {
     source_contract_version: "1.0",
     source_producer_version: "linear_mixed_effects@1.0",
     source_packet_digest: "b".repeat(64),
+    execution_binding: {
+      schema_version: 1,
+      run_id: "run-lmm-1",
+      executed_input_digest: "c".repeat(64),
+    },
     legacy_compatibility: "projected_from_versioned_packet",
     payload: {
       schema_version: 1,
@@ -25,6 +30,11 @@ export function completePublicModelResult(): JsonRecord {
       reference_group: "control",
       comparison_group: "treated",
       primary_target_id: "group_time_interaction",
+      execution_binding: {
+        schema_version: 1,
+        run_id: "run-lmm-1",
+        executed_input_digest: "c".repeat(64),
+      },
       coefficients: {
         group_time_interaction: {
           result_id: "group_time_interaction",
