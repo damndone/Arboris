@@ -10,14 +10,14 @@ CONTEXT_RESCOPED
 
 ## Metrics
 
-- Failure frequency: 4/26 (15.4%; 15.4 per 100 events)
+- Failure frequency: 4/29 (13.8%; 13.8 per 100 events)
 - Repeat rate: 0/4 (0.0%)
 - Recurrence rate: 0/4 (0.0%)
 - MTTR: median=0 ms (sample=4; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/2 (0.0%)
+- Gate waste rate: 0/3 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -96,3 +96,6 @@ CONTEXT_RESCOPED
 - #24: `218fc918-d983-42c5-b1d2-a13ff29d8c5c` | 2026-07-20T07:46:44.876Z | STATE_CHANGE/context_rescope_required | incident=`5e86517f-085f-4728-b193-eb9c34e811a8` | lesson_key=`context-pack-rescope` | event_sha256=`032f69245ef3eacd13bb4e3ff12ffac768fae6b2a0fcbb83f090a44d9d1d291f`
 - #25: `409af46a-1323-4bef-a0a2-345e275f94d8` | 2026-07-20T07:46:44.889Z | STATE_CHANGE/context_rescoped | incident=`ac2d0c0b-01d6-4d90-a1dc-8e82f80cedff` | lesson_key=`context-pack-rescope` | event_sha256=`ffbb8c352797b747b3577bbad99a670dc68bb1fb4e0b97a8c7ba5cf2a73780da`
 - #26: `72225fe5-fd99-4232-8d6a-2e85ce7c2e43` | 2026-07-20T08:00:46.000Z | GATE/precommit_full_local_gate_passed | incident=`7daea5fe-ffbb-4be4-8ec0-ec4ba208511f` | lesson_key=`precommit-full-gate-and-clean-diff` | event_sha256=`c8d30311c08faedfc6fedbd68afcaa7bace6593cde7020153a61e28dea1b2ec2`
+- #27: `f49af146-c542-49c0-95ec-726818f7d60c` | 2026-07-20T08:02:52.712Z | STATE_CHANGE/context_rescope_required | incident=`4d5eddba-1c84-42e9-97e3-f9e3e50aa893` | lesson_key=`context-pack-rescope` | event_sha256=`d61c2bf0df4fc35597ed85b98e1e45b07cb8144159b0b1f5f53b62327b7b714f`
+- #28: `7b812f62-c406-4ca4-bd1d-3d08406debca` | 2026-07-20T08:02:52.727Z | STATE_CHANGE/context_rescoped | incident=`21408edf-1745-48be-a211-94365ed41d54` | lesson_key=`context-pack-rescope` | event_sha256=`6189c0f4b18a41ddcd3dc54cd4ad6fd1ddf1b3cfb713168a6ad133bde1cd9587`
+- #29: `264b965a-1e1a-4671-b8bc-6a087b4a3f57` | 2026-07-20T08:18:00.000Z | GATE/exact_commit_full_gate_passed | incident=`3a77f9cd-76be-47a5-8aa4-bd29c308c1ac` | lesson_key=`exact-commit-full-gate` | event_sha256=`9dcd8d1aadf784a0e16b0e89aff560cef18ed29079a9459eb5372cf604db75e2`

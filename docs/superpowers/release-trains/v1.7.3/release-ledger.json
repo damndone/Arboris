@@ -4,14 +4,14 @@
   "overall_status": "LOCAL_DEVELOPMENT_ACCEPTED_C2_DEFERRED",
   "last_verified_integration": {
     "branch": "integration/v1.7.3",
-    "head": "0251f0a30d984bdbb2cfab404e6c646deab60cae",
-    "state": "UNCOMMITTED_ASSEMBLED_LOCAL_ACCEPTANCE_PASSED",
-    "meaning": "The branch head remains the C1.1 contract lock. The worktree contains an assembled LMM candidate that passed local full-gate and browser acceptance, but it has no exact committed Integration SHA and is not a release candidate."
+    "head": "ffac1929b54d6ec3b8a2afffd0db088c520e31cc",
+    "state": "COMMITTED_LOCAL_ACCEPTANCE_CANDIDATE",
+    "meaning": "The assembled LMM candidate is committed on Integration. Its exact SHA passed the local full gate; browser acceptance was completed immediately before the assembly commit and must be repeated on this exact SHA for formal browser-gate evidence. This is a local-development candidate, not a release candidate."
   },
   "topology": {
     "contract_lock_commit": "0251f0a30d984bdbb2cfab404e6c646deab60cae",
     "lanes_merged_into_integration": [],
-    "meaning": "No WO lane commit is an Integration ancestor. Reviewed WO-A/WO-B/WO-C content has been assembled locally and passed local acceptance, but local composition is not an exact committed candidate or release acceptance."
+    "meaning": "No WO lane commit is an Integration ancestor. Reviewed WO-A/WO-B/WO-C content was assembled under Integration ownership into commit ffac192; its provenance is recorded by the release ledger and Context Pack rather than by merging lane ancestry."
   },
   "gates": [
     {
@@ -47,7 +47,7 @@
     {
       "id": "integration_public_result_foundation",
       "owner": "Integration",
-      "status": "PASS_UNCOMMITTED_ASSEMBLY",
+      "status": "PASS_COMMITTED_LOCAL_ASSEMBLY",
       "evidence": {
         "location": "docs/superpowers/release-trains/v1.7.3/integration-foundation/lmm-public-result-adapter.md",
         "commands": [
@@ -60,7 +60,7 @@
     {
       "id": "wo_a_agent",
       "owner": "WO-A / Agent",
-      "status": "ASSEMBLED_LOCAL_ACCEPTANCE_PASS_UNCOMMITTED",
+      "status": "ASSEMBLED_IN_COMMITTED_LOCAL_CANDIDATE",
       "evidence": {
         "candidate_commit": "a450822",
         "report_head": "d2e43ec",
@@ -71,7 +71,7 @@
     {
       "id": "wo_b_lmm_model_pack",
       "owner": "WO-B / Model Pack",
-      "status": "ASSEMBLED_LOCAL_ACCEPTANCE_PASS_UNCOMMITTED",
+      "status": "ASSEMBLED_IN_COMMITTED_LOCAL_CANDIDATE",
       "evidence": {
         "head": "1262a7",
         "command": "git merge-base --is-ancestor 1262a7 integration/v1.7.3"
@@ -81,7 +81,7 @@
     {
       "id": "wo_c_read_only_ui",
       "owner": "WO-C / UI",
-      "status": "LOCAL_BROWSER_ACCEPTANCE_PASS_UNCOMMITTED",
+      "status": "LOCAL_BROWSER_ACCEPTANCE_PRECOMMIT",
       "evidence": {
         "candidate_commit": "670b960",
         "report_head": "cd8716",
@@ -118,13 +118,13 @@
     {
       "id": "integration_candidate_assembly",
       "owner": "Integration",
-      "status": "LOCAL_ACCEPTANCE_PASS_UNCOMMITTED_NOT_EXACT_SHA",
+      "status": "PASS_EXACT_COMMITTED_SHA",
       "evidence": {
         "commands": [
           "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_pinned_run_directory.py tests/models/linear_mixed_effects/test_runner.py tests/test_lmm_result_adapter.py tests/test_lmm_extension_seams.py tests/contracts/test_lmm_contracts.py tests/contracts/test_lmm_error_contract.py tests/agent/test_repeated_measures_recipe.py tests/agent/test_repeated_measures_recovery.py tests/agent/test_lmm_public_result_view.py -q",
           "cd frontend && npx vitest run && npx tsc --noEmit"
         ],
-        "result": "Focused LMM, Agent, Genesis, ownership, persistence, export, and local-contained dispatch suites pass; full local gate passed: backend 2571 passed / 8 skipped, golden 23 passed, frontend 137 files / 1216 tests, and typecheck. Branch HEAD remains the C1.1 lock, so this uncommitted assembly is not an exact candidate SHA."
+        "result": "Focused LMM, Agent, Genesis, ownership, persistence, export, and local-contained dispatch suites pass. On exact commit ffac1929b54d6ec3b8a2afffd0db088c520e31cc, full local gate passed: backend 2571 passed / 8 skipped, golden 23 passed, frontend 137 files / 1216 tests, and typecheck."
       },
       "release_condition": "The exact reviewed Integration SHA contains the approved foundation and accepted WO-A, WO-B, and WO-C changes with no unreviewed lane content."
     },
@@ -141,7 +141,7 @@
     {
       "id": "browser_acceptance",
       "owner": "WO-C / UI",
-      "status": "LOCAL_BROWSER_PASS_UNCOMMITTED_CANDIDATE",
+      "status": "LOCAL_BROWSER_PASS_PRECOMMIT_TREE_EXACT_RERUN_PENDING",
       "evidence": {
         "required_preconditions": [
           "frontend_native_dependencies",
@@ -155,10 +155,11 @@
     {
       "id": "performance_evidence",
       "owner": "Integration / Evaluation",
-      "status": "LOCAL_DEVELOPMENT_ACCEPTED_C2_DEFERRED",
+      "status": "PERFORMANCE_COLLECTOR_AND_EXACT_EVIDENCE_DEFERRED",
       "evidence": {
         "required_precondition": "integration_candidate_assembly",
-        "location": "docs/superpowers/release-trains/v1.7.3/evidence/"
+        "location": "docs/superpowers/release-trains/v1.7.3/evidence/",
+        "known_gap": "The planned collector scripts/collect_v173_lmm_evidence.py and dedicated tests/evaluation/linear_mixed_effects suite are not present in this train; no performance claim is inferred from functional tests."
       },
       "release_condition": "The agreed performance checks run against the exact integration candidate and their bounded results are recorded."
     },
