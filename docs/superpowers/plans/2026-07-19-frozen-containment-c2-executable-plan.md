@@ -1,5 +1,10 @@
 # Frozen Containment Executor C2 Implementation Plan
 
+> **已停止执行并转入长期路线图（2026-07-20）。** v1.7.3 的目标是本机 macOS
+> Workbench，不接收敌对候选代码或外部模型包。曾按本计划创建但未接入产品运行时的
+> C2 模块和专属测试已经删除。若未来出现部署、App 封装、插件或第三方模型包边界，
+> 必须从新的 Context Pack、威胁模型和目标宿主验收重新立项，不能直接恢复旧原型。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development or executing-plans task-by-task. Each implementation task is separately reviewed before the next task; no candidate-execution capability may be enabled early.
 
 **Goal:** add a supported-host-only, OS-enforced, parent-owned strict evaluation

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)
@@ -92,4 +93,29 @@ def test_run_submission_boundary_allows_lmm_only_after_local_canary(
         "execution_profile": "local_contained",
         "containment_evidence": "local_startup_canary",
         "release_evaluation_eligible": False,
+    }
+
+
+def test_health_reports_the_process_selected_local_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import workbench.services.execution_profile as profiles
+    from workbench.app import app
+
+    monkeypatch.setenv("WORKBENCH_EXECUTION_PROFILE", "local_contained")
+    monkeypatch.setattr(profiles, "_run_local_containment_canary", lambda: None)
+    profiles._reset_execution_profile_for_test()
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "control_plane_mode": "single_worker",
+        "workers": 1,
+        "execution_profile": "local_contained",
+        "lmm_admitted": True,
+        "high_risk_code_admitted": True,
+        "canary_status": "passed",
     }

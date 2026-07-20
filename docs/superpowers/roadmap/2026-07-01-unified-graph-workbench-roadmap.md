@@ -7,8 +7,8 @@
 > **策略（用户拍板）**：先清技术债 + 打磨，再逐步把散落的操作融进主图。
 > **2026-07-03 改签**：v1.6.8 插队为 Graph-native Genesis（从 Launcher 到第一个 run 全程在图内完成）。原 v1.6.8「任选对比 / 节点 Ask AI / 引用报告」顺延为 v1.6.9。
 > **状态同步 2026-07-18**：v1.7.2 已发布；v1.7.3 尚未发布，是一个含两个独立工作包的 release train：
-> Report/Operations closeout 与 Repeated Measures/LMM。后者当前仅进入 C1 Contract Sprint，尚未实现、
-> 评估或发布；两份工作包的证据和完成声明必须独立。下方 §2 的 Gap 表保留为历史快照，当前实现以
+> Report/Operations closeout 与 Repeated Measures/LMM。两条工作包现已完成本机产品实现与验收；
+> C2 敌对扩展认证移入事件触发的长期路线图。下方 §2 的 Gap 表保留为历史快照，当前实现以
 > §2.1 与版本段落为准。
 
 ---
@@ -41,7 +41,7 @@
 - run 运行层已经有 heartbeat、协作式 cancel、timeout 和 dead-run 修复；CS-DiD 变量角色一致性也已纳入确定性测试。
 - v1.7.3 是一个双工作包 release train：Report/Operations closeout 处理真实 DeepSeek
   `cs_did_staggered` 端到端验收、provider citation shorthand 回归、timeout 独立回归和清洁发布基线；
-  Repeated Measures/LMM 目前只处于 C1 Contract Sprint。两者均未因另一方的证据而自动完成。
+  Repeated Measures/LMM 已完成本机 `local_contained` 组装、LMM/Agent/UI 与浏览器验收。
 
 ## 3. 收敛路径（版本切分）
 
@@ -100,9 +100,9 @@
 - **工作包 A — Report & Operations closeout**：以已发布 v1.7.2 为基线，完成真实 DeepSeek
   `cs_did_staggered` 报告验收：8 张图、verified citations、event-study/time-trend source 和导出结果；
   增加 provider citation shorthand（只对 packet 中存在的 fact 做安全归一化）与 timeout 释放槽位的独立回归测试。
-- **工作包 B — Repeated Measures/LMM**：当前仅进入 C1 Contract Sprint：冻结版本化合同、canonical
-  fixtures、真实 MixedLM fit feasibility spike 与最小 Integration seam。它尚不是模型实现、独立
-  Evaluation 证据或发布声明。
+- **工作包 B — Repeated Measures/LMM**：已从 C1 合同锁推进到本机产品实现：版本化结果、
+  canonical fixtures、真实 MixedLM、Agent 只读解释、UI/Genesis、显式 `local_contained`
+  启动与本机浏览器验收均已完成。
 - 两个工作包维护独立的证据账本和完成状态；A 的 closeout 不代表 B 完成，B 的 C1 lock 也不代表 A
   的 release acceptance。除这两个已批准工作包外，仍不做 honest-DiD 性能优化、服务端 PDF 渲染、
   custom-code 扩张或多 child 自治。

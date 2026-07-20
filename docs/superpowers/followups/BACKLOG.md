@@ -22,11 +22,11 @@
 导出、run heartbeat/cancel/timeout 以及 CS-DiD 变量语义修复；发布说明见
 `docs/releases/v1.7.2-release-notes.md`。
 
-**当前开发线 = v1.7.3 release train（未发版）**。它包含两个独立工作包，并须独立记账：
-（A）Report/Operations closeout：对 v1.7.2 报告/运行运维能力做真实 provider 验收、citation
-shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measures / LMM：本机组装、完整 gate
-和浏览器运行已通过，但正式发布仍需要精确提交、C2 原生隔离、性能与独立 Evaluation。A 的完成不得
-被表述为 B 已完成，反之亦然；不得把未 tag 的工作称为已发布能力。
+**当前开发线 = v1.7.3 本机 release train（收尾中）**。两个独立工作包均已完成产品
+实现与本机验收：Report/Operations 完成真实 provider、citation、timeout 和导出验收；
+Repeated Measures/LMM 完成组装、真实 macOS `local_contained` canary、HTTP/浏览器运行、
+Agent 和导出。C2 敌对候选认证不属于本机产品，已从代码删除并进入长期路线图；未 tag
+仍不得称为已公开发布。
 
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
@@ -35,8 +35,8 @@ shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measure
 
 - v1.7.1：已发布。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
-- v1.7.3：尚未发布；LMM 已通过本机开发验收，但 Report/Operations、精确提交复验、C2 与性能
-  仍是独立放行条件。
+- v1.7.3：本机版本收尾中；Report/Operations 与 LMM 已完成，本机性能烟测取代未落地的
+  C2 collector。公共部署/App/插件安全留到出现对应信任边界时重新立项。
 - v1.8：先完成 Time Series Diagnostics C1；在诊断运行时稳定前，不接入预测模型或预测库。
 
 ---
@@ -50,8 +50,9 @@ shorthand 回归、timeout 独立回归和发布收口；（B）Repeated Measure
 
 | 优先级 | ID | 债务（一句话） | 类别 | 修法 / 下一步 | 阻塞 | 详情 |
 |---|---|---|---|---|---|---|
-| 🟡 版本收口 | V1.7.3-R | v1.7.3 Report/Operations closeout：真实 DeepSeek `cs_did_staggered` 报告、8 图展开/导出、citation shorthand 与 timeout regression | 独立版本工作包 | 依独立计划与证据收口；不得据此宣称 LMM 已完成 | 否 | `plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
-| 🟡 发布保证 | V1.7.3-LMM-RELEASE | LMM 已完成本机组装与浏览器/完整 gate 验收；尚缺精确提交复验、C2 原生冻结隔离、性能和独立 Evaluation | 独立发布工作包 | 对同一精确 SHA 依序记录 C2、性能、浏览器复验与 release signoff；本机使用不受阻塞 | 否 | `release-trains/v1.7.3/release-ledger.json` |
+| 🟢 已收口 | V1.7.3-R | Report/Operations：真实 DeepSeek、8 图展开/导出、39 cite chips、timeout regression 已完成 | 独立版本工作包 | 保留既有完成证据；不重复运行真实 provider | 否 | `plans/2026-07-18-v1.7.3-report-ops-closeout.md` |
+| 🟢 已收口 | V1.7.3-LMM-LOCAL | 本机 LMM/Agent/UI：显式 local_contained、真实 Seatbelt canary、已知真值 HTTP/浏览器流程和导出 | 独立版本工作包 | 完整 gate 与精确产品提交证据写入 release ledger | 否 | `release-trains/v1.7.3/release-ledger.json` |
+| 🔵 事件触发 | C2-HOSTILE-EXTENSIONS | 敌对插件、第三方模型包或外部候选代码的冻结执行与独立认证 | 长期安全边界 | 只有产品出现对应信任边界时，从新威胁模型和目标宿主重新立项 | 否 | `roadmap/architecture-debt.md#d7-敌对扩展第三方模型包的冻结执行边界未来需求当前不实现` |
 | 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |

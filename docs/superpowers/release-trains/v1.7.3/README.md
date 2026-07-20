@@ -1,6 +1,9 @@
 # v1.7.3 Release Train
 
-状态：C1.1 合同锁已存在；Integration 工作树已组装未提交的 LMM 候选，并完成代码、原生前端、完整本地 gate 与浏览器端到端验收。它仍不是可发布候选：没有精确提交的 Integration SHA，且 C2 缺少受支持宿主的冻结隔离 canary；性能、独立候选执行和正式发布签字仍未完成。
+状态：C1.1 合同锁与 Integration 组装提交均已存在。v1.7.3 的产品边界已明确收敛为
+**单机 macOS Workbench**：Report/Operations 与 LMM/Agent/UI 已组装；LMM 和沙箱化
+`code.execute` 由每次启动显式选择的 `local_contained` 配置开启。未接入运行时的 C2
+敌对候选认证原型已经删除，其未来需求只保留在长期路线图。
 
 当前唯一的发布状态入口是 [`release-ledger.json`](release-ledger.json)。它逐项记录 owner、证据、状态和放行条件；任何单一 Lane 或局部测试通过均不等于 v1.7.3 可发布。
 
@@ -16,7 +19,10 @@
 v1.7.3 是一个 release train，包含两个独立工作包，并各自持有完成声明和证据：
 
 1. **Report/Operations closeout**：对 v1.7.2 报告与运行运维能力的收口；其已有证据不证明 LMM 已完成。
-2. **Repeated Measures / Linear Mixed Effects**：C1.1 合同锁已存在；Integration 工作树已接入 WO-A/WO-B/WO-C 的受控实现，包括 LMM Pack 声明、公共结果投影、Agent 只读解释、RunForm 与 Genesis 参数入口、PacketPanel 展示。它们尚未形成一个提交的 Integration SHA；WO-D 的冻结隔离执行器也尚未在支持主机上通过 canary。因此不能独立评估或发布。
+2. **Repeated Measures / Linear Mixed Effects**：C1.1 合同锁已存在；Integration 已接入
+   WO-A/WO-B/WO-C 的受控实现，包括 LMM Pack、公共结果投影、Agent 只读解释、RunForm
+   与 Genesis 参数入口、PacketPanel 展示。真实本机 `local_contained` 启动 canary 与 HTTP
+   LMM 已通过；C2 不再是本机版本的产品或发布门。
 
 LMM 的初始 run 是用户通过普通 RunForm / `POST /runs` 创建的显式 run。Agent 不创建初始 LMM run；仅可在一个已完成 LMM run 的确定性事实支持下，提出须用户确认的 child `model.rerun` recovery。该 recovery 扩展既有通用 `model.rerun`，不新增 executable operation type。
 
@@ -32,14 +38,18 @@ C1 锁定版本化 LMM packet contract、canonical fixtures、真实 MixedLM fea
 
 LMM 已作为一个声明式 Pack 能力出现在受控模型入口中；Agent 只允许基于已验证公共结果提出需用户确认的建议，不能创建初始 LMM run 或绕过 WO-D 执行能力。Genesis 与普通 RunForm 都要求明确的受试者、时间、组别、拟合方法和随机斜率选项。`frontend/src/workbench/repeatedMeasures/` 仍是唯一的结果展示消费者；不创建 `frontend/src/features/repeated-measures` 平行消费者。
 
-上述事实证明“未提交工作树中的组装已通过本地完整 gate 与浏览器端到端流程”：真实 CSV Genesis 可不虚构 sheet 名保存，LMM 参数可保存、验证并完成运行，图和结果正确标识 `linear_mixed_effects (primary)`，报告事实、PDF/XLSX 导出和 Agent 的只读 `inspect_repeated_measures_recipe` 均已实际操作验证。它仍不是精确提交候选、严格 C2 候选执行、独立 Evaluation、性能签字或 release 通过声明。
+本机真实烟测使用 480 行 canonical LMM 数据，完成状态为 `completed`，交互项估计
+`0.9404735707`（fixture 真值约 `0.9`），80 个受试者、480 个观测，报告与 PDF/XLSX
+一并生成；`/health` 明确报告 `local_contained`、LMM/高风险本地功能已获准、canary
+通过。浏览器端到端流程还验证了 Genesis、LMM 参数保存、结果面板、导出和 Agent 的
+只读 `inspect_repeated_measures_recipe`。这些结论只覆盖本机产品，不宣称公共部署、
+第三方插件或敌对候选代码安全。
 
 ## 不可做的动作
 
-- 不调用真实 DeepSeek 或其他真实 provider；
-- 不读取真实 API key；
+- 自动 gate 不调用真实 provider、不读取 API key；Report/Operations 的真实 DeepSeek
+  验收已经单独完成并留有无密钥证据；
 - 不安装、卸载或修改共享依赖，也不创建 worktree-local `.venv`；
-- 不创建 Feature/Evaluation lane，直到 C1 receipt 已完成；
 - 不 push、PR、merge、tag 或发布，除非另获明确授权。
 
 ## 依据
