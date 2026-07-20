@@ -6,7 +6,7 @@
 
 ## Final status
 
-STARTED
+BASELINE_REANCHOR_REQUIRED
 
 ## Metrics
 
@@ -57,3 +57,4 @@ STARTED
 
 - #1: `dd6623dd-7286-4892-9c91-72acfedd69bd` | 2026-07-20T08:23:08.653Z | STATE_CHANGE/line_started | incident=`45cf668f-d5aa-4231-bd7c-eefe255877aa` | lesson_key=`frozen-context-before-start` | event_sha256=`6fbd9bd0483f388b6c62e53a62a69ad1e17d89df943456f82934f7ebfbf0d69c`
 - #2: `7906a8b1-7c05-4c77-a2e0-6b1feb85c036` | 2026-07-20T08:29:00.000Z | WASTE/context_pack_start_input_validation | incident=`4c088b52-7d99-458d-93ca-5fd455bbb69a` | lesson_key=`compact-fms-start-objective` | event_sha256=`52102e8c1e53c49157f6a490578e6297b91ca910dd5cf0246474f70530616b2f`
+- #3: `d30ad179-b6fa-42bc-9104-7c283947f94d` | 2026-07-20T19:01:40.000Z | STATE_CHANGE/baseline_reanchor_required | incident=`a731c198-7b53-4997-9012-8f5f5ef5bac7` | lesson_key=`release-baseline-anchor` | event_sha256=`08f6eba56faa01ce5779a9f1a8beab74b40a7fb207d091708b3a284d626e5d26`
