@@ -6,7 +6,7 @@
 
 ## Final status
 
-STARTED
+CLOSED
 
 ## Metrics
 
@@ -56,3 +56,6 @@ STARTED
 ## Event index
 
 - #1: `50f86f5a-c116-47f6-afae-489540795e0d` | 2026-07-20T05:02:45.927Z | STATE_CHANGE/line_started | incident=`45d254e3-312b-4b7b-b37a-eab9b7975ca6` | lesson_key=`frozen-context-before-start` | event_sha256=`4d46e382c77ea45dbcb1fb0244666243ce23e691909ca5fc15e5077c3229aa93`
+- #2: `f6a0fd21-5731-4711-8da3-f12ca0e4c213` | 2026-07-20T05:20:43.176Z | STATE_CHANGE/context_rescope_required | incident=`64a05565-d530-4a82-86cf-641b5f7ef570` | lesson_key=`context-pack-rescope` | event_sha256=`9b07ae743358cf48247f6cf771c1661a1b6da599a59af408a3f498395ff5f8ba`
+- #3: `4e4a6d59-08d5-463c-8151-ba8b7c2fc362` | 2026-07-20T05:20:43.180Z | STATE_CHANGE/context_rescoped | incident=`887ab071-8d4c-470b-a190-23692bbe78d5` | lesson_key=`context-pack-rescope` | event_sha256=`9a0b85683e52c8d8eb61cd1525af91e08257f435401337ef777f6be9815fbc3b`
+- #4: `9044560d-603f-43a6-b71e-c324384fc89d` | 2026-07-20T17:44:54.000Z | STATE_CHANGE/local_contained_accepted | incident=`338e9e9f-551f-4de7-b26b-e95f775914a1` | lesson_key=`assembled-line-state-closeout` | event_sha256=`c90a51a694ac3364d649a8e7381c96d2b0240a6036213924459d2ff260ded7a2`

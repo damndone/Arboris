@@ -6,11 +6,11 @@ Preserve the reviewed LMM Agent persistence boundary while integration resolves 
 
 ## Final status
 
-CONTEXT_RESCOPED
+CLOSED
 
 ## Metrics
 
-- Failure frequency: 1/6 (16.7%; 16.7 per 100 events)
+- Failure frequency: 1/7 (14.3%; 14.3 per 100 events)
 - Repeat rate: 0/1 (0.0%)
 - Recurrence rate: 0/1 (0.0%)
 - MTTR: median=0 ms (sample=1; unresolved=0)
@@ -63,3 +63,4 @@ CONTEXT_RESCOPED
 - #4: `e51fae07-fb09-4b7a-805c-97feadcf5a5c` | 2026-07-20T00:45:16.542Z | STATE_CHANGE/context_rescoped | incident=`179d89b3-3e34-47fe-a35a-c77886a147fb` | lesson_key=`context-pack-rescope` | event_sha256=`ea2b7af2b751f4535e4b1448cc6270ce17c8f3e315d65fa801430b74db651199`
 - #5: `3d8c5409-c437-4e96-baf7-1e2610d22319` | 2026-07-20T00:46:33.000Z | STATE_CHANGE/sealed_admission_state_machine_implemented | incident=`e8be1c61-99a7-4b4e-8933-b10f904fb625` | lesson_key=`filesystem-persistence-capability-bypass` | event_sha256=`350e08b227c4728b879ebe93ab1d47c233784ce4d329aae68809a7ee18c7d2a6`
 - #6: `d45aa448-e4e8-4679-b917-41d7ab6abda4` | 2026-07-20T01:16:00.000Z | FAILURE/durability_retry_boundary | incident=`ecddd91b-24d9-4e4e-ae8a-40a27f19ce14` | lesson_key=`filesystem-persistence-capability-bypass` | event_sha256=`0e063435e9dd1ba14efe41b5141c20ce9073ccdda137a8915435e3213382698f`
+- #7: `f49898dd-15a5-4ec4-a6c3-615b8d32c226` | 2026-07-20T17:44:54.000Z | STATE_CHANGE/wo_a_agent_accepted | incident=`e8a02351-6036-43e9-942e-5480de05e3c7` | lesson_key=`assembled-line-state-closeout` | event_sha256=`287285fb5dd1301257c5f99ddf1eba4edeec2b19a2c8fdfe691e6ef0d7d08c79`

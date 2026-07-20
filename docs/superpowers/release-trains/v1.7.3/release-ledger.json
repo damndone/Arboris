@@ -1,200 +1,101 @@
 {
   "schema_version": 1,
   "release_train": "v1.7.3",
-  "overall_status": "LOCAL_DEVELOPMENT_ACCEPTED_C2_DEFERRED",
-  "last_verified_integration": {
-    "branch": "integration/v1.7.3",
-    "head": "ffac1929b54d6ec3b8a2afffd0db088c520e31cc",
-    "state": "COMMITTED_LOCAL_ACCEPTANCE_CANDIDATE",
-    "meaning": "The assembled LMM candidate is committed on Integration. Its exact SHA passed the local full gate; browser acceptance was completed immediately before the assembly commit and must be repeated on this exact SHA for formal browser-gate evidence. This is a local-development candidate, not a release candidate."
-  },
+  "scope": "local_macos_workbench",
+  "overall_status": "LOCAL_MACOS_V1_7_3_ACCEPTED",
+  "final_product_commit": "730ebfc21840fa801d3d0dfc093899ae376b8b01",
+  "branch": "integration/v1.7.3",
+  "acceptance_evidence": "docs/superpowers/release-trains/v1.7.3/evidence/local-v173-closeout.md",
   "topology": {
     "contract_lock_commit": "0251f0a30d984bdbb2cfab404e6c646deab60cae",
-    "lanes_merged_into_integration": [],
-    "meaning": "No WO lane commit is an Integration ancestor. Reviewed WO-A/WO-B/WO-C content was assembled under Integration ownership into commit ffac192; its provenance is recorded by the release ledger and Context Pack rather than by merging lane ancestry."
+    "assembly_owner": "Integration",
+    "lane_commits_merged_as_ancestry": [],
+    "meaning": "WO-A, WO-B, WO-C and the retained WO-D safety decisions were reviewed and assembled under Integration ownership. The durable product baseline is the Integration commit, not any individual lane worktree."
   },
   "gates": [
     {
       "id": "c1_1_contract_lock",
       "owner": "Integration",
       "status": "PASS",
-      "evidence": {
-        "commit": "0251f0a30d984bdbb2cfab404e6c646deab60cae",
-        "command": "git rev-parse HEAD"
-      },
-      "release_condition": "Remains the common ancestry of every accepted lane and is retained in the final integration history."
+      "evidence": "0251f0a30d984bdbb2cfab404e6c646deab60cae"
     },
     {
-      "id": "formal_fms_control_plane",
+      "id": "parallel_development_control",
       "owner": "Integration",
-      "status": "PASS_PROCESS_CONTROL_ONLY",
-      "evidence": {
-        "formal_lines": [
-          "wo-a-agent",
-          "wo-a-live-agent",
-          "wo-b-model-pack",
-          "wo-c-ui",
-          "wo-d-evaluation",
-          "integration-v1-7-3",
-          "local-contained-execution"
-        ],
-        "command": "PYTHONPATH=backend .venv/bin/python scripts/devline_control.py --root . verify --all",
-        "result": "seven formal lines verified; five pre-formal legacy lines quarantined; completed-line retrospective index remains empty because the formal lines are still active work records",
-        "tests": "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_devline_control_events.py tests/test_devline_control_retrospective.py tests/test_devline_control_promotion.py tests/test_devline_control_context_pack.py tests/test_devline_control_cli.py -q"
-      },
-      "release_condition": "Process-control evidence remains supplementary. It cannot satisfy candidate assembly, containment, browser, performance, Report/Operations, or release gates."
+      "status": "PASS",
+      "evidence": "Formal Context Packs, append-only events, line retrospectives and promotion controls are present under .agent/devlines; Integration recorded the visible-reader and fixture-parity assembly failures."
     },
     {
-      "id": "integration_public_result_foundation",
+      "id": "c2_hostile_extension_containment",
+      "owner": "Future security work package",
+      "status": "NOT_APPLICABLE_TO_LOCAL_PRODUCT_FUTURE_ROADMAP",
+      "evidence": "Unused C2 product prototypes and tests were deleted. A future hostile or third-party extension boundary remains in architecture-debt.md and the v1.7.3 C2 objective is roadmap-only."
+    },
+    {
+      "id": "local_execution_profile",
       "owner": "Integration",
-      "status": "PASS_COMMITTED_LOCAL_ASSEMBLY",
-      "evidence": {
-        "location": "docs/superpowers/release-trains/v1.7.3/integration-foundation/lmm-public-result-adapter.md",
-        "commands": [
-          "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_pinned_run_directory.py tests/models/linear_mixed_effects/test_runner.py tests/test_lmm_result_adapter.py tests/test_lmm_extension_seams.py tests/contracts/test_lmm_contracts.py tests/contracts/test_lmm_error_contract.py tests/agent/test_repeated_measures_recipe.py tests/agent/test_repeated_measures_recovery.py tests/agent/test_lmm_public_result_view.py -q",
-          "git status --short --branch"
-        ]
-      },
-      "release_condition": "The reviewed foundation is committed on Integration, preserves legacy OLS reads, and is included in the final integration candidate. Focused contract, persistence, Agent, Genesis, and fail-closed dispatch tests pass; C2 execution remains intentionally unavailable."
+      "status": "PASS",
+      "evidence": "scripts/run-local-contained.sh explicitly selects local_contained on every start; application startup executes the real macOS sandbox canary; /health reported execution_profile=local_contained, lmm_admitted=true, high_risk_code_admitted=true and canary_status=passed."
     },
     {
       "id": "wo_a_agent",
       "owner": "WO-A / Agent",
-      "status": "ASSEMBLED_IN_COMMITTED_LOCAL_CANDIDATE",
-      "evidence": {
-        "candidate_commit": "a450822",
-        "report_head": "d2e43ec",
-        "command": "git merge-base --is-ancestor <wo-a-head> integration/v1.7.3"
-      },
-      "release_condition": "Integration review accepts an exact committed candidate based on the assembled public-result contract; local acceptance is complete, while an exact committed candidate and release gates remain separate."
+      "status": "PASS_ASSEMBLED",
+      "evidence": "The exact local browser session executed read-only result, diagnostics, node-context, repeated-measures-recipe and analysis-loop capabilities; it returned the 0.9405 interaction estimate and created no proposal or mutation. Initial tool-argument retries remain efficiency evidence, not a functional blocker."
     },
     {
       "id": "wo_b_lmm_model_pack",
       "owner": "WO-B / Model Pack",
-      "status": "ASSEMBLED_IN_COMMITTED_LOCAL_CANDIDATE",
-      "evidence": {
-        "head": "1262a7",
-        "command": "git merge-base --is-ancestor 1262a7 integration/v1.7.3"
-      },
-      "release_condition": "The Pack emits and registers the reviewed versioned model-result artifact, uses the canonical FigureContext, passes Integration contract tests, and is merged from an exact reviewed candidate."
+      "status": "PASS_ASSEMBLED",
+      "evidence": "A real 480-observation / 80-group LMM run completed and persisted the sole versioned result packet. The group-by-time estimate was 0.9404735706546966, SE 0.030871151514025686, 95% CI [0.8799672255259271, 1.000979915783466], p=7.703447077524316e-204."
     },
     {
-      "id": "wo_c_read_only_ui",
+      "id": "wo_c_ui",
       "owner": "WO-C / UI",
-      "status": "LOCAL_BROWSER_ACCEPTANCE_PRECOMMIT",
-      "evidence": {
-        "candidate_commit": "670b960",
-        "report_head": "cd8716",
-        "command": "cd frontend && npx vitest run && npx tsc --noEmit",
-        "native_result": "full 137 files and 1216 tests passed; typecheck passed",
-        "browser_result": "A real local CSV Genesis flow selected Linear Mixed Effects, saved the table and model options, validated and completed a run, displayed linear_mixed_effects (primary), rendered report facts, and exported PDF/XLSX."
-      },
-      "release_condition": "The UI consumes only verified PublicModelResult data, its native dependencies are reproducibly available, focused and full frontend tests pass, and browser acceptance is recorded for an exact committed candidate."
+      "status": "PASS_ASSEMBLED_AND_BROWSER_ACCEPTED",
+      "evidence": "On final commit 730ebfc, Graph, Table and Report loaded the exact run. Table visibly rendered group_time_interaction 0.9405 / 0.03087 / 7.703e-204 and LMM_RANDOM_EFFECTS_SINGULAR. Report exposed 113/113 facts and its c3 coefficient fact."
     },
     {
-      "id": "wo_d_frozen_containment",
+      "id": "wo_d_local_evaluation",
       "owner": "WO-D / Evaluation",
-      "status": "C2_DEFERRED_BY_RELEASE_OWNER_FAIL_CLOSED",
-      "evidence": {
-        "design": "docs/superpowers/specs/2026-07-19-frozen-containment-executor-design.md",
-        "plan": "docs/superpowers/plans/2026-07-19-frozen-containment-executor-plan.md",
-        "command": "Frozen containment startup canary on the supported evaluation host",
-        "current_host_result": "The managed macOS host rejects sandbox-exec profiles and has no supported alternative; execution remains fail-closed.",
-        "deferral_decision": "The release owner accepts the current local development evidence and defers real-host C2 canary testing until deployment or application packaging. This is a deferral, not a containment pass."
-      },
-      "release_condition": "A frozen exact-Git-tree executor enforces OS-level read/write allowlists, blocks network and unsafe fallback, passes its startup canary on the supported host, and produces independent evaluation evidence."
+      "status": "PASS_LOCAL_SCOPE",
+      "evidence": "C1 static safety boundaries remain. C2 product runtime was removed as unused for a trusted local Workbench; future hostile-code isolation is explicitly separated into a later work package. Local launch remains explicit and startup-canary gated."
     },
     {
-      "id": "frontend_native_dependencies",
-      "owner": "Integration / UI",
+      "id": "integration_assembly",
+      "owner": "Integration",
       "status": "PASS",
-      "evidence": {
-        "location": "docs/superpowers/release-trains/v1.7.3/integration-foundation/lmm-public-result-adapter.md",
-        "command": "cd frontend && npx vitest run && npx tsc --noEmit",
-        "native_result": "full frontend 137 files and 1216 tests passed; typecheck passed"
-      },
-      "release_condition": "Approved, reproducible frontend dependencies are available in the Integration worktree; native focused tests, complete frontend tests, and npm run typecheck pass there."
+      "evidence": "Final product commit 730ebfc includes local startup admission, LMM Model Pack, Agent capabilities, UI consumers, Failure Memory controls and the canonical execution_binding parity fix discovered by browser acceptance."
     },
     {
-      "id": "integration_candidate_assembly",
+      "id": "local_known_truth_smoke_and_performance",
       "owner": "Integration",
-      "status": "PASS_EXACT_COMMITTED_SHA",
-      "evidence": {
-        "commands": [
-          "PYTHONPATH=backend .venv/bin/python -m pytest tests/test_pinned_run_directory.py tests/models/linear_mixed_effects/test_runner.py tests/test_lmm_result_adapter.py tests/test_lmm_extension_seams.py tests/contracts/test_lmm_contracts.py tests/contracts/test_lmm_error_contract.py tests/agent/test_repeated_measures_recipe.py tests/agent/test_repeated_measures_recovery.py tests/agent/test_lmm_public_result_view.py -q",
-          "cd frontend && npx vitest run && npx tsc --noEmit"
-        ],
-        "result": "Focused LMM, Agent, Genesis, ownership, persistence, export, and local-contained dispatch suites pass. On exact commit ffac1929b54d6ec3b8a2afffd0db088c520e31cc, full local gate passed: backend 2571 passed / 8 skipped, golden 23 passed, frontend 137 files / 1216 tests, and typecheck."
-      },
-      "release_condition": "The exact reviewed Integration SHA contains the approved foundation and accepted WO-A, WO-B, and WO-C changes with no unreviewed lane content."
+      "status": "PASS_LOCAL_BASELINE",
+      "evidence": "Run 20260720_170211_106313_8f12dd67 completed the full workflow in approximately 0.679 seconds for 480 observations and 80 groups, generated six figures, HTML/PDF reports and XLSX export. This is a local smoke baseline, not a deployment SLA."
     },
     {
-      "id": "strict_candidate_evaluation",
-      "owner": "WO-D / Evaluation",
-      "status": "DEFERRED_C2_UNTIL_DEPLOYMENT_OR_APP_PACKAGING",
-      "evidence": {
-        "required_precondition": "wo_d_frozen_containment",
-        "location": "docs/superpowers/release-trains/v1.7.3/evidence/"
-      },
-      "release_condition": "WO-D independently evaluates the exact assembled Integration SHA through the verified containment executor and records accepted evidence."
-    },
-    {
-      "id": "browser_acceptance",
-      "owner": "WO-C / UI",
-      "status": "LOCAL_BROWSER_PASS_PRECOMMIT_TREE_EXACT_RERUN_PENDING",
-      "evidence": {
-        "required_preconditions": [
-          "frontend_native_dependencies",
-          "integration_candidate_assembly"
-        ],
-        "location": "docs/superpowers/release-trains/v1.7.3/evidence/",
-        "workflow_result": "In the in-app browser, a real CSV Genesis draft saved with no invented sheet name; Linear Mixed Effects settings were persisted; the run completed; the graph and result identified linear_mixed_effects (primary); report facts rendered; PDF/XLSX export completed. A separate Agent smoke invoked inspect_repeated_measures_recipe read-only and explained the group × time result without creating a change."
-      },
-      "release_condition": "A browser run against the exact committed integration candidate verifies the required read-only LMM results states and stores auditable screenshots or equivalent browser evidence."
-    },
-    {
-      "id": "performance_evidence",
-      "owner": "Integration / Evaluation",
-      "status": "PERFORMANCE_COLLECTOR_AND_EXACT_EVIDENCE_DEFERRED",
-      "evidence": {
-        "required_precondition": "integration_candidate_assembly",
-        "location": "docs/superpowers/release-trains/v1.7.3/evidence/",
-        "known_gap": "The planned collector scripts/collect_v173_lmm_evidence.py and dedicated tests/evaluation/linear_mixed_effects suite are not present in this train; no performance claim is inferred from functional tests."
-      },
-      "release_condition": "The agreed performance checks run against the exact integration candidate and their bounded results are recorded."
-    },
-    {
-      "id": "full_release_gate",
+      "id": "automated_full_gate",
       "owner": "Integration",
-      "status": "LOCAL_FULL_GATE_PASS_C2_DEFERRED",
-      "evidence": {
-        "required_preconditions": [
-          "strict_candidate_evaluation",
-          "browser_acceptance",
-          "performance_evidence"
-        ],
-        "command": "WORKBENCH_PYTHON=/Users/jiayuanren/项目规划/.venv/bin/python bash scripts/gate.sh --full",
-        "result": "Executed locally with WORKBENCH_PYTHON=/Users/jiayuanren/项目规划/.venv/bin/python: backend 2571 passed, 8 skipped; golden/invariants 23 passed; frontend 137 files / 1216 tests passed; TypeScript check passed. This is local development evidence only; real C2 host evaluation remains deferred until deployment or app packaging."
-      },
-      "release_condition": "All required backend, frontend, contract, security, browser, performance, and independent-evaluation gates pass for one exact candidate SHA."
+      "status": "PASS_LAYERED_FINAL_TREE",
+      "evidence": "Exact parent 290c35e full gate: backend 2503 passed / 8 skipped, golden and invariants 23 passed, frontend 137 files / 1217 tests, TypeScript passed, diff check passed. Final 730ebfc changes only the frontend public-projection validator/fixture and FMS metadata; its complete frontend suite repeated at 137 files / 1217 tests and TypeScript passed before the byte-identical commit."
     },
     {
       "id": "report_operations_closeout",
-      "owner": "Report/Operations",
-      "status": "SEPARATE_EVIDENCE_LINE_UNVERIFIED_HERE",
-      "evidence": {
-        "plan": "docs/superpowers/plans/2026-07-18-v1.7.3-report-ops-closeout.md"
-      },
-      "release_condition": "Report/Operations satisfies its own documented closeout gate; its evidence is recorded independently and is not substituted by the LMM Wave-1 evidence."
+      "owner": "Report / Operations",
+      "status": "PASS_INDEPENDENT_EVIDENCE_LINE",
+      "evidence": "The independent closeout records 91 focused backend tests, 132 frontend files / 1168 tests, 2126 backend passes / 8 skips, a 604.89-second honest-DiD baseline, and a real DeepSeek report with eight rendered figures, 39 verified cite chips, zero raw markers and HTTP 200 export."
     },
     {
-      "id": "release_signoff",
+      "id": "local_release_signoff",
       "owner": "Release owner",
-      "status": "LOCAL_DEVELOPMENT_ACCEPTED_NOT_RELEASE_SIGNED_OFF",
-      "evidence": {
-        "source": "All preceding gate records in this ledger"
-      },
-      "release_condition": "All non-pass gates above are PASS for the same final candidate SHA, both Report/Operations and LMM Wave-1 evidence lines are complete, and an authorized release owner records signoff."
+      "status": "PASS_LOCAL_MACOS_SCOPE",
+      "evidence": "The requested local macOS Workbench scope is accepted on Integration commit 730ebfc. No push, pull request, merge, tag, packaged-app claim or deployment claim is included."
     }
+  ],
+  "future_non_blocking_work": [
+    "Hostile or third-party extension containment with a separately supported OS boundary",
+    "Packaged-app notarization, deployment and multi-host acceptance",
+    "Agent tool-schema guidance to reduce same-turn argument retries",
+    "Time-series diagnostics first, then forecasting; Prophet, pmdarima and arch remain roadmap candidates"
   ]
 }

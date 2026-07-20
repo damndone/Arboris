@@ -6,14 +6,14 @@ Assemble one evidence-bound v1.7.3 Integration candidate without treating contro
 
 ## Final status
 
-CONTEXT_RESCOPED
+CLOSED
 
 ## Metrics
 
-- Failure frequency: 4/29 (13.8%; 13.8 per 100 events)
-- Repeat rate: 0/4 (0.0%)
-- Recurrence rate: 0/4 (0.0%)
-- MTTR: median=0 ms (sample=4; unresolved=0)
+- Failure frequency: 6/36 (16.7%; 16.7 per 100 events)
+- Repeat rate: 0/6 (0.0%)
+- Recurrence rate: 0/6 (0.0%)
+- MTTR: median=0 ms (sample=6; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -28,11 +28,13 @@ CONTEXT_RESCOPED
 ## All errors
 
 - #12 2026-07-20T02:41:00.000Z `test_helper_shadowed_declared_model_owner`; cause_status: `known`; cause: WO-A tests inserted a manual LMM handler while the production declaration loader owned the same model type, making results depend on suite order.; resolution: `resolved`; lesson: Tests exercising a declared pack must use the same declared owner as production; do not shadow a registered model handler in a fixture because loader conflict checks are intentional safety controls.
+- #35 2026-07-20T17:36:00.000Z `canonical_fixture_missing_execution_binding`; cause_status: `known`; cause: The frontend canonical LMM fixture omitted the execution_binding field that the frozen backend public projection always emits, so the first Table adapter test passed against an impossible packet shape while the browser remained empty.; resolution: `resolved`; lesson: Consumer fixtures for versioned packets must be generated from or equality-checked against the backend public projection, including lineage bindings, before they can satisfy an integration gate.
 
 ## All gaps
 
 - #3 2026-07-20T01:15:00.000Z `runtime_contract_assembly_drift`; cause_status: `known`; cause: Reviewed WO components were present but did not share the runtime declarations and fixed-reader API contract.; resolution: `resolved`; lesson: An accepted lane requires an exact assembled runtime contract test, not only isolated lane tests.
 - #6 2026-07-20T01:37:28.000Z `genesis_lmm_options_missing`; cause_status: `known`; cause: The Genesis wizard did not render or persist LMM model options even though the run form supported them.; resolution: `resolved`; lesson: Integration acceptance must exercise each user entry point, including Genesis, rather than infer coverage from the shared run form.
+- #32 2026-07-20T17:22:58.000Z `lmm_table_packet_adapter_missing`; cause_status: `known`; cause: The assembled Table view still read canonical LMM public projections as legacy flat model results, leaving the coefficient body empty although the packet was valid.; resolution: `resolved`; lesson: Every versioned model-result transport must have an end-to-end visible-reader test in each consumer surface, not only contract and packet tests.
 
 ## All waste
 
@@ -41,29 +43,37 @@ CONTEXT_RESCOPED
 ## Root causes and solutions
 
 - `c1-c2-execution-boundary`: occurrences=1; cause_status: `known`; root cause: Registering the LMM pack made ordinary shared submission paths executable even though no real C2 OS containment capability had been admitted.; solution: `resolved`
+- `cross-boundary-fixture-parity`: occurrences=1; cause_status: `known`; root cause: The frontend canonical LMM fixture omitted the execution_binding field that the frozen backend public projection always emits, so the first Table adapter test passed against an impossible packet shape while the browser remained empty.; solution: `resolved`
 - `declared-owner-no-test-shadowing`: occurrences=1; cause_status: `known`; root cause: WO-A tests inserted a manual LMM handler while the production declaration loader owned the same model type, making results depend on suite order.; solution: `resolved`
 - `entrypoint-contract-coverage`: occurrences=1; cause_status: `known`; root cause: The Genesis wizard did not render or persist LMM model options even though the run form supported them.; solution: `resolved`
 - `runtime-contract-assembly`: occurrences=1; cause_status: `known`; root cause: Reviewed WO components were present but did not share the runtime declarations and fixed-reader API contract.; solution: `resolved`
 - `serialize-fms-control-operations`: occurrences=1; cause_status: `known`; root cause: Retrospective generation and global promotion were started concurrently; promotion read the line before its formal state was visible.; solution: `resolved`
+- `versioned-result-visible-reader-adapter`: occurrences=1; cause_status: `known`; root cause: The assembled Table view still read canonical LMM public projections as legacy flat model results, leaving the coefficient body empty although the packet was valid.; solution: `resolved`
 
 ## Added tests
 
 - `frontend/src/lineage/drafts/GenesisWizard.test.tsx`
+- `frontend/src/workbench/repeatedMeasures/__fixtures__/publicModelResults.ts`
+- `frontend/src/workbench/views/TableView.test.tsx`
 - `tests/agent/test_repeated_measures_recipe.py`
 - `tests/test_lmm_extension_seams.py`
 
 ## New rules
 
 - `c1-c2-execution-boundary`: line experience occurrence(s)=1
+- `cross-boundary-fixture-parity`: line experience occurrence(s)=1
 - `declared-owner-no-test-shadowing`: line experience occurrence(s)=1
 - `entrypoint-contract-coverage`: line experience occurrence(s)=1
 - `runtime-contract-assembly`: line experience occurrence(s)=1
 - `serialize-fms-control-operations`: line experience occurrence(s)=1
+- `versioned-result-visible-reader-adapter`: line experience occurrence(s)=1
 
 ## Future guidance
 
 - An accepted lane requires an exact assembled runtime contract test, not only isolated lane tests.
+- Consumer fixtures for versioned packets must be generated from or equality-checked against the backend public projection, including lineage bindings, before they can satisfy an integration gate.
 - Control operations that update and read the same FMS state must be serialized: append, regenerate retrospective, verify, then promote.
+- Every versioned model-result transport must have an end-to-end visible-reader test in each consumer surface, not only contract and packet tests.
 - Integration acceptance must exercise each user entry point, including Genesis, rather than infer coverage from the shared run form.
 - Shared dispatch and synchronous workflow now reject LMM before any upload, run, or snapshot is materialized; C1 input/result contracts and C2 runtime permission are separate capabilities, so executable model declarations must not imply containment permission.
 - Tests exercising a declared pack must use the same declared owner as production; do not shadow a registered model handler in a fixture because loader conflict checks are intentional safety controls.
@@ -99,3 +109,10 @@ CONTEXT_RESCOPED
 - #27: `f49af146-c542-49c0-95ec-726818f7d60c` | 2026-07-20T08:02:52.712Z | STATE_CHANGE/context_rescope_required | incident=`4d5eddba-1c84-42e9-97e3-f9e3e50aa893` | lesson_key=`context-pack-rescope` | event_sha256=`d61c2bf0df4fc35597ed85b98e1e45b07cb8144159b0b1f5f53b62327b7b714f`
 - #28: `7b812f62-c406-4ca4-bd1d-3d08406debca` | 2026-07-20T08:02:52.727Z | STATE_CHANGE/context_rescoped | incident=`21408edf-1745-48be-a211-94365ed41d54` | lesson_key=`context-pack-rescope` | event_sha256=`6189c0f4b18a41ddcd3dc54cd4ad6fd1ddf1b3cfb713168a6ad133bde1cd9587`
 - #29: `264b965a-1e1a-4671-b8bc-6a087b4a3f57` | 2026-07-20T08:18:00.000Z | GATE/exact_commit_full_gate_passed | incident=`3a77f9cd-76be-47a5-8aa4-bd29c308c1ac` | lesson_key=`exact-commit-full-gate` | event_sha256=`9dcd8d1aadf784a0e16b0e89aff560cef18ed29079a9459eb5372cf604db75e2`
+- #30: `4c1ab0b8-a359-4413-a61a-218fe1bf0e22` | 2026-07-20T17:22:40.628Z | STATE_CHANGE/context_rescope_required | incident=`644afac6-058b-492f-a15b-b872ad251741` | lesson_key=`context-pack-rescope` | event_sha256=`30c27263ea1c61a36b34cf230669a10352968df15f6573607faa1cd1403ab359`
+- #31: `97bcd2c9-2c3a-4277-94e6-9bf9d8c66035` | 2026-07-20T17:22:40.644Z | STATE_CHANGE/context_rescoped | incident=`2a8fbac3-0e94-4894-86ac-73ed9c7d5615` | lesson_key=`context-pack-rescope` | event_sha256=`6681c3bb198384f60a9a5cb279707696c936cb5431f718308ca5be4aa6b01f68`
+- #32: `1aceb134-a346-4f34-84c9-c318491fc062` | 2026-07-20T17:22:58.000Z | GAP/lmm_table_packet_adapter_missing | incident=`dbf3107b-8a10-443e-ab85-ebb411faba21` | lesson_key=`versioned-result-visible-reader-adapter` | event_sha256=`2ce3ef67074c2222f996a90ea36a26b0ed694da75139ce1e1f7dc328e5a5e8a6`
+- #33: `219cabf6-933c-423a-a54a-04db3fb962cb` | 2026-07-20T17:35:50.990Z | STATE_CHANGE/context_rescope_required | incident=`0ae2927f-b8da-445b-a747-1445f00e5d3a` | lesson_key=`context-pack-rescope` | event_sha256=`b5a8885b71871efd3b23d3d170183431259bd0d2a81dcb73d9782a3c6891677f`
+- #34: `a44e53f6-8426-4088-b483-19e84db65df9` | 2026-07-20T17:35:51.007Z | STATE_CHANGE/context_rescoped | incident=`b9b76e8f-d263-4c80-a51c-f03abf510aee` | lesson_key=`context-pack-rescope` | event_sha256=`08a73b8de3b34c6061b7518e9e2648eef07f5e90a54004bff0659c198d9863f6`
+- #35: `819744e9-5ea5-4022-9af1-35030a44cbd8` | 2026-07-20T17:36:00.000Z | ERROR/canonical_fixture_missing_execution_binding | incident=`3c845957-4445-4932-a84d-ee62fbe7bf64` | lesson_key=`cross-boundary-fixture-parity` | event_sha256=`6c1fb382185050191eb1b47c6463fe02f930ae098806c543e4536fb3987498b8`
+- #36: `47b9d090-bb33-4fb6-a9c1-35ae652aeb84` | 2026-07-20T17:43:14.000Z | STATE_CHANGE/local_macos_v1_7_3_accepted | incident=`66af1cc0-dc6f-43ef-bee9-9293a78f8a35` | lesson_key=`local-release-scope-closeout` | event_sha256=`e1f7fe01755b432d642e26fcee8709e5d62259bba84ff5af240fbe806195bc80`

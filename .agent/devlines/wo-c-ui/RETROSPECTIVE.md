@@ -6,7 +6,7 @@ Maintain the read-only LMM UI contract and retain browser acceptance as a separa
 
 ## Final status
 
-STARTED
+CLOSED
 
 ## Metrics
 
@@ -57,3 +57,4 @@ STARTED
 
 - #1: `6c83361a-babc-40e3-9551-57bb0139905e` | 2026-07-19T23:45:18.922Z | STATE_CHANGE/line_started | incident=`f7ae1d5b-b3b8-48ba-8dec-8f94935fe5c4` | lesson_key=`frozen-context-before-start` | event_sha256=`a8f8d7a1a4a416c7534ae31b1fed111046d29bdb891d036b1aec5acb9f815f9c`
 - #2: `10000000-0000-4000-8000-000000000003` | 2026-07-19T19:10:00.000Z | GATE/browser_candidate_prerequisite | incident=`20000000-0000-4000-8000-000000000003` | lesson_key=`native-frontend-environment-blocker` | event_sha256=`59c44e3197380695369fa6a94275299000a1c8e4498420118150ce1db7a2c4f5`
+- #3: `0f54211b-1f97-4a77-aac1-46ea48ca7809` | 2026-07-20T17:44:54.000Z | STATE_CHANGE/wo_c_ui_accepted | incident=`46f25f19-67e7-4e54-8f73-8ab93ced8e7b` | lesson_key=`assembled-line-state-closeout` | event_sha256=`d2536ffb5dc1bfec60634fd49581acd7d1a6c4ce67216c340fd5aa6ba7f57579`

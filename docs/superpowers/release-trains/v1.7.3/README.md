@@ -5,6 +5,10 @@
 `code.execute` 由每次启动显式选择的 `local_contained` 配置开启。未接入运行时的 C2
 敌对候选认证原型已经删除，其未来需求只保留在长期路线图。
 
+本机验收基线为 `730ebfc21840fa801d3d0dfc093899ae376b8b01`；完整证据见
+[`evidence/local-v173-closeout.md`](evidence/local-v173-closeout.md)。本轮未执行 push、PR、
+merge、tag、App 封装或公共部署。
+
 当前唯一的发布状态入口是 [`release-ledger.json`](release-ledger.json)。它逐项记录 owner、证据、状态和放行条件；任何单一 Lane 或局部测试通过均不等于 v1.7.3 可发布。
 
 ## 基线与职责
