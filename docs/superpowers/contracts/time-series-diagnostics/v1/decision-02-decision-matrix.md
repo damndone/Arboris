@@ -2,12 +2,12 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. The current pure-policy tests cover the declared
-truth table, but D02 has no named immutable boundary fixtures or evidence SHA.
-This record therefore does not lock the C1 decision policy or authorize a
-runtime capability.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+The pure normalized-facts matrix and immutable Facts packet are covered by the
+focused contract suite. This locks decision precedence only; no raw-data
+evaluator or runtime capability is authorized.
 
 ## Declared v1 policy values
 
@@ -51,3 +51,9 @@ call a statistical library, infer missing evidence, or mutate its input.
 
 No result in this decision table selects a forecasting model, proves forecast
 eligibility, changes data, or triggers an operation.
+
+## Lock evidence
+
+- `tests/contracts/test_time_series_diagnostics_policy.py`
+- `tests/fixtures/models/time_series_diagnostics/packets/facts-packet.json`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`

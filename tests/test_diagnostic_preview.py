@@ -321,3 +321,53 @@ def test_restrictions_and_actions_include_treatment_proxy_and_causal_limits(tmp_
     action_keys = {item["action_key"] for item in preview["recommended_actions"]}
     assert "INTERPRET_TREATMENT_PROXY_JOINTLY" in action_keys
     assert "REVIEW_CAUTIONS_BEFORE_INTERPRETING" in action_keys
+
+
+# ---------------------------------------------------------------------------
+# Regression: a completed pack result without a classic coefficient table
+# (e.g. ARMA-GARCH) must not be mislabelled "run failed".
+# ---------------------------------------------------------------------------
+
+def test_completed_run_without_coefficient_table_is_not_run_failed(tmp_path: Path):
+    run_root = _run_root(tmp_path)
+    write_json(run_root / "diagnostic_summary.json", {
+        "schema_version": "1.0",
+        "run_id": "r1",
+        "run_status": {
+            "has_blockers": False,
+            "has_warnings": False,
+            "model_results_available": True,
+            "safe_to_generate_report": True,
+        },
+        "diagnostics": {"blockers": [], "warnings": [], "cautions": [], "info": []},
+    })
+    manifest = {"run_id": "r1", "status": "completed", "y": "price", "x": []}
+
+    # The coefficient projection surfaces nothing for a time-series pack result,
+    # so model_results reaches the preview empty even though the run succeeded.
+    preview = build_diagnostic_summary_preview(run_root, manifest, model_results=[])
+
+    assert preview["available"] is True
+    assert preview["trust_label"] == "ready_to_interpret"
+    assert preview["run_status"]["status"] == "ok"
+    assert preview["run_status"]["model_results_available"] is True
+
+
+def test_completed_run_without_results_stays_run_failed(tmp_path: Path):
+    run_root = _run_root(tmp_path)
+    write_json(run_root / "diagnostic_summary.json", {
+        "schema_version": "1.0",
+        "run_id": "r1",
+        "run_status": {
+            "has_blockers": False,
+            "has_warnings": False,
+            "model_results_available": False,
+            "safe_to_generate_report": False,
+        },
+        "diagnostics": {"blockers": [], "warnings": [], "cautions": [], "info": []},
+    })
+    manifest = {"run_id": "r1", "status": "completed", "y": "price", "x": []}
+
+    preview = build_diagnostic_summary_preview(run_root, manifest, model_results=[])
+
+    assert preview["trust_label"] == "run_failed"

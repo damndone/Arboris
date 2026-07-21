@@ -1,0 +1,31 @@
+{
+  "oracle_id": "oracle-regular-grid-v1",
+  "source_kind": "independent_reference_calculation",
+  "source_reference": "precomputed reference calculation recorded outside the C1 contract module",
+  "calculation_status": "precomputed_not_production_runtime",
+  "input_fixture": "raw/regular-grid.csv::value",
+  "supported_runtime_manifest": "oracle/supported-runtime-manifest.json",
+  "supported_runtime_manifest_digest": "fe601492571e9ec32062a4df2ae9785471dac69e5df9a941f45abbcebe2b1d66",
+  "methods": {
+    "adf": {
+      "expected": [-1.291929853162643, 0.6328562804565447],
+      "labels": ["statistic", "p_value"],
+      "tolerance": 1e-12
+    },
+    "kpss": {
+      "expected": [0.7163712113533758, 0.012057162604238563],
+      "labels": ["statistic", "p_value"],
+      "tolerance": 1e-12
+    },
+    "acf": {
+      "expected": [1.0, 0.7272023, 0.76825416, 0.49572637, 0.53410909, 0.2931312],
+      "labels": ["lag_0", "lag_1", "lag_2", "lag_3", "lag_4", "lag_5"],
+      "tolerance": 1e-7
+    },
+    "pacf": {
+      "expected": [1.0, 0.7272023, 0.50815526, -0.42513175, 0.1803976, -0.17168635],
+      "labels": ["lag_0", "lag_1", "lag_2", "lag_3", "lag_4", "lag_5"],
+      "tolerance": 1e-7
+    }
+  }
+}

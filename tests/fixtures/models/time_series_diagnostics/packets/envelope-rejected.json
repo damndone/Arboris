@@ -1,0 +1,6 @@
+{
+  "operation_status": "rejected",
+  "reason_code": "USER_REJECTED",
+  "facts_packet_ref": null,
+  "assessment_packet_ref": null
+}

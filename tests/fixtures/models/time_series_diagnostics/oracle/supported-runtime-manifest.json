@@ -1,0 +1,18 @@
+{
+  "manifest_version": "time_series_diagnostics_reference_runtime_v1",
+  "runtime_id": "c1-independent-oracle-2026-07-20",
+  "calculation_authority": "independent_reference_only",
+  "execution_allowed_in_c1": false,
+  "python": "3.14",
+  "packages": {
+    "numpy": "2.5.0",
+    "scipy": "1.18.0",
+    "statsmodels": "0.14.6"
+  },
+  "method_bindings": {
+    "adf": "regression=c; maxlag=0; autolag=None",
+    "kpss": "regression=c; nlags=auto",
+    "acf": "method=standard; nlags=5; fft=false",
+    "pacf": "method=ywm; nlags=5"
+  }
+}

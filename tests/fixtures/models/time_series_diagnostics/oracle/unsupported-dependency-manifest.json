@@ -1,0 +1,6 @@
+{
+  "status": "rejected",
+  "reason_code": "UNSUPPORTED_DEPENDENCY_MANIFEST",
+  "execution_available": false,
+  "operation_token": null
+}

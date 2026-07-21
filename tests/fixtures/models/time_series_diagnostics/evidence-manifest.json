@@ -1,0 +1,28 @@
+{
+  "manifest_version": "time_series_diagnostics_c1_evidence_v1",
+  "scope": "C1 contract, packet, transport, oracle, and negative discoverability evidence",
+  "test_command": "PYTHONPATH=backend /Users/jiayuanren/项目规划/.venv/bin/python -m pytest -q tests/contracts/test_time_series_diagnostics_evaluation_gates.py tests/contracts/test_time_series_diagnostics_canonical_packets.py tests/contracts/test_time_series_diagnostics_contracts.py tests/contracts/test_time_series_diagnostics_policy.py",
+  "files": [
+    {"path": "tests/fixtures/models/time_series_diagnostics/raw/regular-grid.csv", "sha256": "02ca5a90316ccc9c4243a86990ed6cee1f6fd8b30d932b890c0fdcf6668e80d7"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/raw/irregular-grid.csv", "sha256": "541c1f3e0b18f8b210425a8768e17f21eac778b58301d821fe0e423047682423"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/facts-packet.json", "sha256": "d3cf6f82d0d8ea8f8d2b0cd19ea844883de4a656e832a906cb56a3d893d0afab"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/policy-facts-matrix.json", "sha256": "a1e26bd5ba7ad3a44a85d36f0ff92e978175aeb5380b30caca15ecb7c786149f"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/assessment-packet.json", "sha256": "48734468a10aa3d20699de7758d58ea0692ed0be63447ad4f30231d6c860c1b8"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-completed.json", "sha256": "84f9705a42a262bda22873a9f6a1571aeb3bba6af0dbd17302349869feefcbe3"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-rejected.json", "sha256": "8123c83a50a4d8b3ddda8002a084fbc16b981d5e45478bf79eda7be0990983f7"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-failed.json", "sha256": "df3de8c3a6d86ea376359cc6b298d2b057463719b533c6862c9a8c0ec2f0633f"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-cancelled.json", "sha256": "d79adb12602881ebaa03d2b55863d65309f301c672f9e389bde3c6921cd646b5"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-completed-missing-assessment-ref.json", "sha256": "7fec4cadf313079ff4403f2a5b846d818b85f9fda02885cb64c8ea0e08c0637a"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/envelope-failed-with-refs.json", "sha256": "3919ba1028f48828687c32194d5f5bea57f9e906c41de5b541aecf87f0fc3cd2"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/stale-pre-run-confirmation.json", "sha256": "64db931301c9d51b69aaee1910500c8af40c1dfd30fe8d4834594366f4986222"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/packets/post-run-advisory.json", "sha256": "464a84fae386c548cfdc1e75cc9216af253db5cc766524bba8b6f5791af98cbd"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/oracle/independent-diagnostic-oracle.json", "sha256": "e5a449b8b4caca1666cdd665500bd5a65665eeb6435133fcd98130b492e9978b"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/oracle/supported-runtime-manifest.json", "sha256": "fb6a5dab85b5df699be1f39504817a8ddbe1896f818583dd0bcaf6e3aed8939e"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/oracle/unsupported-dependency-manifest.json", "sha256": "22b4ef7b100a258bf3af784f6cc60b537fa79e746f548e4b200241272813f236"},
+    {"path": "tests/fixtures/models/time_series_diagnostics/oracle/resource-limits.json", "sha256": "3881a12044329722a6fbc9bf50340ab4802bc7f620d56e7c0fe6abe8136a97b3"},
+    {"path": "docs/superpowers/contracts/time-series-diagnostics/v1/policy-manifest.json", "sha256": "8883456a6002550da10658d4f6475c161c21d6a5b1d1622e5f65d47dfa68eac8"},
+    {"path": "tests/contracts/test_time_series_diagnostics_evaluation_gates.py", "sha256": "7a3cbafacab574d84a99c972c3ddd7878edc29b5803143d9a88d01c6471928d7"},
+    {"path": "tests/contracts/test_time_series_diagnostics_canonical_packets.py", "sha256": "cb77555be65fea9e3bf87751769878a1c3d3f10b1f94660dd32f5da868e62649"}
+  ],
+  "evidence_sha256": "5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16"
+}

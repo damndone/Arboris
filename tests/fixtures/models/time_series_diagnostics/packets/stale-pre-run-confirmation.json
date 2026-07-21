@@ -1,0 +1,9 @@
+{
+  "status": "stale",
+  "reason_code": "INPUT_IDENTITY_CHANGED",
+  "confirmed_dataset_artifact_id": "dataset-fixture-regular-grid-v1",
+  "current_dataset_artifact_id": "dataset-fixture-replaced-v1",
+  "confirmed_row_scope_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "current_row_scope_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "execution_available": false
+}

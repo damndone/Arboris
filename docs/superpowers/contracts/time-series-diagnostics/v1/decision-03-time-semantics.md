@@ -2,12 +2,13 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. This contract-layer slice has no immutable raw-fixture
-or canonical-order evidence yet. Fixture/evidence SHA is **pending**; the
-current parser tests are boundary tests only and do not lock D03 or authorize
-a runtime capability.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+The regular/irregular UTF-8 raw fixtures, no-mutation transport test, and
+proposal boundary tests are committed. This locks declared grid/provenance
+semantics only; date parsing, timezone/DST normalization, and calendar
+inference remain deferred and unauthorized.
 
 ## Contract-layer decision
 
@@ -33,11 +34,17 @@ Unknown fields, unknown enum values, booleans masquerading as integers, floats,
 and malformed candidate-period shapes are rejected. No omitted field receives
 a default.
 
-## Deferred evidence and boundary
+## Deferred runtime boundary
 
 Accepted time representations, timezone normalization, DST ambiguity, calendar
-rules, canonical-order digests, duplicate handling, missing-point semantics,
-and source immutability still require the named D03 fixtures and evidence SHA.
-They remain open questions for the later Pack/evaluator work. This record is
-not a time parser or a seasonal detector and adds no runtime, registry, HTTP,
-Agent, UI, forecast, provider, or dependency surface.
+rules, duplicate handling, and missing-point semantics require a later parser
+slice. This record is not a time parser or a seasonal detector and adds no
+runtime, registry, HTTP, Agent, UI, forecast, provider, or dependency surface.
+
+## Lock evidence
+
+- `tests/fixtures/models/time_series_diagnostics/raw/regular-grid.csv`
+- `tests/fixtures/models/time_series_diagnostics/raw/irregular-grid.csv`
+- `tests/contracts/test_time_series_diagnostics_evaluation_gates.py`
+- `tests/contracts/test_time_series_diagnostics_contracts.py`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`

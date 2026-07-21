@@ -2,11 +2,12 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. The current pure-policy tests prove only the declared
-object boundary; named immutable advisory fixtures, the full precondition
-truth table, and an evidence SHA remain required before D05 can be locked.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+The advisory-only and stale-confirmation fixtures, normalized-facts precondition
+tests, and no-forecast/no-operation assertions are committed. This locks the
+packet boundary only and authorizes no execution.
 
 ## Advisory-only rule
 
@@ -40,3 +41,11 @@ An unavailable or unknown precondition never becomes affirmative by default.
 Trend is descriptive evidence only; it does not establish a
 data-generating process, authorize differencing/detrending, or infer a
 forecasting model.
+
+## Lock evidence
+
+- `tests/fixtures/models/time_series_diagnostics/packets/post-run-advisory.json`
+- `tests/fixtures/models/time_series_diagnostics/packets/stale-pre-run-confirmation.json`
+- `tests/contracts/test_time_series_diagnostics_evaluation_gates.py`
+- `tests/contracts/test_time_series_diagnostics_policy.py`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`

@@ -1,0 +1,62 @@
+{
+  "contract": "time_series_diagnostics.facts",
+  "contract_version": "1.0",
+  "packet_id": "facts-fixture-regular-grid-v1",
+  "producer_version": "c1-contract-fixture@1",
+  "policy_version": "time_series_diagnostics_c1_v1",
+  "run_id": "run-fixture-regular-grid-v1",
+  "execution_timestamp": "2026-07-20T12:00:00Z",
+  "input_identity": {
+    "dataset_artifact_id": "dataset-fixture-regular-grid-v1",
+    "row_scope_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "selected_columns": ["time", "value"]
+  },
+  "configuration": {
+    "alpha": 0.05,
+    "lag_cap": 5,
+    "lag_zero": "included"
+  },
+  "numeric_runtime_manifest_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "facts": {
+    "grid": {
+      "regularity": "exact_regular",
+      "basis": "contiguous_integer_step",
+      "semantic_frequency_source": "none"
+    },
+    "usable_observation_count": 24,
+    "adf": {
+      "statistic": -1.291929853162643,
+      "p_value": 0.6328562804565447,
+      "p_value_status": "approximate",
+      "outcome": "reject"
+    },
+    "kpss": {
+      "statistic": 0.7163712113533758,
+      "p_value": 0.012057162604238563,
+      "p_value_status": "approximate",
+      "outcome": "reject"
+    },
+    "acf": {
+      "method": "standard",
+      "values": [1.0, 0.7272023, 0.76825416, 0.49572637, 0.53410909, 0.2931312]
+    },
+    "pacf": {
+      "method": "ywm",
+      "values": [1.0, 0.7272023, 0.50815526, -0.42513175, 0.1803976, -0.17168635]
+    },
+    "trend": {
+      "status": "completed",
+      "evidence": "absent",
+      "advisory_preconditions": "false"
+    },
+    "caveat_codes": [
+      "RAW_LEVEL_CORRELATION_ONLY",
+      "NO_MODEL_ORDER_INFERENCE",
+      "LEVEL_STATIONARITY_ONLY",
+      "NO_FORECAST_ELIGIBILITY",
+      "NO_MODEL_SELECTION",
+      "STRUCTURAL_BREAKS_NOT_ASSESSED"
+    ]
+  },
+  "facts_content_digest": "99b2bf0d16d1bcdc35f998444780e67fa342aa7ce79f6a732bc5b718ee3425ca"
+}

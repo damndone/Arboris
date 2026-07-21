@@ -2,12 +2,12 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. Independent numerical-oracle fixtures, warning
-fixtures, and boundary evidence have not been supplied. Fixture/evidence SHA
-is **pending**; these contract additions do not lock D04 or authorize any
-statistical execution.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+The independent reference oracle, frozen runtime-manifest digest, policy
+manifest, and focused policy tests are committed. These are evidence and
+contract locks only; no statistical execution is authorized.
 
 ## Contract-layer decision
 
@@ -37,11 +37,18 @@ closed caveat codes are `RAW_LEVEL_CORRELATION_ONLY`,
 `STRUCTURAL_BREAKS_NOT_ASSESSED`. These are explanatory contract facts, not
 runtime decisions.
 
-## Deferred evidence and boundary
+## Deferred runtime boundary
 
 Exact lag caps, comparison operators at the alpha boundary, primary
-p-value-versus-critical-value precedence, warning escalation, numerical
-tolerances, and independent oracle provenance remain pending D04 fixture and
-evidence work. This record remains open/unsealed and cannot be presented as a
-locked statistical policy. It adds no statistical engine, Pack, registry,
-HTTP, Agent, UI, forecast, provider, or dependency surface.
+p-value-versus-critical-value precedence, and warning escalation remain
+runtime adapter responsibilities. The recorded tolerances and oracle
+provenance are frozen evidence, not a statistical engine. This record adds no
+Pack, registry, HTTP, Agent, UI, forecast, provider, or dependency surface.
+
+## Lock evidence
+
+- `tests/fixtures/models/time_series_diagnostics/oracle/independent-diagnostic-oracle.json`
+- `tests/fixtures/models/time_series_diagnostics/oracle/supported-runtime-manifest.json`
+- `docs/superpowers/contracts/time-series-diagnostics/v1/policy-manifest.json`
+- `tests/contracts/test_time_series_diagnostics_evaluation_gates.py`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`

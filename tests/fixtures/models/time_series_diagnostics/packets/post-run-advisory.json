@@ -1,0 +1,9 @@
+{
+  "advisory_code": "CONSIDER_DIFFERENCING",
+  "advisory_version": "1.0",
+  "effect": "advisory_only",
+  "execution_available": false,
+  "source_facts_content_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "effects_summary": "Review differencing as a future, separately confirmed operation.",
+  "incompatibility_codes": ["NO_MODEL_SELECTION", "NO_FORECAST_ELIGIBILITY"]
+}

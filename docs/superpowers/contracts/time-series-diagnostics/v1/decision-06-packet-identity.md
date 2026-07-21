@@ -2,18 +2,17 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. Canonical packet fixtures, digest projections,
-malformed-packet tests, stale identity tests, and evidence SHA are still
-required. This record does not authorize a runtime capability.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+Canonical Facts/Assessment packet fixtures, digest projections, malformed-packet
+tests, stale identity tests, and public helper error tests are committed. This
+locks packet identity only and authorizes no runtime capability.
 
-The C1 contract implementation is now present for the strict Facts and
-Assessment packet types and canonical digest helpers. This is a contract
-surface only: it does not create a time-series runtime, registry discovery,
-HTTP route, Agent operation, UI feature, fixture catalogue, or oracle. The
-implementation and focused tests do not seal this decision record; fixture
-identity and evidence SHA remain pending.
+The C1 contract implementation is present for the strict Facts and Assessment
+packet types and canonical digest helpers. This is a contract surface only: it
+does not create a time-series runtime, registry discovery, HTTP route, Agent
+operation, UI feature, or forecast.
 
 ## Normative direction
 
@@ -39,3 +38,10 @@ parent.
 - altered Facts digest and stale identity rejection fixtures;
 - malformed/unknown/non-finite packet rejection tests;
 - exact policy, fixture, and evidence SHA recorded here and in the register.
+
+## Recorded evidence
+
+- `tests/fixtures/models/time_series_diagnostics/packets/facts-packet.json`
+- `tests/fixtures/models/time_series_diagnostics/packets/assessment-packet.json`
+- `tests/contracts/test_time_series_diagnostics_canonical_packets.py`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`

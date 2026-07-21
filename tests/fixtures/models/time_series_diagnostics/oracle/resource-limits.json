@@ -1,0 +1,9 @@
+{
+  "resource_policy_version": "time_series_diagnostics_c1_resource_v1",
+  "execution_authority": "none_in_c1",
+  "max_input_rows": 100000,
+  "max_lag_steps": 256,
+  "max_packet_bytes": 1048576,
+  "max_reference_runtime_seconds": 60,
+  "on_limit": "reject_before_execution"
+}

@@ -20,6 +20,7 @@ PACKAGE_VERSION_NAMES = (
     "openpyxl",
     "pyarrow",
     "statsmodels",
+    "arch",
     "scipy",
     "linearmodels",
     "scikit-learn",

@@ -2,12 +2,12 @@
 
 ## Status and evidence
 
-**Status:** open
+**Status:** locked — contract-only C1
 
-**Evidence:** unsealed. The current parser tests are contract coverage only;
-the named immutable fixture catalogue, lifecycle fixtures, and evidence SHA
-required by the C1 register have not yet been supplied. This record therefore
-does not lock D01 or authorize a runtime capability.
+**Evidence:** `5b18d7c2e59b89f54afdb85b9e6fed34dfd8783032d2bb5efc948b3fb19c6d16`.
+The immutable terminal-state and negative-reference fixtures are parsed by the
+focused D07 evidence test. This locks the envelope shape only and authorizes no
+runtime, confirmation, retry, or executor behavior.
 
 ## Normative v1 boundary
 
@@ -43,6 +43,12 @@ Confirmation idempotence and cancellation lifecycle semantics remain an
 existing platform-lifecycle dependency. D01 defines their terminal envelope
 shape only; it adds no confirmation token, executor, retry behavior, or
 operation route.
+
+## Lock evidence
+
+- `tests/fixtures/models/time_series_diagnostics/packets/envelope-*.json`
+- `tests/contracts/test_time_series_diagnostics_evaluation_gates.py`
+- Evidence manifest: `tests/fixtures/models/time_series_diagnostics/evidence-manifest.json`
 
 ## Exact object shape
 

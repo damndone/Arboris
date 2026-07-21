@@ -77,6 +77,10 @@ def test_lmm_pack_is_explicitly_declared_and_available_only_through_the_pack_loa
             "workbench.engine.packs.linear_mixed_effects.declaration",
             LMM_MODEL_TYPE,
         ),
+        PackDeclaration(
+            "workbench.engine.packs.arma_garch.declaration",
+            "time_series.arma_garch",
+        ),
     )
     bootstrap_builtin_packs()
     assert LMM_MODEL_TYPE in MODEL_REGISTRY
@@ -384,7 +388,7 @@ def test_builtin_lmm_declaration_is_idempotent_for_capabilities() -> None:
     before = build_capabilities()
     bootstrap_builtin_packs()
 
-    assert len(BUILTIN_PACK_DECLARATIONS) == 1
+    assert len(BUILTIN_PACK_DECLARATIONS) == 2
     assert any(item["key"] == LMM_MODEL_TYPE for item in before["model_types"])
     assert build_capabilities() == before
 

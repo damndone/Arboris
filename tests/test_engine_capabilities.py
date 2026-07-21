@@ -60,4 +60,6 @@ def test_groups_match_known_vocabulary():
     payload = build_capabilities()
 
     groups = {entry["group"] for entry in payload["model_types"]}
-    assert groups.issubset({"auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV", "DID"})
+    assert groups.issubset(
+        {"auto", "Linear", "Binary", "Count", "Panel", "GLM", "IV", "DID", "Time Series"}
+    )

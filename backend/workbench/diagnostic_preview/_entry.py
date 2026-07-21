@@ -83,14 +83,20 @@ def _complete_or_partial_preview(
         "cautions": len(cautions),
         "info": len(infos),
     }
-    has_results = bool(model_results)
+    persisted_status = summary.get("run_status")
+    if not isinstance(persisted_status, dict):
+        persisted_status = {}
+    # A completed run can produce a primary model result that the coefficient
+    # projection does not surface (e.g. the ARMA-GARCH pack has no classic
+    # coefficient table). Trust the backend's persisted model_results_available
+    # flag so such runs are not mislabelled "run failed".
+    has_results = bool(model_results) or bool(
+        persisted_status.get("model_results_available")
+    )
     status = trust_status(counts, has_results)
     label = trust_label_for_status(status)
     identity = model_identity(summary, manifest, model_results)
     all_issues = [*blockers, *warnings, *cautions]
-    persisted_status = summary.get("run_status")
-    if not isinstance(persisted_status, dict):
-        persisted_status = {}
     preview = {
         "available": True,
         "preview_contract_version": PREVIEW_CONTRACT_VERSION,
