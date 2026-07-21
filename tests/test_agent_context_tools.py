@@ -168,6 +168,7 @@ def test_unconfigured_orchestrator_does_not_expose_project_context_tool(
     assert "inspect_operation_contract" not in tool_ids
     assert "inspect_diagnostics" not in tool_ids
     assert "inspect_result_summary" not in tool_ids
+    assert "inspect_time_series_summary" not in tool_ids
     assert "inspect_artifact_preview" not in tool_ids
 
 
@@ -187,6 +188,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         "inspect_operation_contract",
         "inspect_diagnostics",
         "inspect_result_summary",
+        "inspect_time_series_summary",
         "inspect_repeated_measures_recipe",
         "inspect_artifact_preview",
     } <= tool_ids
@@ -199,6 +201,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
             "inspect_operation_contract",
             "inspect_diagnostics",
             "inspect_result_summary",
+            "inspect_time_series_summary",
             "inspect_repeated_measures_recipe",
             "inspect_artifact_preview",
         }
@@ -208,6 +211,7 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         "inspect_operation_contract",
         "inspect_diagnostics",
         "inspect_result_summary",
+        "inspect_time_series_summary",
         "inspect_repeated_measures_recipe",
         "inspect_artifact_preview",
     }
@@ -488,6 +492,148 @@ def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
     assert "coefficient_rows" in result.output["omitted_sections"]
 
 
+def test_time_series_summary_reads_only_bounded_public_artifacts(
+    tmp_path: Path,
+) -> None:
+    from tests.agent.test_arma_garch_agent_compare import _artifacts
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    manifest = json.loads((run_root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest["model_routing"] = {
+        "requested_model_type": "time_series.arma_garch",
+        "effective_model_type": "time_series.arma_garch",
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    artifact_root = run_root / "artifacts" / "time_series"
+    artifact_root.mkdir(parents=True)
+    for artifact_id, payload in _artifacts().items():
+        (artifact_root / f"{artifact_id}.json").write_text(
+            json.dumps(
+                {
+                    "artifact_id": artifact_id,
+                    "metadata": {
+                        "run_id": "run-a",
+                        "source_run_id": None,
+                        "node_id": "model:ols_1",
+                    },
+                    "payload": payload,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    before = {
+        path.relative_to(project_root): path.read_bytes()
+        for path in project_root.rglob("*")
+        if path.is_file()
+    }
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-time-series-summary",
+                "tool_id": "inspect_time_series_summary",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    summary = result.output["time_series_summary"]
+    assert summary["available"] is True
+    assert summary["candidate_counts"] == {"mean": 10, "volatility": 1}
+    assert len(summary["mean_candidates"]) == 8
+    assert summary["conditional_series"] == {
+        "available": True,
+        "observation_count": 120,
+    }
+    assert "raw_rows" in result.output["omitted_sections"]
+    assert before == {
+        path.relative_to(project_root): path.read_bytes()
+        for path in project_root.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_time_series_summary_reads_blocked_manifest_and_frozen_run_input(
+    tmp_path: Path,
+) -> None:
+    from tests.agent.test_arma_garch_agent_compare import _contract
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    run_inputs = json.loads((run_root / "run_inputs.json").read_text(encoding="utf-8"))
+    run_inputs["executed_payload"] = {
+        "model_type": "time_series.arma_garch",
+        "model_options": _contract(),
+    }
+    (run_root / "run_inputs.json").write_text(json.dumps(run_inputs), encoding="utf-8")
+    artifact_root = run_root / "artifacts" / "time_series"
+    artifact_root.mkdir(parents=True)
+    diagnostic = {
+        "severity": "blocking",
+        "code": "LOG_REQUIRES_POSITIVE_VALUES",
+        "message": "Log transforms require positive values.",
+        "evidence": {"nonpositive_count": 1},
+        "impact": "The confirmed transform cannot run.",
+        "recommended_actions": [
+            {
+                "operation": "model.rerun",
+                "patch": {"transform": "level", "transform_confirmed": True},
+            }
+        ],
+    }
+    (artifact_root / "ts.artifact_manifest.json").write_text(
+        json.dumps(
+            {
+                "artifact_id": "ts.artifact_manifest",
+                "metadata": {"run_id": "run-a", "node_id": "stage:ts-analysis-view"},
+                "payload": {
+                    "status": "blocked",
+                    "terminal_code": diagnostic["code"],
+                    "complete": False,
+                    "diagnostic": diagnostic,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-blocked-time-series-summary",
+                "tool_id": "inspect_time_series_summary",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    summary = result.output["time_series_summary"]
+    assert summary["available"] is True
+    assert summary["terminal_code"] == "LOG_REQUIRES_POSITIVE_VALUES"
+    assert summary["recommended_actions"][0]["changes"] == {
+        "model_options": {"transform": "level", "transform_confirmed": True}
+    }
+
+
 def test_operation_contract_rejects_unregistered_operation_without_writes(
     tmp_path: Path,
 ) -> None:
@@ -647,3 +793,58 @@ def test_artifact_preview_reports_running_lifecycle_without_writes(
         for path in project_root.rglob("*")
         if path.is_file()
     }
+
+
+def _inspect_contract(project_root: Path, provider_type) -> dict:
+    from workbench.agent.context_tools import InspectOperationContractRequest
+    from workbench.agent.operations import OperationRegistry
+
+    return provider_type(project_root).inspect_operation_contract(
+        InspectOperationContractRequest(
+            request_id="r1",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+            operation_id="model.rerun",
+        ),
+        operation_registry=OperationRegistry(),
+    )
+
+
+def test_arma_garch_contract_publishes_its_option_vocabulary(tmp_path: Path) -> None:
+    """The pack's editable schema is one opaque `model_options` JSON control.
+
+    Without a vocabulary the Agent has to guess field names, closed value sets,
+    and server caps, so it writes patches confirmation rejects. The vocabulary
+    is what makes a natural-language request into a legal typed patch.
+    """
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    manifest = json.loads((run_root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest["model_routing"] = {
+        "requested_model_type": "time_series.arma_garch",
+        "effective_model_type": "time_series.arma_garch",
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    contract = _inspect_contract(project_root, _load_provider_type())["contract"]
+
+    assert contract["op_type"] == "time_series.arma_garch"
+    vocabulary = contract["option_vocabulary"]
+    paths = {field["path"] for field in vocabulary["fields"]}
+    assert {"arma.p", "variance.model", "missing_value_policy"} <= paths
+    assert vocabulary["cross_field_rules"]
+
+
+def test_a_pack_without_a_vocabulary_stays_silent(tmp_path: Path) -> None:
+    # OLS names every field in its own editable schema; a second, hand-written
+    # source of truth there could only drift.
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+
+    contract = _inspect_contract(project_root, _load_provider_type())["contract"]
+
+    assert contract["op_type"] == "ols"
+    assert "option_vocabulary" not in contract

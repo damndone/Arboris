@@ -32,6 +32,7 @@ from ..data_operations import (
     preview_data_column_cast,
     preview_data_columns_cast,
 )
+from ..contracts.common.envelope import ContractError
 from ..lineage.run_inputs import read_run_inputs
 from .chains import (
     ChainHeadConflict,
@@ -2434,6 +2435,11 @@ class WorkbenchOrchestrator:
         preconditions["context_fingerprint"] = snapshot["context_fingerprint"]
         preconditions["owner_resolution"] = snapshot["owner_resolution"]
         preconditions["active_head_run_id"] = snapshot["active_head_run_id"]
+        if operation_id == "model.rerun":
+            self._precheck_model_options(
+                owner_run_id=str(target.get("run_id")),
+                changes=arguments.get("changes"),
+            )
         if operation_id == "graph.fork":
             current_leaf = metadata.get("leaf_entry_id")
             if not isinstance(current_leaf, str) or not current_leaf:
@@ -2443,6 +2449,31 @@ class WorkbenchOrchestrator:
                 raise ValueError("graph_fork_source_entry_not_current_leaf")
             target["source_session_entry_id"] = current_leaf
         return {**arguments, "target": target, "preconditions": preconditions}
+
+    def _precheck_model_options(
+        self, *, owner_run_id: str, changes: Any
+    ) -> None:
+        """Let the owning pack reject an unexecutable patch before confirmation.
+
+        The generic rerun validator can only check that model_options is an
+        object; the field names, closed value sets, and cross-field rules belong
+        to the pack. Deferring that to execution would mean the user confirms a
+        proposal that cannot run.
+        """
+
+        if not isinstance(changes, dict):
+            return
+        patch = changes.get("model_options")
+        if not isinstance(patch, dict) or not patch:
+            return
+        precheck = getattr(self.context_provider, "precheck_model_options_patch", None)
+        if precheck is None:
+            return
+        try:
+            precheck(owner_run_id=owner_run_id, patch=patch)
+        except ContractError as exc:
+            code = getattr(exc, "code", "MODEL_OPTIONS_REJECTED")
+            raise ValueError(f"model_options rejected by the model pack: {code}") from exc
 
     def tool_registry(self, chain_id: str) -> ToolRegistry:
         """Return the allowlisted Workbench tools scoped to one chain."""
