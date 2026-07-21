@@ -93,6 +93,8 @@ _REQUIRED_LOGICAL_ARTIFACTS = {
     "ts.chart.rolling_interval",
     "ts.chart.quantile_exceptions",
     "ts.chart.model_comparison",
+    "ts.chart.abs_return_vs_volatility",
+    "ts.chart.in_sample_interval_comparison",
 }
 
 _NODE_BY_ARTIFACT = {
@@ -127,6 +129,8 @@ _NODE_BY_ARTIFACT = {
     "ts.chart.rolling_interval": "stage:ts-rolling-validation",
     "ts.chart.quantile_exceptions": "stage:ts-rolling-validation",
     "ts.chart.model_comparison": "stage:ts-rolling-validation",
+    "ts.chart.abs_return_vs_volatility": "stage:ts-volatility-selection",
+    "ts.chart.in_sample_interval_comparison": "stage:ts-rolling-validation",
 }
 
 
@@ -777,6 +781,13 @@ def _artifact_payloads(
             final_spec=final_spec,
         )
     )
+    # Reuse the rows the chart already computed so both surfaces agree exactly.
+    payloads["ts.arma_vs_garch_comparison"] = {
+        **dict(rolling.comparison),
+        "in_sample": _in_sample_comparison(
+            payloads["ts.chart.in_sample_interval_comparison"]["rows"]
+        ),
+    }
     return payloads
 
 
@@ -814,6 +825,7 @@ def _chart_payloads(
                 for index, value in enumerate(volatility)
                 if index < len(training)
             ]
+    in_sample_rows = _in_sample_interval_rows(training, conditional_series)
     rolling_rows = rolling.get("rows", [])
     if not isinstance(rolling_rows, list):
         rolling_rows = []
@@ -837,6 +849,21 @@ def _chart_payloads(
             "rows": [row for row in rolling_rows if row.get("quantile_exception")]
         },
         "ts.chart.model_comparison": {"comparison": dict(comparison)},
+        "ts.chart.abs_return_vs_volatility": {
+            "dual_axis": True,
+            "left_axis": "abs_value",
+            "right_axis": "conditional_volatility",
+            "rows": [
+                {
+                    "row_id": row["row_id"],
+                    "time": row["time"],
+                    "abs_value": abs(row["observed"]),
+                    "conditional_volatility": row["conditional_volatility"],
+                }
+                for row in in_sample_rows
+            ],
+        },
+        "ts.chart.in_sample_interval_comparison": {"rows": in_sample_rows},
     }
 
 
@@ -1017,3 +1044,100 @@ def _require_finite_json(value: object, label: str) -> None:
 
 
 __all__ = ["MODEL_ID", "fit_from_context"]
+
+_IN_SAMPLE_Z = 1.959963984540054
+
+
+def _in_sample_interval_rows(
+    training: pd.DataFrame, conditional_series: object
+) -> list[dict[str, object]]:
+    """Full-history in-sample 95% bands for ARMA-only and ARMA-GARCH.
+
+    The GARCH band uses the conditional volatility; the ARMA-only band uses the
+    homoskedastic residual standard deviation, mirroring the reference's use of
+    a single `sigma` for the mean-only model.
+    """
+
+    if not isinstance(conditional_series, Mapping):
+        return []
+    means = conditional_series.get("mean")
+    volatility = conditional_series.get("volatility")
+    residual = conditional_series.get("residual")
+    if not isinstance(means, (list, tuple)) or not isinstance(volatility, (list, tuple)):
+        return []
+    finite_residuals = [
+        float(value)
+        for value in (residual or [])
+        if isinstance(value, (int, float)) and math.isfinite(float(value))
+    ]
+    if len(finite_residuals) < 2:
+        return []
+    constant_sd = float(np.std(np.asarray(finite_residuals, dtype=float), ddof=1))
+    if not math.isfinite(constant_sd) or constant_sd <= 0.0:
+        return []
+
+    rows: list[dict[str, object]] = []
+    for index, (mean_value, sd_value) in enumerate(zip(means, volatility)):
+        if index >= len(training):
+            break
+        if not isinstance(mean_value, (int, float)) or not isinstance(sd_value, (int, float)):
+            continue
+        mean_float = float(mean_value)
+        sd_float = float(sd_value)
+        if not math.isfinite(mean_float) or not math.isfinite(sd_float) or sd_float <= 0.0:
+            continue
+        observed = float(training.iloc[index][TRANSFORMED_VALUE_COLUMN])
+        if not math.isfinite(observed):
+            continue
+        garch_half = _IN_SAMPLE_Z * sd_float
+        arma_half = _IN_SAMPLE_Z * constant_sd
+        rows.append(
+            {
+                "row_id": str(training.iloc[index][ROW_ID_COLUMN]),
+                "time": _time_text(training.iloc[index][PARSED_TIME_COLUMN]),
+                "observed": observed,
+                "conditional_mean": mean_float,
+                "conditional_volatility": sd_float,
+                "garch_lower": mean_float - garch_half,
+                "garch_upper": mean_float + garch_half,
+                "arma_lower": mean_float - arma_half,
+                "arma_upper": mean_float + arma_half,
+            }
+        )
+    return rows
+
+
+def _in_sample_comparison(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """In-sample coverage and interval widths for both models, plus the width gap."""
+
+    if not rows:
+        return {
+            "arma_garch": {"coverage": None, "average_width": None, "n": 0},
+            "arma_only": {"coverage": None, "average_width": None, "n": 0},
+            "width_difference": {"mean": None, "max": None, "min": None},
+        }
+    garch_widths: list[float] = []
+    arma_widths: list[float] = []
+    garch_hits = 0
+    arma_hits = 0
+    for row in rows:
+        observed = float(row["observed"])
+        garch_widths.append(float(row["garch_upper"]) - float(row["garch_lower"]))
+        arma_widths.append(float(row["arma_upper"]) - float(row["arma_lower"]))
+        if float(row["garch_lower"]) <= observed <= float(row["garch_upper"]):
+            garch_hits += 1
+        if float(row["arma_lower"]) <= observed <= float(row["arma_upper"]):
+            arma_hits += 1
+    n = len(rows)
+    differences = [garch - arma for garch, arma in zip(garch_widths, arma_widths)]
+    garch_average = sum(garch_widths) / n
+    arma_average = sum(arma_widths) / n
+    return {
+        "arma_garch": {"coverage": garch_hits / n, "average_width": garch_average, "n": n},
+        "arma_only": {"coverage": arma_hits / n, "average_width": arma_average, "n": n},
+        "width_difference": {
+            "mean": garch_average - arma_average,
+            "max": max(differences),
+            "min": min(differences),
+        },
+    }
