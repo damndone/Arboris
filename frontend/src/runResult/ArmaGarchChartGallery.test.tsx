@@ -63,6 +63,30 @@ const CHARTS: ArmaGarchCharts = {
       conditional_volatility: 5 + (i % 7),
     })),
   },
+  conditionalVariance: {
+    rows: Array.from({ length: 300 }, (_, i) => ({
+      row_id: `r${i}`,
+      time: "2020-01-01",
+      conditional_variance: (5 + (i % 7)) ** 2,
+    })),
+  },
+  standardizedResidualSeries: {
+    rows: Array.from({ length: 300 }, (_, i) => ({
+      row_id: `r${i}`,
+      time: "2020-01-01",
+      standardized_residual: Math.sin(i),
+    })),
+  },
+  squaredStandardizedResidualSeries: {
+    rows: Array.from({ length: 300 }, (_, i) => ({
+      row_id: `r${i}`,
+      time: "2020-01-01",
+      squared_standardized_residual: Math.sin(i) ** 2,
+    })),
+  },
+  squaredResidualSeries: {
+    rows: Array.from({ length: 300 }, (_, i) => ({ position: i, value: Math.sin(i) ** 2 })),
+  },
   inSampleIntervalComparison: {
     rows: Array.from({ length: 300 }, (_, i) => ({
       observed: Math.sin(i),
@@ -87,7 +111,11 @@ describe("ArmaGarchChartGallery", () => {
       "Mean-model residuals",
       "Residual ACF (should sit inside the band)",
       "Squared-residual ACF (spikes here motivate the volatility model)",
-      "Conditional volatility",
+      "Conditional volatility (sd_t)",
+      "Conditional variance (h_t)",
+      "Standardized residuals (should look like white noise)",
+      "Squared standardized residuals (clustering should be gone)",
+      "Squared mean-model residuals (volatility clustering, before GARCH)",
       "Absolute move against conditional volatility",
       "Standardized-residual QQ plot",
       "In-sample 95% intervals: ARMA-GARCH vs ARMA-only",

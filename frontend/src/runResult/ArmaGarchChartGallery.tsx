@@ -1,4 +1,4 @@
-// The pack's thirteen chart artifacts, drawn.
+// The pack's seventeen chart artifacts, drawn.
 //
 // Grouped by the question each answers rather than by artifact id, so the
 // gallery reads as an argument: is the series usable, is the mean adequate, is
@@ -72,6 +72,11 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
           rows={rowsOf(charts.residualAcf)}
           observationCount={residualN}
         />
+        <SeriesChart
+          title="Squared mean-model residuals (volatility clustering, before GARCH)"
+          rows={rowsOf(charts.squaredResidualSeries)}
+          valueKey="value"
+        />
         <CorrelogramChart
           title="Squared-residual ACF (spikes here motivate the volatility model)"
           rows={rowsOf(charts.squaredResidualAcf)}
@@ -81,10 +86,27 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
 
       <Group title="Volatility model adequacy">
         <SeriesChart
-          title="Conditional volatility"
+          title="Conditional volatility (sd_t)"
           rows={rowsOf(charts.conditionalVolatility)}
           valueKey="conditional_volatility"
           color="#f55"
+        />
+        <SeriesChart
+          title="Conditional variance (h_t)"
+          rows={rowsOf(charts.conditionalVariance)}
+          valueKey="conditional_variance"
+          color="#f55"
+        />
+        <SeriesChart
+          title="Standardized residuals (should look like white noise)"
+          rows={rowsOf(charts.standardizedResidualSeries)}
+          valueKey="standardized_residual"
+          zeroLine
+        />
+        <SeriesChart
+          title="Squared standardized residuals (clustering should be gone)"
+          rows={rowsOf(charts.squaredStandardizedResidualSeries)}
+          valueKey="squared_standardized_residual"
         />
         <DualAxisChart
           title="Absolute move against conditional volatility"

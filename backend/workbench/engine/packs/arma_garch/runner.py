@@ -95,6 +95,10 @@ _REQUIRED_LOGICAL_ARTIFACTS = {
     "ts.chart.model_comparison",
     "ts.chart.abs_return_vs_volatility",
     "ts.chart.in_sample_interval_comparison",
+    "ts.chart.conditional_variance",
+    "ts.chart.standardized_residual_series",
+    "ts.chart.squared_standardized_residual_series",
+    "ts.chart.squared_residual_series",
 }
 
 _NODE_BY_ARTIFACT = {
@@ -131,6 +135,10 @@ _NODE_BY_ARTIFACT = {
     "ts.chart.model_comparison": "stage:ts-rolling-validation",
     "ts.chart.abs_return_vs_volatility": "stage:ts-volatility-selection",
     "ts.chart.in_sample_interval_comparison": "stage:ts-rolling-validation",
+    "ts.chart.conditional_variance": "stage:ts-volatility-selection",
+    "ts.chart.standardized_residual_series": "stage:ts-volatility-selection",
+    "ts.chart.squared_standardized_residual_series": "stage:ts-volatility-selection",
+    "ts.chart.squared_residual_series": "stage:ts-mean-selection",
 }
 
 
@@ -825,6 +833,25 @@ def _chart_payloads(
                 for index, value in enumerate(volatility)
                 if index < len(training)
             ]
+    variance_rows = _training_series_rows(
+        training, conditional_series, "variance", "conditional_variance"
+    )
+    standardized_rows = _training_series_rows(
+        training, conditional_series, "standardized_residual", "standardized_residual"
+    )
+    squared_standardized_rows = [
+        {
+            "row_id": row["row_id"],
+            "time": row["time"],
+            "squared_standardized_residual": row["standardized_residual"] ** 2,
+        }
+        for row in standardized_rows
+    ]
+    squared_residual_rows = [
+        {"position": row["position"], "value": float(row["value"]) ** 2}
+        for row in _rows_of(mean_diagnostics.get("residual_series"))
+        if isinstance(row.get("value"), (int, float))
+    ]
     in_sample_rows = _in_sample_interval_rows(training, conditional_series)
     rolling_rows = rolling.get("rows", [])
     if not isinstance(rolling_rows, list):
@@ -864,6 +891,15 @@ def _chart_payloads(
             ],
         },
         "ts.chart.in_sample_interval_comparison": {"rows": in_sample_rows},
+        # The reference plots the conditional VARIANCE, not its square root:
+        # squaring sd_t downstream would re-derive a quantity the model already
+        # produced, so both are published from the same fitted series.
+        "ts.chart.conditional_variance": {"rows": variance_rows},
+        "ts.chart.standardized_residual_series": {"rows": standardized_rows},
+        "ts.chart.squared_standardized_residual_series": {
+            "rows": squared_standardized_rows
+        },
+        "ts.chart.squared_residual_series": {"rows": squared_residual_rows},
     }
 
 
@@ -1047,6 +1083,46 @@ __all__ = ["MODEL_ID", "fit_from_context"]
 
 _IN_SAMPLE_Z = 1.959963984540054
 
+
+def _rows_of(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _training_series_rows(
+    training: Any,
+    conditional_series: object,
+    series_key: str,
+    field_name: str,
+) -> list[dict[str, object]]:
+    """Align one fitted conditional series to the training rows it came from.
+
+    The series are per-observation and carry no identity of their own, so a
+    chart that did not attach row ids and times could not be traced back to the
+    data. Anything longer than the training view is truncated rather than
+    silently paired with the wrong row.
+    """
+
+    if not isinstance(conditional_series, Mapping):
+        return []
+    values = conditional_series.get(series_key, [])
+    if not isinstance(values, (list, tuple)):
+        return []
+    rows: list[dict[str, object]] = []
+    for index, value in enumerate(values):
+        if index >= len(training):
+            break
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            continue
+        rows.append(
+            {
+                "row_id": str(training.iloc[index][ROW_ID_COLUMN]),
+                "time": _time_text(training.iloc[index][PARSED_TIME_COLUMN]),
+                field_name: float(value),
+            }
+        )
+    return rows
 
 def _in_sample_interval_rows(
     training: pd.DataFrame, conditional_series: object

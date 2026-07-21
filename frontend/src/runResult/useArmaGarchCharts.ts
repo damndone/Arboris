@@ -22,6 +22,10 @@ export const ARMA_GARCH_CHART_IDS = {
   modelComparison: "ts.chart.model_comparison",
   absReturnVsVolatility: "ts.chart.abs_return_vs_volatility",
   inSampleIntervalComparison: "ts.chart.in_sample_interval_comparison",
+  conditionalVariance: "ts.chart.conditional_variance",
+  standardizedResidualSeries: "ts.chart.standardized_residual_series",
+  squaredStandardizedResidualSeries: "ts.chart.squared_standardized_residual_series",
+  squaredResidualSeries: "ts.chart.squared_residual_series",
 } as const;
 
 export type ArmaGarchChartKey = keyof typeof ARMA_GARCH_CHART_IDS;
