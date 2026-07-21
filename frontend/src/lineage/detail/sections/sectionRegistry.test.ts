@@ -94,7 +94,7 @@ describe("sectionRegistry", () => {
     const ts = node({
       opType: "time_series.arma_garch",
       editableSchema: [
-        { kind: "object", key: "model_options", label: "Options", value: {} },
+        { kind: "textarea", key: "model_options", label: "Options", value: {} },
       ],
     } as Partial<GraphViewNode>);
     const ids = sectionRegistry.filter((s) => s.shouldRender(ts)).map((s) => s.id);
