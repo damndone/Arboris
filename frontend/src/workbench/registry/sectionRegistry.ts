@@ -43,6 +43,7 @@ import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
 import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
+import { ArmaGarchResultSection } from "../../lineage/detail/sections/ArmaGarchResultSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
 
@@ -132,6 +133,13 @@ export const sectionRegistry: SectionEntry[] = [
     order: 31,
     shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft && isArmaGarch(n),
     Component: ArmaGarchOperationSection,
+  },
+  {
+    // One-view time-series result dashboard (replaces the legacy nine-tab card).
+    id: "armaGarchResult",
+    order: 32,
+    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft && isArmaGarch(n),
+    Component: ArmaGarchResultSection,
   },
   {
     // v1.6.8 — fitted equation from the owner run's coefficients; sits right
