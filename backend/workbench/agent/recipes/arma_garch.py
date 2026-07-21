@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ...contracts.model.arma_garch import ArmaGarchAnalysisContract
+from .arma_garch_vocabulary import LABELLING_INVARIANTS
 
 
 _CANDIDATE_LIMIT = 8
@@ -212,6 +213,43 @@ def _recommended_actions(
     return actions[:_CANDIDATE_LIMIT]
 
 
+_COMPARISON_ROW_ID_FIELDS = (
+    "locked_forecast_origin_row_ids",
+    "locked_target_row_ids",
+    "comparison_forecast_origin_row_ids",
+    "comparison_target_row_ids",
+)
+
+
+def _bounded_comparison(comparison: Mapping[str, object]) -> dict[str, Any]:
+    """Keep the conclusions; count the provenance row ids instead of listing them.
+
+    On a real run these four lists are ~25,000 characters of row identifiers --
+    three times the whole tool-output budget, so a live Agent turn asking for a
+    time-series summary got `tool_output_budget_exceeded` and no summary at all.
+    The ids matter for reproducibility and stay in the artifact; what the reader
+    needs here is that the comparison ran over N locked common origins.
+    """
+
+    bounded = {
+        key: value
+        for key, value in comparison.items()
+        if key not in _COMPARISON_ROW_ID_FIELDS
+    }
+    counts = {
+        len(comparison[key])
+        for key in _COMPARISON_ROW_ID_FIELDS
+        if isinstance(comparison.get(key), (list, tuple))
+    }
+    if len(counts) == 1:
+        bounded["locked_common_origins"] = counts.pop()
+    elif counts:
+        # Differing lengths would mean the locked and comparison sets diverged,
+        # which is a fact worth surfacing rather than averaging away.
+        bounded["row_id_counts_differ"] = sorted(counts)
+    return bounded
+
+
 def build_arma_garch_public_result_view(
     artifacts: Mapping[str, object],
 ) -> dict[str, object]:
@@ -317,8 +355,11 @@ def build_arma_garch_public_result_view(
             else [],
         },
         "forecast_metrics": _object(artifacts.get("ts.forecast_metrics")),
-        "arma_vs_garch": _object(
-            artifacts.get("ts.arma_vs_garch_comparison")
+        # Co-located with the numbers on purpose: whoever reads these values is
+        # the one about to name them.
+        "labelling_invariants": list(LABELLING_INVARIANTS),
+        "arma_vs_garch": _bounded_comparison(
+            _object(artifacts.get("ts.arma_vs_garch_comparison"))
         ),
         "conditional_series": {
             "available": volatility_count > 0,
@@ -332,6 +373,7 @@ def build_arma_garch_public_result_view(
         "recommended_actions": _recommended_actions(artifacts, contract),
         "omitted_sections": [
             "raw_rows",
+            "comparison_row_ids",
             "raw_conditional_series",
             "raw_residual_series",
             "chart_coordinates",

@@ -69,7 +69,7 @@ from .risk import (
     RiskAuthorizationStore,
 )
 from .session import EntryRef, JsonlSessionRepository
-from .tools import ToolDefinition, ToolRegistry
+from .tools import ToolDefinition, ToolRegistry, ToolVisibleError
 
 # Operations whose effect is a derived data child node rather than a child
 # chain, so completing without a child_chain_id is correct rather than a bug.
@@ -2473,7 +2473,13 @@ class WorkbenchOrchestrator:
             precheck(owner_run_id=owner_run_id, patch=patch)
         except ContractError as exc:
             code = getattr(exc, "code", "MODEL_OPTIONS_REJECTED")
-            raise ValueError(f"model_options rejected by the model pack: {code}") from exc
+            # Visible on purpose: the code and the reason are what let an Agent
+            # correct the patch instead of guessing at why it was refused.
+            raise ToolVisibleError(
+                f"model_options rejected by the model pack ({code}): {exc}. "
+                "Fix the patch against the contract's option_vocabulary and "
+                "cross_field_rules, then propose again."
+            ) from exc
 
     def tool_registry(self, chain_id: str) -> ToolRegistry:
         """Return the allowlisted Workbench tools scoped to one chain."""

@@ -181,3 +181,51 @@ def test_an_empty_patch_is_left_to_the_generic_validator(tmp_path: Path) -> None
     canonical = _canonicalize(project_root, {})
 
     assert canonical["changes"]["model_options"] == {}
+
+
+def test_the_refusal_reaches_the_model_not_just_the_exception_class(
+    tmp_path: Path,
+) -> None:
+    """Found by a live DeepSeek turn, not by the deterministic suite.
+
+    The pack refused an auto-mode patch with a specific code, but the tool
+    layer reported only `ValueError` to the model. It could not tell a bad
+    field name from a bad combination, retried, and burned the turn. A refusal
+    is only useful if the reason travels with it.
+    """
+
+    import asyncio
+
+    from workbench.agent.tools import ToolRegistry, ToolVisibleError
+
+    project_root = _project(tmp_path)
+    orchestrator = _orchestrator(project_root)
+
+    with pytest.raises(ToolVisibleError) as excinfo:
+        orchestrator._precheck_model_options(
+            owner_run_id="run-a",
+            changes={"model_options": {"arma": {"p": 1, "q": 1}}},
+        )
+    assert "INVALID_ORDER" in str(excinfo.value)
+
+    # And the registry must forward that message rather than swallowing it.
+    registry = ToolRegistry()
+    registry.register(
+        __import__("workbench.agent.tools", fromlist=["ToolDefinition"]).ToolDefinition(
+            tool_id="boom",
+            version="v1",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            side_effect="none",
+            scope_requirements=(),
+            handler=lambda _a, _c: (_ for _ in ()).throw(ToolVisibleError("SPECIFIC_CODE: do this")),
+        )
+    )
+    result = asyncio.run(
+        registry.execute(
+            {"tool_call_id": "t1", "tool_id": "boom", "arguments": {}},
+            session_id="s",
+        )
+    )
+    assert result.ok is False
+    assert result.error_details == [{"message": "SPECIFIC_CODE: do this"}]
+    assert "SPECIFIC_CODE" in json.dumps(result.to_payload())

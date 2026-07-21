@@ -15,6 +15,8 @@ from typing import Any
 import pytest
 
 from workbench.agent.recipes.arma_garch_vocabulary import (
+    _cross_field_rules,
+    _fields,
     build_arma_garch_option_vocabulary,
 )
 from workbench.contracts.model.arma_garch import (
@@ -73,7 +75,14 @@ def _resolve(payload: dict[str, Any], path: str) -> Any:
 
 
 def _vocabulary_fields() -> dict[str, dict[str, Any]]:
-    return {item["path"]: item for item in build_arma_garch_option_vocabulary()["fields"]}
+    """Every declared field, including the ones the payload only names.
+
+    `build_arma_garch_option_vocabulary` publishes a lean projection to fit the
+    Agent tool-output budget; the declarations remain the source of truth and
+    are what these guards check.
+    """
+
+    return {item["path"]: item for item in _fields()}
 
 
 def test_base_contract_is_valid_so_the_negative_cases_prove_something() -> None:
@@ -172,9 +181,7 @@ def test_published_limits_are_the_real_server_caps(
 
 
 @pytest.mark.parametrize(
-    "rule",
-    build_arma_garch_option_vocabulary()["cross_field_rules"],
-    ids=lambda rule: rule["rule_id"],
+    "rule", _cross_field_rules(), ids=lambda rule: rule["rule_id"]
 )
 def test_each_cross_field_rule_reproduces_its_declared_violation(
     rule: dict[str, Any],
@@ -184,8 +191,11 @@ def test_each_cross_field_rule_reproduces_its_declared_violation(
     assert excinfo.value.code == rule["violation_code"]
 
 
-def test_server_owned_fields_are_not_offered_as_agent_editable() -> None:
-    fields = _vocabulary_fields()
+def test_server_owned_fields_are_named_but_not_offered_as_editable() -> None:
+    """The Agent still needs to know they exist, or it will try to patch them."""
+
+    published = build_arma_garch_option_vocabulary()
+    editable = {item["path"] for item in published["fields"]}
     for path in (
         "pack_id",
         "contract_version",
@@ -193,10 +203,48 @@ def test_server_owned_fields_are_not_offered_as_agent_editable() -> None:
         "forecast.horizon",
         "validation.selection_repeated_during_validation",
     ):
-        assert fields[path]["agent_editable"] is False
+        assert _vocabulary_fields()[path]["agent_editable"] is False
+        assert path in published["server_owned_fields"]
+        assert path not in editable
+
+
+def test_each_published_rule_still_carries_its_refusal_code() -> None:
+    for rule in build_arma_garch_option_vocabulary()["cross_field_rules"]:
+        assert rule["violation_code"]
+        assert rule["requirement"]
 
 
 def test_patch_shape_states_the_one_level_object_contract() -> None:
     vocabulary = build_arma_garch_option_vocabulary()
     assert "one-level patch" in vocabulary["patch_shape"]
     assert "old/new" in vocabulary["patch_shape"]
+
+
+def test_prohibited_claims_are_separate_from_unsupported_operations() -> None:
+    """Found by a live DeepSeek turn, not by the deterministic suite.
+
+    The VaR prohibition sat in `unsupported_requests`, so the model read it as
+    a capability limit -- "this pack cannot compute VaR" -- and then helpfully
+    explained that the 5% conditional quantile and 95% VaR are the same number,
+    which is precisely the claim the pack refuses to make. A thing you must not
+    say is not a thing the pack cannot do, and the two lists must not be mixed.
+    """
+
+    published = build_arma_garch_option_vocabulary()
+
+    claims = " ".join(published["prohibited_claims"]).lower()
+    assert "value-at-risk" in claims
+    assert "equivalent" in claims
+
+    operations = " ".join(published["unsupported_requests"]).lower()
+    assert "value-at-risk" not in operations
+    assert "var" not in operations.split()
+
+
+def test_the_statistical_labelling_invariants_are_all_published() -> None:
+    """The four claims the pack's own artifacts refuse to make."""
+
+    claims = " ".join(build_arma_garch_option_vocabulary()["prohibited_claims"]).lower()
+    assert "parameter uncertainty" in claims
+    assert "composite information criterion" in claims
+    assert "joint likelihood" in claims

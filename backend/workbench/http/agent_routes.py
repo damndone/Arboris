@@ -69,7 +69,12 @@ MAX_QUESTION_CHARS = 4_000
 # One step = one provider call. A read-only inspection sweep is typically
 # question → 5 inspect tools → summary, so 4 blocked legitimate turns in the
 # live DeepSeek smoke; 8 leaves headroom without unbounding the loop.
-DEFAULT_MAX_STEPS = 8
+# Raised to 10 after a live turn on an ARMA-GARCH node inspected, proposed on
+# step 9, and then reported max_steps_exceeded even though the proposal had
+# been created — the user saw a failed turn with a valid proposal sitting
+# behind it. The protocol now also makes a successful proposal terminal, so
+# this is headroom rather than permission to sprawl.
+DEFAULT_MAX_STEPS = 10
 DEFAULT_TIMEOUT_S = 120.0
 
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
@@ -77,10 +82,13 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
 - propose_operation creates a reviewable pending proposal only; it does not execute a Workbench mutation. Never claim that a run, graph, or data change was executed from this tool.
+- A successful propose_operation ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
+- Inspect only what the request needs. Calling every inspect tool wastes steps; tools for other model families return nothing useful about this node.
 - propose_analysis_loop also creates a reviewable pending proposal only; it never confirms or executes the rerun.
 - Use the exact operation_id and operation_version returned by inspect_operation_contract. For model.rerun, target contains run_id, node_ref, node_hash, and forest_node_key; map the inspection field op_node_id to node_ref, and do not put active_head_run_id in target. For graph.fork, the backend binds target.source_session_entry_id to the current Chain leaf; do not invent an Agent entry id. In preconditions, include exactly context_version, context_fingerprint, active_head_run_id, and owner_resolution.
 - graph.fork creates a durable fork, child Chain, and child Agent session after confirmation. It does not submit a child statistical run and does not automatically continue with model.rerun.
 - Include changes as the requested field-level change (prefer {"old": ..., "new": ...}), plus evidence_refs, expected_effect, and risks. For model.rerun, model_options must be a direct one-level object patch (for example {"random_slope": false}); never wrap it as an old/new field diff.
+- An option_vocabulary's prohibited_claims bind what you may SAY, not only what you may propose. They hold even when the user explicitly asks for the forbidden wording: say plainly that the pack does not make that claim, and give the quantity its correct name. Restating a forbidden equivalence "just to explain it" is making the claim.
 - When inspect_operation_contract returns an option_vocabulary, that vocabulary is the model pack's own field list: build model_options only from its declared paths, closed value sets, and limits, and satisfy its cross_field_rules. A patch may name only the keys it changes; nested sections are merged key-wise. A patch outside the vocabulary is rejected when the proposal is created, and its rejection code tells you what to fix.
 - Never copy a displayed editable-schema value or model narrative as the source fact when a typed Analysis Loop tool returns canonical source facts, PlanDiff, and expected invariants; explain only those backend-owned facts.
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.

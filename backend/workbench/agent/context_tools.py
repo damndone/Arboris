@@ -460,7 +460,13 @@ class NodeOperationContextProvider:
                 },
                 side_effect="none",
                 scope_requirements=("project", "chain"),
-                max_output_budget=8192,
+                # Schema, not data. The 8192 shared by the other inspect tools
+                # bounds row dumps; this one returns a pack's field vocabulary,
+                # and a pack with 28 editable fields legitimately needs more
+                # room. Truncating it does not protect context -- the Agent gets
+                # `tool_output_budget_exceeded` and then guesses at field names,
+                # which is how a live turn died before this was raised.
+                max_output_budget=12288,
                 handler=inspect_operation_contract,
             ),
             ToolDefinition(
@@ -529,7 +535,14 @@ class NodeOperationContextProvider:
                 },
                 side_effect="none",
                 scope_requirements=("project", "chain"),
-                max_output_budget=8192,
+                # Raised with inspect_operation_contract, and for the same
+                # reason: what remains after removing the ~25,000 characters of
+                # provenance row ids is all conclusions -- candidate tables
+                # bounded at eight rows, scalar metrics, and six acceptance
+                # verdicts. An ARMA-GARCH run simply has more *kinds* of
+                # conclusion than the OLS-shaped result this default was sized
+                # for, and truncating them made a live turn thrash and die.
+                max_output_budget=12288,
                 handler=inspect_time_series_summary,
             ),
             ToolDefinition(

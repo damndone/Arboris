@@ -218,7 +218,15 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     for descriptor in descriptors.values():
         assert descriptor["side_effect"] == "none"
         assert descriptor["scope_requirements"] == ["project", "chain"]
-        assert descriptor["max_output_budget"] == 8192
+        # The contract tool returns schema rather than rows, so it carries a
+        # larger budget than the row-dumping inspectors — see its definition.
+        expected = (
+            12288
+            if descriptor["tool_id"]
+            in {"inspect_operation_contract", "inspect_time_series_summary"}
+            else 8192
+        )
+        assert descriptor["max_output_budget"] == expected
 
     before = {
         path.relative_to(project_root): path.read_bytes()
@@ -848,3 +856,47 @@ def test_a_pack_without_a_vocabulary_stays_silent(tmp_path: Path) -> None:
 
     assert contract["op_type"] == "ols"
     assert "option_vocabulary" not in contract
+
+
+def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(
+    tmp_path: Path,
+) -> None:
+    """Found by a live DeepSeek turn, not by the deterministic suite.
+
+    The vocabulary made `inspect_operation_contract` exceed the tool's output
+    budget, so the tool returned `tool_output_budget_exceeded`, the model
+    retried the identical call, and the turn died on the repetition limit. The
+    Agent could not read the contract at all -- the opposite of what publishing
+    a vocabulary was for. Asserting the vocabulary is *present* was not enough;
+    it has to fit in the response the model actually receives.
+    """
+
+    from workbench.agent.operations import OperationRegistry
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    manifest = json.loads((run_root / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest["model_routing"] = {
+        "requested_model_type": "time_series.arma_garch",
+        "effective_model_type": "time_series.arma_garch",
+    }
+    (run_root / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    payload = _inspect_contract(project_root, _load_provider_type())
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    budget = next(
+        definition.max_output_budget
+        for definition in _load_provider_type()(project_root).tool_definitions(
+            chain_id="chain-a",
+            session_id="chain-session",
+            operation_registry=OperationRegistry(),
+        )
+        if definition.tool_id == "inspect_operation_contract"
+    )
+    assert budget is not None
+    assert len(serialized) <= budget, (
+        f"contract payload is {len(serialized)} chars against a {budget} budget; "
+        "the Agent would receive tool_output_budget_exceeded instead of the contract"
+    )

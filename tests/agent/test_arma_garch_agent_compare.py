@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from workbench.agent.recipes.arma_garch import (
     build_arma_garch_public_result_view,
     normalize_arma_garch_recommended_action,
@@ -278,3 +280,169 @@ def test_time_series_compare_does_not_rank_runs_on_changed_samples() -> None:
     assert packet.compare_status == "blocked_by_integrity"
     assert "SAMPLE_MISMATCH" in packet.integrity_findings
     assert packet.conclusion_diff["classification"] is None
+
+
+def _seed_time_series_run(project_root: Path, *, origins: int) -> None:
+    """A completed ARMA-GARCH run sized like a real one."""
+
+    import json as _json
+
+    run_root = project_root / "runs" / "run-a"
+    (run_root / "artifacts" / "time_series").mkdir(parents=True)
+    (run_root / "run_manifest.json").write_text(
+        _json.dumps(
+            {
+                "status": "completed",
+                "started_at": "2026-07-21T00:00:00+00:00",
+                "model_routing": {
+                    "requested_model_type": "time_series.arma_garch",
+                    "effective_model_type": "time_series.arma_garch",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "run_inputs.json").write_text(
+        _json.dumps({"rerun_of": None, "form": {}}), encoding="utf-8"
+    )
+    (run_root / "node_index.json").write_text(
+        _json.dumps({"model:arma_garch_1": {"node_hash": "a" * 64}}), encoding="utf-8"
+    )
+    (run_root / "graph.json").write_text(
+        _json.dumps(
+            {
+                "schema_version": 3,
+                "run_id": "run-a",
+                "nodes": {
+                    "model:arma_garch_1": {
+                        "id": "model:arma_garch_1",
+                        "kind": "model",
+                        "display_label": "ARMA-GARCH",
+                        "created_at": "2026-07-21T00:00:00+00:00",
+                        "parent_stage_id": None,
+                        "branch_id": "main",
+                        "stage": "model",
+                    }
+                },
+                "edges": {},
+                "branches": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifacts = dict(_artifacts())
+    comparison = dict(artifacts["ts.arma_vs_garch_comparison"])
+    row_ids = [f"source-row:{index:010d}" for index in range(origins)]
+    for field in (
+        "locked_forecast_origin_row_ids",
+        "locked_target_row_ids",
+        "comparison_forecast_origin_row_ids",
+        "comparison_target_row_ids",
+    ):
+        comparison[field] = list(row_ids)
+    artifacts["ts.arma_vs_garch_comparison"] = comparison
+    for artifact_id, payload in artifacts.items():
+        (run_root / "artifacts" / "time_series" / f"{artifact_id}.json").write_text(
+            _json.dumps(
+                {
+                    "artifact_id": artifact_id,
+                    "metadata": {
+                        "run_id": "run-a",
+                        "source_run_id": None,
+                        "node_id": "model:arma_garch_1",
+                    },
+                    "payload": payload,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+def test_the_public_view_stays_within_the_agent_tool_budget() -> None:
+    """Found by a live DeepSeek turn, not by the deterministic suite.
+
+    On a real 250-origin run the comparison artifact carries four provenance
+    row-id lists totalling ~25,000 characters -- three times the whole tool
+    budget -- so `inspect_time_series_summary` returned
+    `tool_output_budget_exceeded` and the Agent got no summary at all. The
+    synthetic fixtures were small enough to hide it. The ids stay in the
+    artifact; the view reports how many there were.
+    """
+
+    import json
+
+    from workbench.agent.recipes.arma_garch import build_arma_garch_public_result_view
+
+    artifacts = dict(_artifacts())
+    comparison = dict(artifacts["ts.arma_vs_garch_comparison"])
+    row_ids = [f"source-row:{index:010d}" for index in range(250)]
+    for field in (
+        "locked_forecast_origin_row_ids",
+        "locked_target_row_ids",
+        "comparison_forecast_origin_row_ids",
+        "comparison_target_row_ids",
+    ):
+        comparison[field] = list(row_ids)
+    artifacts["ts.arma_vs_garch_comparison"] = comparison
+
+    view = build_arma_garch_public_result_view(artifacts)
+    serialized = json.dumps(view, ensure_ascii=False, sort_keys=True)
+
+    assert len(serialized) <= 12288, (
+        f"public view is {len(serialized)} chars against the 12288 tool budget"
+    )
+    # The count survives even though the ids do not: the reader still learns
+    # the comparison ran over 250 locked common origins.
+    assert view["arma_vs_garch"]["locked_common_origins"] == 250
+    assert "comparison_row_ids" in view["omitted_sections"]
+    for field in ("locked_target_row_ids", "comparison_target_row_ids"):
+        assert field not in view["arma_vs_garch"]
+
+
+def test_the_inspect_tool_response_fits_its_budget_not_just_the_view(
+    tmp_path: Path,
+) -> None:
+    """The mistake that let this reach a live turn twice.
+
+    Measuring `build_arma_garch_public_result_view` is not the same as
+    measuring what `inspect_time_series_summary` returns: the tool wraps the
+    view in a canonical envelope with lineage, node, and omitted-section
+    fields. The first fix brought the view under budget and the tool response
+    was still over, so the Agent still got nothing.
+    """
+
+    import json
+
+    from workbench.agent.context_tools import (
+        InspectTimeSeriesSummaryRequest,
+        NodeOperationContextProvider,
+    )
+    from workbench.agent.operations import OperationRegistry
+
+    project_root = tmp_path / "project"
+    _seed_time_series_run(project_root, origins=250)
+    provider = NodeOperationContextProvider(project_root)
+
+    payload = provider.inspect_time_series_summary(
+        InspectTimeSeriesSummaryRequest(
+            request_id="r1",
+            owner_run_id="run-a",
+            op_node_id="model:arma_garch_1",
+            active_head_run_id="run-a",
+        )
+    )
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    budget = next(
+        definition.max_output_budget
+        for definition in provider.tool_definitions(
+            chain_id="chain-a",
+            session_id="chain-session",
+            operation_registry=OperationRegistry(),
+        )
+        if definition.tool_id == "inspect_time_series_summary"
+    )
+    assert budget is not None
+    assert len(serialized) <= budget, (
+        f"tool response is {len(serialized)} chars against a {budget} budget; "
+        "the Agent would receive tool_output_budget_exceeded instead of a summary"
+    )
