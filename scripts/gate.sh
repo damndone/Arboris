@@ -46,6 +46,55 @@ banner() {
   printf '\n========== %s ==========\n' "$1"
 }
 
+# A full gate runs the whole backend suite plus a multi-worker jsdom pool. Two
+# of them at once, or one alongside a dev server, exhausted a 24 GB machine and
+# the suite was killed mid-run -- which surfaced as a truncated log and a bare
+# exit 1, i.e. it looked like a test failure rather than memory exhaustion.
+# Refuse to start instead of stacking, and say exactly what to stop.
+GATE_LOCK="${TMPDIR:-/tmp}/workbench-gate-$(cd "$(dirname "$0")/.." && basename "$PWD").lock"
+
+preflight_exclusive() {
+  local conflict=0
+
+  if [ -e "$GATE_LOCK" ]; then
+    local holder
+    holder="$(cat "$GATE_LOCK" 2>/dev/null || echo unknown)"
+    if [ "$holder" != "unknown" ] && kill -0 "$holder" 2>/dev/null; then
+      echo "REFUSING: another gate is already running (pid $holder)." >&2
+      echo "  Wait for it, or: kill $holder && rm -f $GATE_LOCK" >&2
+      exit 3
+    fi
+    rm -f "$GATE_LOCK"
+  fi
+
+  # Match how a real vitest run actually appears in the process table --
+  # `node (vitest)` and `node (vitest N)` for its workers -- rather than any
+  # command line that mentions the word. A looser pattern matched its own
+  # monitoring `grep -E "vitest|..."` and refused a perfectly clean gate; a
+  # preflight that cries wolf gets switched off, which is worse than none.
+  local stray
+  stray="$(pgrep -f "node \([v]itest" 2>/dev/null | tr '\n' ' ' || true)"
+  if [ -n "${stray// /}" ]; then
+    echo "REFUSING: vitest is already running (pids: $stray)." >&2
+    echo "  A previous run may not have exited. Stop it first: kill $stray" >&2
+    conflict=1
+  fi
+
+  local dev
+  dev="$(pgrep -f "[v]ite.*--port" 2>/dev/null | tr '\n' ' ' || true)"
+  if [ -n "${dev// /}" ]; then
+    echo "REFUSING: a vite dev server is running (pids: $dev)." >&2
+    echo "  Stop the preview before gating; they contend for memory and the" >&2
+    echo "  same build cache. Then re-run this script." >&2
+    conflict=1
+  fi
+
+  [ "$conflict" -eq 0 ] || exit 3
+
+  echo $$ > "$GATE_LOCK"
+  trap 'rm -f "$GATE_LOCK"' EXIT INT TERM
+}
+
 run_stage() {
   local label="$1"
   shift
@@ -257,6 +306,8 @@ run_quick() {
     printf '%s\n' 'No runtime tests required for documentation-only changes.'
   fi
 }
+
+preflight_exclusive
 
 if [ "$mode" = "quick" ]; then
   run_quick
