@@ -59,6 +59,7 @@ describe("sectionRegistry", () => {
       "dataColumnCast",
       "codeExecute",
       "operation",
+      "armaGarchOperation",
       "estimatedEquation",
       "roleGroups",
       "code",
@@ -70,7 +71,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      5, 10, 20, 25, 26, 27, 28, 29, 30, 34, 35, 40, 50, 60, 70,
+      5, 10, 20, 25, 26, 27, 28, 29, 30, 31, 34, 35, 40, 50, 60, 70,
     ]);
   });
 
@@ -87,6 +88,30 @@ describe("sectionRegistry", () => {
       "lineage",
       "basic",
     ]);
+  });
+
+  it("routes ARMA-GARCH model nodes to the bespoke operation, not the generic one", () => {
+    const ts = node({
+      opType: "time_series.arma_garch",
+      editableSchema: [
+        { kind: "object", key: "model_options", label: "Options", value: {} },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ts)).map((s) => s.id);
+    expect(ids).toContain("armaGarchOperation");
+    expect(ids).not.toContain("operation");
+  });
+
+  it("keeps the generic operation for non-time-series model nodes", () => {
+    const ols = node({
+      opType: "ols",
+      editableSchema: [
+        { kind: "select", key: "covariance", label: "Covariance", options: ["robust"], value: "robust" },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ols)).map((s) => s.id);
+    expect(ids).toContain("operation");
+    expect(ids).not.toContain("armaGarchOperation");
   });
 
   it("compareWithSource renders only for forest nodes with run ownership metadata", () => {

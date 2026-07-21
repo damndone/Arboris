@@ -42,8 +42,14 @@ import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
+import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
+
+/** The time-series pack renders a bespoke operation form instead of the
+ *  generic editable_schema controls (its schema is an opaque model_options). */
+const isArmaGarch = (n: GraphViewNode): boolean =>
+  "opType" in n && n.opType === "time_series.arma_garch";
 
 /**
  * V1.5.2 — SectionEntry is the canonical name; SectionSpec is kept as
@@ -116,8 +122,16 @@ export const sectionRegistry: SectionEntry[] = [
   {
     id: "operation",
     order: 30,
-    shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0,
+    shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0 && !isArmaGarch(n),
     Component: OperationSection,
+  },
+  {
+    // Bespoke time-series operation form (transform / orders / distribution /
+    // strategy / validation) that forks a child model via the shared rerun path.
+    id: "armaGarchOperation",
+    order: 31,
+    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft && isArmaGarch(n),
+    Component: ArmaGarchOperationSection,
   },
   {
     // v1.6.8 — fitted equation from the owner run's coefficients; sits right
