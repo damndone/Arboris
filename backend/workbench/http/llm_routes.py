@@ -9,6 +9,8 @@ inspectable AI-operation record targeted for the report slice and v1.7.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import json
 import math
 import os
@@ -810,6 +812,7 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
             ) from exc
 
     config = load_llm_config()
+    config = _timeout_for_mode(request.mode, config)
     _validate_image_optin(request, config)
     messages = [
         {"role": "system", "content": _build_system_prompt(request)},
@@ -852,6 +855,22 @@ def llm_chat(request: AskAIChatRequest) -> dict[str, Any]:
         "model": result["model"],
         "context_fingerprint": request.packet.get("context_fingerprint"),
     }
+
+
+# A whole-report request is structurally the largest call this endpoint makes:
+# hundreds of facts and every figure in one prompt, and on a contract violation
+# it runs a second corrective round trip. A 214-fact report came in at ~55s and
+# the previous attempt returned 502 at the 60s provider default -- the model was
+# working, the clock simply ran out. Report mode gets its own ceiling instead of
+# raising the default, which would make every small Ask AI call hang far longer
+# against a dead provider.
+REPORT_MODE_TIMEOUT_S = 300.0
+
+
+def _timeout_for_mode(mode: str, config):
+    if mode != REPORT_MODE or config.timeout_s >= REPORT_MODE_TIMEOUT_S:
+        return config
+    return replace(config, timeout_s=min(REPORT_MODE_TIMEOUT_S, MAX_TIMEOUT_S))
 
 
 def _chat_or_api_error(messages: list[dict[str, Any]], config) -> dict[str, Any]:

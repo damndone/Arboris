@@ -277,6 +277,91 @@ describe("TableView", () => {
     expect((askArgs[0] as { source: { kind: string } }).source.kind).toBe("model");
   });
 
+  it("logs the figure explanation so it appears in AI activity", async () => {
+    // Node Ask AI and report generation both write activity records; figure
+    // explanations were the one AI exchange that left no trace at all.
+    localStorage.clear();
+    const { loadAiActivity } = await import("../../aiActivity/aiActivityLog");
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "figure",
+          items: [
+            { artifact_id: "coef_plot", path: "figures/coef_plot.png", artifact_type: "figure", step: "viz", sha256: "a" },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    figureCtxMock.mockResolvedValue({
+      figure: { artifact_id: "coef_plot", chart_type: "coefficient plot" },
+      source: { artifact_id: "ols_1", kind: "model", preview_json: "{}" },
+      response_guardrails: {},
+    });
+    figureAskMock.mockResolvedValue({ text: "Positive and significant." });
+
+    renderTable();
+    await waitFor(() =>
+      expect(screen.getByTestId("figure-ask-ai-button-coef_plot")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId("figure-ask-ai-button-coef_plot"));
+    await waitFor(() =>
+      expect(screen.getByTestId("figure-ask-ai-answer-coef_plot")).toBeTruthy(),
+    );
+
+    const records = loadAiActivity("/tmp/demo");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      kind: "ask_ai",
+      node_key: "figure:coef_plot",
+      status: "answered",
+      answer: "Positive and significant.",
+    });
+  });
+
+  it("restores a previous explanation after the tab was left and reopened", async () => {
+    // Switching to Graph unmounts this view. The answer used to live only in
+    // component state, so coming back showed an empty panel and the user had
+    // to pay for the call again to see what they had already been told.
+    localStorage.clear();
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "figure",
+          items: [
+            { artifact_id: "coef_plot", path: "figures/coef_plot.png", artifact_type: "figure", step: "viz", sha256: "a" },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    figureCtxMock.mockResolvedValue({
+      figure: { artifact_id: "coef_plot", chart_type: "coefficient plot" },
+      source: { artifact_id: "ols_1", kind: "model", preview_json: "{}" },
+      response_guardrails: {},
+    });
+    figureAskMock.mockResolvedValue({ text: "Remembered interpretation." });
+
+    const first = renderTable();
+    await waitFor(() =>
+      expect(screen.getByTestId("figure-ask-ai-button-coef_plot")).toBeTruthy(),
+    );
+    fireEvent.click(screen.getByTestId("figure-ask-ai-button-coef_plot"));
+    await waitFor(() =>
+      expect(screen.getByTestId("figure-ask-ai-answer-coef_plot")).toBeTruthy(),
+    );
+    first.unmount();
+
+    figureAskMock.mockClear();
+    renderTable();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("figure-ask-ai-answer-coef_plot").textContent).toContain(
+        "Remembered interpretation",
+      ),
+    );
+    // Restored from the log, not re-requested from the provider.
+    expect(figureAskMock).not.toHaveBeenCalled();
+  });
+
   it("renders Figure Ask AI Markdown instead of exposing marker syntax", async () => {
     mockArtifacts.current = {
       groups: [

@@ -32,14 +32,37 @@ function node(compare: unknown): GraphViewNode {
   } as unknown as GraphViewNode;
 }
 
+// Field names copied from a real ComparePacket.to_dict() served by
+// GET /compare-nodes, not invented. The first version of this test made up
+// `findings` and `trust_conclusion`; the component matched the fiction and
+// rendered a blocked comparison as though it were clean.
 const PAYLOAD = {
   compare_id: "c1",
   relation: "ancestor_descendant",
   left: { run_id: "run-a", node_id: "model:arma_garch_1" },
   right: { run_id: "run-b", node_id: "model:arma_garch_1" },
   packet: {
-    findings: ["SPLIT_HASH_MISMATCH"],
-    trust_conclusion: {
+    schema_version: "compare_packet_v1",
+    compare_status: "blocked_by_integrity",
+    reason_code: "SAMPLE_MISMATCH",
+    integrity_findings: ["SAMPLE_MISMATCH", "SPLIT_HASH_MISMATCH"],
+    user_safe_message:
+      "The time-series runs cannot be compared until lineage and terminal artifacts are complete.",
+    conclusion_diff: {
+      classification: null,
+      more_trustworthy: null,
+      reason: "Lineage or required terminal artifacts are incomplete.",
+    },
+  },
+};
+
+const COMPLETE_PACKET = {
+  ...PAYLOAD,
+  packet: {
+    schema_version: "compare_packet_v1",
+    compare_status: "complete",
+    integrity_findings: [],
+    conclusion_diff: {
       classification: "COMPARABLE_WITH_NO_AUTOMATIC_WINNER",
       reason: "Metric changes alone do not establish that one is more trustworthy.",
     },
@@ -89,23 +112,41 @@ describe("CompareNodeSection", () => {
     expect(screen.getByText(/no lineage relation/)).toBeInTheDocument();
   });
 
-  it("shows the stored comparability findings verbatim", () => {
+  it("shows the stored integrity findings verbatim", () => {
     renderSection(PAYLOAD);
 
     expect(screen.getByText("SPLIT_HASH_MISMATCH")).toBeInTheDocument();
+    expect(screen.getByText("SAMPLE_MISMATCH")).toBeInTheDocument();
+  });
+
+  it("says loudly when the backend blocked the comparison", () => {
+    // The failure this replaced: a blocked packet rendered with no findings
+    // and no status, so the node looked like a clean comparison.
+    renderSection(PAYLOAD);
+
+    const blocked = screen.getByTestId("compare-node-blocked");
+    expect(blocked).toHaveTextContent("blocked_by_integrity");
+    expect(blocked).toHaveTextContent(/cannot be compared until lineage/);
+  });
+
+  it("does not claim a blocked status on a complete comparison", () => {
+    renderSection(COMPLETE_PACKET);
+
+    expect(screen.queryByTestId("compare-node-blocked")).toBeNull();
+    expect(screen.getByText("COMPARABLE_WITH_NO_AUTOMATIC_WINNER")).toBeInTheDocument();
   });
 
   it("carries the packet's refusal to name a winner from metrics alone", () => {
-    renderSection(PAYLOAD);
+    renderSection(COMPLETE_PACKET);
 
     expect(screen.getByText("COMPARABLE_WITH_NO_AUTOMATIC_WINNER")).toBeInTheDocument();
     expect(screen.getByText(/do not establish that one is more trustworthy/)).toBeInTheDocument();
   });
 
   it("says so when there are no findings instead of showing an empty list", () => {
-    renderSection({ ...PAYLOAD, packet: { findings: [] } });
+    renderSection({ ...PAYLOAD, packet: { integrity_findings: [] } });
 
-    expect(screen.getByText("No comparability findings.")).toBeInTheDocument();
+    expect(screen.getByText("No integrity findings.")).toBeInTheDocument();
   });
 
   it("removes the comparison and reloads the forest", async () => {

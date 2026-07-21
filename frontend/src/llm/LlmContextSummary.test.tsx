@@ -70,7 +70,7 @@ describe("LlmContextSummary", () => {
     render(<LlmContextSummary packet={{}} />);
 
     const summary = screen.getByTestId("llm-context-summary");
-    expect(summary).toHaveTextContent("Model context capacity: Unavailable");
+    expect(summary).toHaveTextContent("Model context capacity: not declared by this provider");
     expect(summary).toHaveTextContent("Supports 1M: Unknown");
     expect(summary).toHaveTextContent("Packet version: Unavailable");
     expect(summary).toHaveTextContent("Node kind/stage: Unavailable / Unavailable");

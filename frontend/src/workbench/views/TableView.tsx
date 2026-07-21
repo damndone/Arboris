@@ -13,6 +13,11 @@
 // §3.5 V).
 
 import { useEffect, useState } from "react";
+import {
+  appendAiActivity,
+  askAiHistoryForNode,
+  makeActivityId,
+} from "../../aiActivity/aiActivityLog";
 import { useSearchParams } from "react-router-dom";
 import { useLineage } from "../../lineage/LineageContext";
 import { useForest } from "../ForestContext";
@@ -134,6 +139,11 @@ function FigureCard({
 }
 
 /** G2: interpret a chart from the numbers it was drawn from (not the pixels). */
+/** Activity key for a figure explanation, so it shares the node Ask AI log. */
+function figureActivityKey(artifactId: string): string {
+  return `figure:${artifactId}`;
+}
+
 function FigureAskAi({
   item,
   projectRoot,
@@ -164,6 +174,20 @@ function FigureAskAi({
     };
   }, []);
 
+  // A tab switch unmounts this component, so an answer held only in local
+  // state disappeared the moment the user looked at the graph and came back.
+  // The explanation is a real AI exchange: it belongs in the durable log, and
+  // restoring from that log is what makes it survive.
+  useEffect(() => {
+    if (!projectRoot) return;
+    const previous = askAiHistoryForNode(projectRoot, figureActivityKey(item.artifact_id));
+    const latest = previous[previous.length - 1];
+    if (latest?.status === "answered" && latest.answer) {
+      setAnswer(latest.answer);
+      setStatus("done");
+    }
+  }, [projectRoot, item.artifact_id]);
+
   const visionAvailable = llmConfig?.configured === true && llmConfig.supports_vision === true;
 
   async function handleAsk() {
@@ -184,10 +208,43 @@ function FigureAskAi({
       const response = await askAiAboutFigure(context, question, imageDataUrl);
       setAnswer(response.text);
       setStatus("done");
+      logFigureExchange({
+        question,
+        status: "answered",
+        answer: response.text,
+        chartType: context.figure.chart_type,
+      });
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
       setStatus("error");
+      // Failures are logged too: an AI activity trail that only records
+      // successes is not a record of what the AI was asked to do.
+      logFigureExchange({ question: "", status: "error", error: message });
     }
+  }
+
+  function logFigureExchange(record: {
+    question: string;
+    status: "answered" | "error";
+    answer?: string;
+    error?: string;
+    chartType?: string | null;
+  }) {
+    if (!projectRoot) return;
+    appendAiActivity(projectRoot, {
+      kind: "ask_ai",
+      id: makeActivityId(),
+      at: new Date().toISOString(),
+      node_key: figureActivityKey(item.artifact_id),
+      node_label: record.chartType
+        ? `Figure · ${record.chartType}`
+        : `Figure · ${item.artifact_id}`,
+      question: record.question,
+      status: record.status,
+      answer: record.answer,
+      error: record.error,
+    });
   }
 
   return (

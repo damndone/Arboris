@@ -130,8 +130,15 @@ export function LlmContextSummary({
         }}
       >
         <div>
+          {/* "Unavailable" read as a fault and prompted "is the key broken?".
+              A null here means only that the provider never declared a context
+              window -- the environment-variable provider does not -- so say
+              that, and say where it can be set. Filling in a token count we
+              cannot verify would be worse: the app would display a capacity
+              that is simply made up. */}
           Model context capacity: {formatTokens(
             contextWindowTokens ?? packetContextWindowTokens,
+            { absent: "not declared by this provider" },
           )}
         </div>
         <div>Supports 1M: {formatBoolean(supports1m ?? packetSupports1m)}</div>
@@ -249,10 +256,13 @@ function utf8ByteLength(value: string): number {
   return byteLength;
 }
 
-function formatTokens(value: number | null | undefined): string {
+function formatTokens(
+  value: number | null | undefined,
+  options: { absent?: string } = {},
+): string {
   const tokens = readFiniteNumber(value);
   return tokens === null
-    ? "Unavailable"
+    ? (options.absent ?? "Unavailable")
     : `${tokens.toLocaleString("en-US")} tokens`;
 }
 

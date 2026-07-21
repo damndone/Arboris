@@ -45,7 +45,14 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
 
   useEffect(() => {
-    setHistory(loadReportHistory(historyRoot));
+    const stored = loadReportHistory(historyRoot);
+    setHistory(stored);
+    // The report itself was never lost -- history is persisted -- but the
+    // preview lived in local state, so switching tabs blanked the screen and
+    // the user had to go dig it out of "Report history" to see it again.
+    // Restoring the newest record makes coming back to this view show what
+    // was last generated, which is what leaving it showed.
+    setCurrent((shown) => shown ?? stored[0] ?? null);
   }, [historyRoot]);
 
   useEffect(() => {
@@ -176,6 +183,11 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         report_record_id: record.id,
       });
     } catch (err) {
+      // Leaving the previously restored report on screen next to a failure
+      // invites reading it as this attempt's output. It is not lost -- it is
+      // still in Report history -- but it must not stand in for a result that
+      // was never produced.
+      setCurrent(null);
       setError(err instanceof Error ? err.message : "Report generation failed");
     } finally {
       setBusy(false);

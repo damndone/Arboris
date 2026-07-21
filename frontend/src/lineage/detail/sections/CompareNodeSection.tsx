@@ -38,7 +38,7 @@ function object(value: unknown): Record<string, unknown> {
 function Findings({ findings }: { findings: unknown }) {
   const items = Array.isArray(findings) ? findings.map(String) : [];
   if (items.length === 0) {
-    return <p style={{ fontSize: 12, margin: "4px 0 0" }}>No comparability findings.</p>;
+    return <p style={{ fontSize: 12, margin: "4px 0 0" }}>No integrity findings.</p>;
   }
   return (
     <ul style={{ fontSize: 12, margin: "4px 0 0", paddingLeft: 18 }}>
@@ -60,7 +60,14 @@ export function CompareNodeSection({ node }: { node: GraphViewNode }) {
   const compare = comparePayload(node);
   if (!compare) return null;
   const packet = object(compare.packet);
-  const trust = object(packet.trust_conclusion);
+  // Field names come from ComparePacket.to_dict(); an earlier version of this
+  // section guessed them, so a comparison the backend had marked
+  // `blocked_by_integrity` rendered as though it had no findings at all.
+  const conclusion = object(packet.conclusion_diff);
+  const status = typeof packet.compare_status === "string" ? packet.compare_status : null;
+  const blocked = status !== null && status !== "complete";
+  const safeMessage =
+    typeof packet.user_safe_message === "string" ? packet.user_safe_message : null;
 
   async function remove() {
     if (!projectRoot || !compare?.compare_id) return;
@@ -103,16 +110,32 @@ export function CompareNodeSection({ node }: { node: GraphViewNode }) {
         </div>
       </dl>
 
-      {trust.classification !== undefined && (
-        <p style={{ fontSize: 12, marginTop: 8 }}>
-          <strong>{String(trust.classification)}</strong>
-          {trust.reason ? ` — ${String(trust.reason)}` : null}
+      {blocked && (
+        <p
+          className="field-error"
+          role="status"
+          data-testid="compare-node-blocked"
+          style={{ fontSize: 12, marginTop: 8 }}
+        >
+          <strong>{status}</strong>
+          {safeMessage ? ` — ${safeMessage}` : null}
         </p>
       )}
 
+      {conclusion.classification != null ? (
+        <p style={{ fontSize: 12, marginTop: 8 }}>
+          <strong>{String(conclusion.classification)}</strong>
+          {conclusion.reason ? ` — ${String(conclusion.reason)}` : null}
+        </p>
+      ) : (
+        conclusion.reason != null && (
+          <p style={{ fontSize: 12, marginTop: 8 }}>{String(conclusion.reason)}</p>
+        )
+      )}
+
       <div style={{ marginTop: 8 }}>
-        <div className="ln-section-label">Comparability findings</div>
-        <Findings findings={packet.findings} />
+        <div className="ln-section-label">Integrity findings</div>
+        <Findings findings={packet.integrity_findings} />
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>

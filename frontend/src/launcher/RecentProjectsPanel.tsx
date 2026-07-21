@@ -84,14 +84,28 @@ export function RecentProjectsPanel({ onOpenProject }: RecentProjectsPanelProps)
                     {probingRoot === recent.root ? "打开中…" : `上次打开 ${recent.lastOpened}`}
                   </span>
                 </button>
-                {stale && (
-                  <p className="field-error" style={{ margin: "8px 0 0" }}>
-                    失效
-                    <button type="button" onClick={() => remove(recent.root)} style={{ marginLeft: 8 }}>
-                      移除
-                    </button>
-                  </p>
-                )}
+                {/* Removal used to appear only once a project had gone stale,
+                    so a healthy project could never be taken off the list.
+                    The wording stays "移除" rather than "删除" on purpose: this
+                    clears the entry, it does not touch the files on disk. */}
+                <div
+                  style={{
+                    margin: "8px 0 0",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {stale && <span className="field-error">失效</span>}
+                  <button
+                    type="button"
+                    data-testid={`recent-remove-${recent.root}`}
+                    onClick={() => remove(recent.root)}
+                    title="从最近列表中移除（不会删除磁盘上的项目文件）"
+                  >
+                    移除
+                  </button>
+                </div>
               </li>
             );
           })}

@@ -222,11 +222,12 @@ export const actionRegistry: ActionEntry[] = [
   {
     id: "generateReport",
     order: 120,
-    label: "Generate report",
+    // Named for what it does. It was called "Generate report" while only
+    // switching views, so it read as a duplicate of the Report view's own
+    // generate button and looked broken when nothing was produced.
+    label: "Open report",
     surfaces: ["topbar"],
     shouldRender: () => true,
-    // v1.6.11 slice C: live — switches to the Report view (fact table +
-    // cite-chip generation for the active run's lineage).
     invoke: (ctx) => ctx.dispatch.setView?.("report"),
   },
 ];
