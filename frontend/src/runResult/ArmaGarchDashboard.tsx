@@ -16,7 +16,10 @@ import {
   type JsonObject,
 } from "./ArmaGarchResultCard";
 
-type Props = { artifacts: ArmaGarchArtifacts | undefined };
+import { ArmaGarchChartGallery } from "./ArmaGarchChartGallery";
+import type { ArmaGarchCharts } from "./useArmaGarchCharts";
+
+type Props = { artifacts: ArmaGarchArtifacts | undefined; charts?: ArmaGarchCharts };
 
 const DIMENSION_LABELS: Record<string, string> = {
   data_readiness: "Data readiness",
@@ -58,7 +61,7 @@ function AcceptanceChips({ dimensions }: { dimensions: JsonObject }) {
   );
 }
 
-export function ArmaGarchDashboard({ artifacts }: Props) {
+export function ArmaGarchDashboard({ artifacts, charts }: Props) {
   if (!artifacts?.report) return null;
   const report = artifacts.report;
   const semantics = object(report.estimation_semantics);
@@ -251,6 +254,12 @@ export function ArmaGarchDashboard({ artifacts }: Props) {
           <p>ARMA-only comparison artifact is unavailable; no locked-comparison claim is made.</p>
         )}
       </Block>
+
+      {charts && (
+        <Block title="Evidence charts">
+          <ArmaGarchChartGallery charts={charts} />
+        </Block>
+      )}
 
       <Block title="Reproducibility">
         <dl className="summary-list">

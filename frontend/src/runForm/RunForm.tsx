@@ -21,6 +21,13 @@ import { DIDControls, type DIDRoleValue } from "./DIDControls";
 import { CSControls, type CSValue } from "./CSControls";
 import { DCDHControls, type DCDHValue } from "./DCDHControls";
 import { FocalSelect } from "./FocalSelect";
+import {
+  ArmaGarchControls,
+  armaGarchValidationErrors,
+  buildArmaGarchModelOptions,
+  createDefaultArmaGarchValue,
+  type ArmaGarchControlValue,
+} from "./ArmaGarchControls";
 
 type RequestState = "idle" | "working";
 
@@ -70,6 +77,9 @@ export function RunForm(props: RunFormProps) {
     fit_method: "reml",
     random_slope: true,
   });
+  const [armaGarchValue, setArmaGarchValue] = useState<ArmaGarchControlValue>(
+    createDefaultArmaGarchValue,
+  );
   // V1.5.4.4: IV role assignment (endog / instruments) over the X selection.
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
@@ -158,11 +168,43 @@ export function RunForm(props: RunFormProps) {
     () => preview?.columns?.map((c) => c.name) ?? [],
     [preview],
   );
+  const isArmaGarch = modelType === "time_series.arma_garch";
+
+  useEffect(() => {
+    if (!isArmaGarch || !preview) return;
+    const suggestedTime =
+      preview.columns.find((column) => column.suggestedRole === "time")?.name
+      ?? preview.columns.find((column) => column.dtype === "datetime")?.name
+      ?? "";
+    const suggestedValue =
+      preview.columns.find(
+        (column) => column.name === preview.suggestedY && column.dtype === "numeric",
+      )?.name
+      ?? preview.columns.find(
+        (column) => column.dtype === "numeric" && column.name !== suggestedTime,
+      )?.name
+      ?? "";
+    setArmaGarchValue((current) => {
+      return {
+        ...current,
+        timeColumn: current.timeColumn || suggestedTime,
+        valueColumn: current.valueColumn || suggestedValue,
+      };
+    });
+    setY(armaGarchValue.valueColumn || suggestedValue);
+    setX("");
+  }, [isArmaGarch, preview, armaGarchValue.valueColumn]);
 
   const runErrors: Record<string, string> = {};
   if (projectRoot.trim() === "") runErrors.projectRoot = "Create a project first";
-  if (y.trim() === "") runErrors.y = "Required";
-  if (modelType !== "linear_mixed_effects" && xColumns.length === 0) runErrors.x = "Provide at least one column";
+  if (isArmaGarch) {
+    armaGarchValidationErrors(armaGarchValue).forEach((error, index) => {
+      runErrors[`armaGarch${index}`] = error;
+    });
+  } else {
+    if (y.trim() === "") runErrors.y = "Required";
+    if (modelType !== "linear_mixed_effects" && xColumns.length === 0) runErrors.x = "Provide at least one column";
+  }
   if (modelType === "linear_mixed_effects") {
     for (const key of ["subject_id", "time", "group"] as const) {
       if (!lmmValue[key]) runErrors[key] = "Required";
@@ -180,6 +222,7 @@ export function RunForm(props: RunFormProps) {
     setSheetName(undefined);
     setTranspose(false);
     setXManuallySet(false);
+    setArmaGarchValue(createDefaultArmaGarchValue());
     if (!nextFile) {
       setPreviewState("idle");
       return;
@@ -270,7 +313,9 @@ export function RunForm(props: RunFormProps) {
             didRole.status,
           ].filter((c) => c !== "")
         : [];
-      const exogColumns = isIV
+      const exogColumns = isArmaGarch
+        ? []
+        : isIV
         ? xColumns.filter(
             (c) =>
               !ivRole.endog.includes(c) && !ivRole.instruments.includes(c),
@@ -283,7 +328,7 @@ export function RunForm(props: RunFormProps) {
       const result = await runWorkflow(
         projectRoot.trim(),
         mode,
-        y.trim(),
+        (isArmaGarch ? armaGarchValue.valueColumn : y).trim(),
         exogColumns.join(","),
         file,
         modelType,
@@ -315,7 +360,15 @@ export function RunForm(props: RunFormProps) {
               : undefined,
           honestDid: usesCsParams ? csValue.honestDid : undefined,
           didTreatmentPath: isDcdh ? dcdhValue.treatmentPath : undefined,
-          modelOptions: modelType === "linear_mixed_effects" ? lmmValue : undefined,
+          modelOptions:
+            modelType === "linear_mixed_effects"
+              ? lmmValue
+              : isArmaGarch
+                ? buildArmaGarchModelOptions(
+                    armaGarchValue,
+                    `upload:${file.name}`,
+                  )
+                : undefined,
           // v1.6.5 role layer: declare focal only for user-focal families and
           // only over the columns actually posted as x. Structural families
           // (IV/DID/CS/SA/dCDH) get nothing — focal/treatment is structural.
@@ -446,6 +499,18 @@ export function RunForm(props: RunFormProps) {
           {modelType === "linear_mixed_effects" && (
             <LmmControls columns={columnNames} value={lmmValue} onChange={setLmmValue} />
           )}
+          {isArmaGarch && (
+            <ArmaGarchControls
+              columns={columnNames}
+              preview={preview}
+              value={armaGarchValue}
+              onChange={(next) => {
+                setArmaGarchValue(next);
+                setY(next.valueColumn);
+                setX("");
+              }}
+            />
+          )}
           {modelType === "iv_2sls" && (
             <div className="ios-group" aria-label="IV controls">
               <p className="ios-hint">
@@ -498,17 +563,19 @@ export function RunForm(props: RunFormProps) {
               onChange={setDcdhValue}
             />
           )}
-          <PredictionControls
-            capabilities={capabilities}
-            enabled={predictionEnabled}
-            modelType={predictionModelType}
-            cvFolds={predictionCvFolds}
-            sampling={predictionSampling}
-            onEnabled={setPredictionEnabled}
-            onModelType={setPredictionModelType}
-            onCvFolds={setPredictionCvFolds}
-            onSampling={setPredictionSampling}
-          />
+          {!isArmaGarch && (
+            <PredictionControls
+              capabilities={capabilities}
+              enabled={predictionEnabled}
+              modelType={predictionModelType}
+              cvFolds={predictionCvFolds}
+              sampling={predictionSampling}
+              onEnabled={setPredictionEnabled}
+              onModelType={setPredictionModelType}
+              onCvFolds={setPredictionCvFolds}
+              onSampling={setPredictionSampling}
+            />
+          )}
           {validationError && (
             <div className="ios-warning" role="alert">{validationError}</div>
           )}
@@ -554,7 +621,7 @@ export function RunForm(props: RunFormProps) {
               leave it off for the usual one-row-per-observation layout.
             </span>
           )}
-          <label>
+          {!isArmaGarch && <label>
             Dependent variable (y)
             <input
               aria-label="dependent variable"
@@ -564,8 +631,8 @@ export function RunForm(props: RunFormProps) {
               onChange={(event) => setY(event.target.value)}
             />
             {runErrors.y && <span className="field-error">{runErrors.y}</span>}
-          </label>
-          <label>
+          </label>}
+          {!isArmaGarch && <label>
             Regressors (x, comma-separated)
             <input
               aria-label="independent variables"
@@ -580,7 +647,7 @@ export function RunForm(props: RunFormProps) {
             <span className={runErrors.x ? "field-error" : "field-hint"}>
               {runErrors.x ?? `${xColumns.length} column${xColumns.length === 1 ? "" : "s"}`}
             </span>
-          </label>
+          </label>}
           {preview && preview.excludedColumns.length > 0 && (
             <details className="excluded-columns">
               <summary>
@@ -609,12 +676,12 @@ export function RunForm(props: RunFormProps) {
               </ul>
             </details>
           )}
-          <FocalSelect
+          {!isArmaGarch && <FocalSelect
             xColumns={xColumns}
             focal={focal.filter((c) => xColumns.includes(c))}
             onChange={setFocal}
             family={modelType}
-          />
+          />}
           <label>
             Data file (.csv, .xlsx, .xls)
             <input
@@ -695,7 +762,7 @@ export function RunForm(props: RunFormProps) {
                 </tbody>
               </table>
             </div>
-            <div className="column-selector" aria-label="column selector">
+            {!isArmaGarch && <div className="column-selector" aria-label="column selector">
               {preview.columns.map((column) => (
                 <div key={column.name} className="column-option">
                   <div>
@@ -729,7 +796,7 @@ export function RunForm(props: RunFormProps) {
                   </label>
                 </div>
               ))}
-            </div>
+            </div>}
           </section>
         )}
       </section>

@@ -103,6 +103,22 @@ describe("sectionRegistry", () => {
     expect(ids).not.toContain("operation");
   });
 
+  it("hides the OLS-shaped sections on a time-series node", () => {
+    // The user's complaint: a one-series ARMA-GARCH node was showing an
+    // estimated equation and outcome/predictor role groups, neither of which
+    // describes it. Its own dashboard states the mean and variance spec.
+    const ts = node({
+      opType: "time_series.arma_garch",
+      editableSchema: [
+        { kind: "textarea", key: "model_options", label: "Options", value: {} },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ts)).map((s) => s.id);
+    expect(ids).not.toContain("estimatedEquation");
+    expect(ids).not.toContain("roleGroups");
+    expect(ids).toContain("armaGarchResult");
+  });
+
   it("keeps the generic operation for non-time-series model nodes", () => {
     const ols = node({
       opType: "ols",

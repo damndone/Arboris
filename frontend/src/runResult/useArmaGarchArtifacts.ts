@@ -5,7 +5,7 @@
 // artifact is stored as an envelope; we surface only its `payload`.
 
 import { useEffect, useState } from "react";
-import { fetchArtifactJson, fetchRunArtifacts } from "../api";
+import { fetchArtifactJson, fetchRunArtifacts, type ArtifactGroup } from "../api";
 import type { ArmaGarchArtifacts } from "./ArmaGarchResultCard";
 
 /** Logical field -> persisted artifact id. Mirrors the pack's artifact contract. */
@@ -26,6 +26,8 @@ export const ARMA_GARCH_ARTIFACT_IDS = {
 export function useArmaGarchArtifacts(
   projectRoot: string | null | undefined,
   runId: string | null | undefined,
+  /** Pass an already-loaded artifact list to avoid a second listing request. */
+  knownGroups?: ArtifactGroup[],
 ): ArmaGarchArtifacts | undefined {
   const [artifacts, setArtifacts] = useState<ArmaGarchArtifacts | undefined>(undefined);
 
@@ -36,7 +38,10 @@ export function useArmaGarchArtifacts(
     }
     let cancelled = false;
 
-    fetchRunArtifacts(projectRoot, runId)
+    const listing = knownGroups
+      ? Promise.resolve({ groups: knownGroups })
+      : fetchRunArtifacts(projectRoot, runId);
+    listing
       .then(async (value) => {
         const artifactIds = new Set(
           value.groups.flatMap((group) => group.items.map((item) => item.artifact_id)),
@@ -73,7 +78,7 @@ export function useArmaGarchArtifacts(
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, runId]);
+  }, [projectRoot, runId, knownGroups]);
 
   return artifacts;
 }

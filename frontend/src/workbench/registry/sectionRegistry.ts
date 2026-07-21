@@ -146,13 +146,19 @@ export const sectionRegistry: SectionEntry[] = [
     // above the specification so estimate vs spec read as a pair.
     id: "estimatedEquation",
     order: 34,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
+    // An ARMA-GARCH node has no classic coefficient equation, and the
+    // dashboard already states its mean and variance specification.
+    shouldRender: (n) =>
+      (n.kind === "model" || n.stage === "model") && !n.isDraft && !isArmaGarch(n),
     Component: EstimatedEquationSection,
   },
   {
     id: "roleGroups",
     order: 35,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
+    // Outcome/predictor roles do not describe a one-series time-series
+    // analysis, whose variables are a time column and a value column.
+    shouldRender: (n) =>
+      (n.kind === "model" || n.stage === "model") && !n.isDraft && !isArmaGarch(n),
     Component: RoleGroupsSection,
   },
   {

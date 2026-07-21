@@ -909,6 +909,31 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border-radius: 10px; padding: 8px 10px; margin-top: 8px;
 }
 
+.run-result-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 14px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.run-result-tabs button {
+  background: var(--ios-bg);
+  border: 1px solid var(--ios-sep);
+  border-radius: 999px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.run-result-tabs button[aria-selected="true"] {
+  background: var(--ios-blue);
+  border-color: var(--ios-blue);
+  color: #fff;
+}
+
 /* IV diagnostics card — verdict-coded pills anchored to the --ios-* palette. */
 .iv-diagnostics .iv-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .iv-diagnostics .iv-message {
