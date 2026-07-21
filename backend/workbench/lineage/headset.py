@@ -132,7 +132,7 @@ def _model_stats(runs_dir: Path, run_id: str, node_id: str) -> dict[str, Any] | 
     return stats or None
 
 
-def _node_key(node_id: str, node_index: dict[str, dict]) -> str:
+def forest_node_key(node_id: str, node_index: dict[str, dict]) -> str:
     """Cross-run dedup key. Two nodes merge iff they are the SAME node_id with the SAME
     node_hash — so the shared prefix (raw/cleaned/variables) collapses across reruns, a
     re-estimated model forks (same id, new hash → distinct), and distinct graph nodes that
@@ -183,7 +183,7 @@ def build_headset(
         form = inputs.get("form") or {}
 
         # id -> dedup key for this run's nodes
-        keymap = {nid: _node_key(nid, node_index) for nid in graph.get("nodes", {})}
+        keymap = {nid: forest_node_key(nid, node_index) for nid in graph.get("nodes", {})}
         rerun_from = inputs.get("rerun_from")
         from_node = inputs.get("from_node")
         if (

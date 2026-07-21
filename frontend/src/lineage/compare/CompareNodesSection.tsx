@@ -11,12 +11,15 @@ import {
   resolveNodeOperationContext,
   type NodeOperationContextV1,
 } from "../api/nodeOperationContext";
+import { useProjectRootOptional } from "../../workbench/ProjectRootContext";
+import { KeepComparisonButton } from "./KeepComparisonButton";
 import { useCompareOptional } from "./CompareContext";
 import { CompareDiffView } from "./CompareDiffView";
 
 export function CompareNodesSection({ node }: { node: GraphViewNode }) {
   const compare = useCompareOptional();
   const forest = useForest();
+  const projectRoot = useProjectRootOptional();
   if (!compare || !forest || !("runs" in node)) return null;
   const nodeKey = (node as HeadSetNode).nodeKey;
 
@@ -60,7 +63,18 @@ export function CompareNodesSection({ node }: { node: GraphViewNode }) {
       return (
         <div>
           <CompareDiffView result={buildNodeComparison(left, right)} />
-          <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+          <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+            <KeepComparisonButton
+              projectRoot={projectRoot}
+              left={left}
+              right={right}
+              onKept={() => {
+                // The comparison now exists on the graph, so the transient
+                // pick has served its purpose.
+                compare.clear();
+                forest.refetch?.();
+              }}
+            />
             <button type="button" onClick={compare.swap}>
               Swap sides
             </button>

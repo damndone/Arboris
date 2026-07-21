@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
+
+from ..artifacts import read_json
 
 from .canonical import sha256_canonical
 from .compare import (
@@ -298,3 +301,40 @@ __all__ = [
     "ARMA_GARCH_COMPARE_STRATEGY_VERSION",
     "build_arma_garch_compare_packet",
 ]
+
+
+_TIME_SERIES_PUBLIC_ARTIFACTS = (
+    "ts.analysis_contract",
+    "ts.data_audit",
+    "ts.report",
+    "ts.arma_candidates",
+    "ts.volatility_candidates",
+    "ts.final_model",
+    "ts.parameters",
+    "ts.final_diagnostics",
+    "ts.forecast_metrics",
+    "ts.arma_vs_garch_comparison",
+    "ts.conditional_series",
+    "ts.artifact_manifest",
+)
+
+
+def read_time_series_artifacts(
+    run_root: Path,
+) -> tuple[dict[str, object], dict[str, object]]:
+    artifacts: dict[str, object] = {}
+    metadata: dict[str, object] = {}
+    root = run_root / "artifacts" / "time_series"
+    for artifact_id in _TIME_SERIES_PUBLIC_ARTIFACTS:
+        try:
+            envelope = read_json(root / f"{artifact_id}.json")
+        except (FileNotFoundError, OSError, ValueError):
+            continue
+        if not isinstance(envelope, dict) or envelope.get("artifact_id") != artifact_id:
+            continue
+        payload = envelope.get("payload")
+        if isinstance(payload, dict):
+            artifacts[artifact_id] = payload
+        if artifact_id == "ts.report" and isinstance(envelope.get("metadata"), dict):
+            metadata = dict(envelope["metadata"])
+    return artifacts, metadata

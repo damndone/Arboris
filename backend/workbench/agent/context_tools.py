@@ -16,6 +16,7 @@ from ..lineage.op_contract import resolve_operation_contract
 from ..lineage.run_inputs import read_run_inputs
 from ..services.results_service import read_model_results
 from ..analysis_loop.compare import ComparePacket
+from ..analysis_loop.time_series_compare import read_time_series_artifacts as _read_time_series_artifacts
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
@@ -993,22 +994,6 @@ def _read_manifest(run_root: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-_TIME_SERIES_PUBLIC_ARTIFACTS = (
-    "ts.analysis_contract",
-    "ts.data_audit",
-    "ts.report",
-    "ts.arma_candidates",
-    "ts.volatility_candidates",
-    "ts.final_model",
-    "ts.parameters",
-    "ts.final_diagnostics",
-    "ts.forecast_metrics",
-    "ts.arma_vs_garch_comparison",
-    "ts.conditional_series",
-    "ts.artifact_manifest",
-)
-
-
 def _analysis_contract_from_run_inputs(
     run_inputs: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -1031,27 +1016,6 @@ def _analysis_contract_from_run_inputs(
         except (KeyError, TypeError, ValueError):
             continue
     return None
-
-
-def _read_time_series_artifacts(
-    run_root: Path,
-) -> tuple[dict[str, object], dict[str, object]]:
-    artifacts: dict[str, object] = {}
-    metadata: dict[str, object] = {}
-    root = run_root / "artifacts" / "time_series"
-    for artifact_id in _TIME_SERIES_PUBLIC_ARTIFACTS:
-        try:
-            envelope = read_json(root / f"{artifact_id}.json")
-        except (FileNotFoundError, OSError, ValueError):
-            continue
-        if not isinstance(envelope, dict) or envelope.get("artifact_id") != artifact_id:
-            continue
-        payload = envelope.get("payload")
-        if isinstance(payload, dict):
-            artifacts[artifact_id] = payload
-        if artifact_id == "ts.report" and isinstance(envelope.get("metadata"), dict):
-            metadata = dict(envelope["metadata"])
-    return artifacts, metadata
 
 
 def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str]:

@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from .compare_nodes import CompareNodeStore, compare_forest_projection
 from .family import scan_family
 from .headset import HEADSET_SCHEMA_VERSION, build_headset
 
@@ -96,6 +97,20 @@ def build_project_forest(
         families.append(
             {"family_root": family.self_id, "members": sorted(members)}
         )
+
+    # Compare nodes are merged last, and only here: a comparison may join two
+    # nodes from different families, which a single-family head-set cannot see.
+    # They are never written into any run's graph.json, so per-run graphs stay
+    # byte-identical.
+    compare_nodes, compare_edges = compare_forest_projection(
+        nodes, CompareNodeStore(runs_dir.parent, create=False).list()
+    )
+    nodes.update(compare_nodes)
+    for edge in compare_edges:
+        key = (edge["source"], edge["target"], edge.get("op"))
+        if key not in edge_seen:
+            edge_seen.add(key)
+            edges.append(edge)
 
     return {
         "nodes": nodes,

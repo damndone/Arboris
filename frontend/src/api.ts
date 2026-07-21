@@ -1403,3 +1403,56 @@ export function connectRunEvents(
   source.onerror = () => callbacks.onError?.(new Error("SSE connection error"));
   return () => source.close();
 }
+
+// ── v1.8 slice C: durable comparison nodes ──
+// A comparison is stored server-side and projected into the forest as a node
+// joining its two endpoints, so a conclusion survives a reload.
+
+export type CompareNodeEndpoint = {
+  run_id: string;
+  node_id: string;
+  node_hash: string;
+  forest_node_key: string;
+};
+
+export type CompareNodeRecord = {
+  compare_id: string;
+  schema_id: string;
+  left: CompareNodeEndpoint;
+  right: CompareNodeEndpoint;
+  relation: "ancestor_descendant" | "unrelated";
+  created_at: string;
+  packet: Record<string, unknown>;
+};
+
+export async function createCompareNode(
+  projectRoot: string,
+  left: { runId: string; nodeId: string },
+  right: { runId: string; nodeId: string },
+): Promise<CompareNodeRecord> {
+  const response = await fetch(
+    apiUrl(`/compare-nodes?project_root=${encodeURIComponent(projectRoot)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        left: { run_id: left.runId, node_id: left.nodeId },
+        right: { run_id: right.runId, node_id: right.nodeId },
+      }),
+    },
+  );
+  return readResponse<CompareNodeRecord>(response);
+}
+
+export async function deleteCompareNode(
+  projectRoot: string,
+  compareId: string,
+): Promise<{ deleted: string }> {
+  const response = await fetch(
+    apiUrl(
+      `/compare-nodes/${encodeURIComponent(compareId)}?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    { method: "DELETE" },
+  );
+  return readResponse<{ deleted: string }>(response);
+}

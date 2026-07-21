@@ -34,6 +34,7 @@ import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
 import { AnalysisLoopSection } from "../../lineage/detail/sections/AnalysisLoopSection";
+import { CompareNodeSection, isCompareNode } from "../../lineage/detail/sections/CompareNodeSection";
 import { CompareNodesSection } from "../../lineage/compare/CompareNodesSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
@@ -86,16 +87,24 @@ export const sectionRegistry: SectionEntry[] = [
     Component: AskAISection,
   },
   {
+    // v1.8 slice C — a stored comparison node reads its own packet; the
+    // sections below are about running a model and do not describe it.
+    id: "compareNode",
+    order: 24,
+    shouldRender: isCompareNode,
+    Component: CompareNodeSection,
+  },
+  {
     id: "compareWithSource",
     order: 25,
-    shouldRender: (n) => "runs" in n,
+    shouldRender: (n) => "runs" in n && !isCompareNode(n),
     Component: CompareWithSourceSection,
   },
   {
     // v1.6.11 B-2 — arbitrary two-node comparison (pick the partner on the canvas).
     id: "compareNodes",
     order: 26,
-    shouldRender: (n) => "runs" in n && !n.isDraft,
+    shouldRender: (n) => "runs" in n && !n.isDraft && !isCompareNode(n),
     Component: CompareNodesSection,
   },
   {
