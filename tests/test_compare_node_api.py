@@ -120,6 +120,9 @@ def test_two_model_nodes_become_one_durable_comparison(tmp_path: Path) -> None:
     assert {record["left"]["run_id"], record["right"]["run_id"]} == {"run-a", "run-b"}
     # The packet is a reading of stored artifacts, not a refit.
     assert record["packet"]["result_diff"]["forecast_metrics"]["changed"] is True
+    assert record["relation"] == "unrelated"
+    assert record["packet"]["compare_status"] == "complete"
+    assert record["packet"]["integrity_findings"] == []
 
 
 def test_the_comparison_survives_a_reload(tmp_path: Path) -> None:

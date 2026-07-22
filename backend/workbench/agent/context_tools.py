@@ -22,7 +22,7 @@ from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
 from .operations import OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
-from .tools import ToolContext, ToolDefinition
+from .tools import ToolContext, ToolDefinition, ToolVisibleError
 
 
 @dataclass(frozen=True)
@@ -983,18 +983,41 @@ class NodeOperationContextProvider:
         active_head_run_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         runs_root = self.project_root / "runs"
-        canonical = build_rerun_operation_context(
-            runs_root,
-            request_id=request_id,
-            owner_run_id=owner_run_id,
-            op_node_id=op_node_id,
-            active_head_run_id=active_head_run_id,
-        )
+        try:
+            canonical = build_rerun_operation_context(
+                runs_root,
+                request_id=request_id,
+                owner_run_id=owner_run_id,
+                op_node_id=op_node_id,
+                active_head_run_id=active_head_run_id,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            prefix = message.partition(":")[0]
+            if prefix not in {
+                "invalid_operation_target",
+                "context_stale",
+                "context_mismatch",
+            }:
+                raise
+            try:
+                valid_ids = sorted(GraphStore(runs_root=runs_root).read(owner_run_id).nodes)
+            except Exception:
+                valid_ids = []
+            targets = ", ".join(valid_ids[:24]) if valid_ids else "none"
+            raise ToolVisibleError(
+                f"{prefix.upper()}: {message}. Valid node IDs for run "
+                f"{owner_run_id}: {targets}."
+            ) from exc
         graph = GraphStore(runs_root=runs_root).read(owner_run_id)
         graph_json = graph_to_json(graph)
         node = graph_json["nodes"].get(op_node_id)
         if not isinstance(node, dict):
-            raise ValueError("invalid_operation_target: op_node_id")
+            valid_ids = ", ".join(sorted(graph_json["nodes"])[:24]) or "none"
+            raise ToolVisibleError(
+                "INVALID_OPERATION_TARGET: invalid_operation_target: op_node_id. "
+                f"Valid node IDs for run {owner_run_id}: {valid_ids}."
+            )
         manifest = _read_manifest(runs_root / owner_run_id)
         return canonical.model_dump(), node, manifest
 

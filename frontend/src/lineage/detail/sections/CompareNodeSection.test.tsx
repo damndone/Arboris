@@ -69,6 +69,24 @@ const COMPLETE_PACKET = {
   },
 };
 
+const PRESENTATION_PACKET = {
+  ...COMPLETE_PACKET,
+  packet: {
+    ...COMPLETE_PACKET.packet,
+    presentation: {
+      sample_identity: {
+        data_changed: false,
+        split_contract_changed: true,
+        message: "Same sample membership; the split contract changed.",
+      },
+      specification_changes: ["ARMA: (1, 1) → (2, 1)"],
+      forecast_metrics: [{ name: "RMSE", before: 7.44, after: 7.53 }],
+      acceptance: { before: "accepted_with_warnings", after: "accepted_with_warnings" },
+      conclusion: "Comparable with no automatic winner.",
+    },
+  },
+};
+
 const refetch = vi.fn();
 
 function renderSection(compare: unknown) {
@@ -141,6 +159,16 @@ describe("CompareNodeSection", () => {
 
     expect(screen.getByText("COMPARABLE_WITH_NO_AUTOMATIC_WINNER")).toBeInTheDocument();
     expect(screen.getByText(/do not establish that one is more trustworthy/)).toBeInTheDocument();
+  });
+
+  it("renders a compact human summary while retaining the stored packet", () => {
+    renderSection(PRESENTATION_PACKET);
+
+    expect(screen.getByText("Same sample membership; the split contract changed.")).toBeInTheDocument();
+    expect(screen.getByText("ARMA: (1, 1) → (2, 1)")).toBeInTheDocument();
+    expect(screen.getByText(/RMSE: 7\.44 → 7\.53/)).toBeInTheDocument();
+    expect(screen.getByText(/accepted_with_warnings → accepted_with_warnings/)).toBeInTheDocument();
+    expect(screen.getByText("View raw Compare JSON")).toBeInTheDocument();
   });
 
   it("says so when there are no findings instead of showing an empty list", () => {

@@ -27,12 +27,17 @@ import {
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
-import type { ArtifactItem, ModelResult, RunDetail } from "../../api";
+import type { ArtifactGroup, ArtifactItem, ModelResult, RunDetail } from "../../api";
 import { buildRepeatedMeasuresViewModel } from "../repeatedMeasures/repeatedMeasuresViewModel";
 import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
 import { fetchLlmConfig } from "../../llm/llmApi";
 import type { LlmConfigInfo } from "../../llm/llmTypes";
 import { renderMarkdown } from "../../report/markdown";
+import { ArmaGarchChartGallery } from "../../runResult/ArmaGarchChartGallery";
+import {
+  ARMA_GARCH_CHART_IDS,
+  useArmaGarchCharts,
+} from "../../runResult/useArmaGarchCharts";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -341,13 +346,24 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [artifactGroups, setArtifactGroups] = useState<ArtifactGroup[] | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Table already owns the artifact listing request. Reusing that listing
+  // avoids a second request while letting the same chart loader used by the
+  // run-detail dashboard draw structured `ts.chart.*` evidence here too.
+  const armaGarchCharts = useArmaGarchCharts(
+    projectRoot,
+    artifactGroups === undefined ? null : runId,
+    artifactGroups,
+  );
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setArtifactGroups(undefined);
     Promise.all([
       fetchRunDetail(projectRoot, runId),
       fetchRunArtifacts(projectRoot, runId),
@@ -355,6 +371,7 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
       .then(([d, a]) => {
         if (cancelled) return;
         setDetail(d);
+        setArtifactGroups(a.groups);
         setArtifacts(a.groups.flatMap((g) => g.items));
       })
       .catch((e: unknown) => {
@@ -371,6 +388,10 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
   const models = detail?.model_results ?? [];
   const figures = artifacts.filter((a) => a.artifact_type === "figure");
   const otherArtifacts = artifacts.filter((a) => a.artifact_type !== "figure");
+  const chartArtifactIds = new Set<string>(Object.values(ARMA_GARCH_CHART_IDS));
+  const hasArmaGarchChartArtifacts = artifacts.some((artifact) =>
+    chartArtifactIds.has(artifact.artifact_id),
+  );
   const isEmpty =
     !loading &&
     !error &&
@@ -436,6 +457,15 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
               <FigureCard key={f.artifact_id} item={f} projectRoot={projectRoot} runId={runId} />
             ))}
           </div>
+        </section>
+      )}
+
+      {!loading && !error && hasArmaGarchChartArtifacts && (
+        <section data-testid="table-view-time-series-charts">
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
+            Time-series charts
+          </h3>
+          <ArmaGarchChartGallery charts={armaGarchCharts} />
         </section>
       )}
 

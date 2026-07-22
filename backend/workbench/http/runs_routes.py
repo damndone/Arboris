@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import queue
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,11 @@ from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..events import get_event_manager
+from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
+from ..engine.packs.arma_garch.errors import ArmaGarchInputError
+from ..engine.packs.arma_garch.input import audit_time_value_input
+from ..engine.packs.arma_garch.transforms import build_transform_profiles
+from ..ingestion import _read_frame
 from ..model_options import ModelOptionsError, parse_model_options
 from ..orchestrator import run_batch_y_workflow
 from ..repository.run_repository import (
@@ -44,6 +50,7 @@ from ..repository.run_repository import (
     _summarize_manifest,
 )
 from ..report_export import ReportExportError, export_report
+from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
 from ..services.run_service import (
@@ -72,10 +79,99 @@ class ReportExportRequest(BaseModel):
     markdown: str = Field(min_length=1, max_length=2_000_000)
     figures: list[ReportExportFigure] = Field(default_factory=list)
 
+
+class AiReportRecordRequest(BaseModel):
+    """The immutable evidence snapshot produced by the browser report flow."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    id: str = Field(pattern=r"^rpt_[A-Za-z0-9_-]{3,100}$")
+    generatedAt: str = Field(min_length=1, max_length=100)
+    model: str | None = Field(default=None, max_length=300)
+    instruction: str = Field(min_length=1, max_length=20_000)
+    text: str = Field(min_length=1, max_length=2_000_000)
+    scope: dict[str, Any]
+    facts: list[dict[str, Any]]
+    excluded_fact_ids: list[str] = Field(default_factory=list)
+    figures: list[dict[str, Any]] = Field(default_factory=list)
+
 _TERMINAL_EVENTS = {
     "workflow_completed", "workflow_blocked",
     "workflow_failed", "workflow_interrupted",
 }
+
+
+@router.post("/runs/arma-garch/transform-preflight")
+async def arma_garch_transform_preflight(
+    project_root: str = Form(...),
+    time_column: str = Form(...),
+    value_column: str = Form(...),
+    time_index_semantics: str = Form("business_or_trading_observations"),
+    missing_value_policy: str = Form("block"),
+    file: UploadFile = File(...),
+    sheet_name: str = Form(""),
+    transpose: str = Form("false"),
+) -> dict[str, Any]:
+    """Profile all supported transforms on the same full analysis view as a run."""
+
+    _resolve_project_runs_dir(project_root)
+    config = load_config(Path(project_root) / "config.yml")
+    max_upload_bytes = int(config.max_single_file_gb * BYTES_PER_GB)
+    filename = Path(file.filename or "upload.csv").name
+    try:
+        data = await _read_upload_bytes(file, max_upload_bytes)
+        with tempfile.TemporaryDirectory(prefix="workbench-ts-preflight-") as tmp:
+            source_path = Path(tmp) / filename
+            source_path.write_bytes(data)
+            frame = _read_frame(
+                source_path,
+                config,
+                sheet_name or None,
+                transpose == "true",
+            )
+        contract = ArmaGarchAnalysisContract.from_dict(
+            {
+                "dataset_ref": f"preflight:upload:{filename}",
+                "time_column": time_column,
+                "value_column": value_column,
+                "time_index_semantics": time_index_semantics,
+                "transform": "level",
+                "transform_confirmed": True,
+                "missing_value_policy": missing_value_policy,
+                "validation": {},
+            }
+        )
+        audited = audit_time_value_input(frame, contract)
+        blocking = next(
+            (item for item in audited.diagnostics if item.severity == "blocking"),
+            None,
+        )
+        if blocking is not None:
+            raise ArmaGarchInputError(blocking)
+        profiles = build_transform_profiles(audited.analysis_view)
+        eligible = [profile for profile in profiles.values() if profile.eligible]
+        recommended = max(eligible, key=lambda item: item.recommendation_score)
+        return {
+            "schema_version": 1,
+            "source_row_count": len(frame),
+            "analysis_row_count": len(audited.analysis_view),
+            "diagnostics": [item.to_dict() for item in audited.diagnostics],
+            "transform_profiles": {
+                transform_id: profile.to_dict()
+                for transform_id, profile in profiles.items()
+            },
+            "recommendation": {
+                "transform_id": recommended.transform_id,
+                "score": recommended.recommendation_score,
+                "reason": recommended.recommendation_reason,
+            },
+            "transform_confirmation_required": True,
+        }
+    except (ArmaGarchInputError, KeyError, TypeError, ValueError) as exc:
+        detail = exc.to_dict() if isinstance(exc, ArmaGarchInputError) else str(exc)
+        raise HTTPException(status_code=422, detail=detail) from exc
+    finally:
+        await file.close()
 
 
 @router.post("/runs")
@@ -340,6 +436,36 @@ def export_report_endpoint(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/runs/{run_id}/ai-reports")
+def save_ai_report_endpoint(
+    run_id: str,
+    project_root: str,
+    request: AiReportRecordRequest,
+) -> dict[str, Any]:
+    run_root = _resolve_run_root(project_root, run_id)
+    if request.scope.get("run_id") != run_id:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="AI_REPORT_SCOPE_MISMATCH",
+            message="AI report scope must match the target run.",
+            details={"scope_run_id": request.scope.get("run_id"), "run_id": run_id},
+        )
+    try:
+        return save_ai_report(run_root, request.model_dump())
+    except ValueError as exc:
+        raise WorkbenchAPIError(
+            status_code=422,
+            code="AI_REPORT_INVALID",
+            message=str(exc),
+            details={"run_id": run_id},
+        ) from exc
+
+
+@router.get("/runs/{run_id}/ai-reports")
+def list_ai_reports_endpoint(run_id: str, project_root: str) -> dict[str, Any]:
+    return {"reports": list_ai_reports(_resolve_run_root(project_root, run_id))}
 
 
 @router.get("/runs/{run_id}/artifacts")

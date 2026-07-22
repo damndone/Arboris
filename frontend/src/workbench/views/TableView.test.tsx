@@ -15,6 +15,7 @@ const figureCtxMock = vi.hoisted(() => vi.fn());
 const figureAskMock = vi.hoisted(() => vi.fn());
 const figureImageMock = vi.hoisted(() => vi.fn());
 const llmConfigMock = vi.hoisted(() => vi.fn());
+const artifactJsonMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./figureAi", () => ({
   fetchFigureAiContext: (...args: unknown[]) => figureCtxMock(...args),
@@ -39,6 +40,7 @@ vi.mock("../../api", async (importOriginal) => {
       artifactCalls.current.push(args);
       return Promise.resolve((mockArtifacts.current ?? { groups: [] }) as ArtifactsResponse);
     },
+    fetchArtifactJson: (...args: unknown[]) => artifactJsonMock(...args),
   };
 });
 
@@ -87,6 +89,7 @@ describe("TableView", () => {
     figureAskMock.mockReset();
     figureImageMock.mockReset();
     llmConfigMock.mockReset();
+    artifactJsonMock.mockReset();
     llmConfigMock.mockResolvedValue({ configured: true, supports_vision: false });
   });
 
@@ -175,6 +178,51 @@ describe("TableView", () => {
     expect(screen.getByTestId("figure-ask-ai-button-correlation_heatmap")).toBeTruthy();
     // human-readable caption/alt
     expect(imgs[0].getAttribute("alt")).toContain("correlation_heatmap");
+  });
+
+  it("renders ARMA-GARCH JSON chart artifacts in Table alongside static figures", async () => {
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "figure",
+          items: Array.from({ length: 4 }, (_, index) => ({
+            artifact_id: `eda_${index + 1}`,
+            path: `figures/eda_${index + 1}.png`,
+            artifact_type: "figure",
+            step: "viz",
+            sha256: String(index),
+          })),
+        },
+        {
+          artifact_type: "time_series_json",
+          items: [
+            {
+              artifact_id: "ts.chart.series_transform",
+              path: "artifacts/time_series/ts.chart.series_transform.json",
+              artifact_type: "time_series_json",
+              step: "time_series_diagnostics",
+              sha256: "ts-series",
+            },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    artifactJsonMock.mockResolvedValue({
+      payload: {
+        rows: [
+          { row_id: "source-row:0", time: "2020-01-01", source_value: 20, transformed_value: 0.1 },
+          { row_id: "source-row:1", time: "2020-01-02", source_value: 21, transformed_value: 0.2 },
+        ],
+      },
+    });
+
+    renderTable();
+
+    expect(await screen.findByText("Figures (4)")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Source series" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Transformed series (the modelled quantity)" }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/1 chart artifacts loaded · 2 displayed panels/)).toBeInTheDocument();
   });
 
   it("lists non-figure artifacts with download links", async () => {

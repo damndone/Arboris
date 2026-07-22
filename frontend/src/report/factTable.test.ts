@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
-import { buildFactTable, buildFigureFacts } from "./factTable";
+import { buildFactTable, buildFigureFacts, buildTimeSeriesFacts } from "./factTable";
 
 function fixtureWithValues() {
   const seed = makeOwnerResolutionSeedFixture();
@@ -75,6 +75,77 @@ describe("buildFactTable", () => {
     expect(facts.map((f) => f.field)).toEqual(["param:formula"]);
     // run_a's path excludes run_c-only nodes (the report node)
     expect(scope.node_keys).not.toContain("hash_report_c");
+  });
+
+  it("skips structured params instead of rendering object coercions", () => {
+    const seed = fixtureWithValues();
+    const model = seed.forest.nodes.find((n) => n.nodeKey === seed.sharedNodeKey)!;
+    model.editableSchema = [
+      { key: "model_options", kind: "textarea", label: "Options", value: { arma: { p: 1 } } },
+    ] as never;
+
+    const { facts } = buildFactTable(seed.forest, "run_c");
+
+    expect(facts.some((fact) => fact.field === "param:model_options")).toBe(false);
+  });
+});
+
+describe("buildTimeSeriesFacts", () => {
+  it("extracts bounded atomic model, diagnostic, validation, persistence, and forecast facts", () => {
+    const facts = buildTimeSeriesFacts({
+      "ts.analysis_contract": { payload: {
+        time_column: "observation_date",
+        value_column: "VIXCLS",
+        time_index_semantics: "business_or_trading_observations",
+        transform: "log_return_pct",
+        transform_confirmed: true,
+        selection_mode: "manual",
+        estimation_strategy: "sequential",
+        innovation_distribution: "normal",
+        missing_value_policy: "drop_missing_confirmed",
+      } },
+      "ts.data_audit": { payload: {
+        data_quality: { finite_value_count: 2542 },
+        diagnostics: [{
+          code: "MISSING_OBSERVATIONS_EXCLUDED",
+          evidence: { excluded_missing_count: 68 },
+        }],
+      } },
+      "ts.arma_selection": { payload: { final_selected_candidate_id: "arma-p1-q1-n" } },
+      "ts.volatility_selection": { payload: { selected_candidate_id: "variance-garch-p1-q1-normal" } },
+      "ts.final_model": { payload: { validation_fit: {
+        mean_stage: { aicc: 100.5, bic: 110.5 },
+        variance_stage: { aicc: 90.5, bic: 99.5 },
+      } } },
+      "ts.parameters": { payload: {
+        mean_candidate: { "ar.L1": 0.9, "ma.L1": -0.8 },
+        selected_variance_candidate: { "alpha[1]": 0.2, "beta[1]": 0.6 },
+      } },
+      "ts.final_diagnostics": { payload: {
+        arch_lm: { p_value: 0.97 },
+        normality: { p_value: 0.001, skew: 1.5, kurtosis: 10 },
+        qq_data: Array.from({ length: 1000 }, () => ({ observed: 9 })),
+      } },
+      "ts.forecast_metrics": { payload: { rmse: 7.4, interval_coverage: 1 } },
+      "ts.next_forecast": { payload: { conditional_mean: 0.6, conditional_volatility: 6.9 } },
+    });
+
+    const byField = new Map(facts.map((fact) => [fact.field, fact.value]));
+    expect(byField.get("ts:contract:transform")).toBe("log_return_pct");
+    expect(byField.get("ts:contract:missing_value_policy")).toBe("drop_missing_confirmed");
+    expect(byField.get("ts:data:analysis_observations")).toBe(2542);
+    expect(byField.get("ts:data:excluded_missing_observations")).toBe(68);
+    expect(byField.get("ts:arma:selected_candidate")).toBe("arma-p1-q1-n");
+    expect(byField.get("ts:mean:aicc")).toBe(100.5);
+    expect(byField.get("ts:variance:aicc")).toBe(90.5);
+    expect(byField.get("ts:diagnostic:arch_lm_p_value")).toBe(0.97);
+    expect(byField.get("ts:validation:rmse")).toBe(7.4);
+    expect(byField.get("ts:volatility:persistence")).toBeCloseTo(0.8);
+    expect(byField.get("ts:volatility:half_life_observations")).toBeCloseTo(
+      Math.log(0.5) / Math.log(0.8),
+    );
+    expect(facts.some((fact) => fact.field.includes("qq_data"))).toBe(false);
+    expect(facts.every((fact) => typeof fact.value !== "object")).toBe(true);
   });
 });
 

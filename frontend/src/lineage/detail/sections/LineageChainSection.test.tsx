@@ -375,10 +375,11 @@ describe("LineageChainSection", () => {
     expect(screen.getByTestId("lineage-chip-shared_model")).toBeInTheDocument();
   });
 
-  it("does not render an owner-run path when context resolution fails", () => {
+  it("falls back to the visible graph path when owner-run context resolution fails", () => {
     renderSectionWithNodeContext(makeOwnerPathFixture("run_x"));
-    expect(screen.queryByTestId("lineage-chain-chips")).toBeNull();
-    expect(screen.getByTestId("lineage-chain-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-chain-chips")).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-chip-raw_a")).toBeInTheDocument();
+    expect(screen.getByTestId("lineage-chip-shared_model")).toBeInTheDocument();
   });
 
   it("clipboard rejection is swallowed (no console errors)", async () => {

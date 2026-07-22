@@ -9,6 +9,8 @@
 // thinned series as if it were complete. Correlograms draw the +-1.96/sqrt(n)
 // band so a reader can see which spikes are actually distinguishable from zero.
 
+import { useRef } from "react";
+
 const W = 560;
 const H = 180;
 const PAD = 28;
@@ -37,25 +39,65 @@ function Frame({
   title,
   note,
   children,
+  exportable = true,
 }: {
   title: string;
   note?: string;
   children: React.ReactNode;
+  exportable?: boolean;
 }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const downloadSvg = () => {
+    const source = bodyRef.current?.querySelector("svg");
+    if (!source) return;
+    const svg = source.cloneNode(true) as SVGSVGElement;
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const accessibleTitle = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    accessibleTitle.textContent = title;
+    svg.prepend(accessibleTitle);
+    if (note) {
+      const description = document.createElementNS("http://www.w3.org/2000/svg", "desc");
+      description.textContent = `Displayed data: ${note}.`;
+      accessibleTitle.after(description);
+    }
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], {
+      type: "image/svg+xml;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "chart"}.svg`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
   return (
     <figure style={{ margin: "12px 0 0" }}>
-      <figcaption className="muted" style={{ fontSize: 12, marginBottom: 2 }}>
-        {title}
-        {note ? <span> · {note}</span> : null}
+      <figcaption className="muted" style={{ fontSize: 12, marginBottom: 2, display: "flex", gap: 6 }}>
+        <span>
+          {title}
+          {note ? <span> · {note}</span> : null}
+        </span>
+        {exportable ? (
+          <button
+            type="button"
+            onClick={downloadSvg}
+            aria-label={`Download ${title} SVG`}
+            title="Downloads the displayed SVG only; full structured evidence remains in JSON."
+          >
+            SVG
+          </button>
+        ) : null}
       </figcaption>
-      <div style={{ overflowX: "auto" }}>{children}</div>
+      <div ref={bodyRef} style={{ overflowX: "auto" }}>{children}</div>
     </figure>
   );
 }
 
 function EmptyChart({ title, reason }: { title: string; reason: string }) {
   return (
-    <Frame title={title}>
+    <Frame title={title} exportable={false}>
       <p className="muted" style={{ fontSize: 12, margin: 0 }}>
         {reason}
       </p>

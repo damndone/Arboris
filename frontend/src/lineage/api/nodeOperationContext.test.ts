@@ -244,6 +244,52 @@ describe("resolveNodeOperationContext", () => {
     expect(expanded.context.comparison_readiness.can_compare).toBe(true);
   });
 
+  it("does not let an unrelated project family invalidate a write fingerprint", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    const first = resolveNodeOperationContext({
+      forest: seed.forest,
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+    const projectWide = resolveNodeOperationContext({
+      forest: {
+        ...seed.forest,
+        nodes: seed.forest.nodes.map((node) =>
+          node.nodeKey === seed.sharedNodeKey
+            ? { ...node, runs: [...node.runs, "unrelated_root"] }
+            : node,
+        ),
+        heads: [
+          ...seed.forest.heads,
+          {
+            runId: "unrelated_root",
+            headNodeHash: seed.sharedNodeKey,
+            fromNode: null,
+            rerunOf: null,
+            rerunReason: null,
+            status: "completed",
+            createdAt: "2026-06-27T00:04:00Z",
+          },
+        ],
+        familyCount: 2,
+        familyRunCount: 3,
+      },
+      selected_forest_node_key: seed.sharedNodeKey,
+      active_head_run_id: seed.activeHeadRunId,
+    });
+
+    expect(first.ok).toBe(true);
+    expect(projectWide.ok).toBe(true);
+    if (!first.ok) throw new Error(first.reason);
+    if (!projectWide.ok) throw new Error(projectWide.reason);
+    expect(projectWide.context.context_fingerprint).toBe(
+      first.context.context_fingerprint,
+    );
+    expect(projectWide.context.ownership.shared_by_run_ids).toContain(
+      "unrelated_root",
+    );
+  });
+
   it("excludes merged-forest upstream nodes that are not in the owner run", () => {
     const seed = makeOwnerResolutionSeedFixture();
     const source = seed.forest.nodes.find((node) => node.nodeKey === "hash_source");

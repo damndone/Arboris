@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   createGenesisDraft,
   executePipelineDraft,
+  fetchArmaGarchTransformPreflight,
   getPipelineDraft,
   listPipelineDrafts,
   patchDraftNode,
@@ -10,6 +11,7 @@ import {
   validatePipelineDraft,
   type DraftExecutionResult,
   type DraftValidationResult,
+  type ArmaGarchTransformPreflight,
   type FilePreview,
   type PipelineDraftNode,
   type PipelineDraftResponse,
@@ -28,6 +30,14 @@ import { CSControls, type CSValue } from "../../runForm/CSControls";
 import { DCDHControls, type DCDHValue } from "../../runForm/DCDHControls";
 import { ColumnRolePicker } from "../../runForm/ColumnRolePicker";
 import { CovarianceSelect, covarianceDefault } from "../../runForm/CovarianceSelect";
+import {
+  ArmaGarchControls,
+  armaGarchValidationErrors,
+  armaGarchValueFromModelOptions,
+  buildArmaGarchModelOptions,
+  createDefaultArmaGarchValue,
+  type ArmaGarchControlValue,
+} from "../../runForm/ArmaGarchControls";
 
 type BusyState =
   | "resume"
@@ -125,6 +135,13 @@ export function GenesisWizard({
     fit_method: "reml",
     random_slope: true,
   });
+  const [armaGarchValue, setArmaGarchValue] = useState<ArmaGarchControlValue>(
+    createDefaultArmaGarchValue,
+  );
+  const [armaGarchPreflight, setArmaGarchPreflight] =
+    useState<ArmaGarchTransformPreflight | null>(null);
+  const [armaGarchPreflightError, setArmaGarchPreflightError] =
+    useState<string | null>(null);
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
     instruments: [],
@@ -253,6 +270,14 @@ export function GenesisWizard({
         }));
       }
     }
+    if (savedType === "time_series.arma_garch") {
+      const savedOptions = modelParams.model_options;
+      if (savedOptions && typeof savedOptions === "object" && !Array.isArray(savedOptions)) {
+        setArmaGarchValue((current) =>
+          armaGarchValueFromModelOptions(savedOptions as Record<string, unknown>, current),
+        );
+      }
+    }
     const savedImputation = firstString(modelParams.imputation);
     if (savedImputation) {
       try {
@@ -377,6 +402,72 @@ export function GenesisWizard({
     }
   }
 
+  useEffect(() => {
+    if (modelType !== "time_series.arma_garch" || !preview) return;
+    const suggestedTime =
+      preview.columns.find((column) => column.suggestedRole === "time")?.name
+      ?? preview.columns.find((column) => column.dtype === "datetime")?.name
+      ?? "";
+    const suggestedValue =
+      preview.columns.find(
+        (column) => column.name === preview.suggestedY && column.dtype === "numeric",
+      )?.name
+      ?? preview.columns.find(
+        (column) => column.dtype === "numeric" && column.name !== suggestedTime,
+      )?.name
+      ?? "";
+    setArmaGarchValue((current) => ({
+      ...current,
+      timeColumn: current.timeColumn || suggestedTime,
+      valueColumn: current.valueColumn || suggestedValue,
+    }));
+  }, [modelType, preview]);
+
+  useEffect(() => {
+    if (
+      modelType !== "time_series.arma_garch"
+      || !file
+      || !armaGarchValue.timeColumn
+      || !armaGarchValue.valueColumn
+    ) {
+      setArmaGarchPreflight(null);
+      setArmaGarchPreflightError(null);
+      return;
+    }
+    let cancelled = false;
+    setArmaGarchPreflight(null);
+    setArmaGarchPreflightError(null);
+    fetchArmaGarchTransformPreflight(projectRoot, file, {
+      timeColumn: armaGarchValue.timeColumn,
+      valueColumn: armaGarchValue.valueColumn,
+      timeIndexSemantics: armaGarchValue.timeIndexSemantics,
+      missingValuePolicy: armaGarchValue.missingValuePolicy,
+      sheetName,
+      transpose,
+    }).then((result) => {
+      if (!cancelled) setArmaGarchPreflight(result);
+    }).catch((err: unknown) => {
+      if (!cancelled) {
+        setArmaGarchPreflightError(
+          err instanceof Error ? err.message : "Full-data transform profile failed",
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    armaGarchValue.missingValuePolicy,
+    armaGarchValue.timeColumn,
+    armaGarchValue.timeIndexSemantics,
+    armaGarchValue.valueColumn,
+    file,
+    modelType,
+    projectRoot,
+    sheetName,
+    transpose,
+  ]);
+
   async function saveTable() {
     if (!draft) return;
     setBusy("table");
@@ -443,8 +534,8 @@ export function GenesisWizard({
     const defaultCovariance = covariance || covarianceDefault(capabilities);
     const params: Record<string, unknown> = {
       model_type: modelType,
-      y: y.trim(),
-      x: exogColumns,
+      y: modelType === "time_series.arma_garch" ? armaGarchValue.valueColumn : y.trim(),
+      x: modelType === "time_series.arma_garch" ? [] : exogColumns,
     };
     if (imputationMethod) params.imputation = JSON.stringify({ method: imputationMethod });
     if (!isDID && !usesCsParams && !isDcdh && defaultCovariance) {
@@ -456,6 +547,15 @@ export function GenesisWizard({
     }
     if (modelType === "linear_mixed_effects") {
       params.model_options = lmmValue;
+    }
+    if (modelType === "time_series.arma_garch") {
+      const sourceFilename = file?.name
+        ?? findNode(draft, "input.upload")?.upload.filename
+        ?? "dataset";
+      params.model_options = buildArmaGarchModelOptions(
+        armaGarchValue,
+        `upload:${sourceFilename}`,
+      );
     }
     if (isIV) {
       if (ivRole.endog.length > 0) params.iv_endog = ivRole.endog;
@@ -511,7 +611,13 @@ export function GenesisWizard({
 
   async function saveModel() {
     if (!draft) return;
-    if (!y.trim() || (modelType !== "linear_mixed_effects" && xColumns.length === 0)) {
+    if (modelType === "time_series.arma_garch") {
+      const issues = armaGarchValidationErrors(armaGarchValue);
+      if (issues.length > 0) {
+        setError(issues[0]);
+        return;
+      }
+    } else if (!y.trim() || (modelType !== "linear_mixed_effects" && xColumns.length === 0)) {
       setError("请选择 y，并至少选择一个 x。");
       return;
     }
@@ -584,11 +690,14 @@ export function GenesisWizard({
   // configuration.  Spreadsheet uploads still require their selected sheet.
   const canSaveTable = Boolean(draftId && (sheetName || sourceSheetNames.length === 0));
   const lmmRolesConfigured = Boolean(lmmValue.subject_id && lmmValue.time && lmmValue.group);
+  const armaGarchConfigured = armaGarchValidationErrors(armaGarchValue).length === 0;
   const canSaveModel = Boolean(
     draftId &&
       tableConfigured &&
-      y.trim() &&
-      (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0),
+      (modelType === "time_series.arma_garch"
+        ? armaGarchConfigured
+        : y.trim() &&
+          (modelType === "linear_mixed_effects" ? lmmRolesConfigured : xColumns.length > 0)),
   );
   const canRun = Boolean(draftId && modelConfigured);
 
@@ -721,6 +830,16 @@ export function GenesisWizard({
               onChange={setLmmValue}
             />
           )}
+          {modelType === "time_series.arma_garch" && (
+            <ArmaGarchControls
+              columns={columnNames}
+              preview={preview}
+              transformPreflight={armaGarchPreflight}
+              transformPreflightError={armaGarchPreflightError}
+              value={armaGarchValue}
+              onChange={setArmaGarchValue}
+            />
+          )}
           {modelType === "iv_2sls" && (
             <div className="ios-group">
               <p className="ios-hint">
@@ -761,7 +880,7 @@ export function GenesisWizard({
               onChange={setDcdhValue}
             />
           )}
-          <PredictionControls
+          {modelType !== "time_series.arma_garch" && <PredictionControls
             capabilities={capabilities}
             enabled={predictionEnabled}
             modelType={predictionModelType}
@@ -771,8 +890,9 @@ export function GenesisWizard({
             onModelType={setPredictionModelType}
             onCvFolds={setPredictionCvFolds}
             onSampling={setPredictionSampling}
-          />
-          {modelType !== "panel_ols" &&
+          />}
+          {modelType !== "time_series.arma_garch" &&
+            modelType !== "panel_ols" &&
             modelType !== "iv_2sls" &&
             modelType !== "did" &&
             modelType !== "cs_did" &&
@@ -784,7 +904,7 @@ export function GenesisWizard({
                 onChange={setCovariance}
               />
             )}
-          <label className="ios-field">
+          {modelType !== "time_series.arma_garch" && <label className="ios-field">
             <span>Dependent variable (y)</span>
             <select
               aria-label="dependent variable"
@@ -798,8 +918,8 @@ export function GenesisWizard({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="ios-field">
+          </label>}
+          {modelType !== "time_series.arma_garch" && <label className="ios-field">
             <span>Regressors (x, comma-separated)</span>
             <input
               aria-label="independent variables"
@@ -807,17 +927,17 @@ export function GenesisWizard({
               onChange={(event) => setX(event.target.value)}
               placeholder="x1, x2"
             />
-          </label>
-          <p className="ios-hint" style={{ marginTop: -4 }}>
+          </label>}
+          {modelType !== "time_series.arma_garch" && <p className="ios-hint" style={{ marginTop: -4 }}>
             Use the column cards below to add or remove x variables; the text field updates with your selection.
-          </p>
-          <FocalSelect
+          </p>}
+          {modelType !== "time_series.arma_garch" && <FocalSelect
             xColumns={xColumns}
             focal={focal}
             onChange={setFocal}
             family={modelType}
-          />
-          {preview && (
+          />}
+          {modelType !== "time_series.arma_garch" && preview && (
             <ColumnRolePicker
               columns={preview.columns}
               excludedColumns={preview.excludedColumns}

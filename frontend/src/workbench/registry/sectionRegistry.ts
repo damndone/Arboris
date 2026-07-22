@@ -52,6 +52,8 @@ import type { RegistryEntry } from "./registryTypes";
  *  generic editable_schema controls (its schema is an opaque model_options). */
 const isArmaGarch = (n: GraphViewNode): boolean =>
   "opType" in n && n.opType === "time_series.arma_garch";
+const isGeneratedArmaGarchStage = (n: GraphViewNode): boolean =>
+  isArmaGarch(n) && n.kind !== "model";
 
 /**
  * V1.5.2 — SectionEntry is the canonical name; SectionSpec is kept as
@@ -97,27 +99,29 @@ export const sectionRegistry: SectionEntry[] = [
   {
     id: "compareWithSource",
     order: 25,
-    shouldRender: (n) => "runs" in n && !isCompareNode(n),
+    shouldRender: (n) => "runs" in n && !isCompareNode(n) && !isGeneratedArmaGarchStage(n),
     Component: CompareWithSourceSection,
   },
   {
     // v1.6.11 B-2 — arbitrary two-node comparison (pick the partner on the canvas).
     id: "compareNodes",
     order: 26,
-    shouldRender: (n) => "runs" in n && !n.isDraft && !isCompareNode(n),
+    shouldRender: (n) =>
+      "runs" in n && !n.isDraft && !isCompareNode(n) && !isGeneratedArmaGarchStage(n),
     Component: CompareNodesSection,
   },
   {
     id: "analysisLoop",
     order: 27,
     shouldRender: (n) =>
-      (n.kind === "model" || n.stage === "model") && !n.isDraft && "runs" in n,
+      n.kind === "model" && !n.isDraft && "runs" in n,
     Component: AnalysisLoopSection,
   },
   {
     id: "dataColumnCast",
     order: 28,
-    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: DataColumnCastSection,
   },
   {
@@ -126,7 +130,8 @@ export const sectionRegistry: SectionEntry[] = [
     // lifecycle, wider blast radius.
     id: "codeExecute",
     order: 29,
-    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: CodeExecuteSection,
   },
   {
@@ -140,14 +145,14 @@ export const sectionRegistry: SectionEntry[] = [
     // strategy / validation) that forks a child model via the shared rerun path.
     id: "armaGarchOperation",
     order: 31,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft && isArmaGarch(n),
+    shouldRender: (n) => n.kind === "model" && !n.isDraft && isArmaGarch(n),
     Component: ArmaGarchOperationSection,
   },
   {
     // One-view time-series result dashboard (replaces the legacy nine-tab card).
     id: "armaGarchResult",
     order: 32,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft && isArmaGarch(n),
+    shouldRender: (n) => n.kind === "model" && !n.isDraft && isArmaGarch(n),
     Component: ArmaGarchResultSection,
   },
   {

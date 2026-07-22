@@ -56,7 +56,8 @@ from workbench.engine.packs.arma_garch.volatility import (
     search_joint_variance_candidates,
     search_variance_candidates,
 )
-from workbench.graph_model import Stage
+from workbench.graph_model import Stage, Trust
+from workbench.lineage.hashing import node_hash
 
 
 MODEL_ID = "arma_garch_1"
@@ -148,18 +149,28 @@ def fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
     try:
         return _fit_from_context(ctx, env)
     except RunInterruptionRequested as exc:
+        terminal_code = (
+            "WORKFLOW_CANCELLED" if exc.reason == "cancelled" else "WORKFLOW_TIMEOUT"
+        )
+        _persist_failed_model_tombstone(
+            ctx, env, status="interrupted", code=terminal_code
+        )
         _persist_terminal_manifest_on_failure(
-            ctx, env, status="interrupted", code=(
-                "WORKFLOW_CANCELLED" if exc.reason == "cancelled" else "WORKFLOW_TIMEOUT"
-            )
+            ctx, env, status="interrupted", code=terminal_code
         )
         raise
     except ArmaGarchInputError as exc:
+        _persist_failed_model_tombstone(
+            ctx, env, status="blocked", code=exc.code
+        )
         _persist_terminal_manifest_on_failure(
             ctx, env, status="blocked", code=exc.code, diagnostic_payload=exc.to_dict()
         )
         raise
     except Exception as exc:
+        _persist_failed_model_tombstone(
+            ctx, env, status="failed", code=type(exc).__name__
+        )
         _persist_terminal_manifest_on_failure(
             ctx, env, status="failed", code=type(exc).__name__
         )
@@ -336,6 +347,9 @@ def _fit_from_context(ctx: Any, env: Any) -> tuple[str, dict[str, Any], None]:
         metadata_base=metadata_base,
         inputs=raw_inputs,
     )
+    ctx.artifacts["_pack_node_index_entries"] = _pack_node_index_entries(
+        artifact_records
+    )
     _record_graph(env.recorder, artifact_records)
 
     result = {
@@ -461,6 +475,119 @@ def _persist_terminal_manifest_on_failure(
     except Exception:
         # The original terminal condition remains authoritative. The shared
         # run lifecycle will still persist its manifest/errors contract.
+        return
+
+
+def _persist_failed_model_tombstone(
+    ctx: Any,
+    env: Any,
+    *,
+    status: str,
+    code: str,
+) -> None:
+    """Materialize a rerunnable configured-model identity without fit claims."""
+
+    try:
+        options = ctx.artifacts.get("_model_options")
+        contract = (
+            ArmaGarchAnalysisContract.from_dict(options)
+            if isinstance(options, Mapping)
+            else None
+        )
+        tombstone = {
+            "model_id": MODEL_ID,
+            "model_type": ARMA_GARCH_PACK_ID,
+            "status": status,
+            "configured_not_fitted": True,
+            "terminal_code": code,
+            "contract_hash": None if contract is None else contract.contract_hash,
+            "model_options": None if contract is None else contract.to_dict(),
+        }
+        _require_finite_json(tombstone, "failed configured-model tombstone")
+        relative_path = f"model_results/{MODEL_ID}.tombstone.json"
+        path = env.run_root / relative_path
+        write_json(path, tombstone)
+
+        index_path = env.run_root / "artifacts_index.json"
+        if index_path.is_file():
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            already_registered = any(
+                isinstance(item, Mapping)
+                and item.get("artifact_id") == f"{MODEL_ID}.tombstone"
+                for item in index.get("artifacts", [])
+            )
+            if not already_registered:
+                register_artifact(
+                    env.run_root,
+                    f"{MODEL_ID}.tombstone",
+                    path,
+                    "model_tombstone",
+                    "arma_garch",
+                    _raw_input_ids(ctx),
+                )
+
+        upload_hash = str(ctx.artifacts.get("_upload_hash") or "")
+        model_hash = node_hash(
+            [upload_hash] if upload_hash else [],
+            {
+                "op": "time_series.arma_garch.configure",
+                "contract_hash": tombstone["contract_hash"],
+                "terminal_status": status,
+                "terminal_code": code,
+                "configured_not_fitted": True,
+            },
+        )
+        node_index_path = env.run_root / "node_index.json"
+        try:
+            current_index = json.loads(node_index_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            current_index = {}
+        if not isinstance(current_index, dict):
+            current_index = {}
+        if upload_hash:
+            upload_payload = "_uploads"
+            try:
+                first_upload = next(
+                    item
+                    for item in sorted((env.run_root / "_uploads").iterdir())
+                    if item.is_file()
+                )
+                upload_payload = f"_uploads/{first_upload.name}"
+            except (OSError, StopIteration):
+                pass
+            current_index["stage:raw"] = {
+                "node_hash": upload_hash,
+                "producing_stage": "ingestion",
+                "cas_ref": {"node_hash": upload_hash, "artifact": upload_payload},
+            }
+        current_index[f"model:{MODEL_ID}"] = {
+            "node_hash": model_hash,
+            "producing_stage": "arma_garch:configured_not_fitted",
+            "cas_ref": {"node_hash": model_hash, "artifact": relative_path},
+        }
+        write_json(node_index_path, current_index)
+
+        record_model = getattr(env.recorder, "record_model", None)
+        if callable(record_model):
+            recorder_nodes = getattr(env.recorder, "_nodes", {})
+            if f"model:{MODEL_ID}" not in recorder_nodes:
+                record_model(
+                    node_id=f"model:{MODEL_ID}",
+                    display_label="time_series.arma_garch (configured, not fitted)",
+                    payload_ref=relative_path,
+                    trust=Trust.BLOCKER,
+                    trust_reason=code,
+                    summary=f"Configured, not fitted · {code}",
+                    stage=Stage.MODEL,
+                )
+                env.recorder.record_edge(
+                    edge_id="e:raw-model-configured-not-fitted",
+                    source_id="stage:raw",
+                    target_id=f"model:{MODEL_ID}",
+                    op="time_series.arma_garch.configure",
+                )
+    except Exception:
+        # Never replace the actual model/input failure with observability work.
         return
 
 
@@ -1025,6 +1152,32 @@ def _record_graph(
             op=node_id.removeprefix("stage:ts-").replace("-", "_"),
         )
         previous = node_id
+
+
+def _pack_node_index_entries(
+    records: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    representatives = {
+        "stage:ts-analysis-view": "ts.analysis_view_manifest",
+        "stage:ts-split": "ts.train_validation_split",
+        "stage:ts-mean-selection": "ts.arma_selection",
+        "stage:ts-volatility-selection": "ts.volatility_selection",
+        "stage:ts-rolling-validation": "ts.forecast_metrics",
+        "stage:ts-full-sample-child": "ts.next_forecast",
+    }
+    entries: dict[str, dict[str, object]] = {}
+    for node_id, artifact_id in representatives.items():
+        record = records[artifact_id]
+        node_hash = str(record["sha256"])
+        entries[node_id] = {
+            "node_hash": node_hash,
+            "producing_stage": f"arma_garch:{node_id.removeprefix('stage:ts-')}",
+            "cas_ref": {
+                "node_hash": node_hash,
+                "artifact": str(record["path"]),
+            },
+        }
+    return entries
 
 
 def _source_run_id(run_root: Path) -> str | None:

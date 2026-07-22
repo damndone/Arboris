@@ -14,6 +14,7 @@ describe("armaGarchValueFromModelOptions", () => {
       timeIndexSemantics: "business_or_trading_observations" as const,
       transform: "log_return_pct" as const,
       transformConfirmed: true,
+      missingValuePolicy: "drop_missing_confirmed" as const,
       selectionMode: "manual" as const,
       armaP: 1,
       armaQ: 1,
@@ -31,6 +32,7 @@ describe("armaGarchValueFromModelOptions", () => {
     const options = buildArmaGarchModelOptions(original, ref);
     const restored = armaGarchValueFromModelOptions(options, createDefaultArmaGarchValue());
     expect(buildArmaGarchModelOptions(restored, ref)).toEqual(options);
+    expect(restored.missingValuePolicy).toBe("drop_missing_confirmed");
   });
 
   test("round-trips a manual ARCH config through model_options", () => {

@@ -265,6 +265,7 @@ class RecordingStage:
                 normalized_y=normalized_y, normalized_x=normalized_x,
                 model_results=model_results,
                 upload_hash=ctx.artifacts.get("_upload_hash", ""),
+                extra_entries=ctx.artifacts.get("_pack_node_index_entries"),
             )
 
         return ctx

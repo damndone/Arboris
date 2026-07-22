@@ -5,7 +5,11 @@
 // contexts from the forest (same pure resolver the drawer itself uses) and
 // render the shared diff engine's result.
 import { useForest } from "../../workbench/ForestContext";
-import type { GraphViewNode, HeadSetNode } from "../api/graphViewTypes";
+import type {
+  ForestViewModel,
+  GraphViewNode,
+  HeadSetNode,
+} from "../api/graphViewTypes";
 import { buildNodeComparison } from "../api/compareNodes";
 import {
   resolveNodeOperationContext,
@@ -94,11 +98,39 @@ export function CompareNodesSection({ node }: { node: GraphViewNode }) {
 
   function resolveContext(key: string): NodeOperationContextV1 | null {
     if (!forest) return null;
+    const selectedRunHint = nearestActiveAncestorOwningNode(
+      forest.forest,
+      forest.activeRunId,
+      key,
+    );
     const resolved = resolveNodeOperationContext({
       forest: forest.forest,
       selected_forest_node_key: key,
       active_head_run_id: forest.activeRunId,
+      selected_run_hint: selectedRunHint,
+      selected_run_hint_source: selectedRunHint
+        ? "manual_candidate_selection"
+        : "none",
     });
     return resolved.ok ? resolved.context : null;
   }
+}
+
+function nearestActiveAncestorOwningNode(
+  forest: ForestViewModel,
+  activeRunId: string,
+  nodeKey: string,
+): string | null {
+  const target = forest.nodes.find((candidate) => candidate.nodeKey === nodeKey);
+  if (!target || target.runs.includes(activeRunId)) return null;
+
+  const headsByRunId = new Map(forest.heads.map((head) => [head.runId, head]));
+  const seen = new Set<string>([activeRunId]);
+  let ancestor = headsByRunId.get(activeRunId)?.rerunOf ?? null;
+  while (ancestor && !seen.has(ancestor)) {
+    if (target.runs.includes(ancestor)) return ancestor;
+    seen.add(ancestor);
+    ancestor = headsByRunId.get(ancestor)?.rerunOf ?? null;
+  }
+  return null;
 }

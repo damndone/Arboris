@@ -51,11 +51,42 @@ function Findings({ findings }: { findings: unknown }) {
   );
 }
 
+function ComparePresentation({ presentation }: { presentation: unknown }) {
+  const value = object(presentation);
+  if (Object.keys(value).length === 0) return null;
+  const sample = object(value.sample_identity);
+  const metrics = Array.isArray(value.forecast_metrics) ? value.forecast_metrics : [];
+  const specifications = Array.isArray(value.specification_changes)
+    ? value.specification_changes
+    : [];
+  const acceptance = object(value.acceptance);
+  return (
+    <div data-testid="compare-presentation" style={{ marginTop: 10, fontSize: 12 }}>
+      <div className="ln-section-label">Compare summary</div>
+      {typeof sample.message === "string" && <p>{sample.message}</p>}
+      {specifications.map((item) => <p key={String(item)}>{String(item)}</p>)}
+      {metrics.map((item) => {
+        const metric = object(item);
+        return (
+          <p key={String(metric.name)}>
+            {String(metric.name)}: {String(metric.before)} → {String(metric.after)}
+          </p>
+        );
+      })}
+      {acceptance.before !== undefined && (
+        <p>Acceptance: {String(acceptance.before)} → {String(acceptance.after)}</p>
+      )}
+      {typeof value.conclusion === "string" && <p>{value.conclusion}</p>}
+    </div>
+  );
+}
+
 export function CompareNodeSection({ node }: { node: GraphViewNode }) {
   const projectRoot = useProjectRootOptional();
   const forest = useForest();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rawOpen, setRawOpen] = useState(false);
 
   const compare = comparePayload(node);
   if (!compare) return null;
@@ -133,12 +164,22 @@ export function CompareNodeSection({ node }: { node: GraphViewNode }) {
         )
       )}
 
+      <ComparePresentation presentation={packet.presentation} />
+
       <div style={{ marginTop: 8 }}>
         <div className="ln-section-label">Integrity findings</div>
         <Findings findings={packet.integrity_findings} />
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+        <details onToggle={(event) => setRawOpen(event.currentTarget.open)}>
+          <summary>View raw Compare JSON</summary>
+          {rawOpen && (
+            <pre style={{ maxWidth: 560, overflow: "auto", fontSize: 11 }}>
+              {JSON.stringify(packet, null, 2)}
+            </pre>
+          )}
+        </details>
         <button type="button" onClick={() => void remove()} disabled={busy}>
           {busy ? "Removing…" : "Remove comparison"}
         </button>

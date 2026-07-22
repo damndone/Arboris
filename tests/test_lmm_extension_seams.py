@@ -480,6 +480,22 @@ def test_model_options_merge_is_one_level_and_leaves_sources_unchanged() -> None
     assert patch == {"random_slope": False}
 
 
+def test_model_options_merge_preserves_unpatched_nested_section_keys() -> None:
+    source = {
+        "selection_mode": "manual",
+        "arma": {"p": 1, "q": 0, "constant_mode": "auto"},
+    }
+    patch = {"arma": {"q": 1, "constant_mode": "exclude"}}
+
+    merged = merge_model_options(source, patch)
+
+    assert merged == {
+        "selection_mode": "manual",
+        "arma": {"p": 1, "q": 1, "constant_mode": "exclude"},
+    }
+    assert source["arma"] == {"p": 1, "q": 0, "constant_mode": "auto"}
+
+
 def test_model_options_are_an_estimation_only_lineage_input() -> None:
     form = {"model_type": "ols", "model_options": {"unused": True}}
 

@@ -222,6 +222,20 @@ export type FilePreview = {
   transpose_warning?: string | null;
 };
 
+export type ArmaGarchTransformPreflight = {
+  schema_version: 1;
+  source_row_count: number;
+  analysis_row_count: number;
+  diagnostics: Array<Record<string, unknown>>;
+  transform_profiles: Record<string, Record<string, unknown>>;
+  recommendation: {
+    transform_id: "level" | "log_level" | "diff_1" | "log_return_pct";
+    score: number;
+    reason: string;
+  };
+  transform_confirmation_required: true;
+};
+
 export type ApiErrorEnvelope = {
   code: string;
   message: string;
@@ -273,6 +287,12 @@ function formatValidationItem(item: FastApiValidationItem): string {
 function extractDetailMessage(detail: unknown): string | null {
   if (typeof detail === "string" && detail.trim() !== "") {
     return detail;
+  }
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim() !== "") {
+      return message;
+    }
   }
   if (Array.isArray(detail) && detail.length > 0) {
     return detail.map((item) => formatValidationItem(item as FastApiValidationItem)).join("; ");
@@ -673,6 +693,34 @@ export async function previewFile(
     transposed: transpose ?? false,
     transpose_warning: transposeWarning,
   };
+}
+
+export async function fetchArmaGarchTransformPreflight(
+  projectRoot: string,
+  file: File,
+  input: {
+    timeColumn: string;
+    valueColumn: string;
+    timeIndexSemantics: string;
+    missingValuePolicy: string;
+    sheetName?: string;
+    transpose?: boolean;
+  },
+): Promise<ArmaGarchTransformPreflight> {
+  const form = new FormData();
+  form.append("project_root", projectRoot);
+  form.append("file", file);
+  form.append("time_column", input.timeColumn);
+  form.append("value_column", input.valueColumn);
+  form.append("time_index_semantics", input.timeIndexSemantics);
+  form.append("missing_value_policy", input.missingValuePolicy);
+  form.append("sheet_name", input.sheetName ?? "");
+  form.append("transpose", input.transpose ? "true" : "false");
+  const response = await fetch(apiUrl("/runs/arma-garch/transform-preflight"), {
+    method: "POST",
+    body: form,
+  });
+  return readResponse<ArmaGarchTransformPreflight>(response);
 }
 
 export async function fetchRuns(projectRoot: string): Promise<RunsListResponse> {

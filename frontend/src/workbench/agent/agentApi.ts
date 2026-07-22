@@ -47,6 +47,17 @@ export function getAgentSession(
   );
 }
 
+export function agentAuditExportUrl(
+  projectRoot: string,
+  sessionId: string,
+  format: "html" | "markdown" | "json" = "html",
+): string {
+  const query = new URLSearchParams({ project_root: projectRoot, format });
+  return apiUrl(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/audit?${query.toString()}`,
+  );
+}
+
 export function getAgentSessionProjection(
   projectRoot: string,
   sessionId: string,

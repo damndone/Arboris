@@ -1,4 +1,4 @@
-import type { FilePreview } from "../api";
+import type { ArmaGarchTransformPreflight, FilePreview } from "../api";
 
 export type TimeSemantics =
   | "regular_calendar"
@@ -7,6 +7,7 @@ export type TimeSemantics =
 export type TransformId = "level" | "log_level" | "diff_1" | "log_return_pct";
 export type SelectionMode = "auto" | "manual";
 export type VarianceModel = "constant_variance" | "arch" | "garch";
+export type MissingValuePolicy = "block" | "drop_missing_confirmed";
 
 export type ArmaGarchControlValue = {
   timeColumn: string;
@@ -14,6 +15,7 @@ export type ArmaGarchControlValue = {
   timeIndexSemantics: TimeSemantics;
   transform: TransformId;
   transformConfirmed: boolean;
+  missingValuePolicy: MissingValuePolicy;
   selectionMode: SelectionMode;
   armaP: number;
   armaQ: number;
@@ -34,6 +36,8 @@ type Props = {
   preview: FilePreview | null;
   value: ArmaGarchControlValue;
   onChange: (value: ArmaGarchControlValue) => void;
+  transformPreflight?: ArmaGarchTransformPreflight | null;
+  transformPreflightError?: string | null;
 };
 
 const TRANSFORM_LABELS: Record<TransformId, string> = {
@@ -50,6 +54,7 @@ export function createDefaultArmaGarchValue(): ArmaGarchControlValue {
     timeIndexSemantics: "business_or_trading_observations",
     transform: "level",
     transformConfirmed: false,
+    missingValuePolicy: "block",
     selectionMode: "auto",
     armaP: 1,
     armaQ: 0,
@@ -105,6 +110,7 @@ export function buildArmaGarchModelOptions(
     time_index_semantics: value.timeIndexSemantics,
     transform: value.transform,
     transform_confirmed: value.transformConfirmed,
+    missing_value_policy: value.missingValuePolicy,
     analysis_goal: "balanced",
     selection_mode: value.selectionMode,
     arma,
@@ -135,6 +141,7 @@ export function armaGarchValueFromModelOptions(
     timeIndexSemantics: pick(options.time_index_semantics, base.timeIndexSemantics),
     transform: pick(options.transform, base.transform),
     transformConfirmed: pick(options.transform_confirmed, base.transformConfirmed),
+    missingValuePolicy: pick(options.missing_value_policy, base.missingValuePolicy),
     selectionMode: pick(options.selection_mode, base.selectionMode),
     armaP: pick(arma.p, base.armaP),
     armaQ: pick(arma.q, base.armaQ),
@@ -195,34 +202,6 @@ export function armaGarchValidationErrors(
   return errors;
 }
 
-function recommendation(
-  preview: FilePreview | null,
-  valueColumn: string,
-): { transform: TransformId; reason: string } {
-  const raw = (preview?.previewRows ?? [])
-    .map((row) => row[valueColumn])
-    .filter((item): item is number => typeof item === "number" && Number.isFinite(item));
-  if (raw.length < 2) {
-    return {
-      transform: "level",
-      reason: "Not enough numeric preview values; start with the original level and review the full backend profile.",
-    };
-  }
-  const positive = raw.every((item) => item > 0);
-  const minimum = Math.min(...raw);
-  const maximum = Math.max(...raw);
-  if (positive && maximum / minimum >= 10) {
-    return {
-      transform: "log_level",
-      reason: "The positive preview spans a wide scale; log level is worth reviewing.",
-    };
-  }
-  return {
-    transform: "level",
-    reason: "The preview does not show a strong scale reason to leave the original level.",
-  };
-}
-
 function numericInput(value: number, minimum: number, maximum: number, onChange: (value: number) => void, label: string) {
   return (
     <input
@@ -236,9 +215,16 @@ function numericInput(value: number, minimum: number, maximum: number, onChange:
   );
 }
 
-export function ArmaGarchControls({ columns, preview, value, onChange }: Props) {
+export function ArmaGarchControls({
+  columns,
+  preview,
+  value,
+  onChange,
+  transformPreflight = null,
+  transformPreflightError = null,
+}: Props) {
   const update = (patch: Partial<ArmaGarchControlValue>) => onChange({ ...value, ...patch });
-  const advised = recommendation(preview, value.valueColumn);
+  const advised = transformPreflight?.recommendation ?? null;
   const numericColumns = preview
     ? preview.columns
         .filter((column) => column.dtype === "numeric")
@@ -282,11 +268,43 @@ export function ArmaGarchControls({ columns, preview, value, onChange }: Props) 
         <p className="ios-hint">
           Preview: {preview?.rowCount ?? "—"} rows; selected value missing rate {valueMetadata ? `${(valueMetadata.missingRate * 100).toFixed(1)}%` : "—"}. The backend will block duplicates, gaps that conflict with the chosen semantics, non-finite values, and constant series.
         </p>
+        <div role="group" aria-label="missing value policy">
+          <label className="inline-choice">
+            <input
+              aria-label="block missing values"
+              type="radio"
+              name="arma-garch-missing-policy"
+              checked={value.missingValuePolicy === "block"}
+              onChange={() => update({ missingValuePolicy: "block", transformConfirmed: false })}
+            />
+            Block when the selected value has missing observations.
+          </label>
+          <label className="inline-choice">
+            <input
+              aria-label="confirm drop missing values"
+              type="radio"
+              name="arma-garch-missing-policy"
+              checked={value.missingValuePolicy === "drop_missing_confirmed"}
+              onChange={() => update({ missingValuePolicy: "drop_missing_confirmed", transformConfirmed: false })}
+            />
+            I explicitly confirm excluding rows where the selected value is missing; do not fill, interpolate, or aggregate values.
+          </label>
+        </div>
       </fieldset>
 
       <fieldset>
         <legend>3. Review and confirm transform</legend>
-        <p className="ios-hint"><strong>System suggestion: {TRANSFORM_LABELS[advised.transform]}.</strong> {advised.reason}</p>
+        {advised ? (
+          <p className="ios-hint">
+            <strong>System suggestion: {TRANSFORM_LABELS[advised.transform_id]}.</strong>{" "}
+            {advised.reason} Full-data profile used {transformPreflight?.analysis_row_count.toLocaleString()} of {transformPreflight?.source_row_count.toLocaleString()} source rows.
+          </p>
+        ) : (
+          <p className="ios-hint">
+            <strong>Full-data suggestion pending.</strong>{" "}
+            {transformPreflightError ?? "Choose valid time/value columns and a missing-value policy to run the backend profile."}
+          </p>
+        )}
         <label>
           Transform
           <select aria-label="transform" value={value.transform} onChange={(event) => update({ transform: event.target.value as TransformId, transformConfirmed: false })}>

@@ -15,6 +15,7 @@ from typing import Any
 
 from ..analysis_loop.time_series_compare import (
     build_arma_garch_compare_packet,
+    build_arma_garch_compare_presentation,
     read_time_series_artifacts,
 )
 from ..artifacts import read_json
@@ -101,7 +102,11 @@ def _source_run_id(runs_dir: Path, run_id: str) -> str | None:
 
 
 def _build_packet(
-    runs_dir: Path, left: CompareEndpoint, right: CompareEndpoint
+    runs_dir: Path,
+    left: CompareEndpoint,
+    right: CompareEndpoint,
+    *,
+    relation: str,
 ) -> dict[str, Any]:
     if _pack_id(runs_dir, left.run_id) != ARMA_GARCH_PACK_ID or _pack_id(
         runs_dir, right.run_id
@@ -121,8 +126,11 @@ def _build_packet(
         source_artifacts=left_artifacts,
         child_artifacts=right_artifacts,
         child_source_run_id=_source_run_id(runs_dir, right.run_id),
+        relation=relation,
     )
-    return packet.to_dict()
+    payload = packet.to_dict()
+    payload["presentation"] = build_arma_garch_compare_presentation(packet)
+    return payload
 
 
 def create_compare_node(
@@ -141,13 +149,15 @@ def create_compare_node(
     ancestor = _ancestor_key(runs_dir, left, right)
     # The packet reads the left side as the baseline, so it is built from the
     # same ordering the record will store -- one function decides both.
-    ordered, _relation = canonical_endpoint_order(
+    ordered, relation = canonical_endpoint_order(
         left, right, ancestor_forest_node_key=ancestor
     )
     record = build_compare_node(
         left=ordered[0],
         right=ordered[1],
-        packet=_build_packet(runs_dir, ordered[0], ordered[1]),
+        packet=_build_packet(
+            runs_dir, ordered[0], ordered[1], relation=relation
+        ),
         created_at=now or datetime.now(UTC).isoformat(),
         ancestor_forest_node_key=ancestor,
     )

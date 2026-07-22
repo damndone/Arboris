@@ -443,6 +443,27 @@ def test_validate_genesis_missing_xy_blocks(tmp_path):
     assert "validated_draft_hash" not in body
 
 
+def test_validate_genesis_accepts_univariate_arma_garch_without_x(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(root)
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": "time_series.arma_garch",
+            "y": "y",
+            "x": [],
+            "model_options": {},
+        },
+    )
+
+    body = _validate(root, draft_id).json()
+
+    assert body["executable"] is True
+    assert not any(c["code"] == "GENESIS_MODEL_INCOMPLETE" for c in body["checks"])
+
+
 def test_validate_genesis_multisheet_requires_sheet_choice(tmp_path):
     root = _mkproject(tmp_path)
     d = _genesis(root, sheet_names=["A", "B"], name="d.xlsx")

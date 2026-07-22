@@ -79,6 +79,171 @@ export function buildFigureFacts(
   return facts;
 }
 
+type TimeSeriesArtifactMap = Record<string, unknown>;
+
+function artifactPayload(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const payload = record.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : record;
+}
+
+function valueAt(root: Record<string, unknown>, path: string[]): unknown {
+  let value: unknown = root;
+  for (const key of path) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
+function isAtomicFact(value: unknown): value is string | number | boolean {
+  return (
+    (typeof value === "string" && value !== "")
+    || (typeof value === "number" && Number.isFinite(value))
+    || typeof value === "boolean"
+  );
+}
+
+/** Bounded whitelist of truthful scalar evidence from ARMA-GARCH artifacts. */
+export function buildTimeSeriesFacts(
+  artifacts: TimeSeriesArtifactMap,
+  startAt = 0,
+  provenance: { nodeKey: string; nodeLabel: string } = {
+    nodeKey: "model:arma_garch_1",
+    nodeLabel: "ARMA-GARCH",
+  },
+): CitableFact[] {
+  const facts: CitableFact[] = [];
+  let counter = startAt;
+  const add = (field: string, label: string, value: unknown) => {
+    if (!isAtomicFact(value) || facts.length >= 80) return;
+    facts.push({
+      id: `c${++counter}`,
+      node_key: provenance.nodeKey,
+      node_label: provenance.nodeLabel,
+      field,
+      label,
+      value,
+    });
+  };
+  const from = (
+    artifactId: string,
+    path: string[],
+    field: string,
+    label: string,
+  ) => add(field, label, valueAt(artifactPayload(artifacts[artifactId]), path));
+
+  // Keep the analysis contract alongside model evidence so a generated report
+  // cannot silently describe transformed/filtered data as the raw source.
+  from("ts.analysis_contract", ["transform"], "ts:contract:transform", "analysis transform");
+  from(
+    "ts.analysis_contract",
+    ["missing_value_policy"],
+    "ts:contract:missing_value_policy",
+    "missing-value policy",
+  );
+  from(
+    "ts.analysis_contract",
+    ["estimation_strategy"],
+    "ts:contract:estimation_strategy",
+    "estimation strategy",
+  );
+  from(
+    "ts.data_audit",
+    ["data_quality", "finite_value_count"],
+    "ts:data:analysis_observations",
+    "analysis-view observations",
+  );
+  const auditDiagnostics = valueAt(artifactPayload(artifacts["ts.data_audit"]), ["diagnostics"]);
+  if (Array.isArray(auditDiagnostics)) {
+    const missingExclusion = auditDiagnostics.find((diagnostic) => (
+      diagnostic
+      && typeof diagnostic === "object"
+      && !Array.isArray(diagnostic)
+      && (diagnostic as Record<string, unknown>).code === "MISSING_OBSERVATIONS_EXCLUDED"
+    ));
+    if (missingExclusion && typeof missingExclusion === "object" && !Array.isArray(missingExclusion)) {
+      add(
+        "ts:data:excluded_missing_observations",
+        "excluded missing observations",
+        valueAt(missingExclusion as Record<string, unknown>, ["evidence", "excluded_missing_count"]),
+      );
+    }
+  }
+
+  from("ts.arma_selection", ["final_selected_candidate_id"], "ts:arma:selected_candidate", "selected ARMA specification");
+  from("ts.volatility_selection", ["selected_candidate_id"], "ts:variance:selected_candidate", "selected variance specification");
+  for (const [stage, prefix] of [["mean_stage", "mean"], ["variance_stage", "variance"]] as const) {
+    for (const criterion of ["aic", "aicc", "bic"] as const) {
+      from(
+        "ts.final_model",
+        ["validation_fit", stage, criterion],
+        `ts:${prefix}:${criterion}`,
+        `${prefix} ${criterion.toUpperCase()}`,
+      );
+    }
+  }
+
+  const parameters = artifactPayload(artifacts["ts.parameters"]);
+  for (const [section, prefix] of [
+    ["mean_candidate", "mean"],
+    ["selected_variance_candidate", "variance"],
+  ] as const) {
+    const values = valueAt(parameters, [section]);
+    if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+    for (const [name, value] of Object.entries(values as Record<string, unknown>)) {
+      add(`ts:parameter:${prefix}:${name}`, `${prefix} parameter ${name}`, value);
+    }
+  }
+  const variance = valueAt(parameters, ["selected_variance_candidate"]);
+  if (variance && typeof variance === "object" && !Array.isArray(variance)) {
+    const record = variance as Record<string, unknown>;
+    const alpha = Object.entries(record)
+      .filter(([key, value]) => key.startsWith("alpha[") && typeof value === "number")
+      .reduce((sum, [, value]) => sum + Number(value), 0);
+    const beta = Object.entries(record)
+      .filter(([key, value]) => key.startsWith("beta[") && typeof value === "number")
+      .reduce((sum, [, value]) => sum + Number(value), 0);
+    if (alpha > 0 || beta > 0) {
+      const persistence = alpha + beta;
+      add("ts:volatility:persistence", "volatility persistence", persistence);
+      if (persistence > 0 && persistence < 1) {
+        add(
+          "ts:volatility:half_life_observations",
+          "volatility half-life (observations)",
+          Math.log(0.5) / Math.log(persistence),
+        );
+      }
+    }
+  }
+
+  for (const [path, field, label] of [
+    [["arch_lm", "p_value"], "ts:diagnostic:arch_lm_p_value", "ARCH-LM p-value"],
+    [["normality", "p_value"], "ts:diagnostic:normality_p_value", "normality p-value"],
+    [["normality", "skew"], "ts:diagnostic:skew", "standardized residual skew"],
+    [["normality", "kurtosis"], "ts:diagnostic:kurtosis", "standardized residual kurtosis"],
+  ] as const) {
+    from("ts.final_diagnostics", [...path], field, label);
+  }
+  for (const metric of [
+    "validation_n", "successful_forecast_n", "mae", "rmse", "mean_error",
+    "interval_coverage", "average_interval_width", "exception_count", "exception_rate",
+    "pinball_loss",
+  ]) {
+    from("ts.forecast_metrics", [metric], `ts:validation:${metric}`, `validation ${metric}`);
+  }
+  for (const metric of [
+    "conditional_mean", "conditional_variance", "conditional_volatility",
+    "lower_bound", "upper_bound", "lower_quantile",
+  ]) {
+    from("ts.next_forecast", [metric], `ts:forecast:${metric}`, `next forecast ${metric}`);
+  }
+  return facts;
+}
+
 function collectNumericLeaves(
   value: unknown,
   path: string,
@@ -126,6 +291,7 @@ export function buildFactTable(
     const nodeLabel = context.selection.display_label;
 
     for (const [key, value] of Object.entries(context.node_payload.params)) {
+      if (!isAtomicFact(value)) continue;
       facts.push({
         id: nextId(),
         node_key: node.nodeKey,

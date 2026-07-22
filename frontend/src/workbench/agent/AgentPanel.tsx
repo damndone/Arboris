@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAgentSurface } from "./AgentSurfaceContext";
+import { agentAuditExportUrl } from "./agentApi";
 import { AgentHierarchyTree } from "./AgentHierarchyTree";
 import { AgentComposer } from "./AgentComposer";
 import { renderMarkdown } from "../../report/markdown";
@@ -106,7 +107,7 @@ function navigationButtonLabel(ref: {
   return `Open ${relation} ${label}`;
 }
 
-export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
+export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot: string }) {
   const agent = useAgentSurface();
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState("");
@@ -115,6 +116,9 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
   const contextLabel = agent.contextWindowTokens === null
     ? `${agent.contextUsedTokens.toLocaleString()} tokens · capacity unknown`
     : `${agent.contextUsedTokens.toLocaleString()} / ${agent.contextWindowTokens.toLocaleString()} tokens`;
+  const auditSessionId = agent.navigationLinks.find(
+    (link) => link.kind === "operation" && typeof link.href.session_id === "string",
+  )?.href.session_id;
 
   return (
     <section
@@ -144,6 +148,16 @@ export function AgentPanel({ runId }: { runId: string; projectRoot: string }) {
         >
           events #{agent.eventCursor}
         </span>
+        {auditSessionId && (
+          <a
+            href={agentAuditExportUrl(projectRoot, auditSessionId)}
+            target="_blank"
+            rel="noreferrer"
+            style={{ color: "var(--label-secondary)" }}
+          >
+            Export Agent audit
+          </a>
+        )}
       </header>
       {hasNavigationContext && (
         <details

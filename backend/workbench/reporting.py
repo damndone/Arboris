@@ -51,7 +51,12 @@ def render_html_report(view_model: dict[str, Any], run_root: Path) -> Path:
         loader=FileSystemLoader(Path(__file__).parent / "templates"),
         autoescape=True,
     )
-    template = environment.get_template("report.html.j2")
-    write_text_durable(html_path, template.render(view_model=_normalize_to_view_model(view_model)))
+    if view_model.get("report_kind") == "arma_garch":
+        template = environment.get_template("arma_garch_report.html.j2")
+        rendered_view_model = view_model
+    else:
+        template = environment.get_template("report.html.j2")
+        rendered_view_model = _normalize_to_view_model(view_model)
+    write_text_durable(html_path, template.render(view_model=rendered_view_model))
     register_artifact(run_root, "report_html", html_path, "report", "reporting", [])
     return html_path

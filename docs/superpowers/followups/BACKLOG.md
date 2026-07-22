@@ -32,13 +32,13 @@ worktree 名称、Lane 分支或本机验收记录推断。
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
 
-## 0.1 当前版本状态（2026-07-20）
+## 0.1 当前版本状态（2026-07-21）
 
 - v1.7.1：已发布。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
 - v1.7.3：本机版本已在 Integration 提交 `730ebfc` 收尾；Report/Operations 与 LMM 已完成，正式 release PR/merge/tag
   采用唯一 Integration 分支；本机性能烟测取代未落地的 C2 collector。公共部署/App/插件安全留到出现对应信任边界时重新立项。
-- v1.8：先完成 Time Series Diagnostics C1；在诊断运行时稳定前，不接入预测模型或预测库。
+- v1.8：ARMA–GARCH Workbench 的实现和 VIXCLS 浏览器证据已形成候选，但尚未发布。发布被交付层事实阻塞：run 内的 HTML/PDF 不是浏览器中的完整 DeepSeek 报告，`tables.xlsx` 对 ARMA–GARCH 为空，Compare 和 Agent transcript 只有机器可读原件。联合含 MA 的 ARCH/GARCH MLE 不属于 v1.8，必须按 `V1.8-JOINT-ARMA-GARCH-MLE` 单独立项；不得称为 Stata 数值复现。
 
 ---
 
@@ -55,6 +55,8 @@ worktree 名称、Lane 分支或本机验收记录推断。
 | 🟢 已收口 | V1.7.3-LMM-LOCAL | 本机 LMM/Agent/UI：显式 local_contained、真实 Seatbelt canary、已知真值 HTTP/浏览器流程和导出 | 独立版本工作包 | 完整 gate 与精确产品提交证据写入 release ledger | 否 | `release-trains/v1.7.3/release-ledger.json` |
 | 🔵 事件触发 | C2-HOSTILE-EXTENSIONS | 敌对插件、第三方模型包或外部候选代码的冻结执行与独立认证 | 长期安全边界 | 只有产品出现对应信任边界时，从新威胁模型和目标宿主重新立项 | 否 | `roadmap/architecture-debt.md#d7-敌对扩展第三方模型包的冻结执行边界未来需求当前不实现` |
 | 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
+| 🔴 发布阻塞 | V1.8-DELIVERY-TRUTH | ARMA–GARCH 的 run 内 HTML/PDF、XLSX、Compare、Agent transcript 不能作为完整的人类交付物：报告存在双轨，workbook 空壳，后两者仅机器原件 | 发布交付层 | 让同一份持久化报告驱动浏览器/HTML/PDF；输出非空结构化 workbook；为 Compare 与 Agent 增加人类可读摘要，同时保留 JSON/JSONL 审计原件 | 是 | §2-V1.8-DELIVERY-TRUTH |
+| 🟡 后续模型核心 | V1.8-JOINT-ARMA-GARCH-MLE | 含 MA 的 ARMA(p,q)-ARCH/GARCH 目前顺序估计，不能对齐 Stata 联合条件极大似然及联合 IC | 独立估计核心 | 以版本化 Stata oracle、conditioning、LL/IC、收敛和预测 parity 为验收工作包；不作为 v1.8 小修 | 否（若不宣称数值复现） | §2-V1.8-JOINT-ARMA-GARCH-MLE |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |
 | 🟡 工程 | W2 | 全量孤儿 upload/draft GC（项目级后台回收未做） | 后端 | 单独设计 GC；本版只回收 discard 创世链的无引用 upload | 否 | §2-W2 |
@@ -169,6 +171,32 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 ### §2-U2 · role 缩写 `X` 二义（需拍板）
 
 `focal` 和 `explanatory_unspecified` 现在都显示 `X`（v1.6.8 把 `X?` 改掉响应"看不出变量名"的抱怨），仅 tooltip 可区分。如果 unspecified 的视觉信号还重要，需要新的呈现方案（如淡色/斜体 X）。
+
+### §2-V1.8-DELIVERY-TRUTH · ARMA–GARCH 交付层发布阻塞
+
+VIXCLS 浏览器验收确认模型、图表和机器审计数据已经生成，但用户下载的 run 内交付物没有忠实呈现同一事实：自动 `reports/report.html` 与 `report.pdf` 是旧的基础摘要；浏览器中较完整的 DeepSeek 报告只在浏览器存储中；`exports/tables.xlsx` 只接收传统结果的 `coefficients`，对 ARMA–GARCH 形成空 sheet；Compare JSON 和 Agent JSONL 可审计却不适合人类直接核查，且 Agent 成功 child/operation record 不在父 session 单文件内。
+
+此项的完成条件是：
+
+1. 报告有唯一、run-owned、可追溯的持久化事实源；浏览器、HTML 与 PDF 从同一事实源渲染，并明确 provider 生成内容与确定性事实的边界。
+2. `tables.xlsx` 至少包含非空的 Overview、候选、参数、诊断、滚动验证、下一期预测和 acceptance 数据表；每个 sheet 都能追到对应 `ts.*` artifact。
+3. Compare 提供人类可读的样本一致性、规格变化、指标/诊断变化和自动判定边界摘要；原 JSON 保留为审计附件，不能取代摘要。
+4. Agent 提供只读聚合记录：用户问题、调查、提案、确认、执行、child run 与终态；原 session、operation 和 tool JSONL 继续保留并可链接。
+5. 对真实 VIX run 增加非空导出验收；在实现真实导出 API 前，禁止用只存在于 fixture 的假 workbook 声称通过。
+
+### §2-V1.8-JOINT-ARMA-GARCH-MLE · 联合 ARMA(p,q)-ARCH/GARCH 条件极大似然
+
+这是新的估计核心工作包，不是 v1.8 的 bugfix。当前当 `q > 0` 时先估 ARMA、再估 ARCH/GARCH，因此不能与 Stata `arch ..., ar() ma() arch() garch()` 的联合条件极大似然、联合参数或联合 IC 做逐数值比较。完成前，产品只能使用 `REFERENCE_SEMANTICS = "directional_or_workflow_regression"`。
+
+工作包必须先冻结一个可复跑的 Stata oracle：Stata 版本与命令、Do-file hash、VIXCLS 输入 hash、缺失值处理、时间排序、ARMA/ARCH/GARCH 阶数、分布和所有估计选项。oracle 必须保存参数、标准误、`e(ll)`、AIC/AICc/BIC、收敛码/迭代信息、conditioning observations、条件方差/标准化残差和逐 origin 预测；不允许从人工抄写的“近似预期值”反推实现。
+
+实现和验收必须覆盖：
+
+1. 联合递归均值创新与条件方差的 ARMA(p,q)-ARCH/GARCH 条件极大似然，连同明确的参数约束、初始化和失败语义。
+2. 与 oracle 完全显式一致的 conditioning 观察期、缺失处理和有效样本定义；不得把 conditioning、训练/验证切分或业务日时间语义隐式改变。
+3. 在冻结 oracle fixture 上比较参数、联合 LL、AIC/AICc/BIC、收敛状态和条件方差/标准化残差；数值容差必须在 fixture 与验收前声明，不能在实现后为了通过测试临时放宽。
+4. 同一冻结 origins 上比较 one-step 预测、区间和下一期预测，并分别记录不可安全推断未来交易时间戳的限制。
+5. 用合成数据、VIXCLS 和至少一个显式收敛失败/边界案例做 RED/GREEN 回归；只有所有 oracle 维度通过，才允许把文案从 directional/workflow 改为数值复现。
 
 ---
 

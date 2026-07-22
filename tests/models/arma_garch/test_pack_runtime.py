@@ -145,6 +145,16 @@ def test_runner_uses_raw_dataset_and_persists_traceable_artifacts_and_child(
     assert refit["fit_statistics"]
     assert ctx.artifacts["_primary_model_input_ids"] == ["raw_input.csv"]
     assert ctx.artifacts["_primary_model_parent_node_id"] == "stage:ts-full-sample-child"
+    pack_index = ctx.artifacts["_pack_node_index_entries"]
+    assert set(pack_index) == {
+        "stage:ts-analysis-view",
+        "stage:ts-split",
+        "stage:ts-mean-selection",
+        "stage:ts-volatility-selection",
+        "stage:ts-rolling-validation",
+        "stage:ts-full-sample-child",
+    }
+    assert all(len(entry["node_hash"]) == 64 for entry in pack_index.values())
     pd.testing.assert_frame_equal(source, before)
 
     required = {
@@ -287,6 +297,14 @@ def test_public_workflow_completes_with_pack_graph_and_raw_lineage(
     run_root = project.root / "runs" / outcome["run_id"]
     result = json.loads((run_root / "model_results" / "arma_garch_1.json").read_text())
     assert result["model_type"] == "time_series.arma_garch"
+    report_html = (run_root / "reports" / "report.html").read_text(encoding="utf-8")
+    assert 'id="time-series-overview"' in report_html
+    assert "ARMA(1,0)" in report_html
+    assert "RMSE" in report_html
+    from openpyxl import load_workbook
+    workbook = load_workbook(run_root / "exports" / "tables.xlsx", read_only=True, data_only=True)
+    assert {"Overview", "Parameters", "Acceptance", "Next forecast"}.issubset(workbook.sheetnames)
+    assert workbook["Parameters"].max_row > 1
     index = json.loads((run_root / "artifacts_index.json").read_text())
     model_record = next(
         item for item in index["artifacts"] if item["artifact_id"] == "arma_garch_1"
@@ -331,6 +349,41 @@ def test_public_workflow_preserves_duplicate_timestamp_error_code(
     issue = next(item for item in errors["issues"] if item["code"] == "DUPLICATE_TIMESTAMP")
     assert issue["evidence"]["duplicate_timestamp_count"] == 2
     assert issue["evidence"]["impact"]
+    run_root = project.root / "runs" / outcome["run_id"]
+    tombstone = json.loads(
+        (run_root / "model_results" / "arma_garch_1.tombstone.json").read_text()
+    )
+    assert tombstone["model_id"] == "arma_garch_1"
+    assert tombstone["model_type"] == "time_series.arma_garch"
+    assert tombstone["status"] == "blocked"
+    assert tombstone["configured_not_fitted"] is True
+    assert tombstone["terminal_code"] == "DUPLICATE_TIMESTAMP"
+    from workbench.contracts.model.arma_garch import ArmaGarchAnalysisContract
+
+    assert tombstone["contract_hash"] == ArmaGarchAnalysisContract.from_dict(
+        tombstone["model_options"]
+    ).contract_hash
+    assert tombstone["model_options"]["missing_value_policy"] == "block"
+    assert not ({"parameters", "converged", "forecast", "production_child"} & tombstone.keys())
+    graph = __import__(
+        "workbench.graph_store", fromlist=["GraphStore"]
+    ).GraphStore(project.root / "runs").read(outcome["run_id"])
+    failed_model = graph.nodes["model:arma_garch_1"]
+    assert failed_model.trust.value == "blocker"
+    assert failed_model.summary == "Configured, not fitted · DUPLICATE_TIMESTAMP"
+    node_index = json.loads((run_root / "node_index.json").read_text())
+    assert len(node_index["stage:raw"]["node_hash"]) == 64
+    assert len(node_index["model:arma_garch_1"]["node_hash"]) == 64
+    from workbench.lineage.node_write_validation import build_rerun_operation_context
+
+    context = build_rerun_operation_context(
+        project.root / "runs",
+        request_id="failed-model-rerun",
+        owner_run_id=outcome["run_id"],
+        op_node_id="model:arma_garch_1",
+        active_head_run_id=outcome["run_id"],
+    )
+    assert context.node_hash == node_index["model:arma_garch_1"]["node_hash"]
 
 
 def test_runner_supports_sequential_student_t_without_composite_likelihood(

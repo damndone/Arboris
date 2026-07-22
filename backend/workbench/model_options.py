@@ -198,10 +198,16 @@ def parse_model_options(raw: str) -> dict[str, object]:
 def merge_model_options(
     source: Mapping[str, object], patch: Mapping[str, object]
 ) -> dict[str, object]:
-    """Apply the only allowed rerun merge: one level below model_options."""
+    """Apply a rerun patch, preserving unmentioned keys in named sections."""
 
     merged = canonicalize_model_options(source)
-    merged.update(canonicalize_model_options(patch))
+    canonical_patch = canonicalize_model_options(patch)
+    for key, value in canonical_patch.items():
+        existing = merged.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[key] = {**dict(existing), **dict(value)}
+        else:
+            merged[key] = value
     return canonicalize_model_options(merged)
 
 

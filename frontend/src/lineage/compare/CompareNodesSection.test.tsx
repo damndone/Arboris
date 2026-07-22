@@ -64,6 +64,10 @@ function contextFor(key: string, params: Record<string, unknown>) {
 describe("CompareNodesSection", () => {
   beforeEach(() => {
     mockCompare.current = makeCompare();
+    mockForest.current = {
+      forest: { nodes: [], edges: [], heads: [] },
+      activeRunId: "run1",
+    } as unknown;
     mockResolve.current = () => ({ ok: false });
   });
 
@@ -103,6 +107,41 @@ describe("CompareNodesSection", () => {
     expect(mockCompare.current!.swap).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /clear/i }));
     expect(mockCompare.current!.clear).toHaveBeenCalled();
+  });
+
+  it("resolves a shared target through the active run's nearest ancestor", () => {
+    mockCompare.current = makeCompare({
+      pair: { anchorKey: "key-a", targetKey: "key-b" },
+    });
+    mockForest.current = {
+      forest: {
+        nodes: [
+          { nodeKey: "key-a", runs: ["run_child"] },
+          { nodeKey: "key-b", runs: ["run_parent", "unrelated_root"] },
+        ],
+        edges: [],
+        heads: [
+          { runId: "run_child", rerunOf: "run_parent" },
+          { runId: "run_parent", rerunOf: "run_root" },
+          { runId: "run_root", rerunOf: null },
+          { runId: "unrelated_root", rerunOf: null },
+        ],
+      },
+      activeRunId: "run_child",
+    } as unknown;
+    const inputs: Array<Record<string, unknown>> = [];
+    mockResolve.current = (input) => {
+      const typed = input as Record<string, unknown>;
+      inputs.push(typed);
+      return contextFor(String(typed.selected_forest_node_key), {});
+    };
+
+    render(<CompareNodesSection node={node} />);
+
+    expect(inputs.find((input) => input.selected_forest_node_key === "key-b")).toMatchObject({
+      selected_run_hint: "run_parent",
+      selected_run_hint_source: "manual_candidate_selection",
+    });
   });
 
   it("pair not involving this node: falls back to the idle action", () => {

@@ -115,6 +115,16 @@ def test_a_legal_patch_survives_canonicalization(tmp_path: Path) -> None:
     assert canonical["target"]["node_hash"] == "hash-a"
 
 
+def test_missing_value_recovery_is_a_typed_model_rerun_patch(tmp_path: Path) -> None:
+    canonical = _canonicalize(
+        _project(tmp_path),
+        {"missing_value_policy": "drop_missing_confirmed"},
+    )
+    assert canonical["changes"]["model_options"] == {
+        "missing_value_policy": "drop_missing_confirmed"
+    }
+
+
 def test_a_partial_section_patch_is_merged_not_replaced(tmp_path: Path) -> None:
     """A patch naming one key of `validation` must not blank out the others."""
 

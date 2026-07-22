@@ -448,6 +448,36 @@ def test_managed_chain_context_tool_rejects_a_forged_active_head(
     assert result.error == "ChainHeadConflict"
 
 
+def test_invalid_node_probe_returns_one_visible_error_with_valid_targets(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-invalid-node",
+                "tool_id": "inspect_node_context",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:does-not-exist",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is False
+    assert result.error == "ToolVisibleError"
+    message = result.error_details[0]["message"]
+    assert "INVALID_OPERATION_TARGET" in message
+    assert "model:ols_1" in message
+
+
 def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
     tmp_path: Path,
 ) -> None:

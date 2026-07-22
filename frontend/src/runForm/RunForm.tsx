@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ApiError,
+  fetchArmaGarchTransformPreflight,
   previewFile,
   runWorkflow,
   waitForRunTerminal,
   type FilePreview,
+  type ArmaGarchTransformPreflight,
   type RunResponse,
 } from "../api";
 import { RunResultView } from "../runResult";
@@ -80,6 +82,10 @@ export function RunForm(props: RunFormProps) {
   const [armaGarchValue, setArmaGarchValue] = useState<ArmaGarchControlValue>(
     createDefaultArmaGarchValue,
   );
+  const [armaGarchPreflight, setArmaGarchPreflight] =
+    useState<ArmaGarchTransformPreflight | null>(null);
+  const [armaGarchPreflightError, setArmaGarchPreflightError] =
+    useState<string | null>(null);
   // V1.5.4.4: IV role assignment (endog / instruments) over the X selection.
   const [ivRole, setIvRole] = useState<IVRoleValue>({
     endog: [],
@@ -194,6 +200,52 @@ export function RunForm(props: RunFormProps) {
     setY(armaGarchValue.valueColumn || suggestedValue);
     setX("");
   }, [isArmaGarch, preview, armaGarchValue.valueColumn]);
+
+  useEffect(() => {
+    if (
+      !isArmaGarch
+      || !file
+      || !armaGarchValue.timeColumn
+      || !armaGarchValue.valueColumn
+      || !projectRoot.trim()
+    ) {
+      setArmaGarchPreflight(null);
+      setArmaGarchPreflightError(null);
+      return;
+    }
+    let cancelled = false;
+    setArmaGarchPreflight(null);
+    setArmaGarchPreflightError(null);
+    fetchArmaGarchTransformPreflight(projectRoot.trim(), file, {
+      timeColumn: armaGarchValue.timeColumn,
+      valueColumn: armaGarchValue.valueColumn,
+      timeIndexSemantics: armaGarchValue.timeIndexSemantics,
+      missingValuePolicy: armaGarchValue.missingValuePolicy,
+      sheetName,
+      transpose,
+    }).then((result) => {
+      if (!cancelled) setArmaGarchPreflight(result);
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setArmaGarchPreflightError(
+          error instanceof Error ? error.message : "Full-data transform profile failed",
+        );
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    armaGarchValue.missingValuePolicy,
+    armaGarchValue.timeColumn,
+    armaGarchValue.timeIndexSemantics,
+    armaGarchValue.valueColumn,
+    file,
+    isArmaGarch,
+    projectRoot,
+    sheetName,
+    transpose,
+  ]);
 
   const runErrors: Record<string, string> = {};
   if (projectRoot.trim() === "") runErrors.projectRoot = "Create a project first";
@@ -503,6 +555,8 @@ export function RunForm(props: RunFormProps) {
             <ArmaGarchControls
               columns={columnNames}
               preview={preview}
+              transformPreflight={armaGarchPreflight}
+              transformPreflightError={armaGarchPreflightError}
               value={armaGarchValue}
               onChange={(next) => {
                 setArmaGarchValue(next);

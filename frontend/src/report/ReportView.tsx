@@ -9,11 +9,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useForest } from "../workbench/ForestContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
-import { buildFactTable, buildFigureFacts, type CitableFact } from "./factTable";
+import {
+  buildFactTable,
+  buildFigureFacts,
+  buildTimeSeriesFacts,
+  type CitableFact,
+} from "./factTable";
 import {
   DEFAULT_REPORT_INSTRUCTION,
   exportReport,
+  fetchAiReports,
   generateReport,
+  saveAiReport,
   type ReportFigure,
 } from "./reportClient";
 import { CiteChip, parseCiteSegments } from "./citeMarkup";
@@ -26,8 +33,20 @@ import {
   saveReportRecord,
   type ReportRecord,
 } from "./reportHistory";
-import { artifactDownloadUrl, fetchRunArtifacts } from "../api";
+import { artifactDownloadUrl, fetchArtifactJson, fetchRunArtifacts } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
+
+const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
+  "ts.analysis_contract",
+  "ts.data_audit",
+  "ts.arma_selection",
+  "ts.volatility_selection",
+  "ts.final_model",
+  "ts.parameters",
+  "ts.final_diagnostics",
+  "ts.forecast_metrics",
+  "ts.next_forecast",
+]);
 
 export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const forest = useForest();
@@ -41,6 +60,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [reportFigures, setReportFigures] = useState<ReportFigure[]>([]);
+  const [timeSeriesArtifacts, setTimeSeriesArtifacts] = useState<Record<string, unknown>>({});
   const [figureContextLoading, setFigureContextLoading] = useState(false);
   const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
 
@@ -57,8 +77,27 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
 
   useEffect(() => {
     const runId = forest?.activeRunId;
+    if (!projectRoot || !runId) return;
+    let cancelled = false;
+    void fetchAiReports({ projectRoot, runId })
+      .then((records) => {
+        if (cancelled || records.length === 0) return;
+        const durable = records as unknown as ReportRecord[];
+        setHistory(durable);
+        setCurrent((shown) => shown ?? durable[0] ?? null);
+      })
+      .catch(() => {
+        // Local history is a cache and a sensible offline fallback. The user is
+        // told about a new persistence failure at generation time instead.
+      });
+    return () => { cancelled = true; };
+  }, [forest?.activeRunId, projectRoot]);
+
+  useEffect(() => {
+    const runId = forest?.activeRunId;
     if (!runId || !projectRoot) {
       setReportFigures([]);
+      setTimeSeriesArtifacts({});
       setFigureContextLoading(false);
       setFigureInventoryError(null);
       return;
@@ -68,34 +107,56 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     setFigureInventoryError(null);
     void fetchRunArtifacts(projectRoot, runId)
       .then(async (response) => {
-        const items = response.groups.flatMap((group) => group.items)
+        const allItems = response.groups.flatMap((group) => group.items);
+        const items = allItems
           .filter((item) => item.artifact_type === "figure");
-        const resolved = await Promise.all(
-          items.map(async (item) => {
-            try {
-              const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
-              return {
-                artifact_id: item.artifact_id,
-                chart_type: context.figure.chart_type,
-                path: context.figure.path,
-                source: context.source,
-              } satisfies ReportFigure;
-            } catch {
-              // The figure remains visible/exportable even when its numeric
-              // source is unavailable; the report packet records that gap.
-              return {
-                artifact_id: item.artifact_id,
-                chart_type: item.artifact_id,
-                source: null,
-              } satisfies ReportFigure;
-            }
-          }),
+        const timeSeriesItems = allItems.filter((item) =>
+          REPORT_TIME_SERIES_ARTIFACT_IDS.has(item.artifact_id),
         );
-        if (!cancelled) setReportFigures(resolved);
+        const [resolved, resolvedTimeSeries] = await Promise.all([
+          Promise.all(
+            items.map(async (item) => {
+              try {
+                const context = await fetchFigureAiContext(projectRoot, runId, item.artifact_id);
+                return {
+                  artifact_id: item.artifact_id,
+                  chart_type: context.figure.chart_type,
+                  path: context.figure.path,
+                  source: context.source,
+                } satisfies ReportFigure;
+              } catch {
+                // The figure remains visible/exportable even when its numeric
+                // source is unavailable; the report packet records that gap.
+                return {
+                  artifact_id: item.artifact_id,
+                  chart_type: item.artifact_id,
+                  source: null,
+                } satisfies ReportFigure;
+              }
+            }),
+          ),
+          Promise.all(
+            timeSeriesItems.map(async (item) => {
+              try {
+                const value = await fetchArtifactJson(projectRoot, runId, item.artifact_id);
+                return [item.artifact_id, value] as const;
+              } catch {
+                return null;
+              }
+            }),
+          ),
+        ]);
+        if (!cancelled) {
+          setReportFigures(resolved);
+          setTimeSeriesArtifacts(
+            Object.fromEntries(resolvedTimeSeries.filter((item) => item !== null)),
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) {
           setReportFigures([]);
+          setTimeSeriesArtifacts({});
           setFigureInventoryError(
             "Unable to load the run figure inventory; report generation is disabled.",
           );
@@ -118,9 +179,28 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     () => buildFigureFacts(reportFigures, table?.facts.length ?? 0),
     [reportFigures, table?.facts.length],
   );
+  const timeSeriesProvenance = useMemo(() => {
+    const modelNode = forest?.forest.nodes.find(
+      (node) =>
+        (node.runs ?? []).includes(forest.activeRunId ?? "")
+        && node.opType === "time_series.arma_garch"
+        && node.kind === "model",
+    );
+    return modelNode
+      ? { nodeKey: modelNode.nodeKey, nodeLabel: modelNode.title }
+      : { nodeKey: "model:arma_garch_1", nodeLabel: "ARMA-GARCH" };
+  }, [forest]);
+  const timeSeriesFacts = useMemo(
+    () => buildTimeSeriesFacts(
+      timeSeriesArtifacts,
+      (table?.facts.length ?? 0) + figureFacts.length,
+      timeSeriesProvenance,
+    ),
+    [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
+  );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts] : []),
-    [figureFacts, table],
+    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts] : []),
+    [figureFacts, table, timeSeriesFacts],
   );
 
   if (!forest || !forest.activeRunId || !table) {
@@ -169,6 +249,9 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         excluded_fact_ids: [...excludedIds],
         figures: reportFigures,
       };
+      if (projectRoot) {
+        await saveAiReport({ projectRoot, runId: table.scope.run_id, record });
+      }
       setCurrent(record);
       setHistory(saveReportRecord(historyRoot, record));
       appendAiActivity(historyRoot, {

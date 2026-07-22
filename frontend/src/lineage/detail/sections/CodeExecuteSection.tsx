@@ -67,6 +67,13 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
 
   const sourceRunId = resolved?.ok ? resolved.context.ownership.owner_run_id : null;
   const sourceNodeId = resolved?.ok ? resolved.context.operation_target.op_node_id : null;
+  const unavailableReason = !projectRoot
+    ? "project_root_unavailable"
+    : resolved && !resolved.ok
+      ? resolved.reason
+      : resolved === null
+        ? "operation_context_unavailable"
+        : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -223,6 +230,17 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
           </div>
         )}
 
+        {unavailableReason && (
+          <div
+            role="status"
+            data-testid="code-execute-unavailable"
+            style={{ color: "var(--label-tertiary)" }}
+          >
+            Run preview is disabled: {unavailableReason}. This node has no resolvable,
+            materialized data payload for the operation.
+          </div>
+        )}
+
         <label htmlFor="code-execute-code" style={{ opacity: 0.75 }}>
           Python
         </label>
@@ -230,7 +248,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
           id="code-execute-code"
           data-testid="code-execute-code"
           value={code}
-          disabled={busy}
+          disabled={busy || unavailableReason !== null}
           spellCheck={false}
           rows={8}
           onChange={(event) => {
@@ -258,7 +276,7 @@ export function CodeExecuteSection({ node }: { node: GraphViewNode }) {
             id="code-execute-format"
             data-testid="code-execute-format"
             value={outputFormat}
-            disabled={busy}
+            disabled={busy || unavailableReason !== null}
             onChange={(event) => {
               setOutputFormat(event.target.value as DataCastOutputFormat);
               invalidateExecutionState();

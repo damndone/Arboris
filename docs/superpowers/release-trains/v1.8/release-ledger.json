@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "release_train": "v1.8",
+  "scope": "local ARMA-GARCH Volatility Workbench candidate",
+  "overall_status": "CANDIDATE_NOT_RELEASED_INDEPENDENT_ACCEPTANCE_PENDING",
+  "release_status": {
+    "push": "NOT_PERFORMED",
+    "pull_request": "NOT_PERFORMED",
+    "merge": "NOT_PERFORMED",
+    "tag": "NOT_PERFORMED"
+  },
+  "baseline_commit": "a81cd4927abb",
+  "final_product_commit": "LOCAL_CANDIDATE_HEAD; resolve with git rev-parse HEAD before independent acceptance",
+  "branch": "workbench-v1.8",
+  "candidate_tree": "local candidate committed; no publication action is authorized",
+  "reference_semantics": "directional_or_workflow_regression",
+  "acceptance_evidence": "docs/superpowers/handoffs/2026-07-21-v1.8-vix-browser-reproduction.md",
+  "gates": [
+    {
+      "id": "vix_browser_workflow",
+      "status": "PASS_SCOPE_EVIDENCE",
+      "evidence": "Original 2,610-row VIXCLS file, explicit exclusion of 68 missing values, manual and bounded-auto flows, 17 structured chart artifacts/18 panels, DeepSeek V4 Pro report and Agent recovery, durable Compare without integrity findings."
+    },
+    {
+      "id": "directional_stata_semantics",
+      "status": "PASS_WITH_EXPLICIT_LIMIT",
+      "evidence": "The workflow is directional/workflow regression only. MA order above zero is sequential, not Stata joint ARMA-GARCH MLE; joint LL/IC and parameter parity are not accepted."
+    },
+    {
+      "id": "automated_gate_prior_to_latest_delivery_followup",
+      "status": "PASS_HISTORICAL_NOT_FINAL_CANDIDATE",
+      "evidence": "Browser handoff records backend 2940 passed / 8 skipped, golden 23 with zero drift, frontend 1288 passed and TypeScript clean; the later Table follow-up recorded frontend 1289 and TypeScript clean. A final single host full gate on the final immutable candidate remains required."
+    },
+    {
+      "id": "report_export_single_source",
+      "status": "PASS_REAL_VIX_RUN",
+      "evidence": "VIX run 20260722_011832_368932_550d4414 generated a run-owned ARMA-GARCH HTML (6.4 KB) and PDF (9.4 KB) from the registered ts.* facts. Browser AI reports now persist as immutable ai_report_<id> artifacts with their fact snapshot; historical browser-only reports are honestly not retroactively reconstructed."
+    },
+    {
+      "id": "xlsx_nonempty_arma_garch_export",
+      "status": "PASS_REAL_VIX_RUN",
+      "evidence": "VIX run 20260722_011832_368932_550d4414 generated an 11 KB workbook with non-empty Overview, ARMA candidates, Volatility candidates, Parameters, Diagnostics, Rolling forecasts, Next forecast, and Acceptance sheets."
+    },
+    {
+      "id": "human_readable_compare_and_agent_handoff",
+      "status": "PASS_FOCUSED_TESTS",
+      "evidence": "Compare now separates unchanged sample membership from a changed split contract and renders a compact reader summary while retaining raw JSON. Agent audit exports aggregate parent session, operation record and child terminal state as JSON, Markdown or HTML; 38 focused backend and 31 focused frontend tests passed before final integration rerun."
+    },
+    {
+      "id": "independent_step_5_acceptance",
+      "status": "PENDING_USER_ASSIGNED",
+      "evidence": "The user assigned Claude Code to independently accept the exact final candidate SHA. This remains a release hold, not an implementation defect."
+    },
+    {
+      "id": "release_document_reconciliation",
+      "status": "IN_PROGRESS",
+      "evidence": "This ledger is reconciled to the delivery fixes and real VIX run. Insert the final candidate SHA and host full-gate evidence only after the local closeout commit."
+    }
+  ],
+  "future_non_blocking_work": [
+    "Joint ARMA(p,q)-ARCH/GARCH conditional MLE with frozen Stata oracle, explicit conditioning, joint LL/IC, convergence, conditional-series and forecast parity.",
+    "Safe future trading-timestamp inference where the input cadence is sufficient."
+  ],
+  "publication_rule": "Only publish after every BLOCKED and PENDING release gate above has a documented passing result on the same immutable final product commit."
+}

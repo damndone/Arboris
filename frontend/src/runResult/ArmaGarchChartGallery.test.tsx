@@ -4,8 +4,8 @@
 // so a rename on the backend fails these tests instead of silently producing
 // blank charts.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { ArmaGarchChartGallery } from "./ArmaGarchChartGallery";
 import type { ArmaGarchCharts } from "./useArmaGarchCharts";
 
@@ -56,6 +56,14 @@ const CHARTS: ArmaGarchCharts = {
   },
   rollingInterval: { rows: rollingRows(250) },
   quantileExceptions: { rows: rollingRows(250).filter((row) => row.quantile_exception) },
+  modelComparison: {
+    comparison: {
+      comparison_validation_n: 250,
+      arma_garch: { rmse: 1.2, mae: 0.8, interval_coverage: 0.96 },
+      arma_only: { rmse: 1.6, mae: 1.1, interval_coverage: 0.91 },
+      runtime_seconds: { arma_garch: 2.4, arma_only: 0.7 },
+    },
+  },
   absReturnVsVolatility: {
     dual_axis: true,
     rows: Array.from({ length: 300 }, (_, i) => ({
@@ -123,6 +131,8 @@ describe("ArmaGarchChartGallery", () => {
     ]) {
       expect(screen.getByRole("img", { name: label })).toBeInTheDocument();
     }
+    expect(screen.getByText("ARMA-GARCH vs ARMA-only validation summary")).toBeInTheDocument();
+    expect(screen.getByText(/17 chart artifacts loaded · 18 displayed panels/)).toBeInTheDocument();
   });
 
   it("says so when a long series is thinned rather than showing it as complete", () => {
@@ -143,6 +153,43 @@ describe("ArmaGarchChartGallery", () => {
 
     expect(screen.getByText(/10 of 250 validation origins/)).toBeInTheDocument();
     expect(screen.getByText(/not a Value-at-Risk figure/)).toBeInTheDocument();
+  });
+
+  it("distinguishes a valid zero-exception artifact from unavailable and malformed artifacts", () => {
+    const { rerender } = render(
+      <ArmaGarchChartGallery charts={{ ...CHARTS, quantileExceptions: { rows: [] } }} />,
+    );
+    expect(screen.getByText(/No lower-quantile exceptions were observed across 250/)).toBeInTheDocument();
+
+    rerender(<ArmaGarchChartGallery charts={{ ...CHARTS, quantileExceptions: undefined }} />);
+    expect(screen.getByText(/ts.chart.quantile_exceptions: artifact unavailable/)).toBeInTheDocument();
+
+    rerender(<ArmaGarchChartGallery charts={{ ...CHARTS, quantileExceptions: { rows: "bad" } }} />);
+    expect(screen.getByText(/ts.chart.quantile_exceptions: malformed rows payload/)).toBeInTheDocument();
+  });
+
+  it("downloads rendered SVG with an explicit displayed-data description", () => {
+    vi.useFakeTimers();
+    const createObjectUrl = vi.fn(() => "blob:chart");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      expect(this.isConnected).toBe(true);
+    });
+    render(<ArmaGarchChartGallery charts={CHARTS} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Source series SVG" }));
+
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalled();
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:chart");
+    click.mockRestore();
+    vi.useRealTimers();
   });
 
   it("degrades to a stated reason instead of an empty frame", () => {

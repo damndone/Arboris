@@ -120,6 +120,25 @@ describe("sectionRegistry", () => {
     expect(ids).toContain("armaGarchResult");
   });
 
+  it("keeps generated time-series stages inspectable without terminal model actions", () => {
+    const stage = node({
+      kind: "dataset_stage",
+      stage: "model",
+      opType: "time_series.arma_garch",
+      runs: ["run-ts"],
+    } as Partial<GraphViewNode>);
+
+    const ids = sectionRegistry.filter((s) => s.shouldRender(stage)).map((s) => s.id);
+
+    expect(ids).toContain("askAi");
+    expect(ids).toContain("lineage");
+    expect(ids).not.toContain("armaGarchOperation");
+    expect(ids).not.toContain("armaGarchResult");
+    expect(ids).not.toContain("analysisLoop");
+    expect(ids).not.toContain("compareNodes");
+    expect(ids).not.toContain("compareWithSource");
+  });
+
   it("keeps the generic operation for non-time-series model nodes", () => {
     const ols = node({
       opType: "ols",

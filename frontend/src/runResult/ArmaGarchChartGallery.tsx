@@ -11,13 +11,55 @@ import {
   QQChart,
   SeriesChart,
 } from "./ArmaGarchCharts";
-import type { ArmaGarchCharts } from "./useArmaGarchCharts";
+import {
+  ARMA_GARCH_CHART_IDS,
+  type ArmaGarchCharts,
+  type ArmaGarchChartKey,
+} from "./useArmaGarchCharts";
 
 type Row = Record<string, unknown>;
 
 function rowsOf(payload: Record<string, unknown> | undefined): Row[] {
   const value = payload?.rows;
   return Array.isArray(value) ? (value as Row[]) : [];
+}
+
+function rowsStatus(payload: Record<string, unknown> | undefined): "ok" | "unavailable" | "malformed" {
+  if (payload === undefined) return "unavailable";
+  return Array.isArray(payload.rows) ? "ok" : "malformed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function display(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toPrecision(4) : "—";
+}
+
+function ModelComparisonSummary({ payload }: { payload: Record<string, unknown> }) {
+  const comparison = isRecord(payload.comparison) ? payload.comparison : {};
+  const garch = isRecord(comparison.arma_garch) ? comparison.arma_garch : {};
+  const arma = isRecord(comparison.arma_only) ? comparison.arma_only : {};
+  return (
+    <section aria-label="ARMA-GARCH vs ARMA-only validation summary" style={{ marginTop: 12 }}>
+      <h6 style={{ margin: "0 0 4px", fontSize: 12 }}>ARMA-GARCH vs ARMA-only validation summary</h6>
+      <table style={{ fontSize: 12, borderCollapse: "collapse" }}>
+        <thead><tr><th>metric</th><th>ARMA-GARCH</th><th>ARMA-only</th></tr></thead>
+        <tbody>
+          {["rmse", "mae", "interval_coverage"].map((metric) => (
+            <tr key={metric}>
+              <td>{metric}</td><td>{display(garch[metric])}</td><td>{display(arma[metric])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+        Comparable validation origins: {display(comparison.comparison_validation_n)}. Information
+        criteria are not compared across the sequential ARMA-GARCH and ARMA-only strategies.
+      </p>
+    </section>
+  );
 }
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
@@ -43,16 +85,34 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
   const seriesN = series.length || null;
   const residualN = residuals.length || null;
 
-  const anything =
-    series.length ||
-    residuals.length ||
-    rolling.length ||
-    inSample.length ||
-    rowsOf(charts.acf).length;
-  if (!anything) return null;
+  const loadedCount = Object.values(charts).filter((payload) => payload !== undefined).length;
+  if (loadedCount === 0) return null;
+  const rowArtifactKeys = (Object.keys(ARMA_GARCH_CHART_IDS) as ArmaGarchChartKey[])
+    .filter((key) => key !== "modelComparison");
+  const artifactIssues = rowArtifactKeys.flatMap((key) => {
+    const status = rowsStatus(charts[key]);
+    return status === "ok"
+      ? []
+      : [`${ARMA_GARCH_CHART_IDS[key]}: ${status === "unavailable" ? "artifact unavailable" : "malformed rows payload"}`];
+  });
+  const modelComparisonOk = isRecord(charts.modelComparison?.comparison);
+  if (!modelComparisonOk) {
+    artifactIssues.push(
+      `ts.chart.model_comparison: ${charts.modelComparison === undefined ? "artifact unavailable" : "malformed comparison payload"}`,
+    );
+  }
+  const displayedPanels = loadedCount + (charts.seriesTransform ? 1 : 0);
 
   return (
     <div data-testid="arma-garch-chart-gallery">
+      <p className="muted" style={{ fontSize: 12, margin: "6px 0" }}>
+        {loadedCount} chart artifacts loaded · {displayedPanels} displayed panels
+      </p>
+      {artifactIssues.length ? (
+        <div role="status" style={{ fontSize: 12 }}>
+          {artifactIssues.map((issue) => <div key={issue}>{issue}</div>)}
+        </div>
+      ) : null}
       <Group title="Series and transform">
         <SeriesChart title="Source series" rows={series} valueKey="source_value" />
         <SeriesChart
@@ -139,10 +199,15 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
           markKey="quantile_exception"
         />
         <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-          {exceptions.length} of {rolling.length} validation origins fell below the lower
-          conditional quantile. This is a conditional quantile, not a Value-at-Risk figure.
-          Intervals are plug-in and exclude parameter uncertainty.
+          {rowsStatus(charts.quantileExceptions) === "ok"
+            ? exceptions.length === 0
+              ? `No lower-quantile exceptions were observed across ${rolling.length} validation origins. `
+              : `${exceptions.length} of ${rolling.length} validation origins fell below the lower conditional quantile. `
+            : "Quantile-exception count unavailable. "}
+          This is a conditional quantile, not a Value-at-Risk figure. Intervals are plug-in and
+          exclude parameter uncertainty.
         </p>
+        {modelComparisonOk ? <ModelComparisonSummary payload={charts.modelComparison!} /> : null}
       </Group>
     </div>
   );

@@ -9,6 +9,7 @@ from workbench.agent.recipes.arma_garch import (
 from workbench.agent.operations import OperationRegistry
 from workbench.analysis_loop.time_series_compare import (
     build_arma_garch_compare_packet,
+    read_time_series_artifacts,
 )
 
 
@@ -67,6 +68,17 @@ def _artifacts(*, distribution: str = "normal", rmse: float = 1.2) -> dict[str, 
                 "analysis_view_hash": "view-hash",
                 "split_hash": "split-hash",
             },
+        },
+        "ts.train_validation_split": {
+            "analysis_view_hash": "view-hash",
+            "split_index": 99,
+            "split_timestamp": "2025-01-01",
+            "training_row_ids": [f"row-{index}" for index in range(99)],
+            "validation_row_ids": [f"row-{index}" for index in range(99, 119)],
+            "validation_n": 20,
+            "n_train": 99,
+            "method": "expanding_window_one_step",
+            "refit_every": 1,
         },
         "ts.arma_candidates": {
             "candidates": [
@@ -282,6 +294,44 @@ def test_time_series_compare_does_not_rank_runs_on_changed_samples() -> None:
     assert packet.conclusion_diff["classification"] is None
 
 
+def test_unrelated_project_peers_use_sample_membership_not_contract_bound_split_hash() -> None:
+    source = _artifacts()
+    peer = _artifacts(rmse=0.8)
+    peer["ts.report"]["reproducibility"]["split_hash"] = "different-contract-split-hash"
+
+    packet = build_arma_garch_compare_packet(
+        source_run_id="run-source",
+        child_run_id="run-peer",
+        source_artifacts=source,
+        child_artifacts=peer,
+        child_source_run_id=None,
+        relation="unrelated",
+    )
+
+    assert packet.compare_status == "complete"
+    assert "SOURCE_CHILD_LINEAGE_MISMATCH" not in packet.integrity_findings
+    assert "SPLIT_HASH_MISMATCH" not in packet.integrity_findings
+
+
+def test_time_series_compare_separates_sample_identity_from_split_contract() -> None:
+    source = _artifacts()
+    child = _artifacts(rmse=0.8)
+    child["ts.report"]["reproducibility"]["split_hash"] = "different-contract-split-hash"
+
+    packet = build_arma_garch_compare_packet(
+        source_run_id="run-source",
+        child_run_id="run-child",
+        source_artifacts=source,
+        child_artifacts=child,
+        child_source_run_id="run-source",
+    )
+
+    payload = packet.to_dict()
+    assert payload["data_diff"]["changed"] is False
+    assert payload["data_diff"]["split_contract_changed"] is True
+    assert "SPLIT_HASH_MISMATCH" not in packet.integrity_findings
+
+
 def _seed_time_series_run(project_root: Path, *, origins: int) -> None:
     """A completed ARMA-GARCH run sized like a real one."""
 
@@ -356,6 +406,19 @@ def _seed_time_series_run(project_root: Path, *, origins: int) -> None:
             ),
             encoding="utf-8",
         )
+
+
+def test_persisted_compare_reader_keeps_the_frozen_split_membership(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    _seed_time_series_run(project_root, origins=20)
+
+    artifacts, _metadata = read_time_series_artifacts(
+        project_root / "runs" / "run-a"
+    )
+
+    assert artifacts["ts.train_validation_split"]["training_row_ids"] == [
+        f"row-{index}" for index in range(99)
+    ]
 
 def test_the_public_view_stays_within_the_agent_tool_budget() -> None:
     """Found by a live DeepSeek turn, not by the deterministic suite.

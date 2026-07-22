@@ -90,3 +90,27 @@ def test_build_node_index_without_upload_hash_omits_stage_raw():
     )
     assert "stage:raw" not in idx
     assert "stage:cleaned" in idx
+
+
+def test_build_node_index_includes_pack_owned_stage_entries():
+    from workbench.lineage.node_index import build_node_index
+
+    extra = {
+        "stage:ts-analysis-view": {
+            "node_hash": "a" * 64,
+            "producing_stage": "arma_garch:analysis-view",
+            "cas_ref": {
+                "node_hash": "a" * 64,
+                "artifact": "artifacts/time_series/ts.analysis_view_manifest.json",
+            },
+        }
+    }
+    idx = build_node_index(
+        {"cleaning": "c" * 64},
+        normalized_y="y",
+        normalized_x=[],
+        model_results=[],
+        extra_entries=extra,
+    )
+
+    assert idx["stage:ts-analysis-view"] == extra["stage:ts-analysis-view"]

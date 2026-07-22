@@ -9,10 +9,15 @@ from time import perf_counter
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.analysis_loop_driver import forward_analysis_intent
+from ..agent.audit_export import (
+    build_agent_audit,
+    render_agent_audit_html,
+    render_agent_audit_markdown,
+)
 from ..agent.context_tools import (
     AnalysisLoopContextError,
     inspect_analysis_loop_context,
@@ -642,6 +647,24 @@ def get_agent_session(session_id: str, project_root: str) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, _events, metadata = _get_session(root, session_id)
     return _public_session(repository, session_id, metadata, load_llm_config())
+
+
+@router.get("/agent/sessions/{session_id}/audit", response_model=None)
+def get_agent_audit_export(
+    session_id: str,
+    project_root: str,
+    format: Literal["json", "markdown", "html"] = Query("json"),
+) -> dict[str, Any] | Response:
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    audit = build_agent_audit(root, session_id)
+    markdown = render_agent_audit_markdown(audit)
+    if format == "markdown":
+        return Response(markdown, media_type="text/markdown")
+    html = render_agent_audit_html(audit)
+    if format == "html":
+        return Response(html, media_type="text/html")
+    return {"audit": audit, "markdown": markdown, "html": html}
 
 
 @router.get("/agent/sessions/{session_id}/proposals")

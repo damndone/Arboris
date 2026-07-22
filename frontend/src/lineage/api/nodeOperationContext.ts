@@ -231,9 +231,21 @@ export function resolveNodeOperationContext(
   }
 
   const ownerHead = findHead(input.forest, owner.run_id);
+  // The canvas is project-wide, so a content-addressed node can be shared by
+  // unrelated rerun families.  Backend write validation is deliberately
+  // family-scoped; only that family may contribute freshness inputs to the
+  // mutation fingerprint.  Keep the project-wide refs below for display and
+  // Compare, but mirror scan_family() for the write boundary.
+  const writeFamilyRunIds = familyRunIdsForOwner(
+    input.forest.heads,
+    owner.run_id,
+  );
+  const writeCandidateRunRefs = candidate_run_refs.filter((ref) =>
+    writeFamilyRunIds.has(ref.run_id),
+  );
   const contextFingerprintInputs = stableFingerprintInput({
-    candidate_run_refs,
-    shared_by_run_ids: node.runs,
+    candidate_run_refs: writeCandidateRunRefs,
+    shared_by_run_ids: writeCandidateRunRefs.map((ref) => ref.run_id),
     owner_head_created_at: ownerHead?.createdAt ?? "",
   });
   const context_fingerprint = fingerprintParts([
@@ -260,6 +272,7 @@ export function resolveNodeOperationContext(
     `selected_run_hint: ${input.selected_run_hint ?? "none"}`,
     `selected_run_hint_source: ${source}`,
     `candidate_run_refs: ${JSON.stringify(candidate_run_refs)}`,
+    `write_candidate_run_refs: ${JSON.stringify(writeCandidateRunRefs)}`,
     `owner_resolution: ${owner_resolution}`,
     `owner_run_id: ${owner.run_id}`,
     `context_fingerprint_inputs: ${contextFingerprintInputs}`,
@@ -589,6 +602,42 @@ function resolveCapabilities(
 
 function findHead(forest: ForestViewModel, runId: string): Head | undefined {
   return forest.heads.find((head) => head.runId === runId);
+}
+
+function familyRunIdsForOwner(heads: Head[], ownerRunId: string): Set<string> {
+  const knownRunIds = new Set(heads.map((head) => head.runId));
+  const parentByRunId = new Map<string, string>();
+  const childrenByRunId = new Map<string, string[]>();
+  for (const head of heads) {
+    if (!head.rerunOf || !knownRunIds.has(head.rerunOf)) continue;
+    parentByRunId.set(head.runId, head.rerunOf);
+    const children = childrenByRunId.get(head.rerunOf) ?? [];
+    children.push(head.runId);
+    childrenByRunId.set(head.rerunOf, children);
+  }
+
+  const family = new Set<string>([ownerRunId]);
+  let ancestor = parentByRunId.get(ownerRunId);
+  while (ancestor && !family.has(ancestor)) {
+    family.add(ancestor);
+    ancestor = parentByRunId.get(ancestor);
+  }
+
+  const frontier = [...(childrenByRunId.get(ownerRunId) ?? [])].sort();
+  while (frontier.length > 0) {
+    const child = frontier.shift()!;
+    if (family.has(child)) continue;
+    family.add(child);
+    frontier.push(...[...(childrenByRunId.get(child) ?? [])].sort());
+  }
+
+  const directParent = parentByRunId.get(ownerRunId);
+  if (directParent) {
+    for (const sibling of childrenByRunId.get(directParent) ?? []) {
+      family.add(sibling);
+    }
+  }
+  return family;
 }
 
 function makeHeadSetNode(args: {

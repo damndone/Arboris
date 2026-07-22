@@ -96,6 +96,66 @@ describe("ArmaGarchControls", () => {
     });
   });
 
+  it("requires an explicit user choice before dropping missing values", () => {
+    const onChange = vi.fn();
+    const value = {
+      ...createDefaultArmaGarchValue(),
+      timeColumn: "date",
+      valueColumn: "vix",
+      transformConfirmed: true,
+    };
+    render(
+      <ArmaGarchControls
+        columns={["date", "vix"]}
+        preview={preview}
+        value={value}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByLabelText("block missing values")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("confirm drop missing values"));
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...value,
+      missingValuePolicy: "drop_missing_confirmed",
+      transformConfirmed: false,
+    });
+  });
+
+  it("shows the full-data backend recommendation instead of inferring from preview rows", () => {
+    render(
+      <ArmaGarchControls
+        columns={["date", "vix"]}
+        preview={preview}
+        transformPreflight={{
+          schema_version: 1,
+          source_row_count: 2610,
+          analysis_row_count: 2542,
+          diagnostics: [],
+          transform_profiles: {},
+          recommendation: {
+            transform_id: "log_return_pct",
+            score: 4.2,
+            reason: "Full-series stationarity evidence favors changes.",
+          },
+          transform_confirmation_required: true,
+        }}
+        transformPreflightError={null}
+        value={{
+          ...createDefaultArmaGarchValue(),
+          timeColumn: "date",
+          valueColumn: "vix",
+        }}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/System suggestion: Log difference/)).toBeInTheDocument();
+    expect(screen.getByText(/Full-series stationarity evidence/)).toBeInTheDocument();
+    expect(screen.getByText(/2,542 of 2,610 source rows/)).toBeInTheDocument();
+  });
+
   it("builds the exact backend contract for manual ARMA-GARCH", () => {
     const value = {
       ...createDefaultArmaGarchValue(),
@@ -103,6 +163,7 @@ describe("ArmaGarchControls", () => {
       valueColumn: "vix",
       transform: "log_return_pct" as const,
       transformConfirmed: true,
+      missingValuePolicy: "drop_missing_confirmed" as const,
       selectionMode: "manual" as const,
       armaP: 2,
       armaQ: 1,
@@ -122,6 +183,7 @@ describe("ArmaGarchControls", () => {
       value_column: "vix",
       transform: "log_return_pct",
       transform_confirmed: true,
+      missing_value_policy: "drop_missing_confirmed",
       selection_mode: "manual",
       arma: { p: 2, q: 1, constant_mode: "include" },
       variance: { model: "garch", garch_p: 1, garch_q: 1 },
