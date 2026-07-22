@@ -5,8 +5,8 @@ work_package: v181-agent-notebook-options
 lane: agent
 release_baseline_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
 integration_base_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
-contract_lock_commit: __C1__
-branch_start_commit: __C1__
+contract_lock_commit: 481fc2e30730395093fc0f8699843e1002d64aa3
+branch_start_commit: 481fc2e30730395093fc0f8699843e1002d64aa3
 
 owned_files:
   - backend/workbench/agent/notebook/**
