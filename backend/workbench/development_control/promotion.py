@@ -103,6 +103,60 @@ DEFAULT_PROMOTION_POLICIES = (
         verification_method="run the frozen containment test marker",
         test_marker="tests/test_frozen_containment.py",
     ),
+    # --- v1.8.1 Notebook wave lessons (registered so recurrence can promote) ---
+    # A lesson only enters the promotion pipeline once a policy declares its
+    # enforcement boundary. Registering here is the deliberate human gate the
+    # system uses instead of auto-promoting arbitrary lesson text.
+    PromotionPolicy(
+        lesson_key="packet-parsers-reject-unknown-fields",
+        rule_id="require-exact-keys-in-packet-parsers",
+        kind="mechanical",
+        scope="contract packet from_dict parsers",
+        enforcement_point="contract lock compatibility suite",
+        false_positive_risk="only applies to versioned packet parsers",
+        verification_method="run the contract lock suite that asserts unknown fields are refused",
+        test_marker="tests/contracts/test_v181_contract_lock.py",
+    ),
+    PromotionPolicy(
+        lesson_key="check-accepted-adrs-before-starting",
+        rule_id="start-devline-from-context-pack",
+        kind="behavior",
+        scope="starting any new version or lane",
+        enforcement_point="integration owner review before feature work",
+        false_positive_risk="a genuinely trivial one-file fix may not warrant a full pack",
+        verification_method="integration owner confirms a frozen Context Pack exists for the line",
+        behavior_proposal=(
+            "Refuse feature work on a devline without a frozen Context Pack, and grep "
+            "docs/superpowers/specs for accepted ADRs before starting; record the rule in "
+            "the managed AGENTS block."
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="mirror-existing-index-vocabulary",
+        rule_id="mirror-shared-data-vocabulary-across-packs",
+        kind="behavior",
+        scope="adding a model that shares data with an existing pack",
+        enforcement_point="contract sprint review",
+        false_positive_risk="only applies when two packs are meant to be compared on one series",
+        verification_method="integration owner confirms index and sample vocabulary match the peer pack",
+        behavior_proposal=(
+            "When a new model shares a dataset with an existing pack, mirror that pack's "
+            "index and sample vocabulary in the Contract Sprint before locking."
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="fixture-numbers-must-be-arithmetically-coherent",
+        rule_id="assert-fixture-arithmetic-identity",
+        kind="behavior",
+        scope="hand-authored numeric canonical fixtures",
+        enforcement_point="contract sprint review",
+        false_positive_risk="only applies to fixtures carrying derived numeric quantities",
+        verification_method="integration owner confirms an arithmetic-identity check covers the fixture",
+        behavior_proposal=(
+            "Add an arithmetic-identity assertion (e.g. AIC/BIC vs log-likelihood and k) for any "
+            "hand-authored numeric fixture before it becomes a shared lock."
+        ),
+    ),
 )
 
 
