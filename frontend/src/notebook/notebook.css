@@ -1,0 +1,243 @@
+/* Notebook surface (v1.8.1, Gate 4 visible slice).
+   Uses the workbench theme variables only; no new tokens, no new deps. */
+
+.nb-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  color: var(--label);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-y: auto;
+}
+
+.nb-label {
+  color: var(--label-tertiary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nb-surface-header,
+.nb-context-header,
+.nb-confirmation-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.nb-narrative-entry {
+  margin: 0 0 8px;
+}
+
+.nb-narrative-kind {
+  color: var(--label-tertiary);
+}
+
+/* --- option cards -------------------------------------------------- */
+
+.nb-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nb-option-card {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* rank 1 is visually distinct, but the distinction is presentational only:
+   whether an option can run is decided by the backend's status axes. */
+.nb-option-card[data-recommended="true"] {
+  border-color: var(--accent, #3b82f6);
+  border-left-width: 3px;
+}
+
+.nb-option-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nb-option-rank {
+  font-weight: 600;
+}
+
+.nb-option-axes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nb-axis {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
+.nb-axis-name {
+  font-weight: 600;
+}
+
+.nb-axis-note {
+  color: var(--label-tertiary);
+}
+
+.nb-axis[data-axis="freshness"][data-value="stale"],
+.nb-axis[data-axis="validation"][data-value="invalid"] {
+  border-color: var(--warning, #d97706);
+  color: var(--warning, #d97706);
+}
+
+.nb-option-rationale {
+  margin: 0;
+}
+
+.nb-option-pins,
+.nb-option-dimensions,
+.nb-outcome-scope,
+.nb-confirmation-scope,
+.nb-context-hash-note,
+.nb-context-trace-note {
+  color: var(--label-secondary);
+  font-size: 11px;
+  margin: 0;
+}
+
+.nb-option-blocked {
+  margin: 0;
+  color: var(--warning, #d97706);
+}
+
+.nb-option-actions,
+.nb-confirmation-actions,
+.nb-selection-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nb-button {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--label);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.nb-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nb-button-primary:not(:disabled) {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #fff;
+}
+
+/* --- states -------------------------------------------------------- */
+
+.nb-error,
+.nb-contract-failure {
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--danger, #dc2626);
+}
+
+.nb-error-code {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.nb-pending,
+.nb-empty {
+  margin: 0;
+  color: var(--label-secondary);
+}
+
+.nb-success {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.nb-success-identity,
+.nb-trace-time {
+  color: var(--label-tertiary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+/* --- visible slice ------------------------------------------------- */
+
+.nb-context-slice {
+  border: 1px dashed var(--separator, rgba(128, 128, 128, 0.4));
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nb-context-slice ul,
+.nb-context-slice ol,
+.nb-option-card ul,
+.nb-confirmation ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.nb-context-hashes div,
+.nb-context-slice li {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.nb-context-omitted-types {
+  color: var(--label-secondary);
+}
+
+.nb-context-budget-total {
+  font-weight: 600;
+}
+
+/* --- confirmation and selection ------------------------------------ */
+
+.nb-confirmation {
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nb-selection-actions {
+  border-left: 3px solid var(--accent, #3b82f6);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nb-selection-quote {
+  margin: 0;
+  font-style: italic;
+}
+
+.nb-selection-source {
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
