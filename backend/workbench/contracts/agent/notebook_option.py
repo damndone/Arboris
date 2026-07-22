@@ -256,9 +256,50 @@ class NotebookOptionRevision:
             "supersedes_option_revision": self.supersedes_option_revision,
         }
 
+    # rationale/assumptions/supersedes_option_revision have defaults, so they are
+    # optional on the wire; everything else is required. Extra keys are refused,
+    # not dropped — silently swallowing an unversioned field is ADR §11's "偷塞
+    # 未版本化字段", and it was asymmetric with the other two packets until now.
+    _OPTIONAL_KEYS = frozenset(
+        {"rationale", "assumptions", "supersedes_option_revision", "contract_version"}
+    )
+    _REQUIRED_KEYS = frozenset(
+        {
+            "option_id",
+            "option_revision",
+            "notebook_id",
+            "run_family_id",
+            "generation_context_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "typed_proposal_id",
+            "typed_proposal_revision",
+            "artifact_contract",
+            "risk_level",
+            "lifecycle_status",
+            "freshness_status",
+            "validation_status",
+            "rank",
+            "batch_id",
+            "created_at",
+        }
+    )
+
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "NotebookOptionRevision":
         payload = dict(value)
+        keys = set(payload)
+        unknown = sorted(keys - cls._REQUIRED_KEYS - cls._OPTIONAL_KEYS)
+        if unknown:
+            raise NotebookContractError(
+                f"notebook_option_revision has unknown field(s): {', '.join(unknown)}; "
+                "unversioned fields are refused, not silently dropped (ADR §11)"
+            )
+        missing = sorted(cls._REQUIRED_KEYS - keys)
+        if missing:
+            raise NotebookContractError(
+                f"notebook_option_revision is missing required field(s): {', '.join(missing)}"
+            )
         return cls(
             option_id=payload["option_id"],
             option_revision=payload["option_revision"],

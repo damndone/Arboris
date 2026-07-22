@@ -247,3 +247,15 @@ def test_ets_rejects_an_invented_time_index_semantics() -> None:
 
     with pytest.raises(ETSContractError):
         ETSResultContract.from_dict(payload)
+
+
+def test_option_revision_refuses_unknown_fields() -> None:
+    """Lane D finding F-2: the option packet must reject smuggled fields, not
+    drop them silently, matching the other two packets (ADR §11)."""
+    payload = _fixture("notebook_option_revision")
+    payload["conditional_volatility_forecast"] = 3.9
+
+    with pytest.raises(NotebookContractError) as excinfo:
+        NotebookOptionRevision.from_dict(payload)
+
+    assert "unknown field" in str(excinfo.value)
