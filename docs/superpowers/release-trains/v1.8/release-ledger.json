@@ -2,7 +2,7 @@
   "schema_version": 1,
   "release_train": "v1.8",
   "scope": "ARMA-GARCH time-series volatility workbench",
-  "overall_status": "CANDIDATE_NOT_RELEASED_INDEPENDENT_ACCEPTANCE_PENDING",
+  "overall_status": "ACCEPTED_ALL_GATES_PASS_CLEARED_FOR_RELEASE",
   "release_status": {
     "push": "NOT_PERFORMED",
     "pull_request": "NOT_PERFORMED",
@@ -10,9 +10,9 @@
     "tag": "NOT_PERFORMED"
   },
   "baseline_commit": "a81cd4927abb",
-  "final_product_commit": "LOCAL_CANDIDATE_HEAD; resolve with git rev-parse HEAD before independent acceptance",
+  "final_product_commit": "93f437d8546145da2f14e6a9e23ae396a7ba17d7",
   "branch": "workbench-v1.8",
-  "candidate_tree": "local candidate committed; no publication action is authorized",
+  "candidate_tree": "all gates pass on 93f437d; user authorized release as v1.8.0",
   "reference_semantics": "directional_or_workflow_regression",
   "acceptance_evidence": "docs/superpowers/handoffs/2026-07-21-v1.8-vix-browser-reproduction.md",
   "gates": [
@@ -88,8 +88,8 @@
     },
     {
       "id": "host_full_gate_on_release_commit",
-      "status": "BLOCKED_PENDING_FINAL_COMMIT",
-      "evidence": "Every earlier gate was measured on a commit that is no longer HEAD. The release commit must carry its own full-gate result on the same immutable tree, per the publication rule."
+      "status": "PASS_ON_RELEASE_COMMIT",
+      "evidence": "Full gate run natively on the host against the release tree at 93f437d, with no development server listening and a clean working tree: backend 2956 passed / 8 skipped, golden and invariants 23 passed with zero drift, frontend 1294 passed across 150 files, tsc --noEmit clean, GATE PASSED."
     }
   ],
   "future_non_blocking_work": [
