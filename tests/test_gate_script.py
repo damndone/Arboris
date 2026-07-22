@@ -44,6 +44,8 @@ def _run_gate(
     mode: str = "--full",
     changed_files: tuple[str, ...] = (),
     devline_control_exit: int = 0,
+    shared_modules: bool = False,
+    local_modules: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str], dict[str, Path]]:
     worktree = tmp_path / "worktree"
     common_checkout = tmp_path / "common"
@@ -78,6 +80,19 @@ exit 0
 """,
     )
     _write_executable(fake_bin / "npx", "#!/usr/bin/env bash\nexit 0\n")
+
+    # The shared-dependency preflight only engages when the common checkout
+    # actually has an install to borrow.
+    shared_path = common_checkout / "frontend" / "node_modules"
+    if shared_modules:
+        shared_path.mkdir(parents=True)
+        (shared_path / "marker").write_text("shared", encoding="utf-8")
+    local_path = worktree / "frontend" / "node_modules"
+    if local_modules == "real":
+        local_path.mkdir(parents=True)
+        (local_path / "marker").write_text("duplicate", encoding="utf-8")
+    elif local_modules == "link":
+        local_path.symlink_to(shared_path)
 
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -280,3 +295,86 @@ def test_vite_proxy_defaults_to_the_documented_backend_port() -> None:
     source = VITE_CONFIG.read_text()
 
     assert 'process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8000"' in source
+
+
+def test_gate_refuses_a_worktree_that_duplicated_the_shared_install(
+    tmp_path: Path,
+) -> None:
+    """Three worktrees each carried a full copy of frontend/node_modules.
+
+    All three had the same package-lock hash as the main checkout, so the
+    431 MB they occupied bought nothing. link-shared-deps.sh had existed for
+    this since v1.6.6; nothing enforced it, so nothing stopped an `npm install`
+    from happening inside a worktree.
+    """
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        shared_modules=True,
+        local_modules="real",
+    )
+
+    assert result.returncode == 3, result.stderr
+    assert "REFUSING" in result.stderr
+    assert "must not install their own" in result.stderr
+    # The fix has to be runnable straight from the message.
+    assert "link-shared-deps.sh" in result.stderr
+    # Refused before doing any work.
+    assert invocations == []
+
+
+def test_gate_accepts_a_worktree_linked_to_the_shared_install(tmp_path: Path) -> None:
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        shared_modules=True,
+        local_modules="link",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "REFUSING" not in result.stderr
+    assert "NOTE: this worktree has no" not in result.stderr
+    assert invocations, "a linked worktree should have gone on to run the suite"
+
+
+def test_gate_points_an_unlinked_worktree_at_the_shared_install_without_blocking(
+    tmp_path: Path,
+) -> None:
+    """Missing costs nothing to leave alone; duplicated is the waste itself."""
+    result, invocations, _ = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        shared_modules=True,
+        local_modules=None,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "NOTE: this worktree has no" in result.stderr
+    assert "REFUSING" not in result.stderr
+    assert invocations
+
+
+def test_gate_does_not_police_a_worktree_that_carries_its_own_venv(
+    tmp_path: Path,
+) -> None:
+    """A local .venv is a supported configuration, not duplication to refuse.
+
+    The first version of this preflight checked .venv too and broke the Python
+    resolution-order tests above. It was never the waste anyway: the worktrees
+    that duplicated node_modules had no .venv at all.
+    """
+    result, invocations, paths = _run_gate(
+        tmp_path,
+        local_has_pytest=True,
+        common_has_pytest=True,
+        shared_modules=True,
+        local_modules="link",
+    )
+
+    assert paths["local"].exists(), "the harness should have built a local venv"
+    assert result.returncode == 0, result.stderr
+    assert "REFUSING" not in result.stderr
+    assert all(line.startswith("local:") for line in invocations)

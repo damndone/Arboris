@@ -32,14 +32,37 @@
 2. **开着的债只放一个地方** = `followups/BACKLOG.md`。§1 是跨文档扁平总索引
    (架构债/roadmap 主线只放 pointer 行,正文在各自文档就地更新)。
    做完就删,git 历史留痕,不靠 `[x]` 勾(实践证明没人回去勾)。
-3. **版本收尾仪式**(发版 merge+tag 后,一次做完):
+3. **worktree 一律共用主 checkout 的依赖,不得自己安装**(2026-07-22 定,机器强制)。
+
+   新建 worktree 后**第一件事**:
+   ```
+   bash scripts/link-shared-deps.sh <worktree路径>
+   ```
+   它把 `.venv` 和 `frontend/node_modules` 建成指向主 checkout 的符号链接。
+   **不要在 worktree 里跑 `npm install`。**
+
+   - **强制点**:`scripts/gate.sh` 的 preflight 会检查。worktree 里若有*实体*
+     `frontend/node_modules`,gate 直接 `exit 3` 并给出可复制的修复命令;
+     没有链接则只提示不拦。主 checkout 自身豁免(它持有权威副本)。
+     契约测试见 `tests/test_gate_script.py`。
+   - **只管 `node_modules`,不管 `.venv`**:gate 支持 worktree 自带 venv
+     (解析顺序 `WORKBENCH_PYTHON` → 本地 `.venv` → 主 checkout `.venv`),
+     那是受支持的配置;而且实测浪费的从来只有 `node_modules`。
+   - **依赖漂移**:某版本新增了包,**在主 checkout 装一次**即可,所有 worktree
+     因共享自动生效。不要为此在 worktree 里单独装。
+   - **为什么定这条**:曾有三个 worktree 各自 `npm install`,每个 137–159 MB,
+     合计 **431 MB 逐字节重复**(三者 `package-lock.json` 与主 checkout 同一 hash,
+     一份都没多买到东西),而当时磁盘只剩 8.8 GB。脚本 v1.6.6 就有了,
+     但没有强制点,所以没人被拦住。
+
+4. **版本收尾仪式**(发版 merge+tag 后,一次做完):
    - 本版 spec/plan → `archive/specs/`、`archive/plans/`;
    - 旧 handoff → `archive/handoff/`,新 handoff 成为唯一 live;
    - BACKLOG:清掉本版做完的项(§3 留一行痕),复制快照进 `archive/followups/`;
    - 根目录会话草稿按需冻结/清空;
    - 检查 `docs/superpowers/` 顶层没有裸放文件(除本 README)。
-4. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
-5. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):
+5. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
+6. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):
    - `docs/releases/` = 各版 release notes,发版时写一份进这里,write-once 历史;
    - `docs/architecture/` = 长活技术参考(含被 estimator 源码注释引用的 `v1.5.8/v1.5.9/v1.6.0-IMPL-NOTES.md`
      实现配方——**是活参考不是历史,移动必须同步改代码注释里的路径**);

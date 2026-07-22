@@ -95,6 +95,70 @@ preflight_exclusive() {
   trap 'rm -f "$GATE_LOCK"' EXIT INT TERM
 }
 
+# A worktree must borrow the main checkout's frontend/node_modules, never
+# install its own.
+#
+# scripts/link-shared-deps.sh has existed for this since v1.6.6, but nothing
+# enforced it, so three worktrees quietly ran `npm install` and carried a full
+# 137-159 MB copy each -- 431 MB of byte-identical duplication, on a disk with
+# 8.8 GB free. All three had the same package-lock hash as the main checkout,
+# so not one of those copies was buying anything.
+#
+# Checked here because the gate is the one command nobody skips before a
+# handoff, a merge or a release.
+#
+# Scope is deliberately narrow. `.venv` is NOT checked: this script resolves a
+# Python in a documented order (WORKBENCH_PYTHON, then a local .venv, then the
+# common checkout's), and tests cover a worktree that carries its own -- and it
+# was never the waste anyway, since the duplicated trees had no .venv at all.
+# The main checkout is skipped because it owns the authoritative directory, and
+# the repo root is derived from git rather than hardcoded so a scratch
+# repository built in a temp directory is simply not our concern.
+preflight_shared_deps() {
+  local here common_git repo_root
+  here="$(cd "$(dirname "$0")/.." && pwd)"
+
+  # Invoked from inside the worktree rather than with `-C`, matching how the
+  # rest of this script calls git.
+  common_git="$(cd "$here" && git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  [ -n "$common_git" ] || return 0
+  case "$common_git" in
+    /*) ;;
+    *) common_git="$here/$common_git" ;;
+  esac
+  # Derived textually: the parent of the common .git directory is the main
+  # checkout. Resolving it by `cd` would depend on that directory existing,
+  # which makes the check silently skip itself rather than fail loudly.
+  repo_root="$(dirname "$common_git")"
+
+  # The main checkout owns the real directory; nothing to enforce there.
+  [ "$here" = "$repo_root" ] && return 0
+  # Without a shared install to borrow, there is nothing to point at.
+  [ -d "$repo_root/frontend/node_modules" ] || return 0
+
+  local modules="$here/frontend/node_modules"
+  if [ -d "$modules" ] && [ ! -L "$modules" ]; then
+    local size
+    size="$(du -sh "$modules" 2>/dev/null | cut -f1)"
+    echo "REFUSING: $modules is a real directory (${size:-?}), not a link to" >&2
+    echo "  the shared install. Worktrees must not install their own." >&2
+    echo "" >&2
+    echo "  Reclaim it, then re-run this script:" >&2
+    echo "    rm -rf \"$modules\"" >&2
+    echo "    bash \"$repo_root/scripts/link-shared-deps.sh\" \"$here\"" >&2
+    echo "" >&2
+    echo "  If this worktree genuinely needs different dependency versions, say" >&2
+    echo "  so in its handoff and install them in the main checkout instead --" >&2
+    echo "  every worktree shares one authoritative install by design." >&2
+    exit 3
+  fi
+
+  if [ ! -e "$modules" ]; then
+    echo "NOTE: this worktree has no frontend/node_modules. Link the shared one:" >&2
+    echo "    bash \"$repo_root/scripts/link-shared-deps.sh\" \"$here\"" >&2
+  fi
+}
+
 run_stage() {
   local label="$1"
   shift
@@ -307,6 +371,7 @@ run_quick() {
   fi
 }
 
+preflight_shared_deps
 preflight_exclusive
 
 if [ "$mode" = "quick" ]; then
