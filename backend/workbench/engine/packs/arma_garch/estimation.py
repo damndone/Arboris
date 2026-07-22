@@ -14,6 +14,7 @@ from workbench.contracts.common.envelope import freeze_json, thaw_json
 from workbench.contracts.model.arma_garch import ArmaGarchAnalysisContract
 from workbench.engine.packs.arma_garch.arma import ArmaCandidateResult
 from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError, diagnostic
+from workbench.engine.packs.arma_garch.statistics import modelling_warnings
 from workbench.engine.packs.arma_garch.volatility import (
     PersistenceResult,
     VarianceCandidateResult,
@@ -374,7 +375,7 @@ def fit_joint_ar_garch(
     with runtime_warnings.catch_warnings(record=True) as caught:
         runtime_warnings.simplefilter("always")
         fitted = model.fit(disp="off", show_warning=False)
-    captured.extend(str(item.message) for item in caught)
+    captured.extend(modelling_warnings(caught))
     converged = fitted.convergence_flag == 0
     parameters = finite_parameters(fitted.params)
     validation = validate_variance_parameters(

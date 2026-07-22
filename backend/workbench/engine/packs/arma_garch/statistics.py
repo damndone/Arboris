@@ -9,6 +9,36 @@ import numpy as np
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 
+# Warnings about library upkeep, not about this model. statsmodels emits a
+# NumPy shape-assignment DeprecationWarning on every ARIMA fit; captured
+# verbatim it was repeated on each candidate, filled a large share of the
+# Agent's tool-output budget, and read to a user as if the model itself had
+# a problem. These belong in our own maintenance signal, not in a candidate
+# record.
+_LIBRARY_UPKEEP_WARNINGS = (
+    DeprecationWarning,
+    PendingDeprecationWarning,
+    FutureWarning,
+    ImportWarning,
+    ResourceWarning,
+)
+
+
+def modelling_warnings(
+    caught: "list[runtime_warnings.WarningMessage]",
+) -> list[str]:
+    """Keep model-relevant warnings, in order, without repeats."""
+
+    messages: list[str] = []
+    for item in caught:
+        if issubclass(item.category, _LIBRARY_UPKEEP_WARNINGS):
+            continue
+        text = str(item.message)
+        if text not in messages:
+            messages.append(text)
+    return messages
+
+
 def calculate_aicc(
     *,
     aic: float,

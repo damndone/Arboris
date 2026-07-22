@@ -19,6 +19,7 @@ from workbench.engine.packs.arma_garch.errors import ArmaGarchDiagnostic, diagno
 from workbench.engine.packs.arma_garch.statistics import (
     calculate_aicc,
     ljung_box_results,
+    modelling_warnings,
 )
 from workbench.engine.packs.arma_garch.transforms import TRANSFORMED_VALUE_COLUMN
 
@@ -185,7 +186,7 @@ def fit_arma_candidate(
             ).fit()
             raw_ar_roots = fitted.arroots
             raw_ma_roots = fitted.maroots
-        captured.extend(str(item.message) for item in caught)
+        captured.extend(modelling_warnings(caught))
 
         convergence = _convergence_details(fitted.mle_retvals)
         converged = bool(convergence.get("converged", True))

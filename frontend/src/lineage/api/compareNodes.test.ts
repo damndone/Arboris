@@ -178,4 +178,63 @@ describe("buildNodeComparison", () => {
     );
     expect(result.total_changed).toBe(0);
   });
+
+  // A model node carries its whole configuration under one `model_options` key.
+  // Diffed as a single value it rendered as two ~900-character JSON blobs joined
+  // by an arrow, and the reader had to find the changed keys by eye.
+  it("diffs nested model options at the leaf that changed, not the whole object", () => {
+    const base = {
+      model_options: {
+        arma: { p: 1, q: 1, constant_mode: "exclude", auto_max_p: 3 },
+        variance: { model: "garch", garch_p: 1, garch_q: 1 },
+        transform: "log_return_pct",
+        validation: { validation_n: 20, refit_every: 1 },
+      },
+    };
+    const changed = {
+      model_options: {
+        arma: { p: null, q: null, constant_mode: "auto", auto_max_p: 3 },
+        variance: { model: "auto", garch_p: null, garch_q: null },
+        transform: "log_return_pct",
+        validation: { validation_n: 20, refit_every: 1 },
+      },
+    };
+
+    const result = buildNodeComparison(
+      ctx({ runId: "a", params: base }),
+      ctx({ runId: "b", params: changed }),
+    );
+
+    const ids = result.sections.params.items.map((item) => item.field_id);
+    expect(ids).toEqual([
+      "model_options.arma.constant_mode",
+      "model_options.arma.p",
+      "model_options.arma.q",
+      "model_options.variance.garch_p",
+      "model_options.variance.garch_q",
+      "model_options.variance.model",
+    ]);
+    // Untouched leaves stay out of the diff entirely.
+    expect(ids).not.toContain("model_options.transform");
+    expect(ids).not.toContain("model_options.validation.validation_n");
+    expect(ids).not.toContain("model_options.arma.auto_max_p");
+
+    const constantMode = result.sections.params.items.find(
+      (item) => item.field_id === "model_options.arma.constant_mode",
+    );
+    expect(constantMode?.old_value).toBe("exclude");
+    expect(constantMode?.new_value).toBe("auto");
+    // The count now means "leaves that changed" rather than "objects touched".
+    expect(result.total_changed).toBe(6);
+  });
+
+  it("keeps arrays and empty objects whole rather than exploding them", () => {
+    const result = buildNodeComparison(
+      ctx({ runId: "a", params: { spec: { order: [1, 0, 1], extras: {} } } }),
+      ctx({ runId: "b", params: { spec: { order: [2, 0, 1], extras: {} } } }),
+    );
+    const ids = result.sections.params.items.map((item) => item.field_id);
+    expect(ids).toEqual(["spec.order"]);
+    expect(result.sections.params.items[0].new_value).toEqual([2, 0, 1]);
+  });
 });

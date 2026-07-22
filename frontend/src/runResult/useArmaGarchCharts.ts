@@ -14,6 +14,7 @@ export const ARMA_GARCH_CHART_IDS = {
   pacf: "ts.chart.pacf",
   residualSeries: "ts.chart.residual_series",
   residualAcf: "ts.chart.residual_acf",
+  residualPacf: "ts.chart.residual_pacf",
   squaredResidualAcf: "ts.chart.squared_residual_acf",
   qq: "ts.chart.qq",
   conditionalVolatility: "ts.chart.conditional_volatility",

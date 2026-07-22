@@ -88,6 +88,7 @@ _REQUIRED_LOGICAL_ARTIFACTS = {
     "ts.chart.pacf",
     "ts.chart.residual_series",
     "ts.chart.residual_acf",
+    "ts.chart.residual_pacf",
     "ts.chart.squared_residual_acf",
     "ts.chart.qq",
     "ts.chart.conditional_volatility",
@@ -128,6 +129,7 @@ _NODE_BY_ARTIFACT = {
     "ts.chart.pacf": "stage:ts-mean-selection",
     "ts.chart.residual_series": "stage:ts-mean-selection",
     "ts.chart.residual_acf": "stage:ts-mean-selection",
+    "ts.chart.residual_pacf": "stage:ts-mean-selection",
     "ts.chart.squared_residual_acf": "stage:ts-mean-selection",
     "ts.chart.qq": "stage:ts-volatility-selection",
     "ts.chart.conditional_volatility": "stage:ts-volatility-selection",
@@ -992,6 +994,12 @@ def _chart_payloads(
         },
         "ts.chart.residual_acf": {
             "rows": mean_diagnostics.get("residual_acf", [])
+        },
+        # The partial autocorrelation of the mean residuals was computed and
+        # registered in ts.final_diagnostics but never charted, so a reader
+        # following the Stata `pac ehat` step had ACF without its PACF.
+        "ts.chart.residual_pacf": {
+            "rows": mean_diagnostics.get("residual_pacf", [])
         },
         "ts.chart.squared_residual_acf": {
             "rows": mean_diagnostics.get("squared_residual_acf", [])

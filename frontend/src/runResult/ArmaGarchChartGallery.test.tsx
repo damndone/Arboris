@@ -40,6 +40,7 @@ const CHARTS: ArmaGarchCharts = {
     rows: Array.from({ length: 300 }, (_, i) => ({ position: i, value: Math.sin(i) })),
   },
   residualAcf: { rows: correlogramRows() },
+  residualPacf: { rows: correlogramRows() },
   squaredResidualAcf: { rows: correlogramRows() },
   qq: {
     rows: Array.from({ length: 300 }, (_, i) => ({
@@ -125,6 +126,7 @@ describe("ArmaGarchChartGallery", () => {
       "Squared standardized residuals (clustering should be gone)",
       "Squared mean-model residuals (volatility clustering, before GARCH)",
       "Absolute move against conditional volatility",
+      "Residual PACF (should sit inside the band)",
       "Standardized-residual QQ plot",
       "In-sample 95% intervals: ARMA-GARCH vs ARMA-only",
       "Rolling one-step validation intervals",
@@ -132,7 +134,7 @@ describe("ArmaGarchChartGallery", () => {
       expect(screen.getByRole("img", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByText("ARMA-GARCH vs ARMA-only validation summary")).toBeInTheDocument();
-    expect(screen.getByText(/17 chart artifacts loaded · 18 displayed panels/)).toBeInTheDocument();
+    expect(screen.getByText(/18 chart artifacts loaded · 19 displayed panels/)).toBeInTheDocument();
   });
 
   it("says so when a long series is thinned rather than showing it as complete", () => {

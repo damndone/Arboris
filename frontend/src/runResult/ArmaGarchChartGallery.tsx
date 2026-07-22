@@ -132,6 +132,11 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
           rows={rowsOf(charts.residualAcf)}
           observationCount={residualN}
         />
+        <CorrelogramChart
+          title="Residual PACF (should sit inside the band)"
+          rows={rowsOf(charts.residualPacf)}
+          observationCount={residualN}
+        />
         <SeriesChart
           title="Squared mean-model residuals (volatility clustering, before GARCH)"
           rows={rowsOf(charts.squaredResidualSeries)}

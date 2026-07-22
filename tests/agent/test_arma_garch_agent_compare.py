@@ -461,6 +461,106 @@ def test_the_public_view_stays_within_the_agent_tool_budget() -> None:
         assert field not in view["arma_vs_garch"]
 
 
+def test_wide_candidate_tables_cannot_push_the_view_over_budget() -> None:
+    """The third route to the same failure, found by a live DeepSeek turn.
+
+    The candidate tables were bounded by a fixed row count, which cannot bound
+    a variable-width payload. On an automatic bounded search the mean and
+    volatility tables carried enough per-row detail -- including a library
+    DeprecationWarning repeated verbatim on every candidate -- to put the whole
+    summary at 14,388 characters, and the Agent again received nothing instead
+    of a shortened table.
+    """
+
+    import json
+
+    from workbench.agent.recipes.arma_garch import build_arma_garch_public_result_view
+
+    artifacts = dict(_artifacts())
+    noise = "x" * 400
+    mean_candidates = [
+        {
+            "candidate_id": f"arma-p{p}-q{q}-n",
+            "p": p,
+            "q": q,
+            "constant": False,
+            "nobs": 2521,
+            "converged": True,
+            "stationary": True,
+            "invertible": True,
+            "parameter_count": p + q + 1,
+            "aic": 17574.227303884865,
+            "aicc": 17574.23683904577,
+            "bic": 17591.72453666643,
+            "failure_code": "ARMA_RESIDUAL_AUTOCORRELATION",
+            "warnings": [noise],
+        }
+        for p in range(5)
+        for q in range(5)
+    ]
+    artifacts["ts.arma_candidates"] = {"candidates": mean_candidates}
+    artifacts["ts.volatility_candidates"] = {
+        "searches": [
+            {
+                "mean_candidate_id": "arma-p1-q1-n",
+                "candidates": [
+                    {
+                        "candidate_id": f"variance-arch-p{order}-normal",
+                        "variance_model": "arch",
+                        "p": order,
+                        "converged": True,
+                        "parameter_count": order + 1,
+                        "aic": 17226.780750940023,
+                        "aicc": 17226.790289890738,
+                        "bic": 17244.27679348154,
+                        "warnings": [noise],
+                    }
+                    for order in range(1, 11)
+                ],
+            }
+        ]
+    }
+
+    view = build_arma_garch_public_result_view(artifacts)
+    serialized = json.dumps(view, ensure_ascii=False, sort_keys=True)
+
+    assert len(serialized) <= 12288, (
+        f"public view is {len(serialized)} chars against the 12288 tool budget"
+    )
+    # Shortened, not emptied: the reader still gets candidates to reason about,
+    # and is told how many were left in the artifact.
+    assert view["mean_candidates"], "the table was emptied rather than shortened"
+    assert view["volatility_candidates"]
+    assert view["candidate_counts"] == {"mean": 25, "volatility": 10}
+    assert view["candidate_rows_omitted"]["mean"] > 0
+
+
+def test_library_upkeep_warnings_never_reach_a_candidate_record() -> None:
+    """statsmodels emits a NumPy DeprecationWarning on every ARIMA fit.
+
+    Captured verbatim it was repeated on each candidate, and it reads to a user
+    as though the model had a problem. Convergence and numerical warnings are
+    real findings and must survive.
+    """
+
+    import warnings
+
+    from workbench.engine.packs.arma_garch.statistics import modelling_warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        warnings.warn("Setting the shape on a NumPy array", DeprecationWarning)
+        warnings.warn("pandas will change", FutureWarning)
+        warnings.warn("Maximum Likelihood optimization failed to converge", UserWarning)
+        warnings.warn("Maximum Likelihood optimization failed to converge", UserWarning)
+        warnings.warn("overflow encountered in exp", RuntimeWarning)
+
+    assert modelling_warnings(caught) == [
+        "Maximum Likelihood optimization failed to converge",
+        "overflow encountered in exp",
+    ]
+
+
 def test_the_inspect_tool_response_fits_its_budget_not_just_the_view(
     tmp_path: Path,
 ) -> None:

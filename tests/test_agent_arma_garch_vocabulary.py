@@ -220,6 +220,49 @@ def test_patch_shape_states_the_one_level_object_contract() -> None:
     assert "old/new" in vocabulary["patch_shape"]
 
 
+def test_the_patch_shape_example_is_executed_not_merely_written() -> None:
+    """Found by a live DeepSeek turn, not by the deterministic suite.
+
+    `fields[].path` advertises dotted paths like `arma.p`, and the model echoed
+    that form back as flat keys; the first `propose_operation` failed, it
+    diagnosed the nesting itself and recovered on the retry, but paid a round
+    trip each time. The example that now removes the guess is only worth
+    carrying if both halves stay true, so run them through the real validator.
+    """
+    from workbench.agent.recipes.arma_garch import (
+        validate_arma_garch_model_options_patch,
+    )
+
+    example = build_arma_garch_option_vocabulary()["patch_shape_example"]
+    current = {**BASE, **MANUAL_GARCH}
+
+    # The correct half must produce exactly the model it claims to.
+    contract = validate_arma_garch_model_options_patch(
+        current_contract=current,
+        patch=example["correct_nested_objects"],
+    )
+    assert contract["arma"]["p"] == 1
+    assert contract["arma"]["q"] == 1
+    assert contract["arma"]["constant_mode"] == "exclude"
+    assert contract["variance"]["model"] == "garch"
+    assert contract["selection_mode"] == "manual"
+
+    # The wrong half must actually be wrong: dotted keys are not contract fields.
+    with pytest.raises(ArmaGarchContractError):
+        validate_arma_garch_model_options_patch(
+            current_contract=current,
+            patch=example["wrong_flat_dotted_keys"],
+        )
+
+    # And the sibling-preservation claim in the note must hold.
+    preserved = validate_arma_garch_model_options_patch(
+        current_contract=current,
+        patch={"arma": {"q": 2}},
+    )
+    assert preserved["arma"]["p"] == 1, "patching one nested key dropped a sibling"
+    assert preserved["arma"]["q"] == 2
+
+
 def test_prohibited_claims_are_separate_from_unsupported_operations() -> None:
     """Found by a live DeepSeek turn, not by the deterministic suite.
 

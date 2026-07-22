@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -10,6 +11,10 @@ from .arma_garch_vocabulary import LABELLING_INVARIANTS
 
 
 _CANDIDATE_LIMIT = 8
+# Per candidate table. The tool declares a 12,288-byte output budget and the
+# non-candidate sections of a real summary run to roughly 6,000; two tables of
+# this size leave usable headroom on either side.
+_CANDIDATE_TABLE_BUDGET = 2000
 _MEAN_FIELDS = (
     "candidate_id",
     "p",
@@ -55,16 +60,48 @@ def _rows(value: object) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
+def _reportable(value: object) -> bool:
+    """Is this field worth spending tool-output budget on?
+
+    ``failure_code: null`` and ``warnings: []`` appear on every converged
+    candidate and say nothing; across a bounded candidate table they were a
+    large fraction of the payload. ``False`` and ``0`` are kept -- a candidate
+    that did not converge, or an order of zero, is a real answer.
+    """
+    if value is None:
+        return False
+    return not (isinstance(value, (list, tuple, dict, str)) and len(value) == 0)
+
+
 def _bounded_rows(
     values: object,
     *,
     allowed_fields: tuple[str, ...],
+    max_bytes: int = _CANDIDATE_TABLE_BUDGET,
 ) -> tuple[list[dict[str, Any]], int]:
+    """Bound a candidate table by rows *and* by serialized size.
+
+    A fixed row count cannot bound a variable-width payload: on an automatic
+    search the two candidate tables carried enough per-row detail to push the
+    whole summary past the tool-output budget, and the Agent then received
+    nothing at all rather than a shortened table. Rows are added while they
+    fit; whatever is left is counted in ``candidate_rows_omitted``, and the
+    full table stays in the artifact.
+    """
     rows = _rows(values)
-    bounded = [
-        {field: row[field] for field in allowed_fields if field in row}
-        for row in rows[:_CANDIDATE_LIMIT]
-    ]
+    bounded: list[dict[str, Any]] = []
+    used = 0
+    for row in rows[:_CANDIDATE_LIMIT]:
+        projected = {
+            field: row[field]
+            for field in allowed_fields
+            if field in row and _reportable(row[field])
+        }
+        size = len(json.dumps(projected, ensure_ascii=False)) + 1
+        if bounded and used + size > max_bytes:
+            break
+        bounded.append(projected)
+        used += size
     return bounded, max(len(rows) - len(bounded), 0)
 
 

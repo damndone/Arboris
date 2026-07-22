@@ -424,8 +424,33 @@ def build_arma_garch_option_vocabulary() -> dict[str, Any]:
         "patch_shape": (
             "changes.model_options is a one-level patch over the node's current "
             "contract; nested sections merge key-wise, so name only the keys you "
-            "change. Never an old/new field diff."
+            "change. Never an old/new field diff. Field paths below are written "
+            "in dotted form for reading, but a patch must nest them as objects: "
+            "the dotted path is not a key. See patch_shape_example."
         ),
+        # `fields[].path` advertises dotted paths such as `arma.p`, and a live
+        # turn echoed that form straight back as a flat key. The first
+        # propose_operation call failed, the model diagnosed it and recovered on
+        # the retry -- but it paid a round trip every time. Showing the wrong
+        # and right shape side by side costs a few bytes and removes the guess.
+        "patch_shape_example": {
+            "goal": "Set a manual ARMA(1,1) with no constant and a GARCH(1,1).",
+            "wrong_flat_dotted_keys": {
+                "arma.p": 1,
+                "arma.q": 1,
+                "arma.constant_mode": "exclude",
+                "variance.model": "garch",
+            },
+            "correct_nested_objects": {
+                "selection_mode": "manual",
+                "arma": {"p": 1, "q": 1, "constant_mode": "exclude"},
+                "variance": {"model": "garch", "garch_p": 1, "garch_q": 1},
+            },
+            "note": (
+                "Sibling keys you do not name are preserved: patching "
+                "{'arma': {'q': 2}} keeps the existing arma.p."
+            ),
+        },
         "fields": [item for item in fields if item.get("agent_editable") is not False],
         # Named, not described: the Agent only needs to know not to patch them.
         "server_owned_fields": [

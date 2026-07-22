@@ -31,13 +31,54 @@ export function emptySection<T>(summary: string): CompareSection<T> {
   return { changed: false, total_changed: 0, items: [], summary };
 }
 
-/** Diff two flat records (params, metrics). Numeric fields carry a signed delta. */
+const MAX_FLATTEN_DEPTH = 6;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Expand nested objects into dotted leaf paths so a diff lands on the field
+ * that actually changed.
+ *
+ * A model node carries its whole configuration under a single `model_options`
+ * key. Diffed as one value, any edit rendered as two ~900-character JSON blobs
+ * joined by an arrow, and the reader had to spot the changed keys by eye. Leaf
+ * paths also make the reported change count mean something: switching a mean
+ * model reads as the handful of orders and modes it really touched.
+ *
+ * Arrays stay whole — index-wise diffs of an order vector are noisier than the
+ * vector itself.
+ */
+export function flattenRecord(
+  record: Record<string, unknown>,
+  prefix = "",
+  depth = 0,
+): Record<string, unknown> {
+  const flat: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (isPlainObject(value) && depth < MAX_FLATTEN_DEPTH) {
+      const nested = flattenRecord(value, path, depth + 1);
+      // An empty object is itself the value; keep it visible rather than drop it.
+      if (Object.keys(nested).length === 0) flat[path] = value;
+      else Object.assign(flat, nested);
+    } else {
+      flat[path] = value;
+    }
+  }
+  return flat;
+}
+
+/** Diff two records (params, metrics), expanding nested objects to leaf paths. */
 export function recordSection(
   label: string,
-  left: Record<string, unknown>,
-  right: Record<string, unknown>,
+  leftRaw: Record<string, unknown>,
+  rightRaw: Record<string, unknown>,
   limit: number = DEFAULT_SECTION_LIMIT,
 ): CompareSection<FieldDiff> {
+  const left = flattenRecord(leftRaw);
+  const right = flattenRecord(rightRaw);
   const keys = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
   const diffs = keys.flatMap((key): FieldDiff[] => {
     if (!(key in left)) {

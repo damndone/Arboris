@@ -32,6 +32,7 @@ from workbench.engine.packs.arma_garch.errors import ArmaGarchDiagnostic, diagno
 from workbench.engine.packs.arma_garch.statistics import (
     calculate_aicc,
     ljung_box_results,
+    modelling_warnings,
 )
 
 
@@ -442,7 +443,7 @@ def _fit_configured_arch_candidate(
     with runtime_warnings.catch_warnings(record=True) as caught:
         runtime_warnings.simplefilter("always")
         fitted = model.fit(disp="off", show_warning=False)
-    captured.extend(str(item.message) for item in caught)
+    captured.extend(modelling_warnings(caught))
 
     convergence = convergence_details(fitted)
     converged = fitted.convergence_flag == 0
