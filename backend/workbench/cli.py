@@ -250,5 +250,53 @@ def run(
     typer.echo(f"Lineage: {_lineage_url(project_root, run_id)}", err=True)
 
 
+run_family_app = typer.Typer(help="Run-family identity maintenance.")
+app.add_typer(run_family_app, name="run-family")
+
+
+@run_family_app.command("migrate")
+def run_family_migrate(project_root: Path) -> None:
+    """Persist every existing run's family, keeping each id byte-identical.
+
+    After this the project is strict: a newly created run that declares no
+    family is refused instead of silently deriving one from ancestry.
+    """
+
+    from .lineage.run_family import migrate_project_families
+
+    result = migrate_project_families(project_root)
+    created = result["created_families"]
+    typer.echo(
+        f"migrated {len(result['migrated_run_ids'])} run(s), "
+        f"{len(created)} new family record(s)"
+    )
+    for family_id in created:
+        typer.echo(f"  + {family_id}")
+    typer.echo(f"project is now strict (cutover {result['migrated_at']})", err=True)
+
+
+@run_family_app.command("verify")
+def run_family_verify(project_root: Path) -> None:
+    """Report runs whose persisted family disagrees with their ancestry.
+
+    Read-only. A divergence is never repaired automatically: two sources
+    disagree about which analysis line a run belongs to, and guessing would
+    silently rewrite lineage that other records already point at.
+    """
+
+    from .lineage.run_family import verify_project_families
+
+    errors = verify_project_families(project_root)
+    runs_root = Path(project_root) / "runs"
+    checked = len([p for p in runs_root.iterdir() if p.is_dir()]) if runs_root.is_dir() else 0
+    if not errors:
+        typer.echo(f"ok: {checked} run(s) consistent")
+        return
+    typer.echo(f"{len(errors)} inconsistency/ies across {checked} run(s):")
+    for error in errors:
+        typer.echo(f"  ! {error}")
+    raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()
