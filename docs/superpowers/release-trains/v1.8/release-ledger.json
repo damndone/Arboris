@@ -58,8 +58,24 @@
     },
     {
       "id": "human_readable_compare_and_agent_handoff",
-      "status": "PASS_FOCUSED_TESTS",
-      "evidence": "Compare now separates unchanged sample membership from a changed split contract and renders a compact reader summary while retaining raw JSON. Agent audit exports aggregate parent session, operation record and child terminal state as JSON, Markdown or HTML; 38 focused backend and 31 focused frontend tests passed before final integration rerun."
+      "status": "PASS_AFTER_BROWSER_REPRODUCTION_FIX",
+      "evidence": "The durable time-series Compare separates unchanged sample membership from a changed split contract and renders a compact reader summary while retaining raw JSON (analysis_loop/time_series_compare.py). A browser reproduction on 2026-07-22 showed that claim did not cover the surface a user actually reaches: the inline node-versus-node Compare in the node drawer rendered two roughly 900-character model_options JSON blobs joined by an arrow and reported two differences, because a model node carries its whole configuration under one key and the diff was taken on that single value. lineage/api/nodeDiff.ts now expands nested objects into dotted leaf paths before diffing; the same comparison renders eight named rows and the count reports leaves changed. Verified live in the browser, not only by test. Agent audit exports aggregate parent session, operation record and child terminal state as JSON, Markdown or HTML; those remain covered by focused tests only.",
+      "residual_risk": "The Agent audit export half of this gate has no real-run evidence. It was not exercised by the browser reproduction."
+    },
+    {
+      "id": "stata_dofile_browser_reproduction",
+      "status": "PASS_REAL_RUN_WITH_LIVE_PROVIDER",
+      "evidence": "Two runs on the user's original 2610-row VIXCLS file through the visible UI with real DeepSeek V4 Pro. Data handling matches the do-file: 68 missing observations explicitly excluded leaving 2542, trading-observation index, log-difference-percent transform, source left unchanged. Within the do-file's own eight ARMA candidates BIC selects n11, the ARMA(1,1) with no constant the do-file chose, and AICc minus AIC is at most 0.010 as its own check anticipated. The variance candidate set matches ARCH(0) plus ARCH(1..10) plus GARCH(1,1). Diagnostics line up including ARCH-LM at lag 10 and the HW8 exceedance rate of 131 of 2520 standardized residuals; persistence 0.7752322643586442 and half-life 2.7225739649169802 match hand calculation. Parameters are bit-identical to the 2026-07-21 VIX run, so determinism holds across projects. An ai_report artifact citing 80 of 80 facts was generated and persisted, closing the evidence gap independent acceptance had recorded against report_export_single_source. Four defects found and fixed under browser_reproduction_findings.",
+      "known_divergences_not_defects": [
+        "Automatic mode selects ARMA(2,1) by an AICc-led basis where the do-file's stated rule is BIC-first, which selects ARMA(1,1). Reproducing the do-file requires manual orders or an Agent instruction.",
+        "The rolling window defaults to 20 origins against the do-file's last 20 percent, roughly 508 refits. validation_n is user-settable; this is a performance tradeoff, not a contract difference.",
+        "Under sequential estimation ARMA-only and ARMA-GARCH share the same conditional mean exactly, so their MAE and RMSE are identical and only interval width differs. Stata's joint arch command would give slightly different mean parameters. This is the already-declared directional_or_workflow_regression limit."
+      ]
+    },
+    {
+      "id": "browser_reproduction_findings",
+      "status": "PASS_ALL_FIXED",
+      "evidence": "Four defects, none visible to the deterministic suite because each needed a live provider turn or a real automatic search. Inline Compare readability, fixed as described under human_readable_compare_and_agent_handoff. inspect_time_series_summary exceeded its tool-output budget for the third time by a third route: statsmodels emits a NumPy shape-assignment DeprecationWarning on every ARIMA fit and it was captured verbatim into every candidate record, both wasting budget and reading to a user as a model problem, and separately a fixed row cap cannot bound a variable-width payload; library-upkeep warnings are now filtered and deduped at the three capture sites and candidate tables are bounded by bytes as well as rows, taking the automatic run from 14388 to 11797 against a 12288 budget with the table shortened rather than emptied. propose_operation failed on its first call every turn because fields[].path advertises dotted paths such as arma.p while a patch must nest them as objects; the vocabulary now carries a worked example whose correct and incorrect halves are both executed against the real validator so it cannot drift. The mean residuals' partial autocorrelation was computed and registered but never charted, leaving a reader following Stata's pac ehat without it; it is now a chart artifact and a gallery panel. Gate after the fixes: backend 2955 passed / 8 skipped, golden 23 zero drift, frontend 1294 across 150 files, tsc clean, GATE PASSED."
     },
     {
       "id": "independent_step_5_acceptance",
@@ -68,8 +84,13 @@
     },
     {
       "id": "release_document_reconciliation",
-      "status": "RECONCILED_TO_ACCEPTANCE",
-      "evidence": "This ledger now records the independent acceptance outcome, the host full gate on the final candidate, and the delivery projection fixes. Publication remains unauthorized: no push, pull request, merge or tag has been performed or requested."
+      "status": "RECONCILED_TO_BROWSER_REPRODUCTION",
+      "evidence": "This ledger records the independent acceptance outcome, the host full gate, the delivery projection fixes, and the 2026-07-22 Stata do-file browser reproduction with its four fixes. Publication remains unauthorized: no push, pull request, merge or tag has been performed or requested."
+    },
+    {
+      "id": "host_full_gate_on_release_commit",
+      "status": "BLOCKED_PENDING_FINAL_COMMIT",
+      "evidence": "Every gate above was measured on a commit that is no longer HEAD. The last full gate ran on 54a9879 and passed with backend 2955 / 8 skipped, golden 23 zero drift, frontend 1294, tsc clean. Whatever commit is finally proposed for release must carry its own full-gate result on the same immutable tree, per the publication rule."
     }
   ],
   "future_non_blocking_work": [
