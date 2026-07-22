@@ -22,9 +22,20 @@ Statistical semantics locked here, before any implementation (ADR §8.2):
    against an ARMA-GARCH AIC is prohibited: different likelihoods, different
    transformations. ComparePacket must return `comparability: restricted` with
    `reason_code: ETS_ARMA_LIKELIHOOD_NOT_COMPARABLE`.
-4. **Missing data.** Complete-case on the modelled series, counted and reported;
-   an interior gap is blocking, because exponential smoothing over an implicit
-   gap silently changes the time index.
+4. **Missing data and time-index semantics.** Complete-case on the modelled
+   series, counted and reported. An interior gap in a `regular_calendar` series
+   is blocking, because exponential smoothing over an implicit gap silently
+   changes the time index.
+
+   `time_index_semantics` (added in 1.1) mirrors the ARMA-GARCH vocabulary
+   exactly, and for the same reason: a trading-day series such as VIXCLS has a
+   weekend "gap" on every calendar week, which is not missing data at all. The
+   1.0 contract had no such field, so ETS would have blocked on the very dataset
+   v1.8.0 shipped with — making the Notebook's alternative model unusable
+   precisely where an alternative is wanted. Under
+   `business_or_trading_observations` or `observation_order`, spacing is the
+   observation sequence and calendar gaps are not defects; interior *missing
+   values* remain blocking under every setting.
 5. **Convergence.** The optimizer status is mapped to a standardized code;
    non-convergence is a blocking diagnostic, not a warning with numbers shown.
 6. **No volatility claims.** ETS models the conditional mean. It must never be
@@ -40,7 +51,11 @@ from typing import Any
 
 from ..common.envelope import ContractError, require_exact_keys
 
-ETS_CONTRACT_VERSION = "1.0"
+ETS_CONTRACT_VERSION = "1.1"
+# §5.3: a minor bump must keep old consumer fixtures valid. A 1.0 packet is a
+# 1.1 packet that omitted an optional field, so it is accepted and defaulted --
+# refusing it would make "backward compatible" a claim rather than a property.
+SUPPORTED_CONTRACT_VERSIONS = ("1.0", "1.1")
 ETS_MODEL_TYPE = "time_series.ets"
 
 ERROR_COMPONENTS = ("add", "mul")
@@ -48,6 +63,19 @@ TREND_COMPONENTS = ("add", "mul", None)
 SEASONAL_COMPONENTS = ("add", "mul", None)
 
 CONVERGENCE_CODES = ("converged", "max_iterations", "failed")
+
+# Identical vocabulary to ArmaGarchAnalysisContract.time_index_semantics. Two
+# models compared on one series must agree about what its index means, or the
+# comparison is between different samples wearing the same name.
+TIME_INDEX_SEMANTICS = (
+    "regular_calendar",
+    "business_or_trading_observations",
+    "observation_order",
+)
+# 1.0 packets carry no such field. Defaulting to regular_calendar preserves
+# their exact behaviour (ADR-PD-001 §5.3: a new optional field must define its
+# missing-value behaviour and keep old consumer fixtures valid).
+DEFAULT_TIME_INDEX_SEMANTICS = "regular_calendar"
 
 # Reason codes a compare adapter may return for this model. Locked so the UI and
 # the agent can render them without inventing text.
@@ -143,15 +171,22 @@ class ETSResultContract:
     convergence_code: str
     fit_method: str
     result_identity: str
+    time_index_semantics: str = DEFAULT_TIME_INDEX_SEMANTICS
     contract_version: str = ETS_CONTRACT_VERSION
 
     def __post_init__(self) -> None:
-        if self.contract_version != ETS_CONTRACT_VERSION:
-            raise ETSContractError(f"contract_version must be {ETS_CONTRACT_VERSION}")
+        if self.contract_version not in SUPPORTED_CONTRACT_VERSIONS:
+            raise ETSContractError(
+                f"contract_version must be one of {list(SUPPORTED_CONTRACT_VERSIONS)}"
+            )
         if self.model_type != ETS_MODEL_TYPE:
             raise ETSContractError(f"model_type must be {ETS_MODEL_TYPE}")
         _require_str(self.endog, "endog")
         _require_str(self.result_identity, "result_identity")
+        if self.time_index_semantics not in TIME_INDEX_SEMANTICS:
+            raise ETSContractError(
+                f"time_index_semantics must be one of {list(TIME_INDEX_SEMANTICS)}"
+            )
         if self.convergence_code not in CONVERGENCE_CODES:
             raise ETSContractError(f"convergence_code must be one of {list(CONVERGENCE_CODES)}")
         if type(self.n_obs) is not int or self.n_obs <= 0:
@@ -183,12 +218,16 @@ class ETSResultContract:
             "convergence_code": self.convergence_code,
             "fit_method": self.fit_method,
             "result_identity": self.result_identity,
+            "time_index_semantics": self.time_index_semantics,
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ETSResultContract":
+        # time_index_semantics is optional (1.0 packets predate it), so it is
+        # stripped before the exact-key check rather than weakening that check.
+        required_view = {k: v for k, v in value.items() if k != "time_index_semantics"}
         require_exact_keys(
-            value,
+            required_view,
             {
                 "contract_version",
                 "model_type",
@@ -223,6 +262,9 @@ class ETSResultContract:
             convergence_code=value["convergence_code"],
             fit_method=value["fit_method"],
             result_identity=value["result_identity"],
+            time_index_semantics=value.get(
+                "time_index_semantics", DEFAULT_TIME_INDEX_SEMANTICS
+            ),
             contract_version=value["contract_version"],
         )
 
@@ -230,6 +272,9 @@ class ETSResultContract:
 __all__ = [
     "COMPARE_REASON_CODES",
     "CONVERGENCE_CODES",
+    "DEFAULT_TIME_INDEX_SEMANTICS",
+    "SUPPORTED_CONTRACT_VERSIONS",
+    "TIME_INDEX_SEMANTICS",
     "ETS_CONTRACT_VERSION",
     "ETS_MODEL_TYPE",
     "ETSContractError",

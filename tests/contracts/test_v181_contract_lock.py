@@ -190,8 +190,60 @@ def test_ets_seasonal_requires_periods() -> None:
 
 
 def test_ets_reports_its_exclusions() -> None:
-    """Sample changes must be separable from parameter changes in Compare."""
-    result = ETSResultContract.from_dict(_fixture("ets_result"))
+    """Sample changes must be separable from parameter changes in Compare.
+
+    The canonical fixture is a clean trading-day series (n_excluded == 0); this
+    injects exclusions to prove they round-trip, since Compare must distinguish
+    "the sample shrank" from "the estimate moved".
+    """
+    payload = _fixture("ets_result")
+    payload["n_excluded"] = 3
+    payload["exclusion_reasons"] = {"missing_endog": 3}
+
+    result = ETSResultContract.from_dict(payload)
 
     assert result.n_excluded == 3
     assert result.exclusion_reasons == {"missing_endog": 3}
+
+
+# ----------------------------------------------------------------------
+# ETSResultContract 1.0 -> 1.1 backward compatibility (ADR §5.3)
+# ----------------------------------------------------------------------
+
+
+def test_ets_1_0_packet_without_time_index_still_validates() -> None:
+    """A minor bump must keep old consumer fixtures valid, not just claim to.
+
+    The 1.0 fixture predates time_index_semantics; it must load and default to
+    regular_calendar, preserving 1.0 behaviour exactly.
+    """
+    from workbench.contracts.model.ets import DEFAULT_TIME_INDEX_SEMANTICS
+
+    payload = _fixture("ets_result")
+    payload["contract_version"] = "1.0"
+    payload.pop("time_index_semantics", None)
+
+    result = ETSResultContract.from_dict(payload)
+
+    assert result.contract_version == "1.0"
+    assert result.time_index_semantics == DEFAULT_TIME_INDEX_SEMANTICS
+
+
+def test_ets_trading_day_semantics_is_expressible() -> None:
+    """A trading-day series is not missing data on weekends (the VIXCLS case)."""
+    payload = _fixture("ets_result")
+    payload["contract_version"] = "1.1"
+    payload["time_index_semantics"] = "business_or_trading_observations"
+
+    result = ETSResultContract.from_dict(payload)
+
+    assert result.time_index_semantics == "business_or_trading_observations"
+
+
+def test_ets_rejects_an_invented_time_index_semantics() -> None:
+    payload = _fixture("ets_result")
+    payload["contract_version"] = "1.1"
+    payload["time_index_semantics"] = "whenever"
+
+    with pytest.raises(ETSContractError):
+        ETSResultContract.from_dict(payload)

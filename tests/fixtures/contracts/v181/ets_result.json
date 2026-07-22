@@ -1,5 +1,5 @@
 {
-  "contract_version": "1.0",
+  "contract_version": "1.1",
   "model_type": "time_series.ets",
   "specification": {
     "error": "add",
@@ -11,8 +11,8 @@
   },
   "endog": "VIXCLS",
   "n_obs": 2610,
-  "n_excluded": 3,
-  "exclusion_reasons": {"missing_endog": 3},
+  "n_excluded": 0,
+  "exclusion_reasons": {},
   "params": {
     "smoothing_level": 0.4213,
     "smoothing_trend": 0.0521,
@@ -26,5 +26,6 @@
   "sigma2": 3.7412,
   "convergence_code": "converged",
   "fit_method": "mle",
-  "result_identity": "ets:VIXCLS:ETS(A,Ad,N):mle:completecase:sha256:1f2e"
+  "result_identity": "ets:VIXCLS:ETS(A,Ad,N):mle:completecase:sha256:1f2e",
+  "time_index_semantics": "business_or_trading_observations"
 }
