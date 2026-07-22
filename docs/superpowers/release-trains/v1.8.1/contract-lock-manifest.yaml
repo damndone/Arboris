@@ -6,6 +6,14 @@ release_baseline_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
 release_baseline_published: false
 integration_base_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
 contract_lock_commit: 481fc2e30730395093fc0f8699843e1002d64aa3
+# The contracts, fixtures and compatibility tests all live in 481fc2e above.
+# A manifest cannot contain its own hash, so stamping that sha in required a
+# second, documentation-only commit. Lanes therefore branch from the tip of
+# integration/v1.8.1 at wave start rather than from 481fc2e itself. ADR-PD-001
+# 4.2 allows branch_start_commit != contract_lock_commit when the reason is
+# recorded; this is the reason. No contract byte differs between the two.
+branch_start_commit: see lane_branch_start below (doc-only commits above C1)
+lane_branch_start_recorded_in: docs/superpowers/release-trains/v1.8.1/lane-branch-start.txt
 
 contracts:
   notebook_option: "1.0"
