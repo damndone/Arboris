@@ -36,6 +36,7 @@ from ...lineage.run_family import (
 )
 from ..context_compiler import (
     NotebookPlanningContextV1,
+    compile_notebook_planning_context,
     freshness_dependency_fingerprint,
     generation_context_hash,
 )
@@ -166,6 +167,9 @@ class NotebookService:
         created_by: str,
         from_run_id: str | None = None,
         notebook_id: str | None = None,
+        analysis_contract: Mapping[str, Any] | None = None,
+        user_focus: Mapping[str, Any] | None = None,
+        available_capabilities: Sequence[str] | None = None,
     ) -> Notebook:
         """Create a notebook, binding it to exactly one run family (DEC-NB-001).
 
@@ -197,6 +201,9 @@ class NotebookService:
             created_at=_now(),
             active_head_run_id=active_head_run_id,
             focused_run_id=active_head_run_id,
+            analysis_contract=dict(analysis_contract or {}),
+            user_focus=dict(user_focus or {}),
+            available_capabilities=tuple(available_capabilities or ()),
         )
         return self.store.create_notebook(notebook)
 
@@ -218,6 +225,71 @@ class NotebookService:
             run_family_id=notebook.run_family_id,
             requested_run_family_id=run_family_id,
         )
+
+    def set_focus(
+        self, notebook_id: str, *, user_focus: Mapping[str, Any]
+    ) -> Notebook:
+        """Record what the user is now looking at (spec §4.2 upstream input).
+
+        `user_focus` is a freshness dependency: changing it between a read and a
+        confirm is exactly the race the fail-closed gate exists to catch. The
+        write goes to the notebook log, never to any option log, so it does not
+        touch an option's append-only revision history.
+        """
+
+        self.get_notebook(notebook_id)  # existence check
+        self.store.append_notebook_state(
+            notebook_id, {"user_focus": dict(user_focus), "reason": "set_focus"}
+        )
+        return self.get_notebook(notebook_id)
+
+    def compile_context(self, notebook_id: str) -> NotebookPlanningContextV1:
+        """Compile the bounded planning context for this notebook (Gate 2).
+
+        Reads the notebook's persisted premises (analysis contract, user focus,
+        capabilities, active head) and the options that already exist, then hands
+        them to the one deterministic compiler. The existing options ride in the
+        generation view but never in the freshness fingerprint — that separation
+        is what lets a batch of siblings stay fresh (spec §4.0).
+        """
+
+        notebook = self.get_notebook(notebook_id)
+        return compile_notebook_planning_context(
+            self.project_root,
+            notebook_id=notebook.notebook_id,
+            run_family_id=notebook.run_family_id,
+            active_head_run_id=notebook.active_head_run_id,
+            analysis_contract=dict(notebook.analysis_contract),
+            user_focus=dict(notebook.user_focus),
+            existing_option_summaries=self._existing_option_summaries(notebook_id),
+            available_capabilities=list(notebook.available_capabilities),
+        )
+
+    def _existing_option_summaries(self, notebook_id: str) -> list[dict[str, Any]]:
+        """A deterministic, content-only digest of every option already stored.
+
+        No timestamps and no freshness verdict: the summary is hashed into the
+        generation context, so anything volatile here would make the generation
+        hash move for reasons unrelated to the analysis premises.
+        """
+
+        summaries: list[dict[str, Any]] = []
+        for option_id in self.store.option_ids(notebook_id):
+            view = self.store.read_option(notebook_id, option_id)
+            current = view.current_revision
+            summaries.append(
+                {
+                    "option_id": option_id,
+                    "batch": view.batch_id,
+                    "rank": view.rank,
+                    "option_revision": current.option_revision,
+                    "lifecycle_status": view.lifecycle_status,
+                    "canonical_proposal_hash": (
+                        view.current_stored_revision.canonical_proposal_hash
+                    ),
+                }
+            )
+        return summaries
 
     def set_active_head(
         self,

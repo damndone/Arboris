@@ -89,6 +89,66 @@ def test_notebook_created_without_any_run_persists_family_and_null_head(tmp_path
     )
 
 
+def test_a_runless_notebook_can_compile_generate_and_confirm_with_a_null_head(
+    tmp_path: Path,
+) -> None:
+    """§9.1 criterion 1, end to end: no run has to exist for the loop to work.
+
+    This is the acceptance the run-family lane pins with an xfail(strict=True)
+    for "notebook without a run"; here it is proven positively on the owned
+    surface. A notebook with zero runs must still compile a bounded context,
+    generate an option against it and confirm that option — the head only moves
+    when a real run is committed, which never happens on this path.
+    """
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(
+        title="Runless",
+        created_by="user_1",
+        analysis_contract={"revision": 1, "target": "y"},
+        user_focus={"selected_text_hash": "sha256:seed"},
+        available_capabilities=["arma_garch_1"],
+    )
+
+    assert (project / "runs").is_dir()
+    assert list((project / "runs").iterdir()) == []
+
+    context = service.compile_context(notebook.notebook_id)
+    assert context.active_head_run_id is None
+    assert context.run_family_id == notebook.run_family_id
+    assert context.active_run_summary == {}
+    assert context.artifact_summaries == []
+    assert context.source_manifest == []
+    assert context.user_focus == {"selected_text_hash": "sha256:seed"}
+
+    (option,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[_draft(1, covariance="robust", proposal_id="p1")],
+    )
+
+    execution = service.confirm(
+        notebook.notebook_id,
+        option.option_id,
+        option_revision=1,
+        proposal_id="p1",
+        proposal_revision=1,
+        context=service.compile_context(notebook.notebook_id),
+    )
+
+    assert execution.run_id is None
+    assert execution.freshness_dependency_fingerprint == (
+        option.freshness_dependency_fingerprint
+    )
+    reloaded = NotebookService(project).get_notebook(notebook.notebook_id)
+    assert reloaded.active_head_run_id is None
+    assert reloaded.last_attempt_run_id is None
+    assert (
+        service.option_view(notebook.notebook_id, option.option_id).lifecycle_status
+        == "executing"
+    )
+
+
 def test_notebook_created_from_a_run_binds_that_runs_persisted_family(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     make_run(project, "run_001")

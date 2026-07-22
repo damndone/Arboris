@@ -14,7 +14,7 @@ which a mutable `typed_proposal JSON` column cannot do (spec §3.8).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -68,6 +68,9 @@ class Notebook:
     active_head_run_id: str | None = None
     focused_run_id: str | None = None
     last_attempt_run_id: str | None = None
+    analysis_contract: dict[str, Any] = field(default_factory=dict)
+    user_focus: dict[str, Any] = field(default_factory=dict)
+    available_capabilities: tuple[str, ...] = ()
     schema_version: str = NOTEBOOK_SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,6 +86,9 @@ class Notebook:
             "active_head_run_id": self.active_head_run_id,
             "focused_run_id": self.focused_run_id,
             "last_attempt_run_id": self.last_attempt_run_id,
+            "analysis_contract": dict(self.analysis_contract),
+            "user_focus": dict(self.user_focus),
+            "available_capabilities": list(self.available_capabilities),
         }
 
     @classmethod
@@ -97,6 +103,9 @@ class Notebook:
             active_head_run_id=value.get("active_head_run_id"),
             focused_run_id=value.get("focused_run_id"),
             last_attempt_run_id=value.get("last_attempt_run_id"),
+            analysis_contract=dict(value.get("analysis_contract") or {}),
+            user_focus=dict(value.get("user_focus") or {}),
+            available_capabilities=tuple(value.get("available_capabilities") or ()),
             schema_version=str(value.get("schema_version", NOTEBOOK_SCHEMA_VERSION)),
         )
 
@@ -248,6 +257,9 @@ class NotebookStore:
                     last_attempt_run_id=record.get(
                         "last_attempt_run_id", notebook.last_attempt_run_id
                     ),
+                    user_focus=dict(record["user_focus"])
+                    if "user_focus" in record
+                    else notebook.user_focus,
                 )
             return notebook
 
