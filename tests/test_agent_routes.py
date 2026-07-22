@@ -270,6 +270,48 @@ def test_agent_audit_export_states_when_no_child_terminal_result_exists(tmp_path
     assert "terminal result is absent" in response.text
 
 
+def test_agent_audit_html_is_a_document_not_markdown_in_a_pre(tmp_path: Path) -> None:
+    """Found by a live browser session, not by the deterministic suite.
+
+    The HTML format was the Markdown rendering escaped inside one ``<pre>``, so
+    a reader who chose HTML got a wall of monospace text with literal ``#`` and
+    ``**`` still in it. Nothing tested the rendering, only the JSON and
+    Markdown payloads, so "exports as JSON, Markdown or HTML" stayed true by
+    name while the third format carried none of the value.
+    """
+    from test_agent_navigation import build_confirmed_rerun_fixture
+
+    fixture = build_confirmed_rerun_fixture(tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            f"/agent/sessions/{fixture.chain_session_id}/audit",
+            params={"project_root": str(fixture.project_root), "format": "html"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    body = response.text
+
+    # Structure a reader can move around, rather than one preformatted block.
+    assert "<h1>Agent audit</h1>" in body
+    assert "<h2>Transcript" in body
+    assert "<h2>Operations" in body
+    assert "<pre>" not in body.split("<h2>Transcript")[0], (
+        "the header region should not be a preformatted dump"
+    )
+
+    # Markdown syntax must have been rendered away, not escaped and shipped.
+    assert "# Agent audit" not in body
+    assert "## Transcript" not in body
+
+    # The evidence itself still has to be there.
+    assert fixture.child_run_id in body
+    assert fixture.child_session_id in body
+
+    # Long machine payloads are folded, not dropped and not inlined whole.
+    assert "<details>" in body
+
+
 def test_agent_messages_include_durable_navigation_refs(tmp_path: Path) -> None:
     from test_agent_navigation import build_confirmed_rerun_fixture
 

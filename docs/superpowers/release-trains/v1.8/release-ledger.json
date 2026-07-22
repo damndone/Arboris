@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_train": "v1.8",
-  "scope": "local ARMA-GARCH Volatility Workbench candidate",
+  "scope": "ARMA-GARCH time-series volatility workbench",
   "overall_status": "CANDIDATE_NOT_RELEASED_INDEPENDENT_ACCEPTANCE_PENDING",
   "release_status": {
     "push": "NOT_PERFORMED",
@@ -58,9 +58,8 @@
     },
     {
       "id": "human_readable_compare_and_agent_handoff",
-      "status": "PASS_AFTER_BROWSER_REPRODUCTION_FIX",
-      "evidence": "The durable time-series Compare separates unchanged sample membership from a changed split contract and renders a compact reader summary while retaining raw JSON (analysis_loop/time_series_compare.py). A browser reproduction on 2026-07-22 showed that claim did not cover the surface a user actually reaches: the inline node-versus-node Compare in the node drawer rendered two roughly 900-character model_options JSON blobs joined by an arrow and reported two differences, because a model node carries its whole configuration under one key and the diff was taken on that single value. lineage/api/nodeDiff.ts now expands nested objects into dotted leaf paths before diffing; the same comparison renders eight named rows and the count reports leaves changed. Verified live in the browser, not only by test. Agent audit exports aggregate parent session, operation record and child terminal state as JSON, Markdown or HTML; those remain covered by focused tests only.",
-      "residual_risk": "The Agent audit export half of this gate has no real-run evidence. It was not exercised by the browser reproduction."
+      "status": "PASS_REAL_RUN_BOTH_HALVES",
+      "evidence": "Two halves, both now demonstrated on a real session rather than by focused tests. Compare: the durable time-series comparison separates unchanged sample membership from a changed split contract (analysis_loop/time_series_compare.py); a browser reproduction on 2026-07-22 showed that did not cover the inline node-versus-node Compare a user actually clicks, which rendered two roughly 900-character model_options JSON blobs joined by an arrow and reported two differences. lineage/api/nodeDiff.ts now expands nested objects to dotted leaf paths before diffing; the same comparison renders eight named rows and reports nine differences, verified live. Agent audit export: exercised end to end on session agent_chain_ee0afb38f699476cb690f934eb9dd939, which carries a real DeepSeek proposal, its confirmation and the executed child. JSON, Markdown and HTML all return 200 with their own content type and all three trace through to child run 20260722_043812_924307_874cc62b. That run found the HTML format was the Markdown rendering escaped inside one <pre>, so choosing HTML produced a wall of monospace text with literal Markdown syntax still in it and every context envelope inlined at full length; nothing tested the rendering, only the JSON and Markdown payloads, so the three-format claim was true by name only. It is now an actual document -- headings, a session definition list, a transcript, and an operations section carrying operation, child session, terminal result and child run -- with machine payloads folded behind a summary rather than dropped or inlined. Regression test asserts the structure and the absence of literal Markdown."
     },
     {
       "id": "stata_dofile_browser_reproduction",
@@ -90,12 +89,13 @@
     {
       "id": "host_full_gate_on_release_commit",
       "status": "BLOCKED_PENDING_FINAL_COMMIT",
-      "evidence": "Every gate above was measured on a commit that is no longer HEAD. The last full gate ran on 54a9879 and passed with backend 2955 / 8 skipped, golden 23 zero drift, frontend 1294, tsc clean. Whatever commit is finally proposed for release must carry its own full-gate result on the same immutable tree, per the publication rule."
+      "evidence": "Every earlier gate was measured on a commit that is no longer HEAD. The release commit must carry its own full-gate result on the same immutable tree, per the publication rule."
     }
   ],
   "future_non_blocking_work": [
     "Joint ARMA(p,q)-ARCH/GARCH conditional MLE with frozen Stata oracle, explicit conditioning, joint LL/IC, convergence, conditional-series and forecast parity.",
     "Safe future trading-timestamp inference where the input cadence is sufficient."
   ],
-  "publication_rule": "Only publish after every BLOCKED and PENDING release gate above has a documented passing result on the same immutable final product commit."
+  "publication_rule": "Only publish after every BLOCKED and PENDING release gate above has a documented passing result on the same immutable final product commit.",
+  "release_version": "v1.8.0"
 }

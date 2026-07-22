@@ -160,14 +160,134 @@ def render_agent_audit_markdown(audit: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_agent_audit_html(audit: dict[str, object]) -> str:
-    markdown = render_agent_audit_markdown(audit)
+# A transcript entry longer than this is a machine payload -- a context
+# envelope or a tool result -- not prose someone reads top to bottom. Those are
+# folded away so the shape of the session stays visible.
+_INLINE_CONTENT_LIMIT = 300
+
+_AUDIT_STYLE = """
+:root { color-scheme: light dark; }
+body { margin: 0 auto; padding: 2rem 1.25rem; max-width: 60rem;
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; padding-bottom: .25rem;
+  border-bottom: 1px solid rgba(128,128,128,.35); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .75rem; margin: .5rem 0 0; }
+dt { font-weight: 600; }
+dd { margin: 0; }
+ol.entries { list-style: none; padding: 0; margin: 0; }
+ol.entries > li { padding: .5rem 0; border-bottom: 1px solid rgba(128,128,128,.18); }
+time { font-variant-numeric: tabular-nums; opacity: .7; margin-right: .5rem; }
+.label { font-weight: 600; margin-right: .4rem; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre { overflow-x: auto; padding: .6rem .75rem; border-radius: 6px;
+  background: rgba(128,128,128,.12); white-space: pre-wrap; word-break: break-word; }
+details > summary { cursor: pointer; opacity: .8; }
+.op { margin: 0 0 1rem; padding: .75rem 1rem; border-radius: 6px;
+  background: rgba(128,128,128,.09); }
+.empty { opacity: .7; font-style: italic; }
+"""
+
+
+def _content_html(content: object) -> str:
+    """Render entry content inline, folding machine payloads behind a summary."""
+    if content is None or content == "":
+        return '<span class="empty">(no text content)</span>'
+    text = str(content)
+    if len(text) <= _INLINE_CONTENT_LIMIT and "\n" not in text:
+        return escape(text)
     return (
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Agent audit</title>"
-        "</head><body><pre>"
-        f"{escape(markdown)}"
-        "</pre></body></html>"
+        f"<details><summary>{len(text)} characters</summary>"
+        f"<pre>{escape(text)}</pre></details>"
     )
+
+
+def render_agent_audit_html(audit: dict[str, object]) -> str:
+    """Render the audit as an actual HTML document.
+
+    This used to be the Markdown rendering escaped inside a single ``<pre>``,
+    so choosing HTML got a wall of monospace text with literal ``#`` and ``**``
+    still in it, and every context envelope inlined at full length. Same
+    evidence, in a document a reader can move around: headings, a transcript
+    list, and long machine payloads folded away rather than dropped.
+    """
+    session = dict(audit["session"])
+    parts = [
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>Agent audit</title>",
+        f"<style>{_AUDIT_STYLE}</style></head><body>",
+        "<h1>Agent audit</h1>",
+        "<dl>",
+        f"<dt>Session</dt><dd><code>{escape(str(session['session_id']))}</code></dd>",
+        f"<dt>Chain</dt><dd><code>{escape(str(session.get('chain_id')))}</code></dd>",
+    ]
+    for key in ("role", "status"):
+        if session.get(key) is not None:
+            parts.append(
+                f"<dt>{escape(key.title())}</dt>"
+                f"<dd>{escape(str(session[key]))}</dd>"
+            )
+    parts.append(
+        f"<dt>Raw record</dt><dd><code>{escape(str(session.get('raw_reference')))}"
+        "</code></dd></dl>"
+    )
+
+    entries = list(audit["entries"])
+    parts.append(f"<h2>Transcript ({len(entries)})</h2>")
+    if not entries:
+        parts.append('<p class="empty">No transcript entries.</p>')
+    else:
+        parts.append('<ol class="entries">')
+        for entry in entries:
+            item = dict(entry)
+            label = item.get("role") or item.get("message_type") or item["entry_type"]
+            parts.append(
+                "<li>"
+                f"<time>{escape(str(item['created_at']))}</time>"
+                f'<span class="label">{escape(str(label))}</span>'
+                f"{_content_html(item.get('content'))}"
+                "</li>"
+            )
+        parts.append("</ol>")
+
+    operations = list(audit["operations"])
+    parts.append(f"<h2>Operations ({len(operations)})</h2>")
+    if not operations:
+        parts.append('<p class="empty">No operations were recorded.</p>')
+    for operation in operations:
+        item = dict(operation)
+        terminal = dict(item["terminal_result"])
+        parts.append(
+            '<div class="op">'
+            f"<div><code>{escape(str(item['operation_id']))}</code> / "
+            f"<code>{escape(str(item['record_id']))}</code> — "
+            f"<strong>{escape(str(item['status']))}</strong></div><dl>"
+        )
+        child = item.get("child_session")
+        if isinstance(child, dict):
+            parts.append(
+                "<dt>Child session</dt>"
+                f"<dd><code>{escape(str(child.get('session_id')))}</code></dd>"
+            )
+        parts.append(
+            f"<dt>Terminal result</dt><dd>{escape(str(terminal.get('status')))} "
+            f"(source: {escape(str(terminal.get('source')))})</dd>"
+        )
+        if terminal.get("reason"):
+            parts.append(
+                f"<dt>Reason</dt><dd>{escape(str(terminal['reason']))}</dd>"
+            )
+        outputs = terminal.get("outputs")
+        if isinstance(outputs, dict) and outputs.get("target_run_id"):
+            parts.append(
+                "<dt>Child run</dt>"
+                f"<dd><code>{escape(str(outputs['target_run_id']))}</code></dd>"
+            )
+        parts.append("</dl></div>")
+
+    parts.append("</body></html>")
+    return "".join(parts)
 
 
 __all__ = [
