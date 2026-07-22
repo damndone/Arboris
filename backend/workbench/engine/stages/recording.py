@@ -159,9 +159,20 @@ class RecordingStage:
                 ),
                 stage=Stage.MODEL,
             )
+            primary_parent_node_id = ctx.artifacts.get(
+                "_primary_model_parent_node_id", "stage:cleaned"
+            )
+            if not isinstance(primary_parent_node_id, str) or not primary_parent_node_id:
+                raise ValueError(
+                    "_primary_model_parent_node_id must be a non-empty string"
+                )
             _recorder.record_edge(
-                edge_id="e:cleaned-model-primary",
-                source_id="stage:cleaned",
+                edge_id=(
+                    "e:cleaned-model-primary"
+                    if primary_parent_node_id == "stage:cleaned"
+                    else "e:pack-model-primary"
+                ),
+                source_id=primary_parent_node_id,
                 target_id=f"model:{primary_model_id}",
                 op=f"{primary_model_type}.fit",
             )
@@ -254,6 +265,7 @@ class RecordingStage:
                 normalized_y=normalized_y, normalized_x=normalized_x,
                 model_results=model_results,
                 upload_hash=ctx.artifacts.get("_upload_hash", ""),
+                extra_entries=ctx.artifacts.get("_pack_node_index_entries"),
             )
 
         return ctx

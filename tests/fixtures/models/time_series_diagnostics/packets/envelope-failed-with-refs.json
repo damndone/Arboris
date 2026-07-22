@@ -1,0 +1,6 @@
+{
+  "operation_status": "failed",
+  "reason_code": "EXECUTOR_TIMEOUT",
+  "facts_packet_ref": "facts-fixture-regular-grid-v1",
+  "assessment_packet_ref": "assessment-fixture-regular-grid-v1"
+}

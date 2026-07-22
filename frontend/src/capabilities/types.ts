@@ -1,8 +1,8 @@
-export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV" | "DID";
+export type ModelGroup = "auto" | "Linear" | "Binary" | "Count" | "Panel" | "GLM" | "IV" | "DID" | "Causal" | "Time Series";
 
 export interface EditableControlSpec {
   key: string;
-  kind: "radio" | "select" | "multiselect" | "slider" | "text" | "textarea" | "toggle" | "columns";
+  kind: "radio" | "select" | "multiselect" | "slider" | "text" | "textarea" | "toggle" | "columns" | "json";
   label?: string;
   role?: string;
   required?: boolean;

@@ -1,0 +1,59 @@
+{
+  "fixture_id": "c1-policy-facts-matrix-v1",
+  "cases": [
+    {
+      "name": "hard_input_violation_has_priority",
+      "facts": {"has_hard_input_violation": true, "required_component_unavailable": true, "adf_outcome": "undetermined", "kpss_outcome": "undetermined", "trend_status": "completed", "trend_evidence": "present", "trend_advisory_preconditions": "true"},
+      "expected_conclusion": "not_suitable",
+      "expected_advisories": []
+    },
+    {
+      "name": "required_component_unavailable",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": true, "adf_outcome": "reject", "kpss_outcome": "fail_to_reject", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "inconclusive",
+      "expected_advisories": []
+    },
+    {
+      "name": "adf_undetermined",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "undetermined", "kpss_outcome": "fail_to_reject", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "inconclusive",
+      "expected_advisories": []
+    },
+    {
+      "name": "kpss_undetermined",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "reject", "kpss_outcome": "undetermined", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "inconclusive",
+      "expected_advisories": []
+    },
+    {
+      "name": "matching_rejects",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "reject", "kpss_outcome": "reject", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "inconclusive",
+      "expected_advisories": []
+    },
+    {
+      "name": "opposing_reject_and_fail_to_reject",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "reject", "kpss_outcome": "fail_to_reject", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "suitable_with_caveats",
+      "expected_advisories": []
+    },
+    {
+      "name": "differencing_advisory",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "fail_to_reject", "kpss_outcome": "reject", "trend_status": "completed", "trend_evidence": "absent", "trend_advisory_preconditions": "false"},
+      "expected_conclusion": "suitable_with_caveats",
+      "expected_advisories": ["CONSIDER_DIFFERENCING"]
+    },
+    {
+      "name": "trend_handling_advisory",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "reject", "kpss_outcome": "fail_to_reject", "trend_status": "completed", "trend_evidence": "present", "trend_advisory_preconditions": "true"},
+      "expected_conclusion": "suitable_with_caveats",
+      "expected_advisories": ["REVIEW_TREND_HANDLING"]
+    },
+    {
+      "name": "unknown_trend_precondition_is_not_affirmative",
+      "facts": {"has_hard_input_violation": false, "required_component_unavailable": false, "adf_outcome": "reject", "kpss_outcome": "fail_to_reject", "trend_status": "completed", "trend_evidence": "present", "trend_advisory_preconditions": "unknown"},
+      "expected_conclusion": "suitable_with_caveats",
+      "expected_advisories": []
+    }
+  ]
+}

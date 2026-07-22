@@ -46,9 +46,7 @@ export function LineageChainSection({ node }: { node: GraphViewNode }) {
         summary: pathNode.label,
         depth: pathNode.depth,
       }))
-    : resolvedContext
-      ? []
-      : null;
+    : null;
   const chain: ChainItem[] =
     contextChain ?? snapshot.lineagePathTo(node.nodeKey);
   // lineagePathTo always includes the target as the last element.

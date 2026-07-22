@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "release_train": "v1.8",
+  "scope": "ARMA-GARCH time-series volatility workbench",
+  "overall_status": "ACCEPTED_ALL_GATES_PASS_CLEARED_FOR_RELEASE",
+  "release_status": {
+    "push": "NOT_PERFORMED",
+    "pull_request": "NOT_PERFORMED",
+    "merge": "NOT_PERFORMED",
+    "tag": "NOT_PERFORMED"
+  },
+  "baseline_commit": "a81cd4927abb",
+  "final_product_commit": "1c1f7eb6f5a0cb13ca8b5b38ade68d7c2552bb2f",
+  "branch": "workbench-v1.8",
+  "candidate_tree": "all gates pass on 93f437d; user authorized release as v1.8.0",
+  "reference_semantics": "directional_or_workflow_regression",
+  "acceptance_evidence": "docs/superpowers/handoffs/2026-07-21-v1.8-vix-browser-reproduction.md",
+  "gates": [
+    {
+      "id": "vix_browser_workflow",
+      "status": "PASS_SCOPE_EVIDENCE",
+      "evidence": "Original 2,610-row VIXCLS file, explicit exclusion of 68 missing values, manual and bounded-auto flows, 17 structured chart artifacts/18 panels, DeepSeek V4 Pro report and Agent recovery, durable Compare without integrity findings."
+    },
+    {
+      "id": "directional_stata_semantics",
+      "status": "PASS_WITH_EXPLICIT_LIMIT",
+      "evidence": "The workflow is directional/workflow regression only. MA order above zero is sequential, not Stata joint ARMA-GARCH MLE; joint LL/IC and parameter parity are not accepted."
+    },
+    {
+      "id": "automated_gate_prior_to_latest_delivery_followup",
+      "status": "PASS_HISTORICAL_NOT_FINAL_CANDIDATE",
+      "evidence": "Browser handoff records backend 2940 passed / 8 skipped, golden 23 with zero drift, frontend 1288 passed and TypeScript clean; the later Table follow-up recorded frontend 1289 and TypeScript clean. A final single host full gate on the final immutable candidate remains required."
+    },
+    {
+      "id": "host_full_gate_on_final_candidate",
+      "status": "PASS_INDEPENDENT_HOST_RUN",
+      "evidence": "Independent acceptance ran the full gate natively on the host, with no nested sandbox and no development server listening, so the environment-only sandbox failures recorded earlier did not apply. On 63c2e41 plus docs: backend 2947 passed / 8 skipped, golden 23 with zero drift, frontend 1292 passed across 150 files, tsc --noEmit clean, GATE PASSED. Re-run after the delivery fixes below: backend 2952 passed / 8 skipped, golden 23 with zero drift, frontend 1292, tsc clean, GATE PASSED."
+    },
+    {
+      "id": "report_export_single_source",
+      "status": "PASS_REAL_VIX_RUN",
+      "evidence": "VIX run 20260722_011832_368932_550d4414 generated a run-owned ARMA-GARCH HTML (6.4 KB) and PDF (9.4 KB) from the registered ts.* facts. Browser AI reports now persist as immutable ai_report_<id> artifacts with their fact snapshot; historical browser-only reports are honestly not retroactively reconstructed."
+    },
+    {
+      "id": "xlsx_nonempty_arma_garch_export",
+      "status": "PASS_AFTER_INDEPENDENT_ACCEPTANCE_FIX",
+      "evidence": "VIX run 20260722_011832_368932_550d4414 generated an 11 KB workbook with all eight sheets present and non-empty. Independent acceptance found non-empty was not sufficient: three sheets were materially lossy and are now fixed and regression-tested against the real artifact schema. See delivery_projection_fidelity."
+    },
+    {
+      "id": "delivery_projection_fidelity",
+      "status": "PASS_AFTER_INDEPENDENT_ACCEPTANCE_FIX",
+      "evidence": "Independent acceptance rebuilt the deliverables from run 20260722_011832_368932_550d4414 and found three lossy projections in engine/packs/arma_garch/deliverables.py. Rolling forecasts exported 2 of 18 columns because the projection guessed flat origin/actual/forecast/covered keys while the artifact nests forecast_origin/target and names the values observed_value/conditional_mean/interval_covered; the partial match on the two interval bounds defeated the scalar fallback, so the sheet could not be reconciled against the reported RMSE or coverage. Volatility candidates listed zero candidates because searches[] groups candidates one level below and a single-level flatten reached only search metadata. Diagnostics and the run-owned HTML and PDF exported ADF alone, omitting the Ljung-Box, ARCH-LM, Jarque-Bera, Shapiro-Wilk, Shapiro-Francia and residual-exceedance results that produce the visible acceptance warnings. All three are fixed; the PDF gained a residual-diagnostics section and no longer caps the chart list at a hardcoded 17. Regenerated from the real run: Rolling forecasts 20 rows x 19 columns, Volatility candidates carrying candidate_id/joint_likelihood/parameter_count/selected, Diagnostics 9 rows. Fixtures in tests/models/arma_garch/test_deliverables.py are now derived from real persisted payloads, which is how the original defect escaped: implementation and test agreed with each other and both disagreed with the artifacts."
+    },
+    {
+      "id": "sequential_estimation_disclosure_in_deliverables",
+      "status": "PASS_INDEPENDENTLY_VERIFIED",
+      "evidence": "No composite ARMA-GARCH information criterion is reported anywhere. Verified numerically on the real run: the ARMA candidate AIC 17574.22730388487 inverts to exactly k=3 (ar.L1, ma.L1, sigma2) against log-likelihood -8784.113651942433, and the variance candidate AIC 17226.780750940023 inverts to exactly k=3 (omega, alpha, beta) against -8610.390375470011; neither pools the other equation's parameters. Candidates carry an explicit joint_likelihood=false flag, now exported to the workbook. The run-owned HTML report states the sequential-versus-joint limitation verbatim. The lower-quantile exception state is never labelled value-at-risk in source, workbook, report or artifacts."
+    },
+    {
+      "id": "human_readable_compare_and_agent_handoff",
+      "status": "PASS_REAL_RUN_BOTH_HALVES",
+      "evidence": "Two halves, both now demonstrated on a real session rather than by focused tests. Compare: the durable time-series comparison separates unchanged sample membership from a changed split contract (analysis_loop/time_series_compare.py); a browser reproduction on 2026-07-22 showed that did not cover the inline node-versus-node Compare a user actually clicks, which rendered two roughly 900-character model_options JSON blobs joined by an arrow and reported two differences. lineage/api/nodeDiff.ts now expands nested objects to dotted leaf paths before diffing; the same comparison renders eight named rows and reports nine differences, verified live. Agent audit export: exercised end to end on session agent_chain_ee0afb38f699476cb690f934eb9dd939, which carries a real DeepSeek proposal, its confirmation and the executed child. JSON, Markdown and HTML all return 200 with their own content type and all three trace through to child run 20260722_043812_924307_874cc62b. That run found the HTML format was the Markdown rendering escaped inside one <pre>, so choosing HTML produced a wall of monospace text with literal Markdown syntax still in it and every context envelope inlined at full length; nothing tested the rendering, only the JSON and Markdown payloads, so the three-format claim was true by name only. It is now an actual document -- headings, a session definition list, a transcript, and an operations section carrying operation, child session, terminal result and child run -- with machine payloads folded behind a summary rather than dropped or inlined. Regression test asserts the structure and the absence of literal Markdown."
+    },
+    {
+      "id": "stata_dofile_browser_reproduction",
+      "status": "PASS_REAL_RUN_WITH_LIVE_PROVIDER",
+      "evidence": "Two runs on the user's original 2610-row VIXCLS file through the visible UI with real DeepSeek V4 Pro. Data handling matches the do-file: 68 missing observations explicitly excluded leaving 2542, trading-observation index, log-difference-percent transform, source left unchanged. Within the do-file's own eight ARMA candidates BIC selects n11, the ARMA(1,1) with no constant the do-file chose, and AICc minus AIC is at most 0.010 as its own check anticipated. The variance candidate set matches ARCH(0) plus ARCH(1..10) plus GARCH(1,1). Diagnostics line up including ARCH-LM at lag 10 and the HW8 exceedance rate of 131 of 2520 standardized residuals; persistence 0.7752322643586442 and half-life 2.7225739649169802 match hand calculation. Parameters are bit-identical to the 2026-07-21 VIX run, so determinism holds across projects. An ai_report artifact citing 80 of 80 facts was generated and persisted, closing the evidence gap independent acceptance had recorded against report_export_single_source. Four defects found and fixed under browser_reproduction_findings.",
+      "known_divergences_not_defects": [
+        "Automatic mode selects ARMA(2,1) by an AICc-led basis where the do-file's stated rule is BIC-first, which selects ARMA(1,1). Reproducing the do-file requires manual orders or an Agent instruction.",
+        "The rolling window defaults to 20 origins against the do-file's last 20 percent, roughly 508 refits. validation_n is user-settable; this is a performance tradeoff, not a contract difference.",
+        "Under sequential estimation ARMA-only and ARMA-GARCH share the same conditional mean exactly, so their MAE and RMSE are identical and only interval width differs. Stata's joint arch command would give slightly different mean parameters. This is the already-declared directional_or_workflow_regression limit."
+      ]
+    },
+    {
+      "id": "browser_reproduction_findings",
+      "status": "PASS_ALL_FIXED",
+      "evidence": "Four defects, none visible to the deterministic suite because each needed a live provider turn or a real automatic search. Inline Compare readability, fixed as described under human_readable_compare_and_agent_handoff. inspect_time_series_summary exceeded its tool-output budget for the third time by a third route: statsmodels emits a NumPy shape-assignment DeprecationWarning on every ARIMA fit and it was captured verbatim into every candidate record, both wasting budget and reading to a user as a model problem, and separately a fixed row cap cannot bound a variable-width payload; library-upkeep warnings are now filtered and deduped at the three capture sites and candidate tables are bounded by bytes as well as rows, taking the automatic run from 14388 to 11797 against a 12288 budget with the table shortened rather than emptied. propose_operation failed on its first call every turn because fields[].path advertises dotted paths such as arma.p while a patch must nest them as objects; the vocabulary now carries a worked example whose correct and incorrect halves are both executed against the real validator so it cannot drift. The mean residuals' partial autocorrelation was computed and registered but never charted, leaving a reader following Stata's pac ehat without it; it is now a chart artifact and a gallery panel. Gate after the fixes: backend 2955 passed / 8 skipped, golden 23 zero drift, frontend 1294 across 150 files, tsc clean, GATE PASSED."
+    },
+    {
+      "id": "independent_step_5_acceptance",
+      "status": "PERFORMED_DEFECTS_FOUND_AND_FIXED",
+      "evidence": "Claude Code independently accepted the candidate rather than inheriting its conclusions. Confirmed: host full gate, the absence of any composite information criterion, the value-at-risk labelling invariant, the 17 registered chart artifacts, the ai_report persistence path with its test, and the three-way Compare summary. Rejected: the delivery-layer claim, on three counts now fixed under delivery_projection_fidelity. The browser Compare node cited as evidence predates the summary fix and does not demonstrate it; the summary itself is implemented in analysis_loop/time_series_compare.py and covered by focused tests only."
+    },
+    {
+      "id": "release_document_reconciliation",
+      "status": "RECONCILED_TO_BROWSER_REPRODUCTION",
+      "evidence": "This ledger records the independent acceptance outcome, the host full gate, the delivery projection fixes, and the 2026-07-22 Stata do-file browser reproduction with its four fixes. Publication remains unauthorized: no push, pull request, merge or tag has been performed or requested."
+    },
+    {
+      "id": "host_full_gate_on_release_commit",
+      "status": "PASS_ON_RELEASE_COMMIT",
+      "evidence": "Full gate run natively on the host with no development server listening and a clean working tree, twice: on 93f437d and again on the release commit 1c1f7eb after the docs-only finalization, because the publication rule asks for a pass on the tree actually released and not merely on an ancestor of it. Both: backend 2956 passed / 8 skipped, golden and invariants 23 passed with zero drift, frontend 1294 passed across 150 files, tsc --noEmit clean, GATE PASSED. The delta between the two commits is documentation only, verified by diff."
+    }
+  ],
+  "future_non_blocking_work": [
+    "Joint ARMA(p,q)-ARCH/GARCH conditional MLE with frozen Stata oracle, explicit conditioning, joint LL/IC, convergence, conditional-series and forecast parity.",
+    "Safe future trading-timestamp inference where the input cadence is sufficient."
+  ],
+  "publication_rule": "Only publish after every BLOCKED and PENDING release gate above has a documented passing result on the same immutable final product commit.",
+  "release_version": "v1.8.0"
+}

@@ -1,0 +1,25 @@
+{
+  "contract": "time_series_diagnostics.assessment",
+  "contract_version": "1.0",
+  "packet_id": "assessment-fixture-regular-grid-v1",
+  "producer_version": "c1-contract-fixture@1",
+  "run_id": "run-fixture-regular-grid-v1",
+  "execution_timestamp": "2026-07-20T12:00:01Z",
+  "facts_packet_id": "facts-fixture-regular-grid-v1",
+  "facts_content_digest": "99b2bf0d16d1bcdc35f998444780e67fa342aa7ce79f6a732bc5b718ee3425ca",
+  "decision_policy_version": "time_series_diagnostics_c1_v1",
+  "assessment_scope": "first_slice_diagnostic_evidence",
+  "conclusion": "inconclusive",
+  "caveat_codes": [
+    "RAW_LEVEL_CORRELATION_ONLY",
+    "NO_FORECAST_ELIGIBILITY",
+    "LEVEL_STATIONARITY_ONLY"
+  ],
+  "caveat_fact_refs": [
+    "facts.adf.outcome",
+    "facts.kpss.outcome",
+    "facts.acf.values"
+  ],
+  "advisories": [],
+  "assessment_content_digest": "b04092a0a80a6f1bb3d02d35e7167596fad81bdbabd43f4319ffa3e057f632a6"
+}

@@ -242,14 +242,22 @@ class ReportStage:
         # Render HTML report via view_model
         report_render_status = "pending"
         report_available = False
+        time_series_deliverables: dict[str, Any] | None = None
         env.step("reporting", "start", "Rendering report...")
         try:
-            from ...report_view_model import build_report_view_model
-            view_model = build_report_view_model(
-                diagnostic_summary, run_root,
-                descriptive_stats=descriptive_stats,
-                statistical_tests=statistical_test_summaries,
-            )
+            if primary_type == "time_series.arma_garch":
+                from ..packs.arma_garch.deliverables import build_arma_garch_deliverables
+
+                time_series_deliverables = build_arma_garch_deliverables(run_root)
+                view_model = time_series_deliverables["report"]
+            else:
+                from ...report_view_model import build_report_view_model
+
+                view_model = build_report_view_model(
+                    diagnostic_summary, run_root,
+                    descriptive_stats=descriptive_stats,
+                    statistical_tests=statistical_test_summaries,
+                )
             render_html_report(view_model, run_root)
             report_render_status = "complete"
             report_available = (run_root / "reports" / "report.html").is_file()
@@ -268,11 +276,19 @@ class ReportStage:
 
         env.step("export", "start", "Exporting files...")
         try:
-            export_pdf(report, run_root)
-            export_xlsx(
-                {"coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results))},
-                run_root,
-            )
+            if primary_type == "time_series.arma_garch":
+                if time_series_deliverables is None:
+                    from ..packs.arma_garch.deliverables import build_arma_garch_deliverables
+
+                    time_series_deliverables = build_arma_garch_deliverables(run_root)
+                export_pdf(time_series_deliverables["report"], run_root)
+                export_xlsx(time_series_deliverables["tables"], run_root)
+            else:
+                export_pdf(report, run_root)
+                export_xlsx(
+                    {"coefficients": _xlsx_export_rows(_coefficient_rows_for_models(model_results))},
+                    run_root,
+                )
             env.step("export", "complete", "Exported PDF and XLSX")
         except Exception as exc:
             issue_dicts.append(GuardrailIssue(

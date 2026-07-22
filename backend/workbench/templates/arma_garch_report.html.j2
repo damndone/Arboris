@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ view_model.title }}</title>
+    <style>
+      :root { color: #192534; background: #f4f7fb; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { max-width: 1100px; margin: 0 auto; padding: 32px; background: white; }
+      h1 { margin-bottom: 4px; } h2 { border-bottom: 2px solid #dbe7f4; padding-bottom: 6px; margin-top: 32px; }
+      .subtitle { color: #48627a; margin-top: 0; } .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 12px; }
+      .metric { background: #eef5fc; border: 1px solid #d6e7f8; border-radius: 8px; padding: 12px; } .metric-label { color: #587087; font-size: .82rem; } .metric-value { display: block; margin-top: 4px; font-size: 1.3rem; font-weight: 650; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .9rem; } th, td { border: 1px solid #dbe3ec; padding: 7px; text-align: left; vertical-align: top; } th { background: #f0f5fa; }
+      .notice { background: #fff8e8; border-left: 4px solid #c98d14; padding: 12px; margin: 8px 0; } code { background: #eef2f5; padding: 1px 4px; }
+      @media print { body { padding: 0; } .metric { break-inside: avoid; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{ view_model.title }}</h1>
+      <p class="subtitle">{{ view_model.model_label }} · deterministic run artifact projection</p>
+    </header>
+    <section id="time-series-overview">
+      <h2>Run and model contract</h2>
+      <table><tbody>{% for row in view_model.overview %}<tr><th>{{ row.field }}</th><td>{{ row.value }}</td></tr>{% endfor %}</tbody></table>
+    </section>
+    <section id="forecast-evaluation">
+      <h2>Rolling forecast evaluation</h2>
+      <div class="metric-grid">
+        {% for label, value in [("Validation observations", view_model.metrics.validation_n), ("Successful forecasts", view_model.metrics.successful_forecast_n), ("MAE", view_model.metrics.mae), ("RMSE", view_model.metrics.rmse), ("Interval coverage", view_model.metrics.interval_coverage), ("Average interval width", view_model.metrics.average_interval_width)] %}
+        <div class="metric"><span class="metric-label">{{ label }}</span><span class="metric-value">{{ value if value is not none else "—" }}</span></div>
+        {% endfor %}
+      </div>
+    </section>
+    <section id="selected-parameters">
+      <h2>Selected parameters</h2>
+      <table><thead><tr><th>Component</th><th>Parameter</th><th>Estimate</th></tr></thead><tbody>{% for row in view_model.parameters %}<tr><td>{{ row.component }}</td><td>{{ row.parameter }}</td><td>{{ row.estimate }}</td></tr>{% endfor %}</tbody></table>
+    </section>
+    <section id="selection-lineage">
+      <h2>Selection lineage</h2>
+      <table><thead><tr><th>Stage</th><th>Selected candidate</th><th>Basis</th></tr></thead><tbody>{% for row in view_model.selection %}<tr><td>{{ row.stage }}</td><td>{{ row.selected_candidate }}</td><td>{{ row.basis }}</td></tr>{% endfor %}</tbody></table>
+    </section>
+    <section id="diagnostics">
+      <h2>Diagnostics</h2>
+      <table><thead><tr><th>Test</th><th>Statistic</th><th>p-value</th><th>Status</th><th>Detail</th></tr></thead><tbody>{% for row in view_model.diagnostics %}<tr><td>{{ row.test }}</td><td>{{ row.statistic }}</td><td>{{ row.p_value }}</td><td>{{ row.status }}</td><td>{{ row.detail }}</td></tr>{% endfor %}</tbody></table>
+    </section>
+    <section id="next-forecast">
+      <h2>Production next-observation forecast</h2>
+      <table><tbody>{% for row in view_model.next_forecast %}<tr><th>{{ row.field }}</th><td>{{ row.value }}</td></tr>{% endfor %}</tbody></table>
+    </section>
+    <section id="chart-artifacts">
+      <h2>Chart evidence</h2>
+      <p>{{ view_model.chart_artifacts|length }} deterministic chart artifacts are registered with this run. Their stable artifact IDs are retained below for review in Workbench.</p>
+      <ul>{% for artifact_id in view_model.chart_artifacts %}<li><code>{{ artifact_id }}</code></li>{% endfor %}</ul>
+    </section>
+    <section id="limitations">
+      <h2>Interpretation limits</h2>
+      {% for item in view_model.limitations %}<div class="notice">{{ item }}</div>{% endfor %}
+    </section>
+  </body>
+</html>

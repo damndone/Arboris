@@ -155,6 +155,27 @@ test("legacy FastAPI detail string is still parsed (POST /runs upload limit)", a
   });
 });
 
+test("structured FastAPI diagnostic detail surfaces its message", async () => {
+  (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    jsonResponse(
+      {
+        detail: {
+          code: "VALUE_PARSE_FAILED",
+          message: "value column contains missing entries",
+          evidence: { missing_value_count: 68 },
+        },
+      },
+      422
+    )
+  );
+
+  await expect(fetchRuns("/tmp/demo")).rejects.toMatchObject({
+    name: "ApiError",
+    status: 422,
+    message: "value column contains missing entries",
+  });
+});
+
 test("artifactDownloadUrl encodes project_root and ids", () => {
   const url = artifactDownloadUrl("/tmp/demo", "abc 123", "report_html");
   expect(url).toBe(

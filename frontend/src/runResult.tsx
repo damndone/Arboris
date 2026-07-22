@@ -39,6 +39,12 @@ import {
   type PredictionResultData,
 } from "./runResult/PredictionResultCard";
 import { PacketPanel } from "./workbench/repeatedMeasures/PacketPanel";
+import { ArmaGarchDashboard } from "./runResult/ArmaGarchDashboard";
+import { useArmaGarchArtifacts } from "./runResult/useArmaGarchArtifacts";
+import { useArmaGarchCharts } from "./runResult/useArmaGarchCharts";
+
+/** Stable identity so the loader effects do not re-run on every render. */
+const NO_GROUPS: ArtifactGroup[] = [];
 
 type Props = {
   projectRoot: string;
@@ -206,6 +212,13 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
     CSDiagnosticsData | undefined
   >(undefined);
   const [dcdhResult, setDcdhResult] = useState<DCDHResult | undefined>(undefined);
+  // The graph node drawer and this page read the pack's artifacts through the
+  // same hooks, so there is one loader and one rendering of a time-series result.
+  // Empty (not undefined) while the listing loads: undefined would tell the
+  // hooks to list the run themselves, duplicating a request this page owns.
+  const loadedGroups = artifactsState.status === "loaded" ? artifactsState.groups : NO_GROUPS;
+  const armaGarchArtifacts = useArmaGarchArtifacts(projectRoot, runId, loadedGroups);
+  const armaGarchCharts = useArmaGarchCharts(projectRoot, runId, loadedGroups);
   const fetchIdRef = useRef(0);
 
   const fetchArtifacts = useCallback(() => {
@@ -526,6 +539,7 @@ export function RunResultView({ projectRoot, runId, onError, onFailureAction }: 
       <DIDDiagnosticsCard diagnostics={didDiagnostics} />
       <CSDiagnosticsCard diagnostics={csDiagnostics} />
       <DCDHResultCard result={dcdhResult} />
+      <ArmaGarchDashboard artifacts={armaGarchArtifacts} charts={armaGarchCharts} />
       {(detail.model_results ?? [])
         .filter((result) => result.model_type === "linear_mixed_effects")
         .map((result) => (

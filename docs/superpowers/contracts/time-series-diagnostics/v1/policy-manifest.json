@@ -1,0 +1,58 @@
+{
+  "policy_version": "time_series_diagnostics_c1_v1",
+  "minimums": {
+    "hard_input_min": 20,
+    "adf_min": 20,
+    "kpss_min": 20,
+    "acf_min": 20,
+    "pacf_min": 20,
+    "trend_min": 8,
+    "minimum_effective_lag": 5,
+    "minimum_complete_cycles": 2
+  },
+  "conclusion_values": [
+    "suitable_with_caveats",
+    "not_suitable",
+    "inconclusive"
+  ],
+  "null_test_outcomes": [
+    "reject",
+    "fail_to_reject",
+    "undetermined"
+  ],
+  "alpha": 0.05,
+  "adf": {
+    "regression": "c",
+    "p_value_statuses": [
+      "approximate",
+      "unavailable"
+    ]
+  },
+  "kpss": {
+    "null": "level_stationarity",
+    "p_value_statuses": [
+      "approximate",
+      "lower_bound",
+      "upper_bound",
+      "unavailable"
+    ]
+  },
+  "acf": {
+    "method": "standard",
+    "lag_zero": "included",
+    "confidence_level": 0.95
+  },
+  "pacf": {
+    "method": "ywm",
+    "lag_zero": "included",
+    "confidence_level": 0.95
+  },
+  "mandatory_caveat_codes": [
+    "RAW_LEVEL_CORRELATION_ONLY",
+    "NO_MODEL_ORDER_INFERENCE",
+    "LEVEL_STATIONARITY_ONLY",
+    "NO_FORECAST_ELIGIBILITY",
+    "NO_MODEL_SELECTION",
+    "STRUCTURAL_BREAKS_NOT_ASSESSED"
+  ]
+}

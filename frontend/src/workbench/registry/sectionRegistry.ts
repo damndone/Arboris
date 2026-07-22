@@ -34,6 +34,7 @@ import { DecisionSection } from "../../lineage/detail/sections/DecisionSection";
 import { AskAISection } from "../../lineage/detail/sections/AskAISection";
 import { CompareWithSourceSection } from "../../lineage/detail/sections/CompareWithSourceSection";
 import { AnalysisLoopSection } from "../../lineage/detail/sections/AnalysisLoopSection";
+import { CompareNodeSection, isCompareNode } from "../../lineage/detail/sections/CompareNodeSection";
 import { CompareNodesSection } from "../../lineage/compare/CompareNodesSection";
 import { OperationSection } from "../../lineage/detail/sections/OperationSection";
 import { RoleGroupsSection } from "../../lineage/detail/sections/RoleGroupsSection";
@@ -42,8 +43,17 @@ import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
+import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
+import { ArmaGarchResultSection } from "../../lineage/detail/sections/ArmaGarchResultSection";
 import { isAskAIEnabled } from "../featureFlags";
 import type { RegistryEntry } from "./registryTypes";
+
+/** The time-series pack renders a bespoke operation form instead of the
+ *  generic editable_schema controls (its schema is an opaque model_options). */
+const isArmaGarch = (n: GraphViewNode): boolean =>
+  "opType" in n && n.opType === "time_series.arma_garch";
+const isGeneratedArmaGarchStage = (n: GraphViewNode): boolean =>
+  isArmaGarch(n) && n.kind !== "model";
 
 /**
  * V1.5.2 — SectionEntry is the canonical name; SectionSpec is kept as
@@ -79,29 +89,39 @@ export const sectionRegistry: SectionEntry[] = [
     Component: AskAISection,
   },
   {
+    // v1.8 slice C — a stored comparison node reads its own packet; the
+    // sections below are about running a model and do not describe it.
+    id: "compareNode",
+    order: 24,
+    shouldRender: isCompareNode,
+    Component: CompareNodeSection,
+  },
+  {
     id: "compareWithSource",
     order: 25,
-    shouldRender: (n) => "runs" in n,
+    shouldRender: (n) => "runs" in n && !isCompareNode(n) && !isGeneratedArmaGarchStage(n),
     Component: CompareWithSourceSection,
   },
   {
     // v1.6.11 B-2 — arbitrary two-node comparison (pick the partner on the canvas).
     id: "compareNodes",
     order: 26,
-    shouldRender: (n) => "runs" in n && !n.isDraft,
+    shouldRender: (n) =>
+      "runs" in n && !n.isDraft && !isCompareNode(n) && !isGeneratedArmaGarchStage(n),
     Component: CompareNodesSection,
   },
   {
     id: "analysisLoop",
     order: 27,
     shouldRender: (n) =>
-      (n.kind === "model" || n.stage === "model") && !n.isDraft && "runs" in n,
+      n.kind === "model" && !n.isDraft && "runs" in n,
     Component: AnalysisLoopSection,
   },
   {
     id: "dataColumnCast",
     order: 28,
-    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: DataColumnCastSection,
   },
   {
@@ -110,27 +130,49 @@ export const sectionRegistry: SectionEntry[] = [
     // lifecycle, wider blast radius.
     id: "codeExecute",
     order: 29,
-    shouldRender: (n) => n.kind === "dataset_stage" && !n.isDraft,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: CodeExecuteSection,
   },
   {
     id: "operation",
     order: 30,
-    shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0,
+    shouldRender: (n) => (n.editableSchema?.length ?? 0) > 0 && !isArmaGarch(n),
     Component: OperationSection,
+  },
+  {
+    // Bespoke time-series operation form (transform / orders / distribution /
+    // strategy / validation) that forks a child model via the shared rerun path.
+    id: "armaGarchOperation",
+    order: 31,
+    shouldRender: (n) => n.kind === "model" && !n.isDraft && isArmaGarch(n),
+    Component: ArmaGarchOperationSection,
+  },
+  {
+    // One-view time-series result dashboard (replaces the legacy nine-tab card).
+    id: "armaGarchResult",
+    order: 32,
+    shouldRender: (n) => n.kind === "model" && !n.isDraft && isArmaGarch(n),
+    Component: ArmaGarchResultSection,
   },
   {
     // v1.6.8 — fitted equation from the owner run's coefficients; sits right
     // above the specification so estimate vs spec read as a pair.
     id: "estimatedEquation",
     order: 34,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
+    // An ARMA-GARCH node has no classic coefficient equation, and the
+    // dashboard already states its mean and variance specification.
+    shouldRender: (n) =>
+      (n.kind === "model" || n.stage === "model") && !n.isDraft && !isArmaGarch(n),
     Component: EstimatedEquationSection,
   },
   {
     id: "roleGroups",
     order: 35,
-    shouldRender: (n) => (n.kind === "model" || n.stage === "model") && !n.isDraft,
+    // Outcome/predictor roles do not describe a one-series time-series
+    // analysis, whose variables are a time column and a value column.
+    shouldRender: (n) =>
+      (n.kind === "model" || n.stage === "model") && !n.isDraft && !isArmaGarch(n),
     Component: RoleGroupsSection,
   },
   {

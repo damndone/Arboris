@@ -421,6 +421,32 @@ describe("AgentPanel", () => {
     );
   });
 
+  it("offers a human-readable audit export for the operation's owning session", () => {
+    const navigationLinks: AgentNavigationRef[] = [{
+      kind: "operation",
+      id: "oprec-1",
+      label: "model.rerun · completed",
+      relation: "audit",
+      available: true,
+      href: {
+        view: "agent",
+        session_id: "agent_chain",
+        operation_record_id: "oprec-1",
+      },
+    }];
+    render(
+      <AgentSurfaceContext.Provider value={value({ navigationLinks })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const link = screen.getByRole("link", { name: "Export Agent audit" });
+    expect(link).toHaveAttribute(
+      "href",
+      expect.stringContaining("/agent/sessions/agent_chain/audit?project_root=%2Fproj&format=html"),
+    );
+  });
+
   it("keeps typed navigation keys unique when one chain has two relations", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const duplicateChainId = "chain-child";

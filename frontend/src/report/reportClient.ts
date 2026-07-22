@@ -70,6 +70,30 @@ export async function exportReport(input: {
   return response.blob();
 }
 
+export async function saveAiReport(input: {
+  projectRoot: string;
+  runId: string;
+  record: object;
+}): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/runs/${encodeURIComponent(input.runId)}/ai-reports?project_root=${encodeURIComponent(input.projectRoot)}`),
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input.record) },
+  );
+  if (!response.ok) throw new Error(await extractError(response));
+}
+
+export async function fetchAiReports(input: {
+  projectRoot: string;
+  runId: string;
+}): Promise<Array<Record<string, unknown>>> {
+  const response = await fetch(
+    apiUrl(`/runs/${encodeURIComponent(input.runId)}/ai-reports?project_root=${encodeURIComponent(input.projectRoot)}`),
+  );
+  if (!response.ok) throw new Error(await extractError(response));
+  const body = await response.json() as { reports?: unknown };
+  return Array.isArray(body.reports) ? body.reports.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : [];
+}
+
 async function extractError(response: Response): Promise<string> {
   const fallback = `Request failed (${response.status})`;
   try {

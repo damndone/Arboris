@@ -30,6 +30,7 @@ def _entry(node_hash: str, producing_stage: str, payload: str) -> dict:
 def build_node_index(
     node_hashes: dict, *, normalized_y, normalized_x, model_results,
     upload_hash: str = "", raw_payload: str = "_uploads",
+    extra_entries: dict[str, dict] | None = None,
 ) -> dict:
     """Map the graph node_ids RecordingStage records to their stage-output node_hash."""
     idx: dict[str, dict] = {}
@@ -59,17 +60,22 @@ def build_node_index(
         if report_h:
             idx["report:html"] = _entry(report_h, "report", "reports/report.html")
 
+    if extra_entries:
+        idx.update(extra_entries)
+
     return idx
 
 
 def write_node_index(
     run_root: Path, node_hashes: dict, *, normalized_y, normalized_x, model_results,
     upload_hash: str = "",
+    extra_entries: dict[str, dict] | None = None,
 ) -> None:
     idx = build_node_index(
         node_hashes, normalized_y=normalized_y,
         normalized_x=normalized_x, model_results=model_results,
         upload_hash=upload_hash, raw_payload=_raw_payload(run_root),
+        extra_entries=extra_entries,
     )
     write_json(run_root / NODE_INDEX_FILENAME, idx)
 

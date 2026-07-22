@@ -535,7 +535,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   ) : (
     <RerunProvider projectRoot={projectRoot} runId={effectiveActiveRunId} onRerun={handleRerun}>
       <ForestContext.Provider
-        value={{ forest, activeRunId: effectiveActiveRunId, setActiveRunId }}
+        value={{
+          forest,
+          activeRunId: effectiveActiveRunId,
+          setActiveRunId,
+          refetch: () => void refetch(),
+        }}
       >
         <WorkbenchStateProvider runId={shellRunId} validNodeKeys={validNodeKeys}>
           <DraftActionsProvider

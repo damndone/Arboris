@@ -14,6 +14,7 @@ vi.mock("../capabilities/useCapabilities", () => ({
         { key: "did", label: "DID", group: "Causal" },
         { key: "cs_did", label: "Callaway-Sant'Anna", group: "Causal" },
         { key: "sa_did", label: "Sun-Abraham", group: "Causal" },
+        { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time Series" },
       ],
       imputation_methods: [],
       covariance_options: [
@@ -216,6 +217,95 @@ describe("RunForm DID wiring", () => {
     expect(extra?.didCohortCol).toBe("cohort");
     expect(extra?.entityCol).toBe("id");
     expect(extra?.timeCol).toBe("year");
+  });
+});
+
+describe("RunForm ARMA-GARCH wiring", () => {
+  it("requests and displays the canonical full-data transform preflight", async () => {
+    const timePreview: api.FilePreview = {
+      ...PREVIEW,
+      columns: [
+        { name: "date", dtype: "datetime", missingRate: 0, uniqueCount: 10, suggestedRole: "time" },
+        { name: "vix", dtype: "numeric", missingRate: 0.03, uniqueCount: 9, suggestedRole: "y" },
+      ],
+      previewRows: [{ date: "2025-01-02", vix: 14.2 }],
+      suggestedY: "vix",
+      suggestedX: [],
+    };
+    vi.spyOn(api, "previewFile").mockResolvedValue(timePreview);
+    const preflight = vi.spyOn(api, "fetchArmaGarchTransformPreflight").mockResolvedValue({
+      schema_version: 1,
+      source_row_count: 2610,
+      analysis_row_count: 2542,
+      diagnostics: [],
+      transform_profiles: {},
+      recommendation: {
+        transform_id: "log_return_pct",
+        score: 5,
+        reason: "Full-series profile favors changes.",
+      },
+      transform_confirmation_required: true,
+    });
+    renderForm();
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "time_series.arma_garch" },
+    });
+    const file = new File(["date,vix\n2025-01-02,14.2\n"], "vix.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(preflight).toHaveBeenCalled());
+    expect(await screen.findByText(/System suggestion: Log difference/)).toBeInTheDocument();
+  });
+
+  it("posts an explicit confirmed time-series model_options contract with no regressors", async () => {
+    const timePreview: api.FilePreview = {
+      ...PREVIEW,
+      columns: [
+        { name: "date", dtype: "datetime", missingRate: 0, uniqueCount: 10, suggestedRole: "time" },
+        { name: "vix", dtype: "numeric", missingRate: 0, uniqueCount: 10, suggestedRole: "y" },
+      ],
+      previewRows: [{ date: "2025-01-02", vix: 14.2 }],
+      suggestedY: "vix",
+      suggestedX: [],
+    };
+    vi.spyOn(api, "previewFile").mockResolvedValue(timePreview);
+    const spy = vi.spyOn(api, "runWorkflow").mockResolvedValue(RUN_RESPONSE);
+    renderForm();
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "time_series.arma_garch" },
+    });
+    const file = new File(["date,vix\n2025-01-02,14.2\n"], "vix.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(screen.getByLabelText("data file"), {
+      target: { files: [file] },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("time column")).toHaveValue("date");
+      expect(screen.getByLabelText("value column")).toHaveValue("vix");
+    });
+    fireEvent.click(screen.getByLabelText("confirm drop missing values"));
+    fireEvent.click(screen.getByLabelText(/confirm transform/i));
+    fireEvent.click(screen.getByRole("button", { name: /run workflow/i }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    const call = spy.mock.calls[0];
+    expect(call[2]).toBe("vix");
+    expect(call[3]).toBe("");
+    expect(call[5]).toBe("time_series.arma_garch");
+    expect(call[9]?.modelOptions).toMatchObject({
+      dataset_ref: "upload:vix.csv",
+      time_column: "date",
+      value_column: "vix",
+      transform: "level",
+      transform_confirmed: true,
+      missing_value_policy: "drop_missing_confirmed",
+      selection_mode: "auto",
+    });
   });
 });
 

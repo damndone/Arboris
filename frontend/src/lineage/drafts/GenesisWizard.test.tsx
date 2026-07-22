@@ -15,6 +15,7 @@ vi.mock("../../capabilities/useCapabilities", () => ({
         { key: "linear_mixed_effects", label: "Linear Mixed Effects", group: "Panel" },
         { key: "iv_2sls", label: "IV / 2SLS", group: "IV" },
         { key: "dcdh", label: "DCDH DID", group: "DID" },
+        { key: "time_series.arma_garch", label: "ARMA-GARCH", group: "Time series" },
       ],
       imputation_methods: [],
       covariance_options: [{ key: "robust", label: "Robust" }],
@@ -104,6 +105,82 @@ function draftResponse(
 }
 
 describe("GenesisWizard", () => {
+  it("saves a univariate ARMA-GARCH genesis model with the shared contract controls", async () => {
+    const timePreview: api.FilePreview = {
+      ...preview(),
+      fileName: "vix.csv",
+      columns: [
+        { name: "date", dtype: "datetime", missingRate: 0, uniqueCount: 3, suggestedRole: "time" },
+        { name: "vix", dtype: "numeric", missingRate: 0.1, uniqueCount: 2, suggestedRole: "y" },
+      ],
+      previewRows: [{ date: "2025-01-02", vix: 14.2 }],
+      suggestedY: "vix",
+      suggestedX: [],
+    };
+    const withColumns = (response: api.PipelineDraftResponse): api.PipelineDraftResponse => ({
+      ...response,
+      draft: {
+        ...response.draft,
+        graph: {
+          ...response.draft.graph,
+          nodes: response.draft.graph.nodes.map((node) =>
+            node.node_type === "input.upload" || node.node_type === "table"
+              ? { ...node, columns: ["date", "vix"] }
+              : node,
+          ),
+        },
+      },
+    });
+    vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
+    vi.spyOn(api, "previewFile").mockResolvedValue(timePreview);
+    vi.spyOn(api, "fetchArmaGarchTransformPreflight").mockResolvedValue({
+      schema_version: 1,
+      source_row_count: 3,
+      analysis_row_count: 2,
+      diagnostics: [],
+      transform_profiles: {},
+      recommendation: { transform_id: "log_return_pct", score: 4, reason: "Full series favors changes." },
+      transform_confirmation_required: true,
+    });
+    vi.spyOn(api, "uploadDataset").mockResolvedValue({ sha256: sha, filename: "vix.csv" });
+    vi.spyOn(api, "createGenesisDraft").mockResolvedValue(withColumns(draftResponse("h1")));
+    const patch = vi.spyOn(api, "patchDraftNode")
+      .mockResolvedValueOnce(withColumns(draftResponse("h2", "configured", "pending")))
+      .mockResolvedValueOnce(withColumns(draftResponse("h3", "configured", "configured")));
+
+    render(<GenesisWizard projectRoot="/proj" onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Dataset file"), {
+      target: { files: [new File(["date,vix\n2025-01-02,14.2"], "vix.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(await screen.findByTestId("genesis-save-table"));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("model type"), {
+      target: { value: "time_series.arma_garch" },
+    });
+    await waitFor(() => expect(screen.getByLabelText("time column")).toHaveValue("date"));
+    expect(screen.getByLabelText("value column")).toHaveValue("vix");
+    fireEvent.click(screen.getByLabelText("confirm drop missing values"));
+    fireEvent.click(screen.getByLabelText("confirm transform"));
+    expect(screen.getByTestId("genesis-save-model")).toBeEnabled();
+    fireEvent.click(screen.getByTestId("genesis-save-model"));
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+    expect(patch.mock.calls[1]?.[3]).toMatchObject({
+      params: {
+        model_type: "time_series.arma_garch",
+        y: "vix",
+        x: [],
+        model_options: {
+          dataset_ref: "upload:vix.csv",
+          time_column: "date",
+          value_column: "vix",
+          missing_value_policy: "drop_missing_confirmed",
+          transform_confirmed: true,
+        },
+      },
+    });
+  });
+
   it("creates a genesis draft, patches table/model nodes, then validates and executes as genesis", async () => {
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([]);
     vi.spyOn(api, "previewFile").mockResolvedValue(preview());

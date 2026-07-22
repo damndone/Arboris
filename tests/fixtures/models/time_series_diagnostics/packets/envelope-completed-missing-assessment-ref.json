@@ -1,0 +1,6 @@
+{
+  "operation_status": "completed",
+  "reason_code": "ASSESSMENT_COMPLETED",
+  "facts_packet_ref": "facts-fixture-regular-grid-v1",
+  "assessment_packet_ref": null
+}

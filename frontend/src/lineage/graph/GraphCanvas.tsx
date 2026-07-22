@@ -40,6 +40,7 @@ const STAGE_LABEL: Record<Exclude<Stage, "unknown">, string> = {
   diag: "诊断",
   viz: "可视化",
   report: "报告",
+  compare: "对比",
 };
 const LEGEND_STAGES: Array<Exclude<Stage, "unknown">> = [
   "source",
@@ -50,6 +51,7 @@ const LEGEND_STAGES: Array<Exclude<Stage, "unknown">> = [
   "diag",
   "viz",
   "report",
+  "compare",
 ];
 
 // Count of decisions across the whole view model whose reviewStatus

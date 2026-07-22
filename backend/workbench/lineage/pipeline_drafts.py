@@ -832,15 +832,13 @@ def _validate_genesis_for_execution(
             )
         )
     model_type = model_params.get("model_type") or model.get("model_type")
-    missing = [
-        key
-        for key, value in (
-            ("model_type", model_type),
-            ("y", model_params.get("y")),
-            ("x", model_params.get("x")),
-        )
-        if not value
+    required_model_fields = [
+        ("model_type", model_type),
+        ("y", model_params.get("y")),
     ]
+    if model_type != "time_series.arma_garch":
+        required_model_fields.append(("x", model_params.get("x")))
+    missing = [key for key, value in required_model_fields if not value]
     if missing:
         checks.append(
             check(

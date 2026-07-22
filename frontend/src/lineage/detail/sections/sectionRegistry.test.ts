@@ -53,12 +53,15 @@ describe("sectionRegistry", () => {
       "draftEditor",
       "trust",
       "askAi",
+      "compareNode",
       "compareWithSource",
       "compareNodes",
       "analysisLoop",
       "dataColumnCast",
       "codeExecute",
       "operation",
+      "armaGarchOperation",
+      "armaGarchResult",
       "estimatedEquation",
       "roleGroups",
       "code",
@@ -70,7 +73,7 @@ describe("sectionRegistry", () => {
 
   it("orders keep source compare between Ask AI and Operation", () => {
     expect(sectionRegistry.map((s) => s.order)).toEqual([
-      5, 10, 20, 25, 26, 27, 28, 29, 30, 34, 35, 40, 50, 60, 70,
+      5, 10, 20, 24, 25, 26, 27, 28, 29, 30, 31, 32, 34, 35, 40, 50, 60, 70,
     ]);
   });
 
@@ -87,6 +90,65 @@ describe("sectionRegistry", () => {
       "lineage",
       "basic",
     ]);
+  });
+
+  it("routes ARMA-GARCH model nodes to the bespoke operation, not the generic one", () => {
+    const ts = node({
+      opType: "time_series.arma_garch",
+      editableSchema: [
+        { kind: "textarea", key: "model_options", label: "Options", value: {} },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ts)).map((s) => s.id);
+    expect(ids).toContain("armaGarchOperation");
+    expect(ids).not.toContain("operation");
+  });
+
+  it("hides the OLS-shaped sections on a time-series node", () => {
+    // The user's complaint: a one-series ARMA-GARCH node was showing an
+    // estimated equation and outcome/predictor role groups, neither of which
+    // describes it. Its own dashboard states the mean and variance spec.
+    const ts = node({
+      opType: "time_series.arma_garch",
+      editableSchema: [
+        { kind: "textarea", key: "model_options", label: "Options", value: {} },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ts)).map((s) => s.id);
+    expect(ids).not.toContain("estimatedEquation");
+    expect(ids).not.toContain("roleGroups");
+    expect(ids).toContain("armaGarchResult");
+  });
+
+  it("keeps generated time-series stages inspectable without terminal model actions", () => {
+    const stage = node({
+      kind: "dataset_stage",
+      stage: "model",
+      opType: "time_series.arma_garch",
+      runs: ["run-ts"],
+    } as Partial<GraphViewNode>);
+
+    const ids = sectionRegistry.filter((s) => s.shouldRender(stage)).map((s) => s.id);
+
+    expect(ids).toContain("askAi");
+    expect(ids).toContain("lineage");
+    expect(ids).not.toContain("armaGarchOperation");
+    expect(ids).not.toContain("armaGarchResult");
+    expect(ids).not.toContain("analysisLoop");
+    expect(ids).not.toContain("compareNodes");
+    expect(ids).not.toContain("compareWithSource");
+  });
+
+  it("keeps the generic operation for non-time-series model nodes", () => {
+    const ols = node({
+      opType: "ols",
+      editableSchema: [
+        { kind: "select", key: "covariance", label: "Covariance", options: ["robust"], value: "robust" },
+      ],
+    } as Partial<GraphViewNode>);
+    const ids = sectionRegistry.filter((s) => s.shouldRender(ols)).map((s) => s.id);
+    expect(ids).toContain("operation");
+    expect(ids).not.toContain("armaGarchOperation");
   });
 
   it("compareWithSource renders only for forest nodes with run ownership metadata", () => {

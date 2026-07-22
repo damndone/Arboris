@@ -80,7 +80,11 @@ def _model_op_type(manifest: dict) -> str | None:
     routing = manifest.get("model_routing") or {}
     caps_keys = {e["key"] for e in build_capabilities()["model_types"] if e["key"] != "auto"}
 
-    for candidate in (routing.get("requested_model_type"), routing.get("effective_model_type")):
+    for candidate in (
+        routing.get("requested_model_type"),
+        routing.get("effective_model_type"),
+        manifest.get("requested_model_type"),
+    ):
         if candidate in caps_keys:
             return candidate
 

@@ -125,6 +125,7 @@ const STAGE_VALUES: ReadonlySet<string> = new Set([
   "diag",
   "viz",
   "report",
+  "compare",
 ]);
 
 function coerceStage(s: unknown): Stage {

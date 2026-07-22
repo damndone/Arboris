@@ -1,0 +1,6 @@
+{
+  "operation_status": "failed",
+  "reason_code": "EXECUTOR_TIMEOUT",
+  "facts_packet_ref": null,
+  "assessment_packet_ref": null
+}

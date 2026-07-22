@@ -140,6 +140,20 @@ describe("CodeExecuteSection", () => {
     expect(section.textContent).toContain("read-only");
   });
 
+  it("explains why preview is disabled when the node has no materialized identity", () => {
+    resolvedMock.current = {
+      ok: false,
+      reason: "missing_node_hash",
+      selected_node_key: "stage:raw",
+    };
+    render(<CodeExecuteSection node={node()} />);
+
+    expect(screen.getByTestId("code-execute-unavailable")).toHaveTextContent(
+      "missing_node_hash",
+    );
+    expect(screen.getByTestId("code-execute-preview-button")).toBeDisabled();
+  });
+
   it("previews by really running the code and shows the schema diff", async () => {
     previewMock.mockResolvedValue(readyPreview());
     render(<CodeExecuteSection node={node()} />);

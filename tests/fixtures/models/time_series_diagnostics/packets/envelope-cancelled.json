@@ -1,0 +1,6 @@
+{
+  "operation_status": "cancelled",
+  "reason_code": "USER_CANCELLED",
+  "facts_packet_ref": null,
+  "assessment_packet_ref": null
+}

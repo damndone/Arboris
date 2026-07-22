@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
+from pydantic import BaseModel, ConfigDict
 
 from .. import flags
 from ..api_errors import WorkbenchAPIError
@@ -19,11 +20,17 @@ from ..lineage.family import scan_family
 from ..lineage.headset import build_headset
 from ..lineage.node_index import NODE_INDEX_FILENAME
 from ..lineage.op_contract import resolve_operation_contract
+from ..lineage.compare_nodes import CompareNodeError
 from ..lineage.project_forest import build_project_forest
 from ..repository.run_repository import (
     _read_manifest,
     _resolve_project_runs_dir,
     _resolve_run_root,
+)
+from ..services.compare_node_service import (
+    create_compare_node,
+    delete_compare_node,
+    list_compare_nodes,
 )
 from ._deps import _backfill_schema_values
 
@@ -101,3 +108,61 @@ def get_run_graph(run_id: str, project_root: str, view: str | None = None):
         "has_dp_count": sum(1 for node in graph.nodes.values() if node.decision_points),
     }
     return body
+
+
+class CompareEndpointRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    node_id: str
+
+
+class CompareNodeCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    left: CompareEndpointRequest
+    right: CompareEndpointRequest
+
+
+@router.post("/compare-nodes")
+def post_compare_node(project_root: str, body: CompareNodeCreateRequest) -> dict[str, Any]:
+    """Create (or reuse) the durable comparison joining two graph nodes."""
+
+    runs_root = _resolve_project_runs_dir(project_root)
+    try:
+        record = create_compare_node(
+            runs_root,
+            left_run_id=body.left.run_id,
+            left_node_id=body.left.node_id,
+            right_run_id=body.right.run_id,
+            right_node_id=body.right.node_id,
+        )
+    except CompareNodeError as exc:
+        # The pack's own refusal reaches the client, so the UI can explain why
+        # this particular pair cannot be compared rather than saying "failed".
+        raise WorkbenchAPIError(
+            status_code=422,
+            code=exc.code,
+            message=exc.message,
+            details=exc.evidence,
+        ) from exc
+    return record.to_dict()
+
+
+@router.get("/compare-nodes")
+def get_compare_nodes(project_root: str) -> dict[str, Any]:
+    runs_root = _resolve_project_runs_dir(project_root)
+    return {"compare_nodes": [record.to_dict() for record in list_compare_nodes(runs_root)]}
+
+
+@router.delete("/compare-nodes/{compare_id}")
+def remove_compare_node(compare_id: str, project_root: str) -> dict[str, Any]:
+    runs_root = _resolve_project_runs_dir(project_root)
+    if not delete_compare_node(runs_root, compare_id):
+        raise WorkbenchAPIError(
+            status_code=404,
+            code="COMPARE_NODE_NOT_FOUND",
+            message=f"no comparison node {compare_id}",
+            details={"compare_id": compare_id},
+        )
+    return {"deleted": compare_id}

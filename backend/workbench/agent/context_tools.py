@@ -13,13 +13,16 @@ from ..diagnostic_preview.artifact_manifest import build_artifact_manifest
 from ..graph_store import GraphStore, graph_to_json
 from ..lineage.node_write_validation import build_rerun_operation_context
 from ..lineage.op_contract import resolve_operation_contract
+from ..lineage.run_inputs import read_run_inputs
 from ..services.results_service import read_model_results
 from ..analysis_loop.compare import ComparePacket
+from ..analysis_loop.time_series_compare import read_time_series_artifacts as _read_time_series_artifacts
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
 from .operations import OperationRegistry
-from .tools import ToolContext, ToolDefinition
+from .recipes.registry import build_option_vocabulary, validate_model_options_patch
+from .tools import ToolContext, ToolDefinition, ToolVisibleError
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,14 @@ class InspectDiagnosticsRequest:
 
 @dataclass(frozen=True)
 class InspectResultSummaryRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectTimeSeriesSummaryRequest:
     request_id: str
     owner_run_id: str
     op_node_id: str
@@ -199,6 +210,25 @@ class NodeOperationContextProvider:
             return self.inspect_result_summary(
                 InspectResultSummaryRequest(
                     request_id=str(arguments.get("request_id") or "inspect-result-summary"),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                )
+            )
+
+        def inspect_time_series_summary(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_time_series_summary(
+                InspectTimeSeriesSummaryRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-time-series-summary"
+                    ),
                     owner_run_id=str(arguments["owner_run_id"]),
                     op_node_id=str(arguments["op_node_id"]),
                     active_head_run_id=self._tool_active_head(
@@ -430,7 +460,13 @@ class NodeOperationContextProvider:
                 },
                 side_effect="none",
                 scope_requirements=("project", "chain"),
-                max_output_budget=8192,
+                # Schema, not data. The 8192 shared by the other inspect tools
+                # bounds row dumps; this one returns a pack's field vocabulary,
+                # and a pack with 28 editable fields legitimately needs more
+                # room. Truncating it does not protect context -- the Agent gets
+                # `tool_output_budget_exceeded` and then guesses at field names,
+                # which is how a live turn died before this was raised.
+                max_output_budget=12288,
                 handler=inspect_operation_contract,
             ),
             ToolDefinition(
@@ -478,6 +514,36 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_result_summary,
+            ),
+            ToolDefinition(
+                tool_id="inspect_time_series_summary",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                # Raised with inspect_operation_contract, and for the same
+                # reason: what remains after removing the ~25,000 characters of
+                # provenance row ids is all conclusions -- candidate tables
+                # bounded at eight rows, scalar metrics, and six acceptance
+                # verdicts. An ARMA-GARCH run simply has more *kinds* of
+                # conclusion than the OLS-shaped result this default was sized
+                # for, and truncating them made a live turn thrash and die.
+                max_output_budget=12288,
+                handler=inspect_time_series_summary,
             ),
             ToolDefinition(
                 tool_id="inspect_repeated_measures_recipe",
@@ -573,6 +639,14 @@ class NodeOperationContextProvider:
                 "schema_id": contract.schema_id,
                 "editable_schema": contract.editable_schema,
             }
+            # A pack whose whole option surface is a single `model_options` JSON
+            # control tells the Agent nothing about what may go inside it. Where
+            # the pack publishes a vocabulary, attach it so a proposal can be
+            # written against real field names, closed value sets, and server
+            # caps instead of guesses.
+            vocabulary = build_option_vocabulary(contract.op_type)
+            if vocabulary is not None:
+                contract_payload["option_vocabulary"] = vocabulary
         elif "data_node" in operation.scope_requirements and operation.editable_schema:
             # Data operations have no per-node lineage contract: `resolve_
             # operation_contract` answers for model nodes only, and a cast's
@@ -607,6 +681,43 @@ class NodeOperationContextProvider:
             "contract": contract_payload,
             "node": _bounded_node(node),
         }
+
+    def precheck_model_options_patch(
+        self,
+        *,
+        owner_run_id: str,
+        patch: dict[str, Any],
+    ) -> None:
+        """Raise the owning pack's structured error if the patch cannot execute.
+
+        Silent when the node's pack declares no validator, or when the node's
+        current contract cannot be resolved — refusing a patch on the basis of
+        evidence we do not have would be worse than letting execution judge it.
+        """
+
+        run_root = self.project_root / "runs" / owner_run_id
+        try:
+            manifest = read_json(run_root / "run_manifest.json")
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            return
+        contract = resolve_operation_contract(stage="model", manifest=manifest)
+        if contract is None:
+            return
+        artifacts, _metadata = _read_time_series_artifacts(run_root)
+        current = artifacts.get("ts.analysis_contract")
+        if not isinstance(current, dict):
+            try:
+                run_inputs = read_run_inputs(run_root)
+            except (FileNotFoundError, OSError, TypeError, ValueError):
+                run_inputs = {}
+            current = _analysis_contract_from_run_inputs(run_inputs)
+        if not isinstance(current, dict):
+            return
+        validate_model_options_patch(
+            contract.op_type,
+            current_contract=current,
+            patch=patch,
+        )
 
     def inspect_diagnostics(
         self,
@@ -663,6 +774,76 @@ class NodeOperationContextProvider:
             "node": _bounded_node(node),
             "result_summary": result_summary,
             "omitted_sections": omitted_sections,
+        }
+
+    def inspect_time_series_summary(
+        self,
+        request: InspectTimeSeriesSummaryRequest,
+    ) -> dict[str, Any]:
+        """Return public ARMA-GARCH evidence without exposing raw series."""
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        from .recipes.arma_garch import build_arma_garch_public_result_view
+
+        run_root = self.project_root / "runs" / request.owner_run_id
+        artifacts, metadata = _read_time_series_artifacts(run_root)
+        summary = build_arma_garch_public_result_view(artifacts)
+        try:
+            run_inputs = read_run_inputs(run_root)
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            run_inputs = {}
+        if "ts.analysis_contract" not in artifacts:
+            recovered = _analysis_contract_from_run_inputs(run_inputs)
+            if recovered is not None:
+                artifacts["ts.analysis_contract"] = recovered
+            summary = build_arma_garch_public_result_view(artifacts)
+        persisted_source_run_id = run_inputs.get("rerun_of")
+        declared_source_run_id = metadata.get("source_run_id")
+        source_run_id = (
+            persisted_source_run_id
+            if isinstance(persisted_source_run_id, str) and persisted_source_run_id
+            else declared_source_run_id
+        )
+        compare = None
+        if isinstance(source_run_id, str) and source_run_id:
+            source_root = self.project_root / "runs" / source_run_id
+            source_artifacts, _ = _read_time_series_artifacts(source_root)
+            if source_artifacts:
+                from ..analysis_loop.time_series_compare import (
+                    build_arma_garch_compare_packet,
+                )
+
+                compare = build_arma_garch_compare_packet(
+                    source_run_id=source_run_id,
+                    child_run_id=request.owner_run_id,
+                    source_artifacts=source_artifacts,
+                    child_artifacts=artifacts,
+                    child_source_run_id=(
+                        declared_source_run_id
+                        if isinstance(declared_source_run_id, str)
+                        else persisted_source_run_id
+                    ),
+                ).to_dict()
+        omitted = summary.pop("omitted_sections", [])
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "lineage": {
+                "run_id": request.owner_run_id,
+                "source_run_id": source_run_id,
+                "node_id": metadata.get("node_id"),
+                "dataset_ref": metadata.get("dataset_ref"),
+                "dataset_hash": metadata.get("dataset_hash"),
+                "contract_hash": metadata.get("contract_hash"),
+            },
+            "time_series_summary": summary,
+            "compare": compare,
+            "omitted_sections": omitted,
         }
 
     def inspect_repeated_measures_recipe(
@@ -802,18 +983,41 @@ class NodeOperationContextProvider:
         active_head_run_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         runs_root = self.project_root / "runs"
-        canonical = build_rerun_operation_context(
-            runs_root,
-            request_id=request_id,
-            owner_run_id=owner_run_id,
-            op_node_id=op_node_id,
-            active_head_run_id=active_head_run_id,
-        )
+        try:
+            canonical = build_rerun_operation_context(
+                runs_root,
+                request_id=request_id,
+                owner_run_id=owner_run_id,
+                op_node_id=op_node_id,
+                active_head_run_id=active_head_run_id,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            prefix = message.partition(":")[0]
+            if prefix not in {
+                "invalid_operation_target",
+                "context_stale",
+                "context_mismatch",
+            }:
+                raise
+            try:
+                valid_ids = sorted(GraphStore(runs_root=runs_root).read(owner_run_id).nodes)
+            except Exception:
+                valid_ids = []
+            targets = ", ".join(valid_ids[:24]) if valid_ids else "none"
+            raise ToolVisibleError(
+                f"{prefix.upper()}: {message}. Valid node IDs for run "
+                f"{owner_run_id}: {targets}."
+            ) from exc
         graph = GraphStore(runs_root=runs_root).read(owner_run_id)
         graph_json = graph_to_json(graph)
         node = graph_json["nodes"].get(op_node_id)
         if not isinstance(node, dict):
-            raise ValueError("invalid_operation_target: op_node_id")
+            valid_ids = ", ".join(sorted(graph_json["nodes"])[:24]) or "none"
+            raise ToolVisibleError(
+                "INVALID_OPERATION_TARGET: invalid_operation_target: op_node_id. "
+                f"Valid node IDs for run {owner_run_id}: {valid_ids}."
+            )
         manifest = _read_manifest(runs_root / owner_run_id)
         return canonical.model_dump(), node, manifest
 
@@ -824,6 +1028,30 @@ def _read_manifest(run_root: Path) -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _analysis_contract_from_run_inputs(
+    run_inputs: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Recover the frozen analysis contract from persisted run inputs.
+
+    A run that failed before its artifacts were written still has the options
+    it was asked to execute, and those options are the only honest basis for
+    judging a patch against that node.
+    """
+
+    for section_name in ("executed_payload", "confirmed_payload", "form"):
+        section = run_inputs.get(section_name)
+        options = section.get("model_options") if isinstance(section, dict) else None
+        if not isinstance(options, dict):
+            continue
+        try:
+            from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
+
+            return ArmaGarchAnalysisContract.from_dict(options).to_dict()
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _read_diagnostic_summary(run_root: Path) -> tuple[dict[str, Any] | None, str]:

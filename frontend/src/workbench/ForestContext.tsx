@@ -13,6 +13,9 @@ export interface ForestContextValue {
    *  head is rollback — pure view-state, no backend mutation. */
   activeRunId: string;
   setActiveRunId: (runId: string) => void;
+  /** Reload the forest after a durable change (e.g. a new comparison node).
+   *  Optional so existing test providers stay valid. */
+  refetch?: () => void;
 }
 
 export const ForestContext = createContext<ForestContextValue | null>(null);

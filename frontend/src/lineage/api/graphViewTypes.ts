@@ -19,6 +19,7 @@ export type Stage =
   | "diag"
   | "viz"
   | "report"
+  | "compare" // v1.8 slice C: a durable comparison joining two model nodes
   | "unknown"; // adapter fallback when backend has no stage field
 
 // v1.6.6 ④: `blocker` is its own strongest variant (backend Trust.BLOCKER)

@@ -110,6 +110,20 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     return details
 
 
+class ToolVisibleError(ValueError):
+    """An error whose message is written for the model, not for a log.
+
+    A tool failure normally surfaces only its exception class name, which is
+    right for internal faults: a model can do nothing with a stack detail and
+    should not see one. But a *refusal* — "this patch is illegal, here is the
+    code" — is useless unless the model reads it. A live DeepSeek turn proved
+    the cost: the pack refused an auto-mode patch with a specific code, the
+    model received the bare string "ValueError", and it burned its remaining
+    steps guessing before the turn died. Raise this when the message is the
+    actionable part.
+    """
+
+
 @dataclass(frozen=True)
 class ToolResult:
     tool_call_id: str
@@ -221,6 +235,14 @@ class ToolRegistry:
                         error="tool_output_budget_exceeded",
                     )
             return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=True, output=output)
+        except ToolVisibleError as exc:
+            return ToolResult(
+                tool_call_id=call_id,
+                tool_id=tool_id,
+                ok=False,
+                error=type(exc).__name__,
+                error_details=[{"message": str(exc)}],
+            )
         except Exception as exc:
             return ToolResult(
                 tool_call_id=call_id,

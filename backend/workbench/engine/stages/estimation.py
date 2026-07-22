@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from ..context import ModelingContext, RunEnv
@@ -699,6 +700,16 @@ class EstimationStage:
                 if env.lmm_execution_admission is None:
                     raise ModelOptionsValidationError("LMM_EXECUTION_BINDING_REQUIRED", "LMM requires a live admission.")
             model_id, primary, fitted = handler.fit(ctx, env)
+            primary_inputs = ctx.artifacts.get("_primary_model_input_ids")
+            if primary_inputs is not None:
+                if not isinstance(primary_inputs, list) or not all(
+                    isinstance(item, str) and item for item in primary_inputs
+                ):
+                    raise ValueError(
+                        "_primary_model_input_ids must be a list of non-empty strings"
+                    )
+                model_input_ids = list(primary_inputs)
+                ctx.artifacts["_model_input_ids"] = list(model_input_ids)
             # LMM's registered PacketEnvelope is its sole model-result source;
             # never create a competing legacy ``model_results/*.json`` copy.
             if handler.model_type != "linear_mixed_effects":
@@ -743,6 +754,13 @@ class EstimationStage:
             # NB: WorkflowValidationError IS-A ValueError but we raised the only
             # pre-check above the try, so any ValueError here is a real fit failure.
             is_model_options_error = isinstance(exc, ModelOptionsValidationError)
+            structured_code = getattr(exc, "code", None)
+            structured_evidence = getattr(exc, "evidence", None)
+            is_structured_model_error = (
+                isinstance(structured_code, str)
+                and bool(structured_code)
+                and isinstance(structured_evidence, Mapping)
+            )
             if is_model_options_error:
                 failure_evidence = {
                     **exc.evidence,
@@ -750,6 +768,19 @@ class EstimationStage:
                     "requested_model_type": model_type,
                 }
                 issue_code = exc.error_code
+            elif is_structured_model_error:
+                failure_evidence = {
+                    **dict(structured_evidence),
+                    "impact": getattr(exc, "impact", None),
+                    "recommended_actions": [
+                        dict(item)
+                        for item in getattr(exc, "recommended_actions", ())
+                        if isinstance(item, Mapping)
+                    ],
+                    "y_type": ctx.y_type,
+                    "requested_model_type": model_type,
+                }
+                issue_code = structured_code
             else:
                 failure_evidence = _model_failure_details(
                     model_type=(

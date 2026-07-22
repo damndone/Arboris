@@ -8,8 +8,11 @@ const mockWb = vi.hoisted(() => ({ current: null as unknown }));
 const mockGenerate = vi.hoisted(() => ({
   current: vi.fn() as ReturnType<typeof vi.fn>,
 }));
+const mockSaveAiReport = vi.hoisted(() => vi.fn());
+const mockFetchAiReports = vi.hoisted(() => vi.fn());
 const mockFigureArtifacts = vi.hoisted(() => ({ groups: [] as unknown[] }));
 const mockFigureContext = vi.hoisted(() => vi.fn());
+const mockArtifactJson = vi.hoisted(() => vi.fn());
 const mockFigureArtifactsError = vi.hoisted(() => ({ current: null as Error | null }));
 
 vi.mock("../workbench/ForestContext", () => ({
@@ -23,6 +26,8 @@ vi.mock("./reportClient", async (importOriginal) => {
   return {
     ...original,
     generateReport: (...args: unknown[]) => mockGenerate.current(...args),
+    saveAiReport: (...args: unknown[]) => mockSaveAiReport(...args),
+    fetchAiReports: (...args: unknown[]) => mockFetchAiReports(...args),
   };
 });
 vi.mock("../api", async (importOriginal) => {
@@ -32,6 +37,7 @@ vi.mock("../api", async (importOriginal) => {
     fetchRunArtifacts: () => mockFigureArtifactsError.current
       ? Promise.reject(mockFigureArtifactsError.current)
       : Promise.resolve(mockFigureArtifacts),
+    fetchArtifactJson: (...args: unknown[]) => mockArtifactJson(...args),
   };
 });
 vi.mock("../workbench/views/figureAi", async (importOriginal) => {
@@ -58,9 +64,13 @@ describe("ReportView", () => {
       dispatch: { setView: vi.fn(), selectByCanvasClick: vi.fn() },
     };
     mockGenerate.current = vi.fn();
+    mockSaveAiReport.mockReset();
+    mockFetchAiReports.mockReset();
+    mockFetchAiReports.mockResolvedValue([]);
     mockFigureArtifacts.groups = [];
     mockFigureArtifactsError.current = null;
     mockFigureContext.mockReset();
+    mockArtifactJson.mockReset();
   });
 
   it("shows the deterministic fact table before any AI call", () => {
@@ -68,6 +78,38 @@ describe("ReportView", () => {
     expect(screen.getByTestId("report-fact-preview")).toBeInTheDocument();
     expect(screen.getByText("param:covariance")).toBeInTheDocument();
     expect(mockGenerate.current).not.toHaveBeenCalled();
+  });
+
+  it("loads bounded time-series artifacts into the citable fact table", async () => {
+    mockFigureArtifacts.groups = [{
+      artifact_type: "time_series_json",
+      items: [
+        { artifact_id: "ts.arma_selection", path: "artifacts/time_series/ts.arma_selection.json", artifact_type: "time_series_json" },
+        { artifact_id: "ts.forecast_metrics", path: "artifacts/time_series/ts.forecast_metrics.json", artifact_type: "time_series_json" },
+        { artifact_id: "ts.analysis_contract", path: "artifacts/time_series/ts.analysis_contract.json", artifact_type: "time_series_json" },
+        { artifact_id: "ts.data_audit", path: "artifacts/time_series/ts.data_audit.json", artifact_type: "time_series_json" },
+      ],
+    }];
+    mockArtifactJson.mockImplementation((_root, _run, artifactId) => {
+      if (artifactId === "ts.arma_selection") {
+        return Promise.resolve({ payload: { final_selected_candidate_id: "arma-p1-q1-n" } });
+      }
+      if (artifactId === "ts.analysis_contract") {
+        return Promise.resolve({ payload: { transform: "log_return_pct" } });
+      }
+      if (artifactId === "ts.data_audit") {
+        return Promise.resolve({ payload: { data_quality: { finite_value_count: 2542 } } });
+      }
+      return Promise.resolve({ payload: { rmse: 7.4, interval_coverage: 1 } });
+    });
+
+    render(<ReportView projectRoot="/tmp/projA" />);
+
+    expect(await screen.findByText("ts:arma:selected_candidate")).toBeInTheDocument();
+    expect(screen.getByText("ts:validation:rmse")).toBeInTheDocument();
+    expect(screen.getByText("ts:contract:transform")).toBeInTheDocument();
+    expect(screen.getByText("ts:data:analysis_observations")).toBeInTheDocument();
+    expect(screen.getByText("arma-p1-q1-n")).toBeInTheDocument();
   });
 
   it("generate renders prose with verified chips and flags unknown ids", async () => {
@@ -84,6 +126,15 @@ describe("ReportView", () => {
     expect(screen.getByTestId("report-provenance").textContent).toContain(
       "deepseek-v4-flash",
     );
+  });
+
+  it("durably stores an AI report with its full fact snapshot when a project is open", async () => {
+    mockGenerate.current = vi.fn().mockResolvedValue({ text: "Result [[c:c1]]", model: "deepseek-v4-pro" });
+    render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
+    await waitFor(() => expect(mockSaveAiReport).toHaveBeenCalledTimes(1));
+    expect(mockSaveAiReport.mock.calls[0][0]).toMatchObject({ projectRoot: "/tmp/projA", runId: "run_c" });
+    expect(mockSaveAiReport.mock.calls[0][0].record.facts.length).toBeGreaterThan(0);
   });
 
   it("chip click jumps back to the graph and selects the node", async () => {

@@ -45,6 +45,14 @@ def test_resolve_normalizes_effective_id_for_auto_runs():
     assert contract is not None and contract.op_type == "ols"
 
 
+def test_failed_model_tombstone_resolves_from_top_level_requested_type():
+    contract = resolve_operation_contract(
+        stage="model",
+        manifest={"status": "failed", "requested_model_type": "time_series.arma_garch"},
+    )
+    assert contract is not None and contract.op_type == "time_series.arma_garch"
+
+
 def test_non_editable_stage_returns_none():
     assert resolve_operation_contract(stage="clean", manifest={}) is None
 
