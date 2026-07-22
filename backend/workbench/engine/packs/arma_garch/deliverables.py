@@ -164,36 +164,257 @@ def _parameter_rows(parameters: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _diagnostic_rows(diagnostics: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Project every registered residual diagnostic, not just the ADF row.
+
+    The acceptance warnings a reader sees ("mean-residual autocorrelation",
+    "rejects normality") are produced by Ljung--Box and Jarque--Bera.  Exporting
+    only ADF shipped the verdict without the evidence behind it.
+    """
     rows: list[dict[str, Any]] = []
     adf = _as_mapping(diagnostics.get("adf"))
     if adf:
-        rows.append({"test": "ADF", "statistic": adf.get("statistic", "—"), "p_value": adf.get("p_value", "—"), "status": adf.get("status", "—")})
+        rows.append(
+            _diagnostic_row(
+                "ADF",
+                adf,
+                detail=_detail(("used_lag", adf.get("used_lag")), ("nobs", adf.get("nobs"))),
+            )
+        )
+
+    ljung_box = diagnostics.get("ljung_box")
+    for entry in ljung_box if isinstance(ljung_box, list) else []:
+        entry = _as_mapping(entry)
+        if not entry:
+            continue
+        # A Ljung--Box entry carries no status of its own, and the producer
+        # emits None for a non-finite statistic; derive it rather than assume.
+        computed = entry.get("statistic") is not None and entry.get("p_value") is not None
+        rows.append(
+            _diagnostic_row(
+                f"Ljung–Box residuals (lag {_value(entry, 'lag', '—')})",
+                entry,
+                status="ok" if computed else "unavailable",
+            )
+        )
+
+    arch_lm = _as_mapping(diagnostics.get("arch_lm"))
+    if arch_lm:
+        rows.append(
+            _diagnostic_row(
+                "ARCH-LM residuals",
+                arch_lm,
+                detail=_detail(
+                    ("lag", arch_lm.get("lag")),
+                    ("F", arch_lm.get("f_statistic")),
+                    ("F p_value", arch_lm.get("f_p_value")),
+                ),
+            )
+        )
+
+    normality = _as_mapping(diagnostics.get("normality"))
+    if normality:
+        rows.append(
+            _diagnostic_row(
+                "Jarque–Bera residuals",
+                normality,
+                detail=_detail(
+                    ("skew", normality.get("skew")),
+                    ("kurtosis", normality.get("kurtosis")),
+                ),
+            )
+        )
+        for key, label in (("shapiro_wilk", "Shapiro–Wilk residuals"), ("shapiro_francia", "Shapiro–Francia residuals")):
+            nested = _as_mapping(normality.get(key))
+            if nested:
+                rows.append(_diagnostic_row(label, nested))
+
+    exceedance = _as_mapping(diagnostics.get("residual_exceedance"))
+    if exceedance:
+        rows.append(
+            {
+                "test": "Residual exceedance rate",
+                "statistic": _value(exceedance, "rate", "—"),
+                "p_value": "—",
+                "status": "ok",
+                "detail": _detail(
+                    ("threshold", exceedance.get("threshold")),
+                    ("count", exceedance.get("count")),
+                    ("n", exceedance.get("n")),
+                ),
+            }
+        )
+
     for warning in diagnostics.get("warnings", []) if isinstance(diagnostics.get("warnings"), list) else []:
-        rows.append({"test": "warning", "statistic": "—", "p_value": "—", "status": str(warning)})
+        rows.append({"test": "warning", "statistic": "—", "p_value": "—", "status": str(warning), "detail": ""})
     return rows
+
+
+def _diagnostic_row(test: str, values: Mapping[str, Any], *, status: str | None = None, detail: str = "") -> dict[str, Any]:
+    return {
+        "test": test,
+        "statistic": _value(values, "statistic", "—"),
+        "p_value": _value(values, "p_value", "—"),
+        "status": status if status is not None else _value(values, "status", "—"),
+        "detail": detail,
+    }
+
+
+def _detail(*pairs: tuple[str, Any]) -> str:
+    return ", ".join(f"{label}={value}" for label, value in pairs if value is not None)
 
 
 def _candidate_rows(payload: object) -> list[dict[str, Any]]:
     values = _as_mapping(payload).get("candidates", payload)
-    return _rows(values, ("candidate_id", "p", "q", "constant", "converged", "aic", "aicc", "bic", "log_likelihood"))
+    return _rows(
+        values,
+        (
+            "candidate_id",
+            "p",
+            "q",
+            "constant",
+            "converged",
+            "stationary",
+            "invertible",
+            "nobs",
+            "effective_sample",
+            "log_likelihood",
+            "parameter_count",
+            "aic",
+            "aicc",
+            "bic",
+            "failure_code",
+        ),
+    )
 
 
 def _volatility_rows(payload: object) -> list[dict[str, Any]]:
-    values = _as_mapping(payload).get("searches", payload)
-    if isinstance(values, Mapping):
-        flattened: list[object] = []
-        for value in values.values():
-            flattened.extend(value if isinstance(value, list) else [value])
-        values = flattened
-    return _rows(values, ("candidate_id", "model", "p", "q", "distribution", "converged", "aic", "aicc", "bic", "log_likelihood"))
+    """Flatten ``searches[].candidates[]`` into one row per variance candidate.
+
+    ``ts.volatility_candidates`` groups candidates under the mean candidate they
+    were fitted against, so a one-level flatten only ever reached the search
+    metadata and dropped every candidate on the floor.
+    """
+    searches = _as_mapping(payload).get("searches", payload)
+    if isinstance(searches, Mapping):
+        searches = list(searches.values())
+    if not isinstance(searches, list):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for search in searches:
+        search = _as_mapping(search)
+        if not search:
+            continue
+        selected_id = search.get("selected_candidate_id")
+        shortlist = search.get("shortlist_candidate_ids")
+        shortlist = shortlist if isinstance(shortlist, list) else []
+        candidates = search.get("candidates")
+        for candidate in candidates if isinstance(candidates, list) else []:
+            candidate = _as_mapping(candidate)
+            if not candidate:
+                continue
+            candidate_id = candidate.get("candidate_id")
+            row: dict[str, Any] = {"mean_candidate_id": _value(search, "mean_candidate_id", "—")}
+            row.update(
+                {
+                    key: candidate.get(key, "")
+                    for key in (
+                        "candidate_id",
+                        "variance_model",
+                        "p",
+                        "q",
+                        "distribution",
+                        "estimation_strategy",
+                        "joint_likelihood",
+                        "mean_binding_status",
+                        "converged",
+                        "nobs",
+                        "effective_sample",
+                        "hold_back",
+                        "log_likelihood",
+                        "parameter_count",
+                        "aic",
+                        "aicc",
+                        "bic",
+                        "failure_code",
+                    )
+                    if key in candidate
+                }
+            )
+            row["shortlisted"] = candidate_id in shortlist
+            row["selected"] = candidate_id == selected_id
+            row["selection_status"] = _value(search, "selection_status", "—")
+            rows.append(row)
+    return rows
 
 
 def _rolling_rows(payload: object) -> list[dict[str, Any]]:
+    """Project one row per rolling origin, flattening the nested row identity.
+
+    ``forecast_origin`` and ``target`` are mappings, and the evaluated values are
+    named ``observed_value``/``conditional_mean``/``interval_covered``.  Guessing
+    flat ``actual``/``forecast``/``covered`` names matched only the two interval
+    bounds, which was enough to defeat the fallback in :func:`_rows` and ship a
+    two-column sheet that could not be reconciled against the reported RMSE.
+    """
     values = _as_mapping(payload).get("rows", payload)
-    return _rows(values, ("origin", "origin_time", "target_time", "actual", "forecast", "error", "lower_bound", "upper_bound", "covered"))
+    if not isinstance(values, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for value in values:
+        value = _as_mapping(value)
+        if not value:
+            continue
+        origin = _as_mapping(value.get("forecast_origin"))
+        target = _as_mapping(value.get("target"))
+        row: dict[str, Any] = {
+            "origin_time": _value(origin, "time", "—"),
+            "origin_row_id": _value(origin, "row_id", "—"),
+            "target_time": _value(target, "time", "—"),
+            "target_row_id": _value(target, "row_id", "—"),
+        }
+        row.update(
+            {
+                key: value.get(key, "")
+                for key in (
+                    "observed_value",
+                    "conditional_mean",
+                    "conditional_variance",
+                    "conditional_volatility",
+                    "lower_bound",
+                    "upper_bound",
+                    "lower_quantile",
+                    "interval_covered",
+                    "quantile_exception",
+                    "fit_status",
+                    "fit_method",
+                    "model_scale",
+                    "predictive_interval",
+                    "parameter_uncertainty_included",
+                    "warning",
+                )
+                if key in value
+            }
+        )
+        rows.append(row)
+    return rows
+
+
+# Wall-clock timings and free-form convergence blobs are not reproducible across
+# runs; a deliverable that embeds them stops being a deterministic projection.
+_NON_DETERMINISTIC_KEYS = frozenset({"elapsed_seconds", "convergence_details"})
 
 
 def _rows(values: object, preferred: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Project mappings onto ``preferred`` columns, falling back to scalars.
+
+    A *partial* key match used to be indistinguishable from a full one: the
+    projection kept whatever happened to match and the fallback below never
+    fired, so an exporter written against a guessed schema silently shipped a
+    truncated sheet instead of an obviously wrong one.  The projections above
+    are now derived from real persisted payloads; the fallback stays for
+    genuinely unknown shapes only.
+    """
     if not isinstance(values, list):
         return []
     rows: list[dict[str, Any]] = []
@@ -201,5 +422,12 @@ def _rows(values: object, preferred: tuple[str, ...]) -> list[dict[str, Any]]:
         if not isinstance(value, Mapping):
             continue
         row = {key: value.get(key, "") for key in preferred if key in value}
-        rows.append(row or {str(key): item for key, item in value.items() if not isinstance(item, (dict, list))})
+        rows.append(
+            row
+            or {
+                str(key): item
+                for key, item in value.items()
+                if not isinstance(item, (dict, list)) and key not in _NON_DETERMINISTIC_KEYS
+            }
+        )
     return rows

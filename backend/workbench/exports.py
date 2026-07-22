@@ -135,12 +135,23 @@ def _draw_arma_garch_pdf(pdf: canvas.Canvas, report: Mapping[str, Any], y: float
     for row in report.get("next_forecast", []):
         if isinstance(row, Mapping):
             y = line(str(row.get("field", "")), row.get("value", ""), y)
+    y = heading("Residual diagnostics", y, level=2)
+    for row in report.get("diagnostics", []):
+        if not isinstance(row, Mapping):
+            continue
+        statistic, p_value = row.get("statistic", "—"), row.get("p_value", "—")
+        detail = row.get("detail", "")
+        summary = f"stat={statistic} p={p_value} [{row.get('status', '—')}]"
+        y = line(str(row.get("test", "")), f"{summary} {detail}".strip(), y)
     y = heading("Interpretation limits", y, level=2)
     for item in report.get("limitations", []):
         y = line("Limit", item, y)
     y = heading("Chart evidence", y, level=2)
-    y = line("Registered chart artifacts", len(report.get("chart_artifacts", [])), y)
-    for artifact_id in report.get("chart_artifacts", [])[:17]:
+    chart_artifacts = report.get("chart_artifacts", [])
+    y = line("Registered chart artifacts", len(chart_artifacts), y)
+    # Every registered chart is listed: a fixed cap here silently disagreed with
+    # the count printed directly above it as soon as the pack grew a chart.
+    for artifact_id in chart_artifacts:
         y = line("artifact", artifact_id, y)
 
 

@@ -41,7 +41,7 @@
     </section>
     <section id="diagnostics">
       <h2>Diagnostics</h2>
-      <table><thead><tr><th>Test</th><th>Statistic</th><th>p-value</th><th>Status</th></tr></thead><tbody>{% for row in view_model.diagnostics %}<tr><td>{{ row.test }}</td><td>{{ row.statistic }}</td><td>{{ row.p_value }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table>
+      <table><thead><tr><th>Test</th><th>Statistic</th><th>p-value</th><th>Status</th><th>Detail</th></tr></thead><tbody>{% for row in view_model.diagnostics %}<tr><td>{{ row.test }}</td><td>{{ row.statistic }}</td><td>{{ row.p_value }}</td><td>{{ row.status }}</td><td>{{ row.detail }}</td></tr>{% endfor %}</tbody></table>
     </section>
     <section id="next-forecast">
       <h2>Production next-observation forecast</h2>

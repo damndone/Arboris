@@ -32,14 +32,29 @@
       "evidence": "Browser handoff records backend 2940 passed / 8 skipped, golden 23 with zero drift, frontend 1288 passed and TypeScript clean; the later Table follow-up recorded frontend 1289 and TypeScript clean. A final single host full gate on the final immutable candidate remains required."
     },
     {
+      "id": "host_full_gate_on_final_candidate",
+      "status": "PASS_INDEPENDENT_HOST_RUN",
+      "evidence": "Independent acceptance ran the full gate natively on the host, with no nested sandbox and no development server listening, so the environment-only sandbox failures recorded earlier did not apply. On 63c2e41 plus docs: backend 2947 passed / 8 skipped, golden 23 with zero drift, frontend 1292 passed across 150 files, tsc --noEmit clean, GATE PASSED. Re-run after the delivery fixes below: backend 2952 passed / 8 skipped, golden 23 with zero drift, frontend 1292, tsc clean, GATE PASSED."
+    },
+    {
       "id": "report_export_single_source",
       "status": "PASS_REAL_VIX_RUN",
       "evidence": "VIX run 20260722_011832_368932_550d4414 generated a run-owned ARMA-GARCH HTML (6.4 KB) and PDF (9.4 KB) from the registered ts.* facts. Browser AI reports now persist as immutable ai_report_<id> artifacts with their fact snapshot; historical browser-only reports are honestly not retroactively reconstructed."
     },
     {
       "id": "xlsx_nonempty_arma_garch_export",
-      "status": "PASS_REAL_VIX_RUN",
-      "evidence": "VIX run 20260722_011832_368932_550d4414 generated an 11 KB workbook with non-empty Overview, ARMA candidates, Volatility candidates, Parameters, Diagnostics, Rolling forecasts, Next forecast, and Acceptance sheets."
+      "status": "PASS_AFTER_INDEPENDENT_ACCEPTANCE_FIX",
+      "evidence": "VIX run 20260722_011832_368932_550d4414 generated an 11 KB workbook with all eight sheets present and non-empty. Independent acceptance found non-empty was not sufficient: three sheets were materially lossy and are now fixed and regression-tested against the real artifact schema. See delivery_projection_fidelity."
+    },
+    {
+      "id": "delivery_projection_fidelity",
+      "status": "PASS_AFTER_INDEPENDENT_ACCEPTANCE_FIX",
+      "evidence": "Independent acceptance rebuilt the deliverables from run 20260722_011832_368932_550d4414 and found three lossy projections in engine/packs/arma_garch/deliverables.py. Rolling forecasts exported 2 of 18 columns because the projection guessed flat origin/actual/forecast/covered keys while the artifact nests forecast_origin/target and names the values observed_value/conditional_mean/interval_covered; the partial match on the two interval bounds defeated the scalar fallback, so the sheet could not be reconciled against the reported RMSE or coverage. Volatility candidates listed zero candidates because searches[] groups candidates one level below and a single-level flatten reached only search metadata. Diagnostics and the run-owned HTML and PDF exported ADF alone, omitting the Ljung-Box, ARCH-LM, Jarque-Bera, Shapiro-Wilk, Shapiro-Francia and residual-exceedance results that produce the visible acceptance warnings. All three are fixed; the PDF gained a residual-diagnostics section and no longer caps the chart list at a hardcoded 17. Regenerated from the real run: Rolling forecasts 20 rows x 19 columns, Volatility candidates carrying candidate_id/joint_likelihood/parameter_count/selected, Diagnostics 9 rows. Fixtures in tests/models/arma_garch/test_deliverables.py are now derived from real persisted payloads, which is how the original defect escaped: implementation and test agreed with each other and both disagreed with the artifacts."
+    },
+    {
+      "id": "sequential_estimation_disclosure_in_deliverables",
+      "status": "PASS_INDEPENDENTLY_VERIFIED",
+      "evidence": "No composite ARMA-GARCH information criterion is reported anywhere. Verified numerically on the real run: the ARMA candidate AIC 17574.22730388487 inverts to exactly k=3 (ar.L1, ma.L1, sigma2) against log-likelihood -8784.113651942433, and the variance candidate AIC 17226.780750940023 inverts to exactly k=3 (omega, alpha, beta) against -8610.390375470011; neither pools the other equation's parameters. Candidates carry an explicit joint_likelihood=false flag, now exported to the workbook. The run-owned HTML report states the sequential-versus-joint limitation verbatim. The lower-quantile exception state is never labelled value-at-risk in source, workbook, report or artifacts."
     },
     {
       "id": "human_readable_compare_and_agent_handoff",
@@ -48,13 +63,13 @@
     },
     {
       "id": "independent_step_5_acceptance",
-      "status": "PENDING_USER_ASSIGNED",
-      "evidence": "The user assigned Claude Code to independently accept the exact final candidate SHA. This remains a release hold, not an implementation defect."
+      "status": "PERFORMED_DEFECTS_FOUND_AND_FIXED",
+      "evidence": "Claude Code independently accepted the candidate rather than inheriting its conclusions. Confirmed: host full gate, the absence of any composite information criterion, the value-at-risk labelling invariant, the 17 registered chart artifacts, the ai_report persistence path with its test, and the three-way Compare summary. Rejected: the delivery-layer claim, on three counts now fixed under delivery_projection_fidelity. The browser Compare node cited as evidence predates the summary fix and does not demonstrate it; the summary itself is implemented in analysis_loop/time_series_compare.py and covered by focused tests only."
     },
     {
       "id": "release_document_reconciliation",
-      "status": "IN_PROGRESS",
-      "evidence": "This ledger is reconciled to the delivery fixes and real VIX run. Insert the final candidate SHA and host full-gate evidence only after the local closeout commit."
+      "status": "RECONCILED_TO_ACCEPTANCE",
+      "evidence": "This ledger now records the independent acceptance outcome, the host full gate on the final candidate, and the delivery projection fixes. Publication remains unauthorized: no push, pull request, merge or tag has been performed or requested."
     }
   ],
   "future_non_blocking_work": [
