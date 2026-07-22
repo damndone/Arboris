@@ -1,0 +1,347 @@
+{
+  "schema_version": 3,
+  "run_id": "20260722_043812_924307_874cc62b",
+  "nodes": {
+    "stage:raw": {
+      "id": "stage:raw",
+      "kind": "dataset_stage",
+      "display_label": "Raw input data",
+      "created_at": "2026-07-22T04:38:12.946664+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Raw: 2610 rows × 2 cols",
+      "annotations": [],
+      "stage": "source"
+    },
+    "stage:ts-analysis-view": {
+      "id": "stage:ts-analysis-view",
+      "kind": "dataset_stage",
+      "display_label": "Time-series analysis view",
+      "created_at": "2026-07-22T04:38:17.839378+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.analysis_view_manifest.json",
+      "decision_points": [],
+      "summary": "Time-series analysis view",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "stage:ts-split": {
+      "id": "stage:ts-split",
+      "kind": "dataset_stage",
+      "display_label": "Frozen train/validation split",
+      "created_at": "2026-07-22T04:38:17.839399+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.train_validation_split.json",
+      "decision_points": [],
+      "summary": "Frozen train/validation split",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "stage:ts-mean-selection": {
+      "id": "stage:ts-mean-selection",
+      "kind": "dataset_stage",
+      "display_label": "ARMA mean selection",
+      "created_at": "2026-07-22T04:38:17.839404+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.arma_selection.json",
+      "decision_points": [],
+      "summary": "ARMA mean selection",
+      "annotations": [],
+      "stage": "model"
+    },
+    "stage:ts-volatility-selection": {
+      "id": "stage:ts-volatility-selection",
+      "kind": "dataset_stage",
+      "display_label": "ARCH/GARCH selection",
+      "created_at": "2026-07-22T04:38:17.839408+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.volatility_selection.json",
+      "decision_points": [],
+      "summary": "ARCH/GARCH selection",
+      "annotations": [],
+      "stage": "model"
+    },
+    "stage:ts-rolling-validation": {
+      "id": "stage:ts-rolling-validation",
+      "kind": "dataset_stage",
+      "display_label": "One-step rolling validation",
+      "created_at": "2026-07-22T04:38:17.839411+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.forecast_metrics.json",
+      "decision_points": [],
+      "summary": "One-step rolling validation",
+      "annotations": [],
+      "stage": "diag"
+    },
+    "stage:ts-full-sample-child": {
+      "id": "stage:ts-full-sample-child",
+      "kind": "dataset_stage",
+      "display_label": "Full-sample production child",
+      "created_at": "2026-07-22T04:38:17.839414+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "artifacts/time_series/ts.next_forecast.json",
+      "decision_points": [],
+      "summary": "Full-sample production child",
+      "annotations": [],
+      "stage": "model"
+    },
+    "stage:cleaned": {
+      "id": "stage:cleaned",
+      "kind": "dataset_stage",
+      "display_label": "Cleaned data",
+      "created_at": "2026-07-22T04:38:17.842783+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "processed/cleaned_dataset.parquet",
+      "decision_points": [
+        {
+          "decision_id": "handle_missing_values",
+          "decision_id_alias": [],
+          "selected": "drop_rows_with_missing_required_fields",
+          "candidates": [
+            "drop_rows_with_missing_required_fields",
+            "mean_imputation",
+            "median_imputation",
+            "group_median_imputation",
+            "mode_imputation",
+            "missing_as_category",
+            "forward_fill",
+            "backward_fill",
+            "linear_interpolation",
+            "spline_interpolation",
+            "moving_average_imputation",
+            "knn_imputation",
+            "regression_imputation",
+            "random_forest_imputation",
+            "multiple_imputation",
+            "kalman_smoothing",
+            "matrix_completion",
+            "model_native_missing_handling"
+          ],
+          "source": "system_default",
+          "contestability": {
+            "is_contestable": true,
+            "assumption_checks_needed": [
+              "missingness_mechanism_audit"
+            ],
+            "warnings": [
+              "Listwise deletion assumes MCAR. May bias estimates under MAR/MNAR.",
+              "Consider per-variable strategy for time series / panel / causal contexts."
+            ],
+            "review_status": "needed"
+          },
+          "reason": {
+            "reason_type": "system_default",
+            "explanation": "Pipeline drops rows with any missing value in y or x. No per-column strategy.",
+            "chosen_params_schema": "MissingValueStrategy.v1",
+            "chosen_params": {
+              "method": "drop_rows_with_missing_required_fields",
+              "variables": [
+                "vixcls"
+              ],
+              "scope": "dataset",
+              "group_by": [],
+              "time_variable": null,
+              "max_gap": null,
+              "add_missing_indicator": false
+            }
+          }
+        }
+      ],
+      "summary": "Cleaned: 2610 rows",
+      "annotations": [],
+      "stage": "clean"
+    },
+    "var:vixcls:cleaned": {
+      "id": "var:vixcls:cleaned",
+      "kind": "variable",
+      "display_label": "vixcls (cleaned)",
+      "created_at": "2026-07-22T04:38:17.842794+00:00",
+      "parent_stage_id": "stage:cleaned",
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": null,
+      "decision_points": [],
+      "summary": "Kept as numeric",
+      "annotations": [],
+      "stage": "transform"
+    },
+    "model:arma_garch_1": {
+      "id": "model:arma_garch_1",
+      "kind": "model",
+      "display_label": "time_series.arma_garch (primary)",
+      "created_at": "2026-07-22T04:38:17.842800+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "model_results/arma_garch_1.json",
+      "decision_points": [],
+      "summary": null,
+      "annotations": [],
+      "stage": "model"
+    },
+    "report:html": {
+      "id": "report:html",
+      "kind": "report",
+      "display_label": "HTML report",
+      "created_at": "2026-07-22T04:38:17.842805+00:00",
+      "parent_stage_id": null,
+      "branch_id": "main",
+      "trust": "ok",
+      "trust_reason": null,
+      "archived": false,
+      "payload_ref": "reports/report.html",
+      "decision_points": [],
+      "summary": "HTML report",
+      "annotations": [],
+      "stage": "report"
+    }
+  },
+  "edges": {
+    "e:raw:ts-analysis-view": {
+      "id": "e:raw:ts-analysis-view",
+      "source_id": "stage:raw",
+      "target_id": "stage:ts-analysis-view",
+      "op": "analysis_view",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:ts-analysis-view:ts-split": {
+      "id": "e:ts-analysis-view:ts-split",
+      "source_id": "stage:ts-analysis-view",
+      "target_id": "stage:ts-split",
+      "op": "split",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:ts-split:ts-mean-selection": {
+      "id": "e:ts-split:ts-mean-selection",
+      "source_id": "stage:ts-split",
+      "target_id": "stage:ts-mean-selection",
+      "op": "mean_selection",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:ts-mean-selection:ts-volatility-selection": {
+      "id": "e:ts-mean-selection:ts-volatility-selection",
+      "source_id": "stage:ts-mean-selection",
+      "target_id": "stage:ts-volatility-selection",
+      "op": "volatility_selection",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:ts-volatility-selection:ts-rolling-validation": {
+      "id": "e:ts-volatility-selection:ts-rolling-validation",
+      "source_id": "stage:ts-volatility-selection",
+      "target_id": "stage:ts-rolling-validation",
+      "op": "rolling_validation",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:ts-rolling-validation:ts-full-sample-child": {
+      "id": "e:ts-rolling-validation:ts-full-sample-child",
+      "source_id": "stage:ts-rolling-validation",
+      "target_id": "stage:ts-full-sample-child",
+      "op": "full_sample_child",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:raw-cleaned": {
+      "id": "e:raw-cleaned",
+      "source_id": "stage:raw",
+      "target_id": "stage:cleaned",
+      "op": "clean_frame",
+      "params": {
+        "cleaning_actions_count": 2
+      },
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:pack-model-primary": {
+      "id": "e:pack-model-primary",
+      "source_id": "stage:ts-full-sample-child",
+      "target_id": "model:arma_garch_1",
+      "op": "time_series.arma_garch.fit",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:model-report": {
+      "id": "e:model-report",
+      "source_id": "model:arma_garch_1",
+      "target_id": "report:html",
+      "op": "render_report",
+      "params": {},
+      "reversible": false,
+      "inverse_op": null
+    },
+    "e:role:vixcls:outcome": {
+      "id": "e:role:vixcls:outcome",
+      "source_id": "var:vixcls:cleaned",
+      "target_id": "model:arma_garch_1",
+      "op": "enters_as_outcome",
+      "params": {
+        "role": "outcome",
+        "source": "outcome",
+        "estimator_family": "regression",
+        "dropped": false
+      },
+      "reversible": false,
+      "inverse_op": null
+    }
+  },
+  "branches": {
+    "main": {
+      "id": "main",
+      "forked_from_node_id": null,
+      "head_node_ids": [
+        "model:arma_garch_1",
+        "report:html"
+      ],
+      "archived": false
+    }
+  },
+  "legacy": false
+}

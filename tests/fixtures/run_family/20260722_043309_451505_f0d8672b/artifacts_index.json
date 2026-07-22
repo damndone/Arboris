@@ -1,0 +1,695 @@
+{
+  "schema_version": 1,
+  "artifacts": [
+    {
+      "artifact_id": "raw_VIXCLS.csv",
+      "path": "raw_snapshot/VIXCLS.csv",
+      "artifact_type": "raw_data",
+      "step": "ingestion",
+      "sha256": "f0c112dbd0df8816423c0f07f780878a0e09074d4d48c0c3dc9d567945169cf0",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "cleaning_actions",
+      "path": "processed/cleaning_actions.json",
+      "artifact_type": "metadata",
+      "step": "cleaning",
+      "sha256": "addbdcabe55a3a9d29e9e11e1494a434ab72d415d7c2efdf0cb69a338a7634df",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "cleaned_dataset",
+      "path": "processed/cleaned_dataset.parquet",
+      "artifact_type": "processed_data",
+      "step": "cleaning",
+      "sha256": "f1b38881c0852f6155cae4942a6840d76e746b6385f7b79727d41e34c9452b82",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "data_profile",
+      "path": "staged/data_profile.json",
+      "artifact_type": "profile",
+      "step": "profiling",
+      "sha256": "089f9557c5a40856c6348c4f111934ddcce5eab4c01dd749801cb1b6d10d41c0",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "analysis_router",
+      "path": "staged/analysis_router.json",
+      "artifact_type": "metadata",
+      "step": "analysis_router",
+      "sha256": "cf5537bf2e6d653a7d89323a53b883169d08dc838c987109e2d402c79f0e35c3",
+      "inputs": [
+        "data_profile"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_correlations",
+      "path": "statistical_tests/correlations.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "84e7ce51050ba0651cd42f886a4be0b268e5710d172b88beb832f1053aa37d5c",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_rank_correlations",
+      "path": "statistical_tests/rank_correlations.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "697549f7dae4de7c9fc9e50ccb16e23942238686c74958b2e6a750bf610d8c04",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_t_tests",
+      "path": "statistical_tests/t_tests.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "1ad21b3e31595a554209e80d57fa34280eedd7f75edf56966029df780fb3ceee",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_anova",
+      "path": "statistical_tests/anova.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "18a39c1dc93d75213f26762537806bafbefc3eb94d59f49b125802316ecd8fdd",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_nonparametric",
+      "path": "statistical_tests/nonparametric.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "14206e3f4afbaf611d3540d82bbfe70ee347d3779221c05959d412cb642ecea2",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_chi_square",
+      "path": "statistical_tests/chi_square.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "e5482e1a7f4d13737d9f70052e2978f74521637c75be96a5f6396e09fcde0260",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "statistical_tests_fisher_exact",
+      "path": "statistical_tests/fisher_exact.json",
+      "artifact_type": "statistical_test",
+      "step": "statistical_tests",
+      "sha256": "ad7a206affb7f6d3502dde28cba81f5e41f5c96abe2b37caac6a9b793538ad34",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.data_audit",
+      "path": "artifacts/time_series/ts.data_audit.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "db5fb3ddc3fec47b7d2c5d6ead4f4254c9a9f19ceb49c1dc06896b003b741587",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.analysis_contract",
+      "path": "artifacts/time_series/ts.analysis_contract.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "0d7cdc70ea7affe6a708939f7dc4d7457bd76ba7f4a91efd4186a41225e4e0e5",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.analysis_view_manifest",
+      "path": "artifacts/time_series/ts.analysis_view_manifest.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "c09275dbdbe3924f249b9051c9ccfdaff994d869416579cb00f1bdb733efab3c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.transform_profile",
+      "path": "artifacts/time_series/ts.transform_profile.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "6c126b49fa1c7b5dde165ce15ba3d2cbfe0e6bcde99c221b5a615df15e353eb2",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.train_validation_split",
+      "path": "artifacts/time_series/ts.train_validation_split.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "f934d55ba22d41e000740ffa1e78ba7e1ae506216622f0b422fc9ca65d31652a",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.arma_candidates",
+      "path": "artifacts/time_series/ts.arma_candidates.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "8364a6ee488bb0a8336c58ebd49d32e52ae3f114cd86ad142468def31f6d8c4f",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.arma_selection",
+      "path": "artifacts/time_series/ts.arma_selection.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "576dbda70dadf86a239e85924add3c7bb007c304f7c586bc9b86498efad70ac7",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.arma_diagnostics",
+      "path": "artifacts/time_series/ts.arma_diagnostics.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "f1b9c708275c1734324ba4e5a855b07948157d8be8443f844b6745b09bdd9642",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.volatility_candidates",
+      "path": "artifacts/time_series/ts.volatility_candidates.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "71084a2efee5c8142796e42fdfd0d872b5c52113bc4aacfdcb75e503b29cd5c7",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.volatility_selection",
+      "path": "artifacts/time_series/ts.volatility_selection.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "51be8472301b8d1d13090ddf656b1a8562dcbe886975b4fa1dcf0fe4a3808ebe",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.final_model",
+      "path": "artifacts/time_series/ts.final_model.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "639fb40e3a17a3217f8aa331f06db22efc3131b0f938e17cdabc88080fc2485b",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.parameters",
+      "path": "artifacts/time_series/ts.parameters.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "360eddb50537586404907e4eb6c766d39300192be18c827cce280243a065455e",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.conditional_series",
+      "path": "artifacts/time_series/ts.conditional_series.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "921e07712d660f41bbb4f02bfe824ae7728ff14e75f4a929e44e5ff27fb8bf4c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.final_diagnostics",
+      "path": "artifacts/time_series/ts.final_diagnostics.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "3383020c838c55a6b54bd53c909256655bf4f60028a12c74d12444d86dd3b226",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.rolling_forecasts",
+      "path": "artifacts/time_series/ts.rolling_forecasts.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "057391ecdf78da1c821062abc95a0586131462978210ef824bc1c9ed10bb0f5d",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.forecast_metrics",
+      "path": "artifacts/time_series/ts.forecast_metrics.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "08d054b3867f5a3b2d40e8bb8baf34304cb6f5c5f89887052c61a3da180db9d4",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.next_forecast",
+      "path": "artifacts/time_series/ts.next_forecast.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "ef72f022baa760e138875f284536e30516b7268539e5779644444dde22248887",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.arma_vs_garch_comparison",
+      "path": "artifacts/time_series/ts.arma_vs_garch_comparison.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "a0b6f519868c932fc5fa0bcff0147ac790234ea7152504d761cc5b676a6d51e4",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.report",
+      "path": "artifacts/time_series/ts.report.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "6f3e28c945452542cc7b8b067ec4e2b8428bd46de6a258b840f6130ff6366a3c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.series_transform",
+      "path": "artifacts/time_series/ts.chart.series_transform.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "ede7a49bc8bb434f7b8de29d4908d02af3643c64cc24e76945ad9eb5e3e2e50c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.acf",
+      "path": "artifacts/time_series/ts.chart.acf.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "6621851eb846fa7547a61f090056321da65f4f6a5ce8827de1c46ce3ed4b7e06",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.pacf",
+      "path": "artifacts/time_series/ts.chart.pacf.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "6e418da37b68123bfb322058929e36f0033dec1bb1db8e32fba4c7591d22cf17",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.residual_series",
+      "path": "artifacts/time_series/ts.chart.residual_series.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "6ed47e9d5e8647047596ddd88d4598948fee23c9a1074207ea0b64cfffeb8241",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.residual_acf",
+      "path": "artifacts/time_series/ts.chart.residual_acf.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "8b52577861420b90db90869f66beb08e6f4a0c4fd0ff30d7b8983c112d6817c1",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.squared_residual_acf",
+      "path": "artifacts/time_series/ts.chart.squared_residual_acf.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "4bd3eb7499d19d18475a4fa2b3f096737c77c850846748e02c916a389133abe9",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.qq",
+      "path": "artifacts/time_series/ts.chart.qq.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "2fd26b973df62d42801a23f8096273ccf042bbebda26624e3c695d8c0451723f",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.conditional_volatility",
+      "path": "artifacts/time_series/ts.chart.conditional_volatility.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "a5885bcb452eb2afcfc05ee00d3b9c24fbfe6db8035fbeaa055ae591dfd2f96c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.rolling_interval",
+      "path": "artifacts/time_series/ts.chart.rolling_interval.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "8d15b0da49e24dc60c41756f246ebc505bfb013ef21f265e1e4b913a4444e8c4",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.quantile_exceptions",
+      "path": "artifacts/time_series/ts.chart.quantile_exceptions.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "de451118dabb4fb8573c36ea794f2085a1bb885172323f1b3681e59b76a73347",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.model_comparison",
+      "path": "artifacts/time_series/ts.chart.model_comparison.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "c99cbfa754ec6a6143f9d36758d9c422838ecdfef469f7fde10dcadd8358ba17",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.abs_return_vs_volatility",
+      "path": "artifacts/time_series/ts.chart.abs_return_vs_volatility.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "18fcd4c614469a2862511164a8d49d93b5f3235f1aa5c5a73af1f39588367b8c",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.in_sample_interval_comparison",
+      "path": "artifacts/time_series/ts.chart.in_sample_interval_comparison.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "82a771a34f6d255f171d128ccf7c23b9167e3662d6730311ee47949309666ad2",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.conditional_variance",
+      "path": "artifacts/time_series/ts.chart.conditional_variance.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "d7c951604875e9bb1d36c6dcda24fdd5c2c5ae8d158e080b056941ff084b1a23",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.standardized_residual_series",
+      "path": "artifacts/time_series/ts.chart.standardized_residual_series.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "4ad99e5c858376801b866a29aa2e7d260c34e9847ee47e8604b263a5cc9d9075",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.squared_standardized_residual_series",
+      "path": "artifacts/time_series/ts.chart.squared_standardized_residual_series.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "81015abb84620367a4910320e9b9b17e4d98af0b737d40a1199ff019094316fc",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.chart.squared_residual_series",
+      "path": "artifacts/time_series/ts.chart.squared_residual_series.json",
+      "artifact_type": "time_series_json",
+      "step": "arma_garch",
+      "sha256": "c08f7fae7b4b6361e4674dcadb6a9d17581b8fdda636c4278daf175bbd8bc3bf",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "ts.artifact_manifest",
+      "path": "artifacts/time_series/ts.artifact_manifest.json",
+      "artifact_type": "time_series_manifest",
+      "step": "arma_garch",
+      "sha256": "1f8502bbb6fe10103256d0cddb8328fd0e35bfcaeeaf22b3dc454e9aaa7d1cfe",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "arma_garch_1",
+      "path": "model_results/arma_garch_1.json",
+      "artifact_type": "model_result",
+      "step": "econometrics",
+      "sha256": "0d98bf21555f34caab2e3194fc592fc7305fa6dede7c8b50a4681a8a3487de24",
+      "inputs": [
+        "raw_VIXCLS.csv"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "time_series_diagnostics",
+      "path": "model_results/time_series_diagnostics.json",
+      "artifact_type": "model_diagnostic",
+      "step": "econometrics",
+      "sha256": "afec501136b6ac288af5cbeaf5dd98adf95a8fd729ba05ca8342a5ed6b1ffecb",
+      "inputs": [
+        "cleaned_dataset"
+      ],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "histograms",
+      "path": "figures/histograms.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "a83f92e65762f453611153c4d37a1e995c42f686395bb193046e3398201b768f",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "kde_plots",
+      "path": "figures/kde_plots.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "0e75f093ae973a789dd76f61535f44cedfeb7706dd1dff26615ead74a6a23b38",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "boxplots",
+      "path": "figures/boxplots.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "30080fc537a0a38908612fdf7d5c9e7c67a454d473951a532d513c1950de0b92",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "time_trend",
+      "path": "figures/time_trend.png",
+      "artifact_type": "figure",
+      "step": "visualization",
+      "sha256": "ba283a2063f53f185f95d4455839700ebf3f54df4ceed6818c648fea857dda9b",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "diagnostic_summary",
+      "path": "diagnostic_summary.json",
+      "artifact_type": "metadata",
+      "step": "diagnostics",
+      "sha256": "ccfefafadefa4dda7621270baf1443637e46271ecce3dd8a0516d080f713b37a",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "report_html",
+      "path": "reports/report.html",
+      "artifact_type": "report",
+      "step": "reporting",
+      "sha256": "70461f7ab58b629cf86aa335667cc54293d4b9314602122de79ce334a89d944d",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "report_pdf",
+      "path": "reports/report.pdf",
+      "artifact_type": "report",
+      "step": "export",
+      "sha256": "01da141f7176da7ed6840fb74dd84e797b803ad0bd526215efd874846f8a30b2",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    },
+    {
+      "artifact_id": "tables_xlsx",
+      "path": "exports/tables.xlsx",
+      "artifact_type": "table_export",
+      "step": "export",
+      "sha256": "c4c6a0756ff4b34a44bfdc169d04bd214bd826b9e30ff76dd0f046c358a9ad45",
+      "inputs": [],
+      "config_hash": "",
+      "code_version": "0.1.0"
+    }
+  ]
+}

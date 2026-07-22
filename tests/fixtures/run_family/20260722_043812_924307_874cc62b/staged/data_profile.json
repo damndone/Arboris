@@ -1,0 +1,25 @@
+{
+  "row_count": 2610,
+  "column_count": 2,
+  "columns": {
+    "observation_date": {
+      "dtype": "datetime64[us]",
+      "missing_rate": 0.0,
+      "unique_count": 2610,
+      "unique_ratio": 1.0
+    },
+    "vixcls": {
+      "dtype": "float64",
+      "missing_rate": 0.026053639846743294,
+      "unique_count": 1417,
+      "unique_ratio": 0.542911877394636,
+      "mean": 18.504822974036195,
+      "std": 7.306776988037041
+    }
+  },
+  "correlations": {
+    "vixcls": {
+      "vixcls": 1.0
+    }
+  }
+}
