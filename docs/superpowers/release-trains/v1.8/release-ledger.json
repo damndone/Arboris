@@ -10,7 +10,7 @@
     "tag": "NOT_PERFORMED"
   },
   "baseline_commit": "a81cd4927abb",
-  "final_product_commit": "93f437d8546145da2f14e6a9e23ae396a7ba17d7",
+  "final_product_commit": "1c1f7eb6f5a0cb13ca8b5b38ade68d7c2552bb2f",
   "branch": "workbench-v1.8",
   "candidate_tree": "all gates pass on 93f437d; user authorized release as v1.8.0",
   "reference_semantics": "directional_or_workflow_regression",
@@ -89,7 +89,7 @@
     {
       "id": "host_full_gate_on_release_commit",
       "status": "PASS_ON_RELEASE_COMMIT",
-      "evidence": "Full gate run natively on the host against the release tree at 93f437d, with no development server listening and a clean working tree: backend 2956 passed / 8 skipped, golden and invariants 23 passed with zero drift, frontend 1294 passed across 150 files, tsc --noEmit clean, GATE PASSED."
+      "evidence": "Full gate run natively on the host with no development server listening and a clean working tree, twice: on 93f437d and again on the release commit 1c1f7eb after the docs-only finalization, because the publication rule asks for a pass on the tree actually released and not merely on an ancestor of it. Both: backend 2956 passed / 8 skipped, golden and invariants 23 passed with zero drift, frontend 1294 passed across 150 files, tsc --noEmit clean, GATE PASSED. The delta between the two commits is documentation only, verified by diff."
     }
   ],
   "future_non_blocking_work": [
