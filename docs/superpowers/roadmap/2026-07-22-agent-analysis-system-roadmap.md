@@ -190,6 +190,22 @@ Adapter → 用用户数据跑出正式数字。它会同时破坏 fail-closed s
 第三档不是妥协，是让"任何未验证实现都不能伪装成 verified estimator"这条不变量
 有可执行判据。
 
+### 前置阻塞：Artifact payload schema
+
+```
+ARTIFACT-SCHEMA-REGISTRY
+        ↓ blocks verified promotion
+V1.8.3-CAPABILITY-EXT
+```
+
+v1.8.1 的输出契约只匹配 `artifact_id + artifact_type + count`（DEC-ART-001），
+对仓库内已注册、已知行为的能力够用。但外部依赖 Adapter 或 Agent 生成的新 capability
+不同：只知道"它产出一个 table"远远不够，系统还必须知道该 table 是否确实含
+参数名、估计值、标准误、区间、样本量、模型标识。
+
+**实验性 capability 可以构建与测试，但在没有 payload contract 之前，
+不得晋升为可产出可信数字的 `verified`。**
+
 ---
 
 ## 5. v1.8.4 — Typed Memory + 项目历史检索
