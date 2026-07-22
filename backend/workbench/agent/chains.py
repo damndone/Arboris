@@ -9,7 +9,11 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 from ..artifacts import read_json, write_json
-from ..lineage.family import scan_family
+
+# Canonical home is the lineage layer (see workbench/lineage/run_family.py).
+# Re-exported here so existing call sites keep working; new code should import
+# it from lineage, or better, use resolve_run_family().
+from ..lineage.run_family import legacy_family_anchor, resolve_run_family  # noqa: F401
 
 
 class ChainHeadConflict(ValueError):
@@ -18,14 +22,6 @@ class ChainHeadConflict(ValueError):
 
 class ChainHeadUnavailable(ValueError):
     """A managed chain does not currently have a usable active head."""
-
-
-def legacy_family_anchor(runs_root: Path | str, run_id: str) -> str:
-    """Return the deterministic family id used when adopting a legacy run."""
-
-    family = scan_family(Path(runs_root), run_id)
-    root_run_id = family.ancestors[-1] if family.ancestors else run_id
-    return f"legacy-family:{root_run_id}"
 
 
 def ensure_chain_root(
@@ -48,7 +44,14 @@ def ensure_chain_root(
     except KeyError:
         return store.create_root(
             chain_id=chain_id,
-            run_family_id=legacy_family_anchor(runs_root, active_head_run_id),
+            # Gate 1 Step 2: this is a *write* path (it persists a chain record
+            # carrying a family id), so it must read the persisted membership
+            # rather than derive one. Pre-migration projects still degrade to
+            # derivation inside resolve_run_family; post-cutover unbound runs
+            # now fail loudly instead of minting a derived id here.
+            run_family_id=resolve_run_family(
+                Path(runs_root).parent, active_head_run_id
+            ).run_family_id,
             active_head_run_id=active_head_run_id,
             agent_session_id=agent_session_id,
         )
