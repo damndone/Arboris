@@ -51,7 +51,10 @@ def _draft(
         expected_artifacts=expected
         or (
             ExpectedArtifact(
-                artifact_id="ts.parameters", artifact_type="table", required=True, count=1
+                artifact_id="ts.parameters",
+                artifact_type="time_series_json",
+                required=True,
+                count=1,
             ),
         ),
         option_id=option_id,
