@@ -22,7 +22,7 @@
 | `handoffs/` | 会话交接快照(现状+下一步+恢复协议) | **人+agent** | 最新即权威 | **只留最新一份**,旧的移 `archive/handoff/` |
 | `specs/` | 每个 feature 一份设计文档(做什么/为什么/契约) | agent(实现者) | 写完即历史 | 只留**当前未发版**版本的;发版收尾移 `archive/specs/` |
 | `plans/` | 对应 spec 的任务清单(TDD 勾选框) | agent(实现者) | 写完即历史 | 同上,发版收尾移 `archive/plans/` |
-| 仓库根 `task_plan.md` / `findings.md` / `progress.md` | 当前开发线的会话草稿(计划/发现/流水账),跨会话恢复用 | agent | 随开发线 | 不是正式文档;开发线收尾可整份冻结进 `archive/` 或清空重开 |
+| 仓库根 `task_plan.md` / `findings.md` / `progress.md` | 当前开发线的会话草稿(计划/发现/流水账),跨会话恢复用 | agent | 随开发线 | 不是正式文档;开发线收尾**整份冻结进 `archive/session-scratch/`**(命名 `<日期>-<版本>-<原名>.md`),根目录不留过期草稿 |
 | `archive/` | 已冻结历史(handoff/followups/specs/plans/复盘) | 考古 | immutable | 只读留痕,不再维护 |
 
 ## 核心约定
@@ -59,10 +59,28 @@
    - 本版 spec/plan → `archive/specs/`、`archive/plans/`;
    - 旧 handoff → `archive/handoff/`,新 handoff 成为唯一 live;
    - BACKLOG:清掉本版做完的项(§3 留一行痕),复制快照进 `archive/followups/`;
-   - 根目录会话草稿按需冻结/清空;
+   - 根目录会话草稿 → `archive/session-scratch/`;
+   - **删掉已合并的分支**(本地+远端),见下条 §5 的 tag 规矩;
    - 检查 `docs/superpowers/` 顶层没有裸放文件(除本 README)。
-5. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
-6. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):
+
+5. **分支合并后即删,但先用 tag 保住名字**(2026-07-22 定)。
+
+   合并进 main 的分支一律删除(本地和远端),否则分支列表会涨到没人看得懂——
+   曾一次性积到 42 条已合并分支。删之前**必须**给分支尖端打 tag:
+   ```
+   git tag -a archive/branch-tip/<名字> <分支> -m "..."
+   git push origin <tag>        # 确认远端有了,再删分支
+   ```
+   - **为什么不能只靠版本 tag**:`v1.6.11` 这类发版 tag 指向的是 main 上的
+     **merge commit**,不是分支尖端。"有同名 tag"≠"尖端被覆盖"。实测 34 条版本
+     分支里,只有 8 条的尖端恰好被某个 tag 指到。判断标准只有一个:
+     `git tag --points-at <分支>` 非空。
+   - **只存在于本机的分支**(远端没有、也不在 main 里)同样用 tag 备份,
+     命名 `archive/local-only/<名字>`。这类分支磁盘一坏就没了。
+     自检:`git rev-list --count <分支> --not --remotes --tags` 必须为 0。
+   - 未合并的分支不要动。
+6. **新建文档前先问**:是不是该写进已有的七类之一?顶层裸放和自创目录是烂账的开始。
+7. **`docs/` 顶层(superpowers 之外)的归属**(2026-07-15 整理定版):
    - `docs/releases/` = 各版 release notes,发版时写一份进这里,write-once 历史;
    - `docs/architecture/` = 长活技术参考(含被 estimator 源码注释引用的 `v1.5.8/v1.5.9/v1.6.0-IMPL-NOTES.md`
      实现配方——**是活参考不是历史,移动必须同步改代码注释里的路径**);

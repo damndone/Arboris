@@ -58,3 +58,6 @@ frontend/dist/
 # tree is unaffected.
 /handoff/
 /uiux/
+
+# pnpm content-addressable store (local cache, never committed)
+.pnpm-store
