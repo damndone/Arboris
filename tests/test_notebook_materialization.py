@@ -219,10 +219,14 @@ def test_materialized_lifecycle_edges_are_allowed_and_terminal_states_refuse_exi
             reason="test",
         )
 
+    with pytest.raises(OptionLifecycleTransitionInvalid):
+        transition("executing")
     transition("materialized")
     transition("selected")
     transition("materialized")
     transition("executing")
+    with pytest.raises(OptionLifecycleTransitionInvalid):
+        transition("selected")
     transition("materialized")
     transition("archived")
 

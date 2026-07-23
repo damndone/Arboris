@@ -95,11 +95,9 @@ _REGISTRY_RISK_TO_OPTION_RISK = {
 _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
     "proposed": frozenset({"selected", "deferred", "rejected", "archived"}),
     "deferred": frozenset({"selected", "rejected", "archived"}),
-    "selected": frozenset(
-        {"deferred", "rejected", "executing", "materialized", "archived"}
-    ),
+    "selected": frozenset({"deferred", "rejected", "materialized", "archived"}),
     "materialized": frozenset({"selected", "executing", "archived"}),
-    "executing": frozenset({"executed", "selected", "materialized"}),
+    "executing": frozenset({"executed", "materialized"}),
     "executed": frozenset(),
     "rejected": frozenset(),
     "archived": frozenset(),
@@ -777,6 +775,15 @@ class NotebookService:
         self._transition(
             notebook_id,
             view,
+            to_status="materialized",
+            actor="user",
+            reason="confirm_materialized",
+            trace=trace,
+        )
+        view = self.store.read_option(notebook_id, option_id)
+        self._transition(
+            notebook_id,
+            view,
             to_status="executing",
             actor="user",
             reason="confirmed",
@@ -894,11 +901,20 @@ class NotebookService:
         self._transition(
             notebook_id,
             view,
-            to_status="executed" if committable else "selected",
+            to_status="executed" if committable else "materialized",
             actor="system",
             reason="artifact_contract_" + validation["validation_status"],
             trace=trace,
         )
+        if not committable:
+            self._transition(
+                notebook_id,
+                self.store.read_option(notebook_id, option_id),
+                to_status="selected",
+                actor="system",
+                reason="artifact_contract_retry",
+                trace=trace,
+            )
         self.store.append_option_record(
             notebook_id,
             option_id,
