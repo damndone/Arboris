@@ -327,6 +327,14 @@ def test_v11_option_revision_fixture_round_trips_with_evidence_and_recommendatio
     assert revision.recommendation_status == "recommended"
 
 
+def test_v11_option_revision_rejects_a_bare_comparative_claim_string() -> None:
+    payload = _fixture("notebook_option_revision_v11")
+    payload["comparative_claims"] = "claim"
+
+    with pytest.raises(NotebookContractError):
+        NotebookOptionRevision.from_dict(payload)
+
+
 @pytest.mark.parametrize(
     "field",
     [
@@ -386,6 +394,23 @@ def test_recommendation_decision_rejects_invalid_outcome_selection(
 def test_recommendation_decision_rejects_recommended_id_outside_candidates() -> None:
     payload = _fixture("recommendation_decision_v1")
     payload["recommended_option_id"] = "opt_not_a_candidate"
+
+    with pytest.raises(NotebookContractError):
+        RecommendationDecision.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "evidence_pack_hashes",
+        "comparison_protocol_refs",
+        "candidate_option_ids",
+        "reason_refs",
+    ],
+)
+def test_recommendation_decision_rejects_bare_string_collections(field: str) -> None:
+    payload = _fixture("recommendation_decision_v1")
+    payload[field] = "not-a-list"
 
     with pytest.raises(NotebookContractError):
         RecommendationDecision.from_dict(payload)
@@ -553,3 +578,35 @@ def test_new_packet_parsers_reject_unknown_versions(parser: object, fixture_name
 
     with pytest.raises(NotebookContractError):
         parser(payload)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "parser,packet",
+    [
+        (NotebookOptionRevision.from_dict, "notebook_option_revision"),
+        (OptionExecution.from_dict, "option_execution"),
+    ],
+)
+@pytest.mark.parametrize("value", [[], "scalar", None])
+def test_public_version_dispatchers_reject_non_mapping_wires(
+    parser: object, packet: str, value: object
+) -> None:
+    with pytest.raises(NotebookContractError, match=rf"{packet} must be a mapping"):
+        parser(value)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "parser",
+    [
+        NotebookOptionRevision.from_dict,
+        RecommendationDecision.from_dict,
+        OptionMaterialization.from_dict,
+        OptionExecution.from_dict,
+    ],
+)
+@pytest.mark.parametrize("value", [[], "scalar", None])
+def test_packet_parsers_do_not_leak_attribute_error_for_non_mappings(
+    parser: object, value: object
+) -> None:
+    with pytest.raises(ContractError):
+        parser(value)  # type: ignore[operator]

@@ -89,6 +89,12 @@ def _require_string_tuple(value: Any, field: str) -> tuple[str, ...]:
     return items
 
 
+def _require_mapping(value: Any, packet: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise NotebookContractError(f"{packet} must be a mapping")
+    return value
+
+
 def _require_optional_str(value: Any, field: str) -> str | None:
     if value is None:
         return None
@@ -355,11 +361,12 @@ class NotebookOptionRevision:
     def from_dict(
         cls, value: Mapping[str, Any]
     ) -> "NotebookOptionRevision | NotebookOptionRevisionV11":
-        version = value.get("contract_version", NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION)
+        payload = _require_mapping(value, "notebook_option_revision")
+        version = payload.get("contract_version", NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION)
         if version == NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION:
-            return cls._from_v10_dict(value)
+            return cls._from_v10_dict(payload)
         if version == NOTEBOOK_OPTION_CONTRACT_VERSION:
-            return NotebookOptionRevisionV11.from_dict(value)
+            return NotebookOptionRevisionV11.from_dict(payload)
         raise NotebookContractError(
             f"NotebookOptionRevision contract_version must be one of "
             f"[{NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_CONTRACT_VERSION!r}], "
@@ -392,7 +399,7 @@ class NotebookOptionRevision:
             typed_proposal_revision=payload["typed_proposal_revision"],
             artifact_contract=ArtifactContract.from_dict(payload["artifact_contract"]),
             rationale=payload.get("rationale", ""),
-            assumptions=tuple(payload.get("assumptions", ())),
+            assumptions=_require_string_tuple(payload.get("assumptions", ()), "assumptions"),
             risk_level=payload["risk_level"],
             lifecycle_status=payload["lifecycle_status"],
             freshness_status=payload["freshness_status"],
@@ -502,7 +509,7 @@ class NotebookOptionRevisionV11:
             typed_proposal_revision=value["typed_proposal_revision"],
             artifact_contract=ArtifactContract.from_dict(value["artifact_contract"]),
             rationale=value["rationale"],
-            assumptions=tuple(value["assumptions"]),
+            assumptions=_require_string_tuple(value["assumptions"], "assumptions"),
             risk_level=value["risk_level"],
             lifecycle_status=value["lifecycle_status"],
             freshness_status=value["freshness_status"],
@@ -511,7 +518,9 @@ class NotebookOptionRevisionV11:
             batch_id=value["batch_id"],
             created_at=value["created_at"],
             evidence_refs=tuple(EvidenceRef.from_dict(item) for item in value["evidence_refs"]),
-            comparative_claims=tuple(value["comparative_claims"]),
+            comparative_claims=_require_string_tuple(
+                value["comparative_claims"], "comparative_claims"
+            ),
             recommendation_decision_id=value["recommendation_decision_id"],
             recommendation_status=value["recommendation_status"],
             supersedes_option_revision=value["supersedes_option_revision"],
@@ -606,12 +615,12 @@ class RecommendationDecision:
             batch_id=value["batch_id"],
             generation_context_hash=value["generation_context_hash"],
             freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
-            evidence_pack_hashes=tuple(value["evidence_pack_hashes"]),
-            comparison_protocol_refs=tuple(value["comparison_protocol_refs"]),
-            candidate_option_ids=tuple(value["candidate_option_ids"]),
+            evidence_pack_hashes=value["evidence_pack_hashes"],
+            comparison_protocol_refs=value["comparison_protocol_refs"],
+            candidate_option_ids=value["candidate_option_ids"],
             outcome=value["outcome"],
             recommended_option_id=value["recommended_option_id"],
-            reason_refs=tuple(value["reason_refs"]),
+            reason_refs=value["reason_refs"],
             contract_version=value["contract_version"],
         )
 
@@ -788,11 +797,12 @@ class OptionExecution:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "OptionExecution | OptionExecutionV11":
-        version = value.get("contract_version")
+        payload = _require_mapping(value, "option_execution")
+        version = payload.get("contract_version")
         if version == OPTION_EXECUTION_LEGACY_CONTRACT_VERSION:
-            return cls._from_v10_dict(value)
+            return cls._from_v10_dict(payload)
         if version == OPTION_EXECUTION_CONTRACT_VERSION:
-            return OptionExecutionV11.from_dict(value)
+            return OptionExecutionV11.from_dict(payload)
         raise NotebookContractError(
             f"OptionExecution contract_version must be one of "
             f"[{OPTION_EXECUTION_LEGACY_CONTRACT_VERSION!r}, {OPTION_EXECUTION_CONTRACT_VERSION!r}], "
