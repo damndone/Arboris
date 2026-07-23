@@ -40,6 +40,7 @@ from ..context_compiler import (
     freshness_dependency_fingerprint,
     generation_context_hash,
 )
+from ...lineage.upload_store import verify_upload
 from ..operations import OperationRegistry, OperationValidationError
 from ..trace import TraceWriter
 from .artifact_contract import (
@@ -71,6 +72,7 @@ from .store import (
     Notebook,
     NotebookStore,
     OptionView,
+    ProjectionSource,
     StoredRevision,
 )
 
@@ -206,6 +208,72 @@ class NotebookService:
             available_capabilities=tuple(available_capabilities or ()),
         )
         return self.store.create_notebook(notebook)
+
+    def ensure_default_projection(
+        self,
+        *,
+        from_run_id: str | None = None,
+        dataset: Mapping[str, Any] | ProjectionSource | None = None,
+        created_by: str,
+        title: str = "Analysis Notebook",
+    ) -> Notebook:
+        """Return the one default projection for one immutable source."""
+
+        if (from_run_id is None) == (dataset is None):
+            raise ValueError("exactly one projection source is required")
+
+        if from_run_id is not None:
+            source = ProjectionSource.from_dict({"kind": "run", "run_id": from_run_id})
+            family_store = RunFamilyStore(self.project_root, create=False)
+            if not family_store.has_migrated():
+                migrate_project_families(self.project_root, created_by="notebook_bootstrap")
+            resolved = resolve_run_family(
+                self.project_root, from_run_id, check_consistency=True
+            )
+            if resolved.source != "persisted":
+                raise ValueError("default projection requires a persisted run family")
+            return self.store.ensure_default_projection(
+                Notebook(
+                    notebook_id=f"nb_{uuid4().hex}",
+                    project_id=self.project_root.name,
+                    run_family_id=resolved.run_family_id,
+                    title=title,
+                    created_by=created_by,
+                    created_at=_now(),
+                    active_head_run_id=from_run_id,
+                    focused_run_id=from_run_id,
+                    projection_key=f"default-projection:{resolved.run_family_id}",
+                    projection_source=source,
+                )
+            )
+
+        source = (
+            dataset
+            if isinstance(dataset, ProjectionSource)
+            else ProjectionSource.from_dict(dataset)
+        )
+        if source.kind != "dataset":
+            raise ValueError("projection_source must be a dataset source")
+        verify_upload(self.project_root, source.upload_sha256)
+
+        def create_dataset_notebook() -> Notebook:
+            family = RunFamilyStore(self.project_root).create_family(
+                project_id=self.project_root.name,
+                created_by=created_by,
+                origin="notebook",
+            )
+            return Notebook(
+                notebook_id=f"nb_{uuid4().hex}",
+                project_id=self.project_root.name,
+                run_family_id=family.run_family_id,
+                title=title,
+                created_by=created_by,
+                created_at=_now(),
+                projection_key=f"default-projection:{family.run_family_id}",
+                projection_source=source,
+            )
+
+        return self.store.ensure_dataset_default_projection(source, create_dataset_notebook)
 
     def get_notebook(self, notebook_id: str) -> Notebook:
         return self.store.get_notebook(notebook_id)

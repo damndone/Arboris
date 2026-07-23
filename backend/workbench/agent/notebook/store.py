@@ -18,7 +18,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from ...contracts.agent.notebook_option import NotebookOptionRevision
 from ..storage import append_jsonl_atomic, read_jsonl
@@ -49,6 +49,89 @@ def _safe_component(value: str, *, label: str) -> str:
     return value
 
 
+def _require_pathless_string(value: object, *, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+    ):
+        raise ValueError(f"{label} must be a nonempty pathless string")
+    return value
+
+
+@dataclass(frozen=True)
+class ProjectionSource:
+    """The immutable, strict source of a default Notebook projection."""
+
+    kind: str
+    run_id: str | None = None
+    upload_sha256: str | None = None
+    filename: str | None = None
+    sheet_names: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind == "run":
+            _require_pathless_string(self.run_id, label="projection_source.run_id")
+            if (
+                self.upload_sha256 is not None
+                or self.filename is not None
+                or self.sheet_names
+            ):
+                raise ValueError("run projection_source cannot carry dataset fields")
+            return
+        if self.kind != "dataset":
+            raise ValueError("projection_source.kind must be 'run' or 'dataset'")
+        if self.run_id is not None:
+            raise ValueError("dataset projection_source cannot carry run_id")
+        _require_pathless_string(
+            self.upload_sha256, label="projection_source.upload_sha256"
+        )
+        _require_pathless_string(self.filename, label="projection_source.filename")
+        if not isinstance(self.sheet_names, tuple) or any(
+            not isinstance(name, str) or not name for name in self.sheet_names
+        ):
+            raise ValueError(
+                "projection_source.sheet_names must be a tuple of nonempty strings"
+            )
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ProjectionSource":
+        if not isinstance(value, Mapping):
+            raise ValueError("projection_source must be a mapping")
+        kind = value.get("kind")
+        if kind == "run":
+            if set(value) != {"kind", "run_id"}:
+                raise ValueError("run projection_source must contain only kind and run_id")
+            return cls(kind="run", run_id=value["run_id"])
+        if kind == "dataset":
+            allowed = {"kind", "upload_sha256", "filename", "sheet_names"}
+            required = {"kind", "upload_sha256", "filename"}
+            if set(value) - allowed or not required.issubset(value):
+                raise ValueError("dataset projection_source has invalid fields")
+            raw_sheet_names = value.get("sheet_names", ())
+            if not isinstance(raw_sheet_names, (list, tuple)):
+                raise ValueError("projection_source.sheet_names must be a list or tuple")
+            return cls(
+                kind="dataset",
+                upload_sha256=value["upload_sha256"],
+                filename=value["filename"],
+                sheet_names=tuple(raw_sheet_names),
+            )
+        raise ValueError("projection_source.kind must be 'run' or 'dataset'")
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.kind == "run":
+            return {"kind": "run", "run_id": self.run_id}
+        return {
+            "kind": "dataset",
+            "upload_sha256": self.upload_sha256,
+            "filename": self.filename,
+            "sheet_names": list(self.sheet_names),
+        }
+
+
 @dataclass(frozen=True)
 class Notebook:
     """The stable identity. Run pointers are three distinct fields on purpose.
@@ -71,7 +154,25 @@ class Notebook:
     analysis_contract: dict[str, Any] = field(default_factory=dict)
     user_focus: dict[str, Any] = field(default_factory=dict)
     available_capabilities: tuple[str, ...] = ()
+    projection_key: str | None = None
+    projection_source: ProjectionSource | None = None
+    supersedes_notebook_id: str | None = None
     schema_version: str = NOTEBOOK_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.projection_key is not None and (
+            not isinstance(self.projection_key, str) or not self.projection_key
+        ):
+            raise ValueError("projection_key must be a nonempty string when supplied")
+        if self.projection_source is not None and not isinstance(
+            self.projection_source, ProjectionSource
+        ):
+            raise ValueError("projection_source must be a ProjectionSource when supplied")
+        if self.supersedes_notebook_id is not None and (
+            not isinstance(self.supersedes_notebook_id, str)
+            or not self.supersedes_notebook_id
+        ):
+            raise ValueError("supersedes_notebook_id must be a nonempty string when supplied")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +190,11 @@ class Notebook:
             "analysis_contract": dict(self.analysis_contract),
             "user_focus": dict(self.user_focus),
             "available_capabilities": list(self.available_capabilities),
+            "projection_key": self.projection_key,
+            "projection_source": (
+                self.projection_source.to_dict() if self.projection_source else None
+            ),
+            "supersedes_notebook_id": self.supersedes_notebook_id,
         }
 
     @classmethod
@@ -106,6 +212,13 @@ class Notebook:
             analysis_contract=dict(value.get("analysis_contract") or {}),
             user_focus=dict(value.get("user_focus") or {}),
             available_capabilities=tuple(value.get("available_capabilities") or ()),
+            projection_key=value.get("projection_key"),
+            projection_source=(
+                ProjectionSource.from_dict(value["projection_source"])
+                if value.get("projection_source") is not None
+                else None
+            ),
+            supersedes_notebook_id=value.get("supersedes_notebook_id"),
             schema_version=str(value.get("schema_version", NOTEBOOK_SCHEMA_VERSION)),
         )
 
@@ -237,6 +350,46 @@ class NotebookStore:
             append_jsonl_atomic(path, notebook.to_dict())
             return notebook
 
+    def ensure_default_projection(self, notebook: Notebook) -> Notebook:
+        """Read/create a key-bound projection while holding the store lock."""
+
+        if notebook.projection_key is None or notebook.projection_source is None:
+            raise ValueError("default projections require projection_key and projection_source")
+        with self._lock:
+            for existing in self.list_notebooks():
+                if existing.projection_key != notebook.projection_key:
+                    continue
+                if existing.projection_source != notebook.projection_source:
+                    raise ValueError(
+                        f"projection key {notebook.projection_key!r} is already bound "
+                        "to a different source"
+                    )
+                if existing.run_family_id != notebook.run_family_id:
+                    raise ValueError(
+                        f"projection key {notebook.projection_key!r} is already bound "
+                        "to a different run family"
+                    )
+                return existing
+            return self.create_notebook(notebook)
+
+    def ensure_dataset_default_projection(
+        self,
+        source: ProjectionSource,
+        create_notebook: Callable[[], Notebook],
+    ) -> Notebook:
+        """Find an existing Dataset default before creating its pre-run family."""
+
+        if source.kind != "dataset":
+            raise ValueError("dataset default projection requires a dataset source")
+        with self._lock:
+            for existing in self.list_notebooks():
+                if (
+                    existing.projection_key is not None
+                    and existing.projection_source == source
+                ):
+                    return existing
+            return self.ensure_default_projection(create_notebook())
+
     def get_notebook(self, notebook_id: str) -> Notebook:
         with self._lock:
             records = read_jsonl(self._notebook_path(notebook_id))
@@ -343,6 +496,7 @@ __all__ = [
     "Notebook",
     "NotebookStore",
     "OptionView",
+    "ProjectionSource",
     "RECORD_EXECUTION",
     "RECORD_EXECUTION_RESULT",
     "RECORD_LIFECYCLE",
