@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
+from threading import Barrier, Thread
 
 import pytest
 
@@ -84,6 +86,78 @@ def test_verified_dataset_projection_creates_one_persisted_prerun_family(tmp_pat
     families = RunFamilyStore(project, create=False).list_families()
     assert [family.run_family_id for family in families] == [projection.run_family_id]
     assert families[0].origin == "notebook"
+
+
+def test_dataset_default_projection_is_atomic_across_store_instances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = make_project(tmp_path)
+    sha256 = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n", filename="observations.csv"
+    )
+    original_create_family = RunFamilyStore.create_family
+
+    def delayed_create_family(self: RunFamilyStore, **kwargs: object):
+        time.sleep(0.05)
+        return original_create_family(self, **kwargs)
+
+    monkeypatch.setattr(RunFamilyStore, "create_family", delayed_create_family)
+    start = Barrier(2)
+    notebook_ids: list[str] = []
+    errors: list[BaseException] = []
+
+    def ensure_projection() -> None:
+        service = NotebookService(project)
+        try:
+            start.wait()
+            notebook_ids.append(
+                service.ensure_default_projection(dataset=_dataset_ref(sha256), created_by="ui").notebook_id
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    threads = [Thread(target=ensure_projection), Thread(target=ensure_projection)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    assert len(set(notebook_ids)) == 1
+    assert len(NotebookService(project).list_notebooks()) == 1
+    assert len(RunFamilyStore(project, create=False).list_families()) == 1
+
+
+def test_malformed_same_source_default_key_fails_closed(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    sha256 = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n", filename="observations.csv"
+    )
+    family = RunFamilyStore(project).create_family(
+        project_id=project.name,
+        created_by="test",
+        origin="notebook",
+    )
+    malformed = Notebook(
+        notebook_id="nb_malformed",
+        project_id=project.name,
+        run_family_id=family.run_family_id,
+        title="Malformed",
+        created_by="test",
+        created_at="2026-07-23T00:00:00+00:00",
+    ).to_dict()
+    malformed["projection_key"] = f"default-projection:{family.run_family_id}-wrong"
+    malformed["projection_source"] = _dataset_ref(sha256)
+    malformed_path = project / "notebooks" / "nb_malformed" / "notebook.jsonl"
+    malformed_path.parent.mkdir(parents=True)
+    malformed_path.write_text(json.dumps(malformed) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="projection_key"):
+        NotebookService(project).ensure_default_projection(
+            dataset=_dataset_ref(sha256), created_by="ui"
+        )
+
+    assert len(RunFamilyStore(project, create=False).list_families()) == 1
 
 
 def test_explicit_and_legacy_notebooks_coexist_without_rebinding(tmp_path: Path) -> None:

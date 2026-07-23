@@ -38,6 +38,9 @@ RECORD_LIFECYCLE = "lifecycle"
 RECORD_EXECUTION = "execution"
 RECORD_EXECUTION_RESULT = "execution_result"
 
+_PROJECT_LOCKS: dict[Path, Any] = {}
+_PROJECT_LOCKS_GUARD = RLock()
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -47,6 +50,13 @@ def _safe_component(value: str, *, label: str) -> str:
     if not value or Path(value).name != value or value.startswith("."):
         raise ValueError(f"{label} is not a safe path component: {value!r}")
     return value
+
+
+def _project_lock(project_root: Path) -> Any:
+    """Return the one in-process reentrant lock for one resolved project root."""
+
+    with _PROJECT_LOCKS_GUARD:
+        return _PROJECT_LOCKS.setdefault(project_root.resolve(), RLock())
 
 
 def _require_pathless_string(value: object, *, label: str) -> str:
@@ -168,6 +178,16 @@ class Notebook:
             self.projection_source, ProjectionSource
         ):
             raise ValueError("projection_source must be a ProjectionSource when supplied")
+        if (self.projection_key is None) != (self.projection_source is None):
+            raise ValueError(
+                "projection_key and projection_source must be supplied together"
+            )
+        if self.projection_key is not None:
+            expected_key = f"default-projection:{self.run_family_id}"
+            if self.projection_key != expected_key:
+                raise ValueError(
+                    f"projection_key must be exactly {expected_key!r} for its run family"
+                )
         if self.supersedes_notebook_id is not None and (
             not isinstance(self.supersedes_notebook_id, str)
             or not self.supersedes_notebook_id
@@ -322,7 +342,7 @@ class NotebookStore:
         self.directory = self.project_root / NOTEBOOK_DIRNAME
         if create:
             self.directory.mkdir(parents=True, exist_ok=True)
-        self._lock = RLock()
+        self._lock = _project_lock(self.project_root)
 
     # -- paths ---------------------------------------------------------
 
