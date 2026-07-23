@@ -320,7 +320,7 @@ def test_direct_storage_append_rejects_a_legacy_option(tmp_path: Path) -> None:
     ) is None
 
 
-def test_v11_option_cannot_confirm_without_a_real_materialization(tmp_path: Path) -> None:
+def test_v11_option_cannot_confirm_without_a_bound_materialization_record(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
     notebook = service.create_notebook(title="Direct confirm", created_by="ui")
@@ -345,7 +345,7 @@ def test_v11_option_cannot_confirm_without_a_real_materialization(tmp_path: Path
     ) is None
 
 
-def test_v11_completion_requires_real_materialization_and_execution_state(
+def test_v11_completion_requires_bound_materialization_record_and_execution_state(
     tmp_path: Path,
 ) -> None:
     project = make_project(tmp_path)
@@ -452,6 +452,7 @@ def test_materialization_rejects_a_v11_option_that_is_not_selected(tmp_path: Pat
 def test_materialized_lifecycle_edges_are_allowed_and_terminal_states_refuse_exit(
     tmp_path: Path,
 ) -> None:
+    """Task 2 gates on a bound record only; Task 7 verifies PipelineDraft provenance."""
     project = make_project(tmp_path)
     service = NotebookService(project)
     notebook = service.create_notebook(title="Lifecycle", created_by="ui")

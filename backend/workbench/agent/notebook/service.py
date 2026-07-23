@@ -104,7 +104,7 @@ _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
     "archived": frozenset(),
 }
 
-# v1.0 has no persisted Draft/materialization record. It retains its original
+# v1.0 has no persisted OptionMaterialization record. It retains its original
 # direct-confirm lifecycle strictly for compatibility; v1.1 never consults it.
 _LEGACY_LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
     "proposed": frozenset({"selected", "deferred", "rejected", "archived"}),
@@ -767,8 +767,8 @@ class NotebookService:
 
         if current.materializable:
             raise OptionMaterializationRequired(
-                f"option {option_id} revision {option_revision} requires a real "
-                "Draft materialization before execution",
+                f"option {option_id} revision {option_revision} requires a "
+                "persisted OptionMaterialization record before execution",
                 option_id=option_id,
                 option_revision=option_revision,
                 contract_version=current.contract_version,
@@ -866,7 +866,7 @@ class NotebookService:
             if materialization is None:
                 raise OptionMaterializationRequired(
                     f"option {option_id} revision {current.option_revision} requires "
-                    "a real Draft materialization before completion",
+                    "a persisted OptionMaterialization record before completion",
                     option_id=option_id,
                     option_revision=current.option_revision,
                     contract_version=current.contract_version,
@@ -1139,8 +1139,8 @@ class NotebookService:
             if materialization is None:
                 raise OptionMaterializationRequired(
                     f"option {view.option_id} revision "
-                    f"{view.current_revision.option_revision} requires a real "
-                    "Draft materialization before entering materialized",
+                    f"{view.current_revision.option_revision} requires a persisted "
+                    "OptionMaterialization record before entering materialized",
                     option_id=view.option_id,
                     option_revision=view.current_revision.option_revision,
                     contract_version=view.current_revision.contract_version,

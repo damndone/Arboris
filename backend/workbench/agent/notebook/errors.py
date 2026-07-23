@@ -80,7 +80,7 @@ class OptionLegacyUnverified(NotebookOptionError):
 
 
 class OptionMaterializationRequired(NotebookOptionError):
-    """A v1.1 option needs Task 7 Draft provenance before execution."""
+    """A v1.1 option needs a persisted, bound OptionMaterialization record."""
 
     code = "OPTION_MATERIALIZATION_REQUIRED"
     status_code = 409
