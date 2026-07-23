@@ -51,6 +51,7 @@ from .artifact_contract import (
 from .errors import (
     NotebookRunFamilyImmutable,
     OptionBatchInvalid,
+    OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
     OptionRevisionStale,
     OptionValidationFailed,
@@ -94,8 +95,11 @@ _REGISTRY_RISK_TO_OPTION_RISK = {
 _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
     "proposed": frozenset({"selected", "deferred", "rejected", "archived"}),
     "deferred": frozenset({"selected", "rejected", "archived"}),
-    "selected": frozenset({"deferred", "rejected", "executing", "archived"}),
-    "executing": frozenset({"executed", "selected"}),
+    "selected": frozenset(
+        {"deferred", "rejected", "executing", "materialized", "archived"}
+    ),
+    "materialized": frozenset({"selected", "executing", "archived"}),
+    "executing": frozenset({"executed", "selected", "materialized"}),
     "executed": frozenset(),
     "rejected": frozenset(),
     "archived": frozenset(),
@@ -641,6 +645,19 @@ class NotebookService:
     ) -> str:
         view = self.store.read_option(notebook_id, option_id)
         return evaluate_option_freshness(view.current_revision, context)
+
+    def assert_materializable(self, notebook_id: str, option_id: str) -> None:
+        """Refuse legacy option revisions before any Draft or record is created."""
+
+        current = self.store.read_option(notebook_id, option_id).current_revision
+        if not current.materializable:
+            raise OptionLegacyUnverified(
+                f"option {option_id} revision {current.option_revision} is legacy and "
+                "cannot be materialized without verified evidence",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                contract_version=current.contract_version,
+            )
 
     # ------------------------------------------------------------------
     # Decisions

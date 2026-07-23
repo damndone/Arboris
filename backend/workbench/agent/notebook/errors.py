@@ -72,6 +72,13 @@ class OptionRevisionStale(NotebookOptionError):
     status_code = 409
 
 
+class OptionLegacyUnverified(NotebookOptionError):
+    """A v1.0 option cannot enter the evidence-backed materialization path."""
+
+    code = "OPTION_LEGACY_UNVERIFIED"
+    status_code = 409
+
+
 class OptionLifecycleTransitionInvalid(NotebookOptionError):
     code = "OPTION_LIFECYCLE_TRANSITION_INVALID"
     status_code = 409
@@ -99,6 +106,7 @@ __all__ = [
     "NotebookRunFamilyImmutable",
     "OptionBatchInvalid",
     "OptionLifecycleTransitionInvalid",
+    "OptionLegacyUnverified",
     "OptionNotFound",
     "OptionRevisionStale",
     "OptionValidationFailed",

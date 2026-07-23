@@ -14,6 +14,7 @@ which a mutable `typed_proposal JSON` column cannot do (spec §3.8).
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -22,7 +23,11 @@ from threading import RLock
 from typing import Any, Callable, Iterator, Mapping
 from weakref import WeakValueDictionary
 
-from ...contracts.agent.notebook_option import NotebookOptionRevision
+from ...contracts.agent.notebook_option import (
+    NotebookOptionRevision,
+    OptionMaterialization,
+    RecommendationDecision,
+)
 from ..storage import append_jsonl_atomic, read_jsonl
 from .errors import NotebookNotFound, OptionNotFound
 from .proposal import TypedProposal
@@ -39,6 +44,9 @@ RECORD_REVISION = "revision"
 RECORD_LIFECYCLE = "lifecycle"
 RECORD_EXECUTION = "execution"
 RECORD_EXECUTION_RESULT = "execution_result"
+RECORD_EVIDENCE_PACK = "evidence_pack"
+RECORD_RECOMMENDATION_DECISION = "recommendation_decision"
+RECORD_OPTION_MATERIALIZATION = "option_materialization"
 
 @dataclass
 class _ProjectLockHolder:
@@ -81,6 +89,39 @@ def _require_pathless_string(value: object, *, label: str) -> str:
     ):
         raise ValueError(f"{label} must be a nonempty pathless string")
     return value
+
+
+def _validate_evidence_pack(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept serializable evidence references, never an arbitrary file payload."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("evidence pack must be a mapping")
+    pack = dict(value)
+    evidence_pack_hash = pack.get("evidence_pack_hash")
+    if not isinstance(evidence_pack_hash, str) or not evidence_pack_hash:
+        raise ValueError("evidence_pack_hash must be a nonempty string")
+    _reject_raw_evidence_values(pack)
+    try:
+        canonical = json.loads(json.dumps(pack, ensure_ascii=False, sort_keys=True))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidence pack must be JSON serializable") from exc
+    if not isinstance(canonical, dict):  # defensive: `pack` is a mapping above.
+        raise ValueError("evidence pack must be a mapping")
+    return canonical
+
+
+def _reject_raw_evidence_values(value: object) -> None:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raise ValueError("evidence pack cannot contain raw bytes")
+    if isinstance(value, Mapping):
+        if "raw_path" in value:
+            raise ValueError("evidence pack cannot contain a raw path")
+        for item in value.values():
+            _reject_raw_evidence_values(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_raw_evidence_values(item)
 
 
 @dataclass(frozen=True)
@@ -474,6 +515,157 @@ class NotebookStore:
                 **dict(payload),
             }
             append_jsonl_atomic(self._notebook_path(notebook_id), record)
+
+    # -- immutable notebook projection records -----------------------
+
+    def _notebook_records(self, notebook_id: str) -> list[dict[str, Any]]:
+        records = read_jsonl(self._notebook_path(notebook_id))
+        if not records:
+            raise NotebookNotFound(
+                f"unknown notebook: {notebook_id}", notebook_id=notebook_id
+            )
+        return records
+
+    def _evidence_packs(self, notebook_id: str) -> dict[str, dict[str, Any]]:
+        packs: dict[str, dict[str, Any]] = {}
+        for record in self._notebook_records(notebook_id):
+            if record.get("record_type") != RECORD_EVIDENCE_PACK:
+                continue
+            value = record.get("evidence_pack")
+            if not isinstance(value, Mapping):
+                raise ValueError("evidence pack record is malformed")
+            pack = _validate_evidence_pack(value)
+            evidence_pack_hash = str(pack["evidence_pack_hash"])
+            existing = packs.get(evidence_pack_hash)
+            if existing is not None and existing != pack:
+                raise ValueError(
+                    f"conflicting evidence pack for hash {evidence_pack_hash}"
+                )
+            packs[evidence_pack_hash] = pack
+        return packs
+
+    def append_evidence_pack(self, notebook_id: str, pack: Mapping[str, Any]) -> None:
+        """Append one content-addressed evidence pack, or accept its exact replay."""
+
+        canonical = _validate_evidence_pack(pack)
+        evidence_pack_hash = str(canonical["evidence_pack_hash"])
+        with self._lock:
+            existing = self._evidence_packs(notebook_id).get(evidence_pack_hash)
+            if existing is not None:
+                if existing != canonical:
+                    raise ValueError(
+                        f"conflicting evidence pack for hash {evidence_pack_hash}"
+                    )
+                return
+            append_jsonl_atomic(
+                self._notebook_path(notebook_id),
+                {
+                    "record_type": RECORD_EVIDENCE_PACK,
+                    "recorded_at": _now(),
+                    "evidence_pack": canonical,
+                },
+            )
+
+    def read_evidence_pack(
+        self, notebook_id: str, evidence_pack_hash: str
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            pack = self._evidence_packs(notebook_id).get(evidence_pack_hash)
+            return dict(pack) if pack is not None else None
+
+    def _decisions(self, notebook_id: str) -> dict[str, RecommendationDecision]:
+        decisions: dict[str, RecommendationDecision] = {}
+        for record in self._notebook_records(notebook_id):
+            if record.get("record_type") != RECORD_RECOMMENDATION_DECISION:
+                continue
+            value = record.get("decision")
+            if not isinstance(value, Mapping):
+                raise ValueError("recommendation decision record is malformed")
+            decision = RecommendationDecision.from_dict(value)
+            existing = decisions.get(decision.batch_id)
+            if existing is not None and existing != decision:
+                raise ValueError(
+                    f"conflicting recommendation decision for batch {decision.batch_id}"
+                )
+            decisions[decision.batch_id] = decision
+        return decisions
+
+    def append_decision(self, notebook_id: str, decision: RecommendationDecision) -> None:
+        if not isinstance(decision, RecommendationDecision):
+            raise ValueError("decision must be a RecommendationDecision")
+        with self._lock:
+            existing = self._decisions(notebook_id).get(decision.batch_id)
+            if existing is not None:
+                if existing != decision:
+                    raise ValueError(
+                        f"conflicting recommendation decision for batch {decision.batch_id}"
+                    )
+                return
+            append_jsonl_atomic(
+                self._notebook_path(notebook_id),
+                {
+                    "record_type": RECORD_RECOMMENDATION_DECISION,
+                    "recorded_at": _now(),
+                    "decision": decision.to_dict(),
+                },
+            )
+
+    def read_decision(
+        self, notebook_id: str, batch_id: str
+    ) -> RecommendationDecision | None:
+        with self._lock:
+            return self._decisions(notebook_id).get(batch_id)
+
+    def _materializations(
+        self, notebook_id: str
+    ) -> dict[tuple[str, int], OptionMaterialization]:
+        materializations: dict[tuple[str, int], OptionMaterialization] = {}
+        for record in self._notebook_records(notebook_id):
+            if record.get("record_type") != RECORD_OPTION_MATERIALIZATION:
+                continue
+            value = record.get("materialization")
+            if not isinstance(value, Mapping):
+                raise ValueError("option materialization record is malformed")
+            materialization = OptionMaterialization.from_dict(value)
+            key = (materialization.option_id, materialization.option_revision)
+            existing = materializations.get(key)
+            if existing is not None and existing != materialization:
+                raise ValueError(
+                    "conflicting option materialization for "
+                    f"{materialization.option_id}@{materialization.option_revision}"
+                )
+            materializations[key] = materialization
+        return materializations
+
+    def append_materialization(
+        self, notebook_id: str, materialization: OptionMaterialization
+    ) -> None:
+        if not isinstance(materialization, OptionMaterialization):
+            raise ValueError("materialization must be an OptionMaterialization")
+        key = (materialization.option_id, materialization.option_revision)
+        with self._lock:
+            existing = self._materializations(notebook_id).get(key)
+            if existing is not None:
+                if existing != materialization:
+                    raise ValueError(
+                        "conflicting option materialization for "
+                        f"{materialization.option_id}@{materialization.option_revision}"
+                    )
+                return
+            append_jsonl_atomic(
+                self._notebook_path(notebook_id),
+                {
+                    "record_type": RECORD_OPTION_MATERIALIZATION,
+                    "recorded_at": _now(),
+                    "materialization": materialization.to_dict(),
+                },
+            )
+
+    def read_materialization(
+        self, notebook_id: str, option_id: str, option_revision: int
+    ) -> OptionMaterialization | None:
+        with self._lock:
+            return self._materializations(notebook_id).get((option_id, option_revision))
 
     # -- options -------------------------------------------------------
 
