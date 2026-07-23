@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   parseArtifactContract,
   parseEtsResult,
   parseNotebookOptionRevision,
+  parseOptionMaterialization,
   parseOptionExecution,
+  parseRecommendationDecision,
 } from "./contracts";
 import {
   canonicalEtsResult,
@@ -12,6 +17,18 @@ import {
   canonicalOptionRevision,
   readCanonicalFixture,
 } from "./fixtures/canonicalMocks";
+
+const V11_FIXTURE_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../tests/fixtures/contracts/v181",
+);
+
+function readV11Fixture(name: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(resolve(V11_FIXTURE_DIR, `${name}.json`), "utf8")) as Record<
+    string,
+    unknown
+  >;
+}
 
 describe("contracts — the canonical v1.8.1 mocks parse into the locked shape", () => {
   it("keeps the two hashes as two separate fields", () => {
@@ -49,6 +66,28 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
     expect(execution.run_id).toBeNull();
   });
 
+  it("projects a v1.0 option as legacy-unverified and not materializable", () => {
+    const option = canonicalOptionRevision();
+    expect(option.contract_version).toBe("1.0");
+    expect(option.lifecycle_projection).toBe("legacy_unverified");
+    expect(option.materializable).toBe(false);
+  });
+
+  it("defaults unversioned v1.0 optional option fields", () => {
+    const raw = { ...readCanonicalFixture("notebook_option_revision") };
+    delete raw.contract_version;
+    delete raw.rationale;
+    delete raw.assumptions;
+    delete raw.supersedes_option_revision;
+
+    const option = parseNotebookOptionRevision(raw);
+
+    expect(option.contract_version).toBe("1.0");
+    expect(option.rationale).toBe("");
+    expect(option.assumptions).toEqual([]);
+    expect(option.supersedes_option_revision).toBeNull();
+  });
+
   it("reads the ETS result without deriving anything from it", () => {
     const result = canonicalEtsResult();
     expect(result.specification.canonical).toBe("ETS(A,Ad,N)");
@@ -63,12 +102,17 @@ describe("contracts — a packet that does not match the lock is rejected, not c
   it("rejects an unknown contract_version on the option revision", () => {
     const raw = { ...readCanonicalFixture("notebook_option_revision"), contract_version: "2.0" };
     expect(() => parseNotebookOptionRevision(raw)).toThrow(
-      "NotebookOptionRevision contract_version must be 1.0, got 2.0",
+      "NotebookOptionRevision contract_version must be 1.0 or 1.1, got 2.0",
     );
   });
 
   it("rejects a lifecycle status outside the locked vocabulary", () => {
     const raw = { ...readCanonicalFixture("notebook_option_revision"), lifecycle_status: "done" };
+    expect(() => parseNotebookOptionRevision(raw)).toThrow("lifecycle_status");
+  });
+
+  it("rejects materialized lifecycle on a v1.0 option", () => {
+    const raw = { ...readCanonicalFixture("notebook_option_revision"), lifecycle_status: "materialized" };
     expect(() => parseNotebookOptionRevision(raw)).toThrow("lifecycle_status");
   });
 
@@ -93,5 +137,150 @@ describe("contracts — a packet that does not match the lock is rejected, not c
   it("rejects an ETS packet whose model_type is not the ETS pack", () => {
     const raw = { ...readCanonicalFixture("ets_result"), model_type: "time_series.arma_garch" };
     expect(() => parseEtsResult(raw)).toThrow("model_type");
+  });
+});
+
+describe("contracts — v1.1 evidence, decision, and materialization records", () => {
+  it("reads a v1.1 option revision with evidence and a materialized lifecycle", () => {
+    const option = parseNotebookOptionRevision(readV11Fixture("notebook_option_revision_v11"));
+    if (option.contract_version !== "1.1") throw new Error("expected a v1.1 option fixture");
+    expect(option.contract_version).toBe("1.1");
+    expect(option.lifecycle_status).toBe("materialized");
+    expect(option.materializable).toBe(true);
+    expect(option.evidence_refs[0]).toMatchObject({ evidence_id: "ev_ets_001" });
+  });
+
+  it("reads a valid recommendation decision and materialization", () => {
+    const decision = parseRecommendationDecision(readV11Fixture("recommendation_decision_v1"));
+    const materialization = parseOptionMaterialization(
+      readV11Fixture("option_materialization_v1"),
+    );
+    expect(decision.recommended_option_id).toBe("opt_7f3a1c");
+    expect(materialization.draft_execution_mode).toBe("rerun_child");
+    expect(materialization.dataset_upload_sha256).toBeNull();
+  });
+
+  it("reads a valid genesis materialization", () => {
+    const materialization = parseOptionMaterialization(
+      readV11Fixture("option_materialization_genesis_v1"),
+    );
+    expect(materialization.draft_execution_mode).toBe("genesis");
+    expect(materialization.source_run_id).toBeNull();
+  });
+
+  it("reads a v1.1 execution with all materialization pins", () => {
+    const execution = parseOptionExecution(readV11Fixture("option_execution_v11"));
+    if (execution.contract_version !== "1.1") throw new Error("expected a v1.1 execution fixture");
+    expect(execution.contract_version).toBe("1.1");
+    expect(execution.materialization_id).toBe("mat_6bca12");
+    expect(execution.run_id).toBe("run_003");
+  });
+
+  it("rejects v1.0 option packets that carry v1.1-only fields", () => {
+    const raw = { ...readCanonicalFixture("notebook_option_revision"), evidence_refs: [] };
+    expect(() => parseNotebookOptionRevision(raw)).toThrow("unknown field");
+  });
+
+  it("rejects an invalid recommendation outcome selection", () => {
+    const raw = { ...readV11Fixture("recommendation_decision_v1"), recommended_option_id: null };
+    expect(() => parseRecommendationDecision(raw)).toThrow("recommended_option_id");
+  });
+
+  it("rejects a recommended id outside the candidate set", () => {
+    const raw = {
+      ...readV11Fixture("recommendation_decision_v1"),
+      recommended_option_id: "opt_not_a_candidate",
+    };
+    expect(() => parseRecommendationDecision(raw)).toThrow("recommended_option_id");
+  });
+
+  it("rejects an invalid rerun-child materialization XOR", () => {
+    const raw = {
+      ...readV11Fixture("option_materialization_v1"),
+      dataset_upload_sha256: "sha256:uploaded-dataset",
+    };
+    expect(() => parseOptionMaterialization(raw)).toThrow("rerun_child");
+  });
+
+  it("rejects a genesis materialization with a source pin", () => {
+    const raw = {
+      ...readV11Fixture("option_materialization_genesis_v1"),
+      source_run_id: "run_002",
+    };
+    expect(() => parseOptionMaterialization(raw)).toThrow("genesis");
+  });
+
+  it("rejects a v1.1 execution without every required pin", () => {
+    const raw = { ...readV11Fixture("option_execution_v11"), materialization_id: null };
+    expect(() => parseOptionExecution(raw)).toThrow("materialization_id");
+  });
+
+  it("rejects a v1.0 execution that carries v1.1-only fields", () => {
+    const raw = { ...readCanonicalFixture("option_execution"), materialization_id: "mat_6bca12" };
+    expect(() => parseOptionExecution(raw)).toThrow("unknown field");
+  });
+
+  it("fails closed on unknown fields", () => {
+    const raw = { ...readV11Fixture("option_execution_v11"), unversioned_extra: true };
+    expect(() => parseOptionExecution(raw)).toThrow("unknown field");
+  });
+
+  it("requires every v1.1 option field and its explicit version", () => {
+    for (const field of [
+      "contract_version",
+      "evidence_refs",
+      "comparative_claims",
+      "recommendation_decision_id",
+      "recommendation_status",
+    ]) {
+      const raw = { ...readV11Fixture("notebook_option_revision_v11") };
+      delete raw[field];
+      expect(() => parseNotebookOptionRevision(raw)).toThrow();
+    }
+  });
+
+  it("rejects zero and negative contract revision fields", () => {
+    const cases = [
+      ["notebook_option_revision_v11", parseNotebookOptionRevision, "option_revision"],
+      ["notebook_option_revision_v11", parseNotebookOptionRevision, "typed_proposal_revision"],
+      ["notebook_option_revision_v11", parseNotebookOptionRevision, "rank"],
+      ["option_materialization_v1", parseOptionMaterialization, "option_revision"],
+      ["option_materialization_v1", parseOptionMaterialization, "proposal_revision"],
+      ["option_execution_v11", parseOptionExecution, "option_revision"],
+      ["option_execution_v11", parseOptionExecution, "proposal_revision"],
+    ] as const;
+    for (const [fixture, parser, field] of cases) {
+      for (const value of [0, -1]) {
+        const raw = { ...readV11Fixture(fixture), [field]: value };
+        expect(() => parser(raw)).toThrow(field);
+      }
+    }
+  });
+
+  it("rejects empty optional run and materialization pins", () => {
+    const legacyExecution = { ...readCanonicalFixture("option_execution"), run_id: "" };
+    const rerun = { ...readV11Fixture("option_materialization_v1"), source_run_id: "" };
+    const genesis = {
+      ...readV11Fixture("option_materialization_genesis_v1"),
+      dataset_upload_sha256: "",
+    };
+
+    expect(() => parseOptionExecution(legacyExecution)).toThrow("run_id");
+    expect(() => parseOptionMaterialization(rerun)).toThrow("source_run_id");
+    expect(() => parseOptionMaterialization(genesis)).toThrow("dataset_upload_sha256");
+  });
+
+  it("rejects unknown versions for each new packet parser", () => {
+    const cases = [
+      ["notebook_option_revision_v11", parseNotebookOptionRevision],
+      ["recommendation_decision_v1", parseRecommendationDecision],
+      ["option_materialization_v1", parseOptionMaterialization],
+      ["option_execution_v11", parseOptionExecution],
+    ] as const;
+    for (const [fixture, parser] of cases) {
+      expect(() => parser({ ...readV11Fixture(fixture), contract_version: "2.0" })).toThrow(
+        "contract_version",
+      );
+    }
   });
 });

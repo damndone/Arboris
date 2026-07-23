@@ -277,6 +277,29 @@ def test_legacy_option_revision_projects_as_unverified_and_cannot_materialize() 
     assert legacy.materializable is False
 
 
+def test_unversioned_v10_option_revision_defaults_optional_fields() -> None:
+    payload = _fixture("notebook_option_revision")
+    payload.pop("contract_version")
+    payload.pop("rationale")
+    payload.pop("assumptions")
+    payload.pop("supersedes_option_revision")
+
+    revision = NotebookOptionRevision.from_dict(payload)
+
+    assert revision.contract_version == "1.0"
+    assert revision.rationale == ""
+    assert revision.assumptions == ()
+    assert revision.supersedes_option_revision is None
+
+
+def test_v10_option_revision_rejects_materialized_lifecycle() -> None:
+    payload = _fixture("notebook_option_revision")
+    payload["lifecycle_status"] = "materialized"
+
+    with pytest.raises(NotebookContractError):
+        NotebookOptionRevision.from_dict(payload)
+
+
 def test_public_legacy_constructors_remain_writable_until_new_writers_migrate() -> None:
     option_payload = _fixture("notebook_option_revision")
     option_payload["artifact_contract"] = ArtifactContract.from_dict(
@@ -302,6 +325,24 @@ def test_v11_option_revision_fixture_round_trips_with_evidence_and_recommendatio
     assert revision.materializable is True
     assert revision.evidence_refs[0].result_hash.startswith("sha256:")
     assert revision.recommendation_status == "recommended"
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "contract_version",
+        "evidence_refs",
+        "comparative_claims",
+        "recommendation_decision_id",
+        "recommendation_status",
+    ],
+)
+def test_v11_option_revision_requires_its_version_and_evidence_fields(field: str) -> None:
+    payload = _fixture("notebook_option_revision_v11")
+    payload.pop(field)
+
+    with pytest.raises((NotebookContractError, ContractError)):
+        NotebookOptionRevision.from_dict(payload)
 
 
 def test_v10_option_revision_rejects_v11_only_fields() -> None:
@@ -342,6 +383,14 @@ def test_recommendation_decision_rejects_invalid_outcome_selection(
         RecommendationDecision.from_dict(payload)
 
 
+def test_recommendation_decision_rejects_recommended_id_outside_candidates() -> None:
+    payload = _fixture("recommendation_decision_v1")
+    payload["recommended_option_id"] = "opt_not_a_candidate"
+
+    with pytest.raises(NotebookContractError):
+        RecommendationDecision.from_dict(payload)
+
+
 def test_materialization_fixture_round_trips_for_a_rerun_child() -> None:
     payload = _fixture("option_materialization_v1")
 
@@ -350,6 +399,16 @@ def test_materialization_fixture_round_trips_for_a_rerun_child() -> None:
     assert materialization.to_dict() == payload
     assert materialization.draft_execution_mode == "rerun_child"
     assert materialization.dataset_upload_sha256 is None
+
+
+def test_materialization_fixture_round_trips_for_genesis() -> None:
+    payload = _fixture("option_materialization_genesis_v1")
+
+    materialization = OptionMaterialization.from_dict(payload)
+
+    assert materialization.to_dict() == payload
+    assert materialization.draft_execution_mode == "genesis"
+    assert materialization.source_run_id is None
 
 
 @pytest.mark.parametrize(
@@ -365,6 +424,36 @@ def test_materialization_rejects_invalid_rerun_child_xor(field: str, value: obje
 
     with pytest.raises(NotebookContractError):
         OptionMaterialization.from_dict(payload)
+
+
+def test_materialization_rejects_genesis_source_pins() -> None:
+    payload = _fixture("option_materialization_genesis_v1")
+    payload["source_run_id"] = "run_002"
+
+    with pytest.raises(NotebookContractError):
+        OptionMaterialization.from_dict(payload)
+
+
+@pytest.mark.parametrize(
+    "fixture_name,parser,field",
+    [
+        ("option_materialization_v1", OptionMaterialization.from_dict, "source_run_id"),
+        (
+            "option_materialization_genesis_v1",
+            OptionMaterialization.from_dict,
+            "dataset_upload_sha256",
+        ),
+        ("option_execution", OptionExecution.from_dict, "run_id"),
+    ],
+)
+def test_optional_string_pins_reject_empty_values(
+    fixture_name: str, parser: object, field: str
+) -> None:
+    payload = _fixture(fixture_name)
+    payload[field] = ""
+
+    with pytest.raises(NotebookContractError):
+        parser(payload)  # type: ignore[operator]
 
 
 def test_v11_execution_fixture_round_trips_with_materialization_pins() -> None:
@@ -401,6 +490,38 @@ def test_v10_execution_refuses_v11_materialization_fields() -> None:
 
 
 @pytest.mark.parametrize(
+    "fixture_name,parser,field",
+    [
+        ("notebook_option_revision", NotebookOptionRevision.from_dict, "option_revision"),
+        ("notebook_option_revision", NotebookOptionRevision.from_dict, "typed_proposal_revision"),
+        ("notebook_option_revision", NotebookOptionRevision.from_dict, "rank"),
+        ("notebook_option_revision_v11", NotebookOptionRevision.from_dict, "option_revision"),
+        (
+            "notebook_option_revision_v11",
+            NotebookOptionRevision.from_dict,
+            "typed_proposal_revision",
+        ),
+        ("notebook_option_revision_v11", NotebookOptionRevision.from_dict, "rank"),
+        ("option_materialization_v1", OptionMaterialization.from_dict, "option_revision"),
+        ("option_materialization_v1", OptionMaterialization.from_dict, "proposal_revision"),
+        ("option_execution", OptionExecution.from_dict, "option_revision"),
+        ("option_execution", OptionExecution.from_dict, "proposal_revision"),
+        ("option_execution_v11", OptionExecution.from_dict, "option_revision"),
+        ("option_execution_v11", OptionExecution.from_dict, "proposal_revision"),
+    ],
+)
+@pytest.mark.parametrize("value", [0, -1])
+def test_contract_positive_integer_fields_reject_zero_and_negatives(
+    fixture_name: str, parser: object, field: str, value: int
+) -> None:
+    payload = _fixture(fixture_name)
+    payload[field] = value
+
+    with pytest.raises(NotebookContractError):
+        parser(payload)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
     "parser,fixture_name",
     [
         (NotebookOptionRevision.from_dict, "notebook_option_revision_v11"),
@@ -414,4 +535,21 @@ def test_v11_packets_reject_unknown_fields(parser: object, fixture_name: str) ->
     payload["unversioned_extra"] = True
 
     with pytest.raises((NotebookContractError, ContractError)):
+        parser(payload)  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "parser,fixture_name",
+    [
+        (NotebookOptionRevision.from_dict, "notebook_option_revision_v11"),
+        (RecommendationDecision.from_dict, "recommendation_decision_v1"),
+        (OptionMaterialization.from_dict, "option_materialization_v1"),
+        (OptionExecution.from_dict, "option_execution_v11"),
+    ],
+)
+def test_new_packet_parsers_reject_unknown_versions(parser: object, fixture_name: str) -> None:
+    payload = _fixture(fixture_name)
+    payload["contract_version"] = "2.0"
+
+    with pytest.raises(NotebookContractError):
         parser(payload)  # type: ignore[operator]

@@ -1,0 +1,14 @@
+{
+  "contract_version": "1.1",
+  "option_id": "opt_7f3a1c",
+  "option_revision": 3,
+  "proposal_id": "prop_51de90",
+  "proposal_revision": 1,
+  "freshness_dependency_fingerprint": "fresh1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "generation_context_id": "ctx_9c21ab",
+  "materialization_id": "mat_6bca12",
+  "draft_id": "draft_2a4b7d",
+  "draft_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "source_run_id": "run_002",
+  "run_id": "run_003"
+}

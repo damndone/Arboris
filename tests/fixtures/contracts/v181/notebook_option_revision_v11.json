@@ -1,0 +1,40 @@
+{
+  "contract_version": "1.1",
+  "option_id": "opt_7f3a1c",
+  "option_revision": 3,
+  "notebook_id": "nb_0001",
+  "run_family_id": "run-family:11111111-1111-4111-8111-111111111111",
+  "generation_context_id": "ctx_9c21ab",
+  "generation_context_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "freshness_dependency_fingerprint": "fresh1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "typed_proposal_id": "prop_51de90",
+  "typed_proposal_revision": 1,
+  "artifact_contract": {
+    "contract_version": "1.0",
+    "expected": [
+      {"artifact_id": "ets_1", "artifact_type": "model_result", "required": true, "count": 1, "step": "estimation"}
+    ],
+    "checked_dimensions": ["artifact_id", "artifact_type", "count", "step"],
+    "not_evaluated_dimensions": ["payload_schema"]
+  },
+  "rationale": "Evidence-backed ETS baseline selected after the comparison protocol completed.",
+  "assumptions": ["the series is observed on a regular calendar"],
+  "risk_level": "low",
+  "lifecycle_status": "materialized",
+  "freshness_status": "fresh",
+  "validation_status": "valid",
+  "rank": 1,
+  "batch_id": "batch_0001",
+  "created_at": "2026-07-23T15:00:00+00:00",
+  "supersedes_option_revision": 2,
+  "evidence_refs": [
+    {
+      "evidence_id": "ev_ets_001",
+      "result_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "source_refs": ["run:run_002", "artifact:ets_1"]
+    }
+  ],
+  "comparative_claims": ["ETS has the lowest AIC among the protocol-comparable candidates."],
+  "recommendation_decision_id": "rec_4af920",
+  "recommendation_status": "recommended"
+}

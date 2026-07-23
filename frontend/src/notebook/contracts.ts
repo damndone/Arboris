@@ -9,8 +9,12 @@
  * coerced into a half-populated card (ADR-PD-001 §7C).
  */
 
-export const NOTEBOOK_OPTION_CONTRACT_VERSION = "1.0";
-export const OPTION_EXECUTION_CONTRACT_VERSION = "1.0";
+export const NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1";
+export const NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0";
+export const OPTION_EXECUTION_CONTRACT_VERSION = "1.1";
+export const OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0";
+export const RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0";
+export const OPTION_MATERIALIZATION_CONTRACT_VERSION = "1.0";
 export const ARTIFACT_CONTRACT_VERSION = "1.0";
 export const ETS_RESULT_CONTRACT_VERSION = "1.0";
 
@@ -22,15 +26,31 @@ export const LIFECYCLE_STATUSES = [
   "executed",
   "rejected",
   "archived",
+  "materialized",
+] as const;
+export const LEGACY_LIFECYCLE_STATUSES = [
+  "proposed",
+  "deferred",
+  "selected",
+  "executing",
+  "executed",
+  "rejected",
+  "archived",
 ] as const;
 export const FRESHNESS_STATUSES = ["fresh", "stale", "revalidating"] as const;
 export const VALIDATION_STATUSES = ["valid", "invalid", "unvalidated"] as const;
 export const RISK_LEVELS = ["low", "medium", "high"] as const;
+export const RECOMMENDATION_OUTCOMES = [
+  "recommended",
+  "tied",
+  "insufficient_evidence",
+] as const;
 
 export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number];
 export type FreshnessStatus = (typeof FRESHNESS_STATUSES)[number];
 export type ValidationStatus = (typeof VALIDATION_STATUSES)[number];
 export type RiskLevel = (typeof RISK_LEVELS)[number];
+export type RecommendationOutcome = (typeof RECOMMENDATION_OUTCOMES)[number];
 
 export class NotebookContractError extends Error {}
 
@@ -55,6 +75,14 @@ function requireInt(raw: Raw, field: string, path: string): number {
   const value = raw[field];
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new NotebookContractError(`${path}.${field} must be an integer`);
+  }
+  return value;
+}
+
+function requirePositiveInt(raw: Raw, field: string, path: string): number {
+  const value = requireInt(raw, field, path);
+  if (value < 1) {
+    throw new NotebookContractError(`${path}.${field} must be an integer >= 1`);
   }
   return value;
 }
@@ -84,10 +112,25 @@ function optionalString(raw: Raw, field: string, path: string): string | null {
   return value;
 }
 
+function optionalNonEmptyString(raw: Raw, field: string, path: string): string | null {
+  const value = raw[field];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || value.length === 0) {
+    throw new NotebookContractError(`${path}.${field} must be a non-empty string or null`);
+  }
+  return value;
+}
+
 function optionalInt(raw: Raw, field: string, path: string): number | null {
   const value = raw[field];
   if (value === null || value === undefined) return null;
   return requireInt(raw, field, path);
+}
+
+function optionalPositiveInt(raw: Raw, field: string, path: string): number | null {
+  const value = raw[field];
+  if (value === null || value === undefined) return null;
+  return requirePositiveInt(raw, field, path);
 }
 
 function requireChoice<T extends string>(
@@ -121,6 +164,27 @@ function requireVersion(raw: Raw, expected: string, packet: string): string {
     );
   }
   return value;
+}
+
+function requireKnownKeys(
+  raw: Raw,
+  required: readonly string[],
+  optional: readonly string[],
+  path: string,
+): void {
+  const allowed = new Set([...required, ...optional]);
+  const unknown = Object.keys(raw).filter((key) => !allowed.has(key));
+  const missing = required.filter((key) => !(key in raw));
+  if (unknown.length > 0) {
+    throw new NotebookContractError(`${path} has unknown field(s): ${unknown.sort().join(", ")}`);
+  }
+  if (missing.length > 0) {
+    throw new NotebookContractError(`${path} is missing required field(s): ${missing.join(", ")}`);
+  }
+}
+
+function requireExactKeys(raw: Raw, keys: readonly string[], path: string): void {
+  requireKnownKeys(raw, keys, [], path);
 }
 
 /* ------------------------------------------------------------------ */
@@ -158,6 +222,7 @@ export function parseExpectedArtifact(value: unknown, index: number): ExpectedAr
       `ARTIFACT_SCHEMA_CONTRACT_UNSUPPORTED: ${path} declares schema_ref, which v1.8.1 cannot evaluate`,
     );
   }
+  requireExactKeys(raw, ["artifact_id", "artifact_type", "required", "count", "step"], path);
   return {
     artifact_id: requireString(raw, "artifact_id", path),
     artifact_type: requireString(raw, "artifact_type", path),
@@ -169,6 +234,11 @@ export function parseExpectedArtifact(value: unknown, index: number): ExpectedAr
 
 export function parseArtifactContract(value: unknown): ArtifactContract {
   const raw = asRecord(value, "artifact_contract");
+  requireExactKeys(
+    raw,
+    ["contract_version", "expected", "checked_dimensions", "not_evaluated_dimensions"],
+    "artifact_contract",
+  );
   requireVersion(raw, ARTIFACT_CONTRACT_VERSION, "ArtifactContract");
   const expected = raw.expected;
   if (!Array.isArray(expected)) {
@@ -192,11 +262,10 @@ export function parseArtifactContract(value: unknown): ArtifactContract {
 }
 
 /* ------------------------------------------------------------------ */
-/* NotebookOptionRevision@1.0                                          */
+/* NotebookOptionRevision@1.0 and @1.1                                 */
 /* ------------------------------------------------------------------ */
 
-export interface NotebookOptionRevision {
-  contract_version: string;
+interface NotebookOptionRevisionBase {
   option_id: string;
   option_revision: number;
   notebook_id: string;
@@ -221,14 +290,81 @@ export interface NotebookOptionRevision {
   supersedes_option_revision: number | null;
 }
 
-export function parseNotebookOptionRevision(value: unknown): NotebookOptionRevision {
-  const raw = asRecord(value, "notebook_option_revision");
-  requireVersion(raw, NOTEBOOK_OPTION_CONTRACT_VERSION, "NotebookOptionRevision");
+export interface EvidenceRef {
+  evidence_id: string;
+  result_hash: string;
+  source_refs: string[];
+}
+
+/** Common consumer shape. New parser outputs are the narrower union below. */
+export interface NotebookOptionRevision extends NotebookOptionRevisionBase {
+  contract_version: "1.0" | "1.1";
+  lifecycle_projection: LifecycleStatus | "legacy_unverified";
+  materializable: boolean;
+  evidence_refs?: EvidenceRef[];
+  comparative_claims?: string[];
+  recommendation_decision_id?: string;
+  recommendation_status?: RecommendationOutcome;
+}
+
+export interface LegacyNotebookOptionRevision extends NotebookOptionRevision {
+  contract_version: "1.0";
+  lifecycle_status: (typeof LEGACY_LIFECYCLE_STATUSES)[number];
+  lifecycle_projection: "legacy_unverified";
+  materializable: false;
+  evidence_refs?: never;
+  comparative_claims?: never;
+  recommendation_decision_id?: never;
+  recommendation_status?: never;
+}
+
+export interface NotebookOptionRevisionV11 extends NotebookOptionRevision {
+  contract_version: "1.1";
+  evidence_refs: EvidenceRef[];
+  comparative_claims: string[];
+  recommendation_decision_id: string;
+  recommendation_status: RecommendationOutcome;
+  lifecycle_projection: LifecycleStatus;
+  materializable: true;
+}
+
+export type ParsedNotebookOptionRevision =
+  | LegacyNotebookOptionRevision
+  | NotebookOptionRevisionV11;
+
+const OPTION_BASE_REQUIRED_KEYS = [
+  "option_id",
+  "option_revision",
+  "notebook_id",
+  "run_family_id",
+  "generation_context_id",
+  "generation_context_hash",
+  "freshness_dependency_fingerprint",
+  "typed_proposal_id",
+  "typed_proposal_revision",
+  "artifact_contract",
+  "risk_level",
+  "lifecycle_status",
+  "freshness_status",
+  "validation_status",
+  "rank",
+  "batch_id",
+  "created_at",
+] as const;
+
+const OPTION_BASE_OPTIONAL_KEYS = [
+  "rationale",
+  "assumptions",
+  "supersedes_option_revision",
+] as const;
+
+const OPTION_BASE_KEYS = [...OPTION_BASE_REQUIRED_KEYS, ...OPTION_BASE_OPTIONAL_KEYS] as const;
+
+function parseOptionBase(raw: Raw): NotebookOptionRevisionBase {
   const path = "notebook_option_revision";
   return {
-    contract_version: NOTEBOOK_OPTION_CONTRACT_VERSION,
     option_id: requireString(raw, "option_id", path),
-    option_revision: requireInt(raw, "option_revision", path),
+    option_revision: requirePositiveInt(raw, "option_revision", path),
     notebook_id: requireString(raw, "notebook_id", path),
     run_family_id: requireString(raw, "run_family_id", path),
     generation_context_id: requireString(raw, "generation_context_id", path),
@@ -239,53 +375,371 @@ export function parseNotebookOptionRevision(value: unknown): NotebookOptionRevis
       path,
     ),
     typed_proposal_id: requireString(raw, "typed_proposal_id", path),
-    typed_proposal_revision: requireInt(raw, "typed_proposal_revision", path),
+    typed_proposal_revision: requirePositiveInt(raw, "typed_proposal_revision", path),
     artifact_contract: parseArtifactContract(raw.artifact_contract),
-    rationale: requireString(raw, "rationale", path),
-    assumptions: requireStringArray(raw, "assumptions", path),
+    rationale: "rationale" in raw ? requireString(raw, "rationale", path) : "",
+    assumptions: "assumptions" in raw ? requireStringArray(raw, "assumptions", path) : [],
     risk_level: requireChoice(raw, "risk_level", RISK_LEVELS, path),
     lifecycle_status: requireChoice(raw, "lifecycle_status", LIFECYCLE_STATUSES, path),
     freshness_status: requireChoice(raw, "freshness_status", FRESHNESS_STATUSES, path),
     validation_status: requireChoice(raw, "validation_status", VALIDATION_STATUSES, path),
-    rank: requireInt(raw, "rank", path),
+    rank: requirePositiveInt(raw, "rank", path),
     batch_id: requireString(raw, "batch_id", path),
     created_at: requireString(raw, "created_at", path),
-    supersedes_option_revision: optionalInt(raw, "supersedes_option_revision", path),
+    supersedes_option_revision:
+      "supersedes_option_revision" in raw
+        ? optionalPositiveInt(raw, "supersedes_option_revision", path)
+        : null,
+  };
+}
+
+function parseEvidenceRef(value: unknown, index: number): EvidenceRef {
+  const path = `notebook_option_revision.evidence_refs[${index}]`;
+  const raw = asRecord(value, path);
+  requireExactKeys(raw, ["evidence_id", "result_hash", "source_refs"], path);
+  return {
+    evidence_id: requireString(raw, "evidence_id", path),
+    result_hash: requireString(raw, "result_hash", path),
+    source_refs: requireStringArray(raw, "source_refs", path),
+  };
+}
+
+export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptionRevision {
+  const raw = asRecord(value, "notebook_option_revision");
+  const hasVersion = "contract_version" in raw;
+  const version = hasVersion
+    ? requireString(raw, "contract_version", "NotebookOptionRevision")
+    : NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION;
+  if (version === NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION) {
+    requireKnownKeys(
+      raw,
+      hasVersion
+        ? ["contract_version", ...OPTION_BASE_REQUIRED_KEYS]
+        : OPTION_BASE_REQUIRED_KEYS,
+      OPTION_BASE_OPTIONAL_KEYS,
+      "notebook_option_revision",
+    );
+    const base = parseOptionBase(raw);
+    return {
+      ...base,
+      contract_version: NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION,
+      lifecycle_status: requireChoice(
+        raw,
+        "lifecycle_status",
+        LEGACY_LIFECYCLE_STATUSES,
+        "notebook_option_revision",
+      ),
+      lifecycle_projection: "legacy_unverified",
+      materializable: false,
+    };
+  }
+  if (version !== NOTEBOOK_OPTION_CONTRACT_VERSION) {
+    throw new NotebookContractError(
+      `NotebookOptionRevision contract_version must be 1.0 or 1.1, got ${version}`,
+    );
+  }
+  requireExactKeys(
+    raw,
+    [
+      "contract_version",
+      ...OPTION_BASE_KEYS,
+      "evidence_refs",
+      "comparative_claims",
+      "recommendation_decision_id",
+      "recommendation_status",
+    ],
+    "notebook_option_revision",
+  );
+  const evidence = raw.evidence_refs;
+  if (!Array.isArray(evidence)) {
+    throw new NotebookContractError("notebook_option_revision.evidence_refs must be an array");
+  }
+  const base = parseOptionBase(raw);
+  return {
+    ...base,
+    contract_version: NOTEBOOK_OPTION_CONTRACT_VERSION,
+    evidence_refs: evidence.map(parseEvidenceRef),
+    comparative_claims: requireStringArray(raw, "comparative_claims", "notebook_option_revision"),
+    recommendation_decision_id: requireString(
+      raw,
+      "recommendation_decision_id",
+      "notebook_option_revision",
+    ),
+    recommendation_status: requireChoice(
+      raw,
+      "recommendation_status",
+      RECOMMENDATION_OUTCOMES,
+      "notebook_option_revision",
+    ),
+    lifecycle_projection: base.lifecycle_status,
+    materializable: true,
   };
 }
 
 /* ------------------------------------------------------------------ */
-/* OptionExecution@1.0                                                 */
+/* RecommendationDecision@1.0                                          */
 /* ------------------------------------------------------------------ */
 
-export interface OptionExecution {
-  contract_version: string;
+export interface RecommendationDecision {
+  contract_version: "1.0";
+  recommendation_decision_id: string;
+  batch_id: string;
+  generation_context_hash: string;
+  freshness_dependency_fingerprint: string;
+  evidence_pack_hashes: string[];
+  comparison_protocol_refs: string[];
+  candidate_option_ids: string[];
+  outcome: RecommendationOutcome;
+  recommended_option_id: string | null;
+  reason_refs: string[];
+}
+
+export function parseRecommendationDecision(value: unknown): RecommendationDecision {
+  const raw = asRecord(value, "recommendation_decision");
+  const path = "recommendation_decision";
+  requireExactKeys(
+    raw,
+    [
+      "contract_version",
+      "recommendation_decision_id",
+      "batch_id",
+      "generation_context_hash",
+      "freshness_dependency_fingerprint",
+      "evidence_pack_hashes",
+      "comparison_protocol_refs",
+      "candidate_option_ids",
+      "outcome",
+      "recommended_option_id",
+      "reason_refs",
+    ],
+    path,
+  );
+  requireVersion(raw, RECOMMENDATION_DECISION_CONTRACT_VERSION, "RecommendationDecision");
+  const candidateOptionIds = requireStringArray(raw, "candidate_option_ids", path);
+  if (new Set(candidateOptionIds).size !== candidateOptionIds.length) {
+    throw new NotebookContractError(`${path}.candidate_option_ids must be unique`);
+  }
+  const outcome = requireChoice(raw, "outcome", RECOMMENDATION_OUTCOMES, path);
+  const recommendedOptionId = optionalNonEmptyString(raw, "recommended_option_id", path);
+  if (outcome === "recommended") {
+    if (recommendedOptionId === null || !candidateOptionIds.includes(recommendedOptionId)) {
+      throw new NotebookContractError(
+        `${path}.recommended_option_id must name exactly one candidate for recommended outcomes`,
+      );
+    }
+  } else if (recommendedOptionId !== null) {
+    throw new NotebookContractError(
+      `${path}.recommended_option_id must be null for tied or insufficient_evidence outcomes`,
+    );
+  }
+  return {
+    contract_version: RECOMMENDATION_DECISION_CONTRACT_VERSION,
+    recommendation_decision_id: requireString(raw, "recommendation_decision_id", path),
+    batch_id: requireString(raw, "batch_id", path),
+    generation_context_hash: requireString(raw, "generation_context_hash", path),
+    freshness_dependency_fingerprint: requireString(raw, "freshness_dependency_fingerprint", path),
+    evidence_pack_hashes: requireStringArray(raw, "evidence_pack_hashes", path),
+    comparison_protocol_refs: requireStringArray(raw, "comparison_protocol_refs", path),
+    candidate_option_ids: candidateOptionIds,
+    outcome,
+    recommended_option_id: recommendedOptionId,
+    reason_refs: requireStringArray(raw, "reason_refs", path),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* OptionMaterialization@1.0                                           */
+/* ------------------------------------------------------------------ */
+
+export interface OptionMaterialization {
+  contract_version: "1.0";
+  materialization_id: string;
   option_id: string;
   option_revision: number;
   proposal_id: string;
   proposal_revision: number;
   freshness_dependency_fingerprint: string;
   generation_context_id: string;
+  draft_id: string;
+  draft_hash: string;
+  draft_execution_mode: "rerun_child" | "genesis";
+  source_run_id: string | null;
+  source_model_node_id: string | null;
+  source_op_node_id: string | null;
+  source_node_hash: string | null;
+  source_forest_node_key: string | null;
+  source_context_fingerprint: string | null;
+  dataset_upload_sha256: string | null;
+  run_family_id: string;
+}
+
+const SOURCE_PIN_FIELDS = [
+  "source_run_id",
+  "source_model_node_id",
+  "source_op_node_id",
+  "source_node_hash",
+  "source_forest_node_key",
+  "source_context_fingerprint",
+] as const;
+
+export function parseOptionMaterialization(value: unknown): OptionMaterialization {
+  const raw = asRecord(value, "option_materialization");
+  const path = "option_materialization";
+  requireExactKeys(
+    raw,
+    [
+      "contract_version",
+      "materialization_id",
+      "option_id",
+      "option_revision",
+      "proposal_id",
+      "proposal_revision",
+      "freshness_dependency_fingerprint",
+      "generation_context_id",
+      "draft_id",
+      "draft_hash",
+      "draft_execution_mode",
+      ...SOURCE_PIN_FIELDS,
+      "dataset_upload_sha256",
+      "run_family_id",
+    ],
+    path,
+  );
+  requireVersion(raw, OPTION_MATERIALIZATION_CONTRACT_VERSION, "OptionMaterialization");
+  const draftExecutionMode = requireChoice(raw, "draft_execution_mode", ["rerun_child", "genesis"], path);
+  const pins = Object.fromEntries(
+    SOURCE_PIN_FIELDS.map((field) => [field, optionalNonEmptyString(raw, field, path)]),
+  ) as Pick<OptionMaterialization, (typeof SOURCE_PIN_FIELDS)[number]>;
+  const datasetUploadSha256 = optionalNonEmptyString(raw, "dataset_upload_sha256", path);
+  if (draftExecutionMode === "rerun_child") {
+    if (datasetUploadSha256 !== null || SOURCE_PIN_FIELDS.some((field) => pins[field] === null)) {
+      throw new NotebookContractError(`${path}.rerun_child requires all source pins and no upload hash`);
+    }
+  } else if (datasetUploadSha256 === null || SOURCE_PIN_FIELDS.some((field) => pins[field] !== null)) {
+    throw new NotebookContractError(`${path}.genesis requires an upload hash and no source pins`);
+  }
+  return {
+    contract_version: OPTION_MATERIALIZATION_CONTRACT_VERSION,
+    materialization_id: requireString(raw, "materialization_id", path),
+    option_id: requireString(raw, "option_id", path),
+    option_revision: requirePositiveInt(raw, "option_revision", path),
+    proposal_id: requireString(raw, "proposal_id", path),
+    proposal_revision: requirePositiveInt(raw, "proposal_revision", path),
+    freshness_dependency_fingerprint: requireString(raw, "freshness_dependency_fingerprint", path),
+    generation_context_id: requireString(raw, "generation_context_id", path),
+    draft_id: requireString(raw, "draft_id", path),
+    draft_hash: requireString(raw, "draft_hash", path),
+    draft_execution_mode: draftExecutionMode,
+    ...pins,
+    dataset_upload_sha256: datasetUploadSha256,
+    run_family_id: requireString(raw, "run_family_id", path),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* OptionExecution@1.0 and @1.1                                       */
+/* ------------------------------------------------------------------ */
+
+interface OptionExecutionBase {
+  option_id: string;
+  option_revision: number;
+  proposal_id: string;
+  proposal_revision: number;
+  freshness_dependency_fingerprint: string;
+  generation_context_id: string;
+}
+
+/** Common consumer shape. New parser outputs are the narrower union below. */
+export interface OptionExecution extends OptionExecutionBase {
+  contract_version: "1.0" | "1.1";
+  materialization_id?: string;
+  draft_id?: string;
+  draft_hash?: string;
+  source_run_id?: string;
   run_id: string | null;
 }
 
-export function parseOptionExecution(value: unknown): OptionExecution {
-  const raw = asRecord(value, "option_execution");
-  requireVersion(raw, OPTION_EXECUTION_CONTRACT_VERSION, "OptionExecution");
+export interface LegacyOptionExecution extends OptionExecution {
+  contract_version: "1.0";
+  materialization_id?: never;
+  draft_id?: never;
+  draft_hash?: never;
+  source_run_id?: never;
+  run_id: string | null;
+}
+
+export interface OptionExecutionV11 extends OptionExecution {
+  contract_version: "1.1";
+  materialization_id: string;
+  draft_id: string;
+  draft_hash: string;
+  source_run_id: string;
+  run_id: string;
+}
+
+export type ParsedOptionExecution = LegacyOptionExecution | OptionExecutionV11;
+
+const OPTION_EXECUTION_BASE_KEYS = [
+  "option_id",
+  "option_revision",
+  "proposal_id",
+  "proposal_revision",
+  "freshness_dependency_fingerprint",
+  "generation_context_id",
+  "run_id",
+] as const;
+
+function parseOptionExecutionBase(raw: Raw): OptionExecutionBase {
   const path = "option_execution";
   return {
-    contract_version: OPTION_EXECUTION_CONTRACT_VERSION,
     option_id: requireString(raw, "option_id", path),
-    option_revision: requireInt(raw, "option_revision", path),
+    option_revision: requirePositiveInt(raw, "option_revision", path),
     proposal_id: requireString(raw, "proposal_id", path),
-    proposal_revision: requireInt(raw, "proposal_revision", path),
+    proposal_revision: requirePositiveInt(raw, "proposal_revision", path),
     freshness_dependency_fingerprint: requireString(
       raw,
       "freshness_dependency_fingerprint",
       path,
     ),
     generation_context_id: requireString(raw, "generation_context_id", path),
-    run_id: optionalString(raw, "run_id", path),
+  };
+}
+
+export function parseOptionExecution(value: unknown): ParsedOptionExecution {
+  const raw = asRecord(value, "option_execution");
+  const version = requireString(raw, "contract_version", "OptionExecution");
+  const path = "option_execution";
+  if (version === OPTION_EXECUTION_LEGACY_CONTRACT_VERSION) {
+    requireExactKeys(raw, ["contract_version", ...OPTION_EXECUTION_BASE_KEYS], path);
+    return {
+      ...parseOptionExecutionBase(raw),
+      contract_version: OPTION_EXECUTION_LEGACY_CONTRACT_VERSION,
+      run_id: optionalNonEmptyString(raw, "run_id", path),
+    };
+  }
+  if (version !== OPTION_EXECUTION_CONTRACT_VERSION) {
+    throw new NotebookContractError(`OptionExecution contract_version must be 1.0 or 1.1, got ${version}`);
+  }
+  requireExactKeys(
+    raw,
+    [
+      "contract_version",
+      ...OPTION_EXECUTION_BASE_KEYS,
+      "materialization_id",
+      "draft_id",
+      "draft_hash",
+      "source_run_id",
+    ],
+    path,
+  );
+  return {
+    ...parseOptionExecutionBase(raw),
+    contract_version: OPTION_EXECUTION_CONTRACT_VERSION,
+    materialization_id: requireString(raw, "materialization_id", path),
+    draft_id: requireString(raw, "draft_id", path),
+    draft_hash: requireString(raw, "draft_hash", path),
+    source_run_id: requireString(raw, "source_run_id", path),
+    run_id: requireString(raw, "run_id", path),
   };
 }
 

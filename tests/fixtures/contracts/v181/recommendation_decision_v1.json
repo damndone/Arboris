@@ -1,0 +1,13 @@
+{
+  "contract_version": "1.0",
+  "recommendation_decision_id": "rec_4af920",
+  "batch_id": "batch_0001",
+  "generation_context_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "freshness_dependency_fingerprint": "fresh1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "evidence_pack_hashes": ["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],
+  "comparison_protocol_refs": ["protocol:time-series-baseline-v1"],
+  "candidate_option_ids": ["opt_7f3a1c", "opt_legacy_b"],
+  "outcome": "recommended",
+  "recommended_option_id": "opt_7f3a1c",
+  "reason_refs": ["claim:ets-lowest-aic"]
+}
