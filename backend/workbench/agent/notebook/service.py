@@ -79,6 +79,13 @@ from .store import (
     ProjectionSource,
     StoredRevision,
 )
+from .evidence import (
+    DatasetSource,
+    DataEvidencePackV1,
+    InspectionRequest,
+    RunSource,
+    compile_evidence_pack,
+)
 
 MAX_OPTIONS_PER_BATCH = 3
 RECOMMENDED_RANK = 1
@@ -371,7 +378,42 @@ class NotebookService:
             projection_source=source.to_dict() if source is not None else None,
             current_family_head_run_id=comparison_run_id,
             dataset_profile_override=dataset_profile_override,
+            evidence_pack_refs=self.store.list_evidence_pack_hashes(notebook_id),
         )
+
+    def compile_evidence_pack(
+        self,
+        notebook_id: str,
+        *,
+        requests: tuple[InspectionRequest, ...],
+        source: RunSource | DatasetSource | None = None,
+        capabilities: Mapping[str, Any] | None = None,
+        trace: TraceWriter | None = None,
+    ) -> DataEvidencePackV1:
+        """Compile and durably append a source-bound, read-only evidence pack."""
+
+        notebook = self.get_notebook(notebook_id)
+        if source is None:
+            projection = notebook.projection_source
+            if projection is None:
+                raise ValueError("evidence requires a persisted projection source")
+            if projection.kind == "run":
+                source = RunSource(projection.run_id or notebook.active_head_run_id or "")
+            else:
+                source = DatasetSource(
+                    projection.upload_sha256 or "",
+                    projection.filename or "dataset.csv",
+                    tuple(projection.sheet_names),
+                )
+        pack = compile_evidence_pack(
+            self.project_root,
+            source=source,
+            requests=requests,
+            capabilities=capabilities,
+            trace=trace,
+        )
+        self.store.append_evidence_pack(notebook_id, pack.to_dict())
+        return pack
 
     def _dataset_header_profile(self, source: ProjectionSource) -> dict[str, Any]:
         """Read only bounded schema metadata from a verified upload, never rows."""

@@ -84,7 +84,7 @@ def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
     """
     offenders: list[str] = []
     for path in sorted(AGENT_DIR.rglob("*.py")):
-        if path.name == "context_compiler.py":
+        if path.name in {"context_compiler.py", "evidence.py"}:
             continue
         text = path.read_text(encoding="utf-8")
         for source in COMPILER_OWNED_SOURCES:

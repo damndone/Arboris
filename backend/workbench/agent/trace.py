@@ -180,6 +180,19 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
         required=("code", "fatal"),
         optional=("option_id", "option_revision", "detail"),
     ),
+    "evidence.inspection.requested": _Schema(
+        "evidence-inspection-requested/v1",
+        required=("inspection_id", "target_ref", "request_hash"),
+    ),
+    "evidence.inspection.completed": _Schema(
+        "evidence-inspection-completed/v1",
+        required=("inspection_id", "evidence_id", "result_hash", "status"),
+        optional=("omissions",),
+    ),
+    "evidence.inspection.failed": _Schema(
+        "evidence-inspection-failed/v1",
+        required=("inspection_id", "failure_code", "evidence_id"),
+    ),
 }
 
 

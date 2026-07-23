@@ -121,9 +121,11 @@ def test_freshness_whitelist_is_declared_not_inferred() -> None:
         "dataset_profile",
         "run_family_id",
         "active_head_run_id",
+        "current_family_head_run_id",
         "available_capabilities",
         "user_focus",
         "source_manifest",
+        "evidence_pack_refs",
     )
     for forbidden in ("existing_option_summaries", "budget_report", "omissions", "trace_id"):
         assert forbidden not in FRESHNESS_DEPENDENCY_FIELDS

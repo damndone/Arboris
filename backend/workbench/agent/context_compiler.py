@@ -23,7 +23,7 @@ its siblings.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,7 @@ class NotebookPlanningContextV1:
     projection_source: dict[str, Any] | None = None
     current_family_head_run_id: str | None = None
     graph_hash: str | None = None
+    evidence_pack_refs: list[str] = field(default_factory=list)
     context_profile: str = CONTEXT_PROFILE
     schema_version: str = CONTEXT_SCHEMA_VERSION
 
@@ -130,6 +131,7 @@ FRESHNESS_DEPENDENCY_FIELDS = (
     "available_capabilities",
     "user_focus",
     "source_manifest",
+    "evidence_pack_refs",
 )
 
 
@@ -386,6 +388,7 @@ def compile_notebook_planning_context(
     projection_source: dict[str, Any] | None = None,
     current_family_head_run_id: str | None = None,
     dataset_profile_override: dict[str, Any] | None = None,
+    evidence_pack_refs: list[str] | None = None,
 ) -> NotebookPlanningContextV1:
     """The one path from project state to what a planning agent sees.
 
@@ -470,6 +473,7 @@ def compile_notebook_planning_context(
         projection_source=dict(projection_source) if projection_source is not None else None,
         current_family_head_run_id=current_family_head_run_id,
         graph_hash=("sha256:" + sha256_canonical(graph)) if isinstance(graph, dict) else None,
+        evidence_pack_refs=sorted(set(evidence_pack_refs or [])),
     )
 
     # The meter cannot measure a payload that contains the meter: writing the

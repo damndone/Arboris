@@ -573,6 +573,12 @@ class NotebookStore:
             pack = self._evidence_packs(notebook_id).get(evidence_pack_hash)
             return dict(pack) if pack is not None else None
 
+    def list_evidence_pack_hashes(self, notebook_id: str) -> list[str]:
+        """Return persisted pack identities in deterministic order."""
+
+        with self._lock:
+            return sorted(self._evidence_packs(notebook_id))
+
     def _decisions(self, notebook_id: str) -> dict[str, RecommendationDecision]:
         decisions: dict[str, RecommendationDecision] = {}
         for record in self._notebook_records(notebook_id):
