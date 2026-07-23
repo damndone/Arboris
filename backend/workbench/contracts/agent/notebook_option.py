@@ -497,6 +497,9 @@ class NotebookOptionRevisionV11:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "NotebookOptionRevisionV11":
         require_exact_keys(value, cls._V11_KEYS, "notebook_option_revision")
+        evidence_refs = value["evidence_refs"]
+        if not isinstance(evidence_refs, (tuple, list)):
+            raise NotebookContractError("evidence_refs must be a tuple or list")
         return cls(
             option_id=value["option_id"],
             option_revision=value["option_revision"],
@@ -517,7 +520,7 @@ class NotebookOptionRevisionV11:
             rank=value["rank"],
             batch_id=value["batch_id"],
             created_at=value["created_at"],
-            evidence_refs=tuple(EvidenceRef.from_dict(item) for item in value["evidence_refs"]),
+            evidence_refs=tuple(EvidenceRef.from_dict(item) for item in evidence_refs),
             comparative_claims=_require_string_tuple(
                 value["comparative_claims"], "comparative_claims"
             ),

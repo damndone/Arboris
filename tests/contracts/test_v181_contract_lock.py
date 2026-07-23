@@ -335,6 +335,17 @@ def test_v11_option_revision_rejects_a_bare_comparative_claim_string() -> None:
         NotebookOptionRevision.from_dict(payload)
 
 
+@pytest.mark.parametrize("evidence_refs", ["", {}, None, 1])
+def test_v11_option_revision_rejects_invalid_evidence_ref_containers(
+    evidence_refs: object,
+) -> None:
+    payload = _fixture("notebook_option_revision_v11")
+    payload["evidence_refs"] = evidence_refs
+
+    with pytest.raises(NotebookContractError):
+        NotebookOptionRevision.from_dict(payload)
+
+
 @pytest.mark.parametrize(
     "field",
     [
