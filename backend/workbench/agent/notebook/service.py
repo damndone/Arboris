@@ -28,7 +28,9 @@ import pandas as pd
 from ...artifacts import read_json
 from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
+    NotebookOptionRevisionV11,
     OptionExecution,
+    RecommendationDecision,
 )
 from ...lineage.run_family import (
     RunFamilyStore,
@@ -503,6 +505,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         trace: TraceWriter | None = None,
         batch_id: str | None = None,
+        recommendation_decision: RecommendationDecision | None = None,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Validate a whole batch, then write it. Never the other way round.
 
@@ -525,32 +528,96 @@ class NotebookService:
         self._assert_batch_shape(drafts)
         prepared = [self._prepare(notebook, context, draft) for draft in drafts]
 
-        batch = batch_id or f"batch_{uuid4().hex}"
+        if recommendation_decision is not None:
+            option_ids = tuple(draft.option_id or "" for draft in drafts)
+            if batch_id is not None and batch_id != recommendation_decision.batch_id:
+                raise OptionBatchInvalid(
+                    "OPTION_BATCH_DECISION_MISMATCH",
+                    "the recommendation decision batch_id must match the persisted option batch",
+                )
+            if (
+                any(not option_id for option_id in option_ids)
+                or option_ids != recommendation_decision.candidate_option_ids
+                or any(
+                    draft.recommendation_decision_id != recommendation_decision.recommendation_decision_id
+                    or draft.recommendation_status != recommendation_decision.outcome
+                    for draft in drafts
+                )
+            ):
+                raise OptionBatchInvalid(
+                    "OPTION_BATCH_DECISION_MISMATCH",
+                    "the persisted recommendation decision must name and classify every option in the batch",
+                )
+        batch = batch_id or (
+            recommendation_decision.batch_id
+            if recommendation_decision is not None
+            else f"batch_{uuid4().hex}"
+        )
         created_at = _now()
-        revisions: list[NotebookOptionRevision] = []
+        revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
         for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
             option_id = draft.option_id or f"opt_{uuid4().hex}"
-            revision = NotebookOptionRevision(
-                option_id=option_id,
-                option_revision=1,
-                notebook_id=notebook.notebook_id,
-                run_family_id=notebook.run_family_id,
-                generation_context_id=context.context_id,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-                typed_proposal_id=proposal.proposal_id,
-                typed_proposal_revision=proposal.proposal_revision,
-                artifact_contract=contract,
-                rationale=draft.rationale,
-                assumptions=tuple(draft.assumptions),
-                risk_level=risk_level,
-                lifecycle_status="proposed",
-                freshness_status=FRESH,
-                validation_status="valid",
-                rank=draft.rank,
-                batch_id=batch,
-                created_at=created_at,
-            )
+            revision: NotebookOptionRevision | NotebookOptionRevisionV11
+            if recommendation_decision is not None:
+                revision = NotebookOptionRevisionV11(
+                    option_id=option_id,
+                    option_revision=1,
+                    notebook_id=notebook.notebook_id,
+                    run_family_id=notebook.run_family_id,
+                    generation_context_id=context.context_id,
+                    generation_context_hash=generation_context_hash(context),
+                    freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                    typed_proposal_id=proposal.proposal_id,
+                    typed_proposal_revision=proposal.proposal_revision,
+                    artifact_contract=contract,
+                    rationale=draft.rationale,
+                    assumptions=tuple(draft.assumptions),
+                    risk_level=risk_level,
+                    lifecycle_status="proposed",
+                    freshness_status=FRESH,
+                    validation_status="valid",
+                    rank=draft.rank,
+                    batch_id=batch,
+                    created_at=created_at,
+                    evidence_refs=tuple(draft.evidence_refs),
+                    comparative_claims=tuple(draft.comparative_claims),
+                    recommendation_decision_id=recommendation_decision.recommendation_decision_id,
+                    recommendation_status=recommendation_decision.outcome,
+                )
+            else:
+                revision = NotebookOptionRevision(
+                    option_id=option_id,
+                    option_revision=1,
+                    notebook_id=notebook.notebook_id,
+                    run_family_id=notebook.run_family_id,
+                    generation_context_id=context.context_id,
+                    generation_context_hash=generation_context_hash(context),
+                    freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                    typed_proposal_id=proposal.proposal_id,
+                    typed_proposal_revision=proposal.proposal_revision,
+                    artifact_contract=contract,
+                    rationale=draft.rationale,
+                    assumptions=tuple(draft.assumptions),
+                    risk_level=risk_level,
+                    lifecycle_status="proposed",
+                    freshness_status=FRESH,
+                    validation_status="valid",
+                    rank=draft.rank,
+                    batch_id=batch,
+                    created_at=created_at,
+                )
+            revisions.append(revision)
+
+        # All contract construction is complete before the first append. This
+        # keeps the decision and option logs from diverging on a malformed v1.1
+        # revision.
+        if recommendation_decision is not None:
+            self.store.append_decision(notebook_id, recommendation_decision)
+
+        for draft, revision, (proposal, _contract, risk_level) in zip(
+            drafts, revisions, prepared
+        ):
+            option_id = revision.option_id
             self.store.append_option_record(
                 notebook_id,
                 option_id,
@@ -580,7 +647,6 @@ class NotebookService:
                 actor="agent",
                 reason="generated",
             )
-            revisions.append(revision)
             if trace is not None:
                 trace.emit(
                     "option.revision.created",

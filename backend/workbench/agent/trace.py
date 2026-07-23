@@ -128,7 +128,15 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
     "agent.plan.completed": _Schema(
         "agent-plan-completed/v1",
         required=("context_id", "generated_option_count", "duration_ms"),
-        optional=("stop_reason", "raw_output_ref"),
+        optional=(
+            "stop_reason",
+            "raw_output_ref",
+            "recommendation_decision_id",
+            "recommendation_outcome",
+            "recommended_option_id",
+            "evidence_pack_hashes",
+            "comparison_protocol_refs",
+        ),
     ),
     "option.revision.created": _Schema(
         "option-revision-created/v1",

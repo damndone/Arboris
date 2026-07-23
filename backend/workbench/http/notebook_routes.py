@@ -15,10 +15,20 @@ from ..agent.context_compiler import (
     generation_context_hash,
 )
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
+from ..agent.notebook.evidence import DataEvidencePackV1
 from ..agent.notebook.errors import NotebookOptionError
+from ..agent.model import OpenAICompatibleModelAdapter
+from ..agent.notebook.planning_agent import (
+    NotebookNoEligibleCapability,
+    NotebookPlanningAgent,
+    NotebookPlanningContractError,
+    NotebookPlanningUnavailable,
+)
+from ..llm.config import load_llm_config
 from ..agent.trace import TraceWriter, record_compiled_context
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
+from ..engine.capabilities import build_capabilities
 
 router = APIRouter()
 
@@ -192,6 +202,48 @@ def _notebook_error(exc: NotebookOptionError) -> WorkbenchAPIError:
     )
 
 
+def _planning_agent(
+    root: Path,
+    service: NotebookService,
+    notebook_id: str,
+    context: NotebookPlanningContextV1,
+    trace: TraceWriter,
+) -> NotebookPlanningAgent:
+    config = load_llm_config()
+    if not config.is_configured():
+        raise NotebookPlanningUnavailable(config.configuration_error_message())
+    manifest = {
+        str(entry["key"]): dict(entry)
+        for entry in build_capabilities().get("model_types", [])
+        if isinstance(entry, dict) and entry.get("key") not in {None, "auto"}
+    }
+    catalog = {
+        capability: {
+            **manifest[capability],
+            "notebook_proposal_adapters": ["model.rerun"],
+        }
+        for capability in context.available_capabilities
+        if capability in manifest
+    }
+    if not catalog:
+        raise NotebookNoEligibleCapability(
+            "the Notebook has no server-registered executable capability"
+        )
+
+    def execute_inspections(requests, current):
+        return service.compile_evidence_pack(
+            notebook_id,
+            requests=requests,
+            trace=trace,
+        )
+
+    return NotebookPlanningAgent(
+        adapter=OpenAICompatibleModelAdapter(config),
+        capability_catalog=catalog,
+        inspection_executor=execute_inspections,
+    )
+
+
 def _request_error(exc: Exception) -> WorkbenchAPIError:
     return WorkbenchAPIError(
         status_code=422,
@@ -299,16 +351,22 @@ def propose_options_endpoint(
             else []
         )
         if not drafts:
-            raise WorkbenchAPIError(
-                status_code=409,
-                code="NOTEBOOK_PLANNING_UNAVAILABLE",
-                message="Typed notebook planning is introduced in the planning-agent slice.",
+            agent = _planning_agent(root, service, notebook_id, context, trace)
+            result = agent.plan(
+                context=context,
+                initial_evidence=DataEvidencePackV1(
+                    source_id=(context.projection_source or {}).get("kind", "notebook"),
+                    records=(),
+                ),
             )
+            drafts = list(result.option_drafts)
         revisions = service.propose_batch(
             notebook_id,
             context=context,
             drafts=drafts,
             trace=trace,
+            batch_id=(result.decision.batch_id if not body.drafts else None),
+            recommendation_decision=(result.decision if not body.drafts else None),
         )
         return {
             "context": _context_packet(context),
@@ -317,6 +375,12 @@ def propose_options_endpoint(
         }
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
+    except NotebookNoEligibleCapability as exc:
+        raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
+    except NotebookPlanningContractError as exc:
+        raise WorkbenchAPIError(status_code=422, code=exc.code, message=str(exc)) from exc
+    except NotebookPlanningUnavailable as exc:
+        raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise _request_error(exc) from exc
 

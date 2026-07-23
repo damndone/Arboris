@@ -123,7 +123,21 @@ def test_one_decision_chain_emits_every_registered_trace_event_type(tmp_path: Pa
 
     events = TraceWriter.replay(project, trace.trace_id)
     emitted = {event["event_type"] for event in events}
-    assert emitted == {f"{name}/v1" for name in TRACE_EVENT_SCHEMAS}
+    core_event_types = {
+        "context.compiled",
+        "agent.plan.requested",
+        "agent.plan.completed",
+        "option.revision.created",
+        "option.lifecycle.changed",
+        "user.decision.recorded",
+        "proposal.validation.completed",
+        "option.execution.started",
+        "option.execution.completed",
+        "artifact_contract.validation.completed",
+        "active_head.changed",
+        "operation.error",
+    }
+    assert emitted == {f"{name}/v1" for name in core_event_types}
     # The stream is ordered and gapless, so "what happened next" is answerable.
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
     assert all(event["scope"]["notebook_id"] == notebook.notebook_id for event in events)

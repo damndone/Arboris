@@ -6,9 +6,17 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from dataclasses import replace
+from types import SimpleNamespace
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 from workbench.api import app
+from workbench.agent.notebook import OptionDraft, TypedProposal
+from workbench.contracts.agent.notebook_option import (
+    EvidenceRef,
+    NOTEBOOK_OPTION_CONTRACT_VERSION,
+    RecommendationDecision,
+)
 from workbench.lineage.upload_store import store_upload_bytes
 
 
@@ -194,6 +202,87 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
 
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_UNAVAILABLE"
+
+
+def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    option = OptionDraft(
+        rank=1,
+        rationale="The bounded time-index inspection is complete.",
+        assumptions=("the observed index remains valid",),
+        proposal=TypedProposal.from_dict(model_rerun_proposal("p_agent")),
+        option_id="opt_agent_1",
+        evidence_refs=(
+            EvidenceRef(
+                evidence_id="evidence:time",
+                result_hash="sha256:time-result",
+                source_refs=("time_index:run_001",),
+            ),
+        ),
+        comparative_claims=("evidence:time supports the proposed path",),
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_agent_1",
+        batch_id="batch_agent_route",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:context",
+        evidence_pack_hashes=("sha256:pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_agent_1",),
+        outcome="insufficient_evidence",
+        recommended_option_id=None,
+        reason_refs=("evidence:time",),
+    )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del initial_evidence
+            return SimpleNamespace(
+                option_drafts=(replace(
+                    option,
+                    recommendation_decision_id=decision.recommendation_decision_id,
+                    recommendation_status=decision.outcome,
+                ),),
+                decision=decision,
+            )
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    response = client.post(
+        f"/notebooks/{notebook['notebook_id']}/options/propose",
+        params={"project_root": str(project)},
+        json={"count": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    persisted = response.json()["options"][0]
+    assert persisted["contract_version"] == NOTEBOOK_OPTION_CONTRACT_VERSION
+    assert persisted["batch_id"] == decision.batch_id
+    assert persisted["recommendation_decision_id"] == decision.recommendation_decision_id
+    assert persisted["recommendation_status"] == "insufficient_evidence"
+    listed = client.get(
+        f"/notebooks/{notebook['notebook_id']}/options",
+        params={"project_root": str(project)},
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["options"][0]["recommendation_decision_id"] == decision.recommendation_decision_id
+    trace = client.get(
+        f"/notebooks/{notebook['notebook_id']}/traces/{response.json()['trace_id']}",
+        params={"project_root": str(project)},
+    )
+    assert trace.status_code == 200, trace.text
+    completed = [
+        event for event in trace.json()["events"]
+        if event["event_type"] == "agent.plan.completed/v1"
+    ]
+    assert completed[0]["payload"]["recommendation_decision_id"] == decision.recommendation_decision_id
+    assert completed[0]["payload"]["evidence_pack_hashes"] == list(decision.evidence_pack_hashes)
 
 
 def test_projection_route_binds_real_run_context_and_hashes_graph(tmp_path: Path) -> None:

@@ -88,6 +88,8 @@ class OptionDraft:
     evidence_refs: tuple[EvidenceRef, ...] = ()
     comparative_claims: tuple[str, ...] = ()
     blocked_reason: str | None = None
+    recommendation_decision_id: str | None = None
+    recommendation_status: str | None = None
 
 
 __all__ = ["CANONICAL_PROPOSAL_HASH_PREFIX", "OptionDraft", "TypedProposal"]

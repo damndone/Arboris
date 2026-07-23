@@ -127,7 +127,7 @@ def _full_chain(writer: TraceWriter) -> list[dict]:
     return events
 
 
-def test_all_twelve_event_types_are_registered() -> None:
+def test_all_registered_trace_event_types_are_registered() -> None:
     assert set(TRACE_EVENT_SCHEMAS) == {
         "context.compiled",
         "agent.plan.requested",
@@ -141,6 +141,9 @@ def test_all_twelve_event_types_are_registered() -> None:
         "artifact_contract.validation.completed",
         "active_head.changed",
         "operation.error",
+        "evidence.inspection.requested",
+        "evidence.inspection.completed",
+        "evidence.inspection.failed",
     }
 
 
