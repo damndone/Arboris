@@ -1,0 +1,151 @@
+# Independent Evaluation Evidence Manifest — ADR-PD-001 §12.3
+#
+# Immutable once committed. A re-run, a re-verification, or a run against a real
+# candidate integration tip MUST mint a new evaluation_id and preserve this file.
+# This manifest records only structural evidence: no API keys, no provider
+# secrets, no raw machine identity, no user data (§12.3).
+
+evaluation_id: eval-v181-ets-001
+evaluated_commit: b3f6a263d339ad11e5fabb5c86de297394854b7e
+contract_lock_commit: 481fc2e30730395093fc0f8699843e1002d64aa3
+evaluation_harness_commit: b3f6a263d339ad11e5fabb5c86de297394854b7e
+
+# What this manifest evaluates
+# ----------------------------
+# The evaluation lane branched from the contract lock (C1), not from any feature
+# branch, and no feature lane (ETS Model Pack, Agent notebook-options, UI) has
+# landed in this worktree. So evaluated_commit == evaluation_harness_commit: what
+# is under test is the locked contracts plus the harness itself. Every check that
+# needs a not-yet-shipped lane runs its body, fails, and is reported as `xfailed`
+# naming the lane it waits on — never a vacuous pass. When a candidate integration
+# tip carries the feature lanes, a NEW evaluation_id must be generated against it.
+
+environment:
+  python_version: "3.14.6"
+  node_version: "24.16.0"   # recorded for completeness; this lane is backend-only
+  os: "Darwin 24.1.0 arm64"
+  dependency_lock_hash: "sha256:fe2539faff86491aad88496a279ca6cc349abca1d689e427f25a4b7551748d16"  # sha256 of `pip freeze`
+  machine_fingerprint: "sha256:4c0fc54da08ac9af7f33dc1544cc4e6c"  # salted, truncated; carries no raw host identity
+
+commands:
+  - command: "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 .venv/bin/python -m pytest tests/evaluation/v181 -q -rx"
+    exit_code: 0
+    duration_seconds: 2.14
+    summary: "73 passed, 41 xfailed, 0 failed"
+    output_artifact: "artifacts/pytest-eval-v181-ets-001.txt"
+    output_sha256: "sha256:89278cd279ebb91d71da3e4c21c04189af208d154526cd581559a130710980f3"
+
+# Per-suite breakdown (all sub-runs of the command above; same evaluated_commit)
+suites:
+  - suite: tests/evaluation/v181/test_contract_validation.py
+    passed: 32
+    xfailed: 2   # findings F-1, F-2 — awaiting integration repair (see results.findings)
+    failed: 0
+  - suite: tests/evaluation/v181/test_ets_known_truth.py
+    passed: 8    # oracle reproducibility + independent-fit recovery (no lane dependency)
+    xfailed: 21  # pack-bound: awaiting Model Pack lane (time_series.ets)
+    failed: 0
+  - suite: tests/evaluation/v181/test_ets_fault_injection.py
+    passed: 10   # fixture self-checks: each fault case genuinely contains its fault
+    xfailed: 16  # pack-bound: awaiting Model Pack lane
+    failed: 0
+  - suite: tests/evaluation/v181/test_checkers_detect_their_own_bugs.py
+    passed: 23   # every adversarial checker proven against a counterexample
+    xfailed: 0
+    failed: 0
+  - suite: tests/evaluation/v181/test_producer_seams.py
+    passed: 0
+    xfailed: 2   # awaiting Agent option-batch generator and cross-family compare adapter
+    failed: 0
+
+fixtures:
+  # Integration-owned canonical fixtures the harness mocks against (read-only here)
+  - path: tests/fixtures/contracts/v181/ets_result.json
+    sha256: "sha256:ffc095646a4caff5e751c3aa8ca6c7fb4b45bd5034701f655eaa1f172d111ef4"
+    note: "subject of finding F-1 (AIC/BIC not from one likelihood/k) at this commit"
+  - path: tests/fixtures/contracts/v181/notebook_option_revision.json
+    sha256: "sha256:727c06741a8b2f15423eaacced19099a76e89ab1cc4c1783f17c9d462f7ee214"
+  - path: tests/fixtures/contracts/v181/option_execution.json
+    sha256: "sha256:5845d9454292c645e9618b990bb33a6df3f5d4dfaa6bbb1af81543bda922e96d"
+  # Evaluation-lane fixtures (owned)
+  - path: tests/fixtures/evaluation/v181/ets_known_truth.py
+    sha256: "sha256:a5cf8e32f8b6cb2ff2d7466f9310100cc7af13bb9a3d4f9644458aff740bb3f7"
+  - path: tests/fixtures/evaluation/v181/fault_cases.py
+    sha256: "sha256:298d93a344ada9b1e10a22f8700e757347d7cecf3b415ade7beefaa4813b0689"
+  - path: tests/fixtures/evaluation/v181/packets.py
+    sha256: "sha256:711fdd8d37b445ae941fafd147a07e8a9b975fffc63739247ff01daf74c05e99"
+  - path: tests/fixtures/evaluation/v181/tolerances.py
+    sha256: "sha256:1b1ccf4b633eb3c0d102765269966fe9cd3ecf1e07fe4602e7cbf773889f2baf"
+  - path: tests/fixtures/evaluation/v181/calibrate_tolerances.py
+    sha256: "sha256:766b294d88fcd52f90229c6463dfbc28cd40e54b634c4c151d5f1241e0e9499a"
+
+# Known-truth oracle series — reproducible byte-for-byte from (seed, n, params).
+# The digest is of the float64 series bytes; a reviewer regenerates it with
+# tests/evaluation/v181/test_ets_known_truth.py::test_oracle_series_are_reproducible_from_seed.
+known_truth_oracles:
+  - name: ann_local_level
+    canonical: "ETS(A,N,N)"
+    seed: 181001
+    n: 4000
+    values_sha256: "sha256:38fafeab0281e5f1a7d40aa5873ba20ac2ffaec21b144f613fafbebe62c3ed8e"
+  - name: aan_linear_trend
+    canonical: "ETS(A,A,N)"
+    seed: 181002
+    n: 4000
+    values_sha256: "sha256:08c4269af86b66f8b100cb20e1856c3f3006e219f3f9a2f5d4b02e70b247413a"
+  - name: aadn_damped_trend
+    canonical: "ETS(A,Ad,N)"
+    seed: 181003
+    n: 6000
+    values_sha256: "sha256:a8a46900b87cca81be8e5d658dba139d6d59cf5f257b4a2d93584e83d38bd217"
+  - name: aaa_seasonal
+    canonical: "ETS(A,A,A)"
+    seed: 181004
+    n: 6000
+    values_sha256: "sha256:8b63ea74da94f5c64b2237ffd0469c1175dc5a9623e5e5e11f789fc5715a549d"
+
+results:
+  contract_validation: passed        # 32 assertions green; 2 findings tracked below
+  known_truth: pending_lane          # oracle self-checks green; pack recovery xfailed (Model Pack absent)
+  fault_injection: pending_lane      # fault-case self-checks green; pack verdicts xfailed (Model Pack absent)
+  overclaim_checks: passed           # volatility/VaR + cross-family-IC scanners proven against counterexamples
+  self_reference_checks: passed      # batch checker proven; producer-bound variant xfailed (Agent absent)
+  browser_e2e: not_applicable        # UI lane absent; no browser path exists to evaluate at this commit
+  findings:
+    - id: F-1
+      severity: blocker
+      status: filed_and_repaired_on_integration
+      subject: tests/fixtures/contracts/v181/ets_result.json
+      claim: >
+        The canonical ETS result fixture carries aic=12043.72, log_likelihood=-6015.86,
+        n_obs=2610, bic=12078.11. AIC implies exactly k=(aic+2*llf)/2=6; with k=6 the
+        coherent bic is -2*llf+6*ln(2610)=12078.92. The published bic implies k=5.897,
+        which is not an integer, so AIC and BIC cannot come from one likelihood and one k.
+      why_it_matters: >
+        This is the fixture every lane mocks against (ADR §5.4); an incoherent canonical
+        packet teaches three lanes to accept a composite information criterion — exactly
+        what the v1.8.0 ledger already refuses.
+      reproduce: "pytest tests/evaluation/v181/test_contract_validation.py::test_canonical_ets_fixture_information_criteria_are_arithmetically_consistent"
+      baseline_at_this_commit: xfailed   # defect still present in evaluated_commit
+      attribution: Integration (Contract Sprint) — fixture is integration-owned; this lane does not edit it (ADR §7D)
+    - id: F-2
+      severity: blocker
+      status: filed_and_repaired_on_integration
+      subject: backend/workbench/contracts/agent/notebook_option.py (NotebookOptionRevision.from_dict)
+      claim: >
+        Unlike ETSResultContract.from_dict and OptionExecution.from_dict (both call
+        require_exact_keys), NotebookOptionRevision.from_dict reads named keys off the
+        payload and silently drops all others, so an unversioned extra field validates
+        and then vanishes on round-trip.
+      why_it_matters: >
+        The precise anti-pattern ADR §11 names — "在 payload 偷塞未版本化字段". A lane can ship
+        a field, the packet still validates, the field disappears, and nothing notices.
+      reproduce: "pytest tests/evaluation/v181/test_contract_validation.py::test_notebook_option_revision_rejects_unknown_fields"
+      baseline_at_this_commit: xfailed   # defect still present in evaluated_commit
+      attribution: Integration (Contract Sprint) — contract is integration-owned; this lane does not edit it (ADR §7D)
+
+artifacts:
+  - path: docs/superpowers/release-trains/v1.8.1/evidence/artifacts/pytest-eval-v181-ets-001.txt
+    sha256: "sha256:89278cd279ebb91d71da3e4c21c04189af208d154526cd581559a130710980f3"
+
+generated_at: "2026-07-22T00:00:00+00:00"
