@@ -252,7 +252,7 @@ def test_two_rank_one_options_are_refused(tmp_path: Path) -> None:
             ],
         )
 
-    assert excinfo.value.code == "OPTION_BATCH_MULTIPLE_RECOMMENDED"
+    assert excinfo.value.code == "OPTION_BATCH_DUPLICATE_RANK"
     assert service.list_options(notebook.notebook_id) == []
 
 

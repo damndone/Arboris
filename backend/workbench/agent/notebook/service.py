@@ -88,7 +88,6 @@ from .evidence import (
 )
 
 MAX_OPTIONS_PER_BATCH = 3
-RECOMMENDED_RANK = 1
 
 # The registry speaks in execution risk ("mutating"/"high"); the option contract
 # speaks in the three levels a user is shown. Mapped explicitly rather than
@@ -1106,13 +1105,6 @@ class NotebookService:
             raise OptionBatchInvalid(
                 "OPTION_BATCH_RANK_OUT_OF_RANGE",
                 f"rank must be 1..{MAX_OPTIONS_PER_BATCH}, got {out_of_range}",
-                ranks=ranks,
-            )
-        if ranks.count(RECOMMENDED_RANK) > 1:
-            raise OptionBatchInvalid(
-                "OPTION_BATCH_MULTIPLE_RECOMMENDED",
-                f"a batch may contain at most one rank {RECOMMENDED_RANK} option; "
-                f"got {ranks.count(RECOMMENDED_RANK)}",
                 ranks=ranks,
             )
         if len(set(ranks)) != len(ranks):

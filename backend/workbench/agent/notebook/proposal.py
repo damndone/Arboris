@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import ExpectedArtifact
+from ...contracts.agent.notebook_option import ExpectedArtifact, EvidenceRef
 
 CANONICAL_PROPOSAL_HASH_PREFIX = "prop1:"
 
@@ -85,6 +85,9 @@ class OptionDraft:
     assumptions: tuple[str, ...] = ()
     expected_artifacts: tuple[ExpectedArtifact, ...] = ()
     option_id: str | None = None
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+    comparative_claims: tuple[str, ...] = ()
+    blocked_reason: str | None = None
 
 
 __all__ = ["CANONICAL_PROPOSAL_HASH_PREFIX", "OptionDraft", "TypedProposal"]
