@@ -18,13 +18,21 @@ from workbench.agent.notebook.errors import (
 )
 from workbench.agent.notebook.store import StoredRevision
 from workbench.contracts.agent.notebook_option import (
+    EvidenceRef,
     ExpectedArtifact,
     NotebookOptionRevision,
     OptionMaterialization,
     RecommendationDecision,
 )
+from workbench.lineage.upload_store import store_upload_bytes
+from workbench.lineage.node_write_validation import (
+    NodeWriteOperationRequestV1,
+    compute_context_fingerprint,
+)
+from workbench.graph_model import Graph, Node, NodeKind, Stage
+from workbench.graph_store import GraphStore
 
-from tests.test_notebook_support import make_project, model_rerun_proposal
+from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 
 
 _CONTRACT_FIXTURES = Path(__file__).parent / "fixtures" / "contracts" / "v181"
@@ -493,3 +501,306 @@ def test_materialized_lifecycle_edges_are_allowed_and_terminal_states_refuse_exi
 
     with pytest.raises(OptionLifecycleTransitionInvalid):
         transition("selected")
+
+
+def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor\n1,2\n2,3\n",
+        filename="data.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "data.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    context = service.compile_context(notebook.notebook_id)
+    pack = {
+        "schema_version": "data-evidence-pack/v1",
+        "source_id": f"dataset:{upload_sha}",
+        "records": [
+            {
+                "evidence_id": "evidence:profile",
+                "inspection_id": "profile.v1",
+                "source_refs": [f"dataset_profile:{upload_sha}"],
+                "protocol_version": "profile/v1",
+                "status": "completed",
+                "observations": {"columns": [{"name": "outcome"}, {"name": "predictor"}]},
+                "metrics": {},
+                "warnings": [],
+                "omissions": [],
+                "failure_code": None,
+                "result_hash": "sha256:profile-result",
+            }
+        ],
+        "pack_omissions": [],
+        "content_hash": "sha256:profile-pack",
+        "evidence_pack_hash": "sha256:profile-pack",
+    }
+    service.store.append_evidence_pack(notebook.notebook_id, pack)
+    context = service.compile_context(notebook.notebook_id)
+    proposal = TypedProposal(
+        proposal_id="prop_genesis",
+        operation_id="model.genesis",
+        target={"dataset_source_id": upload_sha},
+        preconditions={
+            "context_version": "notebook-planning-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={
+            "model_params": {
+                "model_type": "ols",
+                "y": "outcome",
+                "x": ["predictor"],
+            }
+        },
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_genesis",
+        batch_id="batch_genesis",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=("sha256:profile-pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_genesis_real",),
+        outcome="recommended",
+        recommended_option_id="opt_genesis_real",
+        reason_refs=("evidence:profile",),
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="The verified dataset columns support the selected model path.",
+                proposal=proposal,
+                option_id="opt_genesis_real",
+                evidence_refs=(
+                    EvidenceRef(
+                        evidence_id="evidence:profile",
+                        result_hash="sha256:profile-result",
+                        source_refs=(f"dataset_profile:{upload_sha}",),
+                    ),
+                ),
+                comparative_claims=("evidence:profile supports the model path",),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="ui",
+    )
+
+    first = service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    second = service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+
+    assert first.materialization.materialization_id == second.materialization.materialization_id
+    assert first.materialization.draft_execution_mode == "genesis"
+    assert first.draft.draft["created_from"]["source_type"] == "genesis"
+    assert first.draft.draft["created_from"]["source_input_fingerprint"] == upload_sha
+    assert first.draft.draft["notebook_provenance"]["option_id"] == revision.option_id
+    assert first.draft.draft["graph"]["nodes"][2]["params"]["model_type"] == "ols"
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "materialized"
+
+
+def test_selected_run_option_materializes_one_pinned_rerun_child_draft(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    run_root = make_run(project, "run_active")
+    upload_sha = store_upload_bytes(project, b"when,value\n2020-01-01,1\n", filename="data.csv")
+    (run_root / "run_inputs.json").write_text(
+        json.dumps(
+            {
+                "run_input_schema_version": 1,
+                "upload": {"sha256": upload_sha},
+                "form": {
+                    "model_type": "time_series.ets",
+                    "model_options": {
+                        "time_column": "when",
+                        "value_column": "value",
+                        "error": "add",
+                        "trend": "add",
+                        "seasonal": None,
+                        "damped_trend": False,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_active",
+                "mode": "manual",
+                "status": "completed",
+                "model_routing": {
+                    "requested_model_type": "time_series.ets",
+                    "effective_model_type": "time_series.ets",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    GraphStore(project / "runs").write(
+        Graph(
+            schema_version=3,
+            run_id="run_active",
+            nodes={
+                "model:ets_1": Node(
+                    id="model:ets_1",
+                    kind=NodeKind.MODEL,
+                    display_label="ETS",
+                    created_at="2026-07-23T00:00:00+00:00",
+                    parent_stage_id=None,
+                    branch_id="main",
+                    stage=Stage.MODEL,
+                )
+            },
+            edges={},
+            branches={},
+        )
+    )
+    node_hash = "a" * 64
+    (run_root / "node_index.json").write_text(
+        json.dumps({"model:ets_1": {"node_hash": node_hash, "cas_ref": {}}}),
+        encoding="utf-8",
+    )
+    notebook = service.ensure_default_projection(from_run_id="run_active", created_by="ui")
+    request = NodeWriteOperationRequestV1(
+        request_id="materialization-test",
+        operation="rerun",
+        context_version="node-operation-context/v1",
+        context_fingerprint="pending",
+        owner_run_id="run_active",
+        op_node_id="model:ets_1",
+        node_hash=node_hash,
+        forest_node_key=f"{node_hash}::model:ets_1",
+        owner_resolution="single_candidate",
+        active_head_run_id="run_active",
+    )
+    source_context_fingerprint = compute_context_fingerprint(project / "runs", request)
+    context = service.compile_context(notebook.notebook_id)
+    pack = {
+        "schema_version": "data-evidence-pack/v1",
+        "source_id": "run:run_active",
+        "records": [
+            {
+                "evidence_id": "evidence:time",
+                "inspection_id": "time_index.v1",
+                "source_refs": ["time_index:run_active"],
+                "protocol_version": "time-index/v1",
+                "status": "completed",
+                "observations": {"candidate_column": "when"},
+                "metrics": {},
+                "warnings": [],
+                "omissions": [],
+                "failure_code": None,
+                "result_hash": "sha256:time-result",
+            }
+        ],
+        "pack_omissions": [],
+        "content_hash": "sha256:time-pack",
+        "evidence_pack_hash": "sha256:time-pack",
+    }
+    service.store.append_evidence_pack(notebook.notebook_id, pack)
+    context = service.compile_context(notebook.notebook_id)
+    proposal = TypedProposal(
+        proposal_id="prop_rerun",
+        operation_id="model.rerun",
+        target={
+            "run_id": "run_active",
+            "node_ref": "model:ets_1",
+            "node_hash": node_hash,
+            "forest_node_key": f"{node_hash}::model:ets_1",
+        },
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": source_context_fingerprint,
+            "active_head_run_id": "run_active",
+            "owner_resolution": "single_candidate",
+        },
+        changes={
+            "model_options": {
+                "time_column": "when",
+                "value_column": "value",
+                "error": "add",
+                "trend": None,
+                "seasonal": None,
+                "damped_trend": False,
+            }
+        },
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_rerun",
+        batch_id="batch_rerun",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=("sha256:time-pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_rerun_real",),
+        outcome="recommended",
+        recommended_option_id="opt_rerun_real",
+        reason_refs=("evidence:time",),
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="The active run has a valid time index.",
+                proposal=proposal,
+                option_id="opt_rerun_real",
+                evidence_refs=(
+                    EvidenceRef(
+                        evidence_id="evidence:time",
+                        result_hash="sha256:time-result",
+                        source_refs=("time_index:run_active",),
+                    ),
+                ),
+                comparative_claims=("evidence:time supports the rerun path",),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        recommendation_decision=decision,
+    )
+    service.record_decision(notebook.notebook_id, revision.option_id, decision="selected", actor="ui")
+
+    result = service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+
+    assert result.materialization.draft_execution_mode == "rerun_child"
+    assert result.draft.draft["created_from"]["source_run_id"] == "run_active"
+    assert result.draft.draft["created_from"]["source_model_node_id"] == "model:ets_1"
+    assert result.draft.draft["notebook_provenance"]["option_id"] == revision.option_id
+    assert result.draft.draft["graph"]["nodes"][1]["params"]["model_options"]["trend"] is None

@@ -672,14 +672,25 @@ class NotebookService:
                 )
 
         if trace is not None:
+            plan_payload = {
+                "context_id": context.context_id,
+                "generated_option_count": len(revisions),
+                "duration_ms": int((time.monotonic() - started) * 1000),
+                "stop_reason": "complete",
+            }
+            if recommendation_decision is not None:
+                plan_payload.update(
+                    {
+                        "recommendation_decision_id": recommendation_decision.recommendation_decision_id,
+                        "recommendation_outcome": recommendation_decision.outcome,
+                        "recommended_option_id": recommendation_decision.recommended_option_id,
+                        "evidence_pack_hashes": list(recommendation_decision.evidence_pack_hashes),
+                        "comparison_protocol_refs": list(recommendation_decision.comparison_protocol_refs),
+                    }
+                )
             trace.emit(
                 "agent.plan.completed",
-                payload={
-                    "context_id": context.context_id,
-                    "generated_option_count": len(revisions),
-                    "duration_ms": int((time.monotonic() - started) * 1000),
-                    "stop_reason": "complete",
-                },
+                payload=plan_payload,
             )
         return tuple(revisions)
 
@@ -821,6 +832,25 @@ class NotebookService:
                 option_revision=current.option_revision,
                 contract_version=current.contract_version,
             )
+
+    def materialize_option(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        trace: TraceWriter | None = None,
+    ):
+        """Materialize one selected v1.1 Option into a bound Pipeline Draft."""
+
+        from .materialization import NotebookOptionMaterializer
+
+        return NotebookOptionMaterializer(self).materialize(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
 
     # ------------------------------------------------------------------
     # Decisions

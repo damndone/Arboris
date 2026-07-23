@@ -86,6 +86,13 @@ class OptionMaterializationRequired(NotebookOptionError):
     status_code = 409
 
 
+class OptionMaterializationFailed(NotebookOptionError):
+    """A selected evidence-backed option cannot produce a valid Draft."""
+
+    code = "OPTION_MATERIALIZATION_FAILED"
+    status_code = 422
+
+
 class OptionLifecycleTransitionInvalid(NotebookOptionError):
     code = "OPTION_LIFECYCLE_TRANSITION_INVALID"
     status_code = 409
@@ -115,6 +122,7 @@ __all__ = [
     "OptionLifecycleTransitionInvalid",
     "OptionLegacyUnverified",
     "OptionMaterializationRequired",
+    "OptionMaterializationFailed",
     "OptionNotFound",
     "OptionRevisionStale",
     "OptionValidationFailed",

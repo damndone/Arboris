@@ -294,8 +294,11 @@ class NotebookPlanningAgent:
             if context.active_head_run_id:
                 if submission.proposal.operation_id != "model.rerun" or submission.proposal.target.get("run_id") != context.active_head_run_id:
                     raise NotebookPlanningContractError("run-source proposal is not a rerun-child of the active head")
-            elif context.projection_source and context.projection_source.get("kind") == "dataset" and submission.proposal.operation_id == "model.rerun":
-                raise NotebookPlanningContractError("dataset-source proposal requires a genesis materialization path")
+            elif context.projection_source and context.projection_source.get("kind") == "dataset":
+                if submission.proposal.operation_id != "model.genesis":
+                    raise NotebookPlanningContractError("dataset-source proposal requires a genesis materialization path")
+                if submission.proposal.target.get("dataset_source_id") != context.projection_source.get("upload_sha256"):
+                    raise NotebookPlanningContractError("dataset-source proposal is not pinned to the source upload")
 
 
 def _parse_submissions(value: Any) -> tuple[AgentOptionSubmission, ...]:

@@ -46,6 +46,7 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "data.column.cast",
         "data.columns.cast",
         "graph.fork",
+        "model.genesis",
         "model.rerun",
     ]
     assert all(isinstance(item["executor"], str) for item in capabilities)

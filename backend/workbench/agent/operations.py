@@ -117,6 +117,34 @@ class OperationRegistry:
         )
         self.register(
             OperationDefinition(
+                operation_id="model.genesis",
+                operation_version="v1",
+                effect_level="mutation",
+                scope_requirements=("dataset",),
+                scope="dataset source",
+                risk_level="mutating",
+                confirmation_policy="required",
+                proposal_schema=_model_genesis_proposal_schema(),
+                editable_schema={
+                    "type": "object",
+                    "properties": {
+                        "table_params": {"type": "object"},
+                        "model_params": {"type": "object"},
+                        "model_options": {"type": "object"},
+                    },
+                    "additionalProperties": False,
+                },
+                executor_key="model.genesis",
+                reconciler_key="model.genesis",
+                diff_builder_key="genesis.diff.v1",
+                verification_builder_key="genesis.verification.v1",
+                ui_description="Create a first-run model Draft from a verified dataset source.",
+                natural_language_enabled=False,
+                validator=_validate_model_genesis,
+            )
+        )
+        self.register(
+            OperationDefinition(
                 operation_id="graph.fork",
                 operation_version="v1",
                 effect_level="mutation",
@@ -527,6 +555,24 @@ def _model_rerun_proposal_schema() -> dict[str, Any]:
     )
 
 
+def _model_genesis_proposal_schema() -> dict[str, Any]:
+    schema = _proposal_schema(
+        target_required=["dataset_source_id"],
+        changes={
+            "type": "object",
+            "properties": {
+                "table_params": {"type": "object"},
+                "model_params": {"type": "object"},
+                "model_options": {"type": "object"},
+            },
+            "additionalProperties": False,
+        },
+    )
+    preconditions = schema["properties"]["preconditions"]
+    preconditions["required"] = ["context_version", "context_fingerprint", "owner_resolution"]
+    return schema
+
+
 def _graph_fork_proposal_schema() -> dict[str, Any]:
     return _proposal_schema(
         target_required=[
@@ -745,6 +791,35 @@ def _validate_model_rerun(
         # happen to use those names.
         if not isinstance(model_options, dict):
             raise OperationValidationError("model.rerun model_options must be an object")
+
+
+def _validate_model_genesis(
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    if not target.get("dataset_source_id"):
+        raise OperationValidationError("model.genesis target requires dataset_source_id")
+    missing = {
+        key
+        for key in ("context_version", "context_fingerprint", "owner_resolution")
+        if not preconditions.get(key)
+    }
+    if missing:
+        raise OperationValidationError(
+            "model.genesis preconditions missing: " + ", ".join(sorted(missing))
+        )
+    if not isinstance(changes, dict) or not changes:
+        raise OperationValidationError("model.genesis changes must not be empty")
+    allowed = {"table_params", "model_params", "model_options"}
+    unknown = set(changes) - allowed
+    if unknown:
+        raise OperationValidationError(
+            "model.genesis changes contain unknown field(s): " + ", ".join(sorted(unknown))
+        )
+    for key, value in changes.items():
+        if not isinstance(value, dict):
+            raise OperationValidationError(f"model.genesis {key} must be an object")
 
 
 def _validate_graph_fork(

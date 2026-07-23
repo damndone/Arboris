@@ -118,6 +118,7 @@ class PipelineDraftV1(BaseModel):
     ) = None
     graph: dict[str, Any]
     default_execution_mode: Literal["rerun_child", "new_run", "genesis"] = "rerun_child"
+    notebook_provenance: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)

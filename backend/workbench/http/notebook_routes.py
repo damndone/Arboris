@@ -16,7 +16,7 @@ from ..agent.context_compiler import (
 )
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1
-from ..agent.notebook.errors import NotebookOptionError
+from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
 from ..agent.model import OpenAICompatibleModelAdapter
 from ..agent.notebook.planning_agent import (
     NotebookNoEligibleCapability,
@@ -217,10 +217,16 @@ def _planning_agent(
         for entry in build_capabilities().get("model_types", [])
         if isinstance(entry, dict) and entry.get("key") not in {None, "auto"}
     }
+    proposal_adapter = (
+        "model.genesis"
+        if context.projection_source
+        and context.projection_source.get("kind") == "dataset"
+        else "model.rerun"
+    )
     catalog = {
         capability: {
             **manifest[capability],
-            "notebook_proposal_adapters": ["model.rerun"],
+            "notebook_proposal_adapters": [proposal_adapter],
         }
         for capability in context.available_capabilities
         if capability in manifest
@@ -359,6 +365,23 @@ def propose_options_endpoint(
                     records=(),
                 ),
             )
+            # Inspection calls persist Evidence Packs. Recompile the context
+            # before pinning the v1.1 revision so evidence_pack_refs belong to
+            # the same freshness fingerprint that the Draft gate will observe.
+            context = replace(
+                service.compile_context(notebook_id), trace_id=trace.trace_id
+            )
+            decision = replace(
+                result.decision,
+                generation_context_hash=generation_context_hash(context),
+                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+            )
+            # Keep the route test seam usable for a deliberately tiny fake
+            # planner result, while the production adapter remains a dataclass.
+            if hasattr(result, "__dataclass_fields__"):
+                result = replace(result, decision=decision)
+            else:
+                result.decision = decision
             drafts = list(result.option_drafts)
         revisions = service.propose_batch(
             notebook_id,
@@ -486,6 +509,27 @@ def confirm_option_endpoint(
     root, service = _service(project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
+        current = service.store.read_option(notebook_id, option_id).current_revision
+        if current.materializable:
+            if (body.option_revision, body.proposal_id, body.proposal_revision) != (
+                current.option_revision,
+                current.typed_proposal_id,
+                current.typed_proposal_revision,
+            ):
+                raise OptionRevisionStale(
+                    "materialization request does not match the current option revision",
+                    option_id=option_id,
+                    requested_revision=body.option_revision,
+                    current_revision=current.option_revision,
+                    reason="proposal_pin_mismatch",
+                )
+            result = service.materialize_option(
+                notebook_id,
+                option_id,
+                context=context,
+                trace=trace,
+            )
+            return {**result.to_dict(), "trace_id": trace.trace_id}
         execution = service.confirm(
             notebook_id,
             option_id,
@@ -496,6 +540,28 @@ def confirm_option_endpoint(
             trace=trace,
         )
         return {"execution": execution.to_dict(), "trace_id": trace.trace_id}
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
+@router.post("/notebooks/{notebook_id}/options/{option_id}/materialize")
+def materialize_option_endpoint(
+    project_root: str,
+    notebook_id: str,
+    option_id: str,
+) -> dict[str, Any]:
+    root, service = _service(project_root)
+    try:
+        context, trace = _compile(root, service, notebook_id)
+        result = service.materialize_option(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
+        return {**result.to_dict(), "trace_id": trace.trace_id}
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 from workbench.api import app
-from workbench.agent.notebook import OptionDraft, TypedProposal
+from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     NOTEBOOK_OPTION_CONTRACT_VERSION,
@@ -356,6 +356,155 @@ def test_projection_route_rejects_ambiguous_source(tmp_path: Path) -> None:
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "NOTEBOOK_PROJECTION_SOURCE_INVALID"
+
+
+def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    notebook = client.post(
+        "/notebooks/projection",
+        params=params,
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "data.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    notebook_id = notebook["notebook_id"]
+    service = NotebookService(project)
+    service.store.append_evidence_pack(
+        notebook_id,
+        {
+            "schema_version": "data-evidence-pack/v1",
+            "source_id": f"dataset:{upload_sha}",
+            "records": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "inspection_id": "profile.v1",
+                    "source_refs": [f"dataset_profile:{upload_sha}"],
+                    "protocol_version": "profile/v1",
+                    "status": "completed",
+                    "observations": {"columns": ["outcome", "predictor"]},
+                    "metrics": {},
+                    "warnings": [],
+                    "omissions": [],
+                    "failure_code": None,
+                    "result_hash": "sha256:profile-result",
+                }
+            ],
+            "pack_omissions": [],
+            "content_hash": "sha256:profile-pack",
+            "evidence_pack_hash": "sha256:profile-pack",
+        },
+    )
+    context = service.compile_context(notebook_id)
+    option = OptionDraft(
+        rank=1,
+        rationale="The verified dataset exposes the declared outcome and predictor columns.",
+        proposal=TypedProposal(
+            proposal_id="p_genesis_route",
+            operation_id="model.genesis",
+            target={"dataset_source_id": upload_sha},
+            preconditions={
+                "context_version": "notebook-planning-context/v1",
+                "context_fingerprint": context.context_id,
+                "owner_resolution": "dataset_projection",
+            },
+            changes={
+                "model_params": {
+                    "model_type": "ols",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                }
+            },
+        ),
+        option_id="opt_genesis_route",
+        evidence_refs=(
+            EvidenceRef(
+                evidence_id="evidence:profile",
+                result_hash="sha256:profile-result",
+                source_refs=(f"dataset_profile:{upload_sha}",),
+            ),
+        ),
+        comparative_claims=("evidence:profile supports the declared model columns",),
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_genesis_route",
+        batch_id="batch_genesis_route",
+        generation_context_hash="sha256:placeholder",
+        freshness_dependency_fingerprint="fresh1:placeholder",
+        evidence_pack_hashes=("sha256:profile-pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_genesis_route",),
+        outcome="recommended",
+        recommended_option_id="opt_genesis_route",
+        reason_refs=("evidence:profile",),
+    )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del context, initial_evidence
+            return SimpleNamespace(
+                option_drafts=(
+                    replace(
+                        option,
+                        recommendation_decision_id=decision.recommendation_decision_id,
+                        recommendation_status=decision.outcome,
+                    ),
+                ),
+                decision=decision,
+            )
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    proposed = client.post(
+        f"/notebooks/{notebook_id}/options/propose",
+        params=params,
+        json={"count": 1},
+    )
+    assert proposed.status_code == 200, proposed.text
+    persisted = proposed.json()["options"][0]
+    assert persisted["recommendation_status"] == "recommended"
+
+    selected = client.post(
+        f"/notebooks/{notebook_id}/options/{option.option_id}/decision",
+        params=params,
+        json={"decision": "selected", "actor": "ui"},
+    )
+    assert selected.status_code == 200, selected.text
+
+    materialized = client.post(
+        f"/notebooks/{notebook_id}/options/{option.option_id}/materialize",
+        params=params,
+    )
+    assert materialized.status_code == 200, materialized.text
+    packet = materialized.json()
+    assert packet["materialization"]["draft_execution_mode"] == "genesis"
+    assert packet["draft"]["created_from"]["source_type"] == "genesis"
+    assert packet["draft"]["notebook_provenance"]["notebook_id"] == notebook_id
+
+    confirmed = client.post(
+        f"/notebooks/{notebook_id}/options/{option.option_id}/confirm",
+        params=params,
+        json={
+            "option_revision": 1,
+            "proposal_id": "p_genesis_route",
+            "proposal_revision": 1,
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["materialization"]["materialization_id"] == packet["materialization"]["materialization_id"]
 
 
 def test_external_family_focus_marks_options_stale_without_rebinding_source(

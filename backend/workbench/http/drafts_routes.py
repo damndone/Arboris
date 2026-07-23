@@ -3,67 +3,23 @@
 Extracted from api.py in v1.6.10 (D1 decomposition, Phase 4)."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
 
-from ..artifacts import read_json
-from ..graph_store import GraphStore
-from ..lineage.node_index import NODE_INDEX_FILENAME
-from ..lineage.node_write_validation import NodeWriteOperationRequestV1, validate_rerun_operation_target
-from ..lineage.op_contract import resolve_operation_contract
-from ..lineage.pipeline_drafts import DraftHashConflict, DraftLockedForExecution, DraftNodeNotFound, DraftNodePatchConflict, DraftNotFound, DraftValidationFailure, PipelineDraftStore, new_draft_id, schema_hash, utc_now, validate_draft_for_execution
-from ..lineage.run_inputs import read_run_inputs
-from ..lineage.upload_store import delete_upload_if_unreferenced, verify_upload
-from ..repository.run_repository import _read_manifest, _resolve_project_runs_dir, _resolve_run_root
-from ..services.run_service import (
-    _STRUCTURAL_FOCAL_FAMILIES,
-    _parse_focal_x,
-    parse_column_selector,
+from ..lineage.pipeline_drafts import DraftHashConflict, DraftLockedForExecution, DraftNodeNotFound, DraftNodePatchConflict, DraftNotFound, DraftValidationFailure, PipelineDraftStore, validate_draft_for_execution
+from ..lineage.upload_store import delete_upload_if_unreferenced
+from ..services.draft_materialization import (
+    _inject_focal_x_control,
+    create_genesis_draft,
+    create_rerun_draft_from_node,
 )
-from ._deps import _TERMINAL_RUN_STATUSES, _backfill_schema_values
 
 from ..services.draft_service import execute_genesis_draft, execute_rerun_child_draft
 
 router = APIRouter()
-
-
-def _inject_focal_x_control(
-    editable_schema: list[dict[str, Any]],
-    form: dict[str, Any],
-    model_type: str,
-) -> list[dict[str, Any]]:
-    """v1.6.5 — add a `focal_x` multiselect to a model node's editable_schema so
-    the draft inspector can re-declare the focal explanatory variable(s).
-
-    Omitted for structural-focal families (IV/DID/CS/SA/dCDH), where
-    focal/treatment is structural — mirrors the run-POST clear (spec §5). The
-    options are the run's x columns; the value is the run's canonicalized
-    focal_x. No-op when there are no x columns or the control already exists."""
-    if model_type in _STRUCTURAL_FOCAL_FAMILIES:
-        return editable_schema
-    if any(item.get("key") == "focal_x" for item in editable_schema):
-        return editable_schema
-    try:
-        x_columns = parse_column_selector(form.get("x", ""), "x")
-    except ValueError:
-        # Draft schema decoration is best-effort; a malformed selector is
-        # rejected at submit time, not here.
-        return editable_schema
-    if not x_columns:
-        return editable_schema
-    value = _parse_focal_x(form.get("focal_x", ""), x_columns)
-    control = {
-        "key": "focal_x",
-        "kind": "multiselect",
-        "label": "Focal explanatory variable(s)",
-        "options": list(x_columns),
-        "value": value,
-    }
-    return [*editable_schema, control]
 
 
 class PipelineDraftFromNodeRequest(BaseModel):
@@ -108,27 +64,16 @@ def _draft_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail="DRAFT_LOCKED_FOR_EXECUTION")
     if isinstance(exc, DraftValidationFailure):
         return HTTPException(status_code=422, detail=str(exc))
+    message = str(exc)
+    if message == "SOURCE_MODEL_NODE_NOT_FOUND":
+        return HTTPException(status_code=404, detail=message)
+    if message in {"SOURCE_MODEL_NODE_MISMATCH", "SOURCE_NODE_HASH_MISMATCH"}:
+        return HTTPException(status_code=409, detail=message)
+    if message.startswith("SOURCE_CONTEXT_MISMATCH:"):
+        return HTTPException(status_code=409, detail=message)
+    if message == "SOURCE_RUN_NOT_TERMINAL":
+        return HTTPException(status_code=409, detail=message)
     return HTTPException(status_code=422, detail=str(exc))
-
-
-def _read_indexed_node_hash(run_root: Path, node_id: str) -> str | None:
-    index_path = run_root / NODE_INDEX_FILENAME
-    if not index_path.is_file():
-        return None
-    index = read_json(index_path)
-    entry = index.get(node_id)
-    if not isinstance(entry, dict):
-        return None
-    node_hash = entry.get("node_hash")
-    return str(node_hash) if node_hash else None
-
-
-def _source_params_from_schema(editable_schema: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        item["key"]: item.get("value")
-        for item in editable_schema
-        if item.get("key")
-    }
 
 
 @router.post("/pipeline-drafts/from-node")
@@ -136,120 +81,16 @@ def create_pipeline_draft_from_node(
     project_root: str,
     body: PipelineDraftFromNodeRequest,
 ) -> dict[str, Any]:
-    runs_root = _resolve_project_runs_dir(project_root)
-    run_root = _resolve_run_root(project_root, body.source_run_id)
-    manifest = _read_manifest(run_root)
-    if manifest.get("status") not in _TERMINAL_RUN_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Source run not terminal (status={manifest.get('status')}).",
+    try:
+        stored = create_rerun_draft_from_node(
+            Path(project_root),
+            source_run_id=body.source_run_id,
+            source_model_node_id=body.source_model_node_id,
+            source_op_node_id=body.source_op_node_id,
+            source_node_hash=body.source_node_hash,
+            source_forest_node_key=body.source_forest_node_key,
+            source_context_fingerprint=body.source_context_fingerprint,
         )
-
-    graph = GraphStore(runs_root=runs_root).read(body.source_run_id)
-    node = graph.nodes.get(body.source_op_node_id)
-    if node is None:
-        raise HTTPException(status_code=404, detail="SOURCE_MODEL_NODE_NOT_FOUND")
-    if body.source_model_node_id != body.source_op_node_id:
-        raise HTTPException(status_code=409, detail="SOURCE_MODEL_NODE_MISMATCH")
-
-    indexed_hash = _read_indexed_node_hash(run_root, body.source_op_node_id)
-    if indexed_hash is None:
-        raise HTTPException(status_code=422, detail="SOURCE_NODE_HASH_UNAVAILABLE")
-    if indexed_hash != body.source_node_hash:
-        raise HTTPException(status_code=409, detail="SOURCE_NODE_HASH_MISMATCH")
-
-    try:
-        request = NodeWriteOperationRequestV1(
-            request_id="pipeline_draft_from_node",
-            operation="rerun",
-            context_version="node-operation-context/v1",
-            context_fingerprint=body.source_context_fingerprint,
-            owner_run_id=body.source_run_id,
-            op_node_id=body.source_op_node_id,
-            node_hash=body.source_node_hash,
-            forest_node_key=body.source_forest_node_key or body.source_node_hash,
-            owner_resolution="single_candidate",
-            active_head_run_id=body.source_run_id,
-        )
-        validate_rerun_operation_target(runs_root, request)
-    except (ValidationError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=f"SOURCE_CONTEXT_MISMATCH: {exc}") from exc
-
-    stage = node.stage.value if node.stage is not None else None
-    contract = resolve_operation_contract(stage=stage, manifest=manifest)
-    if contract is None:
-        raise HTTPException(status_code=422, detail="MODEL_NODE_NOT_ELIGIBLE")
-
-    try:
-        inputs = read_run_inputs(run_root)
-    except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=422, detail="SOURCE_RUN_INPUTS_UNAVAILABLE") from exc
-    upload = inputs.get("upload") or {}
-    source_input_fingerprint = upload.get("sha256")
-    if not source_input_fingerprint:
-        raise HTTPException(status_code=422, detail="SOURCE_INPUT_FINGERPRINT_UNAVAILABLE")
-
-    now = utc_now()
-    draft_id = new_draft_id()
-    _draft_form = inputs.get("form") or {}
-    editable_schema = _backfill_schema_values(contract.editable_schema, _draft_form)
-    editable_schema = _inject_focal_x_control(editable_schema, _draft_form, contract.op_type)
-    source_params = _source_params_from_schema(editable_schema)
-    draft = {
-        "draft_id": draft_id,
-        "schema_version": "pipeline_draft.v1",
-        "created_at": now,
-        "updated_at": now,
-        "status": "draft",
-        "created_from": {
-            "source_type": "run",
-            "source_run_id": body.source_run_id,
-            "source_model_node_id": body.source_model_node_id,
-            "source_op_node_id": body.source_op_node_id,
-            "source_node_hash": body.source_node_hash,
-            "source_context_fingerprint": body.source_context_fingerprint,
-            "source_input_fingerprint": source_input_fingerprint,
-        },
-        "graph": {
-            "nodes": [
-                {
-                    "node_id": "input_1",
-                    "node_type": "input.dataset",
-                    "source_type": "run_input",
-                    "run_input_id": body.source_run_id,
-                    "schema_fingerprint": inputs.get("dag_hash") or source_input_fingerprint,
-                    "input_fingerprint": source_input_fingerprint,
-                    "columns_summary": [
-                        {"name": key}
-                        for key in sorted((inputs.get("form") or {}).keys())
-                    ],
-                    "status": "bound",
-                },
-                {
-                    "node_id": "model_1",
-                    "node_type": "model",
-                    "model_family": "regression",
-                    "model_type": contract.op_type,
-                    "schema_id": contract.schema_id,
-                    "editable_schema": editable_schema,
-                    "editable_schema_hash": schema_hash(editable_schema),
-                    "source_ref": {
-                        "source_run_id": body.source_run_id,
-                        "source_model_node_id": body.source_model_node_id,
-                        "source_op_node_id": body.source_op_node_id,
-                        "source_node_hash": body.source_node_hash,
-                        "source_context_fingerprint": body.source_context_fingerprint,
-                    },
-                    "source_params": source_params,
-                    "params": source_params,
-                },
-            ],
-            "edges": [{"from": "input_1", "to": "model_1"}],
-        },
-        "default_execution_mode": "rerun_child",
-    }
-    try:
-        stored = _pipeline_draft_store(project_root).create(draft)
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
@@ -279,61 +120,14 @@ def create_pipeline_draft_genesis(
     editable_schema); validate stays structural; column checks belong to
     execute (spec F3/F4).
     """
-    _resolve_project_runs_dir(project_root)  # 404 PROJECT_NOT_FOUND for bogus roots
-    root = Path(project_root)
-    if not re.fullmatch(r"[0-9a-f]{64}", body.upload_sha256):
-        # Reject before touching the filesystem; do NOT reflect the raw value.
-        raise HTTPException(status_code=422, detail="UPLOAD_NOT_FOUND: invalid sha256")
     try:
-        verify_upload(root, body.upload_sha256)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=f"UPLOAD_NOT_FOUND: {exc}") from exc
-
-    now = utc_now()
-    draft = {
-        "draft_id": new_draft_id(),
-        "schema_version": "pipeline_draft.v1",
-        "created_at": now,
-        "updated_at": now,
-        "status": "draft",
-        "created_from": {
-            "source_type": "genesis",
-            "source_input_fingerprint": body.upload_sha256,
-        },
-        "graph": {
-            "nodes": [
-                {
-                    "node_id": "source_1",
-                    "node_type": "input.upload",
-                    "upload": {"sha256": body.upload_sha256, "filename": body.filename},
-                    "sheet_names": body.sheet_names,
-                    "status": "bound",
-                },
-                {
-                    "node_id": "table_1",
-                    "node_type": "table",
-                    "params": {"sheet_name": None, "transpose": False},
-                    "columns": body.columns,
-                    "status": "pending",
-                },
-                {
-                    "node_id": "model_1",
-                    "node_type": "model",
-                    "model_family": "regression",
-                    "model_type": None,
-                    "params": {},
-                    "status": "pending",
-                },
-            ],
-            "edges": [
-                {"from": "source_1", "to": "table_1"},
-                {"from": "table_1", "to": "model_1"},
-            ],
-        },
-        "default_execution_mode": "genesis",
-    }
-    try:
-        stored = _pipeline_draft_store(project_root).create(draft)
+        stored = create_genesis_draft(
+            Path(project_root),
+            upload_sha256=body.upload_sha256,
+            filename=body.filename,
+            sheet_names=tuple(body.sheet_names),
+            columns=tuple(body.columns),
+        )
     except Exception as exc:
         raise _draft_http_error(exc) from exc
     return {"draft": stored.draft, "draft_hash": stored.draft_hash}
