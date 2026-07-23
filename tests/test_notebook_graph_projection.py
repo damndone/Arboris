@@ -1,16 +1,19 @@
 """Graph-first Notebook projection identity is durable and source-bound."""
 from __future__ import annotations
 
+import gc
 import json
 import time
+import weakref
 from pathlib import Path
-from threading import Barrier, Thread
+from threading import Barrier, Lock, Thread
 
 import pytest
 
 from workbench.agent.notebook import NotebookService
+from workbench.agent.notebook import service as notebook_service
 from workbench.agent.notebook import store as notebook_store
-from workbench.agent.notebook.store import Notebook
+from workbench.agent.notebook.store import Notebook, NotebookStore
 from workbench.lineage.run_family import RunFamilyStore, migrate_project_families, resolve_run_family
 from workbench.lineage.upload_store import store_upload_bytes
 
@@ -109,7 +112,7 @@ def test_dataset_default_projection_is_atomic_across_store_instances(
     def ensure_projection() -> None:
         service = NotebookService(project)
         try:
-            start.wait()
+            start.wait(timeout=2)
             notebook_ids.append(
                 service.ensure_default_projection(dataset=_dataset_ref(sha256), created_by="ui").notebook_id
             )
@@ -120,12 +123,79 @@ def test_dataset_default_projection_is_atomic_across_store_instances(
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=2)
 
-    assert errors == []
+    assert not [thread for thread in threads if thread.is_alive()]
+    assert not errors, errors
     assert len(set(notebook_ids)) == 1
     assert len(NotebookService(project).list_notebooks()) == 1
     assert len(RunFamilyStore(project, create=False).list_families()) == 1
+
+
+def test_run_default_projection_is_atomic_across_services_during_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = make_project(tmp_path)
+    make_run(project, "run_001")
+    original_migrate = notebook_service.migrate_project_families
+    migration_count = 0
+    migration_count_lock = Lock()
+
+    def delayed_migrate(*args: object, **kwargs: object):
+        nonlocal migration_count
+        with migration_count_lock:
+            migration_count += 1
+        time.sleep(0.05)
+        return original_migrate(*args, **kwargs)
+
+    monkeypatch.setattr(notebook_service, "migrate_project_families", delayed_migrate)
+    start = Barrier(2)
+    notebook_ids: list[str] = []
+    errors: list[BaseException] = []
+
+    def ensure_projection() -> None:
+        service = NotebookService(project)
+        try:
+            start.wait(timeout=2)
+            notebook_ids.append(
+                service.ensure_default_projection(from_run_id="run_001", created_by="ui").notebook_id
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    threads = [Thread(target=ensure_projection), Thread(target=ensure_projection)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert not [thread for thread in threads if thread.is_alive()]
+    assert not errors, errors
+    assert migration_count == 1
+    assert len(set(notebook_ids)) == 1
+    notebook = NotebookService(project).list_notebooks()[0]
+    resolved = resolve_run_family(project, "run_001", check_consistency=True)
+    assert resolved.source == "persisted"
+    assert notebook.run_family_id == resolved.run_family_id
+    assert [family.run_family_id for family in RunFamilyStore(project, create=False).list_families()] == [
+        resolved.run_family_id
+    ]
+
+
+def test_project_lock_holder_is_shared_and_reclaimable(tmp_path: Path) -> None:
+    first = NotebookStore(tmp_path)
+    second = NotebookStore(tmp_path)
+    holder = getattr(first, "_lock_holder", None)
+
+    assert holder is not None
+    assert holder is getattr(second, "_lock_holder", None)
+    holder_ref = weakref.ref(holder)
+    del first
+    del second
+    del holder
+    gc.collect()
+
+    assert holder_ref() is None
 
 
 def test_malformed_same_source_default_key_fails_closed(tmp_path: Path) -> None:

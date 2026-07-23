@@ -223,29 +223,30 @@ class NotebookService:
             raise ValueError("exactly one projection source is required")
 
         if from_run_id is not None:
-            source = ProjectionSource.from_dict({"kind": "run", "run_id": from_run_id})
-            family_store = RunFamilyStore(self.project_root, create=False)
-            if not family_store.has_migrated():
-                migrate_project_families(self.project_root, created_by="notebook_bootstrap")
-            resolved = resolve_run_family(
-                self.project_root, from_run_id, check_consistency=True
-            )
-            if resolved.source != "persisted":
-                raise ValueError("default projection requires a persisted run family")
-            return self.store.ensure_default_projection(
-                Notebook(
-                    notebook_id=f"nb_{uuid4().hex}",
-                    project_id=self.project_root.name,
-                    run_family_id=resolved.run_family_id,
-                    title=title,
-                    created_by=created_by,
-                    created_at=_now(),
-                    active_head_run_id=from_run_id,
-                    focused_run_id=from_run_id,
-                    projection_key=f"default-projection:{resolved.run_family_id}",
-                    projection_source=source,
+            with self.store.project_lock():
+                source = ProjectionSource.from_dict({"kind": "run", "run_id": from_run_id})
+                family_store = RunFamilyStore(self.project_root, create=False)
+                if not family_store.has_migrated():
+                    migrate_project_families(self.project_root, created_by="notebook_bootstrap")
+                resolved = resolve_run_family(
+                    self.project_root, from_run_id, check_consistency=True
                 )
-            )
+                if resolved.source != "persisted":
+                    raise ValueError("default projection requires a persisted run family")
+                return self.store.ensure_default_projection(
+                    Notebook(
+                        notebook_id=f"nb_{uuid4().hex}",
+                        project_id=self.project_root.name,
+                        run_family_id=resolved.run_family_id,
+                        title=title,
+                        created_by=created_by,
+                        created_at=_now(),
+                        active_head_run_id=from_run_id,
+                        focused_run_id=from_run_id,
+                        projection_key=f"default-projection:{resolved.run_family_id}",
+                        projection_source=source,
+                    )
+                )
 
         source = (
             dataset

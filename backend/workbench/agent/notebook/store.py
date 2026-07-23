@@ -14,11 +14,13 @@ which a mutable `typed_proposal JSON` column cannot do (spec §3.8).
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
+from weakref import WeakValueDictionary
 
 from ...contracts.agent.notebook_option import NotebookOptionRevision
 from ..storage import append_jsonl_atomic, read_jsonl
@@ -38,7 +40,12 @@ RECORD_LIFECYCLE = "lifecycle"
 RECORD_EXECUTION = "execution"
 RECORD_EXECUTION_RESULT = "execution_result"
 
-_PROJECT_LOCKS: dict[Path, Any] = {}
+@dataclass
+class _ProjectLockHolder:
+    lock: Any = field(default_factory=RLock)
+
+
+_PROJECT_LOCKS: WeakValueDictionary[Path, _ProjectLockHolder] = WeakValueDictionary()
 _PROJECT_LOCKS_GUARD = RLock()
 
 
@@ -52,11 +59,16 @@ def _safe_component(value: str, *, label: str) -> str:
     return value
 
 
-def _project_lock(project_root: Path) -> Any:
-    """Return the one in-process reentrant lock for one resolved project root."""
+def _project_lock_holder(project_root: Path) -> _ProjectLockHolder:
+    """Return the weakly registered lock holder for one resolved project root."""
 
     with _PROJECT_LOCKS_GUARD:
-        return _PROJECT_LOCKS.setdefault(project_root.resolve(), RLock())
+        resolved_root = project_root.resolve()
+        holder = _PROJECT_LOCKS.get(resolved_root)
+        if holder is None:
+            holder = _ProjectLockHolder()
+            _PROJECT_LOCKS[resolved_root] = holder
+        return holder
 
 
 def _require_pathless_string(value: object, *, label: str) -> str:
@@ -342,7 +354,8 @@ class NotebookStore:
         self.directory = self.project_root / NOTEBOOK_DIRNAME
         if create:
             self.directory.mkdir(parents=True, exist_ok=True)
-        self._lock = _project_lock(self.project_root)
+        self._lock_holder = _project_lock_holder(self.project_root)
+        self._lock = self._lock_holder.lock
 
     # -- paths ---------------------------------------------------------
 
@@ -360,6 +373,13 @@ class NotebookStore:
         )
 
     # -- notebooks -----------------------------------------------------
+
+    @contextmanager
+    def project_lock(self) -> Iterator[None]:
+        """Hold this project's shared, in-process reentrant store lock."""
+
+        with self._lock:
+            yield
 
     def create_notebook(self, notebook: Notebook) -> Notebook:
         with self._lock:
