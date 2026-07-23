@@ -20,6 +20,7 @@ from .http.drafts_routes import router as drafts_router
 from .http.data_operation_routes import router as data_operation_router
 from .http.graph_routes import router as graph_router
 from .http.llm_routes import router as llm_router
+from .http.notebook_routes import router as notebook_router
 from .http.projects_routes import router as projects_router
 from .http.rerun_routes import router as rerun_router
 from .http.runs_routes import router as runs_router
@@ -53,5 +54,6 @@ app.include_router(graph_router)
 app.include_router(drafts_router)
 app.include_router(data_operation_router)
 app.include_router(agent_router)
+app.include_router(notebook_router)
 app.include_router(rerun_router)
 app.include_router(llm_router)

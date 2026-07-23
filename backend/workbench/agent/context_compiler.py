@@ -72,6 +72,9 @@ class NotebookPlanningContextV1:
     compiled_at: str
     trace_id: str | None = None
     compile_duration_ms: int | None = None
+    projection_source: dict[str, Any] | None = None
+    current_family_head_run_id: str | None = None
+    graph_hash: str | None = None
     context_profile: str = CONTEXT_PROFILE
     schema_version: str = CONTEXT_SCHEMA_VERSION
 
@@ -123,6 +126,7 @@ FRESHNESS_DEPENDENCY_FIELDS = (
     "dataset_profile",
     "run_family_id",
     "active_head_run_id",
+    "current_family_head_run_id",
     "available_capabilities",
     "user_focus",
     "source_manifest",
@@ -379,6 +383,9 @@ def compile_notebook_planning_context(
     diagnostics: list[dict[str, Any]] | None = None,
     budget: BudgetConfig | None = None,
     trace_id: str | None = None,
+    projection_source: dict[str, Any] | None = None,
+    current_family_head_run_id: str | None = None,
+    dataset_profile_override: dict[str, Any] | None = None,
 ) -> NotebookPlanningContextV1:
     """The one path from project state to what a planning agent sees.
 
@@ -401,6 +408,9 @@ def compile_notebook_planning_context(
 
     omissions: list[dict[str, Any]] = []
     dataset_profile, dataset_omissions = _project_dataset(profile, budget.dataset_columns)
+    if dataset_profile_override is not None:
+        dataset_profile = dict(dataset_profile_override)
+        dataset_omissions = []
     omissions.extend(dataset_omissions)
     artifact_summaries, artifact_type_counts, artifact_omissions = _project_artifacts(
         index, budget.artifact_summaries
@@ -426,6 +436,15 @@ def compile_notebook_planning_context(
         source_manifest.append(_source("artifact_index", active_head_run_id, index))
         source_manifest.append(_source("graph", active_head_run_id, graph))
         source_manifest.append(_source("dataset_profile", active_head_run_id, profile))
+        source_manifest.append(_source("errors", active_head_run_id, issues))
+    elif projection_source is not None and projection_source.get("kind") == "dataset":
+        source_manifest.append(
+            {
+                "kind": "dataset_upload",
+                "id": str(projection_source["upload_sha256"]),
+                "sha256": str(projection_source["upload_sha256"]),
+            }
+        )
     source_manifest.sort(key=lambda entry: (entry["kind"], entry["id"]))
 
     context = NotebookPlanningContextV1(
@@ -448,6 +467,9 @@ def compile_notebook_planning_context(
         budget_report={},
         compiled_at=datetime.now(timezone.utc).isoformat(),
         trace_id=trace_id,
+        projection_source=dict(projection_source) if projection_source is not None else None,
+        current_family_head_run_id=current_family_head_run_id,
+        graph_hash=("sha256:" + sha256_canonical(graph)) if isinstance(graph, dict) else None,
     )
 
     # The meter cannot measure a payload that contains the meter: writing the

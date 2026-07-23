@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import uuid4
 
+import pandas as pd
+
 from ...artifacts import read_json
 from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
@@ -327,7 +329,9 @@ class NotebookService:
         )
         return self.get_notebook(notebook_id)
 
-    def compile_context(self, notebook_id: str) -> NotebookPlanningContextV1:
+    def compile_context(
+        self, notebook_id: str, *, focused_run_id: str | None = None
+    ) -> NotebookPlanningContextV1:
         """Compile the bounded planning context for this notebook (Gate 2).
 
         Reads the notebook's persisted premises (analysis contract, user focus,
@@ -338,6 +342,23 @@ class NotebookService:
         """
 
         notebook = self.get_notebook(notebook_id)
+        source = notebook.projection_source
+        comparison_run_id: str | None = None
+        dataset_profile_override: dict[str, Any] | None = None
+        if source is not None and source.kind == "run":
+            comparison_run_id = focused_run_id or notebook.focused_run_id
+            if comparison_run_id is not None:
+                assert_run_in_family(
+                    self.project_root,
+                    run_id=comparison_run_id,
+                    run_family_id=notebook.run_family_id,
+                )
+        elif source is not None and source.kind == "dataset":
+            if focused_run_id is not None:
+                raise ValueError("dataset projection does not accept focused_run_id")
+            dataset_profile_override = self._dataset_header_profile(source)
+        elif focused_run_id is not None:
+            raise ValueError("source-less notebook does not accept focused_run_id")
         return compile_notebook_planning_context(
             self.project_root,
             notebook_id=notebook.notebook_id,
@@ -347,7 +368,31 @@ class NotebookService:
             user_focus=dict(notebook.user_focus),
             existing_option_summaries=self._existing_option_summaries(notebook_id),
             available_capabilities=list(notebook.available_capabilities),
+            projection_source=source.to_dict() if source is not None else None,
+            current_family_head_run_id=comparison_run_id,
+            dataset_profile_override=dataset_profile_override,
         )
+
+    def _dataset_header_profile(self, source: ProjectionSource) -> dict[str, Any]:
+        """Read only bounded schema metadata from a verified upload, never rows."""
+
+        path = verify_upload(self.project_root, source.upload_sha256)
+        suffix = Path(source.filename or "").suffix.lower()
+        if suffix == ".csv":
+            frame = pd.read_csv(path, nrows=0)
+        elif suffix in {".xlsx", ".xls"}:
+            with pd.ExcelFile(path) as workbook:
+                sheet = source.sheet_names[0] if source.sheet_names else workbook.sheet_names[0]
+                frame = pd.read_excel(workbook, sheet_name=sheet, nrows=0)
+        else:
+            raise ValueError(f"unsupported dataset upload type: {suffix or 'unknown'}")
+        return {
+            "columns": [
+                {"name": str(column), "dtype": str(dtype)}
+                for column, dtype in frame.dtypes.items()
+            ],
+            "source_kind": "verified_upload",
+        }
 
     def _existing_option_summaries(self, notebook_id: str) -> list[dict[str, Any]]:
         """A deterministic, content-only digest of every option already stored.
