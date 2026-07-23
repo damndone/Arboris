@@ -53,6 +53,7 @@ from .errors import (
     OptionBatchInvalid,
     OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
+    OptionMaterializationRequired,
     OptionRevisionStale,
     OptionValidationFailed,
 )
@@ -98,6 +99,18 @@ _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
     "selected": frozenset({"deferred", "rejected", "materialized", "archived"}),
     "materialized": frozenset({"selected", "executing", "archived"}),
     "executing": frozenset({"executed", "materialized"}),
+    "executed": frozenset(),
+    "rejected": frozenset(),
+    "archived": frozenset(),
+}
+
+# v1.0 has no persisted Draft/materialization record. It retains its original
+# direct-confirm lifecycle strictly for compatibility; v1.1 never consults it.
+_LEGACY_LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
+    "proposed": frozenset({"selected", "deferred", "rejected", "archived"}),
+    "deferred": frozenset({"selected", "rejected", "archived"}),
+    "selected": frozenset({"deferred", "rejected", "executing", "archived"}),
+    "executing": frozenset({"executed", "selected"}),
     "executed": frozenset(),
     "rejected": frozenset(),
     "archived": frozenset(),
@@ -752,6 +765,15 @@ class NotebookService:
                 reason="proposal_pin_mismatch",
             )
 
+        if current.materializable:
+            raise OptionMaterializationRequired(
+                f"option {option_id} revision {option_revision} requires a real "
+                "Draft materialization before execution",
+                option_id=option_id,
+                option_revision=option_revision,
+                contract_version=current.contract_version,
+            )
+
         # Recompiled upstream facts, compared here and nowhere else.
         assert_executable(current, context)
 
@@ -772,15 +794,6 @@ class NotebookService:
                 trace=trace,
             )
             view = self.store.read_option(notebook_id, option_id)
-        self._transition(
-            notebook_id,
-            view,
-            to_status="materialized",
-            actor="user",
-            reason="confirm_materialized",
-            trace=trace,
-        )
-        view = self.store.read_option(notebook_id, option_id)
         self._transition(
             notebook_id,
             view,
@@ -846,6 +859,25 @@ class NotebookService:
 
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        if current.materializable:
+            materialization = self.store.read_materialization(
+                notebook_id, option_id, current.option_revision
+            )
+            if materialization is None:
+                raise OptionMaterializationRequired(
+                    f"option {option_id} revision {current.option_revision} requires "
+                    "a real Draft materialization before completion",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    contract_version=current.contract_version,
+                )
+            if view.lifecycle_status != "executing":
+                raise OptionLifecycleTransitionInvalid(
+                    f"option {option_id} is {view.lifecycle_status}; only an executing "
+                    "materialized option can complete",
+                    option_id=option_id,
+                    lifecycle_status=view.lifecycle_status,
+                )
         artifacts = (
             [dict(record) for record in produced_artifacts]
             if produced_artifacts is not None
@@ -898,15 +930,25 @@ class NotebookService:
                     },
                 )
 
-        self._transition(
-            notebook_id,
-            view,
-            to_status="executed" if committable else "materialized",
-            actor="system",
-            reason="artifact_contract_" + validation["validation_status"],
-            trace=trace,
-        )
-        if not committable:
+        if current.materializable:
+            self._transition(
+                notebook_id,
+                view,
+                to_status="executed" if committable else "materialized",
+                actor="system",
+                reason="artifact_contract_" + validation["validation_status"],
+                trace=trace,
+            )
+        else:
+            self._transition(
+                notebook_id,
+                view,
+                to_status="executed" if committable else "selected",
+                actor="system",
+                reason="artifact_contract_" + validation["validation_status"],
+                trace=trace,
+            )
+        if not committable and current.materializable:
             self._transition(
                 notebook_id,
                 self.store.read_option(notebook_id, option_id),
@@ -1088,7 +1130,12 @@ class NotebookService:
         trace: TraceWriter | None = None,
     ) -> None:
         current = view.lifecycle_status
-        if to_status not in _LIFECYCLE_TRANSITIONS[current]:
+        transitions = (
+            _LIFECYCLE_TRANSITIONS
+            if view.current_revision.materializable
+            else _LEGACY_LIFECYCLE_TRANSITIONS
+        )
+        if to_status not in transitions[current]:
             raise OptionLifecycleTransitionInvalid(
                 f"option {view.option_id} cannot move from {current} to {to_status}",
                 option_id=view.option_id,

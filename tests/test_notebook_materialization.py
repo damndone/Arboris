@@ -8,12 +8,18 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
+from workbench.agent.context_compiler import (
+    freshness_dependency_fingerprint,
+    generation_context_hash,
+)
 from workbench.agent.notebook.errors import (
     NotebookOptionError,
     OptionLifecycleTransitionInvalid,
 )
+from workbench.agent.notebook.store import StoredRevision
 from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
+    NotebookOptionRevision,
     OptionMaterialization,
     RecommendationDecision,
 )
@@ -82,6 +88,90 @@ def _option(service: NotebookService, notebook_id: str, *, option_id: str):
     )[0]
 
 
+def _v11_option(
+    service: NotebookService,
+    notebook_id: str,
+    *,
+    option_id: str,
+    lifecycle_status: str = "selected",
+) -> NotebookOptionRevision:
+    """Persist one genuine v1.1 option packet for materialization-boundary tests."""
+
+    notebook = service.get_notebook(notebook_id)
+    context = service.compile_context(notebook_id)
+    proposal = TypedProposal.from_dict(model_rerun_proposal(f"proposal_{option_id}"))
+    payload = _contract_fixture("notebook_option_revision_v11")
+    payload.update(
+        {
+            "option_id": option_id,
+            "option_revision": 1,
+            "notebook_id": notebook_id,
+            "run_family_id": notebook.run_family_id,
+            "generation_context_id": context.context_id,
+            "generation_context_hash": generation_context_hash(context),
+            "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+            "typed_proposal_id": proposal.proposal_id,
+            "typed_proposal_revision": proposal.proposal_revision,
+            "lifecycle_status": lifecycle_status,
+            "batch_id": f"batch_{option_id}",
+            "supersedes_option_revision": None,
+        }
+    )
+    revision = NotebookOptionRevision.from_dict(payload)
+    service.store.append_option_record(
+        notebook_id,
+        option_id,
+        {
+            "record_type": "option",
+            "option_id": option_id,
+            "notebook_id": notebook_id,
+            "batch_id": revision.batch_id,
+            "rank": revision.rank,
+            "created_at": revision.created_at,
+        },
+    )
+    service._append_revision(
+        notebook_id,
+        StoredRevision(
+            revision=revision,
+            proposal=proposal,
+            canonical_proposal_hash=proposal.canonical_hash(),
+        ),
+    )
+    service._append_lifecycle(
+        notebook_id,
+        option_id,
+        from_status=None,
+        to_status=lifecycle_status,
+        revision=revision.option_revision,
+        actor="test",
+        reason="v11_fixture",
+    )
+    return revision
+
+
+def _bound_materialization(
+    service: NotebookService,
+    notebook_id: str,
+    revision: NotebookOptionRevision,
+    *,
+    materialization_id: str,
+    name: str = "option_materialization_genesis_v1",
+) -> OptionMaterialization:
+    notebook = service.get_notebook(notebook_id)
+    return replace(
+        _materialization(name),
+        materialization_id=materialization_id,
+        option_id=revision.option_id,
+        option_revision=revision.option_revision,
+        proposal_id=revision.typed_proposal_id,
+        proposal_revision=revision.typed_proposal_revision,
+        freshness_dependency_fingerprint=revision.freshness_dependency_fingerprint,
+        generation_context_id=revision.generation_context_id,
+        run_family_id=notebook.run_family_id,
+    )
+
+
 def test_evidence_pack_is_append_only_idempotent_and_rejects_raw_paths(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
@@ -131,24 +221,30 @@ def test_decision_is_append_only_idempotent_and_rejects_conflicts(tmp_path: Path
         )
 
 
-def test_materialization_records_cover_genesis_and_rerun_child_identities(tmp_path: Path) -> None:
+def test_selected_v11_materialization_records_cover_genesis_and_rerun_child_identities(
+    tmp_path: Path,
+) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
     notebook = service.create_notebook(title="Materialization", created_by="ui")
-    option = _option(service, notebook.notebook_id, option_id="opt_001")
-    genesis = replace(
-        _materialization("option_materialization_genesis_v1"),
-        materialization_id="materialization_genesis",
-        option_id=option.option_id,
-        option_revision=1,
-        run_family_id=notebook.run_family_id,
+    genesis_option = _v11_option(
+        service, notebook.notebook_id, option_id="opt_genesis"
     )
-    rerun_child = replace(
-        _materialization("option_materialization_v1"),
+    rerun_option = _v11_option(
+        service, notebook.notebook_id, option_id="opt_rerun"
+    )
+    genesis = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        genesis_option,
+        materialization_id="materialization_genesis",
+    )
+    rerun_child = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        rerun_option,
         materialization_id="materialization_rerun_child",
-        option_id=option.option_id,
-        option_revision=2,
-        run_family_id=notebook.run_family_id,
+        name="option_materialization_v1",
     )
 
     assert callable(getattr(service.store, "append_materialization", None))
@@ -156,8 +252,12 @@ def test_materialization_records_cover_genesis_and_rerun_child_identities(tmp_pa
         service.store.append_materialization(notebook.notebook_id, record)
         service.store.append_materialization(notebook.notebook_id, record)
 
-    assert service.store.read_materialization(notebook.notebook_id, option.option_id, 1) == genesis
-    assert service.store.read_materialization(notebook.notebook_id, option.option_id, 2) == rerun_child
+    assert service.store.read_materialization(
+        notebook.notebook_id, genesis_option.option_id, genesis_option.option_revision
+    ) == genesis
+    assert service.store.read_materialization(
+        notebook.notebook_id, rerun_option.option_id, rerun_option.option_revision
+    ) == rerun_child
     with pytest.raises(ValueError, match="conflicting"):
         service.store.append_materialization(
             notebook.notebook_id,
@@ -199,16 +299,163 @@ def test_legacy_option_is_rejected_before_any_materialization_record(tmp_path: P
     ) is None
 
 
+def test_direct_storage_append_rejects_a_legacy_option(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Legacy", created_by="ui")
+    legacy = _legacy_option(service, notebook.notebook_id)
+    materialization = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        legacy,
+        materialization_id="materialization_legacy",
+    )
+
+    with pytest.raises(NotebookOptionError) as excinfo:
+        service.store.append_materialization(notebook.notebook_id, materialization)
+
+    assert excinfo.value.code == "OPTION_LEGACY_UNVERIFIED"
+    assert service.store.read_materialization(
+        notebook.notebook_id, legacy.option_id, legacy.option_revision
+    ) is None
+
+
+def test_v11_option_cannot_confirm_without_a_real_materialization(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Direct confirm", created_by="ui")
+    revision = _v11_option(service, notebook.notebook_id, option_id="opt_direct")
+
+    with pytest.raises(NotebookOptionError) as excinfo:
+        service.confirm(
+            notebook.notebook_id,
+            revision.option_id,
+            option_revision=revision.option_revision,
+            proposal_id=revision.typed_proposal_id,
+            proposal_revision=revision.typed_proposal_revision,
+            context=service.compile_context(notebook.notebook_id),
+        )
+
+    assert excinfo.value.code == "OPTION_MATERIALIZATION_REQUIRED"
+    view = service.option_view(notebook.notebook_id, revision.option_id)
+    assert view.lifecycle_status == "selected"
+    assert view.last_execution is None
+    assert service.store.read_materialization(
+        notebook.notebook_id, revision.option_id, revision.option_revision
+    ) is None
+
+
+def test_v11_completion_requires_real_materialization_and_execution_state(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Direct completion", created_by="ui")
+    revision = _v11_option(service, notebook.notebook_id, option_id="opt_complete")
+
+    with pytest.raises(NotebookOptionError) as excinfo:
+        service.complete_execution(
+            notebook.notebook_id,
+            revision.option_id,
+            execution_status="failed",
+        )
+
+    assert excinfo.value.code == "OPTION_MATERIALIZATION_REQUIRED"
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == (
+        "selected"
+    )
+
+
+def test_legacy_confirmation_remains_legacy_without_a_materialized_lie(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Legacy confirm", created_by="ui")
+    legacy = _legacy_option(service, notebook.notebook_id)
+
+    execution = service.confirm(
+        notebook.notebook_id,
+        legacy.option_id,
+        option_revision=legacy.option_revision,
+        proposal_id=legacy.typed_proposal_id,
+        proposal_revision=legacy.typed_proposal_revision,
+        context=service.compile_context(notebook.notebook_id),
+    )
+
+    view = service.option_view(notebook.notebook_id, legacy.option_id)
+    assert execution.contract_version == "1.0"
+    assert view.lifecycle_status == "executing"
+    assert {entry["to_status"] for entry in view.lifecycle_history} == {
+        "proposed",
+        "selected",
+        "executing",
+    }
+    assert service.store.read_materialization(
+        notebook.notebook_id, legacy.option_id, legacy.option_revision
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("label", "change"),
+    [
+        ("option", lambda record: replace(record, option_id="opt_missing")),
+        ("revision", lambda record: replace(record, option_revision=2)),
+        ("family", lambda record: replace(record, run_family_id="run-family:other")),
+        ("proposal", lambda record: replace(record, proposal_id="proposal_other")),
+        ("proposal revision", lambda record: replace(record, proposal_revision=2)),
+        (
+            "freshness",
+            lambda record: replace(record, freshness_dependency_fingerprint="fresh1:other"),
+        ),
+        ("generation context", lambda record: replace(record, generation_context_id="ctx_other")),
+    ],
+)
+def test_materialization_rejects_mismatched_current_option_pins(
+    tmp_path: Path, label: str, change
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Pins", created_by="ui")
+    revision = _v11_option(service, notebook.notebook_id, option_id="opt_pins")
+    materialization = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        revision,
+        materialization_id=f"materialization_{label.replace(' ', '_')}",
+    )
+
+    with pytest.raises((NotebookOptionError, ValueError)):
+        service.store.append_materialization(
+            notebook.notebook_id, change(materialization)
+        )
+
+
+def test_materialization_rejects_a_v11_option_that_is_not_selected(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="State", created_by="ui")
+    revision = _v11_option(
+        service, notebook.notebook_id, option_id="opt_proposed", lifecycle_status="proposed"
+    )
+    materialization = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        revision,
+        materialization_id="materialization_proposed",
+    )
+
+    with pytest.raises(ValueError, match="selected"):
+        service.store.append_materialization(notebook.notebook_id, materialization)
+
+
 def test_materialized_lifecycle_edges_are_allowed_and_terminal_states_refuse_exit(
     tmp_path: Path,
 ) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
     notebook = service.create_notebook(title="Lifecycle", created_by="ui")
-    option = _option(service, notebook.notebook_id, option_id="opt_lifecycle")
-    service.record_decision(
-        notebook.notebook_id, option.option_id, decision="selected", actor="user"
-    )
+    option = _v11_option(service, notebook.notebook_id, option_id="opt_lifecycle")
 
     def transition(to_status: str) -> None:
         service._transition(

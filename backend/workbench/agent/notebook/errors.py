@@ -79,6 +79,13 @@ class OptionLegacyUnverified(NotebookOptionError):
     status_code = 409
 
 
+class OptionMaterializationRequired(NotebookOptionError):
+    """A v1.1 option needs Task 7 Draft provenance before execution."""
+
+    code = "OPTION_MATERIALIZATION_REQUIRED"
+    status_code = 409
+
+
 class OptionLifecycleTransitionInvalid(NotebookOptionError):
     code = "OPTION_LIFECYCLE_TRANSITION_INVALID"
     status_code = 409
@@ -107,6 +114,7 @@ __all__ = [
     "OptionBatchInvalid",
     "OptionLifecycleTransitionInvalid",
     "OptionLegacyUnverified",
+    "OptionMaterializationRequired",
     "OptionNotFound",
     "OptionRevisionStale",
     "OptionValidationFailed",

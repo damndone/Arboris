@@ -29,7 +29,7 @@ from ...contracts.agent.notebook_option import (
     RecommendationDecision,
 )
 from ..storage import append_jsonl_atomic, read_jsonl
-from .errors import NotebookNotFound, OptionNotFound
+from .errors import NotebookNotFound, OptionLegacyUnverified, OptionNotFound
 from .proposal import TypedProposal
 
 NOTEBOOK_SCHEMA_VERSION = "notebook.v1"
@@ -627,6 +627,7 @@ class NotebookStore:
             if not isinstance(value, Mapping):
                 raise ValueError("option materialization record is malformed")
             materialization = OptionMaterialization.from_dict(value)
+            self._validate_persisted_materialization(notebook_id, materialization)
             key = (materialization.option_id, materialization.option_revision)
             existing = materializations.get(key)
             if existing is not None and existing != materialization:
@@ -636,6 +637,62 @@ class NotebookStore:
                 )
             materializations[key] = materialization
         return materializations
+
+    def _materialization_revision(
+        self, notebook_id: str, materialization: OptionMaterialization
+    ) -> tuple[Notebook, OptionView, NotebookOptionRevision]:
+        """Resolve immutable materialization pins against persisted Notebook state."""
+
+        notebook = self.get_notebook(notebook_id)
+        if materialization.run_family_id != notebook.run_family_id:
+            raise ValueError("materialization run_family_id does not match Notebook")
+
+        view = self.read_option(notebook_id, materialization.option_id)
+        revision = next(
+            (
+                candidate
+                for candidate in view.revisions
+                if candidate.option_revision == materialization.option_revision
+            ),
+            None,
+        )
+        if revision is None:
+            raise ValueError("materialization option_revision does not exist")
+        if not revision.materializable:
+            raise OptionLegacyUnverified(
+                f"option {materialization.option_id} revision "
+                f"{materialization.option_revision} is legacy and cannot be materialized",
+                option_id=materialization.option_id,
+                option_revision=materialization.option_revision,
+                contract_version=revision.contract_version,
+            )
+
+        pins = {
+            "proposal_id": revision.typed_proposal_id,
+            "proposal_revision": revision.typed_proposal_revision,
+            "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
+            "generation_context_id": revision.generation_context_id,
+        }
+        for field, expected in pins.items():
+            if getattr(materialization, field) != expected:
+                raise ValueError(f"materialization {field} does not match option revision")
+        return notebook, view, revision
+
+    def _validate_persisted_materialization(
+        self, notebook_id: str, materialization: OptionMaterialization
+    ) -> None:
+        """Fail closed on malformed, conflicting, or foreign persisted records."""
+
+        self._materialization_revision(notebook_id, materialization)
+
+    def _validate_new_materialization(
+        self, notebook_id: str, materialization: OptionMaterialization
+    ) -> None:
+        _, view, revision = self._materialization_revision(notebook_id, materialization)
+        if view.current_revision.option_revision != revision.option_revision:
+            raise ValueError("materialization option_revision is not current")
+        if view.lifecycle_status != "selected":
+            raise ValueError("materialization requires a selected option")
 
     def append_materialization(
         self, notebook_id: str, materialization: OptionMaterialization
@@ -652,6 +709,7 @@ class NotebookStore:
                         f"{materialization.option_id}@{materialization.option_revision}"
                     )
                 return
+            self._validate_new_materialization(notebook_id, materialization)
             append_jsonl_atomic(
                 self._notebook_path(notebook_id),
                 {
