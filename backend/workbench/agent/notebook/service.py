@@ -1130,6 +1130,21 @@ class NotebookService:
         trace: TraceWriter | None = None,
     ) -> None:
         current = view.lifecycle_status
+        if view.current_revision.materializable and to_status == "materialized":
+            materialization = self.store.read_materialization(
+                notebook_id,
+                view.option_id,
+                view.current_revision.option_revision,
+            )
+            if materialization is None:
+                raise OptionMaterializationRequired(
+                    f"option {view.option_id} revision "
+                    f"{view.current_revision.option_revision} requires a real "
+                    "Draft materialization before entering materialized",
+                    option_id=view.option_id,
+                    option_revision=view.current_revision.option_revision,
+                    contract_version=view.current_revision.contract_version,
+                )
         transitions = (
             _LIFECYCLE_TRANSITIONS
             if view.current_revision.materializable

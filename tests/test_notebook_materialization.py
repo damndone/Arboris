@@ -468,6 +468,19 @@ def test_materialized_lifecycle_edges_are_allowed_and_terminal_states_refuse_exi
 
     with pytest.raises(OptionLifecycleTransitionInvalid):
         transition("executing")
+    with pytest.raises(NotebookOptionError) as excinfo:
+        transition("materialized")
+    assert excinfo.value.code == "OPTION_MATERIALIZATION_REQUIRED"
+
+    service.store.append_materialization(
+        notebook.notebook_id,
+        _bound_materialization(
+            service,
+            notebook.notebook_id,
+            option,
+            materialization_id="materialization_lifecycle",
+        ),
+    )
     transition("materialized")
     transition("selected")
     transition("materialized")
