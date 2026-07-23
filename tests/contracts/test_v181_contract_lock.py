@@ -19,8 +19,11 @@ from workbench.contracts.agent.notebook_option import (
     ArtifactContract,
     NotebookContractError,
     NotebookOptionRevision,
+    OptionMaterialization,
     OptionExecution,
+    RecommendationDecision,
 )
+from workbench.contracts.common.envelope import ContractError
 from workbench.contracts.model.ets import (
     ETS_MODEL_TYPE,
     ETSContractError,
@@ -259,3 +262,156 @@ def test_option_revision_refuses_unknown_fields() -> None:
         NotebookOptionRevision.from_dict(payload)
 
     assert "unknown field" in str(excinfo.value)
+
+
+# ----------------------------------------------------------------------
+# Notebook option evidence and materialization contracts (v1.1)
+# ----------------------------------------------------------------------
+
+
+def test_legacy_option_revision_projects_as_unverified_and_cannot_materialize() -> None:
+    legacy = NotebookOptionRevision.from_dict(_fixture("notebook_option_revision"))
+
+    assert legacy.contract_version == "1.0"
+    assert legacy.lifecycle_projection == "legacy_unverified"
+    assert legacy.materializable is False
+
+
+def test_public_legacy_constructors_remain_writable_until_new_writers_migrate() -> None:
+    option_payload = _fixture("notebook_option_revision")
+    option_payload["artifact_contract"] = ArtifactContract.from_dict(
+        option_payload["artifact_contract"]
+    )
+    execution_payload = _fixture("option_execution")
+
+    revision = NotebookOptionRevision(**option_payload)
+    execution = OptionExecution(**execution_payload)
+
+    assert revision.contract_version == "1.0"
+    assert execution.contract_version == "1.0"
+
+
+def test_v11_option_revision_fixture_round_trips_with_evidence_and_recommendation() -> None:
+    payload = _fixture("notebook_option_revision_v11")
+
+    revision = NotebookOptionRevision.from_dict(payload)
+
+    assert revision.to_dict() == payload
+    assert revision.contract_version == "1.1"
+    assert revision.lifecycle_status == "materialized"
+    assert revision.materializable is True
+    assert revision.evidence_refs[0].result_hash.startswith("sha256:")
+    assert revision.recommendation_status == "recommended"
+
+
+def test_v10_option_revision_rejects_v11_only_fields() -> None:
+    payload = _fixture("notebook_option_revision")
+    payload["evidence_refs"] = []
+
+    with pytest.raises(NotebookContractError) as excinfo:
+        NotebookOptionRevision.from_dict(payload)
+
+    assert "unknown field" in str(excinfo.value)
+
+
+def test_recommendation_decision_fixture_round_trips() -> None:
+    payload = _fixture("recommendation_decision_v1")
+
+    decision = RecommendationDecision.from_dict(payload)
+
+    assert decision.to_dict() == payload
+    assert decision.recommended_option_id == "opt_7f3a1c"
+
+
+@pytest.mark.parametrize(
+    "outcome,recommended_option_id",
+    [
+        ("recommended", None),
+        ("tied", "opt_7f3a1c"),
+        ("insufficient_evidence", "opt_7f3a1c"),
+    ],
+)
+def test_recommendation_decision_rejects_invalid_outcome_selection(
+    outcome: str, recommended_option_id: str | None
+) -> None:
+    payload = _fixture("recommendation_decision_v1")
+    payload["outcome"] = outcome
+    payload["recommended_option_id"] = recommended_option_id
+
+    with pytest.raises(NotebookContractError):
+        RecommendationDecision.from_dict(payload)
+
+
+def test_materialization_fixture_round_trips_for_a_rerun_child() -> None:
+    payload = _fixture("option_materialization_v1")
+
+    materialization = OptionMaterialization.from_dict(payload)
+
+    assert materialization.to_dict() == payload
+    assert materialization.draft_execution_mode == "rerun_child"
+    assert materialization.dataset_upload_sha256 is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("dataset_upload_sha256", "sha256:uploaded-dataset"),
+        ("source_run_id", None),
+    ],
+)
+def test_materialization_rejects_invalid_rerun_child_xor(field: str, value: object) -> None:
+    payload = _fixture("option_materialization_v1")
+    payload[field] = value
+
+    with pytest.raises(NotebookContractError):
+        OptionMaterialization.from_dict(payload)
+
+
+def test_v11_execution_fixture_round_trips_with_materialization_pins() -> None:
+    payload = _fixture("option_execution_v11")
+
+    execution = OptionExecution.from_dict(payload)
+
+    assert execution.to_dict() == payload
+    assert execution.contract_version == "1.1"
+    assert execution.run_id == "run_003"
+    assert execution.materialization_id == "mat_6bca12"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["materialization_id", "draft_id", "draft_hash", "source_run_id", "run_id"],
+)
+def test_v11_execution_requires_every_materialization_pin(field: str) -> None:
+    payload = _fixture("option_execution_v11")
+    payload[field] = None
+
+    with pytest.raises(NotebookContractError):
+        OptionExecution.from_dict(payload)
+
+
+def test_v10_execution_refuses_v11_materialization_fields() -> None:
+    payload = _fixture("option_execution")
+    payload["materialization_id"] = "mat_6bca12"
+
+    with pytest.raises((NotebookContractError, ContractError)) as excinfo:
+        OptionExecution.from_dict(payload)
+
+    assert "unknown option_execution field" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "parser,fixture_name",
+    [
+        (NotebookOptionRevision.from_dict, "notebook_option_revision_v11"),
+        (RecommendationDecision.from_dict, "recommendation_decision_v1"),
+        (OptionMaterialization.from_dict, "option_materialization_v1"),
+        (OptionExecution.from_dict, "option_execution_v11"),
+    ],
+)
+def test_v11_packets_reject_unknown_fields(parser: object, fixture_name: str) -> None:
+    payload = _fixture(fixture_name)
+    payload["unversioned_extra"] = True
+
+    with pytest.raises((NotebookContractError, ContractError)):
+        parser(payload)  # type: ignore[operator]
