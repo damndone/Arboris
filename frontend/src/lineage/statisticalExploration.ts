@@ -64,6 +64,24 @@ export interface StatisticalExplorationConfirmResponse {
     source_sha256?: string;
   };
   result?: StatisticalExplorationResult;
+  exports?: Array<{
+    format: "html" | "pdf" | "xlsx";
+    artifact_id: string;
+    path: string;
+  }>;
+}
+
+export interface StatisticalOlsContextRequest extends StatisticalExplorationRequest {
+  outcome_column: string;
+  predictor_columns: string[];
+  preview_fingerprint: string;
+}
+
+export interface StatisticalOlsContextResponse {
+  status: "draft_created";
+  draft: { draft_id: string } & Record<string, unknown>;
+  draft_hash: string;
+  exploration: StatisticalExplorationConfirmResponse["exploration"];
 }
 
 function projectQuery(projectRoot: string): string {
@@ -93,4 +111,16 @@ export async function confirmStatisticalExploration(
     body: JSON.stringify(request),
   });
   return readResponse<StatisticalExplorationConfirmResponse>(response);
+}
+
+export async function createStatisticalOlsContext(
+  projectRoot: string,
+  request: StatisticalOlsContextRequest,
+): Promise<StatisticalOlsContextResponse> {
+  const response = await fetch(apiUrl(`/statistical-explorations/ols-context${projectQuery(projectRoot)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readResponse<StatisticalOlsContextResponse>(response);
 }

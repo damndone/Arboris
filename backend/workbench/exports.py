@@ -13,10 +13,17 @@ from reportlab.pdfgen import canvas
 from .artifacts import register_artifact
 
 
-def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
+def export_pdf(
+    report: Mapping[str, Any],
+    run_root: Path,
+    *,
+    filename: str = "report.pdf",
+    artifact_id: str = "report_pdf",
+    inputs: Sequence[str] = (),
+) -> Path:
     reports_dir = run_root / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = reports_dir / "report.pdf"
+    pdf_path = reports_dir / filename
 
     pdf = canvas.Canvas(str(pdf_path), pagesize=letter, pageCompression=0)
     _, height = letter
@@ -43,14 +50,21 @@ def export_pdf(report: Mapping[str, Any], run_root: Path) -> Path:
         _draw_section(pdf, "Warnings", report.get("warnings", []), y)
     pdf.save()
 
-    register_artifact(run_root, "report_pdf", pdf_path, "report", "export", [])
+    register_artifact(run_root, artifact_id, pdf_path, "report", "export", list(inputs))
     return pdf_path
 
 
-def export_xlsx(tables: Mapping[str, Sequence[Mapping[str, Any]]], run_root: Path) -> Path:
+def export_xlsx(
+    tables: Mapping[str, Sequence[Mapping[str, Any]]],
+    run_root: Path,
+    *,
+    filename: str = "tables.xlsx",
+    artifact_id: str = "tables_xlsx",
+    inputs: Sequence[str] = (),
+) -> Path:
     exports_dir = run_root / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
-    xlsx_path = exports_dir / "tables.xlsx"
+    xlsx_path = exports_dir / filename
 
     workbook = Workbook()
     default_sheet = workbook.active
@@ -74,7 +88,7 @@ def export_xlsx(tables: Mapping[str, Sequence[Mapping[str, Any]]], run_root: Pat
         workbook.create_sheet(title="tables")
     workbook.save(xlsx_path)
 
-    register_artifact(run_root, "tables_xlsx", xlsx_path, "table_export", "export", [])
+    register_artifact(run_root, artifact_id, xlsx_path, "table_export", "export", list(inputs))
     return xlsx_path
 
 

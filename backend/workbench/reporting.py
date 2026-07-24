@@ -36,16 +36,24 @@ def _normalize_to_view_model(data: dict[str, Any]) -> dict[str, Any]:
         ],
         "causal_caution": "",
         "descriptive_stats": data.get("descriptive_stats"),
+        "exploration": data.get("exploration"),
         "statistical_tests": data.get("statistical_tests"),
         "model_diagnostics": data.get("diagnostics", {}),
         "model_quality": None,
     }
 
 
-def render_html_report(view_model: dict[str, Any], run_root: Path) -> Path:
+def render_html_report(
+    view_model: dict[str, Any],
+    run_root: Path,
+    *,
+    filename: str = "report.html",
+    artifact_id: str = "report_html",
+    inputs: list[str] | tuple[str, ...] = (),
+) -> Path:
     reports_dir = run_root / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
-    html_path = reports_dir / "report.html"
+    html_path = reports_dir / filename
 
     environment = Environment(
         loader=FileSystemLoader(Path(__file__).parent / "templates"),
@@ -58,5 +66,5 @@ def render_html_report(view_model: dict[str, Any], run_root: Path) -> Path:
         template = environment.get_template("report.html.j2")
         rendered_view_model = _normalize_to_view_model(view_model)
     write_text_durable(html_path, template.render(view_model=rendered_view_model))
-    register_artifact(run_root, "report_html", html_path, "report", "reporting", [])
+    register_artifact(run_root, artifact_id, html_path, "report", "reporting", list(inputs))
     return html_path

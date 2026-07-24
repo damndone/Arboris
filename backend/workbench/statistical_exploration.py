@@ -322,6 +322,13 @@ def persist_exploration(
         step="statistical_exploration",
         inputs=[artifact_id],
     )
+    exports = _persist_exploration_exports(
+        run_root,
+        artifact_id=artifact_id,
+        fingerprint=fingerprint,
+        spec=spec,
+        result=result,
+    )
     record = {
         "artifact_id": artifact_id,
         "path": result_rel,
@@ -329,6 +336,7 @@ def persist_exploration(
         "transcript_path": transcript_rel,
         "fingerprint": fingerprint,
         "source_sha256": source_sha256,
+        "exports": exports,
     }
     if spec.operation == "derive_boolean":
         if source_frame is None:
@@ -360,6 +368,194 @@ def persist_exploration(
             result=result,
         )
     return record
+
+
+def _persist_exploration_exports(
+    run_root: Path,
+    *,
+    artifact_id: str,
+    fingerprint: str,
+    spec: ExplorationSpec,
+    result: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Persist inspectable report files for one confirmed exploration.
+
+    The JSON result remains authoritative.  These are presentation/export
+    views of that bounded result, each keyed by the same exploration
+    fingerprint so repeated confirmation cannot overwrite another action.
+    """
+    from .exports import export_pdf, export_xlsx
+
+    stem = f"statistical_exploration_{fingerprint[:24]}"
+    report = _exploration_report(spec, result)
+    inputs = [artifact_id]
+
+    html_rel = f"reports/{stem}.html"
+    html_path = run_root / html_rel
+    html_artifact_id = f"{stem}_html"
+    from .reporting import render_html_report
+    if not _artifact_is_registered(run_root, html_artifact_id):
+        render_html_report(
+            report,
+            run_root,
+            filename=f"{stem}.html",
+            artifact_id=html_artifact_id,
+            inputs=inputs,
+        )
+    else:
+        _ensure_exploration_artifact(
+            run_root,
+            artifact_id=html_artifact_id,
+            path=html_path,
+            artifact_type="report",
+            step="statistical_exploration.export",
+            inputs=inputs,
+        )
+
+    pdf_rel = f"reports/{stem}.pdf"
+    pdf_path = run_root / pdf_rel
+    pdf_artifact_id = f"{stem}_pdf"
+    if not _artifact_is_registered(run_root, pdf_artifact_id):
+        export_pdf(
+            report,
+            run_root,
+            filename=f"{stem}.pdf",
+            artifact_id=pdf_artifact_id,
+            inputs=inputs,
+        )
+    else:
+        _ensure_exploration_artifact(
+            run_root,
+            artifact_id=pdf_artifact_id,
+            path=pdf_path,
+            artifact_type="report",
+            step="statistical_exploration.export",
+            inputs=inputs,
+        )
+
+    xlsx_rel = f"exports/{stem}.xlsx"
+    xlsx_path = run_root / xlsx_rel
+    xlsx_artifact_id = f"{stem}_xlsx"
+    if not _artifact_is_registered(run_root, xlsx_artifact_id):
+        export_xlsx(
+            _exploration_tables(result),
+            run_root,
+            filename=f"{stem}.xlsx",
+            artifact_id=xlsx_artifact_id,
+            inputs=inputs,
+        )
+    else:
+        _ensure_exploration_artifact(
+            run_root,
+            artifact_id=xlsx_artifact_id,
+            path=xlsx_path,
+            artifact_type="table_export",
+            step="statistical_exploration.export",
+            inputs=inputs,
+        )
+
+    return [
+        {"format": "html", "artifact_id": html_artifact_id, "path": html_rel},
+        {"format": "pdf", "artifact_id": pdf_artifact_id, "path": pdf_rel},
+        {"format": "xlsx", "artifact_id": xlsx_artifact_id, "path": xlsx_rel},
+    ]
+
+
+def _artifact_is_registered(run_root: Path, artifact_id: str) -> bool:
+    index = read_json(run_root / "artifacts_index.json")
+    return any(item.get("artifact_id") == artifact_id for item in index.get("artifacts", []))
+
+
+def _exploration_report(spec: ExplorationSpec, result: dict[str, Any]) -> dict[str, Any]:
+    facts = [
+        f"Operation: {spec.operation}",
+        f"Source rows: {result.get('source_row_count', 0)}",
+        f"Rows after filters: {result.get('filtered_row_count', 0)}",
+    ]
+    return {
+        "title": f"Statistical exploration — {spec.operation}",
+        "facts": facts,
+        "descriptive_stats": _exploration_descriptive_rows(result),
+        "exploration": {
+            "operation": spec.operation,
+            "source_row_count": result.get("source_row_count", 0),
+            "filtered_row_count": result.get("filtered_row_count", 0),
+            "missing_policy": result.get("missing_policy"),
+            "rows": _result_table_rows(result),
+        },
+        "claims": [],
+        "warnings": [],
+    }
+
+
+def _exploration_descriptive_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    variables = result.get("variables")
+    if not isinstance(variables, Mapping):
+        return []
+    rows: list[dict[str, Any]] = []
+    for name, values in variables.items():
+        if not isinstance(values, Mapping):
+            continue
+        obs = values.get("obs")
+        missing = values.get("missing")
+        rows.append(
+            {
+                "column": str(name),
+                "dtype": "exploration",
+                "count": obs if isinstance(obs, (int, float)) else 0,
+                "missing_rate": (
+                    float(missing) / (float(obs) + float(missing))
+                    if isinstance(missing, (int, float)) and isinstance(obs, (int, float)) and obs + missing
+                    else 0.0
+                ),
+                "mean": values.get("mean"),
+                "std": values.get("std_dev"),
+                "min": values.get("min"),
+                "max": values.get("max"),
+            }
+        )
+    return rows
+
+
+def _result_table_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    variables = result.get("variables")
+    if isinstance(variables, Mapping):
+        rows: list[dict[str, Any]] = []
+        for name, values in variables.items():
+            row: dict[str, Any] = {"variable": str(name)}
+            if isinstance(values, Mapping):
+                for key, value in values.items():
+                    row[str(key)] = value if isinstance(value, (str, int, float, bool)) or value is None else json.dumps(value, ensure_ascii=False, sort_keys=True)
+            else:
+                row["value"] = values
+            rows.append(row)
+        return rows
+    groups = result.get("groups")
+    if isinstance(groups, list):
+        return [dict(item) for item in groups if isinstance(item, Mapping)]
+    matrix = result.get("matrix")
+    if isinstance(matrix, list):
+        return [
+            {"row": index, "values": json.dumps(row, ensure_ascii=False)}
+            for index, row in enumerate(matrix)
+        ]
+    return [
+        {
+            "operation": result.get("operation"),
+            "filtered_row_count": result.get("filtered_row_count"),
+            "correlation_n": result.get("correlation_n"),
+        }
+    ]
+
+
+def _exploration_tables(result: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    tables = {"result": _result_table_rows(result)}
+    if isinstance(result.get("matrix"), list):
+        tables["correlation_matrix"] = [
+            {"row": index, "values": json.dumps(row, ensure_ascii=False)}
+            for index, row in enumerate(result["matrix"])
+        ]
+    return tables
 
 
 def _ensure_exploration_artifact(

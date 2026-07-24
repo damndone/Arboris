@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { artifactDownloadUrl } from "../../../api";
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
 import type { DataColumnCastContext } from "../../dataOperations";
 import { fetchDataColumnCastContext } from "../../dataOperations";
@@ -6,10 +7,13 @@ import type { GraphViewNode } from "../../api/graphViewTypes";
 import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
 import {
   confirmStatisticalExploration,
+  createStatisticalOlsContext,
   previewStatisticalExploration,
   type StatisticalExplorationOperation,
   type StatisticalExplorationPreview,
+  type StatisticalExplorationConfirmResponse,
   type StatisticalExplorationRequest,
+  type StatisticalOlsContextResponse,
   type StatisticalFilter,
   type StatisticalFilterOperator,
 } from "../../statisticalExploration";
@@ -61,6 +65,11 @@ function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) 
         result.groups.map((group, index) => (
           <div key={index} data-testid={`statistical-exploration-group-${index}`}>
             {String(group.value)} · {String(group.filtered_row_count)} rows
+            {typeof group.variables === "object" && group.variables !== null ? (
+              <div>{Object.entries(group.variables as Record<string, unknown>).map(([name, value]) => (
+                <div key={name}><strong>{name}</strong>: {typeof value === "object" ? JSON.stringify(value) : String(value)}</div>
+              ))}</div>
+            ) : null}
           </div>
         ))
       ) : variables && !Array.isArray(variables) ? (
@@ -75,6 +84,32 @@ function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) 
   );
 }
 
+function ExportLinks({
+  projectRoot,
+  runId,
+  exports,
+}: {
+  projectRoot: string;
+  runId: string;
+  exports: NonNullable<StatisticalExplorationConfirmResponse["exports"]>;
+}) {
+  if (exports.length === 0) return null;
+  return (
+    <div data-testid="statistical-exploration-exports">
+      Exports: {exports.map((item) => (
+        <a
+          key={item.artifact_id}
+          href={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+          download
+          style={{ marginLeft: 8 }}
+        >
+          {item.format.toUpperCase()}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function StatisticalExplorationSection({ node }: { node: GraphViewNode }) {
   const isDatasetNode = node.kind === "dataset_stage";
   const projectRoot = useProjectRootOptional();
@@ -84,6 +119,14 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterRowState[]>([]);
   const [preview, setPreview] = useState<StatisticalExplorationPreview | null>(null);
+  const [exports, setExports] = useState<NonNullable<StatisticalExplorationConfirmResponse["exports"]>>([]);
+  const [olsOutcome, setOlsOutcome] = useState("");
+  const [olsPredictors, setOlsPredictors] = useState<string[]>([]);
+  const [olsDraft, setOlsDraft] = useState<StatisticalOlsContextResponse | null>(null);
+  const [olsStatus, setOlsStatus] = useState<"idle" | "creating" | "error">("idle");
+  const [olsError, setOlsError] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState("");
+  const [groupValues, setGroupValues] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "previewing" | "confirming" | "complete" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
@@ -96,6 +139,14 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
     setSelectedColumns([]);
     setFilters([]);
     setPreview(null);
+    setExports([]);
+    setOlsOutcome("");
+    setOlsPredictors([]);
+    setOlsDraft(null);
+    setOlsStatus("idle");
+    setOlsError(null);
+    setGroupBy("");
+    setGroupValues("");
     setError(null);
     if (!isDatasetNode || !projectRoot || !sourceRunId || !sourceNodeId) return;
     setStatus("loading");
@@ -130,8 +181,19 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
       operation,
       selected_columns: selectedColumns,
       filters: typedFilters,
+      options: operation === "summarize" && groupBy
+        ? {
+            group_by: groupBy,
+            group_values: groupValues.split(",").map((value) => value.trim()).filter(Boolean).map((value) => filterValue(value, groupBy, sourceContext)),
+          }
+        : {},
     };
-  }, [filters, operation, selectedColumns, sourceContext, sourceNodeId, sourceRunId]);
+  }, [filters, groupBy, groupValues, operation, selectedColumns, sourceContext, sourceNodeId, sourceRunId]);
+
+  const numericColumns = useMemo(
+    () => sourceContext?.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name) ?? [],
+    [sourceContext],
+  );
 
   function addFilter() {
     const first = sourceContext?.columns[0]?.name ?? "";
@@ -168,14 +230,34 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
     setStatus("confirming");
     setError(null);
     try {
-      await confirmStatisticalExploration(projectRoot, {
+      const response = await confirmStatisticalExploration(projectRoot, {
         ...request,
         preview_fingerprint: preview.fingerprint,
       });
+      setExports(response.exports ?? []);
       setStatus("complete");
     } catch (reason: unknown) {
       setStatus("error");
       setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function handleOlsContext() {
+    if (!projectRoot || !request || !preview || preview.status !== "ready" || !olsOutcome || olsPredictors.length === 0) return;
+    setOlsStatus("creating");
+    setOlsError(null);
+    try {
+      const response = await createStatisticalOlsContext(projectRoot, {
+        ...request,
+        outcome_column: olsOutcome,
+        predictor_columns: olsPredictors,
+        preview_fingerprint: preview.fingerprint,
+      });
+      setOlsDraft(response);
+      setOlsStatus("idle");
+    } catch (reason: unknown) {
+      setOlsStatus("error");
+      setOlsError(reason instanceof Error ? reason.message : String(reason));
     }
   }
 
@@ -212,6 +294,15 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                 <option value="scatter">Scatter plot</option>
               </select>
             </label>
+            {operation === "summarize" && (
+              <div className="statistical-exploration-grouping">
+                <label>Group by <select data-testid="statistical-exploration-group-by" value={groupBy} onChange={(event) => { setGroupBy(event.target.value); setPreview(null); }}>
+                  <option value="">No grouping</option>
+                  {sourceContext.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+                </select></label>
+                {groupBy && <label>Group values <input data-testid="statistical-exploration-group-values" value={groupValues} onChange={(event) => { setGroupValues(event.target.value); setPreview(null); }} placeholder="1998, 2002, 2006, 2010, 2014, 2016" /></label>}
+              </div>
+            )}
             <fieldset>
               <legend>Variables</legend>
               {sourceContext.columns.map((column) => (
@@ -269,13 +360,13 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
               <DerivedVariableBuilder
                 projectRoot={projectRoot ?? ""}
                 request={request}
-                numericColumns={sourceContext.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name)}
+                numericColumns={numericColumns}
               />
             ) : operation === "scatter" && request ? (
               <StatisticalPlotSection
                 projectRoot={projectRoot ?? ""}
                 request={request}
-                numericColumns={sourceContext.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name)}
+                numericColumns={numericColumns}
               />
             ) : (
               <>
@@ -300,9 +391,42 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                   )}
                 </div>
                 {preview && <ResultSummary preview={preview} />}
+                {preview?.status === "ready" && (
+                  <fieldset className="statistical-exploration-derived" data-testid="statistical-ols-context">
+                    <legend>Use filtered context for OLS</legend>
+                    <label>Outcome <select data-testid="statistical-ols-outcome" value={olsOutcome} onChange={(event) => setOlsOutcome(event.target.value)}>
+                      <option value="">Choose outcome</option>
+                      {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+                    </select></label>
+                    <div>Predictors</div>
+                    {numericColumns.map((column) => (
+                      <label key={column} style={{ marginRight: 8 }}>
+                        <input
+                          type="checkbox"
+                          data-testid={`statistical-ols-predictor-${column}`}
+                          checked={olsPredictors.includes(column)}
+                          disabled={column === olsOutcome}
+                          onChange={(event) => setOlsPredictors((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))}
+                        />
+                        {column}
+                      </label>
+                    ))}
+                    <button type="button" data-testid="statistical-ols-context-submit" disabled={!olsOutcome || olsPredictors.length === 0 || olsStatus === "creating"} onClick={() => void handleOlsContext()}>
+                      {olsStatus === "creating" ? "Creating Draft…" : "Create OLS Draft"}
+                    </button>
+                    <div>Creates a reviewable Draft; it does not run OLS.</div>
+                    {olsStatus === "error" && <div data-testid="statistical-ols-context-error">{olsError}</div>}
+                    {olsDraft && <a data-testid="statistical-ols-context-link" href={`/pipeline-drafts/${encodeURIComponent(olsDraft.draft.draft_id)}?project_root=${encodeURIComponent(projectRoot ?? "")}`}>Open OLS Draft</a>}
+                  </fieldset>
+                )}
               </>
             )}
-            {status === "complete" && <div data-testid="statistical-exploration-complete">Exploration saved as an artifact.</div>}
+            {status === "complete" && (
+              <>
+                <div data-testid="statistical-exploration-complete">Exploration saved as an artifact.</div>
+                {projectRoot && sourceRunId && <ExportLinks projectRoot={projectRoot} runId={sourceRunId} exports={exports} />}
+              </>
+            )}
           </>
         )}
       </div>

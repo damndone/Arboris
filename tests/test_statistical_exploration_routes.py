@@ -67,8 +67,8 @@ def test_statistical_exploration_preview_confirm_is_durable_and_idempotent(
             json=body,
         )
 
-    assert first.status_code == 200
-    assert second.status_code == 200
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
     first_record = first.json()["exploration"]
     second_record = second.json()["exploration"]
     assert second_record == first_record
@@ -78,6 +78,12 @@ def test_statistical_exploration_preview_confirm_is_durable_and_idempotent(
     assert len([item for item in records if item["artifact_type"] == "transcript"]) == 1
     assert (project / "runs" / run_id / first_record["path"]).is_file()
     assert (project / "runs" / run_id / first_record["transcript_path"]).is_file()
+    exports = first.json()["exports"]
+    assert {item["format"] for item in exports} == {"html", "pdf", "xlsx"}
+    for item in exports:
+        assert (project / "runs" / run_id / item["path"]).is_file()
+    assert len([item for item in records if item["artifact_type"] == "report"]) == 2
+    assert len([item for item in records if item["artifact_type"] == "table_export"]) == 1
 
 
 def test_statistical_exploration_confirm_fails_closed_when_source_changes(

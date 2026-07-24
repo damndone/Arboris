@@ -149,6 +149,32 @@ def _model_stats(runs_dir: Path, run_id: str, node_id: str) -> dict[str, Any] | 
         coefficients.append({k: row.get(k) for k in _COEFFICIENT_ROW_KEYS})
     if coefficients:
         stats["coefficients"] = coefficients
+    try:
+        index = read_json(runs_dir / run_id / "artifacts_index.json")
+    except (FileNotFoundError, OSError, ValueError):
+        index = {}
+    diagnostic_artifacts = []
+    for record in index.get("artifacts", []):
+        if not isinstance(record, dict) or record.get("artifact_type") != "figure":
+            continue
+        artifact_id = record.get("artifact_id")
+        if not isinstance(artifact_id, str):
+            continue
+        if not (
+            artifact_id in {"residuals_fitted", "qq_residuals", "coef_plot"}
+            or artifact_id.startswith("residuals_vs_")
+            or artifact_id.startswith("fitted_vs_")
+        ):
+            continue
+        path = str(record.get("path") or "")
+        mime = "image/png" if path.lower().endswith(".png") else "application/octet-stream"
+        diagnostic_artifacts.append({
+            "artifact_id": artifact_id,
+            "mime": mime,
+            "sha256": record.get("sha256"),
+        })
+    if diagnostic_artifacts:
+        stats["diagnostic_artifacts"] = diagnostic_artifacts
     return stats or None
 
 

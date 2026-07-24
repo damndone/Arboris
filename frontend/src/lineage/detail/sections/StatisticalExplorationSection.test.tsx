@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StatisticalExplorationSection } from "./StatisticalExplorationSection";
 import type { GraphViewNode } from "../../api/graphViewTypes";
 
-const { resolvedMock, contextMock, schemaMock, previewMock, confirmMock } = vi.hoisted(() => ({
+const { resolvedMock, contextMock, schemaMock, previewMock, confirmMock, olsMock } = vi.hoisted(() => ({
   resolvedMock: { current: null as unknown },
   contextMock: { current: null as unknown },
   schemaMock: vi.fn(),
   previewMock: vi.fn(),
   confirmMock: vi.fn(),
+  olsMock: vi.fn(),
 }));
 
 vi.mock("../NodeOperationContextProvider", () => ({
@@ -23,6 +24,7 @@ vi.mock("../../dataOperations", () => ({
 vi.mock("../../statisticalExploration", () => ({
   previewStatisticalExploration: (...args: unknown[]) => previewMock(...args),
   confirmStatisticalExploration: (...args: unknown[]) => confirmMock(...args),
+  createStatisticalOlsContext: (...args: unknown[]) => olsMock(...args),
 }));
 
 function node(): GraphViewNode {
@@ -75,8 +77,14 @@ describe("StatisticalExplorationSection", () => {
         },
       },
     });
-    confirmMock.mockResolvedValue({
+  confirmMock.mockResolvedValue({
       status: "completed",
+      exploration: { artifact_id: "statistical_exploration_fp-1" },
+    });
+    olsMock.mockResolvedValue({
+      status: "draft_created",
+      draft: { draft_id: "draft_ols_1" },
+      draft_hash: "hash-1",
       exploration: { artifact_id: "statistical_exploration_fp-1" },
     });
   });
@@ -113,5 +121,39 @@ describe("StatisticalExplorationSection", () => {
   it("does not render for a model node", () => {
     render(<StatisticalExplorationSection node={{ ...node(), kind: "model" }} />);
     expect(screen.queryByTestId("statistical-exploration-section")).not.toBeInTheDocument();
+  });
+
+  it("creates a reviewable OLS Draft without running a model", async () => {
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+    await waitFor(() => expect(screen.getByTestId("statistical-ols-context")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("statistical-ols-outcome"), { target: { value: "bdsnew" } });
+    fireEvent.click(screen.getByTestId("statistical-ols-predictor-pfl"));
+    fireEvent.click(screen.getByTestId("statistical-ols-context-submit"));
+    await waitFor(() => expect(screen.getByTestId("statistical-ols-context-link")).toBeInTheDocument());
+    expect(olsMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({
+      outcome_column: "bdsnew",
+      predictor_columns: ["pfl"],
+      preview_fingerprint: "fp-1",
+    }));
+    expect(screen.getByTestId("statistical-ols-context-link")).toHaveAttribute(
+      "href",
+      "/pipeline-drafts/draft_ols_1?project_root=%2Ftmp%2Fproject",
+    );
+  });
+
+  it("builds a typed year-wise summarize request without code", async () => {
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-by"), { target: { value: "year" } });
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-values"), { target: { value: "1998, 2002, 2006, 2010, 2014, 2016" } });
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-result")).toBeInTheDocument());
+    const request = previewMock.mock.calls[previewMock.mock.calls.length - 1]?.[1] as { options: { group_by: string; group_values: number[] } };
+    expect(request.options).toEqual({
+      group_by: "year",
+      group_values: [1998, 2002, 2006, 2010, 2014, 2016],
+    });
   });
 });

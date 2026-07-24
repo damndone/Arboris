@@ -289,6 +289,8 @@ def create_genesis_draft(
     filename: str,
     sheet_names: tuple[str, ...],
     columns: tuple[str, ...],
+    model_params: Mapping[str, Any] | None = None,
+    exploration_context: Mapping[str, Any] | None = None,
     notebook_provenance: Mapping[str, str] | None = None,
 ) -> StoredDraft:
     """Create one parentless, upload-bound genesis Draft without executing it."""
@@ -304,6 +306,15 @@ def create_genesis_draft(
     if not filename or Path(filename).name != filename:
         raise ValueError("FILENAME_INVALID")
     safe_columns = tuple(str(column) for column in columns if str(column))
+    requested_model_type = (model_params or {}).get("model_type") if model_params else None
+    model_node: dict[str, Any] = {
+        "node_id": "model_1",
+        "node_type": "model",
+        "model_family": "regression",
+        "model_type": requested_model_type if isinstance(requested_model_type, str) else None,
+        "params": dict(model_params or {}),
+        "status": "pending",
+    }
     draft: dict[str, Any] = {
         "draft_id": new_draft_id(),
         "schema_version": "pipeline_draft.v1",
@@ -330,14 +341,7 @@ def create_genesis_draft(
                     "columns": list(safe_columns),
                     "status": "pending",
                 },
-                {
-                    "node_id": "model_1",
-                    "node_type": "model",
-                    "model_family": "regression",
-                    "model_type": None,
-                    "params": {},
-                    "status": "pending",
-                },
+                model_node,
             ],
             "edges": [
                 {"from": "source_1", "to": "table_1"},
@@ -346,6 +350,8 @@ def create_genesis_draft(
         },
         "default_execution_mode": "genesis",
     }
+    if exploration_context is not None:
+        draft["exploration_context"] = dict(exploration_context)
     provenance = _provenance_payload(notebook_provenance)
     if provenance is not None:
         draft["notebook_provenance"] = provenance

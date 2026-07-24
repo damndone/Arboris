@@ -279,3 +279,47 @@ def test_create_figures_uses_model_preview_diagnostics(tmp_path: Path):
     assert {"residuals_fitted", "qq_residuals", "coef_plot"}.issubset(figures)
     assert (run.root / figures["residuals_fitted"]).exists()
     assert (run.root / figures["qq_residuals"]).exists()
+
+
+def test_create_figures_emits_class3_residual_and_fitted_predictor_plots(tmp_path: Path):
+    frame = pd.DataFrame(
+        {
+            "adj_dppupil_comp": [10.0, 12.0, 14.0, 16.0],
+            "pfl": [20.0, 30.0, 40.0, 50.0],
+            "pblack": [5.0, 10.0, 15.0, 20.0],
+        },
+        index=[10, 11, 12, 13],
+    )
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    model_result = {
+        "model_id": "ols_1",
+        "model_type": "ols",
+        "fitted_values_preview": [9.8, 12.1, 13.9, 16.2],
+        "residuals_preview": [0.2, -0.1, 0.1, -0.2],
+        "analysis_sample": {"row_order": [11, 12, 13, 10]},
+        "coefficients": {
+            "pfl": {"estimate": 0.1, "std_error": 0.02},
+            "pblack": {"estimate": 0.2, "std_error": 0.03},
+        },
+    }
+
+    figures = create_figures(
+        frame,
+        run.root,
+        numeric_columns=list(frame.columns),
+        time_column=None,
+        model_results=[("ols_1", model_result)],
+        outcome_column="adj_dppupil_comp",
+        regressors=["pfl", "pblack"],
+        model_type="ols",
+    )
+
+    expected = {
+        "residuals_vs_pfl",
+        "residuals_vs_pblack",
+        "fitted_vs_pfl",
+    }
+    assert expected.issubset(figures)
+    for artifact_id in expected:
+        assert (run.root / figures[artifact_id]).exists()

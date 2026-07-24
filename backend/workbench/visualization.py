@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import re
 
 import matplotlib
 
@@ -81,6 +82,14 @@ def create_figures(
 
     # ── model-fit diagnostics (any model exposing residuals/coefficients) ─
     _plot_model_diagnostics(model_results, figures_dir, run_root, figures)
+    _plot_predictor_diagnostics(
+        frame,
+        regressors or [],
+        model_results,
+        figures_dir,
+        run_root,
+        figures,
+    )
 
     # ── model-type-specific plots ───────────────────────────────────────
     _plot_model_specific(
@@ -414,6 +423,118 @@ def _plot_model_diagnostics(model_results, figures_dir, run_root, figures) -> No
         ax.set_yticks(list(y_positions), labels)
         ax.set_xlabel("Estimate")
         _save(fig, figures_dir / "coef_plot.png", run_root, "coef_plot", figures)
+
+
+def _plot_predictor_diagnostics(
+    frame: pd.DataFrame,
+    regressors: list[str],
+    model_results,
+    figures_dir: Path,
+    run_root: Path,
+    figures: dict[str, str],
+) -> None:
+    """Plot model residuals/fitted values against the model predictors.
+
+    The model result preview is aligned through ``analysis_sample.row_order``
+    when the OLS contract provides it.  This keeps a missing-value drop from
+    silently pairing a residual with the wrong source row; a positional
+    fallback is retained for older model results that predate that contract.
+    """
+    model_result = _first_model_result(model_results or [])
+    if model_result is None:
+        return
+    residuals = _model_numeric_list(model_result, "residuals_preview", "residuals")
+    fitted = _model_numeric_list(model_result, "fitted_values_preview", "fitted_values")
+    if not residuals or not fitted:
+        return
+    n = min(len(residuals), len(fitted), len(frame))
+    if n == 0:
+        return
+    aligned = _align_model_preview_frame(frame, model_result, n)
+    residual_values = residuals[:n]
+    fitted_values = fitted[:n]
+    for predictor in dict.fromkeys(regressors):
+        if predictor not in aligned.columns:
+            continue
+        values = pd.to_numeric(aligned[predictor], errors="coerce")
+        plot_frame = pd.DataFrame(
+            {
+                predictor: values.to_numpy(),
+                "residuals": residual_values,
+                "fitted_values": fitted_values,
+            }
+        ).dropna()
+        if plot_frame.empty:
+            continue
+        _save_predictor_diagnostic(
+            plot_frame,
+            predictor,
+            "residuals",
+            figures_dir,
+            run_root,
+            figures,
+            y_label="Residuals",
+            artifact_prefix="residuals_vs",
+        )
+        _save_predictor_diagnostic(
+            plot_frame,
+            predictor,
+            "fitted_values",
+            figures_dir,
+            run_root,
+            figures,
+            y_label="Fitted values",
+            artifact_prefix="fitted_vs",
+        )
+
+
+def _align_model_preview_frame(
+    frame: pd.DataFrame,
+    model_result: dict,
+    n: int,
+) -> pd.DataFrame:
+    sample = model_result.get("analysis_sample")
+    row_order = sample.get("row_order") if isinstance(sample, dict) else None
+    if isinstance(row_order, list) and len(row_order) >= n:
+        positions = {str(value): position for position, value in enumerate(frame.index)}
+        selected = [positions.get(str(value)) for value in row_order[:n]]
+        if all(position is not None for position in selected):
+            return frame.iloc[[int(position) for position in selected]]
+    return frame.iloc[:n]
+
+
+def _save_predictor_diagnostic(
+    plot_frame: pd.DataFrame,
+    predictor: str,
+    y_column: str,
+    figures_dir: Path,
+    run_root: Path,
+    figures: dict[str, str],
+    *,
+    y_label: str,
+    artifact_prefix: str,
+) -> None:
+    artifact_suffix = _safe_artifact_suffix(predictor)
+    artifact_id = f"{artifact_prefix}_{artifact_suffix}"
+    fig, ax = plt.subplots()
+    ax.scatter(plot_frame[predictor], plot_frame[y_column], alpha=0.75)
+    if y_column == "residuals":
+        ax.axhline(0, color="#8a94a6", linewidth=1)
+    ax.set_xlabel(predictor)
+    ax.set_ylabel(y_label)
+    ax.set_title(f"{y_label} vs {predictor} (N={len(plot_frame)})")
+    _save(
+        fig,
+        figures_dir / f"{artifact_id}.png",
+        run_root,
+        artifact_id,
+        figures,
+    )
+
+
+def _safe_artifact_suffix(column: str) -> str:
+    suffix = re.sub(r"[^0-9A-Za-z_]+", "_", str(column)).strip("_")
+    return suffix or "predictor"
 
 
 # ─── model-type-specific plots ──────────────────────────────────────────
