@@ -26,7 +26,12 @@
 // rail + panel + search palette work identically across them.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useSearchParams,
+} from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
@@ -64,9 +69,11 @@ import {
   getRunGraphHeadSet,
   executePipelineDraft,
   deletePipelineDraft,
+  waitForRunTerminal,
   type RerunResponseV1,
   type DraftExecutionResult,
 } from "../api";
+import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import type { GraphViewNode, HeadSetNode } from "../lineage/api/graphViewTypes";
 import { usePendingRun, type PendingRun } from "./usePendingRun";
 import { AgentSurfaceProvider } from "./agent/AgentSurfaceContext";
@@ -75,6 +82,8 @@ import {
   applyAgentNavigationRef,
 } from "./agent/agentNavigation";
 import { registerBuiltinFeatureViews } from "./agent/builtinFeatureViews";
+import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import type { NotebookMaterializationResponse } from "../notebook/notebookApi";
 
 type PendingFocusTarget = {
   runId: string;
@@ -111,6 +120,10 @@ interface WorkbenchHomeProps {
   focusRunId?: string;
 }
 
+type AppShellStatusContext = {
+  setError?: (message: string | null) => void;
+};
+
 /** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
  *  projectRoot alone; runId is only an optional focus hint. */
 export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
@@ -145,6 +158,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
+  const appShellContext = useOutletContext<AppShellStatusContext>();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
@@ -179,6 +193,15 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   // A run can be terminal before the project forest scanner has written its
   // head-set entry. Keep a focused deep link alive through that short window
   // instead of making the user refresh the page manually.
+  useEffect(() => {
+    if (!appShellContext?.setError) return;
+    if (error?.kind === "not_found") {
+      appShellContext.setError("Project not found");
+      return;
+    }
+    appShellContext.setError(null);
+  }, [appShellContext?.setError, error]);
+
   useEffect(() => {
     if (!focusRunId || !forest || focusRunIsKnownHead) {
       if (focusIndexPollAttempts !== 0) setFocusIndexPollAttempts(0);
@@ -383,7 +406,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+        onHome={() => navigate("/")}
       />
     );
   }
@@ -449,10 +472,46 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     setDraftBusy(true);
     dispatchDraft({ type: "executing", draftId });
     try {
+      const executionMode =
+        entry.draft?.default_execution_mode ??
+        entry.validation?.validated_execution_mode ??
+        "rerun_child";
       const result = await executePipelineDraft(projectRoot, draftId, {
         validated_draft_hash: entry.validation?.validated_draft_hash ?? entry.draftHash,
-        execution_mode: "rerun_child",
+        execution_mode: executionMode,
       });
+      const provenance = entry.draft?.notebook_provenance;
+      if (provenance?.notebook_id && provenance.option_id) {
+        // The Graph editor is another execution surface for a Notebook Draft.
+        // Reconcile only after the real run reaches a terminal state; otherwise
+        // Notebook could advance its active head on a merely-dispatched run.
+        void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
+          if (!detail) return;
+          const succeeded = detail.status === "completed";
+          return completeNotebookOptionExecution(
+            projectRoot,
+            provenance.notebook_id,
+            provenance.option_id,
+            {
+              execution_status: succeeded ? "succeeded" : "failed",
+              run_id: result.run_id,
+              ...(succeeded
+                ? {}
+                : {
+                    error_code:
+                      detail.errors?.issues?.[0]?.code ?? "WORKFLOW_NOT_COMPLETED",
+                  }),
+            },
+          );
+        }).catch(() => {
+          // The Run remains authoritative; a remounted Notebook can retry the
+          // reconciliation from the persisted Draft provenance.
+        });
+      }
+      if (executionMode === "genesis") {
+        handleGenesisDraftExecuted(result, draftId);
+        return;
+      }
       // v1.6.9 B1 — the produced run is a background async job; it is NOT in the
       // forest yet (a long run indexes minutes later). So keep the draft node on
       // the canvas in its "executing" (pending) state — the `executing` dispatch
@@ -523,7 +582,19 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     </aside>
   ) : null;
 
-  const body = !shellRunId && searchParams.get("view") === "home" ? (
+  const notebookActiveRunId = forest.heads.some((head) => head.runId === effectiveActiveRunId)
+    ? effectiveActiveRunId
+    : null;
+  const body = !shellRunId && searchParams.get("view") === "notebook" ? (
+    <NotebookOnlyShell
+      projectRoot={projectRoot}
+      activeRunId={notebookActiveRunId}
+      onMaterializedDraft={(response) => {
+        draftHandlers.onForkDraft(response);
+        void refetch();
+      }}
+    />
+  ) : !shellRunId && searchParams.get("view") === "home" ? (
     <HomeOnlyShell projectRoot={projectRoot} />
   ) : !shellRunId ? (
     <EmptyProjectCanvas
@@ -643,6 +714,63 @@ function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
   );
 }
 
+function NotebookOnlyShell({
+  projectRoot,
+  activeRunId,
+  onMaterializedDraft,
+}: {
+  projectRoot: string;
+  activeRunId: string | null;
+  onMaterializedDraft: (response: NotebookMaterializationResponse) => void;
+}) {
+  const navigate = useNavigate();
+
+  return (
+    <div
+      data-testid="workbench-notebook-shell"
+      style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}
+    >
+      <div
+        role="toolbar"
+        aria-label="Project toolbar"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "0 16px",
+          height: 40,
+          borderBottom: "1px solid var(--separator, #2e2e30)",
+        }}
+      >
+        <ProjectSwitcher projectRoot={projectRoot} />
+        <span style={{ color: "var(--label-secondary)", fontSize: 12 }}>Notebook</span>
+        <button
+          type="button"
+          data-testid="workbench-notebook-graph"
+          onClick={() => navigate(window.location.pathname)}
+          style={{
+            marginLeft: "auto",
+            padding: "4px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--separator)",
+            background: "transparent",
+            color: "var(--label)",
+            cursor: "pointer",
+            fontSize: 12,
+          }}
+        >
+          Graph
+        </button>
+      </div>
+      <NotebookRouteView
+        projectRoot={projectRoot}
+        activeRunId={activeRunId}
+        onMaterializedDraft={onMaterializedDraft}
+      />
+    </div>
+  );
+}
+
 /**
  * v1.6.8 T11 — the empty-canvas state for a zero-run project. Dark canvas
  * surface consistent with the workbench shell, a centered empty-state card
@@ -660,6 +788,7 @@ function EmptyProjectCanvas({
   legacyRunCount?: number;
   onOpenWizard: () => void;
 }) {
+  const navigate = useNavigate();
   const hasLegacyFamilies = legacyFamilyCount > 0;
   const legacyDisplayRunCount =
     legacyRunCount > 0 ? legacyRunCount : legacyFamilyCount;
@@ -686,7 +815,23 @@ function EmptyProjectCanvas({
           background: "var(--surface-elevated, transparent)",
         }}
       >
-        <ProjectSwitcher projectRoot={projectRoot} />
+          <ProjectSwitcher projectRoot={projectRoot} />
+          <button
+            type="button"
+            data-testid="notebook-cta"
+            onClick={() => navigate(`${window.location.pathname}?view=notebook`)}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 6,
+              border: "1px solid var(--separator)",
+              background: "transparent",
+              color: "var(--label)",
+              cursor: "pointer",
+              fontSize: 12,
+            }}
+          >
+            Notebook
+          </button>
       </div>
       <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
         <div
@@ -762,7 +907,17 @@ function LegacyGraphWorkbench({
   runId,
 }: WorkbenchRouteContainerProps) {
   const navigate = useNavigate();
+  const appShellContext = useOutletContext<AppShellStatusContext>();
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
+
+  useEffect(() => {
+    if (!appShellContext?.setError) return;
+    if (error?.kind === "not_found") {
+      appShellContext.setError("Project not found");
+      return;
+    }
+    appShellContext.setError(null);
+  }, [appShellContext?.setError, error]);
 
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(() => {
     if (model === null) return undefined;
@@ -775,7 +930,7 @@ function LegacyGraphWorkbench({
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+        onHome={() => navigate("/")}
       />
     );
   }

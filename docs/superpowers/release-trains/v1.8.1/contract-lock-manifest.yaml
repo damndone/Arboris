@@ -1,0 +1,55 @@
+release: v1.8.1
+# NOTE (ADR-PD-001 §4.1 deviation, user-approved 2026-07-22):
+# this baseline is NOT a published release snapshot. Gate 1/2/3 live on the
+# unmerged branch workbench-v1.8.1 and Gate 4/5/6 depend on them semantically.
+release_baseline_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
+release_baseline_published: false
+integration_base_commit: d86bf30195ccf315ce9e9ae3948722ac64202b28
+contract_lock_commit: 481fc2e30730395093fc0f8699843e1002d64aa3
+# The contracts, fixtures and compatibility tests all live in 481fc2e above.
+# A manifest cannot contain its own hash, so stamping that sha in required a
+# second, documentation-only commit. Lanes therefore branch from the tip of
+# integration/v1.8.1 at wave start rather than from 481fc2e itself. ADR-PD-001
+# 4.2 allows branch_start_commit != contract_lock_commit when the reason is
+# recorded; this is the reason. No contract byte differs between the two.
+branch_start_commit: see lane_branch_start below (doc-only commits above C1)
+lane_branch_start_recorded_in: docs/superpowers/release-trains/v1.8.1/lane-branch-start.txt
+
+contracts:
+  notebook_option: "1.0"
+  option_execution: "1.0"
+  artifact_contract: "1.0"
+  ets_result: "1.0"
+  notebook_planning_context: "1.0"   # Gate 2, backend/workbench/agent/context_compiler.py
+  agent_trace_event: "1.0"           # Gate 3, backend/workbench/agent/trace.py
+  run_family: "1.0"                  # Gate 1, backend/workbench/lineage/run_family.py
+
+contract_roots:
+  - backend/workbench/contracts/agent/notebook_option.py
+  - backend/workbench/contracts/model/ets.py
+  - backend/workbench/contracts/common/envelope.py
+
+canonical_fixtures:
+  - tests/fixtures/contracts/v181/notebook_option_revision.json
+  - tests/fixtures/contracts/v181/option_execution.json
+  - tests/fixtures/contracts/v181/ets_result.json
+
+compatibility_tests:
+  command: "pytest tests/contracts/test_v181_contract_lock.py -q"
+  observed: "18 passed"
+  observed_at: "2026-07-22"
+  implementation_present: false
+
+lanes:
+  - work_package: v181-agent-notebook-options
+    branch: feat/v181-agent-notebook-options
+    worktree: .worktrees/v181-agent-notebook-options
+  - work_package: v181-model-ets
+    branch: feat/v181-model-ets
+    worktree: .worktrees/v181-model-ets
+  - work_package: v181-ui-notebook
+    branch: feat/v181-ui-notebook
+    worktree: .worktrees/v181-ui-notebook
+  - work_package: v181-evaluation-harness
+    branch: test/v181-evaluation-harness
+    worktree: .worktrees/v181-evaluation-harness

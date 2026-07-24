@@ -154,6 +154,23 @@ describe("useDraftHandlers", () => {
       expect(setDraftBusy.mock.calls).toEqual([[true], [false]]);
     });
 
+    it("validates a Genesis draft with its persisted execution mode", async () => {
+      const validation = {
+        status: "valid",
+        validated_draft_hash: "genesis-hash",
+      } as unknown as DraftValidationResult;
+      asMock(validatePipelineDraft).mockResolvedValue(validation);
+      const genesis = {
+        ...draft("d1"),
+        default_execution_mode: "genesis",
+      } as PipelineDraftV1;
+      const { result } = setup(registryOf(entry({ draft: genesis })));
+
+      await result.current.onValidate("d1");
+
+      expect(validatePipelineDraft).toHaveBeenCalledWith("/p", "d1", "genesis");
+    });
+
     it("falls back to '' hash when validated_draft_hash is absent", async () => {
       const validation = { status: "invalid" } as unknown as DraftValidationResult;
       asMock(validatePipelineDraft).mockResolvedValue(validation);

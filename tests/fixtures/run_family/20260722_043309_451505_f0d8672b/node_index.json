@@ -1,0 +1,90 @@
+{
+  "stage:raw": {
+    "node_hash": "f0c112dbd0df8816423c0f07f780878a0e09074d4d48c0c3dc9d567945169cf0",
+    "producing_stage": "ingestion",
+    "cas_ref": {
+      "node_hash": "f0c112dbd0df8816423c0f07f780878a0e09074d4d48c0c3dc9d567945169cf0",
+      "artifact": "_uploads/VIXCLS.csv"
+    }
+  },
+  "stage:cleaned": {
+    "node_hash": "25d6da5c23af695985c2324b8086007b3aff494d2aba754ffa56a1f8683f91b8",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "25d6da5c23af695985c2324b8086007b3aff494d2aba754ffa56a1f8683f91b8",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "var:vixcls:cleaned": {
+    "node_hash": "25d6da5c23af695985c2324b8086007b3aff494d2aba754ffa56a1f8683f91b8",
+    "producing_stage": "cleaning",
+    "cas_ref": {
+      "node_hash": "25d6da5c23af695985c2324b8086007b3aff494d2aba754ffa56a1f8683f91b8",
+      "artifact": "processed/cleaned_dataset.parquet"
+    }
+  },
+  "model:arma_garch_1": {
+    "node_hash": "0c680bb0b3c494bfe7b21238b1bc5fb0b7bf5243aea68882f451771b12cd1549",
+    "producing_stage": "estimation",
+    "cas_ref": {
+      "node_hash": "0c680bb0b3c494bfe7b21238b1bc5fb0b7bf5243aea68882f451771b12cd1549",
+      "artifact": "model_results/arma_garch_1.json"
+    }
+  },
+  "report:html": {
+    "node_hash": "a9cbcd1a07a7383d9d6700dfc24652b50e483ee37f8f272c0f88b8aed439d9f9",
+    "producing_stage": "report",
+    "cas_ref": {
+      "node_hash": "a9cbcd1a07a7383d9d6700dfc24652b50e483ee37f8f272c0f88b8aed439d9f9",
+      "artifact": "reports/report.html"
+    }
+  },
+  "stage:ts-analysis-view": {
+    "node_hash": "c09275dbdbe3924f249b9051c9ccfdaff994d869416579cb00f1bdb733efab3c",
+    "producing_stage": "arma_garch:analysis-view",
+    "cas_ref": {
+      "node_hash": "c09275dbdbe3924f249b9051c9ccfdaff994d869416579cb00f1bdb733efab3c",
+      "artifact": "artifacts/time_series/ts.analysis_view_manifest.json"
+    }
+  },
+  "stage:ts-split": {
+    "node_hash": "f934d55ba22d41e000740ffa1e78ba7e1ae506216622f0b422fc9ca65d31652a",
+    "producing_stage": "arma_garch:split",
+    "cas_ref": {
+      "node_hash": "f934d55ba22d41e000740ffa1e78ba7e1ae506216622f0b422fc9ca65d31652a",
+      "artifact": "artifacts/time_series/ts.train_validation_split.json"
+    }
+  },
+  "stage:ts-mean-selection": {
+    "node_hash": "576dbda70dadf86a239e85924add3c7bb007c304f7c586bc9b86498efad70ac7",
+    "producing_stage": "arma_garch:mean-selection",
+    "cas_ref": {
+      "node_hash": "576dbda70dadf86a239e85924add3c7bb007c304f7c586bc9b86498efad70ac7",
+      "artifact": "artifacts/time_series/ts.arma_selection.json"
+    }
+  },
+  "stage:ts-volatility-selection": {
+    "node_hash": "51be8472301b8d1d13090ddf656b1a8562dcbe886975b4fa1dcf0fe4a3808ebe",
+    "producing_stage": "arma_garch:volatility-selection",
+    "cas_ref": {
+      "node_hash": "51be8472301b8d1d13090ddf656b1a8562dcbe886975b4fa1dcf0fe4a3808ebe",
+      "artifact": "artifacts/time_series/ts.volatility_selection.json"
+    }
+  },
+  "stage:ts-rolling-validation": {
+    "node_hash": "08d054b3867f5a3b2d40e8bb8baf34304cb6f5c5f89887052c61a3da180db9d4",
+    "producing_stage": "arma_garch:rolling-validation",
+    "cas_ref": {
+      "node_hash": "08d054b3867f5a3b2d40e8bb8baf34304cb6f5c5f89887052c61a3da180db9d4",
+      "artifact": "artifacts/time_series/ts.forecast_metrics.json"
+    }
+  },
+  "stage:ts-full-sample-child": {
+    "node_hash": "ef72f022baa760e138875f284536e30516b7268539e5779644444dde22248887",
+    "producing_stage": "arma_garch:full-sample-child",
+    "cas_ref": {
+      "node_hash": "ef72f022baa760e138875f284536e30516b7268539e5779644444dde22248887",
+      "artifact": "artifacts/time_series/ts.next_forecast.json"
+    }
+  }
+}

@@ -61,8 +61,13 @@ OPTIONAL_FIELDS = frozenset(
         "duration_ms",
         "resource_usage",
         "tags",
+        "severity",
     }
 )
+# Optional; absent means "normal". A "high" severity does not shortcut the
+# two-incident evidence rule for promotion -- it only makes a single occurrence
+# visible for a human decision (E2). Kept small on purpose.
+SEVERITIES = frozenset({"low", "normal", "high"})
 _LINE_ID = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _LESSON_KEY = re.compile(r"^[a-z][a-z0-9-]{0,127}$")
@@ -292,6 +297,8 @@ def _validate_optional_fields(event: dict[str, Any]) -> None:
     for field in ("state_from", "state_to", "gate_fingerprint"):
         if field in event:
             _validate_nonempty_string(event[field], field)
+    if "severity" in event and event["severity"] not in SEVERITIES:
+        raise EventValidationError("severity must be one of low, normal, high")
 
 
 def _reject_sensitive_values(value: Any) -> None:

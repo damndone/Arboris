@@ -206,6 +206,80 @@ describe("AgentSurfaceProvider", () => {
     await waitFor(() => expect(screen.getByText("已检查 active head。")).toBeInTheDocument());
   });
 
+  it("creates a project-scoped Main Agent when no graph node is selected", async () => {
+    mocks.forest.current = {
+      forest: {
+        schemaVersion: 4,
+        legacy: false,
+        nodes: [{
+          nodeKey: "run-a::model:ols_1",
+          nodeHash: "node-hash-a",
+          opNodeId: "model:ols_1",
+          kind: "model",
+          stage: "model",
+          title: "OLS",
+          summary: "Treatment effect",
+          runs: ["run-a"],
+        }],
+        edges: [],
+        heads: [{
+          runId: "run-a",
+          headNodeHash: "node-hash-a",
+          fromNode: null,
+          rerunOf: null,
+          rerunReason: null,
+          status: "completed",
+          createdAt: "2026-07-18T00:00:00Z",
+        }],
+        familyCount: 1,
+        familyRunCount: 1,
+      },
+      activeRunId: "run-a",
+      setActiveRunId: vi.fn(),
+    };
+
+    mount();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
+      target: { value: "总结整个项目的分析链。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      "/proj",
+      expect.objectContaining({
+        role: "main",
+        chain_id: "project:/proj",
+        run_id: undefined,
+        context_packet: expect.objectContaining({
+          scope: "global_project",
+          project_overview: expect.objectContaining({ family_count: 1, run_count: 1 }),
+        }),
+      }),
+    ));
+  });
+
+  it("clears the composer and shows the user turn immediately while the Agent is pending", async () => {
+    let releaseCreate!: (value: ReturnType<typeof session>) => void;
+    mocks.createAgentSession.mockReturnValueOnce(new Promise((resolve) => {
+      releaseCreate = resolve;
+    }));
+    mount();
+
+    const input = await screen.findByRole("textbox", { name: "Ask Agent" });
+    fireEvent.change(input, { target: { value: "先检查这个图" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+
+    expect(input).toHaveValue("");
+    expect(screen.getByText("先检查这个图")).toBeInTheDocument();
+
+    releaseCreate(session("agent_chain_new"));
+    await waitFor(() => expect(mocks.sendAgentTurn).toHaveBeenCalledWith(
+      "/proj",
+      "agent_chain_new",
+      "先检查这个图",
+    ));
+  });
+
   it("binds a run-rail focus to the active model node instead of sending a run pseudo-key", async () => {
     mocks.workbenchState.selectedKey = "run:run-a";
     const modelNode = {

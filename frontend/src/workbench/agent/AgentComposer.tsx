@@ -1,6 +1,7 @@
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
+import { ContextUsageRing } from "./ContextUsageRing";
 import "./agent.css";
 
 export function AgentComposer({
@@ -25,11 +26,9 @@ function AgentComposerContent({
   showScope: boolean;
   variant: "graph" | "terminal";
 }) {
-  const [contextOpen, setContextOpen] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   const {
-    contextPercent,
     contextUsedTokens,
     contextWindowTokens,
     error,
@@ -44,21 +43,8 @@ function AgentComposerContent({
     setModel,
     setPrompt,
   } = agent;
-  const contextCapacityLabel = contextWindowTokens === null
-    ? "unknown capacity"
-    : contextWindowTokens.toLocaleString();
-  const contextLabel = `Context ${contextUsedTokens.toLocaleString()} / ${contextCapacityLabel} tokens`;
-  const ringPercent = contextPercent ?? 0;
-  const ringStyle = {
-    "--agent-ring-progress": `${ringPercent}%`,
-    aspectRatio: "1 / 1",
-    width: "30px",
-    height: "30px",
-    minWidth: "30px",
-    minHeight: "30px",
-  } as CSSProperties;
   const remainingTokens = contextWindowTokens === null
-    ? null
+    ? 0
     : Math.max(0, contextWindowTokens - contextUsedTokens);
 
   return (
@@ -66,7 +52,7 @@ function AgentComposerContent({
       data-testid="agent-composer"
       className={`wb-agent-composer${variant === "terminal" ? " wb-agent-terminal-composer" : ""}`}
     >
-      <div className="wb-agent-composer-row">
+      <div className="wb-agent-composer-input-row">
         {variant === "terminal" && (
           <span
             data-testid="agent-terminal-prompt-marker"
@@ -90,85 +76,79 @@ function AgentComposerContent({
             }
           }}
         />
-        <div className="wb-agent-context-control">
+      </div>
+      <div className="wb-agent-composer-actions">
+        <div className="wb-agent-composer-actions-left">
           <button
             type="button"
-            aria-label={contextLabel}
-            aria-haspopup="dialog"
-            aria-expanded={contextOpen}
-            data-testid="agent-context-ring"
-            title={contextLabel}
-            className="wb-agent-ring"
-            style={ringStyle}
-            onClick={() => setContextOpen((open) => !open)}
+            className="wb-agent-add-context"
+            data-testid="agent-add-context"
+            aria-label="Add context"
+            title="Focus the Agent prompt"
+            onClick={() => promptInputRef.current?.focus()}
           >
-            <span aria-hidden="true">
-              {contextPercent === null ? "?" : `${Math.round(contextPercent)}%`}
-            </span>
+            <span aria-hidden="true">＋</span>
           </button>
-          {contextOpen && (
-            <div
-              role="dialog"
-              aria-label="Agent context details"
-              data-testid="agent-context-popover"
-              className="wb-agent-context-popover"
-            >
-              <strong>Context window</strong>
-              <div>{contextUsedTokens.toLocaleString()} tokens used</div>
-              <div>{contextWindowTokens === null ? "Capacity unavailable" : `${contextWindowTokens.toLocaleString()} tokens capacity`}</div>
-              <div>{remainingTokens === null ? "Remaining: unknown" : `Remaining: ${remainingTokens.toLocaleString()} tokens`}</div>
-              <div className="wb-agent-context-popover-model">Model: {model}</div>
-            </div>
-          )}
+          <AgentCapabilityPopover
+            catalog={capabilityCatalog}
+            onPromptSelect={(nextPrompt) => {
+              setPrompt(nextPrompt);
+              promptInputRef.current?.focus();
+            }}
+          />
+          {showScope && <span className="wb-agent-composer-scope" title={scopeLabel}>{scopeLabel}</span>}
         </div>
-        <button
-          type="button"
-          aria-label="Send to Agent"
-          className="wb-agent-send"
-          disabled={isSubmitting || prompt.trim().length === 0}
-          onClick={() => void sendPrompt(prompt)}
-        >
-          Send
-        </button>
-      </div>
-      <div className="wb-agent-composer-meta">
-        {showScope && (
-          <>
-            <span title={scopeLabel}>{scopeLabel}</span>
-            <span aria-hidden="true">·</span>
-          </>
-        )}
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-          <span>Model</span>
-          <select
-            role="listbox"
-            aria-label="Agent model"
-            value={model}
-            disabled={isSubmitting || modelOptions.length === 0}
-            onChange={(event) => void setModel(event.target.value)}
+        <div className="wb-agent-composer-actions-right">
+          <ContextUsageRing
+            used={contextUsedTokens}
+            remaining={remainingTokens}
+            total={contextWindowTokens}
+            size={20}
+            strokeWidth={2}
+          />
+          <label className="wb-agent-model-control">
+            <span className="wb-agent-visually-hidden">Model</span>
+            <select
+              role="listbox"
+              aria-label="Agent model"
+              value={model}
+              disabled={isSubmitting || modelOptions.length === 0}
+              onChange={(event) => void setModel(event.target.value)}
+            >
+              {modelOptions.length === 0 && <option value={model}>{model}</option>}
+              {modelOptions.map((option) => (
+                <option
+                  key={option.request_model}
+                  value={option.request_model}
+                  title={option.request_model}
+                >
+                  {option.display_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="wb-agent-session-status" role="status" aria-live="polite">
+            {isSubmitting ? "Thinking" : sessionStatus}
+          </span>
+          <button
+            type="button"
+            className="wb-agent-voice"
+            aria-label="Voice input"
+            title="Voice input is not configured"
+            disabled
           >
-            {modelOptions.length === 0 && <option value={model}>{model}</option>}
-            {modelOptions.map((option) => (
-              <option
-                key={option.request_model}
-                value={option.request_model}
-                title={option.request_model}
-              >
-                {option.display_name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span style={{ marginLeft: "auto" }} role="status" aria-live="polite">
-          {isSubmitting ? "Thinking" : sessionStatus}
-        </span>
-        <AgentCapabilityPopover
-          catalog={capabilityCatalog}
-          onPromptSelect={(nextPrompt) => {
-            setPrompt(nextPrompt);
-            promptInputRef.current?.focus();
-          }}
-        />
+            <span aria-hidden="true">⌁</span>
+          </button>
+          <button
+            type="button"
+            aria-label="Send to Agent"
+            className="wb-agent-send"
+            disabled={isSubmitting || prompt.trim().length === 0}
+            onClick={() => void sendPrompt(prompt)}
+          >
+            <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </div>
       {error && (
         <div role="alert" className="wb-agent-error">

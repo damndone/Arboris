@@ -187,6 +187,28 @@ describe("RunHistoryRail", () => {
     await waitFor(() => expect(screen.getByText("No runs yet.")).toBeInTheDocument());
   });
 
+  it("collapses the history rail and reopens it from a visible edge control", async () => {
+    fetchRunsMock.mockResolvedValue({
+      runs: [
+        { run_id: "r-a", status: "completed", mode: "auto", started_at: null, y: null, x: null },
+      ],
+    });
+    sessionStorage.removeItem("workbench:runRailOpen:/tmp/p");
+    harness(["/runs/r-a?project_root=/tmp/p"]);
+
+    await screen.findByTestId("run-rail-row-r-a");
+    fireEvent.click(screen.getByRole("button", { name: "Close run history" }));
+
+    expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "false");
+    expect(screen.queryByTestId("run-rail-row-r-a")).not.toBeInTheDocument();
+    const reopen = screen.getByRole("button", { name: "Open run history" });
+    expect(reopen).toBeInTheDocument();
+
+    fireEvent.click(reopen);
+    expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "true");
+    expect(screen.getByTestId("run-rail-row-r-a")).toBeInTheDocument();
+  });
+
   it("re-fetches /runs immediately when the RailRefreshContext token bumps", async () => {
     // v1.6.9 B1-4 — a pending run indexing bumps the rail-refresh token; the
     // rail must re-fetch /runs right away (not wait out the 30s poll).

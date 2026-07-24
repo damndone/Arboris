@@ -13,6 +13,8 @@ import { TableView } from "./views/TableView";
 import { PipelineView } from "./views/PipelineView";
 import { ReportView } from "../report/ReportView";
 import { WorkbenchHomeView } from "./views/WorkbenchHomeView";
+import { NotebookRouteView } from "../notebook/NotebookRouteView";
+import { useForest } from "./ForestContext";
 
 export function WorkbenchMain({
   projectRoot,
@@ -24,6 +26,12 @@ export function WorkbenchMain({
   onOpenProject?: (root: string) => void;
 }) {
   const { state } = useWorkbench();
+  const forest = useForest();
+  const notebookActiveRunId = forest?.forest.heads.some(
+    (head) => head.runId === forest.activeRunId,
+  )
+    ? forest.activeRunId
+    : null;
   return (
     <div
       data-testid="workbench-main"
@@ -48,6 +56,9 @@ export function WorkbenchMain({
       {state.view === "table" && <TableView projectRoot={projectRoot} />}
       {state.view === "pipeline" && <PipelineView />}
       {state.view === "report" && <ReportView projectRoot={projectRoot} />}
+      {state.view === "notebook" && (
+        <NotebookRouteView projectRoot={projectRoot} activeRunId={notebookActiveRunId} />
+      )}
     </div>
   );
 }

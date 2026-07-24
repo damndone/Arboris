@@ -18,7 +18,69 @@ const defaultSpan: TextSpanRenderer = (text, key) => (
 
 // ── inline ──────────────────────────────────────────────────────
 
-const INLINE_TOKEN = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g;
+const INLINE_TOKEN = /(`[^`]+`|\$\$[^$\n]+\$\$|\$[^$\n]+\$|\\\([^\)\n]+\\\)|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g;
+
+const GREEK_COMMANDS: Record<string, string> = {
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", varepsilon: "ε",
+  zeta: "ζ", eta: "η", theta: "θ", vartheta: "ϑ", iota: "ι", kappa: "κ",
+  lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", varpi: "ϖ", rho: "ρ",
+  sigma: "σ", tau: "τ", upsilon: "υ", phi: "φ", varphi: "ϕ", chi: "χ",
+  psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ",
+  Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+};
+
+const SUPERSCRIPT: Record<string, string> = {
+  "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵",
+  "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻",
+  "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ",
+};
+const SUBSCRIPT: Record<string, string> = {
+  "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅",
+  "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋",
+  "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", h: "ₕ", i: "ᵢ",
+  j: "ⱼ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", o: "ₒ", p: "ₚ", r: "ᵣ",
+  s: "ₛ", t: "ₜ", u: "ᵤ", v: "ᵥ", x: "ₓ",
+};
+
+function scriptText(value: string, table: Record<string, string>): string {
+  return value.split("").map((char) => table[char] ?? char).join("");
+}
+
+function normalizeMath(source: string): string {
+  let value = source
+    .replace(/\\(?:text|mathrm|operatorname)\{([^{}]*)\}/g, "$1")
+    .replace(/\\hat\{([^{}]+)\}/g, "$1̂")
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "$1⁄$2")
+    .replace(/\\([A-Za-z]+)/g, (_, command: string) => GREEK_COMMANDS[command] ?? command)
+    .replace(/[{}]/g, "");
+  value = value.replace(/\^\{([^{}]+)\}|\^([A-Za-z0-9()+-]+)/g, (_, grouped: string | undefined, single: string | undefined) => (
+    scriptText(grouped ?? single ?? "", SUPERSCRIPT)
+  ));
+  value = value.replace(/_\{([^{}]+)\}|_([A-Za-z0-9()+-]+)/g, (_, grouped: string | undefined, single: string | undefined) => (
+    scriptText(grouped ?? single ?? "", SUBSCRIPT)
+  ));
+  return value.replace(/\\/g, "").trim();
+}
+
+function mathNode(source: string, key: string, block = false): ReactNode {
+  return (
+    <span
+      key={key}
+      role="math"
+      data-testid={block ? "markdown-math-block" : "markdown-math"}
+      className={block ? "wb-markdown-math-block" : "wb-markdown-math"}
+      aria-label={source}
+      style={{
+        fontFamily: "var(--font-serif, Georgia, serif)",
+        fontStyle: "italic",
+        letterSpacing: "0.01em",
+        ...(block ? { display: "block", textAlign: "center", margin: "12px 0", fontSize: "1.05em" } : {}),
+      }}
+    >
+      {normalizeMath(source)}
+    </span>
+  );
+}
 
 export function renderInlineMarkdown(
   text: string,
@@ -40,6 +102,11 @@ export function renderInlineMarkdown(
           {token.slice(1, -1)}
         </code>,
       );
+    } else if (token.startsWith("$$")) {
+      out.push(mathNode(token.slice(2, -2), `${keyPrefix}-m${i++}`));
+    } else if (token.startsWith("$") || token.startsWith("\\(")) {
+      const source = token.startsWith("$") ? token.slice(1, -1) : token.slice(2, -2);
+      out.push(mathNode(source, `${keyPrefix}-m${i++}`));
     } else if (token.startsWith("**")) {
       out.push(
         <strong key={`${keyPrefix}-b${i++}`}>
@@ -69,6 +136,24 @@ const HEADING_SIZES: Record<number, CSSProperties> = {
   3: { fontSize: 13.5, fontWeight: 650, margin: "10px 0 4px" },
   4: { fontSize: 13, fontWeight: 650, margin: "8px 0 3px" },
 };
+
+function splitTableCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+  return trimmed.split("|").map((cell) => cell.trim());
+}
+
+function tableAlignments(separator: string): Array<"left" | "center" | "right"> {
+  return splitTableCells(separator).map((cell) => {
+    if (cell.startsWith(":") && cell.endsWith(":")) return "center";
+    if (cell.endsWith(":")) return "right";
+    return "left";
+  });
+}
+
+function isTableSeparator(line: string): boolean {
+  const cells = splitTableCells(line);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
 
 export function renderMarkdown(
   text: string,
@@ -108,7 +193,8 @@ export function renderMarkdown(
     list = null;
   };
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     if (fence !== null) {
       if (line.trim().startsWith("```")) {
         blocks.push(
@@ -137,6 +223,70 @@ export function renderMarkdown(
       flushPara();
       flushList();
       fence = [];
+      continue;
+    }
+    if (trimmed === "$$" || trimmed === "\\[") {
+      const close = trimmed === "$$" ? "$$" : "\\]";
+      const mathLines: string[] = [];
+      let end = lineIndex + 1;
+      while (end < lines.length && lines[end].trim() !== close) {
+        mathLines.push(lines[end]);
+        end += 1;
+      }
+      if (end < lines.length) {
+        flushPara();
+        flushList();
+        blocks.push(mathNode(mathLines.join(" "), `mb${key++}`, true));
+        lineIndex = end;
+        continue;
+      }
+    }
+    if (lineIndex + 1 < lines.length && trimmed.includes("|") && isTableSeparator(lines[lineIndex + 1])) {
+      flushPara();
+      flushList();
+      const headers = splitTableCells(trimmed);
+      const alignments = tableAlignments(lines[lineIndex + 1]);
+      const rows: string[][] = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length && lines[lineIndex].trim() !== "" && lines[lineIndex].includes("|")) {
+        rows.push(splitTableCells(lines[lineIndex]));
+        lineIndex += 1;
+      }
+      lineIndex -= 1;
+      const cellStyle = (index: number): CSSProperties => ({
+        padding: "5px 7px",
+        borderBottom: "1px solid var(--separator)",
+        textAlign: alignments[index] ?? "left",
+        verticalAlign: "top",
+      });
+      blocks.push(
+        <table
+          key={`table${key++}`}
+          data-testid="markdown-table"
+          style={{ width: "100%", borderCollapse: "collapse", margin: "8px 0", fontSize: "0.94em" }}
+        >
+          <thead>
+            <tr>
+              {headers.map((header, index) => (
+                <th key={index} style={{ ...cellStyle(index), fontWeight: 700 }}>
+                  {renderInlineMarkdown(header, `th${key}-${index}`, renderTextSpan)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {headers.map((_, index) => (
+                  <td key={index} style={cellStyle(index)}>
+                    {renderInlineMarkdown(row[index] ?? "", `td${key}-${rowIndex}-${index}`, renderTextSpan)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>,
+      );
       continue;
     }
     const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);

@@ -1,0 +1,21 @@
+{
+  "contract_version": "1.0",
+  "materialization_id": "mat_genesis_01",
+  "option_id": "opt_7f3a1c",
+  "option_revision": 3,
+  "proposal_id": "prop_51de90",
+  "proposal_revision": 1,
+  "freshness_dependency_fingerprint": "fresh1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "generation_context_id": "ctx_9c21ab",
+  "draft_id": "draft_genesis_01",
+  "draft_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "draft_execution_mode": "genesis",
+  "source_run_id": null,
+  "source_model_node_id": null,
+  "source_op_node_id": null,
+  "source_node_hash": null,
+  "source_forest_node_key": null,
+  "source_context_fingerprint": null,
+  "dataset_upload_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "run_family_id": "run-family:11111111-1111-4111-8111-111111111111"
+}

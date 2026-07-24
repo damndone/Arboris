@@ -4,7 +4,7 @@
 // so a rename on the backend fails these tests instead of silently producing
 // blank charts.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ArmaGarchChartGallery } from "./ArmaGarchChartGallery";
 import type { ArmaGarchCharts } from "./useArmaGarchCharts";
@@ -148,6 +148,27 @@ describe("ArmaGarchChartGallery", () => {
     render(<ArmaGarchChartGallery charts={CHARTS} />);
 
     expect(screen.getAllByText(/95% band/).length).toBeGreaterThan(0);
+  });
+
+  it("offers numeric-source Ask AI for the inline SVG charts in Table", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ text: "这张图显示了结构化序列证据。" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ArmaGarchChartGallery charts={CHARTS} projectRoot="/proj" runId="run-vix" />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about Source series" }));
+
+    expect(await screen.findByText("这张图显示了结构化序列证据。")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/llm/chat"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining("workbench_figure_context_v1"),
+      }),
+    ));
+    vi.unstubAllGlobals();
   });
 
   it("keeps the quantile-exception count honest and refuses the VaR label", () => {

@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.0",
+  "option_id": "opt_7f3a1c",
+  "option_revision": 2,
+  "notebook_id": "nb_0001",
+  "run_family_id": "run-family:11111111-1111-4111-8111-111111111111",
+  "generation_context_id": "ctx_9c21ab",
+  "generation_context_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "freshness_dependency_fingerprint": "fresh1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "typed_proposal_id": "prop_51de90",
+  "typed_proposal_revision": 1,
+  "artifact_contract": {
+    "contract_version": "1.0",
+    "expected": [
+      {"artifact_id": "ets_1", "artifact_type": "model_result", "required": true, "count": 1, "step": "estimation"},
+      {"artifact_id": "ts_residual_acf", "artifact_type": "figure", "required": false, "count": 1, "step": "diagnostics"}
+    ],
+    "checked_dimensions": ["artifact_id", "artifact_type", "count", "step"],
+    "not_evaluated_dimensions": ["payload_schema"]
+  },
+  "rationale": "The residual ACF from the ARMA fit still shows structure at lag 12; an ETS baseline separates trend from that seasonality without assuming a GARCH error.",
+  "assumptions": ["the series is observed on a regular calendar", "no interior gaps after complete-case filtering"],
+  "risk_level": "low",
+  "lifecycle_status": "proposed",
+  "freshness_status": "fresh",
+  "validation_status": "valid",
+  "rank": 1,
+  "batch_id": "batch_0001",
+  "created_at": "2026-07-22T16:20:00+00:00",
+  "supersedes_option_revision": 1
+}

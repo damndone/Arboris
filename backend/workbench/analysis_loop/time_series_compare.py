@@ -369,10 +369,45 @@ def build_arma_garch_compare_packet(
     )
 
 
+def build_compare_packet(
+    *, left: Mapping[str, Any], right: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Build the restricted packet for an ETS/ARMA-GARCH comparison.
+
+    This adapter consumes already-produced result contracts. It never refits a
+    model and never turns a cross-family AIC/BIC difference into a verdict.
+    The generic four-layer ``ComparePacket`` remains the source/child lineage
+    adapter; this small family adapter is the typed boundary for Notebook
+    options that are alternatives rather than ancestor/descendant reruns.
+    """
+
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        raise TypeError("left and right comparison results must be mappings")
+    model_types = {left.get("model_type"), right.get("model_type")}
+    if model_types != {"time_series.ets", "time_series.arma_garch"}:
+        raise ValueError(
+            "cross-family adapter only accepts one ETS result and one ARMA-GARCH result"
+        )
+    return {
+        "contract": "time_series.cross_family_compare",
+        "contract_version": "1.0",
+        "comparability": "restricted",
+        "reason_code": "ETS_ARMA_LIKELIHOOD_NOT_COMPARABLE",
+        "criteria": None,
+        "left": dict(left),
+        "right": dict(right),
+        "user_safe_message": (
+            "The ETS and ARMA-GARCH result contracts use different likelihood "
+            "definitions; information criteria are not ranked across families."
+        ),
+    }
+
+
 __all__ = [
     "ARMA_GARCH_COMPARE_STRATEGY_VERSION",
     "build_arma_garch_compare_packet",
     "build_arma_garch_compare_presentation",
+    "build_compare_packet",
 ]
 
 

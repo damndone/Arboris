@@ -1,0 +1,28 @@
+{
+  "run_id": "20260722_043309_451505_f0d8672b",
+  "mode": "auto",
+  "status": "completed",
+  "started_at": "2026-07-22T04:33:09.450773+00:00",
+  "y": "VIXCLS",
+  "x": [],
+  "lineage": [
+    {
+      "source": "/private/tmp/wb-v18-dofile-repro/vix-dofile-repro/runs/20260722_043309_451505_f0d8672b/_uploads/VIXCLS.csv",
+      "artifact_id": "raw_VIXCLS.csv"
+    }
+  ],
+  "requested_model_type": "time_series.arma_garch",
+  "model_routing": {
+    "requested_model_type": "time_series.arma_garch",
+    "current_y": "vixcls",
+    "dtype": "float64",
+    "min": 9.14,
+    "max": 82.69,
+    "unique": 1417,
+    "integer_like": false,
+    "data_detected_y_type": "continuous",
+    "effective_y_type": "continuous",
+    "effective_model_id": "arma_garch_1",
+    "effective_model_type": "time_series.arma_garch"
+  }
+}

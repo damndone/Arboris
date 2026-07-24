@@ -94,7 +94,11 @@ describe("AgentPanel", () => {
     expect(screen.getByText("检查 active head")).toBeInTheDocument();
     expect(screen.getByText("发现一个待确认的风险。")).toBeInTheDocument();
     expect(screen.getByText(/Current chain · run-a/)).toBeInTheDocument();
-    expect(screen.getByText(/2,048.*32,000/)).toBeInTheDocument();
+    // Context usage is a hollow ring; the token figures live in its aria-label
+    // (and hover tooltip), not as inline summary text.
+    expect(screen.getByTestId("agent-context-ring")).toHaveAccessibleName(
+      /remaining out of 32,000/i,
+    );
   });
 
   it("renders the transcript as a terminal log with role prompt markers", () => {

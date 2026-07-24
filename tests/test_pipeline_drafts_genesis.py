@@ -630,6 +630,40 @@ def test_execute_genesis_produces_first_run(tmp_path):
     _wait_terminal(root, run_id)
 
 
+def test_execute_genesis_normalizes_legacy_ols_covariance_model_options(tmp_path):
+    """A previously materialized Notebook Draft must execute without an OLS options owner."""
+    root = _mkproject(tmp_path)
+    d = _genesis_rich(root)
+    did = d["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        did,
+        model_params={
+            "model_type": "ols",
+            "y": "y",
+            "x": ["x"],
+            "model_options": {"covariance": "robust"},
+        },
+    )
+    v = _validate(root, did).json()
+    response = client.post(
+        f"/pipeline-drafts/{did}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": v["validated_draft_hash"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    inputs = json.loads(
+        (Path(root) / "runs" / response.json()["run_id"] / "run_inputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert inputs["form"]["covariance"] == "robust"
+    assert inputs["form"]["model_options"] == {}
+    _wait_terminal(root, response.json()["run_id"])
+
+
 def test_execute_genesis_idempotent(tmp_path):
     root = _mkproject(tmp_path)
     d = _genesis_rich(root)

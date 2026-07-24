@@ -103,6 +103,87 @@ DEFAULT_PROMOTION_POLICIES = (
         verification_method="run the frozen containment test marker",
         test_marker="tests/test_frozen_containment.py",
     ),
+    # --- v1.8.1 Notebook wave lessons (registered so recurrence can promote) ---
+    # A lesson only enters the promotion pipeline once a policy declares its
+    # enforcement boundary. Registering here is the deliberate human gate the
+    # system uses instead of auto-promoting arbitrary lesson text.
+    PromotionPolicy(
+        lesson_key="packet-parsers-reject-unknown-fields",
+        rule_id="require-exact-keys-in-packet-parsers",
+        kind="mechanical",
+        scope="contract packet from_dict parsers",
+        enforcement_point="contract lock compatibility suite",
+        false_positive_risk="only applies to versioned packet parsers",
+        verification_method="run the contract lock suite that asserts unknown fields are refused",
+        test_marker="tests/contracts/test_v181_contract_lock.py",
+    ),
+    PromotionPolicy(
+        lesson_key="check-accepted-adrs-before-starting",
+        rule_id="start-devline-from-context-pack",
+        kind="behavior",
+        scope="starting any new version or lane",
+        enforcement_point="integration owner review before feature work",
+        false_positive_risk="a genuinely trivial one-file fix may not warrant a full pack",
+        verification_method="integration owner confirms a frozen Context Pack exists for the line",
+        behavior_proposal=(
+            "Refuse feature work on a devline without a frozen Context Pack, and grep "
+            "docs/superpowers/specs for accepted ADRs before starting; record the rule in "
+            "the managed AGENTS block."
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="mirror-existing-index-vocabulary",
+        rule_id="mirror-shared-data-vocabulary-across-packs",
+        kind="behavior",
+        scope="adding a model that shares data with an existing pack",
+        enforcement_point="contract sprint review",
+        false_positive_risk="only applies when two packs are meant to be compared on one series",
+        verification_method="integration owner confirms index and sample vocabulary match the peer pack",
+        behavior_proposal=(
+            "When a new model shares a dataset with an existing pack, mirror that pack's "
+            "index and sample vocabulary in the Contract Sprint before locking."
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="fixture-numbers-must-be-arithmetically-coherent",
+        rule_id="assert-fixture-arithmetic-identity",
+        kind="behavior",
+        scope="hand-authored numeric canonical fixtures",
+        enforcement_point="contract sprint review",
+        false_positive_risk="only applies to fixtures carrying derived numeric quantities",
+        verification_method="integration owner confirms an arithmetic-identity check covers the fixture",
+        behavior_proposal=(
+            "Add an arithmetic-identity assertion (e.g. AIC/BIC vs log-likelihood and k) for any "
+            "hand-authored numeric fixture before it becomes a shared lock."
+        ),
+    ),
+    # --- 2026-07-23 integration review findings (F-6, F-7) ---
+    PromotionPolicy(
+        lesson_key="derive-model-shape-from-capability-not-literal",
+        rule_id="genesis-x-requirement-from-capability",
+        kind="mechanical",
+        scope="notebook genesis materialization model-shape checks",
+        enforcement_point="notebook materialization test gate",
+        false_positive_risk="only applies to genesis model-param validation branches",
+        verification_method="run the univariate-genesis materialization marker",
+        test_marker=(
+            "tests/test_notebook_materialization.py::"
+            "test_univariate_genesis_option_materializes_without_x_regressors"
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="fixture-restores-all-coupled-registration-state",
+        rule_id="fixture-restores-loader-tracking",
+        kind="mechanical",
+        scope="test fixtures mutating shared model-pack registration",
+        enforcement_point="pack runtime test gate",
+        false_positive_risk="only applies to fixtures that declare a pack directly",
+        verification_method="run the ETS declaration capability marker in isolation",
+        test_marker=(
+            "tests/models/ets/test_ets_pack_runtime.py::"
+            "test_declaration_exposes_one_selectable_capability"
+        ),
+    ),
 )
 
 
@@ -122,7 +203,9 @@ def promote(
 
     directory = _ensure_control_dir(control_dir)
     policy_by_lesson = _policy_map(policies)
+    events = list(events)
     grouped = _distinct_incidents(events, policy_by_lesson)
+    high_severity = _high_severity_lessons(events, policy_by_lesson)
     candidates = read_candidate_rules(directory)
     ledger = read_promotion_ledger(directory)
     global_rules = read_global_rules(directory)
@@ -199,12 +282,60 @@ def promote(
                     _append_unique_jsonl(directory / _LEDGER_FILE, entry, "ledger_id", validate_promotion_ledger_entry)
                     ledger.append(entry)
 
+        # E3 -- efficacy feedback. A rule is enabled at 3 distinct incidents; a
+        # 4th or later distinct incident means the enabled rule did not prevent
+        # recurrence. Record it once per new count so the signal is durable and
+        # a human can refine the rule rather than the system silently re-counting.
+        rule_effective: bool | None = None
+        if _global_has(global_rules, policy.rule_id):
+            rule_effective = count <= 3
+            if count > 3:
+                ledger_id = _ledger_id(f"{lesson_key}--{count}", "ineffective")
+                if not _ledger_has(ledger, ledger_id):
+                    entry = _ledger_record(
+                        policy,
+                        decision="rule_ineffective_recurrence",
+                        occurrence_count=count,
+                        sources=sources[-2:],
+                        candidate_id=candidate_id,
+                        rule_id=policy.rule_id,
+                        block_reason=(
+                            f"lesson recurred at occurrence {count} after its rule was enabled; "
+                            "the rule did not prevent recurrence and should be refined"
+                        ),
+                    )
+                    entry["ledger_id"] = ledger_id
+                    entry["ledger_sha256"] = _record_hash(
+                        {k: v for k, v in entry.items() if k != "ledger_sha256"}
+                    )
+                    _append_unique_jsonl(directory / _LEDGER_FILE, entry, "ledger_id", validate_promotion_ledger_entry)
+                    ledger.append(entry)
+
         result[lesson_key] = {
             "distinct_incidents": count,
             "candidate_status": candidate_status,
             "global_rule_status": global_status,
+            # E2 -- a high-severity single occurrence is surfaced for a human,
+            # but never auto-promoted: the schema's two-incident evidence rule holds.
+            "severity_review": count < 2 and lesson_key in high_severity,
+            "rule_effective": rule_effective,
         }
     return result
+
+
+def _high_severity_lessons(
+    events: Iterable[Mapping[str, Any]], policies: Mapping[str, PromotionPolicy]
+) -> set[str]:
+    """Lesson keys with at least one promotable high-severity incident."""
+
+    flagged: set[str] = set()
+    for event in events:
+        lesson_key = event.get("lesson_key")
+        if lesson_key not in policies or event.get("type") not in PROMOTABLE_EVENT_TYPES:
+            continue
+        if event.get("severity") == "high":
+            flagged.add(str(lesson_key))
+    return flagged
 
 
 def read_candidate_rules(control_dir: Path) -> list[dict[str, Any]]:
@@ -257,7 +388,8 @@ def validate_promotion_ledger_entry(value: Mapping[str, Any]) -> None:
     }
     _require_exact_keys(value, required, "promotion ledger entry")
     if value["schema_version"] != 1 or value["decision"] not in {
-        "candidate_created", "mechanical_rule_enabled", "mechanical_rule_blocked_missing_test_marker", "behavior_rule_proposed",
+        "candidate_created", "mechanical_rule_enabled", "mechanical_rule_blocked_missing_test_marker",
+        "behavior_rule_proposed", "rule_ineffective_recurrence",
     }:
         raise PromotionError("promotion ledger entry has an invalid decision")
     for field in ("ledger_id", "lesson_key", "candidate_id"):
@@ -579,6 +711,9 @@ def _decision_suffix(decision: str) -> str:
         "mechanical_rule_enabled": "mechanical_enabled",
         "mechanical_rule_blocked_missing_test_marker": "mechanical_blocked",
         "behavior_rule_proposed": "behavior_proposal",
+        # E3: keyed by occurrence count so each new recurrence is a distinct,
+        # idempotent ledger entry rather than overwriting the last one.
+        "rule_ineffective_recurrence": "ineffective",
     }[decision]
 
 

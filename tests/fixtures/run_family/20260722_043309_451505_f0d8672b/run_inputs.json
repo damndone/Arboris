@@ -1,0 +1,230 @@
+{
+  "run_input_schema_version": 1,
+  "form": {
+    "mode": "auto",
+    "model_type": "time_series.arma_garch",
+    "y": "VIXCLS",
+    "x": "",
+    "sheet_name": "Sheet1",
+    "transpose": "false",
+    "focal_x": "",
+    "covariance": "robust",
+    "model_options": {
+      "analysis_goal": "balanced",
+      "arma": {
+        "auto_max_p": 3,
+        "auto_max_q": 3,
+        "auto_max_total_order": 4,
+        "constant_mode": "auto",
+        "p": null,
+        "q": null
+      },
+      "dataset_ref": "upload:VIXCLS.csv",
+      "estimation_strategy": "auto",
+      "innovation_distribution": "normal",
+      "missing_value_policy": "drop_missing_confirmed",
+      "random_seed": 20260720,
+      "selection_mode": "auto",
+      "time_column": "observation_date",
+      "time_index_semantics": "business_or_trading_observations",
+      "transform": "log_return_pct",
+      "transform_confirmed": true,
+      "validation": {
+        "refit_every": 1,
+        "validation_n": 20
+      },
+      "value_column": "VIXCLS",
+      "variance": {
+        "arch_p": null,
+        "auto_arch_max_p": 10,
+        "garch_p": null,
+        "garch_q": null,
+        "include_garch_1_1": true,
+        "model": "auto"
+      }
+    },
+    "model_options_binding": {
+      "owner_model_type": "time_series.arma_garch",
+      "owner_model_id": "arma_garch_1",
+      "producer_version": "time_series.arma_garch@1.0",
+      "input_contract_version": "1.0",
+      "normalized_options_hash": "5c79d8bc3d936522df363e3e47b24e3ec8e9faa45b7ef175e854d551a7ec1f5e"
+    }
+  },
+  "upload": {
+    "sha256": "f0c112dbd0df8816423c0f07f780878a0e09074d4d48c0c3dc9d567945169cf0",
+    "filename": "VIXCLS.csv"
+  },
+  "rerun_of": null,
+  "from_node": null,
+  "rerun_reason": "initial",
+  "override_hash": null,
+  "dag_hash": "21f3b4dd12794a5013c251798b924f8fe5bd5cf90cc28afe201906a6c97e163e",
+  "source_lineage": {
+    "source_run_id": null,
+    "from_node": null,
+    "rerun_from": null
+  },
+  "contract_summary": {
+    "contract_version": null,
+    "model": "time_series.arma_garch",
+    "model_type": "time_series.arma_garch",
+    "covariance": "robust",
+    "covariance_explicit": true,
+    "entity_col": "",
+    "y": "VIXCLS",
+    "x": [],
+    "source_eligible": false
+  },
+  "executable_payload": {
+    "model_type": "time_series.arma_garch",
+    "covariance": "robust",
+    "entity_col": "",
+    "y": "VIXCLS",
+    "x": [],
+    "model_options": {
+      "analysis_goal": "balanced",
+      "arma": {
+        "auto_max_p": 3,
+        "auto_max_q": 3,
+        "auto_max_total_order": 4,
+        "constant_mode": "auto",
+        "p": null,
+        "q": null
+      },
+      "dataset_ref": "upload:VIXCLS.csv",
+      "estimation_strategy": "auto",
+      "innovation_distribution": "normal",
+      "missing_value_policy": "drop_missing_confirmed",
+      "random_seed": 20260720,
+      "selection_mode": "auto",
+      "time_column": "observation_date",
+      "time_index_semantics": "business_or_trading_observations",
+      "transform": "log_return_pct",
+      "transform_confirmed": true,
+      "validation": {
+        "refit_every": 1,
+        "validation_n": 20
+      },
+      "value_column": "VIXCLS",
+      "variance": {
+        "arch_p": null,
+        "auto_arch_max_p": 10,
+        "garch_p": null,
+        "garch_q": null,
+        "include_garch_1_1": true,
+        "model": "auto"
+      }
+    },
+    "form": {
+      "mode": "auto",
+      "model_type": "time_series.arma_garch",
+      "y": "VIXCLS",
+      "x": "",
+      "sheet_name": "Sheet1",
+      "transpose": "false",
+      "focal_x": "",
+      "covariance": "robust",
+      "model_options": {
+        "analysis_goal": "balanced",
+        "arma": {
+          "auto_max_p": 3,
+          "auto_max_q": 3,
+          "auto_max_total_order": 4,
+          "constant_mode": "auto",
+          "p": null,
+          "q": null
+        },
+        "dataset_ref": "upload:VIXCLS.csv",
+        "estimation_strategy": "auto",
+        "innovation_distribution": "normal",
+        "missing_value_policy": "drop_missing_confirmed",
+        "random_seed": 20260720,
+        "selection_mode": "auto",
+        "time_column": "observation_date",
+        "time_index_semantics": "business_or_trading_observations",
+        "transform": "log_return_pct",
+        "transform_confirmed": true,
+        "validation": {
+          "refit_every": 1,
+          "validation_n": 20
+        },
+        "value_column": "VIXCLS",
+        "variance": {
+          "arch_p": null,
+          "auto_arch_max_p": 10,
+          "garch_p": null,
+          "garch_q": null,
+          "include_garch_1_1": true,
+          "model": "auto"
+        }
+      },
+      "model_options_binding": {
+        "owner_model_type": "time_series.arma_garch",
+        "owner_model_id": "arma_garch_1",
+        "producer_version": "time_series.arma_garch@1.0",
+        "input_contract_version": "1.0",
+        "normalized_options_hash": "5c79d8bc3d936522df363e3e47b24e3ec8e9faa45b7ef175e854d551a7ec1f5e"
+      }
+    },
+    "rerun_of": null,
+    "from_node": null,
+    "model_options_binding": {
+      "owner_model_type": "time_series.arma_garch",
+      "owner_model_id": "arma_garch_1",
+      "producer_version": "time_series.arma_garch@1.0",
+      "input_contract_version": "1.0",
+      "normalized_options_hash": "5c79d8bc3d936522df363e3e47b24e3ec8e9faa45b7ef175e854d551a7ec1f5e"
+    }
+  },
+  "rerun_inputs": {
+    "rerun_of": null,
+    "from_node": null,
+    "rerun_reason": "initial",
+    "override_hash": null
+  },
+  "executed_payload": {
+    "model_type": "time_series.arma_garch",
+    "model_options": {
+      "analysis_goal": "balanced",
+      "arma": {
+        "auto_max_p": 3,
+        "auto_max_q": 3,
+        "auto_max_total_order": 4,
+        "constant_mode": "auto",
+        "p": null,
+        "q": null
+      },
+      "dataset_ref": "upload:VIXCLS.csv",
+      "estimation_strategy": "auto",
+      "innovation_distribution": "normal",
+      "missing_value_policy": "drop_missing_confirmed",
+      "random_seed": 20260720,
+      "selection_mode": "auto",
+      "time_column": "observation_date",
+      "time_index_semantics": "business_or_trading_observations",
+      "transform": "log_return_pct",
+      "transform_confirmed": true,
+      "validation": {
+        "refit_every": 1,
+        "validation_n": 20
+      },
+      "value_column": "VIXCLS",
+      "variance": {
+        "arch_p": null,
+        "auto_arch_max_p": 10,
+        "garch_p": null,
+        "garch_q": null,
+        "include_garch_1_1": true,
+        "model": "auto"
+      }
+    },
+    "model_options_binding": {
+      "owner_model_type": "time_series.arma_garch",
+      "owner_model_id": "arma_garch_1",
+      "producer_version": "time_series.arma_garch@1.0",
+      "input_contract_version": "1.0",
+      "normalized_options_hash": "5c79d8bc3d936522df363e3e47b24e3ec8e9faa45b7ef175e854d551a7ec1f5e"
+    }
+  }
+}

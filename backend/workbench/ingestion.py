@@ -47,25 +47,54 @@ def _read_frame(
     sheet_name: str | None = None,
     transpose: bool = False,
 ) -> pd.DataFrame:
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
-        frame = pd.read_csv(path, nrows=config.max_rows + 1)
-    elif suffix in {".xlsx", ".xls"}:
-        with pd.ExcelFile(path) as excel:
-            if len(excel.sheet_names) > config.max_excel_sheets:
-                raise ValueError(f"excel sheet count exceeds limit: {path.name}")
-            target_sheet = sheet_name if sheet_name else excel.sheet_names[0]
-            frame = pd.read_excel(excel, sheet_name=target_sheet, nrows=config.max_rows + 1)
-        _coerce_datetime_to_numeric(frame)
-    else:
-        raise ValueError(f"unsupported file type: {path.suffix}")
-    if len(frame) > config.max_rows:
+    frame, truncated = read_frame_bounded(
+        path,
+        max_rows=config.max_rows,
+        max_excel_sheets=config.max_excel_sheets,
+        sheet_name=sheet_name,
+    )
+    if truncated:
         raise ValueError(f"row count exceeds limit: {path.name}")
     if transpose:
         frame = frame.transpose()
         frame.columns = frame.iloc[0]
         frame = frame.iloc[1:].reset_index(drop=True)
     return frame
+
+
+def read_frame_bounded(
+    path: Path,
+    *,
+    max_rows: int,
+    max_excel_sheets: int = 32,
+    sheet_name: str | None = None,
+    file_suffix: str | None = None,
+) -> tuple[pd.DataFrame, bool]:
+    """Read a supported tabular source with an explicit, observable row cap.
+
+    The extra sentinel row makes truncation visible to inspection callers. It
+    is deliberately read-only and does not accept a client-provided path
+    policy; callers must resolve the path from a verified project identity.
+    """
+
+    if type(max_rows) is not int or max_rows < 1:
+        raise ValueError("max_rows must be a positive integer")
+    if type(max_excel_sheets) is not int or max_excel_sheets < 1:
+        raise ValueError("max_excel_sheets must be a positive integer")
+    suffix = (file_suffix or path.suffix).lower()
+    if suffix == ".csv":
+        frame = pd.read_csv(path, nrows=max_rows + 1)
+    elif suffix in {".xlsx", ".xls"}:
+        with pd.ExcelFile(path) as excel:
+            if len(excel.sheet_names) > max_excel_sheets:
+                raise ValueError(f"excel sheet count exceeds limit: {path.name}")
+            target_sheet = sheet_name if sheet_name else excel.sheet_names[0]
+            frame = pd.read_excel(excel, sheet_name=target_sheet, nrows=max_rows + 1)
+        _coerce_datetime_to_numeric(frame)
+    else:
+        raise ValueError(f"unsupported file type: {path.suffix}")
+    truncated = len(frame) > max_rows
+    return frame.iloc[:max_rows].copy(), truncated
 
 
 def ingest_files(

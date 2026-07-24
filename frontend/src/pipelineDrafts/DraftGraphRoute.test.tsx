@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { vi } from "vitest";
 import * as api from "../api";
+import * as notebookApi from "../notebook/notebookApi";
 import { DraftGraphRoute } from "./DraftGraphRoute";
 
 vi.mock("react-router-dom", async () => {
@@ -10,15 +11,18 @@ vi.mock("react-router-dom", async () => {
 });
 
 vi.mock("../api");
+vi.mock("../notebook/notebookApi");
 
 function makeDraftResponse({
   draftHash = "h1",
   covariance = "",
   editable = false,
+  executionMode = "rerun_child",
 }: {
   draftHash?: string;
   covariance?: string;
   editable?: boolean;
+  executionMode?: api.DraftExecutionMode;
 } = {}) {
   return {
     draft_hash: draftHash,
@@ -69,9 +73,62 @@ function makeDraftResponse({
         ],
         edges: [{ from: "input_1", to: "model_1" }],
       },
-      default_execution_mode: "rerun_child",
+      default_execution_mode: executionMode,
     },
   } satisfies api.PipelineDraftResponse;
+}
+
+function makeGenesisDraftResponse() {
+  return {
+    draft_hash: "g1",
+    draft: {
+      draft_id: "draft_genesis",
+      schema_version: "pipeline_draft.v1",
+      created_at: "",
+      updated_at: "",
+      status: "draft",
+      created_from: {
+        source_type: "genesis",
+        source_input_fingerprint: "upload_sha",
+      },
+      notebook_provenance: {
+        notebook_id: "nb_1",
+        option_id: "opt_1",
+        option_revision: "1",
+      },
+      graph: {
+        nodes: [
+          {
+            node_id: "source_1",
+            node_type: "input.upload",
+            upload: { sha256: "upload_sha", filename: "data.csv" },
+            sheet_names: [],
+            status: "bound",
+          },
+          {
+            node_id: "table_1",
+            node_type: "table",
+            columns: ["outcome", "treatment"],
+            params: { sheet_name: null, transpose: false },
+            status: "configured",
+          },
+          {
+            node_id: "model_1",
+            node_type: "model",
+            model_family: "regression",
+            model_type: "ols",
+            params: { model_type: "ols", y: "outcome", x: ["treatment"] },
+            status: "configured",
+          },
+        ],
+        edges: [
+          { from: "source_1", to: "table_1" },
+          { from: "table_1", to: "model_1" },
+        ],
+      },
+      default_execution_mode: "genesis",
+    },
+  } as unknown as api.PipelineDraftResponse;
 }
 
 test("loads draft and keeps execute disabled until validated current hash", async () => {
@@ -324,4 +381,113 @@ test("shows a back link to the source run lineage (P6)", async () => {
   expect(navigate).toHaveBeenCalledWith(
     "/runs/run_parent?project_root=%2Ftmp%2Fproject&tab=lineage",
   );
+});
+
+test("uses the persisted Genesis execution mode and returns to the parent Graph", async () => {
+  const navigate = vi.fn();
+  vi.mocked(useNavigate).mockReturnValue(navigate);
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(makeGenesisDraftResponse());
+  vi.mocked(api.validatePipelineDraft).mockResolvedValue({
+    ok: true,
+    status: "valid",
+    executable: true,
+    checks: [],
+    resolved_execution: { execution_mode: "genesis", genesis: true },
+    validated_execution_mode: "genesis",
+    validated_draft_hash: "g1",
+    validated_at: "",
+  });
+  vi.mocked(api.executePipelineDraft).mockResolvedValue({
+    ok: true,
+    run_id: "run_genesis",
+    draft_id: "draft_genesis",
+    executed_draft_hash: "g1",
+    execution_mode: "genesis",
+    produced_lineage: { genesis: true, execution_mode: "genesis" },
+    focus: { status: "pending_index", run_id: "run_genesis", poll: { genesis: true, execution_mode: "genesis" } },
+  });
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_genesis?project_root=/tmp/project&return_to=%2Fp%2Fproject%2Fgraph%3Fview%3Dnotebook%26notebook%3Dnb_1"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  const back = await screen.findByRole("button", { name: /back to lineage/i });
+  expect(back).toBeEnabled();
+  fireEvent.click(back);
+  expect(navigate).toHaveBeenCalledWith("/p/project/graph?view=notebook&notebook=nb_1");
+
+  fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+  await waitFor(() => expect(api.validatePipelineDraft).toHaveBeenCalledWith(
+    "/tmp/project",
+    "draft_genesis",
+    "genesis",
+  ));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Execute Draft" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Execute Draft" }));
+  await waitFor(() => expect(api.executePipelineDraft).toHaveBeenCalledWith(
+    "/tmp/project",
+    "draft_genesis",
+    { validated_draft_hash: "g1", execution_mode: "genesis" },
+  ));
+});
+
+test("reconciles a materialized Notebook option after the Draft run reaches terminal state", async () => {
+  const navigate = vi.fn();
+  vi.mocked(useNavigate).mockReturnValue(navigate);
+  vi.mocked(api.getPipelineDraft).mockResolvedValue(makeGenesisDraftResponse());
+  vi.mocked(api.validatePipelineDraft).mockResolvedValue({
+    ok: true,
+    status: "valid",
+    executable: true,
+    checks: [],
+    resolved_execution: { execution_mode: "genesis", genesis: true },
+    validated_execution_mode: "genesis",
+    validated_draft_hash: "g1",
+    validated_at: "",
+  });
+  vi.mocked(api.executePipelineDraft).mockResolvedValue({
+    ok: true,
+    run_id: "run_genesis",
+    draft_id: "draft_genesis",
+    executed_draft_hash: "g1",
+    execution_mode: "genesis",
+    produced_lineage: { genesis: true },
+    focus: { status: "pending_index", run_id: "run_genesis", poll: { genesis: true } },
+  });
+  vi.mocked(api.waitForRunTerminal).mockResolvedValue({
+    run_id: "run_genesis",
+    status: "completed",
+    mode: "auto",
+    started_at: null,
+    y: "outcome",
+    x: ["treatment"],
+    lineage: [],
+    artifact_counts: { model_result: 1 },
+    errors: { issues: [] },
+  });
+  vi.mocked(notebookApi.completeNotebookOptionExecution).mockResolvedValue({});
+
+  render(
+    <MemoryRouter initialEntries={["/pipeline-drafts/draft_genesis?project_root=/tmp/project"]}>
+      <Routes>
+        <Route path="/pipeline-drafts/:draftId" element={<DraftGraphRoute />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  await screen.findByText("Draft Graph");
+  fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Execute Draft" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Execute Draft" }));
+
+  await waitFor(() => expect(notebookApi.completeNotebookOptionExecution).toHaveBeenCalledWith(
+    "/tmp/project",
+    "nb_1",
+    "opt_1",
+    { execution_status: "succeeded", run_id: "run_genesis" },
+  ));
 });

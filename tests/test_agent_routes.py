@@ -1137,8 +1137,16 @@ def test_main_role_turn_exposes_no_workbench_tools(
             params={"project_root": str(project_root)},
             json={"question": "总结项目状态。"},
         )
-        assert turn.status_code == 200
-        assert FakeAgentAdapter.instances[-1].requests[0].tools == []
+    assert turn.status_code == 200
+    assert FakeAgentAdapter.instances[-1].requests[0].tools == []
+    protocol_messages = [
+        message
+        for message in FakeAgentAdapter.instances[-1].requests[0].messages
+        if message.get("name") == "workbench_global_agent_protocol"
+    ]
+    assert len(protocol_messages) == 1
+    assert "project-level advisory Agent" in protocol_messages[0]["content"]
+    assert "never invent" in protocol_messages[0]["content"].lower()
 
 
 class ProposingAdapter:

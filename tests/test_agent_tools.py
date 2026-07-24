@@ -76,6 +76,45 @@ def test_tool_registry_validates_and_executes_allowlisted_tool() -> None:
     assert registry.descriptors()[0]["tool_id"] == "inspect_node_context"
 
 
+def test_tool_registry_returns_bounded_partial_output_instead_of_budget_error() -> None:
+    async def handler(arguments, context):
+        return {
+            "request_id": "request-1",
+            "status": "complete",
+            "node": {"node_id": "model-1"},
+            "large_section": "x" * 2_000,
+        }
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            tool_id="bounded_inspection",
+            version="v1",
+            input_schema={"type": "object"},
+            side_effect="none",
+            handler=handler,
+            max_output_budget=240,
+        )
+    )
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-bounded",
+                "tool_id": "bounded_inspection",
+                "arguments": {},
+            },
+            session_id="session-a",
+        )
+    )
+
+    assert result.ok is True
+    assert result.error is None
+    assert len(json.dumps(result.output, ensure_ascii=False, sort_keys=True)) <= 240
+    assert result.output["status"] == "partial"
+    assert "large_section" in result.output["omitted_sections"]
+
+
 def test_agent_core_round_trips_tool_call_and_persists_tool_result(tmp_path: Path) -> None:
     async def handler(arguments, context):
         return {"node_ref": arguments["node_ref"], "diagnostic": "heteroskedasticity"}
@@ -329,6 +368,107 @@ def test_existing_openai_compatible_client_wires_and_normalizes_tool_calls(
             "arguments": {"node_ref": "model-ols"},
         }
     ]
+
+
+def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
+    monkeypatch,
+) -> None:
+    """A transient provider JSON defect gets one bounded retry, never repair."""
+
+    config = LLMConfig(
+        base_url="https://api.example.test",
+        api_key="secret",
+        model="deepseek-chat",
+    )
+    seen: list[httpx.Request] = []
+    responses = iter(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "model": "deepseek-chat",
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call-bad",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "inspect_node_context",
+                                            "arguments": "{not-json",
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ],
+                },
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "model": "deepseek-chat",
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call-good",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "inspect_node_context",
+                                            "arguments": '{"node_ref":"model-ols"}',
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return next(responses)
+
+    monkeypatch.setattr(
+        llm_client,
+        "_client_factory",
+        lambda actual_config: httpx.Client(
+            transport=httpx.MockTransport(handler),
+            timeout=actual_config.timeout_s,
+        ),
+    )
+
+    async def scenario() -> None:
+        adapter = OpenAICompatibleModelAdapter(config)
+        events = [
+            event
+            async for event in adapter.stream(
+                ModelRequest(
+                    request_id="request-retry",
+                    messages=[{"role": "user", "content": "inspect"}],
+                    tools=[
+                        {
+                            "tool_id": "inspect_node_context",
+                            "input_schema": {"type": "object"},
+                        }
+                    ],
+                )
+            )
+        ]
+        assert [event.type for event in events] == ["tool_call_delta", "done"]
+        assert events[0].tool_call["tool_call_id"] == "call-good"
+
+    asyncio.run(scenario())
+    assert len(seen) == 2
 
 
 def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None:

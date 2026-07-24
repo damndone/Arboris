@@ -8,14 +8,14 @@
 .wb-agent-composer {
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid var(--separator);
-  border-radius: 14px;
-  background: color-mix(in oklch, var(--bg-card) 72%, transparent);
+  padding: 10px 12px 9px;
+  border: 1px solid color-mix(in oklch, var(--separator) 82%, transparent);
+  border-radius: 24px;
+  background: color-mix(in oklch, var(--bg-card-2) 88%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   backdrop-filter: blur(20px) saturate(140%);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.10),
+    0 10px 30px rgba(0, 0, 0, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transition: box-shadow 150ms ease, border-color 150ms ease;
 }
@@ -34,49 +34,47 @@
 }
 
 .wb-agent-terminal-composer {
-  border-radius: 8px;
-  padding: 3px 8px;
-  background: var(--bg-canvas);
-  box-shadow: none;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  border-radius: 22px;
+  padding: 9px 11px 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 90%, transparent);
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
-.wb-agent-terminal-composer .wb-agent-composer-row {
-  align-items: center;
-}
-
-.wb-agent-terminal-composer textarea {
-  min-height: 24px;
-  max-height: 96px;
-  padding: 2px 0;
-}
-
-.wb-agent-terminal-composer .wb-agent-send {
-  height: 24px;
-  border-radius: 6px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.wb-agent-terminal-composer .wb-agent-composer-meta {
-  min-height: 14px;
-  margin-top: 2px;
-  font-size: 10px;
-}
-
-.wb-agent-composer-row {
+.wb-agent-composer-input-row {
   display: flex;
+  align-items: flex-start;
+  min-height: 32px;
+}
+
+.wb-agent-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  margin-top: 5px;
+}
+
+.wb-agent-composer-actions-left,
+.wb-agent-composer-actions-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   gap: 8px;
-  align-items: flex-end;
+}
+
+.wb-agent-composer-actions-right {
+  margin-left: auto;
+  gap: 7px;
 }
 
 .wb-agent-composer textarea {
   flex: 1;
   min-width: 0;
   resize: none;
-  min-height: 34px;
+  min-height: 32px;
   max-height: 140px;
-  padding: 7px 6px;
+  padding: 3px 1px;
   border: 0;
   background: transparent;
   color: var(--label);
@@ -92,8 +90,26 @@
 .wb-agent-context-control {
   position: relative;
   flex: 0 0 auto;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.wb-agent-context-summary {
+  color: var(--label-tertiary);
+  font: 10px/1.2 var(--font-mono, ui-monospace, monospace);
+  white-space: nowrap;
+}
+
+.wb-agent-composer-scope {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--label-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wb-agent-ring {
@@ -118,6 +134,64 @@
   box-sizing: border-box;
   display: grid;
   place-items: center;
+}
+
+.wb-agent-add-context,
+.wb-agent-voice {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--label-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wb-agent-add-context {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.wb-agent-add-context:hover,
+.wb-agent-add-context:focus-visible,
+.wb-agent-voice:not(:disabled):hover,
+.wb-agent-voice:not(:disabled):focus-visible {
+  background: color-mix(in oklch, var(--label) 10%, transparent);
+  color: var(--label);
+  outline: none;
+}
+
+.wb-agent-voice {
+  cursor: default;
+  opacity: 0.72;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.wb-agent-send {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--label) 12%, transparent);
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--label) 78%, var(--bg-card));
+  color: var(--bg-canvas);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+
+.wb-agent-send:not(:disabled):hover {
+  transform: translateY(-1px);
+  background: var(--label);
 }
 
 .wb-agent-ring > span {
@@ -164,19 +238,6 @@
   font-family: var(--font-mono, ui-monospace, monospace);
 }
 
-.wb-agent-send {
-  height: 32px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--tint);
-  color: var(--bg-card);
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: transform 100ms ease-out, opacity 150ms ease;
-}
-
 .wb-agent-send:active:not(:disabled) {
   transform: scale(0.96);
 }
@@ -196,14 +257,41 @@
   font-size: 11px;
 }
 
+.wb-agent-model-control {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.wb-agent-model-control select,
 .wb-agent-composer-meta select {
   max-width: 190px;
   border: 0;
-  border-radius: 5px;
-  padding: 2px 4px;
-  background: color-mix(in oklch, var(--label) 8%, transparent);
+  border-radius: 999px;
+  padding: 4px 20px 4px 7px;
+  background: color-mix(in oklch, var(--label) 7%, transparent);
   color: inherit;
   font: inherit;
+}
+
+.wb-agent-session-status {
+  max-width: 62px;
+  overflow: hidden;
+  color: var(--label-tertiary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-agent-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wb-agent-capability-control {
@@ -212,9 +300,12 @@
 }
 
 .wb-agent-capability-trigger {
-  border: 1px solid var(--separator);
-  border-radius: 6px;
-  padding: 3px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 7px;
   background: transparent;
   color: var(--label-secondary);
   font: inherit;
@@ -224,7 +315,8 @@
 .wb-agent-capability-trigger:hover,
 .wb-agent-capability-trigger:focus-visible {
   color: var(--label);
-  border-color: var(--tint);
+  background: color-mix(in oklch, var(--label) 9%, transparent);
+  outline: none;
 }
 
 .wb-agent-capability-popover {
@@ -827,3 +919,67 @@
     transition: none;
   }
 }
+
+/* Context usage ring (Codex-style hollow indicator). Fixed size; the progress
+   arc is the only thing that moves, animated so it never jumps. Details live in
+   the hover tooltip, not inline. */
+.wb-context-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  cursor: default;
+  outline: none;
+}
+.wb-context-ring-track {
+  stroke: color-mix(in oklch, var(--label-secondary) 24%, transparent);
+}
+.wb-context-ring-progress {
+  stroke: color-mix(in oklch, var(--tint) 88%, var(--label));
+  transition: stroke-dashoffset 200ms ease-out, stroke 200ms ease-out;
+}
+.wb-context-ring[data-level="warning"] .wb-context-ring-progress {
+  stroke: color-mix(in oklch, #e8a13a 92%, var(--label));
+}
+.wb-context-ring[data-level="danger"] .wb-context-ring-progress {
+  stroke: color-mix(in oklch, #e5484d 94%, var(--label));
+}
+.wb-context-ring:focus-visible {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 40%, transparent);
+}
+.wb-context-ring-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  min-width: 168px;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 97%, transparent);
+  color: var(--label-secondary);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.wb-context-ring-tooltip-head {
+  color: var(--label);
+  margin-bottom: 4px;
+}
+.wb-context-ring-tooltip dl {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.wb-context-ring-tooltip dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wb-context-ring-tooltip dt { color: var(--label-secondary); }
+.wb-context-ring-tooltip dd { margin: 0; color: var(--label); font-variant-numeric: tabular-nums; }

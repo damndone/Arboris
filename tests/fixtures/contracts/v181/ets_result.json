@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.1",
+  "model_type": "time_series.ets",
+  "specification": {
+    "error": "add",
+    "trend": "add",
+    "seasonal": null,
+    "seasonal_periods": null,
+    "damped_trend": true,
+    "canonical": "ETS(A,Ad,N)"
+  },
+  "endog": "VIXCLS",
+  "n_obs": 2610,
+  "n_excluded": 0,
+  "exclusion_reasons": {},
+  "params": {
+    "smoothing_level": 0.4213,
+    "smoothing_trend": 0.0521,
+    "damping_trend": 0.9712,
+    "initial_level": 18.4,
+    "initial_trend": -0.02
+  },
+  "aic": 12043.72,
+  "bic": 12078.9226330019,
+  "log_likelihood": -6015.86,
+  "sigma2": 3.7412,
+  "convergence_code": "converged",
+  "fit_method": "mle",
+  "result_identity": "ets:VIXCLS:ETS(A,Ad,N):mle:completecase:sha256:1f2e",
+  "time_index_semantics": "business_or_trading_observations"
+}

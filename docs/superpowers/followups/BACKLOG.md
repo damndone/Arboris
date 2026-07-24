@@ -17,17 +17,21 @@
 
 ## 0. 一句话结论
 
-**v1.7.2 已 SHIPPED**（tag `v1.7.2`，`origin/main`=`4b2e6c1`）。
-本版完成 OLS Agent Analysis Loop、结构化 Plan/Validation/Compare packet、报告与图表契约、
-导出、run heartbeat/cancel/timeout 以及 CS-DiD 变量语义修复；发布说明见
-`docs/releases/v1.7.2-release-notes.md`。
+**v1.8.0 已 SHIPPED**（2026-07-22，tag `v1.8.0`，`origin/main`=`63f2fa1`；仓库已更名 Arboris）。
+本版是 ARMA–GARCH 时间序列波动率工作台；发布说明见 `docs/releases/v1.8-release-notes.md`，
+逐条 gate 证据见 `release-trains/v1.8/release-ledger.json`。
 
-**v1.7.3 release train 已收尾并进入正式发布流程**。两个独立工作包均已完成产品
-实现与本机验收：Report/Operations 完成真实 provider、citation、timeout 和导出验收；
-Repeated Measures/LMM 完成组装、真实 macOS `local_contained` canary、HTTP/浏览器运行、
-Agent 和导出。C2 敌对候选认证不属于本机产品，已从代码删除并进入长期路线图。公开
-发布事实以远端 `v1.7.3` tag 是否指向 release PR 的 `main` 合并提交为唯一判断，不从
-worktree 名称、Lane 分支或本机验收记录推断。
+**下一版 v1.8.1 = Agent Notebook + 选中文本交互**，路线经 2026-07-22 两轮对齐后拍板，
+见 `roadmap/2026-07-22-agent-analysis-system-roadmap.md`。北极星不是"更自主的 Agent"，
+而是**认知自主性高、操作自主性分级**：理解/检查/设计/生成备选可以高度自主；
+改图、装依赖、跑新算法、产出正式数值必须走 typed → validate → confirm → execute → verify → commit。
+
+> 三条系统不变量（roadmap §1，任何版本不得违反）：
+> 没有类型的内容可以解释、不能执行；没有验证的实现可以实验、不能产出正式数字；
+> 没有 lineage 的结果可以预览、不能成为 Workbench 结论。
+
+> NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
+> P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债。
 
 > NL proposal 当前只开放 `data.columns.cast`；单列 `data.column.cast` 与 `code.execute` 保持 NL 关闭。
 > P-SBX2、P-CE1 和 honest-DiD 性能优化仍是独立后续债，不自动并入 v1.7.3。
@@ -38,7 +42,12 @@ worktree 名称、Lane 分支或本机验收记录推断。
 - v1.7.2：已发布，PR #24 已合并，tag 与 `origin/main` 指向 `4b2e6c1`。
 - v1.7.3：本机版本已在 Integration 提交 `730ebfc` 收尾；Report/Operations 与 LMM 已完成，正式 release PR/merge/tag
   采用唯一 Integration 分支；本机性能烟测取代未落地的 C2 collector。公共部署/App/插件安全留到出现对应信任边界时重新立项。
-- v1.8：ARMA–GARCH Workbench 的实现和 VIXCLS 浏览器证据已形成候选，但尚未发布。发布被交付层事实阻塞：run 内的 HTML/PDF 不是浏览器中的完整 DeepSeek 报告，`tables.xlsx` 对 ARMA–GARCH 为空，Compare 和 Agent transcript 只有机器可读原件。联合含 MA 的 ARCH/GARCH MLE 不属于 v1.8，必须按 `V1.8-JOINT-ARMA-GARCH-MLE` 单独立项；不得称为 Stata 数值复现。
+- v1.8.0：**已发布**（2026-07-22，PR #26，`origin/main`=`63f2fa1`，tag `v1.8.0`）。ARMA–GARCH
+  时间序列工作台。交付层阻塞（原 `V1.8-DELIVERY-TRUTH`）已在发版前修复并独立验收，详见 §3。
+  联合含 MA 的 ARCH/GARCH MLE 仍不属于本版，按 `V1.8-JOINT-ARMA-GARCH-MLE` 单独立项；
+  当前一律 `REFERENCE_SEMANTICS = "directional_or_workflow_regression"`，不得称为 Stata 数值复现。
+- v1.8.1：**进行中**。Agent Notebook + 选中文本交互。路线与三条系统不变量见
+  `roadmap/2026-07-22-agent-analysis-system-roadmap.md`（2026-07-22 两轮对齐后拍板）。
 
 ---
 
@@ -55,8 +64,12 @@ worktree 名称、Lane 分支或本机验收记录推断。
 | 🟢 已收口 | V1.7.3-LMM-LOCAL | 本机 LMM/Agent/UI：显式 local_contained、真实 Seatbelt canary、已知真值 HTTP/浏览器流程和导出 | 独立版本工作包 | 完整 gate 与精确产品提交证据写入 release ledger | 否 | `release-trains/v1.7.3/release-ledger.json` |
 | 🔵 事件触发 | C2-HOSTILE-EXTENSIONS | 敌对插件、第三方模型包或外部候选代码的冻结执行与独立认证 | 长期安全边界 | 只有产品出现对应信任边界时，从新威胁模型和目标宿主重新立项 | 否 | `roadmap/architecture-debt.md#d7-敌对扩展第三方模型包的冻结执行边界未来需求当前不实现` |
 | 🟢 下一版本 | V1.8-TS-C1 | Time Series Diagnostics：先锁 Facts/Assessment/Advisory 合同、统一“结论不充分”与条件化建议；不注册运行时能力 | 合同冲刺 | C1 锁定后再从同一提交并行创建 Pack、Agent、UI、Evaluation；预测另列后续工作包 | 否 | `plans/2026-07-19-time-series-diagnostics-c1-contract-lock-plan.md` |
-| 🔴 发布阻塞 | V1.8-DELIVERY-TRUTH | ARMA–GARCH 的 run 内 HTML/PDF、XLSX、Compare、Agent transcript 不能作为完整的人类交付物：报告存在双轨，workbook 空壳，后两者仅机器原件 | 发布交付层 | 让同一份持久化报告驱动浏览器/HTML/PDF；输出非空结构化 workbook；为 Compare 与 Agent 增加人类可读摘要，同时保留 JSON/JSONL 审计原件 | 是 | §2-V1.8-DELIVERY-TRUTH |
-| 🟡 后续模型核心 | V1.8-JOINT-ARMA-GARCH-MLE | 含 MA 的 ARMA(p,q)-ARCH/GARCH 目前顺序估计，不能对齐 Stata 联合条件极大似然及联合 IC | 独立估计核心 | 以版本化 Stata oracle、conditioning、LL/IC、收敛和预测 parity 为验收工作包；不作为 v1.8 小修 | 否（若不宣称数值复现） | §2-V1.8-JOINT-ARMA-GARCH-MLE |
+| 🟢 主线 | V1.8.1-NOTEBOOK | Agent Notebook（Graph 的叙事视图）+ 选中文本四类操作；备选方案存为带上下文指纹的 typed proposal，不预建空分支 | 主线 | 见 `specs/2026-07-22-v1.8.1-agent-notebook-analysis-option.md` | 否 | roadmap §2 |
+| 🟡 横向基础 | V1.8.2-EVAL | 评测工装：已知真值、参考实现对照、错误注入、lineage 检查、结论忠实度、proposal replay | 测试基建 | **必须照"实现与测试合谋"这一失败模式设计**：fixture 一律从真实持久化响应提取，禁止手写；replay 之外须含真 provider 探索性运行 | 否 | roadmap §3 |
+| 🟡 后续模型核心 | V1.8.2-JOINT-ARMA-GARCH-MLE | 含 MA 的 ARMA(p,q)-ARCH/GARCH 目前顺序估计，无法对齐 Stata 联合条件 MLE 与联合 IC。**但联合估计只在联合设定正确时更有效**；设定有误时误差会沿似然传遍所有参数，顺序估计反而更稳健（有限信息 vs 全信息） | 独立估计核心 | 冻结版本化 Stata oracle 做 parity；**同时交付 typed recommendation**（当前建议/原因/升级条件/预期收益/额外风险），由 Agent 依方差诊断给出建议而非直接切换估计器 | 否（若不宣称数值复现） | §2-V1.8.2-JOINT-ARMA-GARCH-MLE |
+| 🟡 基础设施 | ARTIFACT-SCHEMA-REGISTRY | artifact 不声明 payload 符合哪个 schema 版本（`register_artifact` 只有 `artifact_id`/`artifact_type`/`step`）。v1.8.1 已按 DEC-ART-001 明确排除，**不得声称已校验** | 契约基建 | schema registry + 命名版本规则 + producer 声明 + validator + 兼容性判定 + 旧 artifact 迁移 + 消费者版本协商；表格/模型对象/图形元数据 payload 规则各异 | 否 | spec §5、DEC-ART-FUTURE-001 |
+| 🔵 待立项 | V1.8.3-CAPABILITY-EXT | Agent 提议扩展能力（依赖或自研）；**运行时禁止任意安装**。缺一层判据：无 oracle 时如何验证 | 能力扩展 | 分层判据：有 oracle→逐元素对照；无 oracle 但有可推导性质→性质/模拟回收检验；两者皆无→**只能停在 experimental，永不升 verified**。⛔ **被 `ARTIFACT-SCHEMA-REGISTRY` 阻塞晋升 verified**：只知道"它产出一个 table"不足以信任外部 Adapter 的产物 | 否 | roadmap §4 |
+| 🔵 待立项 | V1.8.4-TYPED-MEMORY | 分级 typed memory（偏好/项目事实/分析模板/Failure Memory）+ 项目历史检索 | Agent 记忆 | 记忆须带正/反测试与 `vocabulary_version`；**`last_validated_at`/`expires_at` 需要执行者**，建议同共享依赖守卫走 gate preflight | 否 | roadmap §5 |
 | 🟡 测试 | N2 | 预存 slot-leak race:`test_run_inputs_persisted` 发 run 不等完成 → EventManager 单例 slot 泄漏，反字母序运行会 429 污染后续 run 测试 | 测试卫生（预存，v1.6.10 发现） | 测试收尾 join/await run 或按测试隔离 slot（字母序下不触发，故 gate 一直绿；非回归） | 否 | §2-N2 |
 | 🟡 工程 | W1 | draft-execute dedupe 响应 `produced_lineage` 与 fresh execute 不同形 | 后端协议 | 统一响应形状 | 否 | §2-W1 |
 | 🟡 工程 | W2 | 全量孤儿 upload/draft GC（项目级后台回收未做） | 后端 | 单独设计 GC；本版只回收 discard 创世链的无引用 upload | 否 | §2-W2 |
@@ -93,6 +106,17 @@ worktree 名称、Lane 分支或本机验收记录推断。
 | 🟢 更远 | M5 | roadmap §3.5 的 W·C·A + Agent Harness | v1.7 | — | — | roadmap |
 | 🟢 穿插 | M6 | 统计方法线未建大类:**机器学习**(RF/XGBoost/CV 框架/SHAP)·**降维聚类**(PCA/K-means/层次)·**高级时序**(VAR/VECM/协整/GARCH)·**生存分析**(KM/Cox PH/log-rank)。⚠️ 统计方法 roadmap §12 版本表是 2026-05-13 旧草稿(写"V1.7=DID"但 DID v1.5.x 已全 ship),版本号作废勿照排 | 统计方法(独立穿插线,低风险不阻塞) | 沿用 DID 模式:自实现+R oracle 验证+golden;每类单独排版本,与主线穿插 | 否 | roadmap §13 |
 
+> **已清（v1.8.0，做完即删，git 历史留痕）**：🔴 **V1.8-DELIVERY-TRUTH**（ARMA–GARCH 交付层）
+> — 五条完成条件全部有真机证据（run `20260722_043812_924307_874cc62b`）：报告单一事实源 +
+> 新报告持久化为 `ai_report_<id>`；`tables.xlsx` **八表全非空**；Compare 人类摘要；
+> Agent 聚合审计三格式。**独立验收推翻了它原本"已完成"的自述**：非空不等于可用——
+> Rolling forecasts 只导出 18 列里的 2 列、Volatility candidates 一个候选都没有、
+> Diagnostics 只有 ADF（漏掉产生验收警告的那些检验），根因是 exporter 与其 fixture
+> 共用同一套猜错的列名。commit `ede19ff`。
+> 另清 🔵 **U-COMPARE-INLINE**（内联 Compare 打印两坨 ~900 字符 JSON）— `nodeDiff.ts`
+> 展平为叶子路径，commit `54a9879`；🔵 **U-AUDIT-HTML**（HTML 审计导出实为 markdown
+> 塞进 `<pre>`，因为只测了 JSON/Markdown 载荷没测渲染）— commit `93f437d`。
+>
 > **已清（v1.6.11，做完即删，git 历史留痕）**：🔵 **U3**（covariance 默认值硬耦合）
 > — 后端 `COVARIANCE_UI` robust 标 `default:True` + `_COVARIANCE_DEFAULT` 单源驱动 param value;
 > 合约放行 `default:boolean`;前端 `covarianceDefault()` 读 flag（`[0]` 仅防御兜底）。commit `2a3eca5`。
@@ -172,19 +196,7 @@ DetailHeader 渲染 `{runId} · {nodeKey}`（森林下 nodeKey 是 64-hex hash�
 
 `focal` 和 `explanatory_unspecified` 现在都显示 `X`（v1.6.8 把 `X?` 改掉响应"看不出变量名"的抱怨），仅 tooltip 可区分。如果 unspecified 的视觉信号还重要，需要新的呈现方案（如淡色/斜体 X）。
 
-### §2-V1.8-DELIVERY-TRUTH · ARMA–GARCH 交付层发布阻塞
-
-VIXCLS 浏览器验收确认模型、图表和机器审计数据已经生成，但用户下载的 run 内交付物没有忠实呈现同一事实：自动 `reports/report.html` 与 `report.pdf` 是旧的基础摘要；浏览器中较完整的 DeepSeek 报告只在浏览器存储中；`exports/tables.xlsx` 只接收传统结果的 `coefficients`，对 ARMA–GARCH 形成空 sheet；Compare JSON 和 Agent JSONL 可审计却不适合人类直接核查，且 Agent 成功 child/operation record 不在父 session 单文件内。
-
-此项的完成条件是：
-
-1. 报告有唯一、run-owned、可追溯的持久化事实源；浏览器、HTML 与 PDF 从同一事实源渲染，并明确 provider 生成内容与确定性事实的边界。
-2. `tables.xlsx` 至少包含非空的 Overview、候选、参数、诊断、滚动验证、下一期预测和 acceptance 数据表；每个 sheet 都能追到对应 `ts.*` artifact。
-3. Compare 提供人类可读的样本一致性、规格变化、指标/诊断变化和自动判定边界摘要；原 JSON 保留为审计附件，不能取代摘要。
-4. Agent 提供只读聚合记录：用户问题、调查、提案、确认、执行、child run 与终态；原 session、operation 和 tool JSONL 继续保留并可链接。
-5. 对真实 VIX run 增加非空导出验收；在实现真实导出 API 前，禁止用只存在于 fixture 的假 workbook 声称通过。
-
-### §2-V1.8-JOINT-ARMA-GARCH-MLE · 联合 ARMA(p,q)-ARCH/GARCH 条件极大似然
+### §2-V1.8.2-JOINT-ARMA-GARCH-MLE · 联合 ARMA(p,q)-ARCH/GARCH 条件极大似然
 
 这是新的估计核心工作包，不是 v1.8 的 bugfix。当前当 `q > 0` 时先估 ARMA、再估 ARCH/GARCH，因此不能与 Stata `arch ..., ar() ma() arch() garch()` 的联合条件极大似然、联合参数或联合 IC 做逐数值比较。完成前，产品只能使用 `REFERENCE_SEMANTICS = "directional_or_workflow_regression"`。
 

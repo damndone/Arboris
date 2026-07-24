@@ -234,6 +234,13 @@ def run_workflow(
     )
     config = load_config(project_root / "config.yml")
     run = create_run(project_root, mode=mode)
+    # Gate 1: bind family at birth in migrated projects. This path always
+    # creates a root run (rerun_of is None below), so it adopts a new family.
+    # Imported locally: `test_orchestrator_namespace` pins this module's public
+    # names, and a module-level import would add one.
+    from ..lineage.run_family import ensure_run_family_binding
+
+    ensure_run_family_binding(project_root, run.root, rerun_of=None, created_by="orchestrator")
     started_at = datetime.now(timezone.utc).isoformat()
     direct_form = {
         "mode": mode,
