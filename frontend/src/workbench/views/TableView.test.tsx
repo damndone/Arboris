@@ -121,7 +121,7 @@ describe("TableView", () => {
           r_squared: 0.42,
           nobs: 100,
           coefficients: {
-            education: { estimate: 0.08, std_error: 0.01, p_value: 0.001, p_value_display: "<0.001" },
+            education: { estimate: 0.08, std_error: 0.01, p_value: 0.001, p_value_display: "<0.001", ci_lower: 0.0604, ci_upper: 0.0996 },
             age: { estimate: 0.02, std_error: 0.005, p_value: 0.04, p_value_display: "0.04" },
           },
         },
@@ -135,6 +135,9 @@ describe("TableView", () => {
     expect(screen.getByText("education")).toBeTruthy();
     expect(screen.getByText("age")).toBeTruthy();
     expect(screen.getByText("0.08")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "95% CI" })).toBeTruthy();
+    expect(screen.getByText("[0.0604, 0.0996]")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("renders the canonical LMM packet coefficient and diagnostic", async () => {

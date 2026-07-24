@@ -158,6 +158,8 @@ export type CoefficientRecord = {
   std_error?: number | null;
   p_value?: number | null;
   p_value_display?: string | null;
+  ci_lower?: number | null;
+  ci_upper?: number | null;
   source_id?: string;
 };
 

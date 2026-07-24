@@ -53,6 +53,17 @@ function fmt(n: number | null | undefined): string {
   return String(Number(n.toPrecision(4)));
 }
 
+function confidenceIntervalText(coefficient: {
+  ci_lower?: number | null;
+  ci_upper?: number | null;
+  confidence_interval?: readonly [number, number] | null;
+}): string {
+  const lower = typeof coefficient.ci_lower === "number" ? coefficient.ci_lower : coefficient.confidence_interval?.[0];
+  const upper = typeof coefficient.ci_upper === "number" ? coefficient.ci_upper : coefficient.confidence_interval?.[1];
+  if (typeof lower !== "number" || typeof upper !== "number") return "—";
+  return `[${fmt(lower)}, ${fmt(upper)}]`;
+}
+
 /** "correlation_heatmap" → "Correlation heatmap" for captions/alt text. */
 function humanize(id: string): string {
   const s = id.replace(/[_-]+/g, " ").trim();
@@ -84,6 +95,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
             <th style={{ padding: "2px 8px" }}>estimate</th>
             <th style={{ padding: "2px 8px" }}>std. error</th>
             <th style={{ padding: "2px 8px" }}>p-value</th>
+            <th style={{ padding: "2px 8px" }}>95% CI</th>
           </tr>
         </thead>
         <tbody>
@@ -95,6 +107,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
               <td style={{ padding: "2px 8px" }}>
                 {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
               </td>
+              <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
             </tr>
           ))}
         </tbody>
