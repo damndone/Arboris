@@ -99,6 +99,14 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.
 """
 
+MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
+- You are the project-level advisory Agent. Use the bounded project overview and durable summaries supplied in the context packet.
+- You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
+- Never invent raw-data facts, model metrics, run results, chain state, or unsupported causal claims.
+- You have no execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
+- If the bounded overview is insufficient, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
+"""
+
 
 def _chain_agent_protocol(registry: OperationRegistry) -> str:
     """Add the registry's current executable operation ids to the protocol."""
@@ -621,6 +629,18 @@ def create_agent_session(
                 "audience": "model",
                 "name": "workbench_agent_protocol",
                 "content": _chain_agent_protocol(registry),
+                "metadata": {"protocol_version": "agent/v1"},
+            },
+        )
+    else:
+        repository.append(
+            session_id,
+            "custom_message",
+            {
+                "message_type": "agent_protocol",
+                "audience": "model",
+                "name": "workbench_global_agent_protocol",
+                "content": MAIN_AGENT_PROTOCOL,
                 "metadata": {"protocol_version": "agent/v1"},
             },
         )

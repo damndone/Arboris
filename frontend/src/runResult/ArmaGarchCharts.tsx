@@ -9,7 +9,14 @@
 // thinned series as if it were complete. Correlograms draw the +-1.96/sqrt(n)
 // band so a reader can see which spikes are actually distinguishable from zero.
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  appendAiActivity,
+  askAiHistoryForNode,
+  makeActivityId,
+} from "../aiActivity/aiActivityLog";
+import { askAiAboutFigure, type FigureAiContext } from "../workbench/views/figureAi";
+import { renderMarkdown } from "../report/markdown";
 
 const W = 560;
 const H = 180;
@@ -17,6 +24,13 @@ const PAD = 28;
 const MAX_POINTS = 700;
 
 type Row = Record<string, unknown>;
+
+type ChartAiSpec = {
+  artifactId: string;
+  payload: Record<string, unknown>;
+  projectRoot?: string | null;
+  runId?: string | null;
+};
 
 function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -40,11 +54,13 @@ function Frame({
   note,
   children,
   exportable = true,
+  ai,
 }: {
   title: string;
   note?: string;
   children: React.ReactNode;
   exportable?: boolean;
+  ai?: ChartAiSpec;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const downloadSvg = () => {
@@ -91,7 +107,150 @@ function Frame({
         ) : null}
       </figcaption>
       <div ref={bodyRef} style={{ overflowX: "auto" }}>{children}</div>
+      {ai && <ChartAskAi title={title} spec={ai} />}
     </figure>
+  );
+}
+
+const MAX_AI_ROWS = 120;
+
+function chartFigureContext(title: string, spec: ChartAiSpec): FigureAiContext {
+  const sourceRows = spec.payload.rows;
+  const rows = Array.isArray(sourceRows) ? sourceRows : null;
+  const truncated = rows !== null && rows.length > MAX_AI_ROWS;
+  const boundedPayload = rows !== null && truncated
+    ? {
+        ...spec.payload,
+        rows: [
+          ...rows.slice(0, MAX_AI_ROWS / 2),
+          ...rows.slice(-MAX_AI_ROWS / 2),
+        ],
+        row_count: rows.length,
+        rows_truncated: true,
+      }
+    : spec.payload;
+  return {
+    figure_context_version: "figure-ai-context/v1",
+    run_id: spec.runId ?? "current-run",
+    figure: {
+      artifact_id: spec.artifactId,
+      path: `artifacts/${spec.artifactId}.json`,
+      chart_type: title,
+      sha256: null,
+    },
+    source: {
+      artifact_id: spec.artifactId,
+      path: `artifacts/${spec.artifactId}.json`,
+      kind: "structured_chart",
+      sha256: null,
+      preview_json: JSON.stringify(boundedPayload),
+      preview_truncated: truncated,
+    },
+    guidance: "Interpret the chart from the persisted structured numeric source, not from pixels.",
+    context_visibility_notice: {
+      source: "persisted structured chart artifact",
+      rows_included: rows === null ? null : truncated ? MAX_AI_ROWS : rows.length,
+      rows_total: rows?.length ?? null,
+    },
+    response_guardrails: {
+      must_interpret_from_numeric_source: true,
+      must_not_invent_values: true,
+      chart_source_is_bounded_preview: truncated,
+    },
+  };
+}
+
+function ChartAskAi({ title, spec }: { title: string; spec: ChartAiSpec }) {
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!spec.projectRoot) return;
+    const previous = askAiHistoryForNode(spec.projectRoot, `figure:${spec.artifactId}`);
+    const latest = previous[previous.length - 1];
+    if (latest?.status === "answered" && latest.answer) {
+      setAnswer(latest.answer);
+      setStatus("done");
+    }
+  }, [spec.artifactId, spec.projectRoot]);
+
+  async function handleAsk() {
+    setStatus("loading");
+    setError(null);
+    try {
+      const context = chartFigureContext(title, spec);
+      const question = `Interpret this ${title} for me: what does it show about the analysis, and what should I watch out for? Use only the persisted structured numeric source.`;
+      const response = await askAiAboutFigure(context, question);
+      setAnswer(response.text);
+      setStatus("done");
+      if (spec.projectRoot) {
+        appendAiActivity(spec.projectRoot, {
+          kind: "ask_ai",
+          id: makeActivityId(),
+          at: new Date().toISOString(),
+          node_key: `figure:${spec.artifactId}`,
+          node_label: `Figure · ${title}`,
+          question,
+          status: "answered",
+          answer: response.text,
+        });
+      }
+    } catch (reason: unknown) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setError(message);
+      setStatus("error");
+      if (spec.projectRoot) {
+        appendAiActivity(spec.projectRoot, {
+          kind: "ask_ai",
+          id: makeActivityId(),
+          at: new Date().toISOString(),
+          node_key: `figure:${spec.artifactId}`,
+          node_label: `Figure · ${title}`,
+          question: "",
+          status: "error",
+          error: message,
+        });
+      }
+    }
+  }
+
+  return (
+    <div data-testid={`chart-ask-ai-${spec.artifactId}`} style={{ marginTop: 6 }}>
+      <button
+        type="button"
+        aria-label={`Ask AI about ${title}`}
+        disabled={status === "loading"}
+        onClick={() => void handleAsk()}
+      >
+        {status === "loading" ? "Asking AI…" : "Ask AI"}
+      </button>
+      {status === "loading" && (
+        <span style={{ marginLeft: 6, fontSize: 11, color: "var(--label-tertiary)" }}>
+          Numeric source only · bounded preview
+        </span>
+      )}
+      {status === "error" && (
+        <div role="alert" style={{ fontSize: 11, color: "var(--accent-negative, #d33)", marginTop: 4 }}>
+          {error}
+        </div>
+      )}
+      {status === "done" && answer && (
+        <div
+          data-testid={`chart-ask-ai-answer-${spec.artifactId}`}
+          style={{
+            fontSize: 12,
+            marginTop: 6,
+            padding: 8,
+            whiteSpace: "pre-wrap",
+            background: "var(--bg-card-2, rgba(0,0,0,0.03))",
+            borderRadius: 6,
+          }}
+        >
+          {renderMarkdown(answer)}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -112,12 +271,14 @@ export function SeriesChart({
   valueKey,
   color = "#4a6cf7",
   zeroLine = false,
+  ai,
 }: {
   title: string;
   rows: Row[];
   valueKey: string;
   color?: string;
   zeroLine?: boolean;
+  ai?: ChartAiSpec;
 }) {
   const values = source.map((row) => num(row[valueKey])).filter((v): v is number => v !== null);
   if (values.length < 2) {
@@ -137,6 +298,7 @@ export function SeriesChart({
           ? `${values.length} observations`
           : `${values.length} observations, drawn every ${Math.ceil(values.length / MAX_POINTS)}th`
       }
+      ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
         <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#ccc" />
@@ -160,10 +322,12 @@ export function CorrelogramChart({
   title,
   rows: source,
   observationCount,
+  ai,
 }: {
   title: string;
   rows: Row[];
   observationCount: number | null;
+  ai?: ChartAiSpec;
 }) {
   const bars = source
     .map((row) => ({ lag: num(row.lag), value: num(row.value) }))
@@ -183,6 +347,7 @@ export function CorrelogramChart({
     <Frame
       title={title}
       note={band ? `95% band +-${band.toFixed(3)}` : "95% band unavailable"}
+      ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
         <line x1={PAD} y1={sy(0)} x2={W - PAD} y2={sy(0)} stroke="#ccc" />
@@ -209,7 +374,7 @@ export function CorrelogramChart({
 }
 
 /** Standardized-residual QQ plot against the 45-degree reference. */
-export function QQChart({ title, rows: source }: { title: string; rows: Row[] }) {
+export function QQChart({ title, rows: source, ai }: { title: string; rows: Row[]; ai?: ChartAiSpec }) {
   const pairs = source
     .map((row) => ({
       theoretical: num(row.theoretical_quantile),
@@ -232,6 +397,7 @@ export function QQChart({ title, rows: source }: { title: string; rows: Row[] })
     <Frame
       title={title}
       note={kept ? `${pairs.length} points` : `${pairs.length} points, thinned for display`}
+      ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
         <line x1={sx(lo)} y1={sy(lo)} x2={sx(hi)} y2={sy(hi)} stroke="#f55" strokeDasharray="4 3" />
@@ -250,12 +416,14 @@ export function IntervalBandChart({
   observedKey,
   bands,
   markKey,
+  ai,
 }: {
   title: string;
   rows: Row[];
   observedKey: string;
   bands: { lowerKey: string; upperKey: string; color: string; label: string }[];
   markKey?: string;
+  ai?: ChartAiSpec;
 }) {
   const usable = source.filter((row) => num(row[observedKey]) !== null);
   if (usable.length < 2) {
@@ -287,6 +455,7 @@ export function IntervalBandChart({
         kept ? `${usable.length} origins` : `${usable.length} origins, thinned for display`,
         ...bands.map((band) => band.label),
       ].join(" · ")}
+      ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
         {bands.map((band) => (
@@ -315,6 +484,7 @@ export function DualAxisChart({
   rightKey,
   leftLabel,
   rightLabel,
+  ai,
 }: {
   title: string;
   rows: Row[];
@@ -322,6 +492,7 @@ export function DualAxisChart({
   rightKey: string;
   leftLabel: string;
   rightLabel: string;
+  ai?: ChartAiSpec;
 }) {
   const usable = source.filter(
     (row) => num(row[leftKey]) !== null && num(row[rightKey]) !== null,
@@ -344,6 +515,7 @@ export function DualAxisChart({
     <Frame
       title={title}
       note={`${leftLabel} (left) vs ${rightLabel} (right)${kept ? "" : ", thinned for display"} · independent scales`}
+      ai={ai}
     >
       <svg width={W} height={H} aria-label={title} role="img">
         <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#ccc" />

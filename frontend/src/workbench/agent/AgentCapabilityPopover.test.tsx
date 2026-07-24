@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
 
@@ -51,5 +51,18 @@ describe("AgentCapabilityPopover", () => {
     const popover = screen.getByTestId("agent-capability-popover");
     expect(popover.parentElement).toBe(document.body);
     expect(popover).toHaveStyle({ position: "fixed" });
+  });
+
+  it("opens on hover and closes after the pointer leaves the trigger", async () => {
+    render(<AgentCapabilityPopover catalog={catalog} onPromptSelect={() => {}} />);
+    const trigger = screen.getByTestId("agent-capability-trigger");
+
+    fireEvent.mouseEnter(trigger);
+    expect(screen.getByTestId("agent-capability-popover")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(trigger);
+    await waitFor(() => {
+      expect(screen.queryByTestId("agent-capability-popover")).not.toBeInTheDocument();
+    });
   });
 });

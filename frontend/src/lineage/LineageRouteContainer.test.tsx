@@ -103,7 +103,7 @@ describe("LineageRouteContainer", () => {
     fireEvent.click(backHome);
     await waitFor(() =>
       expect(screen.getByTestId("location-probe")).toHaveTextContent(
-        "/p/L3Byb2o/graph?view=home",
+        "/",
       ),
     );
   });

@@ -488,6 +488,21 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
     });
 
+    it("collapses and reopens the BottomPanel without losing its active tab", async () => {
+      sessionStorage.removeItem("workbench:bottomPanelOpen:r1");
+      mountAt("/?tab=lineage&panel=logs");
+      await screen.findByTestId("graph-workbench");
+
+      fireEvent.click(screen.getByRole("button", { name: "Close bottom panel" }));
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "false");
+      expect(screen.queryByTestId("bottom-panel-body")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open bottom panel" }));
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("panel-tab-logs")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
+    });
+
     it("keeps the bottom panel freely resizable instead of forcing Focus mode", async () => {
       mountAt("/?tab=lineage&panel=agent");
       await screen.findByTestId("graph-workbench");

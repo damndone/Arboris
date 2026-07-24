@@ -120,6 +120,13 @@ export function GraphView() {
     if (compare?.handleCanvasSelect(nodeKey)) return;
     select(nodeKey);
   };
+  const handlePaneClick = () => {
+    if (picking !== null) {
+      compare?.cancelPick();
+      return;
+    }
+    select(null);
+  };
   useEffect(() => {
     if (picking === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -207,6 +214,7 @@ export function GraphView() {
           selectedNodeId={effectiveSelectedKey}
           expandedGroups={expandedGroups}
           onSelect={handleSelect}
+          onPaneClick={handlePaneClick}
           onExpandGroup={handleExpandGroup}
           layout={layout}
           onLayoutChange={setLayout}

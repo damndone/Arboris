@@ -53,4 +53,24 @@ describe("renderMarkdown", () => {
     mount("# T\n\npara\n\n---\n\n- a\n- b continuation\n  next line\n\n## S2");
     expect(screen.getByTestId("md").querySelector("hr")).not.toBeNull();
   });
+
+  it("renders pipe tables as semantic table markup", () => {
+    mount("| Model | Estimate |\n| :--- | ---: |\n| OLS | 1.25 |\n| Robust | 1.31 |");
+
+    const table = screen.getByTestId("markdown-table");
+    expect(table.querySelectorAll("thead th")).toHaveLength(2);
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(table).toHaveTextContent("Robust");
+    expect(table.querySelector("th")).toHaveStyle({ textAlign: "left" });
+    expect(table.querySelectorAll("th")[1]).toHaveStyle({ textAlign: "right" });
+  });
+
+  it("renders inline and block math without leaking LaTeX delimiters", () => {
+    mount("The coefficient is $\\beta_1$ and $\\sigma^2$.\n\n$$\n\\hat{\\beta} = (X'X)^{-1}X'y\n$$");
+
+    expect(screen.getAllByRole("math").length).toBe(3);
+    expect(screen.getByTestId("markdown-math-block")).toHaveTextContent("β");
+    expect(screen.getByTestId("md").textContent).not.toContain("\\beta");
+    expect(screen.getByTestId("md").textContent).not.toContain("$$");
+  });
 });

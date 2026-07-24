@@ -42,6 +42,7 @@ import type {
   AgentNavigationRef,
   AgentOperationRecord,
   AgentProposal,
+  AgentRole,
 } from "./agentTypes";
 import type { ForestViewModel } from "../../lineage/api/graphViewTypes";
 
@@ -125,6 +126,63 @@ function runFocusModelNodeKey(
   return activeModel?.nodeKey ?? null;
 }
 
+const MAX_GLOBAL_PROJECT_NODES = 120;
+const MAX_GLOBAL_PROJECT_RUNS = 200;
+
+function boundedGlobalProjectContext(
+  projectRoot: string,
+  forest: { forest: ForestViewModel; activeRunId: string },
+): AgentContextPacket {
+  const view = forest.forest;
+  const nodes = view.nodes.slice(0, MAX_GLOBAL_PROJECT_NODES).map((node) => ({
+    node_key: node.nodeKey,
+    kind: node.kind,
+    stage: node.stage,
+    title: node.title,
+    summary: node.summary ?? null,
+    runs: node.runs.slice(0, 12),
+  }));
+  const runs = Array.from(new Set(view.nodes.flatMap((node) => node.runs)))
+    .slice(0, MAX_GLOBAL_PROJECT_RUNS);
+  const heads = view.heads.map((head) => ({
+    run_id: head.runId,
+    head_node_hash: head.headNodeHash,
+    status: head.status,
+    rerun_of: head.rerunOf,
+    created_at: head.createdAt,
+  }));
+  const headFingerprint = view.heads
+    .map((head) => `${head.runId}:${head.headNodeHash ?? "none"}:${head.status ?? "unknown"}`)
+    .join("|");
+
+  return {
+    packet_version: "agent-project-context/v1",
+    context_fingerprint: `project:${projectRoot}:heads:${headFingerprint}:nodes:${view.nodes.length}`,
+    scope: "global_project",
+    project_overview: {
+      family_count: view.familyCount,
+      run_count: view.familyRunCount,
+      active_head_run_id: forest.activeRunId,
+      heads,
+      runs,
+      nodes,
+      truncation: {
+        nodes_truncated: view.nodes.length > MAX_GLOBAL_PROJECT_NODES,
+        runs_truncated: runs.length >= MAX_GLOBAL_PROJECT_RUNS,
+        raw_datasets_included: false,
+        full_artifacts_included: false,
+      },
+    },
+    response_guardrails: {
+      advisory_text_only: true,
+      executable_actions_allowed: false,
+      graph_mutations_allowed: false,
+      file_reads_allowed: false,
+      must_disclose_visibility_limits: true,
+    },
+  };
+}
+
 export interface AgentSurfaceContextValue {
   messages: AgentMessage[];
   prompt: string;
@@ -205,7 +263,13 @@ export function AgentSurfaceProvider({
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
   const selectedNode = graphNodes.find((node) => node.nodeKey === selectedKey) ?? null;
+  // A run-rail focus still belongs to its chain. Only an actual blank canvas
+  // selection in forest mode promotes the surface to the project Main Agent.
+  const isGlobalScope = Boolean(forest) && selectedNode === null && selectedKey === null;
   const contextPacket = useMemo<AgentContextPacket>(() => {
+    if (isGlobalScope && forest) {
+      return boundedGlobalProjectContext(projectRoot, forest);
+    }
     const scopedSelection = forest
       ? runFocusModelNodeKey(forest, selectedKey)
       : null;
@@ -218,13 +282,15 @@ export function AgentSurfaceProvider({
       if (resolved.ok) return buildAskAIContextPacket(resolved.context);
     }
     return fallbackProjectContext(runId, selectedKey);
-  }, [forest, runId, selectedKey]);
+  }, [forest, isGlobalScope, projectRoot, runId, selectedKey]);
 
   const contextFingerprint = typeof contextPacket.context_fingerprint === "string"
     && contextPacket.context_fingerprint
     ? contextPacket.context_fingerprint
     : `${runId}:${selectedKey ?? "none"}`;
-  const storageKey = `workbench:agent-session:${projectRoot}:${runId}:${encodeURIComponent(contextFingerprint)}`;
+  const storageKey = isGlobalScope
+    ? `workbench:agent-session:${projectRoot}:main:${encodeURIComponent(contextFingerprint)}`
+    : `workbench:agent-session:${projectRoot}:${runId}:${encodeURIComponent(contextFingerprint)}`;
   const linkedSessionId = searchParams.get("agent_session") || null;
   const linkedOperationId = searchParams.get("operation") || null;
   const linkedDiffFocused = searchParams.get("diff") === "1";
@@ -232,6 +298,7 @@ export function AgentSurfaceProvider({
     ? `workbench:agent-linked:${projectRoot}:${linkedSessionId}`
     : storageKey;
   const activeScopeRef = useRef(sessionScope);
+  const optimisticMessageCounterRef = useRef(0);
   const applyEvents = useCallback((events: AgentEvent[]) => {
     if (events.length === 0) return;
     const latest = events.reduce((current, event) => (
@@ -267,6 +334,7 @@ export function AgentSurfaceProvider({
   useEffect(() => {
     let cancelled = false;
     activeScopeRef.current = sessionScope;
+    optimisticMessageCounterRef.current = 0;
     setSessionId(null);
     setMessages([]);
     setProposals([]);
@@ -390,7 +458,9 @@ export function AgentSurfaceProvider({
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
-  const scopeLabel = selectedNode
+  const scopeLabel = isGlobalScope
+    ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
+    : selectedNode
     ? `${forest ? "Current chain" : "Run"} · ${selectedNode.title}`
     : forest
       ? `Current chain · ${forest.activeRunId}`
@@ -413,15 +483,33 @@ export function AgentSurfaceProvider({
     if (!question || isSubmitting) return;
     const requestScope = sessionScope;
     if (activeScopeRef.current !== requestScope) return;
+    optimisticMessageCounterRef.current += 1;
+    const optimisticMessage: AgentMessage = {
+      entry_id: `local-user-${optimisticMessageCounterRef.current}`,
+      role: "user",
+      content: question,
+      stop_reason: null,
+    };
+    // The transcript is the conversation surface, so a sent turn must be
+    // visible before the provider round-trip completes. The durable response
+    // replaces this optimistic entry with its canonical entry_id; if the
+    // provider fails, the user turn remains visible beside the error.
+    setMessages((current) => [...current, optimisticMessage]);
+    setPrompt("");
     setIsSubmitting(true);
     setError(null);
     try {
       let activeSessionId = sessionId;
       if (!activeSessionId) {
+        const role: AgentRole = isGlobalScope ? "main" : "chain";
         const created = await createAgentSession(projectRoot, {
-          role: "chain",
-          chain_id: forest ? `chain:${forest.activeRunId}` : `run:${runId}`,
-          run_id: runId,
+          role,
+          chain_id: isGlobalScope
+            ? `project:${projectRoot}`
+            : forest
+              ? `chain:${forest.activeRunId}`
+              : `run:${runId}`,
+          run_id: isGlobalScope ? undefined : runId,
           context_packet: contextPacket,
         });
         activeSessionId = created.session_id;
@@ -440,14 +528,13 @@ export function AgentSurfaceProvider({
       } catch {
         // The durable session response still contains the completed turn.
       }
-      setPrompt("");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Agent turn failed");
       setSessionStatus("failed");
     } finally {
       if (activeScopeRef.current === requestScope) setIsSubmitting(false);
     }
-  }, [contextPacket, eventCursor, forest, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, runId, sessionId, sessionScope, storageKey]);
+  }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, runId, sessionId, sessionScope, storageKey]);
 
   const confirmProposal = useCallback(async (proposalId: string) => {
     if (!sessionId || confirmationBusyId !== null) return;

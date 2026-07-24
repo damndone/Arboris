@@ -26,7 +26,12 @@
 // rail + panel + search palette work identically across them.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useSearchParams,
+} from "react-router-dom";
 import { useGraphData } from "../lineage/hooks/useGraphData";
 import { useLineage } from "../lineage/LineageContext";
 import { ErrorBanner, Loading } from "../lineage/statusViews";
@@ -115,6 +120,10 @@ interface WorkbenchHomeProps {
   focusRunId?: string;
 }
 
+type AppShellStatusContext = {
+  setError?: (message: string | null) => void;
+};
+
 /** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
  *  projectRoot alone; runId is only an optional focus hint. */
 export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
@@ -149,6 +158,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
+  const appShellContext = useOutletContext<AppShellStatusContext>();
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [pendingFocusTarget, setPendingFocusTarget] =
     useState<PendingFocusTarget | null>(null);
@@ -183,6 +193,15 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   // A run can be terminal before the project forest scanner has written its
   // head-set entry. Keep a focused deep link alive through that short window
   // instead of making the user refresh the page manually.
+  useEffect(() => {
+    if (!appShellContext?.setError) return;
+    if (error?.kind === "not_found") {
+      appShellContext.setError("Project not found");
+      return;
+    }
+    appShellContext.setError(null);
+  }, [appShellContext?.setError, error]);
+
   useEffect(() => {
     if (!focusRunId || !forest || focusRunIsKnownHead) {
       if (focusIndexPollAttempts !== 0) setFocusIndexPollAttempts(0);
@@ -387,7 +406,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+        onHome={() => navigate("/")}
       />
     );
   }
@@ -888,7 +907,17 @@ function LegacyGraphWorkbench({
   runId,
 }: WorkbenchRouteContainerProps) {
   const navigate = useNavigate();
+  const appShellContext = useOutletContext<AppShellStatusContext>();
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
+
+  useEffect(() => {
+    if (!appShellContext?.setError) return;
+    if (error?.kind === "not_found") {
+      appShellContext.setError("Project not found");
+      return;
+    }
+    appShellContext.setError(null);
+  }, [appShellContext?.setError, error]);
 
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(() => {
     if (model === null) return undefined;
@@ -901,7 +930,7 @@ function LegacyGraphWorkbench({
       <ErrorBanner
         error={error}
         onRetry={refetch}
-        onHome={() => navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`)}
+        onHome={() => navigate("/")}
       />
     );
   }

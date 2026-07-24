@@ -365,7 +365,7 @@ function AppShell() {
             role="tab"
             aria-selected={isProjectHomeActive}
             onClick={() => {
-              if (isProjectGraphRoute && projectRoot) {
+              if (isProjectGraphRoute && projectRoot && !errorMessage) {
                 navigate(`/p/${rootToSlug(projectRoot)}/graph?view=home`);
               } else {
                 navigate("/");

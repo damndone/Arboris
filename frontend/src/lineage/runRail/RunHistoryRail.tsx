@@ -63,10 +63,16 @@ function statusClass(status: string): string {
 const MIN_RAIL_WIDTH = 160;
 const DEFAULT_RAIL_WIDTH = 240;
 const MAX_RAIL_WIDTH = 480;
+const RAIL_OPEN_KEY_PREFIX = "workbench:runRailOpen:";
 
 function clampRailWidth(width: number): number {
   if (!Number.isFinite(width)) return DEFAULT_RAIL_WIDTH;
   return Math.min(MAX_RAIL_WIDTH, Math.max(MIN_RAIL_WIDTH, Math.round(width)));
+}
+
+function readRailOpen(storageKey: string): boolean {
+  const raw = sessionStorage.getItem(storageKey);
+  return raw === null ? true : raw !== "false";
 }
 
 function readRailWidth(storageKey: string): number {
@@ -87,18 +93,26 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const navigate = useNavigate();
   const { runs, loading, error, refresh } = useRunHistory(projectRoot);
   const widthStorageKey = `workbench:runRailWidth:${projectRoot ?? "default"}`;
+  const openStorageKey = `${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`;
   const [railWidth, setRailWidth] = useState(() => readRailWidth(widthStorageKey));
+  const [railOpen, setRailOpenState] = useState(() => readRailOpen(openStorageKey));
   const dragStart = useRef<{ x: number; width: number; pointerId: number } | null>(null);
 
   useEffect(() => {
     setRailWidth(readRailWidth(widthStorageKey));
-  }, [widthStorageKey]);
+    setRailOpenState(readRailOpen(openStorageKey));
+  }, [openStorageKey, widthStorageKey]);
 
   const commitRailWidth = useCallback((nextWidth: number) => {
     const clamped = clampRailWidth(nextWidth);
     setRailWidth(clamped);
     sessionStorage.setItem(widthStorageKey, String(clamped));
   }, [widthStorageKey]);
+
+  const setRailOpen = useCallback((nextOpen: boolean) => {
+    setRailOpenState(nextOpen);
+    sessionStorage.setItem(openStorageKey, String(nextOpen));
+  }, [openStorageKey]);
 
   const onRailResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
     dragStart.current = {
@@ -170,83 +184,138 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
       <aside
         className="run-rail"
         data-testid="run-rail"
+        data-open={railOpen ? "true" : "false"}
         aria-label="Run history"
-        style={{ width: railWidth, flexBasis: railWidth }}
+        style={railOpen
+          ? { width: railWidth, flexBasis: railWidth }
+          : { width: 0, flexBasis: 0, overflow: "hidden" }}
       >
-      <header className="run-rail__header">
-        <h3 className="run-rail__title">Runs</h3>
-        {projectRoot && (
-          <Link
-            to={`/runs?project_root=${encodeURIComponent(projectRoot)}`}
-            className="run-rail__viewall"
-          >
-            View all
-          </Link>
-        )}
-      </header>
-      {loading && sorted.length === 0 && (
-        <p className="run-rail__empty">Loading…</p>
-      )}
-      {!loading && sorted.length === 0 && !error && (
-        <p className="run-rail__empty">No runs yet.</p>
-      )}
-      {error && sorted.length === 0 && (
-        <p className="run-rail__empty">Couldn't load runs.</p>
-      )}
-      {sorted.length > 0 && (
-        <ul className="run-rail__list" role="list">
-          {sorted.map((r) => {
-            const isActive = r.run_id === activeRunId;
-            return (
-              <li key={r.run_id}>
-                <button
-                  type="button"
-                  className="run-rail__row"
-                  data-testid={`run-rail-row-${r.run_id}`}
-                  data-active={isActive ? "true" : undefined}
-                  aria-current={isActive ? "true" : undefined}
-                  onClick={() => onPick(r)}
-                  title={`${r.run_id}\nstatus: ${r.status}\nstarted: ${
-                    r.started_at ?? "—"
-                  }`}
-                >
-                  <span className="run-rail__id">{shortRunId(r.run_id)}</span>
-                  <span className="run-rail__time">
-                    {formatRelativeTime(r.started_at)}
-                  </span>
-                  <span className={statusClass(r.status)}>{r.status}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+      {railOpen && (
+        <>
+          <header className="run-rail__header">
+            <h3 className="run-rail__title">Runs</h3>
+            {projectRoot && (
+              <Link
+                to={`/runs?project_root=${encodeURIComponent(projectRoot)}`}
+                className="run-rail__viewall"
+              >
+                View all
+              </Link>
+            )}
+            <button
+              type="button"
+              className="run-rail__toggle"
+              aria-label="Close run history"
+              title="Close run history"
+              onClick={() => setRailOpen(false)}
+              style={{
+                marginLeft: "auto",
+                width: 24,
+                height: 24,
+                border: "1px solid var(--separator)",
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--label-secondary)",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+              }}
+            >
+              ‹
+            </button>
+          </header>
+          {loading && sorted.length === 0 && (
+            <p className="run-rail__empty">Loading…</p>
+          )}
+          {!loading && sorted.length === 0 && !error && (
+            <p className="run-rail__empty">No runs yet.</p>
+          )}
+          {error && sorted.length === 0 && (
+            <p className="run-rail__empty">Couldn't load runs.</p>
+          )}
+          {sorted.length > 0 && (
+            <ul className="run-rail__list" role="list">
+              {sorted.map((r) => {
+                const isActive = r.run_id === activeRunId;
+                return (
+                  <li key={r.run_id}>
+                    <button
+                      type="button"
+                      className="run-rail__row"
+                      data-testid={`run-rail-row-${r.run_id}`}
+                      data-active={isActive ? "true" : undefined}
+                      aria-current={isActive ? "true" : undefined}
+                      onClick={() => onPick(r)}
+                      title={`${r.run_id}\nstatus: ${r.status}\nstarted: ${
+                        r.started_at ?? "—"
+                      }`}
+                    >
+                      <span className="run-rail__id">{shortRunId(r.run_id)}</span>
+                      <span className="run-rail__time">
+                        {formatRelativeTime(r.started_at)}
+                      </span>
+                      <span className={statusClass(r.status)}>{r.status}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
       </aside>
-      <div
-        role="separator"
-        aria-label="Resize run history rail"
-        aria-orientation="vertical"
-        aria-valuemin={MIN_RAIL_WIDTH}
-        aria-valuemax={MAX_RAIL_WIDTH}
-        aria-valuenow={railWidth}
-        data-testid="run-rail-resizer"
-        tabIndex={0}
-        onPointerDown={onRailResizeStart}
-        onPointerMove={onRailResizeMove}
-        onPointerUp={onRailResizeEnd}
-        onPointerCancel={onRailResizeEnd}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowRight") {
-            event.preventDefault();
-            commitRailWidth(railWidth + 24);
-          }
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            commitRailWidth(railWidth - 24);
-          }
-        }}
-        className="run-rail__resizer"
-      />
+      {railOpen ? (
+        <div
+          role="separator"
+          aria-label="Resize run history rail"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_RAIL_WIDTH}
+          aria-valuemax={MAX_RAIL_WIDTH}
+          aria-valuenow={railWidth}
+          data-testid="run-rail-resizer"
+          tabIndex={0}
+          onPointerDown={onRailResizeStart}
+          onPointerMove={onRailResizeMove}
+          onPointerUp={onRailResizeEnd}
+          onPointerCancel={onRailResizeEnd}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              commitRailWidth(railWidth + 24);
+            }
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              commitRailWidth(railWidth - 24);
+            }
+          }}
+          className="run-rail__resizer"
+        />
+      ) : (
+        <button
+          type="button"
+          className="run-rail__reopen"
+          aria-label="Open run history"
+          title="Open run history"
+          onClick={() => setRailOpen(true)}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 2,
+            width: 28,
+            height: "100%",
+            padding: "10px 0",
+            border: 0,
+            borderRight: "1px solid var(--separator)",
+            background: "var(--bg-card)",
+            color: "var(--label-secondary)",
+            cursor: "pointer",
+            font: "11px var(--font-mono)",
+          }}
+        >
+          ›<span>Runs</span>
+        </button>
+      )}
     </>
   );
 }

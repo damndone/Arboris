@@ -90,6 +90,11 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
     "bottomPanelHeight",
     DEFAULT_PANEL_HEIGHT,
   );
+  const [open, setOpen] = useSessionByRunId<boolean>(
+    runId,
+    "bottomPanelOpen",
+    true,
+  );
   const resize = usePointerResize({
     height,
     setHeight,
@@ -103,114 +108,156 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
   return (
     <div
       data-testid="bottom-panel"
-      data-open="true"
+      data-open={open ? "true" : "false"}
       style={{
         borderTop: "1px solid var(--separator, #2e2e30)",
         background: "var(--surface-elevated, transparent)",
         display: "flex",
         flexDirection: "column",
         flex: "0 0 auto",
-        height: clampHeight(height),
-        minHeight: MIN_PANEL_HEIGHT,
+        height: open ? clampHeight(height) : 34,
+        minHeight: open ? MIN_PANEL_HEIGHT : 34,
       }}
     >
-      <div
-        role="separator"
-        aria-label="Resize bottom panel"
-        aria-orientation="horizontal"
-        data-testid="bottom-panel-resizer"
-        tabIndex={0}
-        onPointerDown={resize.onPointerDown}
-        onPointerMove={resize.onPointerMove}
-        onPointerUp={resize.onPointerEnd}
-        onPointerCancel={resize.onPointerEnd}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            resize.commitHeight(height + 24);
-          }
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            resize.commitHeight(height - 24);
-          }
-        }}
-        style={{
-          height: 8,
-          marginTop: -4,
-          cursor: "ns-resize",
-          flex: "0 0 auto",
-          touchAction: "none",
-        }}
-      />
-      <div
-        role="tablist"
-        aria-label="Bottom panels"
-        data-testid="bottom-panel-tabs"
-        style={{
-          display: "flex",
-          alignItems: "stretch",
-          gap: 0,
-          height: 32,
-          borderBottom: "1px solid var(--separator, #2e2e30)",
-          padding: "0 4px",
-          flex: "0 0 auto",
-        }}
-      >
-        {bottomPanelRegistry
-          .filter((p) => p.shouldRender(ctx))
-          .sort((a, b) => a.order - b.order)
-          .map((panel) => {
-            const isActive = panel.id === state.bottomPanel;
-            const disabled = panel.disabled?.(ctx);
-            return (
-              <button
-                key={panel.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                data-testid={`panel-tab-${panel.id}`}
-                data-disabled={disabled ? "true" : undefined}
-                title={disabled ? disabled.reason : undefined}
-                onClick={() => {
-                  dispatch.setBottomPanel(panel.id);
-                }}
-                style={{
-                  padding: "0 12px",
-                  border: 0,
-                  background: isActive
-                    ? "var(--tint-bg, rgba(10,132,255,0.12))"
-                    : "transparent",
-                  color: disabled
-                    ? "var(--label-tertiary)"
-                    : isActive
-                      ? "var(--tint, #0a84ff)"
-                      : "var(--label-secondary)",
-                  cursor: disabled ? "help" : "pointer",
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
-                  borderRadius: 4,
-                  opacity: disabled ? 0.7 : 1,
-                }}
-              >
-                {panel.label}
-              </button>
-            );
-          })}
-        <div style={{ flex: 1 }} />
-      </div>
-      {Body && (
-        <div
-          data-testid="bottom-panel-body"
+      {open ? (
+        <>
+          <div
+            role="separator"
+            aria-label="Resize bottom panel"
+            aria-orientation="horizontal"
+            data-testid="bottom-panel-resizer"
+            tabIndex={0}
+            onPointerDown={resize.onPointerDown}
+            onPointerMove={resize.onPointerMove}
+            onPointerUp={resize.onPointerEnd}
+            onPointerCancel={resize.onPointerEnd}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                resize.commitHeight(height + 24);
+              }
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                resize.commitHeight(height - 24);
+              }
+            }}
+            style={{
+              height: 8,
+              marginTop: -4,
+              cursor: "ns-resize",
+              flex: "0 0 auto",
+              touchAction: "none",
+            }}
+          />
+          <div
+            role="tablist"
+            aria-label="Bottom panels"
+            data-testid="bottom-panel-tabs"
+            style={{
+              display: "flex",
+              alignItems: "stretch",
+              gap: 0,
+              height: 32,
+              borderBottom: "1px solid var(--separator, #2e2e30)",
+              padding: "0 4px",
+              flex: "0 0 auto",
+            }}
+          >
+            {bottomPanelRegistry
+              .filter((p) => p.shouldRender(ctx))
+              .sort((a, b) => a.order - b.order)
+              .map((panel) => {
+                const isActive = panel.id === state.bottomPanel;
+                const disabled = panel.disabled?.(ctx);
+                return (
+                  <button
+                    key={panel.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    data-testid={`panel-tab-${panel.id}`}
+                    data-disabled={disabled ? "true" : undefined}
+                    title={disabled ? disabled.reason : undefined}
+                    onClick={() => {
+                      dispatch.setBottomPanel(panel.id);
+                    }}
+                    style={{
+                      padding: "0 12px",
+                      border: 0,
+                      background: isActive
+                        ? "var(--tint-bg, rgba(10,132,255,0.12))"
+                        : "transparent",
+                      color: disabled
+                        ? "var(--label-tertiary)"
+                        : isActive
+                          ? "var(--tint, #0a84ff)"
+                          : "var(--label-secondary)",
+                      cursor: disabled ? "help" : "pointer",
+                      fontSize: 12,
+                      fontWeight: isActive ? 600 : 400,
+                      borderRadius: 4,
+                      opacity: disabled ? 0.7 : 1,
+                    }}
+                  >
+                    {panel.label}
+                  </button>
+                );
+              })}
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              aria-label="Close bottom panel"
+              title="Close bottom panel"
+              data-testid="bottom-panel-toggle"
+              onClick={() => setOpen(false)}
+              style={{
+                border: 0,
+                background: "transparent",
+                color: "var(--label-secondary)",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+                padding: "0 8px",
+              }}
+            >
+              ˅
+            </button>
+          </div>
+          {Body && (
+            <div
+              data-testid="bottom-panel-body"
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                overflow: "auto",
+              }}
+            >
+              <Body {...ctx} />
+            </div>
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          aria-label="Open bottom panel"
+          title="Open bottom panel"
+          data-testid="bottom-panel-toggle"
+          onClick={() => setOpen(true)}
           style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            overflow: "auto",
+            alignSelf: "flex-end",
+            height: 32,
+            border: 0,
+            background: "transparent",
+            color: "var(--label-secondary)",
+            cursor: "pointer",
+            fontSize: 12,
+            padding: "0 12px",
           }}
         >
-          <Body {...ctx} />
-        </div>
+          Open panel ^
+        </button>
       )}
     </div>
   );

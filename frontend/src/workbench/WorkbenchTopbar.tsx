@@ -38,10 +38,10 @@ interface TabSpec {
 // navigation, so it is intentionally not duplicated in this inner switcher.
 // Exported for testing.
 export const VIEW_TABS: TabSpec[] = [
+  { id: "notebook", label: "Notebook" },
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
   { id: "report", label: "Report" },
-  { id: "notebook", label: "Notebook" },
 ];
 
 function projectName(root: string): string {

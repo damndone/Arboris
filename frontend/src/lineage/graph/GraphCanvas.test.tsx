@@ -119,6 +119,29 @@ function StatefulVariableGraph() {
 }
 
 describe("GraphCanvas", () => {
+  it("reports a blank-canvas click separately from node selection", async () => {
+    const onPaneClick = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId="stage:cleaned"
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+        onPaneClick={onPaneClick}
+      />,
+    );
+
+    const pane = await waitFor(() => {
+      const el = document.querySelector(".react-flow__pane");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(pane);
+
+    expect(onPaneClick).toHaveBeenCalledTimes(1);
+  });
+
   it("clicking a folded variable group requests expansion", async () => {
     const onExpandGroup = vi.fn();
     render(

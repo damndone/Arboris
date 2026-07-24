@@ -319,6 +319,8 @@ interface GraphCanvasProps {
   selectedNodeId: string | null;
   expandedGroups: Set<string>;
   onSelect: (nodeId: string) => void;
+  /** Blank-canvas selection is a first-class scope change for the Agent. */
+  onPaneClick?: () => void;
   onExpandGroup: (groupId: string) => void;
   /** V1.5.1 T4' — controlled layout. Defaults to "free" when omitted. */
   layout?: LayoutMode;
@@ -392,6 +394,7 @@ export function GraphCanvas({
   selectedNodeId,
   expandedGroups,
   onSelect,
+  onPaneClick,
   onExpandGroup,
   layout: layoutProp,
   onLayoutChange,
@@ -828,6 +831,7 @@ export function GraphCanvas({
             onExpandGroup(n.id.slice("container:".length));
           else onSelect(n.id);
         }}
+        onPaneClick={onPaneClick}
         onNodeContextMenu={(e, n) => {
           // V1.5.2 P4 — open the workbench context menu. Suppress the
           // browser default so the registry menu is the only one shown.

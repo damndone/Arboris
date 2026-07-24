@@ -168,4 +168,26 @@ describe("AgentComposer", () => {
     expect(screen.getByTestId("agent-context-popover")).toHaveTextContent("32,000");
     expect(screen.getByTestId("agent-context-popover")).toHaveTextContent(/remaining/i);
   });
+
+  it("opens context details on hover and closes them when the pointer leaves", () => {
+    mount(value());
+
+    const ring = screen.getByTestId("agent-context-ring");
+    const control = ring.parentElement as HTMLElement;
+    fireEvent.mouseEnter(control);
+    expect(screen.getByTestId("agent-context-popover")).toBeInTheDocument();
+
+    fireEvent.mouseLeave(control);
+    expect(screen.queryByTestId("agent-context-popover")).not.toBeInTheDocument();
+  });
+
+  it("shows remaining and total context beside the ring without requiring a click", () => {
+    mount(value());
+
+    const summary = screen.getByTestId("agent-context-summary");
+    expect(summary).toHaveTextContent("29,952");
+    expect(summary).toHaveTextContent("32,000");
+    expect(summary).toHaveTextContent(/remaining/i);
+    expect(screen.getByTestId("agent-context-ring")).toHaveAttribute("aria-valuemax", "32000");
+  });
 });

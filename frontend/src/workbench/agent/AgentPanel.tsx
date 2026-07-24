@@ -113,9 +113,6 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
   const [revisionDraft, setRevisionDraft] = useState("");
   const [revisionError, setRevisionError] = useState<string | null>(null);
   const hasNavigationContext = Boolean(agent.hierarchy || agent.navigationLinks.length > 0);
-  const contextLabel = agent.contextWindowTokens === null
-    ? `${agent.contextUsedTokens.toLocaleString()} tokens · capacity unknown`
-    : `${agent.contextUsedTokens.toLocaleString()} / ${agent.contextWindowTokens.toLocaleString()} tokens`;
   const auditSessionId = agent.navigationLinks.find(
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
@@ -137,7 +134,6 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
       >
         <strong style={{ color: "var(--label)" }}>agent</strong>
         <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>
-        <span style={{ marginLeft: "auto", color: "var(--label-tertiary)" }}>{contextLabel}</span>
         <span style={{ color: "var(--label-tertiary)" }} aria-label={`Session status: ${agent.sessionStatus}`}>
           [{agent.isSubmitting ? "thinking" : agent.sessionStatus}]
         </span>

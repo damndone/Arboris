@@ -4,6 +4,7 @@
 // gallery reads as an argument: is the series usable, is the mean adequate, is
 // the volatility model adequate, and did it pay off out of sample.
 
+import { useContext } from "react";
 import {
   CorrelogramChart,
   DualAxisChart,
@@ -16,6 +17,8 @@ import {
   type ArmaGarchCharts,
   type ArmaGarchChartKey,
 } from "./useArmaGarchCharts";
+import { LineageContext } from "../lineage/LineageContext";
+import { useProjectRootOptional } from "../workbench/ProjectRootContext";
 
 type Row = Record<string, unknown>;
 
@@ -73,7 +76,18 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | undefined }) {
+export function ArmaGarchChartGallery({
+  charts,
+  projectRoot: projectRootProp,
+  runId: runIdProp,
+}: {
+  charts: ArmaGarchCharts | undefined;
+  projectRoot?: string | null;
+  runId?: string | null;
+}) {
+  const projectRoot = projectRootProp ?? useProjectRootOptional();
+  const lineage = useContext(LineageContext);
+  const runId = runIdProp ?? lineage?.model.runId ?? null;
   if (!charts) return null;
 
   const series = rowsOf(charts.seriesTransform);
@@ -102,6 +116,12 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
     );
   }
   const displayedPanels = loadedCount + (charts.seriesTransform ? 1 : 0);
+  const ai = (key: ArmaGarchChartKey) => ({
+    artifactId: ARMA_GARCH_CHART_IDS[key],
+    payload: charts[key] ?? {},
+    projectRoot,
+    runId,
+  });
 
   return (
     <div data-testid="arma-garch-chart-gallery">
@@ -114,38 +134,43 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
         </div>
       ) : null}
       <Group title="Series and transform">
-        <SeriesChart title="Source series" rows={series} valueKey="source_value" />
+        <SeriesChart title="Source series" rows={series} valueKey="source_value" ai={ai("seriesTransform")} />
         <SeriesChart
           title="Transformed series (the modelled quantity)"
           rows={series}
           valueKey="transformed_value"
           zeroLine
+          ai={ai("seriesTransform")}
         />
-        <CorrelogramChart title="ACF of the transformed series" rows={rowsOf(charts.acf)} observationCount={seriesN} />
-        <CorrelogramChart title="PACF of the transformed series" rows={rowsOf(charts.pacf)} observationCount={seriesN} />
+        <CorrelogramChart title="ACF of the transformed series" rows={rowsOf(charts.acf)} observationCount={seriesN} ai={ai("acf")} />
+        <CorrelogramChart title="PACF of the transformed series" rows={rowsOf(charts.pacf)} observationCount={seriesN} ai={ai("pacf")} />
       </Group>
 
       <Group title="Mean model adequacy">
-        <SeriesChart title="Mean-model residuals" rows={residuals} valueKey="value" zeroLine />
+        <SeriesChart title="Mean-model residuals" rows={residuals} valueKey="value" zeroLine ai={ai("residualSeries")} />
         <CorrelogramChart
           title="Residual ACF (should sit inside the band)"
           rows={rowsOf(charts.residualAcf)}
           observationCount={residualN}
+          ai={ai("residualAcf")}
         />
         <CorrelogramChart
           title="Residual PACF (should sit inside the band)"
           rows={rowsOf(charts.residualPacf)}
           observationCount={residualN}
+          ai={ai("residualPacf")}
         />
         <SeriesChart
           title="Squared mean-model residuals (volatility clustering, before GARCH)"
           rows={rowsOf(charts.squaredResidualSeries)}
           valueKey="value"
+          ai={ai("squaredResidualSeries")}
         />
         <CorrelogramChart
           title="Squared-residual ACF (spikes here motivate the volatility model)"
           rows={rowsOf(charts.squaredResidualAcf)}
           observationCount={residualN}
+          ai={ai("squaredResidualAcf")}
         />
       </Group>
 
@@ -155,23 +180,27 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
           rows={rowsOf(charts.conditionalVolatility)}
           valueKey="conditional_volatility"
           color="#f55"
+          ai={ai("conditionalVolatility")}
         />
         <SeriesChart
           title="Conditional variance (h_t)"
           rows={rowsOf(charts.conditionalVariance)}
           valueKey="conditional_variance"
           color="#f55"
+          ai={ai("conditionalVariance")}
         />
         <SeriesChart
           title="Standardized residuals (should look like white noise)"
           rows={rowsOf(charts.standardizedResidualSeries)}
           valueKey="standardized_residual"
           zeroLine
+          ai={ai("standardizedResidualSeries")}
         />
         <SeriesChart
           title="Squared standardized residuals (clustering should be gone)"
           rows={rowsOf(charts.squaredStandardizedResidualSeries)}
           valueKey="squared_standardized_residual"
+          ai={ai("squaredStandardizedResidualSeries")}
         />
         <DualAxisChart
           title="Absolute move against conditional volatility"
@@ -180,8 +209,9 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
           rightKey="conditional_volatility"
           leftLabel="|observed|"
           rightLabel="conditional volatility"
+          ai={ai("absReturnVsVolatility")}
         />
-        <QQChart title="Standardized-residual QQ plot" rows={rowsOf(charts.qq)} />
+        <QQChart title="Standardized-residual QQ plot" rows={rowsOf(charts.qq)} ai={ai("qq")} />
       </Group>
 
       <Group title="Interval behaviour">
@@ -193,6 +223,7 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
             { lowerKey: "garch_lower", upperKey: "garch_upper", color: "#4a6cf7", label: "ARMA-GARCH" },
             { lowerKey: "arma_lower", upperKey: "arma_upper", color: "#8e8e93", label: "ARMA-only" },
           ]}
+          ai={ai("inSampleIntervalComparison")}
         />
         <IntervalBandChart
           title="Rolling one-step validation intervals"
@@ -202,6 +233,7 @@ export function ArmaGarchChartGallery({ charts }: { charts: ArmaGarchCharts | un
             { lowerKey: "lower_bound", upperKey: "upper_bound", color: "#4a6cf7", label: "plug-in conditional" },
           ]}
           markKey="quantile_exception"
+          ai={ai("rollingInterval")}
         />
         <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
           {rowsStatus(charts.quantileExceptions) === "ok"

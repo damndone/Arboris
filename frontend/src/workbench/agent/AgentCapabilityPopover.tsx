@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import type {
   AgentCapability,
   AgentCapabilityCatalog,
@@ -80,6 +80,8 @@ export function AgentCapabilityPopover({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const [popoverPosition, setPopoverPosition] = useState({ right: 16, bottom: 16 });
   const hasCatalog = Boolean(
     catalog
@@ -98,6 +100,34 @@ export function AgentCapabilityPopover({
     onPromptSelect?.(prompt);
     setOpen(false);
   };
+
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+  const openFromInteraction = () => {
+    cancelClose();
+    setOpen(true);
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      setOpen(false);
+    }, 100);
+  };
+  const handleBlur = (event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (
+      next instanceof Node
+      && (triggerRef.current?.contains(next) || popoverRef.current?.contains(next))
+    ) return;
+    scheduleClose();
+  };
+
+  useEffect(() => () => cancelClose(), []);
 
   useLayoutEffect(() => {
     if (!open) return undefined;
@@ -127,6 +157,11 @@ export function AgentCapabilityPopover({
       aria-label="Agent capabilities"
       data-testid="agent-capability-popover"
       className="wb-agent-capability-popover"
+      ref={popoverRef}
+      onMouseEnter={cancelClose}
+      onMouseLeave={scheduleClose}
+      onFocus={openFromInteraction}
+      onBlur={handleBlur}
       style={{
         position: "fixed",
         right: `${popoverPosition.right}px`,
@@ -176,6 +211,10 @@ export function AgentCapabilityPopover({
           aria-haspopup="dialog"
           aria-expanded={open}
           data-testid="agent-capability-trigger"
+          onMouseEnter={openFromInteraction}
+          onMouseLeave={scheduleClose}
+          onFocus={openFromInteraction}
+          onBlur={handleBlur}
           onClick={() => setOpen((value) => !value)}
         >
           Capabilities
