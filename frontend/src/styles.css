@@ -650,6 +650,26 @@ dd {
   font-size: 0.95rem;
 }
 
+.statistical-exploration-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-card-2, rgba(255, 255, 255, 0.04));
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.statistical-exploration-panel fieldset {
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.statistical-exploration-panel button {
+  margin-right: 6px;
+}
+
 .pagination {
   display: flex;
   align-items: center;

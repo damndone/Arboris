@@ -42,6 +42,7 @@ import { EstimatedEquationSection } from "../../lineage/detail/sections/Estimate
 import { CodeSection } from "../../lineage/detail/sections/CodeSection";
 import { DraftEditorSlot } from "../../lineage/detail/sections/DraftEditorSlot";
 import { CodeExecuteSection } from "../../lineage/detail/sections/CodeExecuteSection";
+import { StatisticalExplorationSection } from "../../lineage/detail/sections/StatisticalExplorationSection";
 import { DataColumnCastSection } from "../../lineage/detail/sections/DataColumnCastSection";
 import { ArmaGarchOperationSection } from "../../lineage/detail/sections/ArmaGarchOperationSection";
 import { ArmaGarchResultSection } from "../../lineage/detail/sections/ArmaGarchResultSection";
@@ -133,6 +134,13 @@ export const sectionRegistry: SectionEntry[] = [
     shouldRender: (n) =>
       n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
     Component: CodeExecuteSection,
+  },
+  {
+    id: "statisticalExploration",
+    order: 29.5,
+    shouldRender: (n) =>
+      n.kind === "dataset_stage" && !n.isDraft && !isGeneratedArmaGarchStage(n),
+    Component: StatisticalExplorationSection,
   },
   {
     id: "operation",
