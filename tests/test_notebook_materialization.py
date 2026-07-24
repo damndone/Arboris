@@ -750,6 +750,145 @@ def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
     assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "materialized"
 
 
+def test_univariate_genesis_option_materializes_without_x_regressors(
+    tmp_path: Path,
+) -> None:
+    """A univariate model (ETS) declares no x regressors and must materialize
+    a genesis draft without one; the mandatory-x rule is keyed to the target
+    capability, not to a hardcoded model_type. Notebook is model-agnostic."""
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+        filename="series.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "series.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    context = service.compile_context(notebook.notebook_id)
+    pack = {
+        "schema_version": "data-evidence-pack/v1",
+        "source_id": f"dataset:{upload_sha}",
+        "records": [
+            {
+                "evidence_id": "evidence:profile",
+                "inspection_id": "profile.v1",
+                "source_refs": [f"dataset_profile:{upload_sha}"],
+                "protocol_version": "profile/v1",
+                "status": "completed",
+                "observations": {"columns": [{"name": "when"}, {"name": "value"}]},
+                "metrics": {},
+                "warnings": [],
+                "omissions": [],
+                "failure_code": None,
+                "result_hash": "sha256:profile-result",
+            }
+        ],
+        "pack_omissions": [],
+        "content_hash": "sha256:profile-pack",
+        "evidence_pack_hash": "sha256:profile-pack",
+    }
+    service.store.append_evidence_pack(notebook.notebook_id, pack)
+    context = service.compile_context(notebook.notebook_id)
+    proposal = TypedProposal(
+        proposal_id="prop_ets_genesis",
+        operation_id="model.genesis",
+        target={"dataset_source_id": upload_sha},
+        preconditions={
+            "context_version": "notebook-planning-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={
+            "model_params": {
+                "model_type": "time_series.ets",
+                "y": "value",
+                "model_options": {
+                    "time_column": "when",
+                    "value_column": "value",
+                    "error": "add",
+                    "trend": None,
+                    "seasonal": None,
+                    "damped_trend": False,
+                },
+            }
+        },
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_ets_genesis",
+        batch_id="batch_ets_genesis",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=("sha256:profile-pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_ets_genesis",),
+        outcome="recommended",
+        recommended_option_id="opt_ets_genesis",
+        reason_refs=("evidence:profile",),
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="The verified evenly spaced series supports a univariate ETS fit.",
+                proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="ets_1",
+                        artifact_type="model_result",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                capability_id="time_series.ets",
+                option_id="opt_ets_genesis",
+                evidence_refs=(
+                    EvidenceRef(
+                        evidence_id="evidence:profile",
+                        result_hash="sha256:profile-result",
+                        source_refs=(f"dataset_profile:{upload_sha}",),
+                    ),
+                ),
+                comparative_claims=("evidence:profile supports the univariate fit",),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="ui",
+    )
+
+    result = service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+
+    assert result.materialization.draft_execution_mode == "genesis"
+    assert result.draft.draft["created_from"]["source_type"] == "genesis"
+    model_node = result.draft.draft["graph"]["nodes"][2]
+    assert model_node["params"]["model_type"] == "time_series.ets"
+    assert "x" not in model_node["params"]
+    assert (
+        service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status
+        == "materialized"
+    )
+
+
 @pytest.mark.parametrize(
     "model_options",
     [

@@ -34,6 +34,7 @@ class _Recorder:
 def declared_pack():
     from workbench.engine import capabilities
     from workbench.engine.pack import REGISTERED_PACKS, RERUN_ACTION_REGISTRY
+    from workbench.engine.packs import loader
     from workbench.engine.registry import DEFAULT_BY_Y_TYPE, MODEL_REGISTRY
 
     before = (
@@ -42,6 +43,8 @@ def declared_pack():
         list(REGISTERED_PACKS),
         list(RERUN_ACTION_REGISTRY),
         dict(capabilities._DECLARED_CAPABILITIES),
+        set(loader._LOADED_MODEL_TYPES),
+        dict(loader._DECLARED_PACK_MODULES),
     )
     # Integration bootstraps ETS as a builtin. Keep this direct declaration
     # test focused on the pack's own contribution instead of colliding with a
@@ -52,6 +55,16 @@ def declared_pack():
     ]
     capabilities._DECLARED_CAPABILITIES.pop(ETS_MODEL_TYPE, None)
     declare_pack()
+    # The direct declaration above bypasses the loader; keep the loader's
+    # tracking consistent with the registry so a later build_capabilities()
+    # bootstrap treats ETS as already loaded (the idempotent skip) instead of
+    # fail-closing on an untracked pre-registered handler. Otherwise this test
+    # would only pass when an earlier in-process loader run happened to prime
+    # that state -- a hidden ordering dependency.
+    loader._LOADED_MODEL_TYPES.add(ETS_MODEL_TYPE)
+    loader._DECLARED_PACK_MODULES[ETS_MODEL_TYPE] = (
+        "workbench.engine.packs.ets.declaration"
+    )
     try:
         yield MODEL_REGISTRY
     finally:
@@ -63,6 +76,10 @@ def declared_pack():
         RERUN_ACTION_REGISTRY[:] = before[3]
         capabilities._DECLARED_CAPABILITIES.clear()
         capabilities._DECLARED_CAPABILITIES.update(before[4])
+        loader._LOADED_MODEL_TYPES.clear()
+        loader._LOADED_MODEL_TYPES.update(before[5])
+        loader._DECLARED_PACK_MODULES.clear()
+        loader._DECLARED_PACK_MODULES.update(before[6])
 
 
 def _options(**overrides) -> dict[str, object]:

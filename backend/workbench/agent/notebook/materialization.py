@@ -395,9 +395,13 @@ class NotebookOptionMaterializer:
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
             raise _fail("genesis model_params requires model_type")
-        known = {str(entry["key"]) for entry in build_capabilities().get("model_types", [])}
+        capability_entries = build_capabilities().get("model_types", [])
+        known = {str(entry["key"]) for entry in capability_entries}
         if model_type not in known or model_type == "auto":
             raise _fail("genesis model_type is not a registered executable capability")
+        capability = next(
+            entry for entry in capability_entries if str(entry.get("key")) == model_type
+        )
         try:
             model_params = normalize_ols_genesis_model_params(model_params)
         except ValueError as exc:
@@ -407,7 +411,17 @@ class NotebookOptionMaterializer:
             raise _fail("genesis model_params requires evidence-backed y")
         if y not in columns:
             raise _fail("genesis y is not a column in the verified dataset", column=y)
-        if model_type != "time_series.arma_garch":
+        # A model takes X regressors only when its published capability declares a
+        # required parameter with role "x". Univariate models (ETS, ARMA-GARCH, ...)
+        # declare none, so the model-agnostic Notebook must not demand one; keying
+        # this to a capability signal keeps every future model working unpatched.
+        model_requires_x = any(
+            isinstance(param, dict)
+            and param.get("role") == "x"
+            and param.get("required")
+            for param in capability.get("params", [])
+        )
+        if model_requires_x:
             x = model_params.get("x")
             if (
                 not isinstance(x, list)

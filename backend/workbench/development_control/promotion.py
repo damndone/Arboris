@@ -157,6 +157,33 @@ DEFAULT_PROMOTION_POLICIES = (
             "hand-authored numeric fixture before it becomes a shared lock."
         ),
     ),
+    # --- 2026-07-23 integration review findings (F-6, F-7) ---
+    PromotionPolicy(
+        lesson_key="derive-model-shape-from-capability-not-literal",
+        rule_id="genesis-x-requirement-from-capability",
+        kind="mechanical",
+        scope="notebook genesis materialization model-shape checks",
+        enforcement_point="notebook materialization test gate",
+        false_positive_risk="only applies to genesis model-param validation branches",
+        verification_method="run the univariate-genesis materialization marker",
+        test_marker=(
+            "tests/test_notebook_materialization.py::"
+            "test_univariate_genesis_option_materializes_without_x_regressors"
+        ),
+    ),
+    PromotionPolicy(
+        lesson_key="fixture-restores-all-coupled-registration-state",
+        rule_id="fixture-restores-loader-tracking",
+        kind="mechanical",
+        scope="test fixtures mutating shared model-pack registration",
+        enforcement_point="pack runtime test gate",
+        false_positive_risk="only applies to fixtures that declare a pack directly",
+        verification_method="run the ETS declaration capability marker in isolation",
+        test_marker=(
+            "tests/models/ets/test_ets_pack_runtime.py::"
+            "test_declaration_exposes_one_selectable_capability"
+        ),
+    ),
 )
 
 
