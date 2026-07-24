@@ -1095,6 +1095,10 @@ export interface NotebookErrorPacket {
 
 export interface NotebookLoadingView {
   status: "loading";
+  // Which bounded step is in flight. Real agent planning can take tens of
+  // seconds; distinguishing it from the fast context compile keeps the loading
+  // state from reading as a hang.
+  phase?: "compiling" | "planning";
 }
 export interface NotebookErrorView {
   status: "error";

@@ -52,6 +52,13 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-option-list")).toBeNull();
   });
 
+  it("loading (planning phase): names the slow agent step so it does not read as a hang", () => {
+    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+    expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
+      "Planning analysis options with the agent…",
+    );
+  });
+
   it("error: shows the error code and message, and no success wording", () => {
     render(
       <NotebookSurface

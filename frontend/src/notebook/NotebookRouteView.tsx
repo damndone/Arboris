@@ -343,10 +343,14 @@ export function NotebookRouteView({
       }
 
       const compiled = await compileNotebookContext(projectRoot, notebook.notebook_id);
+      // Agent planning is the slow leg (real providers take tens of seconds);
+      // surface it as its own phase so the loading state does not read as a hang.
+      if (refreshToken > 0) setView({ status: "loading", phase: "planning" });
       let snapshot = refreshToken > 0
         ? await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3)
         : await listNotebookOptions(projectRoot, notebook.notebook_id);
       if (snapshot.options.length === 0) {
+        setView({ status: "loading", phase: "planning" });
         snapshot = await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3);
       }
       const traceId = snapshot.trace_id ?? compiled.trace_id;

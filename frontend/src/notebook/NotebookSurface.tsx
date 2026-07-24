@@ -93,9 +93,14 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
   }
 
   if (view.status === "loading") {
+    const loadingMessage = view.phase === "planning"
+      ? "Planning analysis options with the agent…"
+      : "Compiling the bounded notebook context…";
     return (
       <div className="nb-surface" data-testid="notebook-surface" data-state="loading">
-        <p data-testid="notebook-loading">Compiling the bounded notebook context…</p>
+        <p data-testid="notebook-loading" data-phase={view.phase ?? "compiling"}>
+          {loadingMessage}
+        </p>
       </div>
     );
   }
