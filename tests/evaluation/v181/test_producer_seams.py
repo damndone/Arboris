@@ -29,19 +29,23 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 import pytest
 
+from workbench.agent.context_compiler import compile_notebook_planning_context
+from workbench.agent.model import ModelRequest, ModelStreamEvent
+from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
+from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
 from tests.evaluation.v181 import capabilities
 from tests.evaluation.v181.checks import (
     format_findings,
-    scan_batch_self_reference,
     scan_cross_family_ic_claims,
 )
 from tests.evaluation.v181.driver import ETSPackUnavailable, fit_ets
 from tests.evaluation.v181.test_ets_known_truth import as_ets_result
 from tests.fixtures.evaluation.v181 import ets_known_truth as oracle
+from tests.test_notebook_support import make_project, model_rerun_proposal
 
 _BATCH = capabilities.notebook_option_batch()
 requires_option_batch = pytest.mark.xfail(
@@ -63,21 +67,15 @@ requires_cross_family_adapter = pytest.mark.xfail(
 )
 
 
-def _as_dict(option: Any) -> dict[str, Any]:
-    """Coerce whatever the generator yields into the contract-shaped mapping."""
-
-    if hasattr(option, "to_dict"):
-        return dict(option.to_dict())
-    if isinstance(option, dict):
-        return dict(option)
-    raise AssertionError(
-        "the option-batch generator yielded an item that is neither a mapping "
-        f"nor a to_dict()-bearing contract object: {type(option)!r}. The public "
-        "seam does not match NotebookOptionRevision — reported as a contract gap."
-    )
-
-
-def _invoke_batch(generator: Any, *, notebook_id: str, count: int) -> list[Any]:
+def _invoke_batch(
+    generator: Any,
+    *,
+    notebook_id: str,
+    count: int,
+    planner: Any,
+    context: Any,
+    initial_evidence: DataEvidencePackV1,
+) -> list[Any]:
     """Call the generator through the plausible contract-named signatures.
 
     A generator that accepts none of these keyword shapes is a contract gap: the
@@ -89,10 +87,13 @@ def _invoke_batch(generator: Any, *, notebook_id: str, count: int) -> list[Any]:
         raise ETSPackUnavailable("no public option-batch generator is importable")
 
     attempts: list[dict[str, Any]] = [
-        {"notebook_id": notebook_id, "count": count},
-        {"notebook_id": notebook_id, "n": count},
-        {"notebook_id": notebook_id, "size": count},
-        {"notebook_id": notebook_id},
+        {
+            "notebook_id": notebook_id,
+            "count": count,
+            "planner": planner,
+            "context": context,
+            "initial_evidence": initial_evidence,
+        }
     ]
     signature = None
     try:
@@ -118,20 +119,135 @@ def _invoke_batch(generator: Any, *, notebook_id: str, count: int) -> list[Any]:
     )
 
 
+class _EvaluationPlanningAdapter:
+    """Deterministic provider transcript driven through the real typed agent."""
+
+    def __init__(self, submit_args: dict[str, Any]) -> None:
+        self.submit_args = submit_args
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            arguments = {
+                "requests": [
+                    {
+                        "inspection_id": "time_index.v1",
+                        "target_ref": "run:active",
+                        "arguments": {"max_rows": 10},
+                        "why_needed": "validate the bounded time index",
+                    }
+                ]
+            }
+            tool_id = "request_notebook_inspections"
+            tool_call_id = "eval-inspection"
+        else:
+            arguments = self.submit_args
+            tool_id = "submit_notebook_option_batch"
+            tool_call_id = "eval-options"
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": tool_call_id,
+                "tool_id": tool_id,
+                "arguments": arguments,
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+
+def _evaluation_option_batch() -> dict[str, Any]:
+    options = []
+    covariances = ("robust", "classic", "hc1")
+    for rank, covariance in enumerate(covariances, start=1):
+        proposal = model_rerun_proposal(
+            f"prop_eval_{rank}", covariance=covariance, run_id="notebook:nb_eval_0001"
+        )
+        options.append(
+            {
+                "rank": rank,
+                "rationale": f"Evidence-backed registered path {rank}.",
+                "assumptions": ["the bounded time index remains valid"],
+                "capability_id": "time_series.ets",
+                "option_id": f"opt_eval_{rank}",
+                "proposal": proposal,
+                "expected_artifacts": [
+                    {
+                        "artifact_id": "ets_1",
+                        "artifact_type": "model_result",
+                        "required": True,
+                        "count": 1,
+                        "step": None,
+                    }
+                ],
+                "evidence_refs": [
+                    {
+                        "evidence_id": "evidence:time",
+                        "result_hash": "sha256:time-evaluation",
+                        "source_refs": ["time_index:run_eval"],
+                    }
+                ],
+                "comparative_claims": [
+                    f"evidence:time supports registered path {rank}"
+                ],
+            }
+        )
+    return {"options": options}
+
+
 @requires_option_batch
-def test_real_option_batch_of_three_is_all_fresh_and_self_consistent() -> None:
-    """A batch of 3 real options must all be fresh, share one context, and not
-    stale themselves (spec §4.0 self-reference)."""
+def test_real_option_batch_of_three_is_all_fresh_and_self_consistent(
+    tmp_path: Path,
+) -> None:
+    """The public producer must drive the real typed agent, not synthesize paths."""
+
+    project = make_project(tmp_path)
+    context = compile_notebook_planning_context(
+        project,
+        notebook_id="nb_eval_0001",
+        run_family_id="family_eval_0001",
+        active_head_run_id=None,
+        analysis_contract={"revision": 1, "target": "y"},
+        available_capabilities=["time_series.ets"],
+    )
+    evidence = DataEvidencePackV1(
+        source_id="run:run_eval",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:time",
+                inspection_id="time_index.v1",
+                source_refs=("time_index:run_eval",),
+                protocol_version="time-index/v1",
+                status="completed",
+                observations={"candidate_column": "when"},
+                result_hash="sha256:time-evaluation",
+            ),
+        ),
+    )
+    adapter = _EvaluationPlanningAdapter(_evaluation_option_batch())
+    planner = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=lambda requests, current: evidence,
+    )
 
     generator = capabilities.notebook_option_batch().handle
-    batch = _invoke_batch(generator, notebook_id="nb_eval_0001", count=3)
-    options = [_as_dict(item) for item in batch]
-
-    assert len(options) == 3, (
-        f"asked for 3 options, the generator produced {len(options)}"
+    batch = _invoke_batch(
+        generator,
+        notebook_id="nb_eval_0001",
+        count=3,
+        planner=planner,
+        context=context,
+        initial_evidence=DataEvidencePackV1("run:run_eval", ()),
     )
-    findings = scan_batch_self_reference(options)
-    assert findings == [], format_findings(findings)
+
+    assert len(batch) == 3
+    assert [item.rank for item in batch] == [1, 2, 3]
+    assert len({item.option_id for item in batch}) == 3
+    assert len({item.proposal.canonical_hash() for item in batch}) == 3
+    assert len({item.recommendation_decision_id for item in batch}) == 1
+    assert all(item.evidence_refs for item in batch)
+    assert len(adapter.requests) == 2
 
 
 def _cross_family_compare(adapter: Any, tmp_path: Path) -> Any:

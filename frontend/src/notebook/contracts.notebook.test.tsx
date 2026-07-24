@@ -92,8 +92,8 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
     const result = canonicalEtsResult();
     expect(result.specification.canonical).toBe("ETS(A,Ad,N)");
     expect(result.aic).toBe(12043.72);
-    expect(result.n_excluded).toBe(3);
-    expect(result.exclusion_reasons).toEqual({ missing_endog: 3 });
+    expect(result.n_excluded).toBe(0);
+    expect(result.exclusion_reasons).toEqual({});
     expect(result.convergence_code).toBe("converged");
   });
 });

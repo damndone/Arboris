@@ -31,7 +31,7 @@ def test_result_round_trips_through_the_contract() -> None:
 
     assert restored.to_dict() == payload
     assert restored.result_identity == outcome.result.result_identity
-    assert restored.contract_version == "1.0"
+    assert restored.contract_version == "1.1"
     assert restored.fit_method == "statsmodels.ets.mle"
 
 

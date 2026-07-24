@@ -83,6 +83,19 @@ def test_interior_time_gap_is_blocking() -> None:
     assert error.evidence["distinct_step_count"] == 2
 
 
+def test_business_observation_semantics_allows_calendar_weekends_and_survives_result(
+    ) -> None:
+    frame = _frame()
+    frame["date"] = pd.bdate_range("2015-01-05", periods=len(frame))
+    options = _options(time_index_semantics="business_or_trading_observations")
+
+    prepared = prepare_ets_input(frame, ETSModelOptions.from_dict(options))
+    assert prepared.options.time_index_semantics == "business_or_trading_observations"
+
+    outcome = fit_ets(frame, options)
+    assert outcome.result.time_index_semantics == "business_or_trading_observations"
+
+
 def test_duplicate_timestamp_is_blocking() -> None:
     frame = _frame()
     frame.loc[10, "date"] = frame.loc[9, "date"]

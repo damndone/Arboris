@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.notebook import (
+    ArtifactContractEmpty,
     ArtifactNotDeclarable,
     ArtifactSchemaContractUnsupported,
     NotebookService,
@@ -32,6 +33,11 @@ REQUIRED_PARAMETERS = ExpectedArtifact(
 OPTIONAL_QQ = ExpectedArtifact(
     artifact_id="ts.chart.qq", artifact_type="time_series_json", required=False, count=1
 )
+
+
+def test_an_empty_artifact_contract_is_refused_before_persistence() -> None:
+    with pytest.raises(ArtifactContractEmpty, match="at least one expected artifact"):
+        build_artifact_contract([])
 
 
 def _artifact(artifact_id: str, artifact_type: str = "time_series_json", step: str = "arma_garch"):

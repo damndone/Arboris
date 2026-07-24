@@ -17,7 +17,12 @@ import numpy as np
 import pandas as pd
 
 from workbench.canonical import sha256_canonical
-from workbench.contracts.model.ets import ETSContractError, ETSSpecification
+from workbench.contracts.model.ets import (
+    DEFAULT_TIME_INDEX_SEMANTICS,
+    TIME_INDEX_SEMANTICS,
+    ETSContractError,
+    ETSSpecification,
+)
 
 from .errors import ETSInputError, diagnostic
 
@@ -25,7 +30,9 @@ from .errors import ETSInputError, diagnostic
 _REQUIRED_OPTION_KEYS = frozenset(
     {"time_column", "value_column", "error", "trend", "seasonal"}
 )
-_OPTIONAL_OPTION_KEYS = frozenset({"seasonal_periods", "damped_trend"})
+_OPTIONAL_OPTION_KEYS = frozenset(
+    {"seasonal_periods", "damped_trend", "time_index_semantics"}
+)
 
 MIN_NON_SEASONAL_OBSERVATIONS = 10
 SEASONAL_OBSERVATION_MARGIN = 5
@@ -38,6 +45,7 @@ class ETSModelOptions:
     time_column: str
     value_column: str
     specification: ETSSpecification
+    time_index_semantics: str = DEFAULT_TIME_INDEX_SEMANTICS
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ETSModelOptions":
@@ -67,6 +75,14 @@ class ETSModelOptions:
         damped_trend = value.get("damped_trend", False)
         if type(damped_trend) is not bool:
             raise ETSContractError("damped_trend must be a boolean")
+        time_index_semantics = value.get(
+            "time_index_semantics", DEFAULT_TIME_INDEX_SEMANTICS
+        )
+        if time_index_semantics not in TIME_INDEX_SEMANTICS:
+            raise ETSContractError(
+                "time_index_semantics must be one of "
+                f"{list(TIME_INDEX_SEMANTICS)}"
+            )
         specification = ETSSpecification(
             error=value["error"],
             trend=value["trend"],
@@ -82,13 +98,18 @@ class ETSModelOptions:
             time_column=value["time_column"],
             value_column=value["value_column"],
             specification=specification,
+            time_index_semantics=time_index_semantics,
         )
 
     def to_dict(self) -> dict[str, Any]:
         payload = self.specification.to_dict()
         payload.pop("canonical")
         payload.update(
-            {"time_column": self.time_column, "value_column": self.value_column}
+            {
+                "time_column": self.time_column,
+                "value_column": self.value_column,
+                "time_index_semantics": self.time_index_semantics,
+            }
         )
         return payload
 
@@ -104,6 +125,7 @@ class ETSSampleAudit:
     first_timestamp: str
     last_timestamp: str
     inferred_step_seconds: float
+    time_index_semantics: str
 
 
 @dataclass(frozen=True)
@@ -227,19 +249,22 @@ def prepare_ets_input(
                 float(pd.Timedelta(delta).total_seconds()) % step_seconds == 0.0
                 for delta in unique_deltas
             ) if step_seconds else False
-            _block(
-                "ETS_INTERIOR_TIME_GAP" if multiples else "ETS_IRREGULAR_TIME_INDEX",
-                "the modelled time index is not evenly spaced",
-                evidence={
-                    "column": options.time_column,
-                    "modal_step_seconds": step_seconds,
-                    "distinct_step_count": int(len(unique_deltas)),
-                },
-                impact=(
-                    "An implicit hole in the time index would be smoothed over as "
-                    "if the observations were adjacent."
-                ),
-            )
+            if options.time_index_semantics == "regular_calendar":
+                _block(
+                    "ETS_INTERIOR_TIME_GAP"
+                    if multiples
+                    else "ETS_IRREGULAR_TIME_INDEX",
+                    "the modelled time index is not evenly spaced",
+                    evidence={
+                        "column": options.time_column,
+                        "modal_step_seconds": step_seconds,
+                        "distinct_step_count": int(len(unique_deltas)),
+                    },
+                    impact=(
+                        "An implicit hole in the time index would be smoothed over "
+                        "as if the observations were adjacent."
+                    ),
+                )
 
     endog = modelled["value"].to_numpy(dtype=float)
     n_obs = int(endog.size)
@@ -287,6 +312,7 @@ def prepare_ets_input(
         first_timestamp=str(times.iloc[0]),
         last_timestamp=str(times.iloc[-1]),
         inferred_step_seconds=step_seconds,
+        time_index_semantics=options.time_index_semantics,
     )
     fingerprint = sha256_canonical(
         {

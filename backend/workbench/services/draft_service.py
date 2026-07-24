@@ -28,6 +28,17 @@ from ..lineage.upload_store import verify_upload
 from ..model_options import ModelOptionsError, canonicalize_model_options, parse_model_options
 from ..repository.run_repository import _resolve_run_root
 from .run_service import _submit_run, merge_form_overrides
+from .draft_materialization import normalize_ols_genesis_model_params
+
+
+def _draft_run_family_id(draft: dict[str, Any]) -> str | None:
+    """Read an explicit Notebook line pin from the Draft handoff."""
+
+    provenance = draft.get("notebook_provenance")
+    if not isinstance(provenance, dict):
+        return None
+    value = provenance.get("run_family_id")
+    return value if isinstance(value, str) and value else None
 
 
 def execute_genesis_draft(
@@ -114,6 +125,13 @@ def execute_genesis_draft(
 
         tp = nodes["table_1"].get("params") or {}
         mp = dict(nodes["model_1"].get("params") or {})
+        try:
+            # Compatibility adapter for already-materialized Notebook drafts;
+            # new proposals are rejected upstream unless they use the canonical
+            # OLS top-level covariance field.
+            mp = normalize_ols_genesis_model_params(mp)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if "model_options_binding" in mp:
             raise HTTPException(
                 status_code=422,
@@ -199,6 +217,7 @@ def execute_genesis_draft(
                 upload_filename=filename,
                 started_at=datetime.now(timezone.utc).isoformat(),
                 rerun_reason="initial",
+                run_family_id=_draft_run_family_id(draft),
                 before_dispatch=_record_snapshot_before_dispatch,
             )
         except ModelOptionsError as exc:
@@ -381,6 +400,7 @@ def execute_rerun_child_draft(
                 rerun_reason="pipeline_draft",
                 op_overrides=op_overrides,
                 rerun_from=run_level_rerun_from,
+                run_family_id=_draft_run_family_id(draft),
                 before_dispatch=_record_snapshot_before_dispatch,
             )
         except ModelOptionsError as exc:

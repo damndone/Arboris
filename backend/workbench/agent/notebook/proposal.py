@@ -87,6 +87,10 @@ class OptionDraft:
     option_id: str | None = None
     evidence_refs: tuple[EvidenceRef, ...] = ()
     comparative_claims: tuple[str, ...] = ()
+    # Planning-only capability identity. It is not persisted in the public
+    # OptionRevision; it selects the server-owned artifact vocabulary before
+    # that revision is constructed.
+    capability_id: str | None = None
     blocked_reason: str | None = None
     recommendation_decision_id: str | None = None
     recommendation_status: str | None = None

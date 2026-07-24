@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import uuid4
 
-from workbench.llm.client import chat_completion
+from workbench.llm.client import LLMUpstreamError, chat_completion
 from workbench.llm.config import LLMConfig
 
 
@@ -105,6 +105,11 @@ def _to_openai_tool_descriptors(
                 "function": {
                     "name": str(tool["tool_id"]),
                     "parameters": dict(tool.get("input_schema") or {}),
+                    **(
+                        {"description": str(tool["description"])}
+                        if tool.get("description")
+                        else {}
+                    ),
                 },
             }
         )
@@ -175,20 +180,31 @@ class OpenAICompatibleModelAdapter:
         if abort_event is not None and abort_event.is_set():
             yield ModelStreamEvent.from_error(request.request_id, "aborted")
             return
-        try:
-            wire_messages = _to_openai_wire_messages(request.messages)
-            if request.tools:
-                result = await asyncio.to_thread(
-                    chat_completion,
-                    wire_messages,
-                    self.config,
-                    tools=_to_openai_tool_descriptors(request.tools),
-                )
-            else:
-                result = await asyncio.to_thread(chat_completion, wire_messages, self.config)
-        except Exception as exc:
-            yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
-            return
+        wire_messages = _to_openai_wire_messages(request.messages)
+        wire_tools = _to_openai_tool_descriptors(request.tools)
+        for attempt in range(2):
+            try:
+                if request.tools:
+                    result = await asyncio.to_thread(
+                        chat_completion,
+                        wire_messages,
+                        self.config,
+                        tools=wire_tools,
+                    )
+                else:
+                    result = await asyncio.to_thread(chat_completion, wire_messages, self.config)
+                break
+            except LLMUpstreamError as exc:
+                # A malformed 2xx body or transient network error has no
+                # trustworthy response status. Retry it once; never retry a
+                # provider-auth/request rejection such as 401/422.
+                if attempt == 0 and exc.upstream_status is None:
+                    continue
+                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                return
+            except Exception as exc:
+                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                return
         if abort_event is not None and abort_event.is_set():
             yield ModelStreamEvent.from_error(request.request_id, "aborted")
             return

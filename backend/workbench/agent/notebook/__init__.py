@@ -13,6 +13,7 @@ from .artifact_contract import (
     validate_produced_artifacts,
 )
 from .errors import (
+    ArtifactContractEmpty,
     ArtifactNotDeclarable,
     ArtifactSchemaContractUnsupported,
     NotebookNotFound,
@@ -30,17 +31,26 @@ from .freshness import (
     freshness_details,
 )
 from .proposal import OptionDraft, TypedProposal
+from .producer import (
+    MAX_PLANNED_OPTIONS,
+    NOTEBOOK_OPTION_BATCH_STATUS,
+    generate_option_batch,
+    plan_option_drafts,
+)
 from .service import ExecutionOutcome, MAX_OPTIONS_PER_BATCH, NotebookService
 from .store import Notebook, NotebookStore, OptionView, StoredRevision
 from .vocabulary import DECLARED_ARTIFACT_TYPES
 
 __all__ = [
+    "ArtifactContractEmpty",
     "ArtifactNotDeclarable",
     "ArtifactSchemaContractUnsupported",
     "CONTRACT_PROFILE",
     "DECLARED_ARTIFACT_TYPES",
     "ExecutionOutcome",
     "MAX_OPTIONS_PER_BATCH",
+    "MAX_PLANNED_OPTIONS",
+    "NOTEBOOK_OPTION_BATCH_STATUS",
     "Notebook",
     "NotebookNotFound",
     "NotebookOptionError",
@@ -60,5 +70,7 @@ __all__ = [
     "build_artifact_contract",
     "evaluate_option_freshness",
     "freshness_details",
+    "generate_option_batch",
+    "plan_option_drafts",
     "validate_produced_artifacts",
 ]

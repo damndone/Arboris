@@ -69,6 +69,7 @@ def _result_identity(
             "sample_fingerprint": prepared.sample_fingerprint,
             "n_obs": prepared.audit.n_obs,
             "n_excluded": prepared.audit.n_excluded,
+            "time_index_semantics": prepared.audit.time_index_semantics,
             "fit_method": FIT_METHOD,
             "param_names": sorted(params),
         }
@@ -177,6 +178,7 @@ def estimate_ets(prepared: PreparedETSInput) -> ETSFitOutcome:
         convergence_code=convergence_code,
         fit_method=FIT_METHOD,
         result_identity=_result_identity(prepared=prepared, params=params),
+        time_index_semantics=prepared.audit.time_index_semantics,
     )
     return ETSFitOutcome(
         result=result,

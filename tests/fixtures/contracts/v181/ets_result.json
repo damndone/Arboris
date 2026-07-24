@@ -21,7 +21,7 @@
     "initial_trend": -0.02
   },
   "aic": 12043.72,
-  "bic": 12078.92,
+  "bic": 12078.9226330019,
   "log_likelihood": -6015.86,
   "sigma2": 3.7412,
   "convergence_code": "converged",

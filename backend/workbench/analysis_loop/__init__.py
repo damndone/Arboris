@@ -72,6 +72,7 @@ from .compare import (
 from .time_series_compare import (
     ARMA_GARCH_COMPARE_STRATEGY_VERSION,
     build_arma_garch_compare_packet,
+    build_compare_packet as build_time_series_compare_packet,
 )
 from .recovery import (
     OLS_CLUSTERED_RECOVERY_ACTION,
@@ -158,6 +159,7 @@ __all__ = [
     "compare_logical_key",
     "ARMA_GARCH_COMPARE_STRATEGY_VERSION",
     "build_arma_garch_compare_packet",
+    "build_time_series_compare_packet",
     "AnalysisLoopSourceResolutionError",
     "ResolvedAnalysisLoopInputs",
     "ResolvedAnalysisLoopRun",

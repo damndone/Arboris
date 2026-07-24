@@ -7,6 +7,6 @@ describe("WorkbenchTopbar VIEW_TABS", () => {
     // v1.6.11 slice C) are the clickable view tabs. The "pipeline" ViewMode +
     // PipelineView stay as a URL deep-link fallback, but the tab is no longer
     // offered.
-    expect(VIEW_TABS.map((t) => t.id)).toEqual(["graph", "table", "report"]);
+    expect(VIEW_TABS.map((t) => t.id)).toEqual(["graph", "table", "report", "notebook"]);
   });
 });

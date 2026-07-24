@@ -32,6 +32,7 @@ const FIXTURE_DIR = resolve(
 
 export type CanonicalFixtureName =
   | "notebook_option_revision"
+  | "notebook_option_revision_v11"
   | "option_execution"
   | "ets_result";
 

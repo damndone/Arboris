@@ -28,6 +28,14 @@ const TERMINAL_LIFECYCLE_REASON: Partial<Record<NotebookOptionRevision["lifecycl
   };
 
 export function executability(option: NotebookOptionRevision): Executability {
+  // Lifecycle terminality is authoritative for actions.  An executed option
+  // may become stale after the Notebook active head advances, but it must not
+  // be offered for revalidation or execution again; revalidation is only a
+  // recovery path for a still-unmaterialized proposal.
+  const lifecycleReason = TERMINAL_LIFECYCLE_REASON[option.lifecycle_status];
+  if (lifecycleReason) {
+    return { executable: false, needsRevalidation: false, blockedReason: lifecycleReason };
+  }
   if (option.freshness_status === "stale") {
     return {
       executable: false,
@@ -56,10 +64,6 @@ export function executability(option: NotebookOptionRevision): Executability {
       needsRevalidation: false,
       blockedReason: "The proposal validator has not judged this option yet",
     };
-  }
-  const lifecycleReason = TERMINAL_LIFECYCLE_REASON[option.lifecycle_status];
-  if (lifecycleReason) {
-    return { executable: false, needsRevalidation: false, blockedReason: lifecycleReason };
   }
   return { executable: true, blockedReason: null, needsRevalidation: false };
 }
@@ -90,6 +94,23 @@ export function axisNote(option: NotebookOptionRevision): {
   };
 }
 
+export function recommendationLabel(option: NotebookOptionRevision): string {
+  if (option.lifecycle_projection === "legacy_unverified") {
+    return "Historical option · revalidate required";
+  }
+  switch (option.recommendation_status) {
+    case "recommended":
+      return "Recommended";
+    case "tied":
+      return "Near-equivalent candidates";
+    case "insufficient_evidence":
+      return "More evidence required";
+    default:
+      return option.validation_status === "invalid" ? "Not eligible" : `Option ${option.rank}`;
+  }
+}
+
+/** @deprecated Recommendation display must use recommendationLabel(option). */
 export function rankLabel(rank: number): string {
-  return rank === 1 ? "rank 1 · recommended" : `rank ${rank} · alternative`;
+  return `Option ${rank}`;
 }

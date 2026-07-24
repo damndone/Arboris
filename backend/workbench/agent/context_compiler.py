@@ -31,6 +31,10 @@ from uuid import uuid4
 
 from ..artifacts import read_json
 from ..canonical import canonical_json_v1, sha256_canonical
+from ..lineage.node_write_validation import (
+    NodeWriteOperationRequestV1,
+    compute_context_fingerprint,
+)
 
 CONTEXT_PROFILE = "notebook-plan/v1"
 CONTEXT_SCHEMA_VERSION = "notebook-planning-context.v1"
@@ -309,18 +313,57 @@ _ARTIFACT_TYPE_RANK = {
 }
 
 
-def _project_lineage(graph: Any, limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _project_lineage(
+    graph: Any,
+    node_index: Any,
+    limit: int,
+    *,
+    runs_root: Path | None = None,
+    active_head_run_id: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     nodes = graph.get("nodes") if isinstance(graph, dict) else None
     if not isinstance(nodes, dict):
         return [], []
-    records = [
-        {
-            "node_id": node.get("id", key),
+    indexed_nodes = node_index if isinstance(node_index, dict) else {}
+
+    def context_fingerprint(node_id: str, node_hash: str | None, forest_key: str) -> str | None:
+        if not (runs_root and active_head_run_id and node_hash):
+            return None
+        try:
+            request = NodeWriteOperationRequestV1(
+                request_id="notebook_context_compiler",
+                operation="rerun",
+                context_version="node-operation-context/v1",
+                context_fingerprint="pending",
+                owner_run_id=active_head_run_id,
+                op_node_id=node_id,
+                node_hash=node_hash,
+                forest_node_key=forest_key,
+                owner_resolution="single_candidate",
+                active_head_run_id=active_head_run_id,
+            )
+            return compute_context_fingerprint(runs_root, request)
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def project_node(key: str, node: dict[str, Any]) -> dict[str, Any]:
+        node_id = node.get("id", key)
+        indexed = indexed_nodes.get(node_id)
+        node_hash = indexed.get("node_hash") if isinstance(indexed, dict) else None
+        forest_key = f"{node_hash}::{node_id}" if node_hash else node_id
+        return {
+            "node_id": node_id,
             "kind": node.get("kind"),
             "stage": node.get("stage"),
             "summary": node.get("summary"),
             "trust": node.get("trust"),
+            "node_hash": node_hash,
+            "forest_node_key": forest_key,
+            "context_fingerprint": context_fingerprint(node_id, node_hash, forest_key),
         }
+
+    records = [
+        project_node(key, node)
         for key, node in nodes.items()
         if isinstance(node, dict)
     ]
@@ -405,6 +448,7 @@ def compile_notebook_planning_context(
 
     manifest = _read_json(run_root / "run_manifest.json") if run_root else None
     index = _read_json(run_root / "artifacts_index.json") if run_root else None
+    node_index = _read_json(run_root / "node_index.json") if run_root else None
     graph = _read_json(run_root / "graph.json") if run_root else None
     profile = _read_json(run_root / "staged" / "data_profile.json") if run_root else None
     issues = _read_json(run_root / "errors.json") if run_root else None
@@ -419,7 +463,13 @@ def compile_notebook_planning_context(
         index, budget.artifact_summaries
     )
     omissions.extend(artifact_omissions)
-    bounded_lineage, lineage_omissions = _project_lineage(graph, budget.lineage_nodes)
+    bounded_lineage, lineage_omissions = _project_lineage(
+        graph,
+        node_index,
+        budget.lineage_nodes,
+        runs_root=(project_root / "runs") if active_head_run_id else None,
+        active_head_run_id=active_head_run_id,
+    )
     omissions.extend(lineage_omissions)
     options, option_omissions = project_list(
         list(existing_option_summaries or []),

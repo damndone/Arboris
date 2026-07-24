@@ -142,7 +142,12 @@ export function useDraftHandlers({
     clearError(draftId);
     dispatchDraft({ type: "validating", draftId });
     try {
-      const v = await validatePipelineDraft(projectRoot, draftId, "rerun_child");
+      const entry = registry.get(draftId);
+      const executionMode =
+        entry?.draft?.default_execution_mode ??
+        entry?.validation?.validated_execution_mode ??
+        "rerun_child";
+      const v = await validatePipelineDraft(projectRoot, draftId, executionMode);
       dispatchDraft({
         type: "validated",
         draftId,

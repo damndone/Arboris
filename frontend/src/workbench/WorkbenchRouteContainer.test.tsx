@@ -15,6 +15,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkbenchHome, WorkbenchRouteContainer } from "./WorkbenchRouteContainer";
 import * as api from "../api";
+import * as notebookApi from "../notebook/notebookApi";
 import type { GraphResponse } from "../lineage/types";
 import type { HeadSetResponse } from "../lineage/api/graphViewTypes";
 
@@ -1213,8 +1214,8 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
     };
   }
 
-  function draftGet(): api.PipelineDraftResponse {
-    return {
+  function draftGet(withNotebook = false): api.PipelineDraftResponse {
+    const response = {
       draft_hash: "h1",
       draft: {
         draft_id: "d1",
@@ -1241,7 +1242,15 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
         },
         default_execution_mode: "rerun_child",
       },
-    } as never;
+    } as api.PipelineDraftResponse;
+    if (withNotebook) {
+      response.draft.notebook_provenance = {
+        notebook_id: "nb_1",
+        option_id: "opt_1",
+        option_revision: "1",
+      };
+    }
+    return response;
   }
 
   function validResult(): api.DraftValidationResult {
@@ -1287,12 +1296,15 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
   async function mountAndExecute(opts: {
     forestBody: () => HeadSetResponse;
     runDetail: () => { status: string };
+    notebookProvenance?: boolean;
   }) {
     const forestSpy = vi
       .spyOn(api, "fetchProjectForest")
       .mockImplementation(async () => opts.forestBody());
     vi.spyOn(api, "listPipelineDrafts").mockResolvedValue([draftSummary()]);
-    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(draftGet());
+    vi.spyOn(api, "getPipelineDraft").mockResolvedValue(
+      draftGet(opts.notebookProvenance),
+    );
     vi.spyOn(api, "validatePipelineDraft").mockResolvedValue(validResult());
     const executeSpy = vi
       .spyOn(api, "executePipelineDraft")
@@ -1350,6 +1362,32 @@ describe("draft execute — index-wait (v1.6.9 B1)", () => {
     expect(deleteSpy).not.toHaveBeenCalled();
     // The run never indexed → no child head became active.
     expect(screen.queryByTestId("forest-head-run_child")).toBeNull();
+  });
+
+  it("reconciles a Notebook option when the Graph draft editor executes it", async () => {
+    vi.spyOn(api, "waitForRunTerminal").mockResolvedValue({
+      status: "completed",
+    } as never);
+    const completeSpy = vi
+      .spyOn(notebookApi, "completeNotebookOptionExecution")
+      .mockResolvedValue({} as never);
+
+    await mountAndExecute({
+      forestBody: soloForest,
+      runDetail: () => ({ status: "completed" }),
+      notebookProvenance: true,
+    });
+
+    await flush();
+    expect(completeSpy).toHaveBeenCalledWith(
+      "/proj",
+      "nb_1",
+      "opt_1",
+      {
+        execution_status: "succeeded",
+        run_id: "run_child",
+      },
+    );
   });
 
   it("removes the draft and focuses once the run indexes", async () => {

@@ -62,6 +62,7 @@ _TIME_SERIES_JSON_ARTIFACTS = (
 )
 
 ARTIFACT_VOCABULARY_VERSION = "arma-garch-artifacts/v1"
+CAPABILITY_ARTIFACT_VOCABULARY_VERSION = "workbench-capability-artifacts/v1"
 
 DECLARED_ARTIFACT_TYPES = MappingProxyType(
     {
@@ -69,6 +70,46 @@ DECLARED_ARTIFACT_TYPES = MappingProxyType(
         "ts.artifact_manifest": "time_series_manifest",
     }
 )
+
+# The ARMA-GARCH pack owns the historical ``ts.*`` vocabulary above.  The
+# Notebook also exposes registered model capabilities whose primary result ids
+# are stable and already written by the estimation stage.  Keep this second
+# map separate: extending the pack-owned set would falsely claim that the pack
+# produces cross-family model artifacts.
+_CAPABILITY_PRIMARY_ARTIFACTS = {
+    "ols": {"ols_1": "model_result"},
+    "logit": {"logit_1": "model_result"},
+    "probit": {"probit_1": "model_result"},
+    "poisson": {"poisson_1": "model_result"},
+    "negative_binomial": {"negative_binomial_1": "model_result"},
+    "panel_ols": {"panel_ols_1": "model_result"},
+    "iv_2sls": {"iv_2sls_1": "model_result"},
+    "did": {"did_1": "model_result"},
+    "cs_did": {"cs_did_1": "model_result"},
+    "sa_did": {"sa_did_1": "model_result"},
+    "dcdh": {"dcdh_1": "model_result"},
+    "glm:binomial": {"glm_1": "model_result"},
+    "glm:poisson": {"glm_1": "model_result"},
+    "glm:negative_binomial": {"glm_1": "model_result"},
+    "time_series.ets": {"ets_1": "model_result"},
+    "linear_mixed_effects": {
+        "linear_mixed_effects_1.result": "model_result_packet"
+    },
+    "arma_garch_1": {"ts.artifact_manifest": "time_series_manifest"},
+    "time_series.arma_garch": {"ts.artifact_manifest": "time_series_manifest"},
+}
+CAPABILITY_ARTIFACT_TYPES = MappingProxyType(
+    {
+        capability_id: MappingProxyType(dict(artifact_types))
+        for capability_id, artifact_types in _CAPABILITY_PRIMARY_ARTIFACTS.items()
+    }
+)
+
+
+def capability_artifact_types(capability_id: str) -> MappingProxyType:
+    """Return the server-published artifact ids for one executable capability."""
+
+    return CAPABILITY_ARTIFACT_TYPES.get(capability_id, MappingProxyType({}))
 
 
 def is_declared(artifact_id: str) -> bool:
@@ -81,7 +122,10 @@ def declared_type(artifact_id: str) -> str | None:
 
 __all__ = [
     "ARTIFACT_VOCABULARY_VERSION",
+    "CAPABILITY_ARTIFACT_TYPES",
+    "CAPABILITY_ARTIFACT_VOCABULARY_VERSION",
     "DECLARED_ARTIFACT_TYPES",
+    "capability_artifact_types",
     "declared_type",
     "is_declared",
 ]

@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
+from workbench.agent.notebook.store import NotebookStore
+from workbench.agent.trace import TraceWriter
 from workbench.agent.notebook.vocabulary import DECLARED_ARTIFACT_TYPES
 from workbench.contracts.agent.notebook_option import ExpectedArtifact
 
@@ -107,6 +109,62 @@ def test_a_notebook_and_its_options_survive_a_process_restart(tmp_path: Path) ->
     assert view.current_stored_revision.proposal.proposal_id == "p1"
     assert view.lifecycle_status == "proposed"
     assert [n.notebook_id for n in reopened.list_notebooks()] == [notebook.notebook_id]
+
+
+def test_first_persisted_trace_adopts_richest_legacy_notebook_trace(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Trace migration", created_by="u")
+    legacy = TraceWriter(
+        project,
+        scope={
+            "project_id": project.name,
+            "notebook_id": notebook.notebook_id,
+            "run_family_id": notebook.run_family_id,
+        },
+        versions={
+            "app_commit": "test",
+            "model_id": "test",
+            "prompt_version": "test",
+            "vocabulary_version": "test",
+            "context_profile": "test",
+        },
+    )
+    other = TraceWriter(
+        project,
+        scope=legacy.scope,
+        versions=legacy.versions,
+    )
+    # TraceWriter validates event payloads; context.compiled is the smallest
+    # real event and is enough to distinguish the richer historical trace.
+    for index in range(2):
+        legacy.emit(
+            "context.compiled",
+            payload={
+                "context_id": f"ctx_{index}",
+                "generation_context_hash": f"sha256:{index}",
+                "freshness_dependency_fingerprint": f"fresh:{index}",
+                "compiled_context_blob_ref": f"blob:{index}",
+                "omitted_sections": [],
+                "content_chars": 10 + index,
+            },
+        )
+    other.emit(
+        "context.compiled",
+        payload={
+            "context_id": "ctx_other",
+            "generation_context_hash": "sha256:other",
+            "freshness_dependency_fingerprint": "fresh:other",
+            "compiled_context_blob_ref": "blob:other",
+            "omitted_sections": [],
+            "content_chars": 12,
+        },
+    )
+
+    trace_id = NotebookStore(project).ensure_trace_id(notebook.notebook_id)
+
+    assert trace_id == legacy.trace_id
+    assert NotebookStore(project).get_notebook(notebook.notebook_id).trace_id == trace_id
 
 
 def test_the_published_vocabulary_matches_the_packs_required_artifacts() -> None:

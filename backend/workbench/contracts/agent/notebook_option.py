@@ -168,6 +168,10 @@ class ArtifactContract:
             raise NotebookContractError(
                 f"contract_version must be {ARTIFACT_CONTRACT_VERSION}"
             )
+        if not self.expected:
+            raise NotebookContractError(
+                "artifact_contract must contain at least one expected artifact"
+            )
         ids = [item.artifact_id for item in self.expected]
         if len(ids) != len(set(ids)):
             raise NotebookContractError("expected artifacts must have unique artifact_id")

@@ -25,7 +25,6 @@ from uuid import uuid4
 
 import pandas as pd
 
-from ...artifacts import read_json
 from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
@@ -38,6 +37,7 @@ from ...lineage.run_family import (
     migrate_project_families,
     resolve_run_family,
 )
+from ...repository.run_repository import _read_artifact_records
 from ..context_compiler import (
     NotebookPlanningContextV1,
     compile_notebook_planning_context,
@@ -58,6 +58,7 @@ from .errors import (
     OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
     OptionMaterializationRequired,
+    OptionNotFound,
     OptionRevisionStale,
     OptionValidationFailed,
 )
@@ -88,6 +89,7 @@ from .evidence import (
     RunSource,
     compile_evidence_pack,
 )
+from .vocabulary import capability_artifact_types
 
 MAX_OPTIONS_PER_BATCH = 3
 
@@ -241,6 +243,7 @@ class NotebookService:
         dataset: Mapping[str, Any] | ProjectionSource | None = None,
         created_by: str,
         title: str = "Analysis Notebook",
+        available_capabilities: Sequence[str] | None = None,
     ) -> Notebook:
         """Return the one default projection for one immutable source."""
 
@@ -270,6 +273,7 @@ class NotebookService:
                         focused_run_id=from_run_id,
                         projection_key=f"default-projection:{resolved.run_family_id}",
                         projection_source=source,
+                        available_capabilities=tuple(available_capabilities or ()),
                     )
                 )
 
@@ -297,6 +301,7 @@ class NotebookService:
                 created_at=_now(),
                 projection_key=f"default-projection:{family.run_family_id}",
                 projection_source=source,
+                available_capabilities=tuple(available_capabilities or ()),
             )
 
         return self.store.ensure_dataset_default_projection(source, create_dataset_notebook)
@@ -506,6 +511,7 @@ class NotebookService:
         trace: TraceWriter | None = None,
         batch_id: str | None = None,
         recommendation_decision: RecommendationDecision | None = None,
+        revalidate_existing: bool = False,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Validate a whole batch, then write it. Never the other way round.
 
@@ -527,6 +533,87 @@ class NotebookService:
 
         self._assert_batch_shape(drafts)
         prepared = [self._prepare(notebook, context, draft) for draft in drafts]
+
+        # An explicit Agent replan is a revalidation episode for any provider
+        # option ids that already exist.  Stable option_id means a new
+        # append-only option_revision, not a second object with the same
+        # identity and not a silent overwrite.  Keep the ordinary public
+        # propose_batch path strict so callers that did not explicitly request
+        # revalidation still receive OPTION_ID_REUSE_CONFLICT.
+        if revalidate_existing and any(draft.option_id for draft in drafts):
+            existing = []
+            for draft in drafts:
+                if not draft.option_id:
+                    existing.append(None)
+                    continue
+                try:
+                    existing.append(self.store.read_option(notebook_id, draft.option_id))
+                except OptionNotFound:
+                    existing.append(None)
+            if any(item is not None for item in existing):
+                return self._revalidate_planning_batch(
+                    notebook=notebook,
+                    context=context,
+                    drafts=drafts,
+                    prepared=prepared,
+                    existing=existing,
+                    batch_id=batch_id,
+                    recommendation_decision=recommendation_decision,
+                    trace=trace,
+                )
+
+        # Browser remounts and request retries can submit the same typed batch
+        # more than once.  A stable option_id is an identity, not permission to
+        # append another option@rev1; replay the exact same semantic revision
+        # and reject a conflicting reuse so the append-only log stays foldable.
+        replayed: list[NotebookOptionRevision] = []
+        for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
+            if not draft.option_id:
+                replayed = []
+                break
+            try:
+                existing = self.store.read_option(notebook_id, draft.option_id)
+            except OptionNotFound:
+                replayed = []
+                break
+            current = existing.current_revision
+            same_semantics = (
+                current.generation_context_hash == generation_context_hash(context)
+                and existing.current_stored_revision.canonical_proposal_hash
+                == proposal.canonical_hash()
+                and current.rank == draft.rank
+                and current.rationale == draft.rationale
+                and current.assumptions == tuple(draft.assumptions)
+                and current.risk_level == risk_level
+                and current.artifact_contract == contract
+                and current.evidence_refs == tuple(draft.evidence_refs)
+                and current.comparative_claims == tuple(draft.comparative_claims)
+                and getattr(current, "recommendation_status", None)
+                == (
+                    recommendation_decision.outcome
+                    if recommendation_decision is not None
+                    else draft.recommendation_status
+                )
+            )
+            if not same_semantics:
+                raise OptionBatchInvalid(
+                    "OPTION_ID_REUSE_CONFLICT",
+                    "an existing option_id is already bound to a different typed revision; revalidate it instead",
+                    option_id=draft.option_id,
+                )
+            replayed.append(current)
+        if replayed and len(replayed) == len(drafts):
+            if trace is not None:
+                trace.emit(
+                    "agent.plan.completed",
+                    payload={
+                        "context_id": context.context_id,
+                        "generated_option_count": len(replayed),
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                        "stop_reason": "idempotent_replay",
+                    },
+                )
+            return tuple(replayed)
 
         if recommendation_decision is not None:
             option_ids = tuple(draft.option_id or "" for draft in drafts)
@@ -692,6 +779,172 @@ class NotebookService:
                 "agent.plan.completed",
                 payload=plan_payload,
             )
+        return tuple(revisions)
+
+    def _revalidate_planning_batch(
+        self,
+        *,
+        notebook: Notebook,
+        context: NotebookPlanningContextV1,
+        drafts: Sequence[OptionDraft],
+        prepared: Sequence[tuple[TypedProposal, Any, str]],
+        existing: Sequence[OptionView | None],
+        batch_id: str | None,
+        recommendation_decision: RecommendationDecision | None,
+        trace: TraceWriter | None,
+    ) -> tuple[NotebookOptionRevision, ...]:
+        """Persist one explicit replan as revisions of existing option ids.
+
+        This is intentionally separate from ``propose_batch``'s idempotent
+        replay path.  A replan may change the typed proposal and evidence, so
+        it must receive a fresh recommendation decision and a higher option
+        revision while retaining the stable option identity.
+        """
+
+        if recommendation_decision is None:
+            raise OptionBatchInvalid(
+                "OPTION_REVALIDATION_DECISION_REQUIRED",
+                "an explicit planning revalidation must carry a recommendation decision",
+            )
+        option_ids = tuple(draft.option_id or "" for draft in drafts)
+        if (
+            any(not option_id for option_id in option_ids)
+            or option_ids != recommendation_decision.candidate_option_ids
+            or any(
+                draft.recommendation_decision_id
+                != recommendation_decision.recommendation_decision_id
+                or draft.recommendation_status != recommendation_decision.outcome
+                for draft in drafts
+            )
+        ):
+            raise OptionBatchInvalid(
+                "OPTION_BATCH_DECISION_MISMATCH",
+                "the revalidated recommendation decision must name and classify every option in the batch",
+            )
+        batch = batch_id or recommendation_decision.batch_id
+        created_at = _now()
+        revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
+        stored: list[StoredRevision | None] = []
+        for draft, (proposal, contract, risk_level), prior in zip(
+            drafts, prepared, existing
+        ):
+            if prior is None:
+                option_id = draft.option_id or f"opt_{uuid4().hex}"
+                revision_number = 1
+                lifecycle_status = "proposed"
+                supersedes = None
+            else:
+                if prior.lifecycle_status not in {"proposed", "deferred", "selected"}:
+                    # Replans are allowed to include the provider's previous
+                    # candidate set, but terminal options are immutable. Keep
+                    # their last revision exactly as-is and let the eligible
+                    # siblings receive fresh revisions. This avoids turning a
+                    # remount/replan into a lifecycle transition out of
+                    # materialized, executed, rejected, or archived state.
+                    revisions.append(prior.current_revision)
+                    stored.append(None)
+                    continue
+                current = prior.current_revision
+                option_id = prior.option_id
+                revision_number = current.option_revision + 1
+                lifecycle_status = prior.lifecycle_status
+                supersedes = current.option_revision
+            revision = NotebookOptionRevisionV11(
+                option_id=option_id,
+                option_revision=revision_number,
+                notebook_id=notebook.notebook_id,
+                run_family_id=notebook.run_family_id,
+                generation_context_id=context.context_id,
+                generation_context_hash=generation_context_hash(context),
+                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                typed_proposal_id=proposal.proposal_id,
+                typed_proposal_revision=proposal.proposal_revision,
+                artifact_contract=contract,
+                rationale=draft.rationale,
+                assumptions=tuple(draft.assumptions),
+                risk_level=risk_level,
+                lifecycle_status=lifecycle_status,
+                freshness_status=FRESH,
+                validation_status="valid",
+                rank=draft.rank,
+                batch_id=batch,
+                created_at=created_at,
+                evidence_refs=tuple(draft.evidence_refs),
+                comparative_claims=tuple(draft.comparative_claims),
+                recommendation_decision_id=recommendation_decision.recommendation_decision_id,
+                recommendation_status=recommendation_decision.outcome,
+                supersedes_option_revision=supersedes,
+            )
+            revisions.append(revision)
+            stored.append(
+                StoredRevision(
+                    revision=revision,
+                    proposal=proposal,
+                    canonical_proposal_hash=proposal.canonical_hash(),
+                )
+            )
+
+        # All revisions are constructed and validated before the first append.
+        self.store.append_decision(notebook.notebook_id, recommendation_decision)
+        for draft, revision, stored_revision, prior in zip(
+            drafts, revisions, stored, existing
+        ):
+            if stored_revision is None:
+                if trace is not None:
+                    trace.emit(
+                        "option.replan.skipped_terminal",
+                        payload={
+                            "option_id": revision.option_id,
+                            "option_revision": revision.option_revision,
+                            "lifecycle_status": revision.lifecycle_status,
+                        },
+                    )
+                continue
+            if prior is None:
+                self.store.append_option_record(
+                    notebook.notebook_id,
+                    revision.option_id,
+                    {
+                        "record_type": RECORD_OPTION,
+                        "option_id": revision.option_id,
+                        "notebook_id": notebook.notebook_id,
+                        "batch_id": batch,
+                        "rank": draft.rank,
+                        "created_at": created_at,
+                    },
+                )
+                self._append_lifecycle(
+                    notebook.notebook_id,
+                    revision.option_id,
+                    from_status=None,
+                    to_status="proposed",
+                    revision=revision.option_revision,
+                    actor="agent",
+                    reason="generated",
+                )
+            self._append_revision(notebook.notebook_id, stored_revision)
+            if trace is not None:
+                trace.emit(
+                    "option.revision.created",
+                    payload={
+                        "option_id": revision.option_id,
+                        "option_revision": revision.option_revision,
+                        "generation_context_hash": revision.generation_context_hash,
+                        "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
+                        "rank": revision.rank,
+                        "risk_level": revision.risk_level,
+                        "supersedes_option_revision": revision.supersedes_option_revision,
+                    },
+                )
+                trace.emit(
+                    "proposal.validation.completed",
+                    payload={
+                        "option_id": revision.option_id,
+                        "option_revision": revision.option_revision,
+                        "proposal_id": revision.typed_proposal_id,
+                        "validation_status": "valid",
+                    },
+                )
         return tuple(revisions)
 
     def revalidate_option(
@@ -877,7 +1130,10 @@ class NotebookService:
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
         target = _DECISION_TO_LIFECYCLE.get(decision)
-        if target is not None:
+        # Browser retries and remounts may replay the same user intent. Keep
+        # the lifecycle state machine strict, but make the public observation
+        # operation idempotent when the requested state is already current.
+        if target is not None and target != view.lifecycle_status:
             self._transition(
                 notebook_id,
                 view,
@@ -1053,6 +1309,35 @@ class NotebookService:
                     option_revision=current.option_revision,
                     contract_version=current.contract_version,
                 )
+            if view.lifecycle_status == "materialized":
+                # A materialized Draft has not gone through the legacy
+                # Notebook `confirm` endpoint.  Its real execution begins in
+                # Draft Graph, so the first callback from that run is the
+                # authoritative start of the materialized option's execution.
+                # Record the transition before validating artifacts; a failed
+                # run must still leave an append-only execution attempt.
+                self._transition(
+                    notebook_id,
+                    view,
+                    to_status="executing",
+                    actor="system",
+                    reason="draft_execution_started",
+                    trace=trace,
+                )
+                if trace is not None:
+                    trace.emit(
+                        "option.execution.started",
+                        payload={
+                            "option_id": option_id,
+                            "option_revision": current.option_revision,
+                            "proposal_id": current.typed_proposal_id,
+                            "proposal_revision": current.typed_proposal_revision,
+                            "freshness_dependency_fingerprint": (
+                                current.freshness_dependency_fingerprint
+                            ),
+                        },
+                    )
+                view = self.store.read_option(notebook_id, option_id)
             if view.lifecycle_status != "executing":
                 raise OptionLifecycleTransitionInvalid(
                     f"option {option_id} is {view.lifecycle_status}; only an executing "
@@ -1253,8 +1538,24 @@ class NotebookService:
                 operation_id=proposal.operation_id,
                 validation_issues=[{"code": "OPERATION_VALIDATION", "detail": str(error)}],
             ) from error
+        try:
+            self._validate_target_model_options(proposal)
+        except Exception as error:
+            code = getattr(error, "code", "MODEL_OPTIONS_PATCH_INVALID")
+            raise OptionValidationFailed(
+                "option model_options failed the target model contract: "
+                f"[{code}] {error}",
+                option_id=draft.option_id,
+                operation_id=proposal.operation_id,
+                validation_issues=[{"code": code, "detail": str(error)}],
+            ) from error
 
-        contract = build_artifact_contract(draft.expected_artifacts)
+        contract = build_artifact_contract(
+            draft.expected_artifacts,
+            additional_artifact_types=capability_artifact_types(
+                draft.capability_id or ""
+            ),
+        )
         risk_level = _REGISTRY_RISK_TO_OPTION_RISK.get(definition.risk_level)
         if risk_level is None:
             raise OptionValidationFailed(
@@ -1263,6 +1564,68 @@ class NotebookService:
                 operation_id=proposal.operation_id,
             )
         return proposal, contract, risk_level
+
+    def _validate_target_model_options(self, proposal: TypedProposal) -> None:
+        """Validate model-specific options before persisting an Option revision."""
+
+        changes = proposal.changes
+        if proposal.operation_id == "model.rerun":
+            patch = changes.get("model_options") or {}
+            if not patch:
+                return
+            from ...lineage.run_inputs import read_run_inputs
+            from ...repository.run_repository import _resolve_run_root
+            from ...services.run_service import merge_form_overrides
+
+            try:
+                run_root = _resolve_run_root(
+                    str(self.project_root), str(proposal.target["run_id"])
+                )
+            except Exception as error:
+                # Some append-only compatibility tests intentionally exercise
+                # the Option lifecycle with a symbolic run id and no persisted
+                # source.  There is no target contract to validate in that
+                # case, so leave the option unverified; materialization still
+                # requires a real source and remains fail-closed.
+                if getattr(error, "code", None) == "RUN_NOT_FOUND":
+                    return
+                raise
+            inputs = read_run_inputs(run_root)
+            form = inputs.get("form") or {}
+            if not isinstance(form, Mapping) or not isinstance(patch, Mapping):
+                raise ValueError("model_options target and patch must be objects")
+            # A persisted run without model identity is an incomplete legacy
+            # fixture, not a model contract.  Do not guess its owner.
+            if not form.get("model_type"):
+                return
+            merge_form_overrides(form, {"model_options": dict(patch)})
+            return
+
+        if proposal.operation_id == "model.genesis":
+            from ...model_options import bind_new_model_options
+
+            model_params = changes.get("model_params") or {}
+            if not isinstance(model_params, Mapping):
+                return
+            model_type = model_params.get("model_type")
+            payload = changes.get("model_options")
+            if payload is None:
+                payload = model_params.get("model_options")
+            if payload:
+                # OLS owns the historical top-level covariance field, while
+                # early Notebook providers nested it under model_options.  Use
+                # the same narrow, explicit adapter as Draft materialization;
+                # never invent a generic OLS model-options contract.
+                if model_type == "ols":
+                    from ...services.draft_materialization import (
+                        normalize_ols_genesis_model_params,
+                    )
+
+                    normalize_ols_genesis_model_params(
+                        {"model_type": model_type, "model_options": payload}
+                    )
+                    return
+                bind_new_model_options(model_type, payload)
 
     def _append_revision(self, notebook_id: str, stored: StoredRevision) -> None:
         self.store.append_option_record(
@@ -1358,11 +1721,10 @@ class NotebookService:
         if not run_id:
             return []
         try:
-            index = read_json(self.project_root / "runs" / run_id / "artifacts_index.json")
+            records = _read_artifact_records(self.project_root / "runs" / run_id)
         except (FileNotFoundError, OSError, ValueError):
             return []
-        artifacts = index.get("artifacts") if isinstance(index, dict) else None
-        return [dict(item) for item in artifacts or [] if isinstance(item, dict)]
+        return [dict(item) for item in records if isinstance(item, Mapping)]
 
 
 __all__ = ["ExecutionOutcome", "MAX_OPTIONS_PER_BATCH", "NotebookService"]

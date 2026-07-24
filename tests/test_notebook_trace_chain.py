@@ -156,6 +156,42 @@ def test_one_decision_chain_emits_every_registered_trace_event_type(tmp_path: Pa
     assert set(decisions[0]["payload"]) == {"option_id", "option_revision", "decision"}
 
 
+def test_two_trace_writers_share_monotonic_sequence_numbers(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    scope = {
+        "project_id": project.name,
+        "notebook_id": "nb_shared",
+        "run_family_id": "family_shared",
+    }
+    versions = {
+        "app_commit": "test",
+        "model_id": "test",
+        "prompt_version": "test",
+        "vocabulary_version": "test",
+        "context_profile": "test",
+    }
+    first = TraceWriter(project, scope=scope, versions=versions)
+    second = TraceWriter(
+        project,
+        scope=scope,
+        versions=versions,
+        trace_id=first.trace_id,
+    )
+
+    payload = {
+        "context_id": "ctx_shared",
+        "generation_context_hash": "sha256:g",
+        "freshness_dependency_fingerprint": "fresh:f",
+        "compiled_context_blob_ref": "blob:shared",
+        "omitted_sections": [],
+        "content_chars": 1,
+    }
+    first.emit("context.compiled", payload=payload)
+    second.emit("context.compiled", payload=payload)
+
+    assert [event["sequence"] for event in first.replay(project, first.trace_id)] == [1, 2]
+
+
 def test_a_decision_carrying_a_reward_is_refused_by_the_trace_schema(tmp_path: Path) -> None:
     """DEC-TRACE-001 — a v1.8.1 trace records observations, not judgements."""
     project = make_project(tmp_path)

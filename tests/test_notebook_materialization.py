@@ -14,8 +14,11 @@ from workbench.agent.context_compiler import (
 )
 from workbench.agent.notebook.errors import (
     NotebookOptionError,
+    OptionMaterializationFailed,
     OptionLifecycleTransitionInvalid,
+    OptionValidationFailed,
 )
+from workbench.agent.notebook.materialization import NotebookOptionMaterializer
 from workbench.agent.notebook.store import StoredRevision
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
@@ -31,6 +34,8 @@ from workbench.lineage.node_write_validation import (
 )
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
+from workbench.lineage.run_family import bind_run_to_family
+from workbench.model_options import bind_new_model_options
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 
@@ -229,6 +234,62 @@ def test_decision_is_append_only_idempotent_and_rejects_conflicts(tmp_path: Path
         )
 
 
+def test_repeating_identical_v11_batch_is_idempotent(tmp_path: Path) -> None:
+    """A remount/retry must not write the same option revision twice."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Retry", created_by="ui")
+    context = service.compile_context(notebook.notebook_id)
+    option_id = "opt_retry"
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_retry",
+        batch_id="batch_retry",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=(),
+        comparison_protocol_refs=(),
+        candidate_option_ids=(option_id,),
+        outcome="recommended",
+        recommended_option_id=option_id,
+        reason_refs=(),
+    )
+    draft = OptionDraft(
+        rank=1,
+        rationale="verified retry option",
+        proposal=TypedProposal.from_dict(model_rerun_proposal("proposal_retry")),
+        expected_artifacts=(
+            ExpectedArtifact(
+                artifact_id="ts.parameters",
+                artifact_type="time_series_json",
+                required=True,
+                count=1,
+            ),
+        ),
+        option_id=option_id,
+        recommendation_decision_id=decision.recommendation_decision_id,
+        recommendation_status=decision.outcome,
+    )
+
+    first = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[draft],
+        recommendation_decision=decision,
+    )
+    second = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[draft],
+        recommendation_decision=decision,
+    )
+
+    assert second == first
+    assert service.store.read_option(notebook.notebook_id, option_id).revisions == (
+        first[0],
+    )
+
+
 def test_selected_v11_materialization_records_cover_genesis_and_rerun_child_identities(
     tmp_path: Path,
 ) -> None:
@@ -372,6 +433,58 @@ def test_v11_completion_requires_bound_materialization_record_and_execution_stat
     assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == (
         "selected"
     )
+
+
+def test_materialized_option_can_reconcile_a_successful_draft_run(
+    tmp_path: Path,
+) -> None:
+    """Graph execution starts after materialization, then commits the same option."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Draft reconciliation", created_by="ui")
+    revision = _v11_option(service, notebook.notebook_id, option_id="opt_draft_run")
+    materialization = _bound_materialization(
+        service,
+        notebook.notebook_id,
+        revision,
+        materialization_id="mat_draft_run",
+    )
+    service.store.append_materialization(notebook.notebook_id, materialization)
+    service._transition(
+        notebook.notebook_id,
+        service.option_view(notebook.notebook_id, revision.option_id),
+        to_status="materialized",
+        actor="agent",
+        reason="draft_materialized",
+    )
+
+    run = make_run(project, "run_draft_reconciled")
+    bind_run_to_family(run, run_family_id=notebook.run_family_id, bound_by="test")
+
+    outcome = service.complete_execution(
+        notebook.notebook_id,
+        revision.option_id,
+        execution_status="succeeded",
+        run_id="run_draft_reconciled",
+        produced_artifacts=[
+            {
+                "artifact_id": "ets_1",
+                "artifact_type": "model_result",
+                "count": 1,
+                "step": "estimation",
+            }
+        ],
+    )
+
+    assert outcome.lifecycle_status == "executed"
+    assert outcome.active_head_advanced is True
+    assert service.get_notebook(notebook.notebook_id).active_head_run_id == (
+        "run_draft_reconciled"
+    )
+    assert [entry["to_status"] for entry in service.option_view(
+        notebook.notebook_id, revision.option_id
+    ).lifecycle_history] == ["selected", "materialized", "executing", "executed"]
 
 
 def test_legacy_confirmation_remains_legacy_without_a_materialized_lie(
@@ -561,6 +674,7 @@ def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
                 "model_type": "ols",
                 "y": "outcome",
                 "x": ["predictor"],
+                "covariance": "robust",
             }
         },
     )
@@ -584,6 +698,15 @@ def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
                 rank=1,
                 rationale="The verified dataset columns support the selected model path.",
                 proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="ols_1",
+                        artifact_type="model_result",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                capability_id="ols",
                 option_id="opt_genesis_real",
                 evidence_refs=(
                     EvidenceRef(
@@ -623,11 +746,29 @@ def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
     assert first.draft.draft["created_from"]["source_input_fingerprint"] == upload_sha
     assert first.draft.draft["notebook_provenance"]["option_id"] == revision.option_id
     assert first.draft.draft["graph"]["nodes"][2]["params"]["model_type"] == "ols"
+    assert first.draft.draft["graph"]["nodes"][2]["params"]["covariance"] == "robust"
     assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "materialized"
 
 
+@pytest.mark.parametrize(
+    "model_options",
+    [
+        pytest.param(
+            {
+                "time_column": "when",
+                "value_column": "value",
+                "error": "add",
+                "trend": None,
+                "seasonal": None,
+                "damped_trend": False,
+            },
+            id="non-empty-options",
+        ),
+        pytest.param({}, id="retain-current-path"),
+    ],
+)
 def test_selected_run_option_materializes_one_pinned_rerun_child_draft(
-    tmp_path: Path,
+    tmp_path: Path, model_options: dict[str, object]
 ) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
@@ -746,14 +887,7 @@ def test_selected_run_option_materializes_one_pinned_rerun_child_draft(
             "owner_resolution": "single_candidate",
         },
         changes={
-            "model_options": {
-                "time_column": "when",
-                "value_column": "value",
-                "error": "add",
-                "trend": None,
-                "seasonal": None,
-                "damped_trend": False,
-            }
+            "model_options": model_options,
         },
     )
     decision = RecommendationDecision(
@@ -776,6 +910,15 @@ def test_selected_run_option_materializes_one_pinned_rerun_child_draft(
                 rank=1,
                 rationale="The active run has a valid time index.",
                 proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="ets_1",
+                        artifact_type="model_result",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                capability_id="time_series.ets",
                 option_id="opt_rerun_real",
                 evidence_refs=(
                     EvidenceRef(
@@ -803,4 +946,332 @@ def test_selected_run_option_materializes_one_pinned_rerun_child_draft(
     assert result.draft.draft["created_from"]["source_run_id"] == "run_active"
     assert result.draft.draft["created_from"]["source_model_node_id"] == "model:ets_1"
     assert result.draft.draft["notebook_provenance"]["option_id"] == revision.option_id
-    assert result.draft.draft["graph"]["nodes"][1]["params"]["model_options"]["trend"] is None
+    if model_options:
+        assert result.draft.draft["graph"]["nodes"][1]["params"]["model_options"]["trend"] is None
+
+
+def test_invalid_model_options_are_rejected_before_option_persistence(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    run_root = make_run(project, "run_arma")
+    source_options = {
+        "dataset_ref": "upload:vix.csv",
+        "time_column": "date",
+        "value_column": "value",
+        "time_index_semantics": "business_or_trading_observations",
+        "transform": "log_return_pct",
+        "transform_confirmed": True,
+        "analysis_goal": "balanced",
+        "selection_mode": "auto",
+        "arma": {
+            "p": None,
+            "q": None,
+            "constant_mode": "auto",
+            "auto_max_p": 3,
+            "auto_max_q": 3,
+            "auto_max_total_order": 4,
+        },
+        "variance": {
+            "model": "auto",
+            "arch_p": None,
+            "garch_p": None,
+            "garch_q": None,
+            "auto_arch_max_p": 10,
+            "include_garch_1_1": True,
+        },
+        "estimation_strategy": "auto",
+        "innovation_distribution": "normal",
+        "missing_value_policy": "drop_missing_confirmed",
+        "validation": {"validation_n": 20, "refit_every": 1},
+        "random_seed": 1,
+    }
+    bound = bind_new_model_options("time_series.arma_garch", source_options)
+    (run_root / "run_inputs.json").write_text(
+        json.dumps(
+            {
+                "run_input_schema_version": 1,
+                "form": {
+                    "model_type": "time_series.arma_garch",
+                    "model_options": bound.payload,
+                    "model_options_binding": bound.binding.to_dict(),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    notebook = service.create_notebook(title="Contract", created_by="test")
+    proposal = TypedProposal.from_dict(
+        {
+            "proposal_id": "prop_bad_arma_aliases",
+            "proposal_revision": 1,
+            "operation_id": "model.rerun",
+            "operation_version": "v1",
+            "target": {
+                "run_id": "run_arma",
+                "node_ref": "model:arma",
+                "node_hash": "a" * 64,
+                "forest_node_key": "a" * 64 + "::model:arma",
+            },
+            "preconditions": {
+                "context_version": "node-operation-context/v1",
+                "context_fingerprint": "nocv1:test",
+                "active_head_run_id": "run_arma",
+                "owner_resolution": "single_candidate",
+            },
+            "changes": {
+                "model_options": {
+                    "ar": 2,
+                    "ma": 1,
+                    "dist": "normal",
+                    "volatility_model": "EGARCH",
+                }
+            },
+        }
+    )
+
+    with pytest.raises(OptionValidationFailed, match="MODEL_OPTIONS_INVALID_VALUE"):
+        service.propose_batch(
+            notebook.notebook_id,
+            context=service.compile_context(notebook.notebook_id),
+            drafts=[
+                OptionDraft(
+                    rank=1,
+                    rationale="invalid target contract",
+                    proposal=proposal,
+                    expected_artifacts=(
+                        ExpectedArtifact(
+                            artifact_id="ts.artifact_manifest",
+                            artifact_type="time_series_manifest",
+                            required=True,
+                        ),
+                    ),
+                    capability_id="time_series.arma_garch",
+                    option_id="opt_bad_arma_aliases",
+                )
+            ],
+        )
+
+    assert service.store.option_ids(notebook.notebook_id) == []
+
+
+def test_non_editable_run_model_options_are_rejected_before_draft_creation(
+    tmp_path: Path,
+) -> None:
+    """A generic proposal must not create an orphan Draft at the semantic seam."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    run_root = make_run(project, "run_ols")
+    upload_sha = store_upload_bytes(project, b"y,x\n1,2\n3,4\n", filename="data.csv")
+    (run_root / "run_inputs.json").write_text(
+        json.dumps(
+            {
+                "run_input_schema_version": 1,
+                "upload": {"sha256": upload_sha},
+                "form": {
+                    "model_type": "ols",
+                    "y": "y",
+                    "x": "x",
+                    "covariance": "robust",
+                    "model_options": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run_ols",
+                "mode": "manual",
+                "status": "completed",
+                "model_routing": {
+                    "requested_model_type": "ols",
+                    "effective_model_type": "ols",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    GraphStore(project / "runs").write(
+        Graph(
+            schema_version=3,
+            run_id="run_ols",
+            nodes={
+                "model:ols_1": Node(
+                    id="model:ols_1",
+                    kind=NodeKind.MODEL,
+                    display_label="OLS",
+                    created_at="2026-07-23T00:00:00+00:00",
+                    parent_stage_id=None,
+                    branch_id="main",
+                    stage=Stage.MODEL,
+                )
+            },
+            edges={},
+            branches={},
+        )
+    )
+    node_hash = "b" * 64
+    (run_root / "node_index.json").write_text(
+        json.dumps({"model:ols_1": {"node_hash": node_hash, "cas_ref": {}}}),
+        encoding="utf-8",
+    )
+    notebook = service.ensure_default_projection(from_run_id="run_ols", created_by="ui")
+    request = NodeWriteOperationRequestV1(
+        request_id="materialization-non-editable-options",
+        operation="rerun",
+        context_version="node-operation-context/v1",
+        context_fingerprint="pending",
+        owner_run_id="run_ols",
+        op_node_id="model:ols_1",
+        node_hash=node_hash,
+        forest_node_key=f"{node_hash}::model:ols_1",
+        owner_resolution="single_candidate",
+        active_head_run_id="run_ols",
+    )
+    source_context_fingerprint = compute_context_fingerprint(project / "runs", request)
+    proposal = TypedProposal(
+        proposal_id="prop_ols_unsupported_options",
+        operation_id="model.rerun",
+        target={
+            "run_id": "run_ols",
+            "node_ref": "model:ols_1",
+            "node_hash": node_hash,
+            "forest_node_key": f"{node_hash}::model:ols_1",
+        },
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": source_context_fingerprint,
+            "active_head_run_id": "run_ols",
+            "owner_resolution": "single_candidate",
+        },
+        changes={"model_options": {"covariance": "clustered"}},
+    )
+
+    with pytest.raises(OptionMaterializationFailed, match="not editable"):
+        NotebookOptionMaterializer(service)._materialize_run(
+            notebook,
+            proposal.to_dict(),
+            {
+                "notebook_id": notebook.notebook_id,
+                "option_id": "opt_ols_unsupported_options",
+                "option_revision": "1",
+            },
+        )
+
+    assert service.project_root.joinpath("data", "pipeline_drafts").exists() is False
+
+
+def test_ols_genesis_covariance_model_options_are_materialized_as_covariance(
+    tmp_path: Path,
+) -> None:
+    """Provider-era nested covariance is normalized before an OLS Draft is persisted."""
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(project, b"outcome,age\n1,20\n2,30\n", filename="data.csv")
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "data.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    context = service.compile_context(notebook.notebook_id)
+    pack = {
+        "schema_version": "data-evidence-pack/v1",
+        "source_id": f"dataset:{upload_sha}",
+        "records": [
+            {
+                "evidence_id": "evidence:profile",
+                "inspection_id": "profile.v1",
+                "source_refs": [f"dataset_profile:{upload_sha}"],
+                "protocol_version": "profile/v1",
+                "status": "completed",
+                "observations": {"columns": [{"name": "outcome"}, {"name": "age"}]},
+                "metrics": {},
+                "warnings": [],
+                "omissions": [],
+                "failure_code": None,
+                "result_hash": "sha256:profile-result",
+            }
+        ],
+        "pack_omissions": [],
+        "content_hash": "sha256:profile-pack",
+        "evidence_pack_hash": "sha256:profile-pack",
+    }
+    service.store.append_evidence_pack(notebook.notebook_id, pack)
+    context = service.compile_context(notebook.notebook_id)
+    proposal = TypedProposal(
+        proposal_id="prop_ols_nested_covariance",
+        operation_id="model.genesis",
+        target={"dataset_source_id": upload_sha},
+        preconditions={
+            "context_version": "notebook-planning-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={
+            "model_params": {
+                "model_type": "ols",
+                "y": "outcome",
+                "x": ["age"],
+            },
+            "model_options": {"covariance": "robust"},
+        },
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_ols_nested_covariance",
+        batch_id="batch_ols_nested_covariance",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=("sha256:profile-pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_ols_nested_covariance",),
+        outcome="recommended",
+        recommended_option_id="opt_ols_nested_covariance",
+        reason_refs=("evidence:profile",),
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="The verified columns support OLS.",
+                proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="ols_1",
+                        artifact_type="model_result",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                capability_id="ols",
+                option_id="opt_ols_nested_covariance",
+                evidence_refs=(
+                    EvidenceRef(
+                        evidence_id="evidence:profile",
+                        result_hash="sha256:profile-result",
+                        source_refs=(f"dataset_profile:{upload_sha}",),
+                    ),
+                ),
+                comparative_claims=("evidence:profile supports OLS",),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        recommendation_decision=decision,
+    )
+    service.record_decision(notebook.notebook_id, revision.option_id, decision="selected", actor="ui")
+    result = NotebookOptionMaterializer(service).materialize(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    model = next(node for node in result.draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"]["covariance"] == "robust"
+    assert "model_options" not in model["params"]

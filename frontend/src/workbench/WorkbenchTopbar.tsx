@@ -41,6 +41,7 @@ export const VIEW_TABS: TabSpec[] = [
   { id: "graph", label: "Graph" },
   { id: "table", label: "Table" },
   { id: "report", label: "Report" },
+  { id: "notebook", label: "Notebook" },
 ];
 
 function projectName(root: string): string {

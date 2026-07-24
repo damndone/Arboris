@@ -99,7 +99,11 @@ def notebook_option_batch() -> Capability:
         except Exception:
             continue
         candidate: Callable[..., Any] | None = getattr(module, attribute, None)
-        if callable(candidate):
+        # A public fail-closed placeholder may exist before the configured
+        # provider-backed seam lands.  Importability alone is not evidence of
+        # a real producer: the module must explicitly advertise availability.
+        status = getattr(module, "NOTEBOOK_OPTION_BATCH_STATUS", "available")
+        if callable(candidate) and status == "available":
             return Capability(
                 name=f"{module_name}.{attribute}",
                 lane="Agent",
@@ -111,7 +115,7 @@ def notebook_option_batch() -> Capability:
         name="notebook option batch generator",
         lane="Agent",
         present=False,
-        detail="none of " + ", ".join(tried) + " is importable",
+        detail="none of " + ", ".join(tried) + " is an available provider-backed seam",
     )
 
 

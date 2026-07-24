@@ -19,6 +19,7 @@ from ..lineage.op_contract import resolve_operation_contract
 from ..lineage.pipeline_drafts import (
     PipelineDraftStore,
     StoredDraft,
+    compute_executable_draft_hash,
     new_draft_id,
     schema_hash,
     utc_now,
@@ -97,6 +98,34 @@ def _source_params_from_schema(editable_schema: list[dict[str, Any]]) -> dict[st
     return {item["key"]: item.get("value") for item in editable_schema if item.get("key")}
 
 
+def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize the historical nested covariance spelling for OLS Genesis.
+
+    OLS owns the legacy top-level ``covariance`` form, not the generic
+    ``model_options`` contract. Early Notebook providers nevertheless put
+    ``{"covariance": ...}`` in ``model_options``. Keep this adapter narrow and
+    explicit: only that one known field is migrated; every other nested option
+    remains fail-closed instead of being guessed or forwarded to execution.
+    """
+    normalized = dict(model_params)
+    if normalized.get("model_type") != "ols" or "model_options" not in normalized:
+        return normalized
+    options = normalized.get("model_options")
+    if not isinstance(options, Mapping):
+        raise ValueError("MODEL_OPTIONS_UNSUPPORTED_FOR_OLS_GENESIS")
+    unknown = set(options) - {"covariance"}
+    if unknown:
+        raise ValueError("MODEL_OPTIONS_UNSUPPORTED_FOR_OLS_GENESIS")
+    if "covariance" in options:
+        nested_covariance = options["covariance"]
+        current_covariance = normalized.get("covariance")
+        if current_covariance is not None and current_covariance != nested_covariance:
+            raise ValueError("MODEL_OPTIONS_COVARIANCE_CONFLICT")
+        normalized["covariance"] = nested_covariance
+    normalized.pop("model_options", None)
+    return normalized
+
+
 def _read_indexed_node_hash(run_root: Path, node_id: str) -> str | None:
     index_path = run_root / NODE_INDEX_FILENAME
     if not index_path.is_file():
@@ -130,6 +159,7 @@ def create_rerun_draft_from_node(
     source_forest_node_key: str | None,
     source_context_fingerprint: str,
     notebook_provenance: Mapping[str, str] | None = None,
+    persist: bool = True,
 ) -> StoredDraft:
     """Create one source-pinned rerun-child Draft without executing it."""
 
@@ -240,6 +270,12 @@ def create_rerun_draft_from_node(
     provenance = _provenance_payload(notebook_provenance)
     if provenance is not None:
         draft["notebook_provenance"] = provenance
+    candidate = StoredDraft(
+        draft=draft,
+        draft_hash=compute_executable_draft_hash(draft),
+    )
+    if not persist:
+        return candidate
     try:
         return PipelineDraftStore(root).create(draft)
     except Exception as exc:

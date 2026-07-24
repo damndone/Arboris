@@ -1010,6 +1010,7 @@ export type PipelineDraftV1 = {
   updated_at: string;
   status: string;
   created_from?: Record<string, string>;
+  notebook_provenance?: Record<string, string>;
   graph: {
     nodes: PipelineDraftNode[];
     edges: Array<{ from: string; to: string }>;

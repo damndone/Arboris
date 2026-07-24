@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -15,6 +16,78 @@ from jsonschema.exceptions import best_match
 # not a leak, but an unbounded blob would be.
 MAX_VALIDATION_ERRORS = 5
 MAX_VALIDATION_MESSAGE_CHARS = 240
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _project_value(value: Any, budget: int) -> Any:
+    """Recursively keep a useful prefix of an oversized JSON value."""
+
+    if _json_size(value) <= budget:
+        return value
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            candidate = dict(projected)
+            candidate[str(key)] = _project_value(item, max(budget // 2, 64))
+            if _json_size(candidate) <= budget:
+                projected[str(key)] = candidate[str(key)]
+        return projected
+    if isinstance(value, list):
+        projected: list[Any] = []
+        for item in value:
+            candidate = [*projected, _project_value(item, max(budget // 2, 64))]
+            if _json_size(candidate) > budget:
+                break
+            projected.append(candidate[-1])
+        return projected
+    if isinstance(value, str):
+        marker = "… [truncated]"
+        return value[: max(0, budget - len(json.dumps(marker, ensure_ascii=False))) - 2] + marker
+    return value
+
+
+def _bounded_tool_output(value: Any, budget: int) -> Any:
+    """Return partial evidence instead of discarding an oversized tool result."""
+
+    if _json_size(value) <= budget:
+        return value
+    if not isinstance(value, Mapping):
+        return _project_value(value, budget)
+
+    # Keep identifiers and lifecycle facts first; large tables/previews are
+    # omitted as named sections so the Agent can request a narrower inspection.
+    priority = (
+        "request_id",
+        "tool_id",
+        "op_type",
+        "model_type",
+        "node",
+        "canonical",
+        "lineage",
+        "result_summary",
+        "time_series_summary",
+    )
+    projected: dict[str, Any] = {"status": "partial", "omitted_sections": []}
+    omitted: list[str] = []
+    keys = [key for key in priority if key in value]
+    keys.extend(key for key in value if key not in keys and key not in {"status", "omitted_sections"})
+    for key in keys:
+        candidate_value = _project_value(value[key], max(budget // 2, 64))
+        candidate = dict(projected)
+        candidate[str(key)] = candidate_value
+        if _json_size(candidate) <= budget:
+            projected[str(key)] = candidate_value
+        else:
+            omitted.append(str(key))
+    projected["omitted_sections"] = omitted
+    if _json_size(projected) > budget:
+        # The normal tool budgets are large enough for this envelope. Keep a
+        # deterministic last-resort response for unusually small test budgets.
+        projected = {"status": "partial", "omitted_sections": omitted}
+    return projected
 
 
 class ToolError(RuntimeError):
@@ -228,12 +301,20 @@ class ToolRegistry:
             if definition.max_output_budget is not None:
                 serialized = json.dumps(output, ensure_ascii=False, sort_keys=True)
                 if len(serialized) > definition.max_output_budget:
-                    return ToolResult(
-                        tool_call_id=call_id,
-                        tool_id=tool_id,
-                        ok=False,
-                        error="tool_output_budget_exceeded",
-                    )
+                    output = _bounded_tool_output(output, definition.max_output_budget)
+                    serialized = json.dumps(output, ensure_ascii=False, sort_keys=True)
+                    if len(serialized) > definition.max_output_budget:
+                        return ToolResult(
+                            tool_call_id=call_id,
+                            tool_id=tool_id,
+                            ok=False,
+                            error="tool_output_budget_exceeded",
+                            error_details=[
+                                {
+                                    "message": "tool output could not be projected within the declared budget"
+                                }
+                            ],
+                        )
             return ToolResult(tool_call_id=call_id, tool_id=tool_id, ok=True, output=output)
         except ToolVisibleError as exc:
             return ToolResult(

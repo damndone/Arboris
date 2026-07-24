@@ -24,6 +24,7 @@ export interface ContextSlicePanelProps {
 
 export function ContextSlicePanel({ slice }: ContextSlicePanelProps) {
   const budget = slice.budget_report;
+  const budgetUnit = budget.unit ?? "bytes";
 
   return (
     <section className="nb-context-slice" data-testid="context-slice-panel">
@@ -92,11 +93,11 @@ export function ContextSlicePanel({ slice }: ContextSlicePanelProps) {
         <ul>
           {budget.sections.map((section) => (
             <li key={section.section}>
-              {`${section.section} ${section.used_bytes} / ${section.budget_bytes} bytes`}
+              {`${section.section} ${section.used_bytes} / ${section.budget_bytes} ${budgetUnit}`}
             </li>
           ))}
           <li className="nb-context-budget-total">
-            {`total ${budget.total_used_bytes} / ${budget.total_budget_bytes} bytes`}
+            {`total ${budget.total_used_bytes} / ${budget.total_budget_bytes} ${budgetUnit}`}
           </li>
         </ul>
       </div>

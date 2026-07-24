@@ -43,6 +43,14 @@ def declared_pack():
         list(RERUN_ACTION_REGISTRY),
         dict(capabilities._DECLARED_CAPABILITIES),
     )
+    # Integration bootstraps ETS as a builtin. Keep this direct declaration
+    # test focused on the pack's own contribution instead of colliding with a
+    # handler/capability left by an earlier capability query.
+    MODEL_REGISTRY.pop(ETS_MODEL_TYPE, None)
+    REGISTERED_PACKS[:] = [
+        pack for pack in REGISTERED_PACKS if pack.pack_id != ETS_MODEL_TYPE
+    ]
+    capabilities._DECLARED_CAPABILITIES.pop(ETS_MODEL_TYPE, None)
     declare_pack()
     try:
         yield MODEL_REGISTRY
@@ -88,7 +96,7 @@ def test_declaration_registers_exactly_one_handler(declared_pack) -> None:
 
     assert handler.model_id == MODEL_ID
     assert handler.serves_y_types == ("continuous",)
-    assert handler.model_options_contract.input_contract_version == "1.0"
+    assert handler.model_options_contract.input_contract_version == "1.1"
     assert handler.validate_model_options(_options()).specification.canonical == "ETS(A,A,N)"
 
 

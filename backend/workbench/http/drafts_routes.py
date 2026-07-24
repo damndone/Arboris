@@ -18,6 +18,7 @@ from ..services.draft_materialization import (
 )
 
 from ..services.draft_service import execute_genesis_draft, execute_rerun_child_draft
+from ..api_errors import WorkbenchAPIError
 
 router = APIRouter()
 
@@ -51,7 +52,12 @@ def _pipeline_draft_store(project_root: str) -> PipelineDraftStore:
     return PipelineDraftStore(Path(project_root))
 
 
-def _draft_http_error(exc: Exception) -> HTTPException:
+def _draft_http_error(exc: Exception) -> HTTPException | WorkbenchAPIError:
+    if isinstance(exc, WorkbenchAPIError):
+        # Repository path resolution already carries the canonical status,
+        # error code, and details.  Preserve it instead of flattening it into
+        # the generic 422 draft error.
+        return exc
     if isinstance(exc, DraftNotFound):
         return HTTPException(status_code=404, detail="DRAFT_NOT_FOUND")
     if isinstance(exc, DraftNodeNotFound):

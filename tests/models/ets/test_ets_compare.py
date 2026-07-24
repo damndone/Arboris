@@ -44,7 +44,7 @@ def test_compare_against_arma_garch_is_restricted() -> None:
     assert packet["reason_code"] in COMPARE_REASON_CODES
     assert packet["criteria"] is None
     assert packet["contract"] == "time_series.ets.compare"
-    assert packet["contract_version"] == "1.0"
+    assert packet["contract_version"] == "1.1"
 
 
 def test_compare_across_different_samples_is_restricted() -> None:

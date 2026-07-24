@@ -22,7 +22,11 @@ from workbench.agent.notebook.errors import (
     OptionBatchInvalid,
     OptionValidationFailed,
 )
-from workbench.contracts.agent.notebook_option import ExpectedArtifact
+from workbench.contracts.agent.notebook_option import (
+    EvidenceRef,
+    ExpectedArtifact,
+    RecommendationDecision,
+)
 from workbench.lineage.run_family import RunFamilyStore
 
 from tests.test_notebook_support import (
@@ -413,6 +417,181 @@ def test_revalidation_creates_a_new_revision_and_keeps_the_old_one_verbatim(
     assert view.revisions[0].to_dict() == first.to_dict()
     assert view.revisions[0].typed_proposal_id == "prop_1"
     assert view.current_revision.option_revision == 2
+
+
+def test_explicit_agent_replan_revalidates_existing_option_ids_append_only(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="n", created_by="u")
+    context = make_context(
+        project, notebook_id=notebook.notebook_id, run_family_id=notebook.run_family_id
+    )
+    evidence = EvidenceRef(
+        evidence_id="evidence:profile",
+        result_hash="sha256:profile",
+        source_refs=("dataset_profile:upload",),
+    )
+    first_decision = RecommendationDecision(
+        recommendation_decision_id="rec_1",
+        batch_id="batch_1",
+        generation_context_hash="sha256:ctx_1",
+        freshness_dependency_fingerprint="fresh1:ctx_1",
+        evidence_pack_hashes=("sha256:pack_1",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_replan",),
+        outcome="recommended",
+        recommended_option_id="opt_replan",
+        reason_refs=("evidence:profile",),
+    )
+    first_draft = OptionDraft(
+        **{
+            **_draft(1, covariance="robust", proposal_id="p1", option_id="opt_replan").__dict__,
+            "evidence_refs": (evidence,),
+            "comparative_claims": ("evidence:profile supports robust covariance",),
+            "recommendation_decision_id": first_decision.recommendation_decision_id,
+            "recommendation_status": first_decision.outcome,
+        }
+    )
+    (first,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[first_draft],
+        batch_id=first_decision.batch_id,
+        recommendation_decision=first_decision,
+    )
+
+    second_decision = RecommendationDecision(
+        recommendation_decision_id="rec_2",
+        batch_id="batch_2",
+        generation_context_hash="sha256:ctx_2",
+        freshness_dependency_fingerprint="fresh1:ctx_2",
+        evidence_pack_hashes=("sha256:pack_2",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_replan",),
+        outcome="recommended",
+        recommended_option_id="opt_replan",
+        reason_refs=("evidence:profile",),
+    )
+    second_draft = OptionDraft(
+        **{
+            **_draft(1, covariance="clustered", proposal_id="p2", option_id="opt_replan").__dict__,
+            "evidence_refs": (evidence,),
+            "comparative_claims": ("evidence:profile supports clustered covariance",),
+            "recommendation_decision_id": second_decision.recommendation_decision_id,
+            "recommendation_status": second_decision.outcome,
+        }
+    )
+
+    (second,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[second_draft],
+        batch_id=second_decision.batch_id,
+        recommendation_decision=second_decision,
+        revalidate_existing=True,
+    )
+
+    assert second.option_id == first.option_id == "opt_replan"
+    assert second.option_revision == 2
+    assert second.supersedes_option_revision == 1
+    assert second.batch_id == "batch_2"
+    view = service.option_view(notebook.notebook_id, "opt_replan")
+    assert [revision.option_revision for revision in view.revisions] == [1, 2]
+    assert view.revisions[0].to_dict() == first.to_dict()
+    assert view.current_revision.typed_proposal_id == "p2"
+
+
+def test_explicit_agent_replan_preserves_materialized_terminal_option(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="n", created_by="u")
+    context = make_context(
+        project, notebook_id=notebook.notebook_id, run_family_id=notebook.run_family_id
+    )
+    first_decision = RecommendationDecision(
+        recommendation_decision_id="rec_terminal_1",
+        batch_id="batch_terminal_1",
+        generation_context_hash="sha256:terminal_1",
+        freshness_dependency_fingerprint="fresh1:terminal_1",
+        evidence_pack_hashes=(),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_terminal",),
+        outcome="recommended",
+        recommended_option_id="opt_terminal",
+        reason_refs=(),
+    )
+    first_draft = OptionDraft(
+        **{
+            **_draft(1, covariance="robust", proposal_id="terminal_p1", option_id="opt_terminal").__dict__,
+            "recommendation_decision_id": first_decision.recommendation_decision_id,
+            "recommendation_status": first_decision.outcome,
+        }
+    )
+    (first,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[first_draft],
+        batch_id=first_decision.batch_id,
+        recommendation_decision=first_decision,
+    )
+    service._append_lifecycle(
+        notebook.notebook_id,
+        first.option_id,
+        from_status="proposed",
+        to_status="selected",
+        revision=first.option_revision,
+        actor="test",
+        reason="select",
+    )
+    service._append_lifecycle(
+        notebook.notebook_id,
+        first.option_id,
+        from_status="selected",
+        to_status="materialized",
+        revision=first.option_revision,
+        actor="test",
+        reason="draft_materialized",
+    )
+
+    second_decision = RecommendationDecision(
+        recommendation_decision_id="rec_terminal_2",
+        batch_id="batch_terminal_2",
+        generation_context_hash="sha256:terminal_2",
+        freshness_dependency_fingerprint="fresh1:terminal_2",
+        evidence_pack_hashes=(),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_terminal",),
+        outcome="recommended",
+        recommended_option_id="opt_terminal",
+        reason_refs=(),
+    )
+    second_draft = OptionDraft(
+        **{
+            **_draft(1, covariance="clustered", proposal_id="terminal_p2", option_id="opt_terminal").__dict__,
+            "recommendation_decision_id": second_decision.recommendation_decision_id,
+            "recommendation_status": second_decision.outcome,
+        }
+    )
+
+    (result,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[second_draft],
+        batch_id=second_decision.batch_id,
+        recommendation_decision=second_decision,
+        revalidate_existing=True,
+    )
+
+    assert result.option_id == first.option_id
+    assert result.option_revision == first.option_revision
+    view = service.option_view(notebook.notebook_id, first.option_id)
+    assert view.lifecycle_status == "materialized"
+    assert [revision.option_revision for revision in view.revisions] == [1]
+    assert view.current_revision.typed_proposal_id == first.typed_proposal_id
 
 
 def test_reading_the_same_context_twice_does_not_bump_the_revision(tmp_path: Path) -> None:

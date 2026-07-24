@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,7 +15,7 @@ from ..agent.context_compiler import (
     generation_context_hash,
 )
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
-from ..agent.notebook.evidence import DataEvidencePackV1
+from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
 from ..agent.model import OpenAICompatibleModelAdapter
 from ..agent.notebook.planning_agent import (
@@ -29,6 +29,8 @@ from ..agent.trace import TraceWriter, record_compiled_context
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
+from ..agent.notebook.vocabulary import capability_artifact_types
+from ..agent.recipes.registry import build_option_vocabulary
 
 router = APIRouter()
 
@@ -139,7 +141,13 @@ def _service(project_root: str) -> tuple[Path, NotebookService]:
     return root, NotebookService(root)
 
 
-def _trace(root: Path, notebook_id: str, run_family_id: str) -> TraceWriter:
+def _trace(
+    root: Path,
+    notebook_id: str,
+    run_family_id: str,
+    *,
+    trace_id: str | None = None,
+) -> TraceWriter:
     return TraceWriter(
         root,
         scope={
@@ -148,6 +156,20 @@ def _trace(root: Path, notebook_id: str, run_family_id: str) -> TraceWriter:
             "run_family_id": run_family_id,
         },
         versions=dict(_TRACE_VERSIONS),
+        trace_id=trace_id,
+    )
+
+
+def _notebook_trace(root: Path, service: NotebookService, notebook_id: str) -> TraceWriter:
+    """Open the Notebook's persisted trace, creating it exactly once."""
+
+    notebook = service.get_notebook(notebook_id)
+    trace_id = service.store.ensure_trace_id(notebook_id)
+    return _trace(
+        root,
+        notebook.notebook_id,
+        notebook.run_family_id,
+        trace_id=trace_id,
     )
 
 
@@ -155,7 +177,7 @@ def _compile(
     root: Path, service: NotebookService, notebook_id: str, *, focused_run_id: str | None = None
 ) -> tuple[NotebookPlanningContextV1, TraceWriter]:
     notebook = service.get_notebook(notebook_id)
-    trace = _trace(root, notebook.notebook_id, notebook.run_family_id)
+    trace = _notebook_trace(root, service, notebook.notebook_id)
     context = replace(
         service.compile_context(notebook_id, focused_run_id=focused_run_id), trace_id=trace.trace_id
     )
@@ -193,6 +215,70 @@ def _context_packet(context: NotebookPlanningContextV1) -> dict[str, Any]:
     return packet
 
 
+def _materializations_packet(
+    service: NotebookService, notebook_id: str, revisions: list[Any]
+) -> dict[str, dict[str, Any]]:
+    """Project persisted Draft handoffs alongside the current option revisions."""
+
+    materializations: dict[str, dict[str, Any]] = {}
+    for revision in revisions:
+        materialization = service.store.read_materialization(
+            notebook_id, revision.option_id, revision.option_revision
+        )
+        if materialization is not None:
+            materializations[revision.option_id] = materialization.to_dict()
+    return materializations
+
+
+def _execution_results_packet(
+    service: NotebookService, notebook_id: str, revisions: list[Any]
+) -> dict[str, dict[str, Any]]:
+    """Project the latest result for each current Option revision.
+
+    The Notebook is a durable projection.  A browser remount must therefore
+    be able to recover a completed Draft/Run without relying on the transient
+    confirmation state that initiated it.  Keep this packet model-neutral:
+    the result contract records execution and artifact-contract facts, while
+    model-specific result payloads remain in the Run's artifacts.
+    """
+
+    results: dict[str, dict[str, Any]] = {}
+    for revision in revisions:
+        view = service.store.read_option(notebook_id, revision.option_id)
+        if not view.execution_results:
+            continue
+        raw = dict(view.execution_results[-1])
+        if raw.get("option_revision") != revision.option_revision:
+            # Do not display a result from an older revision as if it proved
+            # the current proposal.  The option revision is the pin.
+            continue
+        validation = raw.get("artifact_validation")
+        if not isinstance(validation, dict):
+            continue
+        raw_issues = [dict(issue) for issue in validation.get("issues", [])]
+        bounded_issues = raw_issues[:64]
+        validation_packet: dict[str, Any] = {
+            "contract_profile": validation.get("contract_profile"),
+            "validation_status": validation.get("validation_status"),
+            "checked_dimensions": list(validation.get("checked_dimensions", [])),
+            "not_evaluated_dimensions": list(
+                validation.get("not_evaluated_dimensions", [])
+            ),
+            "issues": bounded_issues,
+        }
+        if len(raw_issues) > len(bounded_issues):
+            validation_packet["omitted_issue_count"] = len(raw_issues) - len(bounded_issues)
+        results[revision.option_id] = {
+            "option_id": revision.option_id,
+            "option_revision": revision.option_revision,
+            "run_id": raw.get("run_id"),
+            "execution_status": raw.get("execution_status"),
+            "committed": raw.get("committed") is True,
+            "artifact_validation": validation_packet,
+        }
+    return results
+
+
 def _notebook_error(exc: NotebookOptionError) -> WorkbenchAPIError:
     return WorkbenchAPIError(
         status_code=exc.status_code,
@@ -209,6 +295,10 @@ def _planning_agent(
     context: NotebookPlanningContextV1,
     trace: TraceWriter,
 ) -> NotebookPlanningAgent:
+    if context.projection_source is None:
+        raise NotebookPlanningUnavailable(
+            "a source-bound Notebook projection is required before planning"
+        )
     config = load_llm_config()
     if not config.is_configured():
         raise NotebookPlanningUnavailable(config.configuration_error_message())
@@ -223,13 +313,25 @@ def _planning_agent(
         and context.projection_source.get("kind") == "dataset"
         else "model.rerun"
     )
+    source_model_type = _source_model_type(root, context)
     catalog = {
         capability: {
             **manifest[capability],
             "notebook_proposal_adapters": [proposal_adapter],
+            **_model_options_catalog_metadata(root, context, capability),
         }
         for capability in context.available_capabilities
         if capability in manifest
+        and capability_artifact_types(capability)
+        and (
+            proposal_adapter == "model.genesis"
+            or source_model_type is None
+            or capability == source_model_type
+        )
+        and (
+            proposal_adapter == "model.genesis"
+            or _supports_rerun_model_options(manifest[capability])
+        )
     }
     if not catalog:
         raise NotebookNoEligibleCapability(
@@ -243,11 +345,148 @@ def _planning_agent(
             trace=trace,
         )
 
+    def validate_proposal(_context, submission) -> None:
+        """Validate the provider packet against the server-owned model contract.
+
+        The operation registry is intentionally provider-neutral. This second
+        seam resolves the actual source handler and validates the merged
+        payload, so a provider cannot turn a model-specific alias into a Draft
+        that only fails after the user confirms it.
+        """
+
+        proposal = submission.proposal
+        changes = proposal.changes
+        if proposal.operation_id == "model.rerun":
+            from ..lineage.run_inputs import read_run_inputs
+            from ..repository.run_repository import _resolve_run_root
+            from ..services.run_service import merge_form_overrides
+
+            source_root = _resolve_run_root(str(root), str(proposal.target["run_id"]))
+            inputs = read_run_inputs(source_root)
+            source_form = inputs.get("form") or {}
+            patch = changes.get("model_options") or {}
+            if not isinstance(source_form, Mapping):
+                raise ValueError("SOURCE_RUN_FORM_INVALID")
+            if not isinstance(patch, Mapping):
+                raise ValueError("MODEL_OPTIONS_PATCH_NOT_OBJECT")
+            merge_form_overrides(source_form, {"model_options": dict(patch)})
+            return
+
+        if proposal.operation_id == "model.genesis":
+            from ..model_options import bind_new_model_options
+
+            model_params = changes.get("model_params") or {}
+            if not isinstance(model_params, Mapping):
+                return
+            model_type = model_params.get("model_type")
+            payload = changes.get("model_options")
+            if payload is None:
+                payload = model_params.get("model_options")
+            if payload:
+                if not isinstance(model_type, str) or not model_type:
+                    raise ValueError("MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED")
+                bind_new_model_options(model_type, payload)
+
     return NotebookPlanningAgent(
         adapter=OpenAICompatibleModelAdapter(config),
         capability_catalog=catalog,
         inspection_executor=execute_inspections,
+        proposal_validator=validate_proposal,
+        available_inspections=tuple(INSPECTIONS),
+        model_timeout_s=config.timeout_s,
     )
+
+
+def _baseline_planning_evidence(
+    service: NotebookService,
+    notebook_id: str,
+    context: NotebookPlanningContextV1,
+    trace: TraceWriter,
+) -> DataEvidencePackV1:
+    """Compile one bounded source profile before asking the provider to plan."""
+
+    if context.projection_source is None:
+        return DataEvidencePackV1(source_id="notebook", records=())
+    target_ref = (
+        "run:active"
+        if context.projection_source
+        and context.projection_source.get("kind") == "run"
+        else "dataset:active"
+    )
+    requests = tuple(
+        InspectionRequest(inspection_id, target_ref, {})
+        for inspection_id in ("profile.v1", "quality.v1", "time_index.v1", "sample.v1")
+    )
+    return service.compile_evidence_pack(
+        notebook_id,
+        requests=requests,
+        trace=trace,
+    )
+
+
+def _supports_rerun_model_options(declaration: Mapping[str, Any]) -> bool:
+    """Whether a registered model pack owns the rerun ``model_options`` envelope.
+
+    ``model.rerun`` is intentionally narrower than Genesis: it may only patch
+    a model pack's server-owned options.  Legacy model declarations such as
+    OLS expose editable ``x``/``covariance`` form fields, but do not own a
+    ``model_options`` contract; advertising them as rerun Notebook
+    capabilities produces a typed proposal that can only fail at Draft
+    materialization. Filter them from the Agent catalog up front.
+    """
+
+    params = declaration.get("params") if isinstance(declaration, Mapping) else None
+    return any(
+        isinstance(item, Mapping) and item.get("key") == "model_options"
+        for item in (params or ())
+    )
+
+
+def _source_model_type(root: Path, context: NotebookPlanningContextV1) -> str | None:
+    source = context.projection_source or {}
+    if source.get("kind") != "run" or not context.active_head_run_id:
+        return None
+    try:
+        from ..lineage.run_inputs import read_run_inputs
+        from ..repository.run_repository import _resolve_run_root
+
+        inputs = read_run_inputs(_resolve_run_root(str(root), context.active_head_run_id))
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return None
+    model_type = (inputs.get("form") or {}).get("model_type")
+    return model_type if isinstance(model_type, str) and model_type else None
+
+
+def _model_options_catalog_metadata(
+    root: Path,
+    context: NotebookPlanningContextV1,
+    capability: str,
+) -> dict[str, Any]:
+    """Expose only bounded, server-owned option shape facts to the provider."""
+
+    metadata: dict[str, Any] = {}
+    vocabulary = build_option_vocabulary(capability)
+    if vocabulary:
+        metadata["model_options_vocabulary"] = vocabulary
+    source = context.projection_source or {}
+    if source.get("kind") == "run" and context.active_head_run_id:
+        try:
+            from ..lineage.run_inputs import read_run_inputs
+            from ..repository.run_repository import _resolve_run_root
+
+            inputs = read_run_inputs(_resolve_run_root(str(root), context.active_head_run_id))
+            form = inputs.get("form") or {}
+            if form.get("model_type") == capability and isinstance(
+                form.get("model_options"), Mapping
+            ):
+                metadata["notebook_model_options_contract"] = {
+                    "model_type": capability,
+                    "current_payload": dict(form["model_options"]),
+                    "patch_rule": "Use exact existing top-level and nested field names; server validates the merged payload.",
+                }
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            pass
+    return metadata
 
 
 def _request_error(exc: Exception) -> WorkbenchAPIError:
@@ -293,6 +532,12 @@ def ensure_notebook_projection_endpoint(
             message="Provide exactly one of from_run_id or dataset.",
         )
     try:
+        available_capabilities = tuple(
+            str(entry["key"])
+            for entry in build_capabilities().get("model_types", [])
+            if isinstance(entry, dict)
+            and entry.get("key") not in {None, "auto"}
+        )
         notebook = service.ensure_default_projection(
             from_run_id=body.from_run_id,
             dataset=(
@@ -302,6 +547,7 @@ def ensure_notebook_projection_endpoint(
             ),
             created_by=body.created_by,
             title=body.title,
+            available_capabilities=available_capabilities,
         )
         return {
             **notebook.to_dict(),
@@ -358,13 +604,21 @@ def propose_options_endpoint(
         )
         if not drafts:
             agent = _planning_agent(root, service, notebook_id, context, trace)
+            initial_evidence = _baseline_planning_evidence(
+                service, notebook_id, context, trace
+            )
             result = agent.plan(
                 context=context,
-                initial_evidence=DataEvidencePackV1(
-                    source_id=(context.projection_source or {}).get("kind", "notebook"),
-                    records=(),
-                ),
+                initial_evidence=initial_evidence,
             )
+            # Each bounded inspection is persisted separately by the service.
+            # Persist the planner's final append-only view as well, because the
+            # recommendation decision may cite evidence from more than one
+            # inspection round and materialization must be able to replay that
+            # exact pack by hash.
+            final_evidence = getattr(result, "evidence_pack", None)
+            if isinstance(final_evidence, DataEvidencePackV1):
+                service.store.append_evidence_pack(notebook_id, final_evidence.to_dict())
             # Inspection calls persist Evidence Packs. Recompile the context
             # before pinning the v1.1 revision so evidence_pack_refs belong to
             # the same freshness fingerprint that the Draft gate will observe.
@@ -390,10 +644,35 @@ def propose_options_endpoint(
             trace=trace,
             batch_id=(result.decision.batch_id if not body.drafts else None),
             recommendation_decision=(result.decision if not body.drafts else None),
+            # Provider-generated planning is the only path that may
+            # deliberately revalidate existing stable option ids.  Manual
+            # draft submission keeps the strict reuse-conflict behavior.
+            revalidate_existing=not bool(body.drafts),
         )
+        # The Notebook projection is the fold of every persisted option, not
+        # only the candidates returned by the latest planning pass.  This is
+        # especially important for explicit replans: unchanged/deferred
+        # siblings must remain visible while the replanned stable ids expose
+        # their new option revisions.
+        projected = service.list_options(notebook_id, context=context)
+        projected_revisions = [
+            replace(
+                item.current_revision,
+                lifecycle_status=item.lifecycle_status,
+                freshness_status=item.freshness_status
+                or item.current_revision.freshness_status,
+            )
+            for item in projected
+        ]
         return {
             "context": _context_packet(context),
-            "options": [revision.to_dict() for revision in revisions],
+            "options": [revision.to_dict() for revision in projected_revisions],
+            "materializations": _materializations_packet(
+                service, notebook_id, projected_revisions
+            ),
+            "execution_results": _execution_results_packet(
+                service, notebook_id, projected_revisions
+            ),
             "trace_id": trace.trace_id,
         }
     except NotebookOptionError as exc:
@@ -436,6 +715,8 @@ def list_options_endpoint(
         return {
             "context": _context_packet(context),
             "options": [revision.to_dict() for revision in revisions],
+            "materializations": _materializations_packet(service, notebook_id, revisions),
+            "execution_results": _execution_results_packet(service, notebook_id, revisions),
             "trace_id": trace.trace_id,
         }
     except NotebookOptionError as exc:
@@ -578,7 +859,7 @@ def record_decision_endpoint(
     root, service = _service(project_root)
     try:
         notebook = service.get_notebook(notebook_id)
-        trace = _trace(root, notebook.notebook_id, notebook.run_family_id)
+        trace = _notebook_trace(root, service, notebook.notebook_id)
         option = service.record_decision(
             notebook_id,
             option_id,
@@ -588,7 +869,11 @@ def record_decision_endpoint(
             note_ref=body.note_ref,
             trace=trace,
         )
-        return {**option.to_dict(), "trace_id": trace.trace_id}
+        # The service needs the full OptionView to fold lifecycle state, but
+        # this public route is consumed by the frontend revision parser. Do
+        # not leak the internal view (revisions, execution history, and
+        # materialization details) as if it were a NotebookOptionRevision.
+        return {**option.current_revision.to_dict(), "lifecycle_status": option.lifecycle_status}
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:
@@ -605,7 +890,7 @@ def complete_option_execution_endpoint(
     root, service = _service(project_root)
     try:
         notebook = service.get_notebook(notebook_id)
-        trace = _trace(root, notebook.notebook_id, notebook.run_family_id)
+        trace = _notebook_trace(root, service, notebook.notebook_id)
         outcome = service.complete_execution(
             notebook_id,
             option_id,

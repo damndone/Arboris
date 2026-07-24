@@ -19,7 +19,11 @@ from ...contracts.agent.notebook_option import (
     ArtifactContract,
     ExpectedArtifact,
 )
-from .errors import ArtifactNotDeclarable, ArtifactSchemaContractUnsupported
+from .errors import (
+    ArtifactContractEmpty,
+    ArtifactNotDeclarable,
+    ArtifactSchemaContractUnsupported,
+)
 from .vocabulary import declared_type, is_declared
 
 CONTRACT_PROFILE = "artifact-identity-type-count/v1"
@@ -34,10 +38,15 @@ _UNSUPPORTED_EXPECTATION_KEYS = ("schema_ref", "schema", "payload_schema")
 
 def build_artifact_contract(
     expectations: Iterable[ExpectedArtifact | Mapping[str, Any]],
+    *,
+    additional_artifact_types: Mapping[str, str] | None = None,
 ) -> ArtifactContract:
     """Turn agent-supplied expectations into the locked contract, or refuse."""
 
     expected: list[ExpectedArtifact] = []
+    published_types = {
+        **dict(additional_artifact_types or {}),
+    }
     for item in expectations:
         if isinstance(item, ExpectedArtifact):
             candidate = item
@@ -60,20 +69,30 @@ def build_artifact_contract(
                 step=item.get("step"),
             )
         if candidate.required:
-            _assert_declarable(candidate)
+            _assert_declarable(candidate, additional_artifact_types=published_types)
         expected.append(candidate)
+    if not expected:
+        raise ArtifactContractEmpty(
+            "an option must declare at least one expected artifact; an empty "
+            "artifact contract cannot prove that an executed result is auditable"
+        )
     return ArtifactContract(expected=tuple(expected))
 
 
-def _assert_declarable(candidate: ExpectedArtifact) -> None:
-    if not is_declared(candidate.artifact_id):
+def _assert_declarable(
+    candidate: ExpectedArtifact,
+    *,
+    additional_artifact_types: Mapping[str, str] | None = None,
+) -> None:
+    additional = dict(additional_artifact_types or {})
+    if not is_declared(candidate.artifact_id) and candidate.artifact_id not in additional:
         raise ArtifactNotDeclarable(
             f"{candidate.artifact_id!r} is not in the published artifact vocabulary, "
             "so it may not be declared required; an agent that can require an "
             "artifact nothing produces can fail a healthy run (spec §5.4)",
             artifact_id=candidate.artifact_id,
         )
-    expected_type = declared_type(candidate.artifact_id)
+    expected_type = declared_type(candidate.artifact_id) or additional.get(candidate.artifact_id)
     if candidate.artifact_type != expected_type:
         raise ArtifactNotDeclarable(
             f"{candidate.artifact_id!r} is declared as {expected_type!r}, not "

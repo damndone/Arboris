@@ -112,7 +112,15 @@ class ArtifactNotDeclarable(NotebookOptionError):
     status_code = 422
 
 
+class ArtifactContractEmpty(NotebookOptionError):
+    """An option must name at least one artifact that makes its result auditable."""
+
+    code = "ARTIFACT_CONTRACT_EMPTY"
+    status_code = 422
+
+
 __all__ = [
+    "ArtifactContractEmpty",
     "ArtifactNotDeclarable",
     "ArtifactSchemaContractUnsupported",
     "NotebookNotFound",

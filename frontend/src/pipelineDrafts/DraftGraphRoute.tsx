@@ -6,11 +6,14 @@ import {
   getPipelineDraft,
   patchPipelineDraftParams,
   validatePipelineDraft,
+  waitForRunTerminal,
   type DraftValidationResult,
   type PipelineDraftV1,
 } from "../api";
+import { completeNotebookOptionExecution } from "../notebook/notebookApi";
 import { DraftGraphCanvas } from "./DraftGraphCanvas";
 import { ModelNodeInspector } from "./ModelNodeInspector";
+import { rootToSlug } from "../workbench/projectSlug";
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
@@ -77,8 +80,26 @@ export function DraftGraphRoute() {
         n.node_type === "input.dataset",
     )?.run_input_id ??
     null;
+  const executionMode = draft?.default_execution_mode ?? "rerun_child";
+  const returnTo = searchParams.get("return_to");
+  const notebookId =
+    draft?.notebook_provenance?.notebook_id ?? searchParams.get("notebook");
+  const draftModelNodeKey = `draft:${draftId}:model_1`;
   const goBackToLineage = () => {
-    if (!sourceRunId) return;
+    if (returnTo) {
+      navigate(returnTo);
+      return;
+    }
+    if (!sourceRunId && !projectRoot) return;
+    if (!sourceRunId) {
+      const params = new URLSearchParams({ view: "graph" });
+      if (notebookId) params.set("notebook", notebookId);
+      params.set("tabs", draftModelNodeKey);
+      params.set("active", draftModelNodeKey);
+      params.set("focus", draftModelNodeKey);
+      navigate(`/p/${rootToSlug(projectRoot)}/graph?${params.toString()}`);
+      return;
+    }
     const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
     navigate(`/runs/${sourceRunId}?${params.toString()}`);
   };
@@ -118,7 +139,7 @@ export function DraftGraphRoute() {
           type="button"
           className="draft-back-link"
           onClick={goBackToLineage}
-          disabled={!sourceRunId}
+          disabled={!sourceRunId && !projectRoot && !returnTo}
         >
           ← Back to Lineage
         </button>
@@ -140,7 +161,7 @@ export function DraftGraphRoute() {
               setIsValidating(true);
               setError(null);
               try {
-                setValidation(await validatePipelineDraft(projectRoot, draftId, "rerun_child"));
+                setValidation(await validatePipelineDraft(projectRoot, draftId, executionMode));
                 setValidationStale(false);
               } catch (validateError) {
                 setValidation(null);
@@ -161,8 +182,38 @@ export function DraftGraphRoute() {
               try {
                 const result = await executePipelineDraft(projectRoot, draftId, {
                   validated_draft_hash: validatedHash ?? "",
-                  execution_mode: "rerun_child",
+                  execution_mode: executionMode,
                 });
+                const provenance = draft.notebook_provenance;
+                if (provenance?.notebook_id && provenance.option_id) {
+                  // Draft execution is asynchronous. Reconcile the Notebook
+                  // only after the real run reaches a terminal state, so the
+                  // active head and Artifact Contract never advance on a
+                  // merely-dispatched or still-running run.
+                  void waitForRunTerminal(projectRoot, result.run_id).then((detail) => {
+                    if (!detail) return;
+                    const succeeded = detail.status === "completed";
+                    return completeNotebookOptionExecution(
+                      projectRoot,
+                      provenance.notebook_id,
+                      provenance.option_id,
+                      {
+                        execution_status: succeeded ? "succeeded" : "failed",
+                        run_id: result.run_id,
+                        ...(succeeded
+                          ? {}
+                          : {
+                              error_code:
+                                detail.errors?.issues?.[0]?.code ??
+                                "WORKFLOW_NOT_COMPLETED",
+                            }),
+                      },
+                    );
+                  }).catch(() => {
+                    // The run remains authoritative; a later Notebook mount
+                    // can retry reconciliation from the persisted draft.
+                  });
+                }
                 const params = new URLSearchParams({ project_root: projectRoot, tab: "lineage" });
                 if (result.focus.target_model_node_id) {
                   params.set("focus", result.focus.target_model_node_id);

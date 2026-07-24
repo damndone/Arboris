@@ -20,7 +20,7 @@
 
 import type { BottomPanelId } from "../registry/bottomPanelRegistry";
 
-export type ViewMode = "home" | "graph" | "table" | "pipeline" | "report";
+export type ViewMode = "home" | "graph" | "table" | "pipeline" | "report" | "notebook";
 
 const VIEW_MODES: readonly ViewMode[] = [
   "home",
@@ -28,6 +28,7 @@ const VIEW_MODES: readonly ViewMode[] = [
   "table",
   "pipeline",
   "report",
+  "notebook",
 ];
 // v1.6.12: shell/pending/timeline placeholder panels removed; legacy URLs
 // carrying them fall back to the "logs" default via pickEnum.

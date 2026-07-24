@@ -29,17 +29,49 @@ describe("OptionCard — the canonical option, rendered as the packet states it"
     expect(screen.getByTestId("option-pins")).toHaveTextContent("supersedes rev 1");
   });
 
-  it("marks rank 1 as the recommended option and rank 2/3 as alternatives", () => {
-    const { unmount } = render(<OptionCard option={option({ rank: 1 })} />);
-    expect(screen.getByTestId("option-rank")).toHaveTextContent("rank 1 · recommended");
+  it("uses the batch decision instead of display rank for recommendation styling", () => {
+    const v11 = (overrides: Partial<NotebookOptionRevision> = {}) =>
+      option({
+        contract_version: "1.1",
+        lifecycle_projection: "proposed",
+        materializable: true,
+        evidence_refs: [],
+        comparative_claims: [],
+        recommendation_decision_id: "rec_1",
+        recommendation_status: "recommended",
+        ...overrides,
+      });
+    const { unmount } = render(<OptionCard option={v11({ rank: 2 })} />);
+    expect(screen.getByTestId("option-rank")).toHaveTextContent("Recommended");
     expect(screen.getByTestId("option-card-opt_7f3a1c")).toHaveAttribute(
       "data-recommended",
       "true",
     );
     unmount();
 
-    render(<OptionCard option={option({ rank: 2 })} />);
-    expect(screen.getByTestId("option-rank")).toHaveTextContent("rank 2 · alternative");
+    render(<OptionCard option={v11({ rank: 1, recommendation_status: "tied" })} />);
+    expect(screen.getByTestId("option-rank")).toHaveTextContent("Near-equivalent candidates");
+    expect(screen.getByTestId("option-card-opt_7f3a1c")).toHaveAttribute(
+      "data-recommended",
+      "false",
+    );
+  });
+
+  it("does not create a primary recommendation when evidence is insufficient", () => {
+    render(
+      <OptionCard
+        option={option({
+          contract_version: "1.1",
+          lifecycle_projection: "proposed",
+          materializable: true,
+          evidence_refs: [],
+          comparative_claims: [],
+          recommendation_decision_id: "rec_2",
+          recommendation_status: "insufficient_evidence",
+        })}
+      />,
+    );
+    expect(screen.getByTestId("option-rank")).toHaveTextContent("More evidence required");
     expect(screen.getByTestId("option-card-opt_7f3a1c")).toHaveAttribute(
       "data-recommended",
       "false",
@@ -110,6 +142,20 @@ describe("OptionCard — a stale option is never directly executable", () => {
     render(<OptionCard option={option()} />);
     expect(screen.getByTestId("option-execute")).toBeEnabled();
     expect(screen.queryByTestId("option-blocked-reason")).toBeNull();
+  });
+
+  it("keeps an executed option terminal even when the active head makes its old context stale", () => {
+    render(
+      <OptionCard
+        option={option({ lifecycle_status: "executed", freshness_status: "stale" })}
+      />,
+    );
+
+    expect(screen.getByTestId("option-execute")).toBeDisabled();
+    expect(screen.getByTestId("option-blocked-reason")).toHaveTextContent(
+      "This option has already been executed",
+    );
+    expect(screen.getByTestId("option-revalidate")).toBeDisabled();
   });
 });
 

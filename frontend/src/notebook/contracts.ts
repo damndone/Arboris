@@ -16,7 +16,7 @@ export const OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0";
 export const RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0";
 export const OPTION_MATERIALIZATION_CONTRACT_VERSION = "1.0";
 export const ARTIFACT_CONTRACT_VERSION = "1.0";
-export const ETS_RESULT_CONTRACT_VERSION = "1.0";
+export const ETS_RESULT_CONTRACT_VERSION = "1.1";
 
 export const LIFECYCLE_STATUSES = [
   "proposed",
@@ -772,6 +772,7 @@ export interface EtsResult {
   convergence_code: string;
   fit_method: string;
   result_identity: string;
+  time_index_semantics: string;
 }
 
 function parseNumberMap(value: unknown, path: string): Record<string, number> {
@@ -821,6 +822,7 @@ export function parseEtsResult(value: unknown): EtsResult {
     convergence_code: requireString(raw, "convergence_code", path),
     fit_method: requireString(raw, "fit_method", path),
     result_identity: requireString(raw, "result_identity", path),
+    time_index_semantics: requireString(raw, "time_index_semantics", path),
   };
 }
 
@@ -846,6 +848,132 @@ export interface ArtifactContractOutcome {
   checked_dimensions: string[];
   not_evaluated_dimensions: string[];
   observed: ObservedArtifact[];
+}
+
+/**
+ * Model-neutral persisted execution projection.
+ *
+ * A Notebook cannot assume every model has an ETS-shaped result packet.  The
+ * model-specific payload stays in Run artifacts; this packet is the durable
+ * cross-model evidence that a run happened and whether its declared artifact
+ * contract was committable.
+ */
+export interface NotebookExecutionIssue {
+  code: string;
+  severity: string;
+  artifact_id: string;
+  detail: string;
+  observed_count: number | null;
+}
+
+export interface NotebookExecutionResult {
+  option_id: string;
+  option_revision: number;
+  run_id: string | null;
+  execution_status: "pending" | "running" | "succeeded" | "failed";
+  committed: boolean;
+  artifact_validation: {
+    contract_profile: string;
+    validation_status: "passed" | "passed_with_warnings" | "failed";
+    checked_dimensions: string[];
+    not_evaluated_dimensions: string[];
+    issues: NotebookExecutionIssue[];
+    omitted_issue_count?: number;
+  };
+}
+
+export function parseNotebookExecutionResult(value: unknown): NotebookExecutionResult {
+  const raw = asRecord(value, "notebook_execution_result");
+  const path = "notebook_execution_result";
+  requireExactKeys(
+    raw,
+    [
+      "option_id",
+      "option_revision",
+      "run_id",
+      "execution_status",
+      "committed",
+      "artifact_validation",
+    ],
+    path,
+  );
+  const validation = asRecord(raw.artifact_validation, `${path}.artifact_validation`);
+  requireKnownKeys(
+    validation,
+    [
+      "contract_profile",
+      "validation_status",
+      "checked_dimensions",
+      "not_evaluated_dimensions",
+      "issues",
+    ],
+    ["omitted_issue_count"],
+    `${path}.artifact_validation`,
+  );
+  const issues = Array.isArray(validation.issues)
+    ? validation.issues.map((value, index) => {
+        const issue = asRecord(value, `${path}.artifact_validation.issues[${index}]`);
+        return {
+          code: requireString(issue, "code", `${path}.artifact_validation.issues[${index}]`),
+          severity: requireString(
+            issue,
+            "severity",
+            `${path}.artifact_validation.issues[${index}]`,
+          ),
+          artifact_id: requireString(
+            issue,
+            "artifact_id",
+            `${path}.artifact_validation.issues[${index}]`,
+          ),
+          detail: requireString(
+            issue,
+            "detail",
+            `${path}.artifact_validation.issues[${index}]`,
+          ),
+          observed_count: optionalInt(
+            issue,
+            "observed_count",
+            `${path}.artifact_validation.issues[${index}]`,
+          ),
+        };
+      })
+    : (() => {
+        throw new NotebookContractError(`${path}.artifact_validation.issues must be an array`);
+      })();
+  return {
+    option_id: requireString(raw, "option_id", path),
+    option_revision: requirePositiveInt(raw, "option_revision", path),
+    run_id: optionalNonEmptyString(raw, "run_id", path),
+    execution_status: requireChoice(
+      raw,
+      "execution_status",
+      ["pending", "running", "succeeded", "failed"],
+      path,
+    ),
+    committed: requireBoolean(raw, "committed", path),
+    artifact_validation: {
+      contract_profile: requireString(validation, "contract_profile", `${path}.artifact_validation`),
+      validation_status: requireChoice(
+        validation,
+        "validation_status",
+        ["passed", "passed_with_warnings", "failed"],
+        `${path}.artifact_validation`,
+      ),
+      checked_dimensions: requireStringArray(
+        validation,
+        "checked_dimensions",
+        `${path}.artifact_validation`,
+      ),
+      not_evaluated_dimensions: requireStringArray(
+        validation,
+        "not_evaluated_dimensions",
+        `${path}.artifact_validation`,
+      ),
+      issues,
+      omitted_issue_count:
+        optionalInt(validation, "omitted_issue_count", `${path}.artifact_validation`) ?? 0,
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -877,6 +1005,8 @@ export interface BudgetReport {
   sections: BudgetSection[];
   total_used_bytes: number;
   total_budget_bytes: number;
+  /** The backend may meter the bounded context in characters rather than bytes. */
+  unit?: "bytes" | "characters";
 }
 
 export interface SourceManifestEntry {
@@ -924,6 +1054,12 @@ export interface NotebookSelection {
   source_ref: string;
 }
 
+/** Browser-only anchor for the ephemeral selected-text action surface. */
+export interface NotebookSelectionAnchor {
+  top: number;
+  left: number;
+}
+
 export interface PlanDiffLine {
   field: string;
   from: string | null;
@@ -946,6 +1082,9 @@ export interface NotebookData {
   execution: OptionExecution | null;
   result: EtsResult | null;
   outcome?: ArtifactContractOutcome | null;
+  /** Persisted results keyed by Option id; model-neutral and reload-safe. */
+  executionResults?: Record<string, NotebookExecutionResult>;
+  materialization?: OptionMaterialization | null;
   selection: NotebookSelection | null;
 }
 

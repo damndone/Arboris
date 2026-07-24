@@ -378,6 +378,7 @@ def _submit_run(
     op_overrides: dict | None = None,
     rerun_from: dict[str, Any] | None = None,
     workbench_context: dict[str, Any] | None = None,
+    run_family_id: str | None = None,
     before_dispatch: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Single dispatch path shared by POST /runs and POST /runs/{id}/rerun.
@@ -436,7 +437,13 @@ def _submit_run(
     # Gate 1: a run in a migrated project carries its family membership from
     # birth. A child inherits; a root run adopts a new family. Nothing here
     # re-derives a family from ancestry.
-    ensure_run_family_binding(root, run.root, rerun_of=rerun_of, created_by="run_service")
+    ensure_run_family_binding(
+        root,
+        run.root,
+        rerun_of=rerun_of,
+        created_by="run_service",
+        run_family_id=run_family_id,
+    )
 
     model_type = form_for_persist.get("model_type", "auto")
     requested_covariance = str(form_for_persist.get("covariance", "")).strip().lower()

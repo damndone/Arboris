@@ -1,8 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { NotebookSurface } from "./NotebookSurface";
+import { rootToSlug } from "../workbench/projectSlug";
 import type { NotebookReadyView } from "./contracts";
 import {
   canonicalEtsResult,
@@ -71,6 +72,29 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-success")).toBeNull();
   });
 
+  it("materialization failure exposes an explicit recovery action without success state", () => {
+    const onReplan = vi.fn();
+    render(
+      <NotebookSurface
+        view={{
+          status: "error",
+          error: {
+            code: "OPTION_MATERIALIZATION_FAILED",
+            message: "genesis materialization rejected an incomplete model",
+          },
+        }}
+        onReplan={onReplan}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-replan-options")).toHaveTextContent(
+      "Replan with current evidence",
+    );
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+    expect(onReplan).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("notebook-success")).toBeNull();
+  });
+
   it("empty: says no options were proposed rather than rendering an empty list", () => {
     render(<NotebookSurface view={ready({ options: [] })} />);
     expect(screen.getByTestId("notebook-empty")).toHaveTextContent(
@@ -119,6 +143,12 @@ describe("NotebookSurface — six states, none of them lying", () => {
       "opt_7f3a1c rev 2 · prop_51de90 rev 1",
     );
     expect(screen.queryByTestId("notebook-success")).toBeNull();
+    expect(
+      Boolean(
+        screen.getByTestId("notebook-option-list").compareDocumentPosition(confirmation) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
   });
 
   it("success: renders the executed result exactly as the ETS packet states it", () => {
@@ -136,11 +166,50 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(success).toHaveTextContent("ETS(A,Ad,N)");
     expect(success).toHaveTextContent("VIXCLS");
     expect(success).toHaveTextContent("n_obs 2610");
-    expect(success).toHaveTextContent("excluded 3 (missing_endog 3)");
+    expect(success).toHaveTextContent("excluded 0 ()");
     expect(success).toHaveTextContent("AIC 12043.72");
-    expect(success).toHaveTextContent("BIC 12078.11");
+    expect(success).toHaveTextContent("BIC 12078.9226330019");
     expect(success).toHaveTextContent("converged");
     expect(success).toHaveTextContent("run-9ab");
+  });
+
+  it("renders a bounded model-neutral execution summary for non-ETS results", () => {
+    const option = { ...canonicalOptionRevision(), lifecycle_status: "executed" as const };
+    render(
+      <NotebookSurface
+        view={ready({
+          options: [option],
+          executionResults: {
+            [option.option_id]: {
+              option_id: option.option_id,
+              option_revision: option.option_revision,
+              run_id: "run-arma-1",
+              execution_status: "succeeded",
+              committed: true,
+              artifact_validation: {
+                contract_profile: "artifact-identity-type-count/v1",
+                validation_status: "passed",
+                checked_dimensions: ["artifact_id", "artifact_type", "count", "step"],
+                not_evaluated_dimensions: ["payload_schema"],
+                issues: Array.from({ length: 10 }, (_, index) => ({
+                  code: "ARTIFACT_UNDECLARED",
+                  severity: "informational",
+                  artifact_id: `extra_${index}`,
+                  detail: "not named by the contract",
+                  observed_count: 1,
+                })),
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    const summary = screen.getByTestId("notebook-execution-summary");
+    expect(summary).toHaveTextContent("run-arma-1");
+    expect(summary).toHaveTextContent("output contract passed");
+    expect(summary).toHaveTextContent("2 additional artifact notes omitted");
+    expect(summary).not.toHaveTextContent("extra_9");
   });
   it("a run that finished but missed a required artifact is not shown as a result", () => {
     render(
@@ -178,25 +247,33 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 });
 
-describe("NotebookSurface — generation limits and the visible slice", () => {
-  it("renders at most three option cards and says so when given more", () => {
+describe("NotebookSurface — persisted option batches and the visible slice", () => {
+  it("shows every persisted option while grouping options by generation batch", () => {
     const base = canonicalOptionRevision();
     render(
       <NotebookSurface
         view={ready({
           options: [
-            { ...base, option_id: "opt_a", rank: 1 },
-            { ...base, option_id: "opt_b", rank: 2 },
-            { ...base, option_id: "opt_c", rank: 3 },
-            { ...base, option_id: "opt_d", rank: 4 },
+            { ...base, option_id: "opt_a", rank: 1, batch_id: "batch_a" },
+            { ...base, option_id: "opt_b", rank: 2, batch_id: "batch_a" },
+            { ...base, option_id: "opt_c", rank: 1, batch_id: "batch_b" },
+            { ...base, option_id: "opt_d", rank: 2, batch_id: "batch_b" },
           ],
         })}
       />,
     );
-    expect(screen.getAllByTestId(/^option-card-/)).toHaveLength(3);
-    expect(screen.getByTestId("notebook-option-overflow")).toHaveTextContent(
-      "1 option beyond the 3-option limit is not shown",
-    );
+    expect(screen.getAllByTestId(/^option-card-/)).toHaveLength(4);
+    expect(screen.getAllByTestId(/^notebook-option-batch-/)).toHaveLength(2);
+    expect(screen.queryByTestId("notebook-option-overflow")).toBeNull();
+  });
+
+  it("offers an explicit replan action when persisted options need recovery", () => {
+    const onReplan = vi.fn();
+    render(<NotebookSurface view={ready()} onReplan={onReplan} />);
+
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+
+    expect(onReplan).toHaveBeenCalledOnce();
   });
 
   it("always keeps the context slice visible next to the options", () => {
@@ -204,6 +281,81 @@ describe("NotebookSurface — generation limits and the visible slice", () => {
     expect(screen.getByTestId("context-omission-artifact_summaries")).toHaveTextContent(
       "5 of 59 included",
     );
+  });
+
+  it("opens a materialized Draft inside the project Graph with Notebook context", () => {
+    render(
+      <NotebookSurface
+        projectRoot="/tmp/project"
+        view={ready({
+          materialization: {
+            contract_version: "1.0",
+            materialization_id: "mat_1",
+            option_id: "opt_7f3a1c",
+            option_revision: 2,
+            proposal_id: "prop_51de90",
+            proposal_revision: 1,
+            freshness_dependency_fingerprint: "fresh1:x",
+            generation_context_id: "ctx_1",
+            draft_id: "draft_genesis",
+            draft_hash: "sha256:draft",
+            draft_execution_mode: "genesis",
+            source_run_id: null,
+            source_model_node_id: null,
+            source_op_node_id: null,
+            source_node_hash: null,
+            source_forest_node_key: null,
+            source_context_fingerprint: null,
+            dataset_upload_sha256: "a".repeat(64),
+            run_family_id: "family_1",
+          },
+        })}
+      />,
+    );
+
+    const href = screen.getByRole("link", { name: "Open Draft in Graph" }).getAttribute("href");
+    expect(href).toContain(`/p/${rootToSlug("/tmp/project")}/graph`);
+    const url = new URL(href!, "http://localhost");
+    expect(url.searchParams.get("view")).toBe("graph");
+    expect(url.searchParams.get("notebook")).toBe("nb_0001");
+    expect(url.searchParams.get("active")).toBe("draft:draft_genesis:model_1");
+    expect(url.searchParams.get("focus")).toBe("draft:draft_genesis:model_1");
+  });
+
+  it("uses a rerun-child Draft node key without inventing a genesis model node", () => {
+    render(
+      <NotebookSurface
+        projectRoot="/tmp/project"
+        view={ready({
+          materialization: {
+            contract_version: "1.0",
+            materialization_id: "mat_2",
+            option_id: "opt_7f3a1c",
+            option_revision: 2,
+            proposal_id: "prop_51de90",
+            proposal_revision: 1,
+            freshness_dependency_fingerprint: "fresh1:x",
+            generation_context_id: "ctx_1",
+            draft_id: "draft_rerun",
+            draft_hash: "sha256:draft",
+            draft_execution_mode: "rerun_child",
+            source_run_id: "run_1",
+            source_model_node_id: "model:1",
+            source_op_node_id: "model:1",
+            source_node_hash: "hash_1",
+            source_forest_node_key: "hash_1::model:1",
+            source_context_fingerprint: "nocv1:source",
+            dataset_upload_sha256: null,
+            run_family_id: "family_1",
+          },
+        })}
+      />,
+    );
+
+    const href = screen.getByRole("link", { name: "Open Draft in Graph" }).getAttribute("href");
+    const url = new URL(href!, "http://localhost");
+    expect(url.searchParams.get("active")).toBe("draft:draft_rerun");
+    expect(url.searchParams.get("focus")).toBe("draft:draft_rerun");
   });
 
   it("offers the selected-text actions when text is selected", () => {
@@ -223,5 +375,28 @@ describe("NotebookSurface — generation limits and the visible slice", () => {
     expect(screen.getByTestId("notebook-selection-actions")).toHaveTextContent(
       "structure at lag 12",
     );
+  });
+
+  it("captures a browser selection from a narrative entry with a typed source ref", () => {
+    const onTextSelection = vi.fn();
+    const getSelection = vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "structure at lag 12",
+      anchorNode: document.createTextNode("structure at lag 12"),
+    } as unknown as Selection);
+
+    render(<NotebookSurface view={ready()} onTextSelection={onTextSelection} />);
+    const narrative = screen.getByTestId("narrative-nar_2");
+    narrative.appendChild(document.createTextNode("structure at lag 12"));
+    fireEvent.mouseUp(narrative);
+
+    expect(onTextSelection).toHaveBeenCalledWith(
+      {
+        text: "structure at lag 12",
+        source_label: "agent message nar_2",
+        source_ref: "narrative:nar_2",
+      },
+      { top: 8, left: 0 },
+    );
+    getSelection.mockRestore();
   });
 });

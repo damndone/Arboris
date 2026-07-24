@@ -44,6 +44,26 @@
   gap: 12px;
 }
 
+.nb-option-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nb-option-batch-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--label-secondary);
+  font-size: 11px;
+}
+
+.nb-option-batch-header code {
+  color: var(--label-tertiary);
+  font-family: ui-monospace, monospace;
+}
+
 .nb-option-card {
   border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
   border-radius: 8px;
@@ -53,8 +73,7 @@
   gap: 8px;
 }
 
-/* rank 1 is visually distinct, but the distinction is presentational only:
-   whether an option can run is decided by the backend's status axes. */
+/* Only the backend's batch decision receives recommendation styling. */
 .nb-option-card[data-recommended="true"] {
   border-color: var(--accent, #3b82f6);
   border-left-width: 3px;
@@ -224,12 +243,54 @@
   gap: 10px;
 }
 
+.nb-dataset-start,
+.nb-draft-handoff {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 720px;
+}
+
+.nb-dataset-start h2,
+.nb-dataset-start p,
+.nb-draft-handoff p {
+  margin: 0;
+}
+
+.nb-dataset-start input[type="file"] {
+  color: var(--label-secondary);
+}
+
+.nb-dataset-start [role="alert"] {
+  color: var(--danger, #dc2626);
+}
+
+.nb-draft-handoff {
+  border-color: var(--accent, #3b82f6);
+}
+
+.nb-draft-handoff code {
+  color: var(--label-secondary);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .nb-selection-actions {
   border-left: 3px solid var(--accent, #3b82f6);
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface-elevated, var(--bg-canvas, #1c1c1e));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
   padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-width: min(520px, calc(100vw - 24px));
 }
 
 .nb-selection-quote {
@@ -239,5 +300,51 @@
 
 .nb-selection-source {
   color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.nb-selection-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+}
+
+.nb-selection-composer {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nb-selection-composer-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.nb-selection-composer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--background-secondary, transparent);
+  color: var(--label);
+  font: inherit;
+}
+
+.nb-selection-composer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.nb-selection-composer-notice {
+  margin: 0;
+  color: var(--label-secondary);
   font-size: 11px;
 }

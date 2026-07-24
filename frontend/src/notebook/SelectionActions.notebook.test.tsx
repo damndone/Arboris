@@ -32,23 +32,44 @@ describe("SelectionActions — Gate 6 selected-text interaction", () => {
     );
   });
 
-  it("passes the selection, verbatim and with its source ref, to each action", () => {
+  it("offers the three Codex-style primary actions with the typed selection", () => {
+    const spies = handlers();
+    render(
+      <SelectionActions
+        selection={selection}
+        onAddToTask={spies.onAsk}
+        onMoreDetails={spies.onExplain}
+        onAskInSideChat={spies.onFollowUp}
+        {...spies}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("selection-action-add-to-task"));
+    fireEvent.click(screen.getByTestId("selection-action-more-details"));
+    fireEvent.click(screen.getByTestId("selection-action-side-chat"));
+
+    expect(spies.onAsk).toHaveBeenCalledWith(selection);
+    expect(spies.onExplain).toHaveBeenCalledWith(selection);
+    expect(spies.onFollowUp).toHaveBeenCalledWith(selection);
+  });
+
+  it("keeps follow-up, note, and deferred-option actions behind More actions", () => {
     const spies = handlers();
     render(<SelectionActions selection={selection} {...spies} />);
 
+    fireEvent.click(screen.getByTestId("selection-action-more"));
     fireEvent.click(screen.getByTestId("selection-action-ask"));
-    fireEvent.click(screen.getByTestId("selection-action-explain"));
-    fireEvent.click(screen.getByTestId("selection-action-follow-up"));
     fireEvent.click(screen.getByTestId("selection-action-note"));
     fireEvent.click(screen.getByTestId("selection-action-defer"));
 
-    for (const spy of Object.values(spies)) {
-      expect(spy).toHaveBeenCalledWith(selection);
-    }
+    expect(spies.onFollowUp).toHaveBeenCalledWith(selection);
+    expect(spies.onSaveNote).toHaveBeenCalledWith(selection);
+    expect(spies.onDeferAsOption).toHaveBeenCalledWith(selection);
   });
 
   it("labels the deferred-option action as a proposal request, not an execution", () => {
     render(<SelectionActions selection={selection} {...handlers()} />);
+    fireEvent.click(screen.getByTestId("selection-action-more"));
     expect(screen.getByTestId("selection-action-defer")).toHaveTextContent(
       "Save as deferred option",
     );

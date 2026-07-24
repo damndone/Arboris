@@ -73,6 +73,16 @@ def test_lineage_is_bounded_and_reported(project: Path) -> None:
     assert dropped[0]["included_count"] == 4
 
 
+def test_model_lineage_exposes_pins_needed_for_rerun_proposals(project: Path) -> None:
+    context = _compile(project)
+
+    model = next(item for item in context.bounded_lineage if item["kind"] == "model")
+
+    assert model["node_hash"]
+    assert model["forest_node_key"] == f"{model['node_hash']}::{model['node_id']}"
+    assert model["context_fingerprint"].startswith("nocv1:")
+
+
 def test_nothing_is_dropped_silently(project: Path) -> None:
     """Every truncated section must own an omission record."""
     context = _compile(project, budget=BudgetConfig(lineage_nodes=2, artifact_summaries=1))

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Iterator, Mapping
+from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from ...contracts.agent.notebook_option import (
@@ -28,6 +29,7 @@ from ...contracts.agent.notebook_option import (
     OptionMaterialization,
     RecommendationDecision,
 )
+from ..events import AgentEventStream
 from ..storage import append_jsonl_atomic, read_jsonl
 from .errors import NotebookNotFound, OptionLegacyUnverified, OptionNotFound
 from .proposal import TypedProposal
@@ -220,6 +222,10 @@ class Notebook:
     projection_key: str | None = None
     projection_source: ProjectionSource | None = None
     supersedes_notebook_id: str | None = None
+    # Internal stable trace identity. It is folded from notebook_state rather
+    # than exposed in the public Notebook record so remounts can replay the
+    # same decision chain without making Trace a second source of truth.
+    trace_id: str | None = None
     schema_version: str = NOTEBOOK_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -494,8 +500,62 @@ class NotebookStore:
                     user_focus=dict(record["user_focus"])
                     if "user_focus" in record
                     else notebook.user_focus,
+                    trace_id=record.get("trace_id", notebook.trace_id),
                 )
             return notebook
+
+    def ensure_trace_id(self, notebook_id: str) -> str:
+        """Return one append-only trace identity for the Notebook.
+
+        The check and state append share the project lock, so concurrent route
+        calls cannot fork a Notebook into multiple planning traces.
+        """
+
+        with self._lock:
+            notebook = self.get_notebook(notebook_id)
+            if notebook.trace_id:
+                return notebook.trace_id
+            trace_id = self._legacy_trace_id(notebook)
+            if trace_id is None:
+                trace_id = f"trace_{uuid4().hex}"
+            append_jsonl_atomic(
+                self._notebook_path(notebook_id),
+                {
+                    "record_type": RECORD_NOTEBOOK_STATE,
+                    "recorded_at": _now(),
+                    "trace_id": trace_id,
+                    "reason": "trace_started",
+                },
+            )
+            return trace_id
+
+    def _legacy_trace_id(self, notebook: Notebook) -> str | None:
+        """Find the richest pre-persistence trace for one Notebook.
+
+        v1.8.1 initially created a new trace per HTTP request. On first read
+        after this repair, adopt the existing trace with the most matching
+        events so a user's prior planning evidence is not discarded. Future
+        requests use the persisted state above and never rescan this directory.
+        """
+
+        events = AgentEventStream(self.project_root, create=False)
+        candidates: list[tuple[int, int, str]] = []
+        if not events.events_dir.is_dir():
+            return None
+        for path in events.events_dir.glob("trace_*.jsonl"):
+            trace_id = path.stem
+            matching = [
+                event
+                for event in events.replay(trace_id)
+                if event.payload.get("scope", {}).get("notebook_id") == notebook.notebook_id
+                and event.payload.get("scope", {}).get("run_family_id")
+                == notebook.run_family_id
+            ]
+            if matching:
+                candidates.append((len(matching), matching[-1].seq, trace_id))
+        if not candidates:
+            return None
+        return max(candidates)[2]
 
     def list_notebooks(self) -> list[Notebook]:
         with self._lock:

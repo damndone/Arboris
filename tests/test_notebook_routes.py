@@ -14,10 +14,13 @@ from workbench.api import app
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
+    ExpectedArtifact,
     NOTEBOOK_OPTION_CONTRACT_VERSION,
+    NotebookOptionRevision,
     RecommendationDecision,
 )
 from workbench.lineage.upload_store import store_upload_bytes
+from workbench.http.notebook_routes import _supports_rerun_model_options
 
 
 def _persisted_run(project: Path, run_id: str, *, rerun_of: str | None = None) -> None:
@@ -48,6 +51,13 @@ def _create(client: TestClient, project: Path) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def test_run_notebook_catalog_only_advertises_model_packs_with_options_owner() -> None:
+    assert _supports_rerun_model_options({"params": [{"key": "model_options"}]})
+    assert not _supports_rerun_model_options(
+        {"params": [{"key": "x"}, {"key": "covariance"}]}
+    )
 
 
 def _drafts() -> list[dict]:
@@ -129,6 +139,7 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
         "opt_route_1"
     ]
     assert snapshot.json()["options"][0]["freshness_status"] == "fresh"
+    assert snapshot.json()["trace_id"] == proposed.json()["trace_id"]
 
     trace = client.get(
         f"/notebooks/{notebook_id}/traces/{snapshot.json()['trace_id']}",
@@ -145,6 +156,15 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     )
     assert decision.status_code == 200, decision.text
     assert decision.json()["lifecycle_status"] == "selected"
+    NotebookOptionRevision.from_dict(decision.json())
+
+    repeated_decision = client.post(
+        f"/notebooks/{notebook_id}/options/opt_route_1/decision",
+        params=params,
+        json={"decision": "selected", "actor": "user_1"},
+    )
+    assert repeated_decision.status_code == 200, repeated_decision.text
+    assert repeated_decision.json()["lifecycle_status"] == "selected"
 
     confirmed = client.post(
         f"/notebooks/{notebook_id}/options/opt_route_1/confirm",
@@ -186,6 +206,27 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert completed.json()["artifact_validation"]["validation_status"] == "passed"
     assert completed.json()["lifecycle_status"] == "executed"
 
+    reloaded = client.get(
+        f"/notebooks/{notebook_id}/options",
+        params=params,
+    )
+    assert reloaded.status_code == 200, reloaded.text
+    persisted_result = reloaded.json()["execution_results"]["opt_route_1"]
+    assert persisted_result == {
+        "option_id": "opt_route_1",
+        "option_revision": 1,
+        "run_id": None,
+        "execution_status": "succeeded",
+        "committed": True,
+        "artifact_validation": {
+            "contract_profile": "artifact-identity-type-count/v1",
+            "validation_status": "passed",
+            "checked_dimensions": ["artifact_id", "artifact_type", "count", "step"],
+            "not_evaluated_dimensions": ["payload_schema"],
+            "issues": [],
+        },
+    }
+
 
 def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
     tmp_path: Path,
@@ -215,6 +256,15 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
         rationale="The bounded time-index inspection is complete.",
         assumptions=("the observed index remains valid",),
         proposal=TypedProposal.from_dict(model_rerun_proposal("p_agent")),
+        expected_artifacts=(
+            ExpectedArtifact(
+                artifact_id="ets_1",
+                artifact_type="model_result",
+                required=True,
+                count=1,
+            ),
+        ),
+        capability_id="time_series.ets",
         option_id="opt_agent_1",
         evidence_refs=(
             EvidenceRef(
@@ -308,6 +358,7 @@ def test_projection_route_binds_real_run_context_and_hashes_graph(tmp_path: Path
     packet = context.json()
     assert packet["active_head_run_id"] == "run_001"
     assert packet["current_family_head_run_id"] == "run_001"
+    assert "ols" in packet["available_capabilities"]
     assert packet["graph_hash"].startswith("sha256:")
     assert {item["kind"] for item in packet["source_manifest"]} >= {"graph", "errors"}
 
@@ -427,6 +478,15 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
                 }
             },
         ),
+        expected_artifacts=(
+            ExpectedArtifact(
+                artifact_id="ols_1",
+                artifact_type="model_result",
+                required=True,
+                count=1,
+            ),
+        ),
+        capability_id="ols",
         option_id="opt_genesis_route",
         evidence_refs=(
             EvidenceRef(
@@ -505,6 +565,101 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["materialization"]["materialization_id"] == packet["materialization"]["materialization_id"]
+
+    listed = client.get(
+        f"/notebooks/{notebook_id}/options",
+        params=params,
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["materializations"][option.option_id]["draft_id"] == packet["draft"]["draft_id"]
+
+
+def test_replan_route_returns_replanned_option_and_deferred_sibling(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    notebook_id = notebook["notebook_id"]
+    params = {"project_root": str(project)}
+    initial = _drafts()
+    initial.append(
+        {
+            **_drafts()[0],
+            "rank": 2,
+            "option_id": "opt_route_2",
+            "proposal": model_rerun_proposal("p2", covariance="clustered"),
+        }
+    )
+    first = client.post(
+        f"/notebooks/{notebook_id}/options/propose",
+        params=params,
+        json={"drafts": initial},
+    )
+    assert first.status_code == 200, first.text
+
+    evidence = EvidenceRef(
+        evidence_id="evidence:time",
+        result_hash="sha256:time-result",
+        source_refs=("time_index:run_001",),
+    )
+    replanned = OptionDraft(
+        rank=1,
+        rationale="The bounded time-index inspection still supports the robust path.",
+        proposal=TypedProposal.from_dict(model_rerun_proposal("p1-replanned")),
+        expected_artifacts=(
+            ExpectedArtifact(
+                artifact_id="ts.parameters",
+                artifact_type="time_series_json",
+                required=True,
+                count=1,
+            ),
+        ),
+        option_id="opt_route_1",
+        evidence_refs=(evidence,),
+        comparative_claims=("evidence:time supports the replanned robust path",),
+        recommendation_decision_id="rec_replan",
+        recommendation_status="insufficient_evidence",
+    )
+    decision = RecommendationDecision(
+        recommendation_decision_id="rec_replan",
+        batch_id="batch_replan",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:context",
+        evidence_pack_hashes=("sha256:pack",),
+        comparison_protocol_refs=(),
+        candidate_option_ids=("opt_route_1",),
+        outcome="insufficient_evidence",
+        recommended_option_id=None,
+        reason_refs=("evidence:time",),
+    )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del context, initial_evidence
+            return SimpleNamespace(option_drafts=(replanned,), decision=decision)
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    second = client.post(
+        f"/notebooks/{notebook_id}/options/propose",
+        params=params,
+        json={"count": 3},
+    )
+    assert second.status_code == 200, second.text
+    options = second.json()["options"]
+    assert {item["option_id"] for item in options} == {
+        "opt_route_1",
+        "opt_route_2",
+    }
+    assert next(item for item in options if item["option_id"] == "opt_route_1")[
+        "option_revision"
+    ] == 2
+    assert next(item for item in options if item["option_id"] == "opt_route_2")[
+        "option_revision"
+    ] == 1
 
 
 def test_external_family_focus_marks_options_stale_without_rebinding_source(

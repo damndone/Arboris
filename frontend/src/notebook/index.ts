@@ -12,5 +12,11 @@ export { OptionCard, type OptionCardProps } from "./OptionCard";
 export { ContextSlicePanel, type ContextSlicePanelProps } from "./ContextSlicePanel";
 export { PlanDiffConfirmation, type PlanDiffConfirmationProps } from "./PlanDiffConfirmation";
 export { SelectionActions, type SelectionActionsProps } from "./SelectionActions";
-export { executability, axisNote, rankLabel, type Executability } from "./statusAxes";
+export {
+  executability,
+  axisNote,
+  rankLabel,
+  recommendationLabel,
+  type Executability,
+} from "./statusAxes";
 export * from "./contracts";

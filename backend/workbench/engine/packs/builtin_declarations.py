@@ -14,4 +14,8 @@ BUILTIN_PACK_DECLARATIONS: tuple[PackDeclaration, ...] = (
         module="workbench.engine.packs.arma_garch.declaration",
         model_type="time_series.arma_garch",
     ),
+    PackDeclaration(
+        module="workbench.engine.packs.ets.declaration",
+        model_type="time_series.ets",
+    ),
 )

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from uuid import uuid4
 
@@ -28,6 +29,11 @@ from ..canonical import sha256_canonical
 from .events import AgentEventStream
 
 TRACE_SCHEMA = "agent-trace-event/v1"
+
+# The Workbench control plane is single-worker. A shared writer lock keeps
+# concurrent HTTP requests from reading the same replay length and emitting
+# duplicate envelope sequence numbers into one persisted Notebook trace.
+_TRACE_WRITE_LOCK = RLock()
 
 REQUIRED_SCOPE_KEYS = ("project_id", "notebook_id", "run_family_id")
 REQUIRED_VERSION_KEYS = (
@@ -248,34 +254,37 @@ class TraceWriter:
         refs: dict[str, Any] | None = None,
         command_id: str | None = None,
     ) -> dict[str, Any]:
-        schema = TRACE_EVENT_SCHEMAS.get(event_type)
-        if schema is None:
-            raise UnknownTraceEventType(
-                f"no payload schema registered for trace event {event_type!r}; "
-                f"known types: {', '.join(sorted(TRACE_EVENT_SCHEMAS))}"
+        with _TRACE_WRITE_LOCK:
+            schema = TRACE_EVENT_SCHEMAS.get(event_type)
+            if schema is None:
+                raise UnknownTraceEventType(
+                    f"no payload schema registered for trace event {event_type!r}; "
+                    f"known types: {', '.join(sorted(TRACE_EVENT_SCHEMAS))}"
+                )
+            schema.validate(payload, event_type=event_type)
+            # Refresh after waiting: another TraceWriter instance may have
+            # appended to this same trace while this writer was constructed.
+            self._sequence = len(self._stream.replay(self.trace_id)) + 1
+            envelope = {
+                "trace_schema": TRACE_SCHEMA,
+                "trace_id": self.trace_id,
+                "sequence": self._sequence,
+                "occurred_at": _now(),
+                "event_type": f"{event_type}/v1",
+                "scope": dict(self.scope),
+                "actor": dict(self.actor),
+                "versions": dict(self.versions),
+                "refs": dict(refs or {}),
+                "payload_schema": schema.payload_schema,
+                "payload": dict(payload),
+            }
+            stored = self._stream.emit(
+                self.trace_id,
+                f"{event_type}/v1",
+                envelope,
+                command_id=command_id,
             )
-        schema.validate(payload, event_type=event_type)
-        self._sequence += 1
-        envelope = {
-            "trace_schema": TRACE_SCHEMA,
-            "trace_id": self.trace_id,
-            "sequence": self._sequence,
-            "occurred_at": _now(),
-            "event_type": f"{event_type}/v1",
-            "scope": dict(self.scope),
-            "actor": dict(self.actor),
-            "versions": dict(self.versions),
-            "refs": dict(refs or {}),
-            "payload_schema": schema.payload_schema,
-            "payload": dict(payload),
-        }
-        stored = self._stream.emit(
-            self.trace_id,
-            f"{event_type}/v1",
-            envelope,
-            command_id=command_id,
-        )
-        return {**envelope, "event_id": stored.event_id}
+            return {**envelope, "event_id": stored.event_id}
 
     @staticmethod
     def replay(project_root: Path | str, trace_id: str) -> list[dict[str, Any]]:

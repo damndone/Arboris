@@ -1,5 +1,5 @@
 import type { ArtifactContractOutcome, NotebookOptionRevision } from "./contracts";
-import { axisNote, executability, rankLabel } from "./statusAxes";
+import { axisNote, executability, recommendationLabel } from "./statusAxes";
 
 export interface OptionCardProps {
   option: NotebookOptionRevision;
@@ -50,14 +50,14 @@ export function OptionCard({
     <article
       className="nb-option-card"
       data-testid={`option-card-${option.option_id}`}
-      data-recommended={option.rank === 1 ? "true" : "false"}
+      data-recommended={option.recommendation_status === "recommended" ? "true" : "false"}
       data-lifecycle={option.lifecycle_status}
       data-freshness={option.freshness_status}
       data-validation={option.validation_status}
     >
       <header className="nb-option-header">
         <span className="nb-option-rank" data-testid="option-rank">
-          {rankLabel(option.rank)}
+          {recommendationLabel(option)}
         </span>
         <span className="nb-option-risk">{`risk ${option.risk_level}`}</span>
       </header>
@@ -152,7 +152,11 @@ export function OptionCard({
           disabled={!gate.executable}
           onClick={() => onSelect?.(option)}
         >
-          Review and confirm
+          {option.lifecycle_status === "executed"
+            ? "Already executed"
+            : option.materializable
+              ? "Review and prepare Draft"
+              : "Review and confirm"}
         </button>
         <button
           type="button"

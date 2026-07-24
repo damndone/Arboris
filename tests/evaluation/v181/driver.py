@@ -64,13 +64,18 @@ def frame_for(values: np.ndarray) -> pd.DataFrame:
 
 
 def ets_options(spec: dict[str, Any], *, flat: bool = False) -> dict[str, Any]:
-    """Options built from the contract's own field names."""
+    """Build input options without smuggling result-only metadata.
+
+    ``fit_method`` is a field on ``ETSResultContract`` and ``dataset_ref`` is
+    evaluation provenance; neither is an input accepted by the model pack.
+    The result contract intentionally does not lock the input nesting, so the
+    driver still probes both plausible specification spellings below.
+    """
 
     base: dict[str, Any] = {
-        "dataset_ref": "dataset:evaluation:v181",
         "time_column": TIME_COLUMN,
         "value_column": VALUE_COLUMN,
-        "fit_method": "mle",
+        "time_index_semantics": "business_or_trading_observations",
     }
     if flat:
         base.update(spec)

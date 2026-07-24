@@ -29,7 +29,9 @@ export function PlanDiffConfirmation({
   return (
     <section className="nb-confirmation" data-testid="notebook-confirmation">
       <header className="nb-confirmation-header">
-        <span className="nb-label">Confirm before running</span>
+        <span className="nb-label">
+          {option.materializable ? "Confirm before preparing Draft" : "Confirm before running"}
+        </span>
         <span data-testid="confirmation-pins">
           {`${execution.option_id} rev ${execution.option_revision} · ${execution.proposal_id} rev ${execution.proposal_revision}`}
         </span>
@@ -86,7 +88,11 @@ export function PlanDiffConfirmation({
           disabled={busy}
           onClick={() => onConfirm?.(confirmation)}
         >
-          {busy ? "Submitting…" : "Confirm and run"}
+          {busy
+            ? "Submitting…"
+            : option.materializable
+              ? "Confirm and prepare Draft"
+              : "Confirm and run"}
         </button>
         <button
           type="button"
