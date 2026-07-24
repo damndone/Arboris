@@ -113,21 +113,42 @@ export function StatisticalVariablePicker({
           <div
             role="group"
             aria-label="Variable list"
-            style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 3 }}
+            style={{
+              maxHeight: 190,
+              overflowY: "auto",
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 3,
+            }}
           >
             {matchingColumns.length > 0 ? matchingColumns.map((column) => (
               <label
                 key={column.name}
-                style={{ display: "flex", alignItems: "center", gap: 7, padding: "5px 4px", borderRadius: 5 }}
+                style={{
+                  minWidth: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 5px",
+                  borderRadius: 5,
+                  background: selectedSet.has(column.name) ? "var(--control-selected, rgba(90, 120, 170, 0.12))" : "transparent",
+                }}
               >
                 <input
                   type="checkbox"
                   aria-label={column.name}
                   checked={selectedSet.has(column.name)}
                   onChange={(event) => toggleColumn(column.name, event.target.checked)}
+                  style={{
+                    width: 12,
+                    height: 12,
+                    margin: 0,
+                    flex: "0 0 auto",
+                    accentColor: "var(--accent, #4c8dff)",
+                  }}
                 />
-                <span style={{ color: "var(--label)" }}>{column.name}</span>
-                <span style={{ marginLeft: "auto", color: "var(--label-tertiary)", fontSize: 11 }}>{column.dtype}</span>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--label)", fontSize: 12 }}>{column.name}</span>
+                <span style={{ marginLeft: "auto", color: "var(--label-tertiary)", fontSize: 10, whiteSpace: "nowrap" }}>{column.dtype}</span>
               </label>
             )) : (
               <div style={{ padding: "8px 4px", color: "var(--label-tertiary)", fontSize: 12 }}>No variables match</div>
