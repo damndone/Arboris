@@ -20,6 +20,7 @@ import {
 } from "../../statisticalExploration";
 import { DerivedVariableBuilder } from "./DerivedVariableBuilder";
 import { StatisticalPlotSection } from "./StatisticalPlotSection";
+import { StatisticalVariablePicker } from "./StatisticalVariablePicker";
 
 interface FilterRowState {
   column: string;
@@ -297,23 +298,14 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
             )}
             <fieldset>
               <legend>Variables</legend>
-              {sourceContext.columns.map((column) => (
-                <label key={column.name} style={{ marginRight: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedColumns.includes(column.name)}
-                    onChange={(event) => {
-                      setSelectedColumns((current) =>
-                        event.target.checked
-                          ? [...current, column.name]
-                          : current.filter((name) => name !== column.name),
-                      );
-                      setPreview(null);
-                    }}
-                  />
-                  {column.name}
-                </label>
-              ))}
+              <StatisticalVariablePicker
+                columns={sourceContext.columns}
+                selectedColumns={selectedColumns}
+                onChange={(columns) => {
+                  setSelectedColumns(columns);
+                  setPreview(null);
+                }}
+              />
             </fieldset>
             <div data-testid="statistical-exploration-filters">
               <strong>Filters (AND)</strong>

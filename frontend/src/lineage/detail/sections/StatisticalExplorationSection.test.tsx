@@ -157,6 +157,20 @@ describe("StatisticalExplorationSection", () => {
     });
   });
 
+  it("passes compact picker changes into the typed preview request", async () => {
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /4 variables selected/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "pfl" }));
+    expect(screen.getByRole("button", { name: /3 variables selected/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-result")).toBeInTheDocument());
+    const request = previewMock.mock.calls[previewMock.mock.calls.length - 1]?.[1] as { selected_columns: string[] };
+    expect(request.selected_columns).toEqual(["year", "middle", "bdsnew"]);
+  });
+
   it("keeps grouped result details out of the right panel", async () => {
     previewMock.mockResolvedValueOnce({
       spec: { operation: "summarize" },
