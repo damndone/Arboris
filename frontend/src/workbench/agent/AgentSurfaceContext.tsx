@@ -454,7 +454,17 @@ export function AgentSurfaceProvider({
     ),
     [contextPacket, messages, prompt],
   );
-  const contextWindowTokens = llmConfig?.context_window_tokens ?? null;
+  // Resolve a real context capacity so the ring is a live gauge, not decoration.
+  // Prefer the active model's declared window; otherwise 1,000,000 when the
+  // model advertises the 1M context; otherwise the config-level value. Only when
+  // none of these exist do we honestly report an unknown capacity.
+  const activeModelRecord = modelOptions.find((option) => option.request_model === model);
+  const ONE_MILLION = 1_000_000;
+  const contextWindowTokens =
+    activeModelRecord?.context_window_tokens
+    ?? (activeModelRecord?.supports_1m ? ONE_MILLION : null)
+    ?? llmConfig?.context_window_tokens
+    ?? (llmConfig?.supports_1m ? ONE_MILLION : null);
   const contextPercent = contextWindowTokens
     ? Math.min(100, (contextUsedTokens / contextWindowTokens) * 100)
     : null;
