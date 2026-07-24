@@ -83,6 +83,7 @@ DEFAULT_MAX_STEPS = 10
 DEFAULT_TIMEOUT_S = 120.0
 
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
+- You are the Econometrics Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
@@ -100,6 +101,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 """
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
+- You are the Econometrics Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - You are the project-level advisory Agent. Use the bounded project overview and durable summaries supplied in the context packet.
 - You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
 - Never invent raw-data facts, model metrics, run results, chain state, or unsupported causal claims.
@@ -617,6 +619,27 @@ def create_agent_session(
                 "context_fingerprint": fingerprint,
                 "run_id": body.run_id,
             },
+        },
+    )
+    identity_config = load_llm_config()
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_identity",
+            "audience": "model",
+            "name": "workbench_agent_identity",
+            "content": (
+                "Agent identity (authoritative): you are the Econometrics Workbench "
+                + ("Chain" if body.role == "chain" else "Global")
+                + " Agent. You run on the configured provider "
+                + f"'{identity_config.provider_id or 'unknown'}' using model "
+                + f"'{identity_config.model or 'unknown'}'. Answer identity and "
+                + "\"what model are you\" questions with exactly this; do not invent a "
+                + "product, brand, or vendor name and do not deflect to external "
+                + "documentation."
+            ),
+            "metadata": {"protocol_version": "agent/v1"},
         },
     )
     if body.role == "chain":
