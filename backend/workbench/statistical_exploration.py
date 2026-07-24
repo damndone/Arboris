@@ -10,7 +10,9 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, ClassVar, Mapping
 
 import pandas as pd
@@ -22,6 +24,7 @@ from .artifacts import (
     write_json,
     write_text_durable,
 )
+from .graph_model import Edge, Graph, Node, NodeKind, Stage, Trust
 
 
 SCHEMA_VERSION = "statistical-exploration.v1"
@@ -203,6 +206,32 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
     if spec.operation == "corr":
         return _correlation_result(base, filtered, spec.selected_columns, spec.options)
 
+    if spec.operation == "derive_boolean":
+        return {
+            **base,
+            "missing_policy": "variablewise",
+            "derived": _derived_boolean_result(filtered, spec),
+        }
+
+    if spec.operation == "scatter":
+        x_column, y_column = _scatter_columns(frame, spec)
+        aligned = pd.concat(
+            [
+                pd.to_numeric(filtered[x_column], errors="coerce").rename("x"),
+                pd.to_numeric(filtered[y_column], errors="coerce").rename("y"),
+            ],
+            axis=1,
+        ).dropna()
+        return {
+            **base,
+            "missing_policy": "complete_case_for_plot",
+            "plot": {
+                "x_column": x_column,
+                "y_column": y_column,
+                "plotted_row_count": int(len(aligned)),
+            },
+        }
+
     raise StatisticalExplorationValidationError(
         f"exploration operation is not implemented: {spec.operation}"
     )
@@ -236,11 +265,13 @@ def persist_exploration(
     project_root: Path | str,
     *,
     source_run_id: str,
+    source_node_id: str,
     source_artifact_id: str,
     source_sha256: str,
     spec: ExplorationSpec,
     result: dict[str, Any],
     fingerprint: str,
+    source_frame: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Write one idempotent result and transcript pair into the source run."""
     root = Path(project_root).expanduser().resolve()
@@ -291,7 +322,7 @@ def persist_exploration(
         step="statistical_exploration",
         inputs=[artifact_id],
     )
-    return {
+    record = {
         "artifact_id": artifact_id,
         "path": result_rel,
         "transcript_artifact_id": transcript_artifact_id,
@@ -299,6 +330,36 @@ def persist_exploration(
         "fingerprint": fingerprint,
         "source_sha256": source_sha256,
     }
+    if spec.operation == "derive_boolean":
+        if source_frame is None:
+            raise StatisticalExplorationValidationError(
+                "derive_boolean requires the resolved source frame"
+            )
+        record["derived"] = _persist_derived_boolean(
+            run_root,
+            source_run_id=source_run_id,
+            source_node_id=source_node_id,
+            source_artifact_id=source_artifact_id,
+            source_sha256=source_sha256,
+            source_frame=source_frame,
+            spec=spec,
+            fingerprint=fingerprint,
+            result=result,
+        )
+    if spec.operation == "scatter":
+        if source_frame is None:
+            raise StatisticalExplorationValidationError(
+                "scatter requires the resolved source frame"
+            )
+        record["plot"] = _persist_statistical_scatter(
+            run_root,
+            source_artifact_id=source_artifact_id,
+            source_frame=source_frame,
+            spec=spec,
+            fingerprint=fingerprint,
+            result=result,
+        )
+    return record
 
 
 def _ensure_exploration_artifact(
@@ -321,6 +382,224 @@ def _ensure_exploration_artifact(
             )
         return
     register_artifact(run_root, artifact_id, path, artifact_type, step, inputs)
+
+
+def _persist_derived_boolean(
+    run_root: Path,
+    *,
+    source_run_id: str,
+    source_node_id: str,
+    source_artifact_id: str,
+    source_sha256: str,
+    source_frame: pd.DataFrame,
+    spec: ExplorationSpec,
+    fingerprint: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    from .data_operations import (
+        _ensure_node_index_entry,
+        _ensure_registered_artifact,
+        _graph_store_for,
+        _mark_downstream_invalidation,
+        _write_frame_artifact,
+    )
+    from .graph_model import BranchRef
+
+    filtered = _apply_filters(source_frame, spec.filters)
+    _filtered_derived, definition = _derived_boolean_series(filtered, spec)
+    source_column = definition["source_column"]
+    output_name = definition["output_name"]
+    output = pd.Series(pd.NA, index=source_frame.index, dtype="boolean")
+    source = source_frame[source_column]
+    if definition["comparison"] == "lte":
+        output.loc[source.notna()] = source.loc[source.notna()] <= definition["threshold"]
+    else:
+        output.loc[source.notna()] = source.loc[source.notna()] >= definition["threshold"]
+    output_frame = source_frame.copy()
+    output_frame[output_name] = output
+
+    relative_dir = Path("derived") / "statistical_exploration" / fingerprint
+    artifact_rel = (relative_dir / "data.csv").as_posix()
+    recipe_rel = (relative_dir / "recipe.json").as_posix()
+    artifact_path = run_root / artifact_rel
+    recipe_path = run_root / recipe_rel
+    _write_frame_artifact(artifact_path, output_frame, "csv")
+    artifact_id = f"derived_data_{fingerprint[:24]}"
+    recipe_artifact_id = f"derived_data_recipe_{fingerprint[:24]}"
+    recipe = {
+        "schema_version": "statistical-derived-boolean.v1",
+        "spec": spec.to_dict(),
+        "source": {
+            "artifact_id": source_artifact_id,
+            "sha256": source_sha256,
+        },
+        "definition": definition,
+        "result": {
+            "artifact_id": artifact_id,
+            "path": artifact_rel,
+            "child_node_id": f"data-derive:{fingerprint[:24]}",
+        },
+    }
+    if recipe_path.exists() and read_json(recipe_path) != recipe:
+        raise StatisticalExplorationValidationError(
+            "deterministic derived recipe path is occupied"
+        )
+    if not recipe_path.exists():
+        write_json(recipe_path, recipe)
+    _ensure_registered_artifact(
+        run_root,
+        artifact_id=artifact_id,
+        path=artifact_path,
+        artifact_type="derived_data",
+        step="data.derive.boolean",
+        inputs=[source_artifact_id],
+    )
+    _ensure_registered_artifact(
+        run_root,
+        artifact_id=recipe_artifact_id,
+        path=recipe_path,
+        artifact_type="metadata",
+        step="data.derive.boolean",
+        inputs=[source_artifact_id, artifact_id],
+    )
+
+    child_node_id = f"data-derive:{fingerprint[:24]}"
+    execution_key = f"derive_{fingerprint[:24]}"
+    branch_id = f"data-derive:{fingerprint[:20]}"
+
+    def commit_graph_child(current: Graph) -> Graph:
+        if child_node_id in current.nodes:
+            return current
+        child = Node(
+            id=child_node_id,
+            kind=NodeKind.DATASET_STAGE,
+            display_label=f"Derive {output_name}",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            parent_stage_id=source_node_id,
+            branch_id=branch_id,
+            trust=Trust.OK,
+            payload_ref=artifact_rel,
+            summary=(
+                f"{output_name} = {source_column} {definition['comparison']} "
+                f"p{definition['percentile']:.0f} ({definition['threshold']:.6g}); "
+                f"{len(output_frame)} rows"
+            ),
+            annotations=(
+                {
+                    "type": "data_operation",
+                    "operation_id": "data.derive.boolean",
+                    "execution_key": execution_key,
+                    "recipe_path": recipe_rel,
+                    "source_fingerprint": fingerprint,
+                    "definition": definition,
+                },
+            ),
+            stage=Stage.TRANSFORM,
+        )
+        nodes = _mark_downstream_invalidation(
+            {**current.nodes, child_node_id: child},
+            reason="data_derive_boolean",
+            source_node_id=source_node_id,
+            child_node_id=child_node_id,
+        )
+        edges = dict(current.edges)
+        edges[f"edge:{child_node_id}"] = Edge(
+            id=f"edge:{child_node_id}",
+            source_id=source_node_id,
+            target_id=child_node_id,
+            op="data.derive.boolean",
+            params={"definition": definition, "execution_key": execution_key},
+        )
+        branches = dict(current.branches)
+        branches[branch_id] = BranchRef(
+            id=branch_id,
+            forked_from_node_id=source_node_id,
+            head_node_ids=(child_node_id,),
+        )
+        return Graph(
+            schema_version=current.schema_version,
+            run_id=current.run_id,
+            nodes=nodes,
+            edges=edges,
+            branches=branches,
+            legacy=current.legacy,
+        )
+
+    _graph_store_for(run_root).mutate(source_run_id, commit_graph_child)
+    _ensure_node_index_entry(
+        run_root,
+        child_node_id=child_node_id,
+        node_hash=sha256_file(artifact_path),
+        artifact_rel=artifact_rel,
+        producing_stage="data.derive.boolean",
+    )
+    return {
+        "child_node_id": child_node_id,
+        "artifact_id": artifact_id,
+        "artifact_path": artifact_rel,
+        "recipe_artifact_id": recipe_artifact_id,
+        "recipe_path": recipe_rel,
+        "threshold": definition["threshold"],
+        "output_name": output_name,
+    }
+
+
+def _scatter_columns(frame: pd.DataFrame, spec: ExplorationSpec) -> tuple[str, str]:
+    x_column = spec.options.get("x_column")
+    y_column = spec.options.get("y_column")
+    if not isinstance(x_column, str) or not isinstance(y_column, str):
+        raise StatisticalExplorationValidationError(
+            "scatter requires x_column and y_column"
+        )
+    for column in (x_column, y_column):
+        _require_column(frame, column)
+        if not pd.api.types.is_numeric_dtype(frame[column]):
+            raise StatisticalExplorationValidationError(
+                f"scatter column must be numeric: {column}"
+            )
+    if x_column == y_column:
+        raise StatisticalExplorationValidationError("scatter x_column and y_column must differ")
+    return x_column, y_column
+
+
+def _persist_statistical_scatter(
+    run_root: Path,
+    *,
+    source_artifact_id: str,
+    source_frame: pd.DataFrame,
+    spec: ExplorationSpec,
+    fingerprint: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    from .visualization import write_statistical_scatter
+
+    filtered = _apply_filters(source_frame, spec.filters)
+    x_column, y_column = _scatter_columns(filtered, spec)
+    artifact_id = f"statistical_scatter_{fingerprint[:24]}"
+    artifact_rel = f"figures/statistical_scatter_{fingerprint[:24]}.png"
+    artifact_path = run_root / artifact_rel
+    plotted_n = write_statistical_scatter(
+        filtered,
+        artifact_path,
+        x_column=x_column,
+        y_column=y_column,
+    )
+    _ensure_exploration_artifact(
+        run_root,
+        artifact_id=artifact_id,
+        path=artifact_path,
+        artifact_type="figure",
+        step="statistical_exploration",
+        inputs=[source_artifact_id],
+    )
+    return {
+        "artifact_id": artifact_id,
+        "path": artifact_rel,
+        "x_column": x_column,
+        "y_column": y_column,
+        "plotted_row_count": plotted_n,
+        "fingerprint": fingerprint,
+    }
 
 
 def _validate_frame(frame: Any) -> None:
@@ -483,6 +762,76 @@ def _correlation_result(
         "correlation_n": int(len(complete)),
         "matrix": [[_safe_number(value) for value in row] for row in matrix],
     }
+
+
+def _derived_definition(spec: ExplorationSpec) -> tuple[str, float, str, str]:
+    source_column = spec.options.get("source_column")
+    if source_column is None and len(spec.selected_columns) == 1:
+        source_column = spec.selected_columns[0]
+    percentile = spec.options.get("percentile")
+    comparison = spec.options.get("comparison")
+    output_name = spec.options.get("output_name")
+    if not isinstance(source_column, str) or not source_column.strip():
+        raise StatisticalExplorationValidationError(
+            "derive_boolean requires a source_column"
+        )
+    if isinstance(percentile, bool) or not isinstance(percentile, (int, float)) or not 0 <= percentile <= 100:
+        raise StatisticalExplorationValidationError(
+            "derive_boolean percentile must be between 0 and 100"
+        )
+    if comparison not in {"lte", "gte"}:
+        raise StatisticalExplorationValidationError(
+            "derive_boolean comparison must be lte or gte"
+        )
+    if not isinstance(output_name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", output_name) is None:
+        raise StatisticalExplorationValidationError(
+            "derive_boolean output_name must be a valid column name"
+        )
+    return source_column, float(percentile), comparison, output_name
+
+
+def _derived_boolean_series(
+    frame: pd.DataFrame,
+    spec: ExplorationSpec,
+) -> tuple[pd.Series, dict[str, Any]]:
+    source_column, percentile, comparison, output_name = _derived_definition(spec)
+    _require_column(frame, source_column)
+    if not pd.api.types.is_numeric_dtype(frame[source_column]):
+        raise StatisticalExplorationValidationError(
+            f"derive_boolean source column must be numeric: {source_column}"
+        )
+    source = frame[source_column]
+    complete = source.dropna()
+    if complete.empty:
+        raise StatisticalExplorationValidationError(
+            f"derive_boolean source column has no nonmissing values: {source_column}"
+        )
+    threshold = float(complete.quantile(percentile / 100, interpolation="linear"))
+    derived = pd.Series(pd.NA, index=frame.index, dtype="boolean")
+    if comparison == "lte":
+        derived.loc[source.notna()] = source.loc[source.notna()] <= threshold
+    else:
+        derived.loc[source.notna()] = source.loc[source.notna()] >= threshold
+    counts = {
+        "true": int((derived == True).sum()),  # noqa: E712
+        "false": int((derived == False).sum()),  # noqa: E712
+        "missing": int(derived.isna().sum()),
+    }
+    definition = {
+        "source_column": source_column,
+        "percentile": percentile,
+        "comparison": comparison,
+        "output_name": output_name,
+        "threshold": threshold,
+        "counts": counts,
+        "preview": [None if pd.isna(value) else bool(value) for value in derived.tolist()[:20]],
+    }
+    return derived, definition
+
+
+def _derived_boolean_result(frame: pd.DataFrame, spec: ExplorationSpec) -> dict[str, Any]:
+    _derived, definition = _derived_boolean_series(frame, spec)
+    return definition
 
 
 __all__ = [

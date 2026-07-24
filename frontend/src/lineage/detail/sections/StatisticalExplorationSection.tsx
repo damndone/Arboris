@@ -13,6 +13,8 @@ import {
   type StatisticalFilter,
   type StatisticalFilterOperator,
 } from "../../statisticalExploration";
+import { DerivedVariableBuilder } from "./DerivedVariableBuilder";
+import { StatisticalPlotSection } from "./StatisticalPlotSection";
 
 interface FilterRowState {
   column: string;
@@ -206,6 +208,8 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                 <option value="summarize_detail">Summarize detail</option>
                 <option value="misstable">Missing values</option>
                 <option value="corr">Correlation</option>
+                <option value="derive_boolean">Derived percentile variable</option>
+                <option value="scatter">Scatter plot</option>
               </select>
             </label>
             <fieldset>
@@ -261,27 +265,43 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
             <div style={{ color: "var(--label-tertiary)" }}>
               Preview applies every filter as AND. The source data and model state are unchanged.
             </div>
-            <div>
-              <button
-                type="button"
-                data-testid="statistical-exploration-preview"
-                disabled={!request || request.selected_columns.length === 0 || status === "previewing" || status === "confirming"}
-                onClick={() => void handlePreview()}
-              >
-                {status === "previewing" ? "Previewing…" : "Preview"}
-              </button>
-              {preview?.status === "ready" && (
-                <button
-                  type="button"
-                  data-testid="statistical-exploration-confirm"
-                  disabled={status === "confirming"}
-                  onClick={() => void handleConfirm()}
-                >
-                  {status === "confirming" ? "Saving…" : "Save exploration"}
-                </button>
-              )}
-            </div>
-            {preview && <ResultSummary preview={preview} />}
+            {operation === "derive_boolean" && request ? (
+              <DerivedVariableBuilder
+                projectRoot={projectRoot ?? ""}
+                request={request}
+                numericColumns={sourceContext.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name)}
+              />
+            ) : operation === "scatter" && request ? (
+              <StatisticalPlotSection
+                projectRoot={projectRoot ?? ""}
+                request={request}
+                numericColumns={sourceContext.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name)}
+              />
+            ) : (
+              <>
+                <div>
+                  <button
+                    type="button"
+                    data-testid="statistical-exploration-preview"
+                    disabled={!request || request.selected_columns.length === 0 || status === "previewing" || status === "confirming"}
+                    onClick={() => void handlePreview()}
+                  >
+                    {status === "previewing" ? "Previewing…" : "Preview"}
+                  </button>
+                  {preview?.status === "ready" && (
+                    <button
+                      type="button"
+                      data-testid="statistical-exploration-confirm"
+                      disabled={status === "confirming"}
+                      onClick={() => void handleConfirm()}
+                    >
+                      {status === "confirming" ? "Saving…" : "Save exploration"}
+                    </button>
+                  )}
+                </div>
+                {preview && <ResultSummary preview={preview} />}
+              </>
+            )}
             {status === "complete" && <div data-testid="statistical-exploration-complete">Exploration saved as an artifact.</div>}
           </>
         )}

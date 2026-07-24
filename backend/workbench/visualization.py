@@ -172,6 +172,40 @@ def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, 
     figures[artifact_id] = record.path
 
 
+def write_statistical_scatter(
+    frame: pd.DataFrame,
+    path: Path,
+    *,
+    x_column: str,
+    y_column: str,
+) -> int:
+    """Write one explicit x/y scatter figure and return the plotted N.
+
+    Registration is intentionally owned by the caller so a repeated
+    source-bound exploration can use the same idempotent artifact helper as
+    its JSON result.
+    """
+    aligned = pd.concat(
+        [
+            pd.to_numeric(frame[x_column], errors="coerce").rename("x"),
+            pd.to_numeric(frame[y_column], errors="coerce").rename("y"),
+        ],
+        axis=1,
+    ).dropna()
+    if aligned.empty:
+        raise ValueError("scatter requires at least one complete x/y row")
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    ax.scatter(aligned["x"], aligned["y"], alpha=0.65, s=18, color="#54a24b")
+    ax.set_xlabel(x_column)
+    ax.set_ylabel(y_column)
+    ax.set_title(f"{y_column} versus {x_column} (N={len(aligned)})")
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    return int(len(aligned))
+
+
 def _new_grid(n: int):
     rows, cols = _grid_dims(n)
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 3.2, rows * 2.6), squeeze=False)

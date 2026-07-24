@@ -121,7 +121,7 @@ def _evaluate(
             details={"reason": str(exc)},
         ) from exc
     fingerprint = exploration_fingerprint(context["source_sha256"], spec)
-    return context, result, fingerprint
+    return context, frame, result, fingerprint
 
 
 @router.post("/statistical-explorations/preview")
@@ -131,7 +131,7 @@ def preview_statistical_exploration(
 ) -> dict[str, Any]:
     root = _root(project_root)
     spec = _spec(body)
-    context, result, fingerprint = _evaluate(root, body, spec)
+    context, frame, result, fingerprint = _evaluate(root, body, spec)
     return {
         "spec": spec.to_dict(),
         "preview": {
@@ -151,7 +151,7 @@ def confirm_statistical_exploration(
 ) -> dict[str, Any]:
     root = _root(project_root)
     spec = _spec(body)
-    context, result, fingerprint = _evaluate(root, body, spec, confirm=True)
+    context, frame, result, fingerprint = _evaluate(root, body, spec, confirm=True)
     if fingerprint != body.preview_fingerprint:
         raise WorkbenchAPIError(
             status_code=409,
@@ -163,11 +163,13 @@ def confirm_statistical_exploration(
         record = persist_exploration(
             root,
             source_run_id=body.source_run_id,
+            source_node_id=body.source_node_id,
             source_artifact_id=body.source_artifact_id,
             source_sha256=context["source_sha256"],
             spec=spec,
             result=result,
             fingerprint=fingerprint,
+            source_frame=frame,
         )
     except (StatisticalExplorationValidationError, OSError, KeyError, ValueError) as exc:
         raise WorkbenchAPIError(
@@ -176,4 +178,9 @@ def confirm_statistical_exploration(
             message="The exploration artifact could not be durably bound to the source.",
             details={"reason": str(exc)},
         ) from exc
-    return {"status": "completed", "exploration": record, "result": result}
+    response: dict[str, Any] = {"status": "completed", "exploration": record, "result": result}
+    if "derived" in record:
+        response["derived"] = record["derived"]
+    if "plot" in record:
+        response["plot"] = record["plot"]
+    return response
