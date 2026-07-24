@@ -128,6 +128,8 @@ describe("StatisticalExplorationSection", () => {
     await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
     await waitFor(() => expect(screen.getByTestId("statistical-ols-context")).toBeInTheDocument());
+    expect(screen.getByTestId("statistical-ols-predictors")).toHaveClass("statistical-ols-predictors-grid");
+    expect(screen.getByTestId("statistical-ols-predictor-pfl").parentElement).toHaveClass("statistical-ols-predictor-option");
     fireEvent.change(screen.getByTestId("statistical-ols-outcome"), { target: { value: "bdsnew" } });
     fireEvent.click(screen.getByTestId("statistical-ols-predictor-pfl"));
     fireEvent.click(screen.getByTestId("statistical-ols-context-submit"));

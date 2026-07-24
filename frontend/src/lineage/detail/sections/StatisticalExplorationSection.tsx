@@ -378,13 +378,17 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                 {preview?.status === "ready" && (
                   <fieldset className="statistical-exploration-derived" data-testid="statistical-ols-context">
                     <legend>Use filtered context for OLS</legend>
-                    <label>Outcome <select data-testid="statistical-ols-outcome" value={olsOutcome} onChange={(event) => setOlsOutcome(event.target.value)}>
-                      <option value="">Choose outcome</option>
-                      {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-                    </select></label>
-                    <div>Predictors</div>
-                    {numericColumns.map((column) => (
-                      <label key={column} style={{ marginRight: 8 }}>
+                    <label className="statistical-ols-outcome">
+                      <span>Outcome</span>
+                      <select data-testid="statistical-ols-outcome" value={olsOutcome} onChange={(event) => setOlsOutcome(event.target.value)}>
+                        <option value="">Choose outcome</option>
+                        {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+                      </select>
+                    </label>
+                    <div className="statistical-ols-predictors-label">Predictors</div>
+                    <div data-testid="statistical-ols-predictors" className="statistical-ols-predictors-grid">
+                      {numericColumns.map((column) => (
+                      <label key={column} className="statistical-ols-predictor-option">
                         <input
                           type="checkbox"
                           data-testid={`statistical-ols-predictor-${column}`}
@@ -392,9 +396,10 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                           disabled={column === olsOutcome}
                           onChange={(event) => setOlsPredictors((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))}
                         />
-                        {column}
+                        <span>{column}</span>
                       </label>
-                    ))}
+                      ))}
+                    </div>
                     <button type="button" data-testid="statistical-ols-context-submit" disabled={!olsOutcome || olsPredictors.length === 0 || olsStatus === "creating"} onClick={() => void handleOlsContext()}>
                       {olsStatus === "creating" ? "Creating Draft…" : "Create OLS Draft"}
                     </button>
