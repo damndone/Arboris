@@ -82,7 +82,7 @@ export function AgentCapabilityPopover({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<number | null>(null);
-  const [popoverPosition, setPopoverPosition] = useState({ right: 16, bottom: 16 });
+  const [popoverPosition, setPopoverPosition] = useState({ left: 16, bottom: 16 });
   const hasCatalog = Boolean(
     catalog
       && Array.isArray(catalog.capabilities)
@@ -136,8 +136,14 @@ export function AgentCapabilityPopover({
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
 
+      // Anchor the panel's LEFT edge to the trigger (which lives on the bottom
+      // left) and clamp it inside the viewport, so a left-side trigger never
+      // pushes the panel off the left edge. Fall back to the CSS max width
+      // before the panel has measured itself.
+      const width = popoverRef.current?.offsetWidth || Math.min(390, window.innerWidth - 32);
+      const left = Math.min(Math.max(16, rect.left), Math.max(16, window.innerWidth - width - 16));
       setPopoverPosition({
-        right: Math.max(16, window.innerWidth - rect.right),
+        left,
         bottom: Math.max(16, window.innerHeight - rect.top + 8),
       });
     };
@@ -164,7 +170,8 @@ export function AgentCapabilityPopover({
       onBlur={handleBlur}
       style={{
         position: "fixed",
-        right: `${popoverPosition.right}px`,
+        left: `${popoverPosition.left}px`,
+        right: "auto",
         bottom: `${popoverPosition.bottom}px`,
       }}
     >

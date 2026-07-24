@@ -291,30 +291,39 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           className="run-rail__resizer"
         />
       ) : (
-        <button
-          type="button"
-          className="run-rail__reopen"
-          aria-label="Open run history"
-          title="Open run history"
-          onClick={() => setRailOpen(true)}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 2,
-            width: 28,
-            height: "100%",
-            padding: "10px 0",
-            border: 0,
-            borderRight: "1px solid var(--separator)",
-            background: "var(--bg-card)",
-            color: "var(--label-secondary)",
-            cursor: "pointer",
-            font: "11px var(--font-mono)",
-          }}
-        >
-          ›<span>Runs</span>
-        </button>
+        // Claude-style collapse: the rail fully disappears (no leftover strip);
+        // a single compact icon button floats at the top-left to reopen it.
+        <div style={{ position: "relative", width: 0, flexBasis: 0 }}>
+          <button
+            type="button"
+            className="run-rail__reopen"
+            aria-label="Open run history"
+            title="Show runs"
+            onClick={() => setRailOpen(true)}
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 30,
+              height: 30,
+              padding: 0,
+              border: "1px solid var(--separator)",
+              borderRadius: 8,
+              background: "color-mix(in oklch, var(--bg-card) 92%, transparent)",
+              color: "var(--label-secondary)",
+              cursor: "pointer",
+              zIndex: 5,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+              <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+          </button>
+        </div>
       )}
     </>
   );
