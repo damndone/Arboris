@@ -225,6 +225,64 @@ describe("TableView", () => {
     expect(screen.getByText(/1 chart artifacts loaded · 2 displayed panels/)).toBeInTheDocument();
   });
 
+  it("renders grouped statistical exploration results as a readable table", async () => {
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "statistical_exploration",
+          items: [
+            {
+              artifact_id: "statistical_exploration_years",
+              path: "artifacts/statistical_exploration/statistical_exploration_years.json",
+              artifact_type: "statistical_exploration",
+              step: "statistical_exploration",
+              sha256: "exploration-sha",
+            },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    artifactJsonMock.mockResolvedValue({
+      spec: { operation: "summarize", options: { group_by: "year" } },
+      result: {
+        operation: "summarize",
+        source_row_count: 4110,
+        filtered_row_count: 4110,
+        group_by: "year",
+        groups: [
+          {
+            value: 1998,
+            filtered_row_count: 685,
+            variables: {
+              bdsnew: { obs: 685, mean: 314738.1, std_dev: 120738.7, min: 101015, max: 531075 },
+            },
+          },
+          {
+            value: 2002,
+            filtered_row_count: 685,
+            variables: {
+              bdsnew: { obs: 685, mean: 314738.1, std_dev: 120738.7, min: 101015, max: 531075 },
+            },
+          },
+        ],
+      },
+    });
+
+    renderTable();
+
+    const table = await screen.findByTestId("table-view-statistical-exploration");
+    expect(table).toHaveTextContent("Statistical exploration");
+    expect(table).toHaveTextContent("1998");
+    expect(table).toHaveTextContent("2002");
+    expect(table).toHaveTextContent("bdsnew");
+    expect(table).toHaveTextContent("314738.1");
+    expect(artifactJsonMock).toHaveBeenCalledWith(
+      "/tmp/demo",
+      "run-1",
+      "statistical_exploration_years",
+    );
+  });
+
   it("lists non-figure artifacts with download links", async () => {
     mockArtifacts.current = {
       groups: [

@@ -24,6 +24,7 @@ import { useForest } from "../ForestContext";
 import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   artifactDownloadUrl,
+  fetchArtifactJson,
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
@@ -38,6 +39,7 @@ import {
   ARMA_GARCH_CHART_IDS,
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
+import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -346,6 +348,7 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [explorations, setExplorations] = useState<Array<{ item: ArtifactItem; payload: unknown }>>([]);
   const [artifactGroups, setArtifactGroups] = useState<ArtifactGroup[] | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -364,15 +367,29 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
     setLoading(true);
     setError(null);
     setArtifactGroups(undefined);
+    setExplorations([]);
     Promise.all([
       fetchRunDetail(projectRoot, runId),
       fetchRunArtifacts(projectRoot, runId),
     ])
-      .then(([d, a]) => {
+      .then(async ([d, a]) => {
+        const explorationItems = a.groups
+          .filter((group) => group.artifact_type === "statistical_exploration")
+          .flatMap((group) => group.items);
+        const explorationResults = (await Promise.all(
+          explorationItems.map(async (item) => {
+            try {
+              return { item, payload: await fetchArtifactJson(projectRoot, runId, item.artifact_id) };
+            } catch {
+              return null;
+            }
+          }),
+        )).filter((entry): entry is { item: ArtifactItem; payload: unknown } => entry !== null);
         if (cancelled) return;
         setDetail(d);
         setArtifactGroups(a.groups);
         setArtifacts(a.groups.flatMap((g) => g.items));
+        setExplorations(explorationResults);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -387,7 +404,10 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
 
   const models = detail?.model_results ?? [];
   const figures = artifacts.filter((a) => a.artifact_type === "figure");
-  const otherArtifacts = artifacts.filter((a) => a.artifact_type !== "figure");
+  const loadedExplorationIds = new Set(explorations.map(({ item }) => item.artifact_id));
+  const otherArtifacts = artifacts.filter((a) =>
+    a.artifact_type !== "figure" && !loadedExplorationIds.has(a.artifact_id),
+  );
   const chartArtifactIds = new Set<string>(Object.values(ARMA_GARCH_CHART_IDS));
   const hasArmaGarchChartArtifacts = artifacts.some((artifact) =>
     chartArtifactIds.has(artifact.artifact_id),
@@ -396,6 +416,7 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
     !loading &&
     !error &&
     models.length === 0 &&
+    explorations.length === 0 &&
     figures.length === 0 &&
     otherArtifacts.length === 0;
 
@@ -445,6 +466,10 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
             <CoefficientTable key={m.model_id} model={m} />
           ))}
         </section>
+      )}
+
+      {!loading && !error && explorations.length > 0 && (
+        <StatisticalExplorationTable explorations={explorations} />
       )}
 
       {!loading && !error && figures.length > 0 && (

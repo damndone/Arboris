@@ -156,4 +156,35 @@ describe("StatisticalExplorationSection", () => {
       group_values: [1998, 2002, 2006, 2010, 2014, 2016],
     });
   });
+
+  it("keeps grouped result details out of the right panel", async () => {
+    previewMock.mockResolvedValueOnce({
+      spec: { operation: "summarize" },
+      preview: {
+        status: "ready",
+        fingerprint: "fp-grouped",
+        source_sha256: "sha-1",
+        source_artifact_id: "source_data",
+        result: {
+          filtered_row_count: 4110,
+          groups: [
+            {
+              value: 1998,
+              filtered_row_count: 685,
+              variables: { bdsnew: { obs: 685, mean: 314738.1 } },
+            },
+          ],
+        },
+      },
+    });
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-by"), { target: { value: "year" } });
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-values"), { target: { value: "1998" } });
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+    const result = await screen.findByTestId("statistical-exploration-result");
+    expect(result).toHaveTextContent("1 group");
+    expect(result).not.toHaveTextContent("bdsnew");
+    expect(screen.queryByTestId("statistical-exploration-group-0")).not.toBeInTheDocument();
+  });
 });

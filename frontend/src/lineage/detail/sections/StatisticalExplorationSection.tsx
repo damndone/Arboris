@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { artifactDownloadUrl } from "../../../api";
 import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
+import { useWorkbenchOptional } from "../../../workbench/WorkbenchStateProvider";
 import type { DataColumnCastContext } from "../../dataOperations";
 import { fetchDataColumnCastContext } from "../../dataOperations";
 import type { GraphViewNode } from "../../api/graphViewTypes";
@@ -55,31 +56,18 @@ function filterValue(value: string, column: string, context: DataColumnCastConte
 
 function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) {
   const result = preview.result;
-  const variables = result.variables;
+  const groups = Array.isArray(result.groups) ? result.groups : [];
+  const variableCount = result.variables && typeof result.variables === "object" && !Array.isArray(result.variables)
+    ? Object.keys(result.variables).length
+    : 0;
   return (
     <div data-testid="statistical-exploration-result" style={{ borderTop: "1px solid var(--separator)", paddingTop: 8 }}>
       <strong>Preview</strong>
       <div>Rows after filters: {String(result.filtered_row_count ?? 0)}</div>
       {result.missing_policy && <div>Missing policy: {result.missing_policy}</div>}
-      {Array.isArray(result.groups) ? (
-        result.groups.map((group, index) => (
-          <div key={index} data-testid={`statistical-exploration-group-${index}`}>
-            {String(group.value)} · {String(group.filtered_row_count)} rows
-            {typeof group.variables === "object" && group.variables !== null ? (
-              <div>{Object.entries(group.variables as Record<string, unknown>).map(([name, value]) => (
-                <div key={name}><strong>{name}</strong>: {typeof value === "object" ? JSON.stringify(value) : String(value)}</div>
-              ))}</div>
-            ) : null}
-          </div>
-        ))
-      ) : variables && !Array.isArray(variables) ? (
-        Object.entries(variables).map(([name, value]) => (
-          <div key={name}>
-            <strong>{name}</strong>: {typeof value === "object" ? JSON.stringify(value) : String(value)}
-          </div>
-        ))
-      ) : null}
-      {typeof result.correlation_n === "number" && <div>Correlation N: {result.correlation_n}</div>}
+      {groups.length > 0 && <div>{groups.length} {groups.length === 1 ? "group" : "groups"} · {groups.reduce((total, group) => total + (typeof group.filtered_row_count === "number" ? group.filtered_row_count : 0), 0)} grouped rows</div>}
+      {groups.length === 0 && variableCount > 0 && <div>{variableCount} variables summarized; full result will open in Table.</div>}
+      {Array.isArray(result.matrix) && <div>Correlation matrix · N={String(result.correlation_n ?? "—")}</div>}
     </div>
   );
 }
@@ -114,6 +102,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
   const isDatasetNode = node.kind === "dataset_stage";
   const projectRoot = useProjectRootOptional();
   const resolved = useResolvedNodeOperationContext();
+  const workbench = useWorkbenchOptional();
   const [sourceContext, setSourceContext] = useState<DataColumnCastContext | null>(null);
   const [operation, setOperation] = useState<StatisticalExplorationOperation>("summarize");
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
@@ -125,6 +114,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
   const [olsDraft, setOlsDraft] = useState<StatisticalOlsContextResponse | null>(null);
   const [olsStatus, setOlsStatus] = useState<"idle" | "creating" | "error">("idle");
   const [olsError, setOlsError] = useState<string | null>(null);
+  const [savedExplorationArtifactId, setSavedExplorationArtifactId] = useState<string | null>(null);
   const [groupBy, setGroupBy] = useState("");
   const [groupValues, setGroupValues] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "previewing" | "confirming" | "complete" | "error">("idle");
@@ -145,6 +135,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
     setOlsDraft(null);
     setOlsStatus("idle");
     setOlsError(null);
+    setSavedExplorationArtifactId(null);
     setGroupBy("");
     setGroupValues("");
     setError(null);
@@ -235,6 +226,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
         preview_fingerprint: preview.fingerprint,
       });
       setExports(response.exports ?? []);
+      setSavedExplorationArtifactId(response.exploration.artifact_id);
       setStatus("complete");
     } catch (reason: unknown) {
       setStatus("error");
@@ -424,6 +416,10 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
             {status === "complete" && (
               <>
                 <div data-testid="statistical-exploration-complete">Exploration saved as an artifact.</div>
+                <button type="button" data-testid="statistical-exploration-open-table" onClick={() => workbench?.dispatch.setView("table")}>
+                  Open in Table
+                </button>
+                {savedExplorationArtifactId && <div style={{ color: "var(--label-tertiary)", fontSize: 11 }}>Table artifact: {savedExplorationArtifactId}</div>}
                 {projectRoot && sourceRunId && <ExportLinks projectRoot={projectRoot} runId={sourceRunId} exports={exports} />}
               </>
             )}
