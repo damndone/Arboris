@@ -24,6 +24,7 @@ from .http.notebook_routes import router as notebook_router
 from .http.projects_routes import router as projects_router
 from .http.rerun_routes import router as rerun_router
 from .http.runs_routes import router as runs_router
+from .http.statistical_exploration_routes import router as statistical_exploration_router
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
@@ -50,6 +51,7 @@ def health() -> dict[str, object]:
 
 app.include_router(projects_router)
 app.include_router(runs_router)
+app.include_router(statistical_exploration_router)
 app.include_router(graph_router)
 app.include_router(drafts_router)
 app.include_router(data_operation_router)

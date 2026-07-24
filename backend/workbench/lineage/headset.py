@@ -54,28 +54,48 @@ _PROFILE_CORRELATION_MAX_COLS = 12
 
 
 def _dataset_artifacts(runs_dir: Path, run_id: str, node_id: str) -> list[dict] | None:
-    if node_id == "stage:raw":
+    if node_id in {"stage:raw", "stage:source"}:
+        artifacts: list[dict] = []
         try:
             profile = read_json(runs_dir / run_id / "staged" / "data_profile.json")
         except (FileNotFoundError, OSError, ValueError):
-            return None
-        preview: dict[str, Any] = {
-            "row_count": profile.get("row_count"),
-            "column_count": profile.get("column_count"),
-            "columns": profile.get("columns"),
-        }
-        columns = profile.get("columns") or {}
-        if len(columns) <= _PROFILE_CORRELATION_MAX_COLS and profile.get("correlations"):
-            preview["correlations"] = profile["correlations"]
-        return [{
-            "name": "data_profile.json",
-            "mime": "application/json",
-            "summary": {
+            profile = None
+        if profile is not None:
+            preview: dict[str, Any] = {
                 "row_count": profile.get("row_count"),
                 "column_count": profile.get("column_count"),
-            },
-            "preview": preview,
-        }]
+                "columns": profile.get("columns"),
+            }
+            columns = profile.get("columns") or {}
+            if len(columns) <= _PROFILE_CORRELATION_MAX_COLS and profile.get("correlations"):
+                preview["correlations"] = profile["correlations"]
+            artifacts.append({
+                "name": "data_profile.json",
+                "mime": "application/json",
+                "summary": {
+                    "row_count": profile.get("row_count"),
+                    "column_count": profile.get("column_count"),
+                },
+                "preview": preview,
+            })
+        try:
+            index = read_json(runs_dir / run_id / "artifacts_index.json")
+        except (FileNotFoundError, OSError, ValueError):
+            index = {}
+        for record in index.get("artifacts", []):
+            if not isinstance(record, dict) or record.get("artifact_type") != "statistical_exploration":
+                continue
+            artifact_id = record.get("artifact_id")
+            if not isinstance(artifact_id, str):
+                continue
+            artifacts.append({
+                "name": artifact_id,
+                "artifact_id": artifact_id,
+                "mime": "application/json",
+                "sha256": record.get("sha256"),
+                "summary": {"artifact_type": "statistical_exploration"},
+            })
+        return artifacts or None
     if node_id == "stage:cleaned":
         try:
             actions = read_json(runs_dir / run_id / "processed" / "cleaning_actions.json")

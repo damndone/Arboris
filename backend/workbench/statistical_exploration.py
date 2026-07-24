@@ -10,9 +10,18 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar, Mapping
 
 import pandas as pd
+
+from .artifacts import (
+    read_json,
+    register_artifact,
+    sha256_file,
+    write_json,
+    write_text_durable,
+)
 
 
 SCHEMA_VERSION = "statistical-exploration.v1"
@@ -197,6 +206,121 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
     raise StatisticalExplorationValidationError(
         f"exploration operation is not implemented: {spec.operation}"
     )
+
+
+def resolve_statistical_source(
+    project_root: Path | str,
+    *,
+    source_run_id: str,
+    source_node_id: str,
+    source_artifact_id: str,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Resolve a dataset node through the existing data-operation binding."""
+    from .data_operations import _read_frame, resolve_data_column_cast_context
+
+    context = resolve_data_column_cast_context(
+        project_root,
+        source_run_id=source_run_id,
+        source_node_id=source_node_id,
+    )
+    if context["source_artifact_id"] != source_artifact_id:
+        raise StatisticalExplorationValidationError(
+            "source artifact is not owned by the selected dataset node"
+        )
+    root = Path(project_root).expanduser().resolve()
+    source_path = root / "runs" / source_run_id / context["source_artifact_path"]
+    return context, _read_frame(source_path)
+
+
+def persist_exploration(
+    project_root: Path | str,
+    *,
+    source_run_id: str,
+    source_artifact_id: str,
+    source_sha256: str,
+    spec: ExplorationSpec,
+    result: dict[str, Any],
+    fingerprint: str,
+) -> dict[str, Any]:
+    """Write one idempotent result and transcript pair into the source run."""
+    root = Path(project_root).expanduser().resolve()
+    run_root = root / "runs" / source_run_id
+    result_rel = f"artifacts/statistical_exploration/{fingerprint}.json"
+    transcript_rel = f"artifacts/statistical_exploration/{fingerprint}.txt"
+    result_path = run_root / result_rel
+    transcript_path = run_root / transcript_rel
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(
+        result_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "fingerprint": fingerprint,
+            "source_artifact_id": source_artifact_id,
+            "source_sha256": source_sha256,
+            "spec": spec.to_dict(),
+            "result": result,
+        },
+    )
+    artifact_id = f"statistical_exploration_{fingerprint[:24]}"
+    transcript_artifact_id = f"statistical_exploration_transcript_{fingerprint[:24]}"
+    transcript = "\n".join(
+        [
+            "# Statistical exploration transcript",
+            f"source_artifact_id: {source_artifact_id}",
+            f"source_sha256: {source_sha256}",
+            f"operation: {spec.operation}",
+            f"filters: {json.dumps(spec.to_dict()['filters'], ensure_ascii=False, sort_keys=True)}",
+            f"filtered_row_count: {result.get('filtered_row_count')}",
+            f"result_artifact_id: {artifact_id}",
+        ]
+    ) + "\n"
+    write_text_durable(transcript_path, transcript)
+    _ensure_exploration_artifact(
+        run_root,
+        artifact_id=artifact_id,
+        path=result_path,
+        artifact_type="statistical_exploration",
+        step="statistical_exploration",
+        inputs=[source_artifact_id],
+    )
+    _ensure_exploration_artifact(
+        run_root,
+        artifact_id=transcript_artifact_id,
+        path=transcript_path,
+        artifact_type="transcript",
+        step="statistical_exploration",
+        inputs=[artifact_id],
+    )
+    return {
+        "artifact_id": artifact_id,
+        "path": result_rel,
+        "transcript_artifact_id": transcript_artifact_id,
+        "transcript_path": transcript_rel,
+        "fingerprint": fingerprint,
+        "source_sha256": source_sha256,
+    }
+
+
+def _ensure_exploration_artifact(
+    run_root: Path,
+    *,
+    artifact_id: str,
+    path: Path,
+    artifact_type: str,
+    step: str,
+    inputs: list[str],
+) -> None:
+    index_path = run_root / "artifacts_index.json"
+    index = read_json(index_path)
+    records = [item for item in index.get("artifacts", []) if item.get("artifact_id") == artifact_id]
+    digest = sha256_file(path)
+    if records:
+        if len(records) != 1 or records[0].get("sha256") != digest:
+            raise StatisticalExplorationValidationError(
+                "statistical exploration artifact binding is not deterministic"
+            )
+        return
+    register_artifact(run_root, artifact_id, path, artifact_type, step, inputs)
 
 
 def _validate_frame(frame: Any) -> None:
