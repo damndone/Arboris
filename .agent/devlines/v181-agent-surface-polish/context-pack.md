@@ -54,8 +54,8 @@ execution boundaries.
   browser acceptance all pass.
 
 ## Boundary
-- Affected paths: `frontend/src/workbench/views/GraphView.tsx`
-- Allowed paths: `frontend/src/workbench/views/GraphView.tsx`
+- Affected paths: `docs/releases/v1.8.1-release-notes.md`
+- Allowed paths: `docs/releases/v1.8.1-release-notes.md`
 - Protected paths: none
 - Dependencies: none
 - Tests: `cd frontend && npm test -- --run src/workbench/agent src/report/markdown.test.tsx src/lineage/graph/GraphCanvas.test.tsx`, `cd frontend && npm run typecheck`

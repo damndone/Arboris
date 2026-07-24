@@ -1,0 +1,40 @@
+{
+  "release_version": "v1.8.1",
+  "release_branch": "integration/v1.8.1",
+  "release_candidate_commit": "ecf2aa07c117fca98e513b2cf6424ec9c49075ce",
+  "scope": {
+    "primary_feature": "Graph-first Agent Notebook with typed AnalysisOptions and selected-text actions",
+    "selected_text_actions": ["add_to_task", "more_details", "side_chat"],
+    "correctness_foundations": ["RunFamily identity", "bounded Context Compiler", "Core Agent Trace v1"],
+    "model_surface": ["time_series.arma_garch", "time_series.ets"]
+  },
+  "gate": {
+    "command": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 bash scripts/gate.sh --full",
+    "host": "normal macOS host permission with no development server listening",
+    "status": "passed",
+    "backend": {"passed": 3484, "skipped": 8, "xfail": 1},
+    "golden_invariants_snapshot": {"passed": 23, "drift": 0},
+    "frontend": {"test_files": 158, "passed": 1395},
+    "typecheck": "passed"
+  },
+  "browser_evidence": {
+    "surface": "Codex in-app browser",
+    "project_fixture": "wb-v181-vixcls",
+    "verified": [
+      "persisted Graph to Notebook projection",
+      "typed option batches with evidence references",
+      "stale options are visibly blocked",
+      "materialized Draft is visible and links back to Graph",
+      "bounded What the agent saw context with omitted sections"
+    ],
+    "not_claimed": [
+      "native mouse drag selection was not independently captured because the in-app automation coordinate API could not reliably target the text selection gesture"
+    ]
+  },
+  "release_notes": "docs/releases/v1.8.1-release-notes.md",
+  "publication": {
+    "pr": "to be recorded after creation",
+    "merge_commit": "to be recorded after merge",
+    "tag": "v1.8.1"
+  }
+}
