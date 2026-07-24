@@ -919,3 +919,67 @@
     transition: none;
   }
 }
+
+/* Context usage ring (Codex-style hollow indicator). Fixed size; the progress
+   arc is the only thing that moves, animated so it never jumps. Details live in
+   the hover tooltip, not inline. */
+.wb-context-ring {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  cursor: default;
+  outline: none;
+}
+.wb-context-ring-track {
+  stroke: color-mix(in oklch, var(--label-secondary) 24%, transparent);
+}
+.wb-context-ring-progress {
+  stroke: color-mix(in oklch, var(--tint) 88%, var(--label));
+  transition: stroke-dashoffset 200ms ease-out, stroke 200ms ease-out;
+}
+.wb-context-ring[data-level="warning"] .wb-context-ring-progress {
+  stroke: color-mix(in oklch, #e8a13a 92%, var(--label));
+}
+.wb-context-ring[data-level="danger"] .wb-context-ring-progress {
+  stroke: color-mix(in oklch, #e5484d 94%, var(--label));
+}
+.wb-context-ring:focus-visible {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 40%, transparent);
+}
+.wb-context-ring-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 1000;
+  min-width: 168px;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 97%, transparent);
+  color: var(--label-secondary);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.wb-context-ring-tooltip-head {
+  color: var(--label);
+  margin-bottom: 4px;
+}
+.wb-context-ring-tooltip dl {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+}
+.wb-context-ring-tooltip dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.wb-context-ring-tooltip dt { color: var(--label-secondary); }
+.wb-context-ring-tooltip dd { margin: 0; color: var(--label); font-variant-numeric: tabular-nums; }

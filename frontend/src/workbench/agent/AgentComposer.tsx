@@ -1,6 +1,7 @@
-import { useRef, useState, type CSSProperties, type FocusEvent } from "react";
+import { useRef } from "react";
 import { useAgentSurfaceOptional } from "./AgentSurfaceContext";
 import { AgentCapabilityPopover } from "./AgentCapabilityPopover";
+import { ContextUsageRing } from "./ContextUsageRing";
 import "./agent.css";
 
 export function AgentComposer({
@@ -25,11 +26,9 @@ function AgentComposerContent({
   showScope: boolean;
   variant: "graph" | "terminal";
 }) {
-  const [contextOpen, setContextOpen] = useState(false);
   const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   const {
-    contextPercent,
     contextUsedTokens,
     contextWindowTokens,
     error,
@@ -44,34 +43,9 @@ function AgentComposerContent({
     setModel,
     setPrompt,
   } = agent;
-  const contextCapacityLabel = contextWindowTokens === null
-    ? "unknown capacity"
-    : contextWindowTokens.toLocaleString();
-  const contextLabel = contextWindowTokens === null
-    ? `Context estimate ${contextUsedTokens.toLocaleString()} tokens / capacity unavailable`
-    : `Context estimate ${contextUsedTokens.toLocaleString()} used / ${contextCapacityLabel} total tokens`;
-  const ringPercent = contextPercent ?? 0;
-  const ringStyle = {
-    "--agent-ring-progress": `${ringPercent}%`,
-    aspectRatio: "1 / 1",
-    width: "30px",
-    height: "30px",
-    minWidth: "30px",
-    minHeight: "30px",
-  } as CSSProperties;
   const remainingTokens = contextWindowTokens === null
-    ? null
+    ? 0
     : Math.max(0, contextWindowTokens - contextUsedTokens);
-  const contextSummary = contextWindowTokens === null
-    ? `~${contextUsedTokens.toLocaleString()} used · total unavailable`
-    : `~${contextUsedTokens.toLocaleString()} used · ${remainingTokens!.toLocaleString()} remaining / ${contextWindowTokens.toLocaleString()} total`;
-
-  const closeContextOnBlur = (event: FocusEvent<HTMLDivElement>) => {
-    const next = event.relatedTarget;
-    if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
-      setContextOpen(false);
-    }
-  };
 
   return (
     <div
@@ -125,53 +99,13 @@ function AgentComposerContent({
           {showScope && <span className="wb-agent-composer-scope" title={scopeLabel}>{scopeLabel}</span>}
         </div>
         <div className="wb-agent-composer-actions-right">
-          <div
-            className="wb-agent-context-control"
-            onMouseEnter={() => setContextOpen(true)}
-            onMouseLeave={() => setContextOpen(false)}
-            onFocusCapture={() => setContextOpen(true)}
-            onBlurCapture={closeContextOnBlur}
-          >
-            <button
-              type="button"
-              aria-label={contextLabel}
-              aria-haspopup="dialog"
-              aria-expanded={contextOpen}
-              aria-valuemin={contextWindowTokens === null ? undefined : 0}
-              aria-valuemax={contextWindowTokens ?? undefined}
-              aria-valuenow={contextWindowTokens === null ? undefined : Math.min(contextWindowTokens, contextUsedTokens)}
-              data-testid="agent-context-ring"
-              title={contextLabel}
-              className="wb-agent-ring"
-              style={ringStyle}
-              onClick={() => setContextOpen(true)}
-            >
-              <span aria-hidden="true">
-                {contextPercent === null ? "?" : `${Math.round(contextPercent)}%`}
-              </span>
-            </button>
-            {contextOpen && (
-              <div
-                role="dialog"
-                aria-label="Agent context details"
-                data-testid="agent-context-popover"
-                className="wb-agent-context-popover"
-              >
-                <strong>Context window</strong>
-                <div>{contextUsedTokens.toLocaleString()} tokens used</div>
-                <div>{contextWindowTokens === null ? "Capacity unavailable" : `${contextWindowTokens.toLocaleString()} tokens capacity`}</div>
-                <div>{remainingTokens === null ? "Remaining: unknown" : `Remaining: ${remainingTokens.toLocaleString()} tokens`}</div>
-                <div className="wb-agent-context-popover-model">Model: {model}</div>
-              </div>
-            )}
-            <span
-              data-testid="agent-context-summary"
-              className="wb-agent-context-summary"
-              title={contextLabel}
-            >
-              {contextSummary}
-            </span>
-          </div>
+          <ContextUsageRing
+            used={contextUsedTokens}
+            remaining={remainingTokens}
+            total={contextWindowTokens}
+            size={20}
+            strokeWidth={2}
+          />
           <label className="wb-agent-model-control">
             <span className="wb-agent-visually-hidden">Model</span>
             <select

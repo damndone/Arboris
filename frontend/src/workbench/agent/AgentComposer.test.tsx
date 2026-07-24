@@ -55,7 +55,7 @@ describe("AgentComposer", () => {
 
     expect(screen.getByTestId("agent-composer")).toBeInTheDocument();
     expect(screen.getByTestId("agent-context-ring")).toHaveAccessibleName(
-      /2,048.*32,000/i,
+      /29,952 tokens remaining out of 32,000/i,
     );
     expect(screen.getByRole("listbox", { name: "Agent model" })).toHaveValue(
       "deepseek-v4-flash",
@@ -147,47 +147,35 @@ describe("AgentComposer", () => {
     expect(screen.getByRole("button", { name: "Send to Agent" })).toBeDisabled();
   });
 
-  it("opens a usable context popover from a true circular control", () => {
+  it("renders a hollow ring whose progress arc uses a round linecap and does not resize", () => {
     mount(value());
 
     const ring = screen.getByTestId("agent-context-ring");
-    expect(ring).toHaveAttribute("aria-haspopup", "dialog");
-    expect(ring).toHaveAttribute("aria-expanded", "false");
-    expect(ring).toHaveStyle({ aspectRatio: "1 / 1" });
-    expect(ring).toHaveStyle({
-      width: "30px",
-      height: "30px",
-      minWidth: "30px",
-      minHeight: "30px",
-    });
-
-    fireEvent.click(ring);
-
-    expect(ring).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByTestId("agent-context-popover")).toHaveTextContent("2,048");
-    expect(screen.getByTestId("agent-context-popover")).toHaveTextContent("32,000");
-    expect(screen.getByTestId("agent-context-popover")).toHaveTextContent(/remaining/i);
+    const progress = ring.querySelector(".wb-context-ring-progress") as SVGCircleElement;
+    // Hollow ring, not a filled pie: the arc is a stroked circle with no fill.
+    expect(progress).toHaveAttribute("fill", "none");
+    expect(progress).toHaveAttribute("stroke-linecap", "round");
+    // Fixed geometry -> the SVG box is constant regardless of progress.
+    expect(ring.querySelector("svg")).toHaveAttribute("width", "20");
+    expect(ring.querySelector("svg")).toHaveAttribute("height", "20");
   });
 
-  it("opens context details on hover and closes them when the pointer leaves", () => {
+  it("reveals used / remaining / total only in a hover tooltip, not inline", () => {
     mount(value());
+
+    // No always-on summary text beside the ring anymore.
+    expect(screen.queryByTestId("agent-context-summary")).not.toBeInTheDocument();
 
     const ring = screen.getByTestId("agent-context-ring");
-    const control = ring.parentElement as HTMLElement;
-    fireEvent.mouseEnter(control);
-    expect(screen.getByTestId("agent-context-popover")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-context-tooltip")).not.toBeInTheDocument();
 
-    fireEvent.mouseLeave(control);
-    expect(screen.queryByTestId("agent-context-popover")).not.toBeInTheDocument();
-  });
+    fireEvent.mouseEnter(ring);
+    const tooltip = screen.getByTestId("agent-context-tooltip");
+    expect(tooltip).toHaveTextContent("2,048"); // used
+    expect(tooltip).toHaveTextContent("29,952"); // remaining
+    expect(tooltip).toHaveTextContent("32,000"); // total
 
-  it("shows remaining and total context beside the ring without requiring a click", () => {
-    mount(value());
-
-    const summary = screen.getByTestId("agent-context-summary");
-    expect(summary).toHaveTextContent("29,952");
-    expect(summary).toHaveTextContent("32,000");
-    expect(summary).toHaveTextContent(/remaining/i);
-    expect(screen.getByTestId("agent-context-ring")).toHaveAttribute("aria-valuemax", "32000");
+    fireEvent.mouseLeave(ring);
+    expect(screen.queryByTestId("agent-context-tooltip")).not.toBeInTheDocument();
   });
 });
