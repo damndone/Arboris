@@ -525,14 +525,18 @@ def _result_table_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
             row: dict[str, Any] = {"variable": str(name)}
             if isinstance(values, Mapping):
                 for key, value in values.items():
-                    row[str(key)] = value if isinstance(value, (str, int, float, bool)) or value is None else json.dumps(value, ensure_ascii=False, sort_keys=True)
+                    row[str(key)] = _table_cell(value)
             else:
-                row["value"] = values
+                row["value"] = _table_cell(values)
             rows.append(row)
         return rows
     groups = result.get("groups")
     if isinstance(groups, list):
-        return [dict(item) for item in groups if isinstance(item, Mapping)]
+        return [
+            {str(key): _table_cell(value) for key, value in item.items()}
+            for item in groups
+            if isinstance(item, Mapping)
+        ]
     matrix = result.get("matrix")
     if isinstance(matrix, list):
         return [
@@ -546,6 +550,12 @@ def _result_table_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
             "correlation_n": result.get("correlation_n"),
         }
     ]
+
+
+def _table_cell(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _exploration_tables(result: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:

@@ -6,6 +6,9 @@ from pathlib import Path
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from workbench.artifacts import sha256_file, write_json
+from workbench.graph_model import BranchRef, Graph, Node, NodeKind, Stage
+from workbench.graph_store import GraphStore
 from tests.test_data_column_cast import _source_project
 from workbench.app import app
 from workbench.lineage.headset import _dataset_artifacts
@@ -22,6 +25,118 @@ def _request(run_id: str, artifact_id: str) -> dict:
             {"column": "year", "operator": "eq", "value": 1998},
             {"column": "middle", "operator": "eq", "value": 0},
         ],
+    }
+
+
+def _raw_stage_project(tmp_path: Path, frame: pd.DataFrame) -> tuple[Path, str, str]:
+    project = tmp_path / "raw-project"
+    run_id = "run_raw"
+    run_root = project / "runs" / run_id
+    raw_dir = run_root / "raw_snapshot"
+    raw_dir.mkdir(parents=True)
+    raw_path = raw_dir / "newschool9816.csv"
+    frame.to_csv(raw_path, index=False)
+    artifact_id = "raw_newschool9816.csv"
+    write_json(
+        run_root / "artifacts_index.json",
+        {
+            "schema_version": 1,
+            "artifacts": [
+                {
+                    "artifact_id": artifact_id,
+                    "path": "raw_snapshot/newschool9816.csv",
+                    "artifact_type": "raw_data",
+                    "step": "ingestion",
+                    "sha256": sha256_file(raw_path),
+                    "inputs": [],
+                }
+            ],
+        },
+    )
+    node = Node(
+        id="stage:raw",
+        kind=NodeKind.DATASET_STAGE,
+        display_label="Raw input data",
+        created_at="2026-07-24T00:00:00+00:00",
+        parent_stage_id=None,
+        branch_id="main",
+        payload_ref=None,
+        summary=f"Raw: {len(frame)} rows",
+        stage=Stage.SOURCE,
+    )
+    GraphStore(project / "runs").write(
+        Graph(
+            schema_version=3,
+            run_id=run_id,
+            nodes={node.id: node},
+            edges={},
+            branches={"main": BranchRef("main", None, (node.id,))},
+        )
+    )
+    return project, run_id, artifact_id
+
+
+def test_statistical_exploration_preview_resolves_raw_stage_without_payload_ref(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _raw_stage_project(
+        tmp_path,
+        pd.DataFrame({"year": [1998, 2002], "bdsnew": [101015, 531075]}),
+    )
+
+    response = TestClient(app).post(
+        "/statistical-explorations/preview",
+        params={"project_root": str(project)},
+        json={
+            "source_run_id": run_id,
+            "source_node_id": "stage:raw",
+            "source_artifact_id": artifact_id,
+            "operation": "summarize",
+            "selected_columns": ["bdsnew"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["preview"]["result"]["filtered_row_count"] == 2
+
+
+def test_grouped_statistical_exploration_confirm_exports_nested_rows_as_json(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "year": [1998, 1998, 2002],
+                "bdsnew": [101015, 531075, 250000],
+                "pfl": [6.3, 96.5, 25.0],
+            }
+        ),
+    )
+    request = {
+        **_request(run_id, artifact_id),
+        "selected_columns": ["bdsnew", "pfl"],
+        "filters": [],
+        "options": {"group_by": "year", "group_values": [1998, 2002]},
+    }
+
+    with TestClient(app) as client:
+        preview = client.post(
+            "/statistical-explorations/preview",
+            params={"project_root": str(project)},
+            json=request,
+        ).json()["preview"]
+        response = client.post(
+            "/statistical-explorations/confirm",
+            params={"project_root": str(project)},
+            json={**request, "preview_fingerprint": preview["fingerprint"]},
+        )
+
+    assert response.status_code == 200, response.text
+    assert {item["format"] for item in response.json()["exports"]} == {
+        "html",
+        "pdf",
+        "xlsx",
     }
 
 
