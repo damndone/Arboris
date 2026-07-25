@@ -6,7 +6,7 @@
 
 ## Final status
 
-STARTED
+CLOSED
 
 ## Metrics
 
@@ -19,7 +19,7 @@ STARTED
 - Plan churn: N/A (sample=0)
 - Gate waste rate: N/A (sample=0)
 - Same-state retry rate: N/A (sample=0)
-- Token waste: N/A (sample=0)
+- Token waste: N/A (sample=0; coverage=0/1)
 
 ## All failures
 
@@ -35,11 +35,11 @@ STARTED
 
 ## All waste
 
-- None recorded.
+- #2 2026-07-25T22:00:21.776Z `cli_flag_mismatch`; cause_status: `known`; cause: The first replacement-line start command reused rescope-context spelling and passed --allow-path, while start requires --allowed-path.; resolution: `resolved`; lesson: Read each subcommand help independently because start uses --allowed-path while rescope-context uses --allow-path.
 
 ## Root causes and solutions
 
-- None recorded.
+- `devline-subcommand-flag-spelling`: occurrences=1; cause_status: `known`; root cause: The first replacement-line start command reused rescope-context spelling and passed --allow-path, while start requires --allowed-path.; solution: `resolved`
 
 ## Added tests
 
@@ -47,12 +47,16 @@ STARTED
 
 ## New rules
 
-- No rule candidate recorded.
+- `devline-subcommand-flag-spelling`: line experience occurrence(s)=1
 
 ## Future guidance
 
-- No guidance recorded.
+- Keep a narrow foundation line stable and point later product orchestration to a separate authoritative scope map.
+- Read each subcommand help independently because start uses --allowed-path while rescope-context uses --allow-path.
 
 ## Event index
 
 - #1: `b0bf5358-a7ea-4c08-9d96-1947c11528a5` | 2026-07-25T21:59:56.699Z | STATE_CHANGE/line_started | incident=`7de8ab30-1e51-4e24-ae6f-9401fd1fdc26` | lesson_key=`frozen-context-before-start` | event_sha256=`480101f0be9646c1ed0f9af96701e7497c0a8e8b74caca3f45d88201e7139cee`
+- #2: `49ba3635-8d14-4167-aed1-64eb2d997ac3` | 2026-07-25T22:00:21.776Z | WASTE/cli_flag_mismatch | incident=`8d9c73ad-1053-437a-bd12-bbc69b588df6` | lesson_key=`devline-subcommand-flag-spelling` | event_sha256=`08dd33ea409613cac8c55f164d104bd9b24f6e21177cb925a69cd487c1b2276a`
+- #3: `fe3441b2-5481-4088-b11d-def658c5a18b` | 2026-07-25T23:02:02.000Z | REVIEW/upstream_scope_positioned | incident=`d92dbdee-0640-452f-bb88-4126e42df546` | lesson_key=`b0-upstream-scope-linkage` | event_sha256=`7f7d61323f76ca515a80519d7a989312fcf07091f2d86c631959bb9a99fc11f6`
+- #4: `81f83858-c19a-45d8-bd43-9ab5a5ce6a9e` | 2026-07-25T23:12:28.000Z | STATE_CHANGE/superseded_by_new_baseline | incident=`7bd92818-5aca-4c6c-b97e-412e81ebb485` | lesson_key=`new-baseline-requires-new-implementation-line` | event_sha256=`1dcb40d6c151243331b7eca8df6eddbe1c381c11cce61c86f91f118ec1e219c1`
