@@ -14,7 +14,7 @@ from workbench.statistical_exploration import (
 )
 
 
-FIXTURE = Path(__file__).parent / "fixtures" / "statistical_exploration" / "class3.csv"
+FIXTURE = Path(__file__).parent / "fixtures" / "statistical_exploration" / "school_panel.csv"
 
 
 def _frame() -> pd.DataFrame:

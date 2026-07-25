@@ -1,4 +1,4 @@
-"""Server-owned compilation and execution contracts for Class 3 workflows."""
+"""Server-owned compilation and execution contracts for step workflows."""
 
 from __future__ import annotations
 
@@ -11,16 +11,12 @@ from typing import Any, Mapping
 from ..exploration_log import ExplorationLog
 from .operations import OperationValidationError
 from .storage import append_jsonl_atomic, read_jsonl
-from .workflow_contracts import (
-    validate_workflow_steps,
-    CLASS3_GROUP_VALUES,
-    CLASS3_WORKFLOW_TEMPLATE,
-    compile_step_bindings,
-)
+from .workflow_contracts import WORKFLOW_TEMPLATE, validate_workflow_steps
 
 
-WORKFLOW_SCHEMA_VERSION = "class3-workflow.v1"
-_THRESHOLD_REF = {"step_id": "step-4", "artifact_role": "result"}
+# Written into every plan and state record. Nothing compares it on read, so
+# older records keep their previous value; it is metadata, not a gate.
+WORKFLOW_SCHEMA_VERSION = "workflow.v1"
 
 
 def _canonical(value: Any) -> str:
@@ -454,284 +450,17 @@ def compile_workflow(
     )
 
 
-def compile_class3_workflow(
-    *,
-    workflow_id: str,
-    target: Mapping[str, Any],
-    preconditions: Mapping[str, Any],
-    bindings: Mapping[str, Any],
-    available_columns: list[str] | tuple[str, ...] | None = None,
-    group_value_witness: list[Any] | tuple[Any, ...] | None = None,
-) -> WorkflowDraft:
-    """Compile the Stata-semantics template from typed source bindings.
-
-    The grouping values come from the proposal and are checked against the real
-    column contents, so the same template serves any panel rather than only the
-    reference exercise's years.
-    """
-
-    if not isinstance(workflow_id, str) or not workflow_id.strip():
-        raise OperationValidationError("workflow_id must be a non-empty string")
-    required_target = {"run_id", "node_ref", "artifact_id"}
-    missing_target = {key for key in required_target if not target.get(key)}
-    if missing_target:
-        raise OperationValidationError(
-            "workflow target missing: " + ", ".join(sorted(missing_target))
-        )
-    if not preconditions.get("context_fingerprint"):
-        raise OperationValidationError("workflow source context_fingerprint is required")
-    bound = compile_step_bindings(
-        bindings,
-        available_columns=available_columns,
-        group_value_witness=group_value_witness,
-    )
-    source_artifact_fingerprint = str(
-        preconditions.get("source_artifact_fingerprint")
-        or preconditions["context_fingerprint"]
-    )
-
-    def make_step(**kwargs):
-        step_kwargs = dict(kwargs)
-        raw_spec = dict(step_kwargs.pop("spec"))
-        return _make_step(
-            **step_kwargs,
-            spec={
-                **raw_spec,
-                "source_artifact_fingerprint": source_artifact_fingerprint,
-            },
-        )
-
-    year = bound["year_column"]
-    spending = bound["spending_column"]
-    black = bound["black_column"]
-    poverty = bound["poverty_column"]
-    enrollment = bound["enrollment_column"]
-    numeric = list(bound["all_numeric_columns"])
-    groups = list(bound["group_values"])
-
-    step1 = make_step(
-        step_id="step-1",
-        operation_id="statistical.explore",
-        depends_on=(),
-        spec={
-            "operation": "summarize",
-            "selected_columns": numeric,
-            "filters": [],
-            "options": {"group_by": year, "group_values": groups},
-            "missing_policy": "variablewise",
-        },
-        expected_artifacts=("table.grouped_descriptive_statistics",),
-    )
-    step2 = make_step(
-        step_id="step-2",
-        operation_id="statistical.explore",
-        depends_on=(),
-        spec={
-            "operation": "misstable",
-            "selected_columns": numeric,
-            "filters": [],
-            "options": {},
-            "missing_policy": "variablewise",
-        },
-        expected_artifacts=("table.missingness",),
-    )
-    step3 = make_step(
-        step_id="step-3",
-        operation_id="statistical.explore",
-        depends_on=(),
-        spec={
-            "operation": "corr",
-            "selected_columns": numeric,
-            "filters": [],
-            "options": {"missing_policy": "listwise"},
-            "missing_policy": "listwise",
-        },
-        expected_artifacts=("table.correlation_matrix",),
-    )
-    step4 = make_step(
-        step_id="step-4",
-        operation_id="statistical.explore",
-        depends_on=(),
-        spec={
-            "operation": "summarize_detail",
-            "selected_columns": [enrollment, poverty],
-            "filters": [],
-            "options": {
-                "quantile_method": "stata_summarize_detail_v1",
-                "percentiles": [1, 5, 10, 25, 50, 75, 90, 95, 99],
-            },
-            "missing_policy": "variablewise",
-        },
-        expected_artifacts=("table.detailed_descriptive_statistics",),
-    )
-    recipes = (
-        {
-            "source_column": enrollment,
-            "percentile": 25,
-            "comparison": "lte",
-            "output_name": "small_school",
-            "threshold_ref": dict(_THRESHOLD_REF),
-        },
-        {
-            "source_column": enrollment,
-            "percentile": 75,
-            "comparison": "gte",
-            "output_name": "large_school",
-            "threshold_ref": dict(_THRESHOLD_REF),
-        },
-        {
-            "source_column": poverty,
-            "percentile": 75,
-            "comparison": "gte",
-            "output_name": "poor_school",
-            "threshold_ref": dict(_THRESHOLD_REF),
-        },
-        {
-            "source_column": poverty,
-            "percentile": 25,
-            "comparison": "lte",
-            "output_name": "least_poor_school",
-            "threshold_ref": dict(_THRESHOLD_REF),
-        },
-    )
-    step5 = make_step(
-        step_id="step-5",
-        operation_id="statistical.derive_boolean",
-        depends_on=(step4,),
-        spec={
-            "operation": "derive_boolean",
-            "quantile_method": "stata_summarize_detail_v1",
-            "recipes": list(recipes),
-            "threshold_source": dict(_THRESHOLD_REF),
-        },
-        expected_artifacts=("derived_data.grouping_booleans", "recipe.boolean_groups"),
-    )
-    step6 = make_step(
-        step_id="step-6",
-        operation_id="statistical.derived_group_summarize",
-        # The derived columns come from step5; the thresholds that define them
-        # come from step4. Both are real dependencies, so both are declared —
-        # the runtime resolves percentile evidence through depends_on.
-        depends_on=(step5, step4),
-        spec={
-            # Self-describing: the runtime summarises exactly these groups over
-            # exactly these columns. Nothing about which groups exist, or what
-            # they are called, lives in the executor any more.
-            "groups": [
-                {
-                    "source_column": recipe["source_column"],
-                    "percentile": recipe["percentile"],
-                    "comparison": recipe["comparison"],
-                    "output_name": recipe["output_name"],
-                }
-                for recipe in recipes
-            ],
-            "summarize_columns": [spending],
-            "missing_policy": "variablewise",
-        },
-        expected_artifacts=("table.grouped_spending_statistics",),
-    )
-    scatter_specs = [
-        {"x_column": poverty, "y_column": spending},
-        {"x_column": enrollment, "y_column": spending},
-    ]
-    step7 = make_step(
-        step_id="step-7",
-        operation_id="statistical.explore",
-        depends_on=(),
-        spec={
-            "operation": "scatter",
-            "plots": scatter_specs,
-            "missing_policy": "complete_case_for_plot",
-        },
-        expected_artifacts=("figure.spending_vs_poverty", "figure.spending_vs_enrollment"),
-    )
-    step8 = make_step(
-        step_id="step-8",
-        operation_id="model.genesis",
-        depends_on=(step1, step2, step3, step4, step5, step6, step7),
-        spec={
-            "model_family": "ols",
-            "covariance": "unadjusted",
-            "branches": [
-                {
-                    "branch_id": "ols_pblack",
-                    "outcome": spending,
-                    "predictors": [black],
-                    "covariance": "unadjusted",
-                },
-                {
-                    "branch_id": "ols_pblack_pfl",
-                    "outcome": spending,
-                    "predictors": [black, poverty],
-                    "covariance": "unadjusted",
-                },
-            ],
-            "expected_artifacts": [
-                "coefficient_ci",
-                "sample_size",
-                "residual_diagnostics",
-                "fitted_diagnostics",
-            ],
-        },
-        expected_artifacts=(
-            "model.ols_pblack",
-            "model.ols_pblack_pfl",
-            "model.coefficient_ci",
-            "coefficient_ci",
-            "sample_size",
-            "residual_diagnostics",
-            "fitted_diagnostics",
-            "model.sample_size",
-            "figure.residuals_vs_poverty",
-            "figure.residuals_vs_black",
-            "figure.fitted_vs_poverty",
-        ),
-    )
-    step9 = make_step(
-        step_id="step-9",
-        operation_id="report.class3",
-        depends_on=(step1, step2, step3, step4, step5, step6, step7, step8),
-        spec={
-            "report_contract": "class3-complete-v1",
-            "required_steps": [f"step-{index}" for index in range(1, 9)],
-            "formats": ["html", "pdf", "xlsx"],
-            "complete_only": True,
-        },
-        expected_artifacts=("report.class3.html", "report.class3.pdf", "report.class3.xlsx"),
-    )
-    steps = (step1, step2, step3, step4, step5, step6, step7, step8, step9)
-    plan_identity = {
-        "schema_version": WORKFLOW_SCHEMA_VERSION,
-        "workflow_id": workflow_id,
-        "workflow_template": CLASS3_WORKFLOW_TEMPLATE,
-        "target": dict(target),
-        "preconditions": dict(preconditions),
-        "bindings": bound,
-        "steps": [step.to_dict() for step in steps],
-    }
-    return WorkflowDraft(
-        workflow_id=workflow_id,
-        workflow_template=CLASS3_WORKFLOW_TEMPLATE,
-        target=dict(target),
-        preconditions=dict(preconditions),
-        bindings=bound,
-        steps=steps,
-        plan_fingerprint=_fingerprint(plan_identity),
-    )
-
-
-def execute_class3_workflow(
+def execute_workflow(
     project_root: Path | str,
     draft: WorkflowDraft,
 ) -> WorkflowExecutionState:
-    """Execute the compiled Class 3 template using native Workbench services."""
+    """Execute a compiled workflow plan using native Workbench services."""
 
-    from .workflow_runtime import build_class3_step_executor
+    from .workflow_runtime import build_workflow_step_executor
 
     return WorkflowExecutor(project_root).execute(
         draft,
-        build_class3_step_executor(project_root, draft),
+        build_workflow_step_executor(project_root, draft),
     )
 
 
@@ -744,6 +473,6 @@ __all__ = [
     "WorkflowStateStore",
     "WorkflowStepResult",
     "WorkflowStep",
-    "compile_class3_workflow",
-    "execute_class3_workflow",
+    "compile_workflow",
+    "execute_workflow",
 ]

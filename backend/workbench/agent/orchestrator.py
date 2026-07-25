@@ -74,8 +74,7 @@ from .tools import ToolDefinition, ToolRegistry, ToolVisibleError
 from .workflow import (
     WorkflowDraft,
     WorkflowExecutionState,
-    compile_class3_workflow,
-    execute_class3_workflow,
+    execute_workflow,
 )
 
 # Operations whose effect is a derived data child node rather than a child
@@ -183,7 +182,7 @@ class _OrchestratorOperationHandler:
             if preview.fingerprint != record.preconditions.get("context_fingerprint"):
                 raise ProposalStaleError("data columns cast preview is stale")
         if self.executor_key == "operation.multi_step":
-            self.orchestrator._compile_class3_workflow_record(
+            self.orchestrator._compile_workflow_record(
                 record,
                 project_root=self.project_root,
             )
@@ -251,7 +250,7 @@ class _OrchestratorOperationHandler:
                 materialize=False,
             )
         if self.executor_key == "operation.multi_step":
-            draft = self.orchestrator._compile_class3_workflow_record(
+            draft = self.orchestrator._compile_workflow_record(
                 record,
                 project_root=self.project_root,
             )
@@ -303,18 +302,18 @@ class _OrchestratorOperationHandler:
                 materialize=True,
             )
         elif self.executor_key == "operation.multi_step":
-            draft = self.orchestrator._compile_class3_workflow_record(
+            draft = self.orchestrator._compile_workflow_record(
                 record,
                 project_root=self.project_root,
             )
             state = await asyncio.to_thread(
-                execute_class3_workflow,
+                execute_workflow,
                 self.project_root,
                 draft,
             )
-            self.orchestrator._persist_class3_step_audit(record, draft, state)
+            self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
-                raise ValueError("Class 3 workflow did not complete")
+                raise ValueError("workflow did not complete")
             return OperationEffect(
                 outputs={
                     "status": "completed",
@@ -371,18 +370,18 @@ class _OrchestratorOperationHandler:
                 materialize=True,
             )
         elif self.executor_key == "operation.multi_step":
-            draft = self.orchestrator._compile_class3_workflow_record(
+            draft = self.orchestrator._compile_workflow_record(
                 record,
                 project_root=self.project_root,
             )
             state = await asyncio.to_thread(
-                execute_class3_workflow,
+                execute_workflow,
                 self.project_root,
                 draft,
             )
-            self.orchestrator._persist_class3_step_audit(record, draft, state)
+            self.orchestrator._persist_workflow_step_audit(record, draft, state)
             if state.status != "completed":
-                raise ValueError("Class 3 workflow did not complete")
+                raise ValueError("workflow did not complete")
             return OperationEffect(
                 outputs={"workflow_state": state.to_dict()},
                 execution=record.execution,
@@ -540,22 +539,21 @@ class WorkbenchOrchestrator:
         self._operation_locks: dict[str, asyncio.Lock] = {}
         self._lease_owner = f"agent:{uuid4().hex}"
 
-    def _compile_class3_workflow_record(
+    def _compile_workflow_record(
         self,
         record: OperationRecord,
         *,
         project_root: Path | str,
     ) -> WorkflowDraft:
-        """Rebind a confirmed workflow proposal to the live Raw schema."""
+        """Rebind a confirmed workflow proposal to the live source schema."""
 
         from ..statistical_exploration import resolve_statistical_source
 
         changes = record.changes or {}
         composed_steps = changes.get("steps")
-        bindings = changes.get("bindings")
-        if composed_steps is None and not isinstance(bindings, dict):
+        if composed_steps is None:
             raise ValueError(
-                "operation.multi_step confirmed changes are missing steps or bindings"
+                "operation.multi_step confirmed changes are missing steps"
             )
         source_context, frame = resolve_statistical_source(
             project_root,
@@ -563,65 +561,25 @@ class WorkbenchOrchestrator:
             source_node_id=str(record.target["node_ref"]),
             source_artifact_id=str(record.target["artifact_id"]),
         )
-        if composed_steps is not None:
-            from .workflow import compile_workflow
+        from .workflow import compile_workflow
 
-            workflow_id = (
-                record.workflow_id
-                or record.execution.get("workflow_id")
-                or f"workflow_{record.record_id}"
-            )
-            return compile_workflow(
-                workflow_id=str(workflow_id),
-                target=record.target,
-                preconditions={
-                    **record.preconditions,
-                    "source_artifact_fingerprint": source_context["source_sha256"],
-                },
-                steps=composed_steps,
-                available_columns=[str(column) for column in frame.columns],
-            )
-        requested_numeric = bindings.get("all_numeric_columns")
-        if isinstance(requested_numeric, list):
-            import pandas as pd
-
-            nonnumeric = [
-                str(column)
-                for column in requested_numeric
-                if column in frame.columns
-                and not pd.api.types.is_numeric_dtype(frame[column])
-            ]
-            if nonnumeric:
-                raise ValueError(
-                    "operation.multi_step all_numeric_columns must be numeric: "
-                    + ", ".join(nonnumeric)
-                )
         workflow_id = (
             record.workflow_id
             or record.execution.get("workflow_id")
             or f"workflow_{record.record_id}"
         )
-        return compile_class3_workflow(
+        return compile_workflow(
             workflow_id=str(workflow_id),
             target=record.target,
             preconditions={
                 **record.preconditions,
                 "source_artifact_fingerprint": source_context["source_sha256"],
             },
-            bindings=bindings,
+            steps=composed_steps,
             available_columns=[str(column) for column in frame.columns],
-            # The live column decides which grouping values are real; a value
-            # the data never takes must fail here rather than compile into a
-            # step that summarises an empty group.
-            group_value_witness=(
-                frame[str(bindings["year_column"])].dropna().unique().tolist()
-                if isinstance(bindings.get("year_column"), str)
-                and str(bindings["year_column"]) in frame.columns
-                else None
-            ),
         )
 
-    def _persist_class3_step_audit(
+    def _persist_workflow_step_audit(
         self,
         parent: OperationRecord,
         draft: WorkflowDraft,
@@ -2460,11 +2418,11 @@ class WorkbenchOrchestrator:
             "changes": changes,
         }
 
-    def _canonicalize_class3_workflow_arguments(
+    def _canonicalize_workflow_arguments(
         self,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        """Bind a Class 3 workflow to the artifact owned by its Raw node.
+        """Bind a workflow proposal to the artifact owned by its source node.
 
         The Agent may identify the selected node, but it must not choose the
         durable artifact identity behind that node. The workflow executor
@@ -2681,7 +2639,7 @@ class WorkbenchOrchestrator:
         if operation_id == "data.columns.cast":
             return self._canonicalize_data_columns_cast_arguments(arguments)
         if operation_id == "operation.multi_step":
-            return self._canonicalize_class3_workflow_arguments(arguments)
+            return self._canonicalize_workflow_arguments(arguments)
         if self.context_provider is None or operation_id not in {"model.rerun", "graph.fork"}:
             return arguments
         inspect = getattr(self.context_provider, "inspect_node_context", None)

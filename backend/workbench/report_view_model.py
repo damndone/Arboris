@@ -97,10 +97,15 @@ def build_report_view_model(
 
     critical_errors = _render_issues(diagnostics.get("blockers", []))
     if exploration is not None and exploration.get("status") != "completed":
+        # Report text is read by whoever ran the workflow, so it must describe
+        # the workflow, not the exercise this feature was first built for.
         critical_errors.append(
             {
-                "text": "The Class 3 workflow did not complete; the final report is blocked.",
-                "code": "CLASS3_WORKFLOW_INCOMPLETE",
+                "text": (
+                    "The statistical workflow did not complete; "
+                    "the final report is blocked."
+                ),
+                "code": "WORKFLOW_INCOMPLETE",
                 "severity": "BLOCKER",
                 "variables": [],
             }

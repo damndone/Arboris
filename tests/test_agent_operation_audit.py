@@ -9,11 +9,8 @@ from workbench.agent.workflow_contracts import workflow_authorization
 from workbench.agent.operations import OperationRecordStore
 from workbench.agent.proposals import ProposalConfirmation
 from workbench.agent.session import JsonlSessionRepository
-from workbench.agent.workflow import (
-    WorkflowExecutionState,
-    WorkflowStepState,
-    compile_class3_workflow,
-)
+from tests.workflow_fixtures import composed_plan, compile_fixture_workflow
+from workbench.agent.workflow import WorkflowExecutionState, WorkflowStepState
 
 
 def test_workflow_authorization_is_explicit_and_auditable() -> None:
@@ -77,26 +74,9 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
     agent = AgentCore(repository, events, object(), session_id="chain-session")
     orchestrator = WorkbenchOrchestrator(repository, events, main_session_id="main")
     orchestrator.register_chain("chain-1", "chain-session", agent)
-    bindings = {
-        "year_column": "year",
-        "spending_column": "spending",
-        "black_column": "black",
-        "poverty_column": "poverty",
-        "enrollment_column": "enrollment",
-        "all_numeric_columns": ["year", "spending", "black", "poverty", "enrollment"],
-        "group_values": [1998, 2002, 2006, 2010, 2014, 2016],
-    }
-    draft = compile_class3_workflow(
-        workflow_id="wf-audit",
-        target={"run_id": "run-1", "node_ref": "stage:raw", "artifact_id": "raw-1"},
-        preconditions={
-            "context_version": "node-operation-context/v1",
-            "context_fingerprint": "ctx-1",
-            "active_head_run_id": "run-1",
-            "owner_resolution": "single_candidate",
-        },
-        bindings=bindings,
-        available_columns=bindings["all_numeric_columns"],
+    steps = composed_plan()
+    draft = compile_fixture_workflow(
+        workflow_id="wf-audit", source_fingerprint="ctx-1", steps=steps
     )
     state = WorkflowExecutionState(
         workflow_id=draft.workflow_id,
@@ -115,20 +95,20 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         orchestrator,
-        "_compile_class3_workflow_record",
+        "_compile_workflow_record",
         lambda record, project_root: draft,
     )
     import workbench.agent.orchestrator as orchestrator_module
 
-    monkeypatch.setattr(orchestrator_module, "execute_class3_workflow", lambda root, compiled: state)
+    monkeypatch.setattr(orchestrator_module, "execute_workflow", lambda root, compiled: state)
     proposal = orchestrator.create_proposal(
         chain_id="chain-1",
         operation_id="operation.multi_step",
         target=draft.target,
         preconditions=draft.preconditions,
-        changes={"workflow_template": "class3-stata-v1", "bindings": bindings},
+        changes={"steps": steps},
         evidence_refs=["schema:raw-1"],
-        expected_effect=["nine workflow steps"],
+        expected_effect=[f"{len(steps)} workflow steps"],
         risks=["creates model runs and report artifacts"],
     )
     record = orchestrator.confirm_proposal(
@@ -151,7 +131,7 @@ def test_completed_workflow_persists_authorized_child_records(tmp_path, monkeypa
 
     assert completed.status == "completed"
     children = [item for item in orchestrator.operation_store.list_records() if item.record_id != record.record_id]
-    assert len(children) == 9
+    assert len(children) == len(steps)
     assert all(item.workflow_id == "wf-audit" for item in children)
     assert all(item.workflow_confirmation_id == f"confirmation_{record.record_id}" for item in children)
     assert all(item.workflow_plan_fingerprint == draft.plan_fingerprint for item in children)

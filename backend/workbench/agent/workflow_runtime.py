@@ -1,4 +1,4 @@
-"""Native service adapter for the locked Class 3 workflow template."""
+"""Native service adapter that executes one compiled workflow step."""
 
 from __future__ import annotations
 
@@ -176,7 +176,7 @@ def _exploration_step(
     )
 
 
-def build_class3_step_executor(project_root: Path | str, draft: WorkflowDraft):
+def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft):
     """Return one callback that dispatches only the compiled step identities."""
 
     root = Path(project_root).expanduser().resolve()
@@ -351,7 +351,7 @@ def build_class3_step_executor(project_root: Path | str, draft: WorkflowDraft):
                 root, draft, source_context, source_frame, step
             )
         if operation_id.startswith("report."):
-            return _execute_class3_report(root, draft, previous)
+            return _execute_workflow_report(root, draft, previous)
         raise WorkflowExecutionError(
             f"unsupported workflow operation: {step.operation_id}"
         )
@@ -410,7 +410,11 @@ def _execute_ols_branches(
         for summary in store.list():
             candidate = store.get(summary["draft_id"])
             context = candidate.draft.get("exploration_context") or {}
-            if context.get("class3_workflow_id") == draft.workflow_id and context.get("class3_branch_id") == branch_id:
+            # Legacy keys are still read so a draft created before the rename
+            # still resumes instead of re-estimating under a new identity.
+            context_workflow = context.get("workflow_id", context.get("class3_workflow_id"))  # legacy-compat
+            context_branch = context.get("branch_id", context.get("class3_branch_id"))  # legacy-compat
+            if context_workflow == draft.workflow_id and context_branch == branch_id:
                 stored = candidate
                 break
         if stored is None:
@@ -426,8 +430,8 @@ def _execute_ols_branches(
                 options={"quantile_method": STATA_QUANTILE_METHOD},
             )
             context = {
-                "class3_workflow_id": draft.workflow_id,
-                "class3_branch_id": branch_id,
+                "workflow_id": draft.workflow_id,
+                "branch_id": branch_id,
                 "source_run_id": source_run_id,
                 "source_node_id": str(draft.target["node_ref"]),
                 "source_artifact_id": str(draft.target["artifact_id"]),
@@ -504,9 +508,9 @@ def _execute_ols_branches(
 def required_branch_figures(predictors: Iterable[str]) -> set[str]:
     """Residual and fitted plots the branch's own predictors imply.
 
-    This gate used to name one exercise's columns (``pblack``/``pfl``) and
-    special-case the branch id ``ols_pblack``, so a correct single-predictor
-    branch under any other name was rejected for "missing diagnostics".
+    This gate used to name one exercise's columns and special-case one of
+    its branch ids, so a correct single-predictor branch under any other
+    name was rejected for "missing diagnostics".
     """
 
     figures: set[str] = set()
@@ -528,7 +532,7 @@ def _wait_for_run(root: Path, run_id: str, *, timeout_seconds: float = 1800.0) -
     raise WorkflowExecutionError(f"run did not reach a terminal state: {run_id}")
 
 
-def _execute_class3_report(
+def _execute_workflow_report(
     root: Path,
     draft: WorkflowDraft,
     previous: Mapping[str, WorkflowStepResult],
@@ -547,16 +551,16 @@ def _execute_class3_report(
         }
         for step_id, result in previous.items()
     }
-    collection_id = f"class3_report_collection_{draft.workflow_id}"
-    html_id = f"class3_report_{draft.workflow_id}_html"
-    pdf_id = f"class3_report_{draft.workflow_id}_pdf"
-    xlsx_id = f"class3_report_{draft.workflow_id}_xlsx"
+    collection_id = f"workflow_report_collection_{draft.workflow_id}"
+    html_id = f"workflow_report_{draft.workflow_id}_html"
+    pdf_id = f"workflow_report_{draft.workflow_id}_pdf"
+    xlsx_id = f"workflow_report_{draft.workflow_id}_xlsx"
     steps["step-9"] = {
         "status": "completed",
         "artifact_ids": [collection_id, html_id, pdf_id, xlsx_id],
     }
     collection = {
-        "schema_version": "class3-report-collection.v1",
+        "schema_version": "workflow-report-collection.v1",
         "workflow_id": draft.workflow_id,
         "workflow_plan_fingerprint": draft.plan_fingerprint,
         "status": "completed",
@@ -566,12 +570,12 @@ def _execute_class3_report(
     collection_path = run_root / "artifacts" / "statistical_exploration" / f"{draft.workflow_id}.json"
     collection_path.parent.mkdir(parents=True, exist_ok=True)
     if collection_path.exists() and read_json(collection_path) != collection:
-        raise WorkflowExecutionError("Class 3 report collection path is occupied")
+        raise WorkflowExecutionError("workflow report collection path is occupied")
     if not collection_path.exists():
         write_json(collection_path, collection)
-    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.class3", [])
+    register_artifact(run_root, collection_id, collection_path, "report_collection", "report.compose", [])
     view_model = {
-        "title": "Class 3 Stata workflow report",
+        "title": "Statistical workflow report",
         "facts": [
             "Nine server-defined workflow steps completed.",
             f"Workflow id: {draft.workflow_id}",
@@ -607,4 +611,4 @@ def _execute_class3_report(
     )
 
 
-__all__ = ["build_class3_step_executor"]
+__all__ = ["build_workflow_step_executor"]

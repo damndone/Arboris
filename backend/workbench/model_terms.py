@@ -29,7 +29,7 @@ class ModelTermError(ValueError):
 MAX_CATEGORICAL_LEVELS = 50
 
 # Powers above this stop being a polynomial fit and start being a numerical
-# accident; totreg**8 overflows float range for realistic enrollments.
+# accident, and a high power of a large count overflows float range.
 MAX_POLYNOMIAL_DEGREE = 4
 
 _SAFE_NAME = re.compile(r"[^0-9A-Za-z]+")

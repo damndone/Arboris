@@ -281,7 +281,7 @@ def test_create_figures_uses_model_preview_diagnostics(tmp_path: Path):
     assert (run.root / figures["qq_residuals"]).exists()
 
 
-def test_create_figures_emits_class3_residual_and_fitted_predictor_plots(tmp_path: Path):
+def test_create_figures_emits_residual_and_fitted_plots_per_predictor(tmp_path: Path):
     frame = pd.DataFrame(
         {
             "adj_dppupil_comp": [10.0, 12.0, 14.0, 16.0],

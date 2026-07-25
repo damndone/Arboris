@@ -95,8 +95,8 @@ class OperationRegistry:
         # Keep this import local so importing this module does not create a
         # module-initialization cycle.
         from .workflow_contracts import (
-            class3_workflow_proposal_schema,
-            validate_class3_workflow,
+            workflow_proposal_schema,
+            validate_workflow_operation,
             workflow_step_vocabulary,
         )
 
@@ -329,18 +329,18 @@ class OperationRegistry:
                 scope="dataset workflow",
                 risk_level="mutating",
                 confirmation_policy="required",
-                proposal_schema=class3_workflow_proposal_schema(),
+                proposal_schema=workflow_proposal_schema(),
                 # The editable surface is the proposal's `changes` object, which
                 # is a composed step list OR a preset binding. Requiring the
                 # preset here contradicted the proposal schema and told an Agent
                 # that composing steps was illegal.
-                editable_schema=class3_workflow_proposal_schema()["properties"]["changes"],
+                editable_schema=workflow_proposal_schema()["properties"]["changes"],
                 contract_owner="operation_registry",
                 vocabulary_builder=workflow_step_vocabulary,
                 executor_key="operation.multi_step",
                 reconciler_key="operation.multi_step",
-                diff_builder_key="workflow.class3.diff.v1",
-                verification_builder_key="workflow.class3.verification.v1",
+                diff_builder_key="workflow.diff.v1",
+                verification_builder_key="workflow.verification.v1",
                 ui_description=(
                     "Compile and execute a multi-step statistical workflow with one "
                     "confirmation and auditable per-step artifacts."
@@ -350,14 +350,14 @@ class OperationRegistry:
                     "regress spending on the demographic shares.",
                 ),
                 natural_language_enabled=True,
-                validator=validate_class3_workflow,
+                validator=validate_workflow_operation,
             )
         )
         # These identities describe the only operations a compiled workflow
         # may use.  They are intentionally typed but not Agent-facing: the
         # user confirms the parent workflow once, while the executor records
         # each child step with the parent's authorization metadata.
-        for definition in _class3_internal_operation_definitions():
+        for definition in _workflow_step_operation_definitions():
             self.register(definition)
 
     def register(self, definition: OperationDefinition) -> None:
@@ -437,7 +437,7 @@ class OperationRegistry:
                 },
                 {
                     "id": "operation.multi_step",
-                    "label": "Run a locked Class 3 workflow",
+                    "label": "Run a multi-step statistical workflow",
                     "description": (
                         "Compile the selected Raw data into nine typed steps under one "
                         "confirmation; the Agent cannot change statistical semantics."
@@ -540,8 +540,8 @@ class OperationRegistry:
             ) from exc
 
 
-def _class3_internal_operation_definitions() -> tuple[OperationDefinition, ...]:
-    """Return the closed set of typed operations used by Class 3 compilation."""
+def _workflow_step_operation_definitions() -> tuple[OperationDefinition, ...]:
+    """Return the closed set of typed operations a compiled workflow may use."""
 
     return (
         OperationDefinition(
@@ -552,7 +552,7 @@ def _class3_internal_operation_definitions() -> tuple[OperationDefinition, ...]:
             scope="Raw data statistical exploration",
             risk_level="none",
             confirmation_policy="workflow_parent",
-            proposal_schema=_class3_internal_step_schema(
+            proposal_schema=_workflow_step_schema(
                 "statistical.explore",
                 changes={
                     "operation": {"type": "string"},
@@ -567,7 +567,7 @@ def _class3_internal_operation_definitions() -> tuple[OperationDefinition, ...]:
             verification_builder_key="exploration.verification.v1",
             ui_description="Run one server-defined statistical exploration step.",
             natural_language_enabled=False,
-            validator=_validate_class3_internal_step,
+            validator=_validate_workflow_step,
         ),
         OperationDefinition(
             operation_id="statistical.derive_boolean",
@@ -577,7 +577,7 @@ def _class3_internal_operation_definitions() -> tuple[OperationDefinition, ...]:
             scope="Raw data derived grouping",
             risk_level="mutating",
             confirmation_policy="workflow_parent",
-            proposal_schema=_class3_internal_step_schema(
+            proposal_schema=_workflow_step_schema(
                 "statistical.derive_boolean",
                 changes={"recipe": {"type": "object"}},
                 required_changes=["recipe"],
@@ -588,33 +588,60 @@ def _class3_internal_operation_definitions() -> tuple[OperationDefinition, ...]:
             verification_builder_key="exploration.derived_verification.v1",
             ui_description="Create one server-defined boolean grouping node.",
             natural_language_enabled=False,
-            validator=_validate_class3_internal_step,
+            validator=_validate_workflow_step,
         ),
         OperationDefinition(
-            operation_id="report.class3",
+            # A composed plan could name this step, but nothing declared it, so
+            # the registry silently stopped being the closed set it claims to
+            # be and audit records carried an unregistered identity.
+            operation_id="statistical.derived_group_summarize",
             operation_version="v1",
             effect_level="mutation",
             scope_requirements=("chain", "active_head"),
-            scope="Class 3 workflow report",
+            scope="derived group comparison",
             risk_level="mutating",
             confirmation_policy="workflow_parent",
-            proposal_schema=_class3_internal_step_schema(
-                "report.class3",
+            proposal_schema=_workflow_step_schema(
+                "statistical.derived_group_summarize",
+                changes={
+                    "groups": {"type": "array", "items": {"type": "object"}},
+                    "summarize_columns": {"type": "array", "items": {"type": "string"}},
+                },
+                required_changes=["groups"],
+            ),
+            executor_key="statistical.derived_group_summarize",
+            reconciler_key="statistical.derived_group_summarize",
+            diff_builder_key="exploration.derived_diff.v1",
+            verification_builder_key="exploration.derived_verification.v1",
+            ui_description="Summarize columns within each derived group.",
+            natural_language_enabled=False,
+            validator=_validate_workflow_step,
+        ),
+        OperationDefinition(
+            operation_id="report.compose",
+            operation_version="v1",
+            effect_level="mutation",
+            scope_requirements=("chain", "active_head"),
+            scope="workflow report",
+            risk_level="mutating",
+            confirmation_policy="workflow_parent",
+            proposal_schema=_workflow_step_schema(
+                "report.compose",
                 changes={"report_contract": {"type": "object"}},
                 required_changes=["report_contract"],
             ),
-            executor_key="report.class3",
-            reconciler_key="report.class3",
-            diff_builder_key="report.class3.diff.v1",
-            verification_builder_key="report.class3.verification.v1",
-            ui_description="Assemble the complete Class 3 workflow report.",
+            executor_key="report.compose",
+            reconciler_key="report.compose",
+            diff_builder_key="report.compose.diff.v1",
+            verification_builder_key="report.compose.verification.v1",
+            ui_description="Assemble the compiled workflow's report.",
             natural_language_enabled=False,
-            validator=_validate_class3_internal_step,
+            validator=_validate_workflow_step,
         ),
     )
 
 
-def _class3_internal_step_schema(
+def _workflow_step_schema(
     operation_id: str,
     *,
     changes: dict[str, Any],
@@ -667,7 +694,7 @@ def _class3_internal_step_schema(
     }
 
 
-def _validate_class3_internal_step(
+def _validate_workflow_step(
     target: dict[str, Any],
     preconditions: dict[str, Any],
     changes: dict[str, Any],
@@ -676,16 +703,16 @@ def _validate_class3_internal_step(
     missing_target = {key for key in required_target if not target.get(key)}
     if missing_target:
         raise OperationValidationError(
-            "Class 3 internal step target missing: " + ", ".join(sorted(missing_target))
+            "workflow step target missing: " + ", ".join(sorted(missing_target))
         )
     if not preconditions.get("source_fingerprint"):
-        raise OperationValidationError("Class 3 internal step source_fingerprint is required")
+        raise OperationValidationError("workflow step source_fingerprint is required")
     if not isinstance(preconditions.get("dependency_fingerprints"), list):
         raise OperationValidationError(
-            "Class 3 internal step dependency_fingerprints must be a list"
+            "workflow step dependency_fingerprints must be a list"
         )
     if not isinstance(changes, dict) or not changes:
-        raise OperationValidationError("Class 3 internal step changes must not be empty")
+        raise OperationValidationError("workflow step changes must not be empty")
 
 
 def _proposal_schema(

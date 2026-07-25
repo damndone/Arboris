@@ -12,8 +12,8 @@ from workbench.statistical_exploration import ExplorationSpec, FilterSpec, execu
 ROOT = Path(__file__).parent / "fixtures" / "statistical_exploration"
 
 
-def test_class3_fixture_matches_stable_summary_detail_and_corr_golden() -> None:
-    frame = pd.read_csv(ROOT / "class3.csv")
+def test_the_panel_fixture_matches_the_stable_exploration_golden() -> None:
+    frame = pd.read_csv(ROOT / "school_panel.csv")
     expected = json.loads((ROOT / "expected.json").read_text(encoding="utf-8"))
 
     summary = execute_exploration(

@@ -326,7 +326,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                   <option value="">No grouping</option>
                   {sourceContext.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
                 </select></label>
-                {groupBy && <label>Group values <input data-testid="statistical-exploration-group-values" value={groupValues} onChange={(event) => { setGroupValues(event.target.value); setPreview(null); }} placeholder="1998, 2002, 2006, 2010, 2014, 2016" /></label>}
+                {groupBy && <label>Group values <input data-testid="statistical-exploration-group-values" value={groupValues} onChange={(event) => { setGroupValues(event.target.value); setPreview(null); }} placeholder="leave empty for every observed value" /></label>}
               </div>
             )}
             <fieldset>

@@ -232,37 +232,20 @@ def test_a_model_supplied_artifact_id_and_fingerprint_are_overridden(
     assert canonical["preconditions"]["context_fingerprint"] != "f" * 64
 
 
-def test_class3_workflow_binds_the_real_source_artifact_id(
+def test_a_workflow_proposal_binds_the_real_source_artifact_id(
     tmp_path: Path,
 ) -> None:
     project, run_id, artifact_id = _source_project(
         tmp_path,
         pd.DataFrame(
             {
-                "year": [1998, 2002],
-                "adj_dppupil_comp": [100.0, 110.0],
-                "pblack": [10.0, 20.0],
-                "pfl": [30.0, 40.0],
-                "totreg": [500.0, 600.0],
+                "wave": [1, 2],
+                "outcome": [100.0, 110.0],
+                "rate": [10.0, 20.0],
             }
         ),
     )
     orchestrator = _orchestrator(project)
-    bindings = {
-        "all_numeric_columns": [
-            "year",
-            "adj_dppupil_comp",
-            "pblack",
-            "pfl",
-            "totreg",
-        ],
-        "black_column": "pblack",
-        "enrollment_column": "totreg",
-        "group_values": [1998, 2002, 2006, 2010, 2014, 2016],
-        "poverty_column": "pfl",
-        "spending_column": "adj_dppupil_comp",
-        "year_column": "year",
-    }
 
     canonical = orchestrator._canonicalize_proposal_arguments(
         "operation.multi_step",
@@ -275,8 +258,16 @@ def test_class3_workflow_binds_the_real_source_artifact_id(
             },
             "preconditions": {"active_head_run_id": run_id},
             "changes": {
-                "workflow_template": "class3-stata-v1",
-                "bindings": bindings,
+                "steps": [
+                    {
+                        "step_id": "describe",
+                        "operation_id": "statistical.explore",
+                        "spec": {
+                            "operation": "summarize",
+                            "selected_columns": ["outcome", "rate"],
+                        },
+                    }
+                ]
             },
         },
         session_id="s1",

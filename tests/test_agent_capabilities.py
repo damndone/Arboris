@@ -49,8 +49,9 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "model.genesis",
         "model.rerun",
         "operation.multi_step",
-        "report.class3",
+        "report.compose",
         "statistical.derive_boolean",
+        "statistical.derived_group_summarize",
         "statistical.explore",
     ]
     assert all(isinstance(item["executor"], str) for item in capabilities)

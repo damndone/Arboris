@@ -1,3 +1,10 @@
+"""The one confirmation entry point for a multi-step statistical workflow.
+
+This file used to validate a server-side preset whose bindings named one
+exercise's variables. The preset is gone; what remains is the contract that any
+composed plan must satisfy.
+"""
+
 from __future__ import annotations
 
 import pytest
@@ -22,22 +29,33 @@ def _preconditions() -> dict[str, str]:
     }
 
 
-def _bindings() -> dict[str, object]:
-    return {
-        "year_column": "year",
-        "spending_column": "adj_dppupil_comp",
-        "black_column": "pblack",
-        "poverty_column": "pfl",
-        "enrollment_column": "totreg",
-        "all_numeric_columns": ["bdsnew", "year", "middle", "pfl", "pblack", "totreg", "adj_dppupil_comp"],
-        "group_values": [1998, 2002, 2006, 2010, 2014, 2016],
-    }
-
-
 def _changes() -> dict[str, object]:
     return {
-        "workflow_template": "class3-stata-v1",
-        "bindings": _bindings(),
+        "steps": [
+            {
+                "step_id": "describe",
+                "operation_id": "statistical.explore",
+                "spec": {
+                    "operation": "summarize",
+                    "selected_columns": ["outcome", "rate"],
+                    "options": {"group_by": "wave"},
+                },
+            },
+            {
+                "step_id": "models",
+                "operation_id": "model.genesis",
+                "depends_on": ["describe"],
+                "spec": {
+                    "branches": [
+                        {
+                            "branch_id": "m1",
+                            "outcome": "outcome",
+                            "predictors": ["rate"],
+                        }
+                    ]
+                },
+            },
+        ]
     }
 
 
@@ -49,20 +67,27 @@ def test_registry_exposes_one_confirmation_workflow_entry_point() -> None:
     assert definition.natural_language_enabled is True
     assert definition.confirmation_policy == "required"
     changes_schema = definition.proposal_schema["properties"]["changes"]
-    # Either an Agent-composed plan or the legacy preset binding, never neither.
-    assert changes_schema["anyOf"] == [
-        {"required": ["steps"]},
-        {"required": ["workflow_template", "bindings"]},
-    ]
+    # A composed step list is the only accepted form; there is no named preset
+    # a specific assignment could be privileged through.
+    assert changes_schema["required"] == ["steps"]
+    assert "bindings" not in changes_schema["properties"]
+    assert "workflow_template" not in changes_schema["properties"]
     assert "operation.multi_step" not in {
         item["id"] for item in registry.boundary()["unsupported"]
     }
 
 
-def test_workflow_validator_accepts_only_evidence_backed_bindings() -> None:
+def test_a_composed_plan_validates() -> None:
     definition = OperationRegistry().require("operation.multi_step")
 
-    definition.validate(target=_target(), preconditions=_preconditions(), changes=_changes())
+    definition.validate(
+        target=_target(), preconditions=_preconditions(), changes=_changes()
+    )
+
+
+def test_semantic_fields_outside_the_step_contract_are_rejected() -> None:
+    """The server owns statistical semantics; a plan may not restate them."""
+    definition = OperationRegistry().require("operation.multi_step")
 
     for forbidden in ("quantile_method", "comparison", "missing_policy", "covariance"):
         changes = _changes()
@@ -73,26 +98,31 @@ def test_workflow_validator_accepts_only_evidence_backed_bindings() -> None:
             )
 
 
-def test_workflow_validator_accepts_any_panel_but_rejects_a_malformed_group_set() -> None:
-    """Group values are the assignment's, not one fixed exercise's.
-
-    Existence is proved later against the real column (see
-    ``compile_step_bindings(group_value_witness=...)``); what the proposal
-    validator owns is shape, so a duplicated or empty set still fails here.
-    """
+def test_a_plan_without_steps_is_not_a_workflow() -> None:
     definition = OperationRegistry().require("operation.multi_step")
 
-    for accepted in ([1998, 2002, 2006], [2000, 2005, 2010, 2015], ["w1", "w2"]):
-        changes = _changes()
-        changes["bindings"] = {**changes["bindings"], "group_values": accepted}
-        definition.validate(
-            target=_target(), preconditions=_preconditions(), changes=changes
-        )
-
-    for rejected in ([], [1998, 1998]):
-        changes = _changes()
-        changes["bindings"] = {**changes["bindings"], "group_values": rejected}
-        with pytest.raises(OperationValidationError, match="group_values"):
+    for changes in ({}, {"steps": []}):
+        with pytest.raises(OperationValidationError):
             definition.validate(
                 target=_target(), preconditions=_preconditions(), changes=changes
             )
+
+
+def test_the_grouping_column_is_whatever_the_plan_names() -> None:
+    """No panel, wave set, or column name is privileged by the contract."""
+    definition = OperationRegistry().require("operation.multi_step")
+
+    for column, values in (
+        ("wave", [1, 2, 3]),
+        ("survey_year", [2000, 2005, 2010, 2015]),
+        ("cohort", ["a", "b"]),
+    ):
+        changes = _changes()
+        changes["steps"][0]["spec"]["options"] = {
+            "group_by": column,
+            "group_values": values,
+        }
+        changes["steps"][0]["spec"]["selected_columns"] = ["outcome"]
+        definition.validate(
+            target=_target(), preconditions=_preconditions(), changes=changes
+        )

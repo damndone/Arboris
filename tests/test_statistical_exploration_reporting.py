@@ -56,4 +56,4 @@ def test_incomplete_workflow_is_visible_as_a_blocking_report_issue() -> None:
     )
 
     assert view_model["exploration"]["status"] == "failed"
-    assert any(issue["code"] == "CLASS3_WORKFLOW_INCOMPLETE" for issue in view_model["critical_errors"])
+    assert any(issue["code"] == "WORKFLOW_INCOMPLETE" for issue in view_model["critical_errors"])

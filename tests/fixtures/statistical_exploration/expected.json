@@ -1,6 +1,6 @@
 {
   "schema_version": "statistical-exploration.v1",
-  "fixture": "class3.csv",
+  "fixture": "school_panel.csv",
   "operations": [
     "summarize",
     "summarize_detail",

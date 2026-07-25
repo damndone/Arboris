@@ -1,4 +1,4 @@
-"""Server-owned contracts for the v1.8.2 Class 3 workflow."""
+"""Server-owned contracts for Agent-composed multi-step workflows."""
 
 from __future__ import annotations
 
@@ -11,40 +11,9 @@ from typing import Any
 from .operations import OperationValidationError
 
 
-CLASS3_WORKFLOW_TEMPLATE = "class3-stata-v1"
 WORKFLOW_OPERATION_ID = "operation.multi_step"
 WORKFLOW_OPERATION_VERSION = "v1"
-CLASS3_GROUP_VALUES = (1998, 2002, 2006, 2010, 2014, 2016)
-_BINDING_KEYS = frozenset(
-    {
-        "year_column",
-        "spending_column",
-        "black_column",
-        "poverty_column",
-        "enrollment_column",
-        "all_numeric_columns",
-        "group_values",
-    }
-)
-
-
-def _group_key(value: Any) -> Any:
-    """Compare group values the way the data does.
-
-    A grouping column read from CSV may hold 1998 while the proposal carries
-    1998.0 or "1998"; treating those as different values would reject a
-    perfectly valid plan for a formatting difference.
-    """
-
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return float(value)
-    text = str(value).strip()
-    try:
-        return float(text)
-    except ValueError:
-        return text
+WORKFLOW_TEMPLATE = "agent-composed-v1"
 
 
 def workflow_authorization(
@@ -68,27 +37,7 @@ def workflow_authorization(
     }
 
 
-def class3_workflow_proposal_schema() -> dict[str, Any]:
-    binding_properties = {
-        "year_column": {"type": "string", "minLength": 1},
-        "spending_column": {"type": "string", "minLength": 1},
-        "black_column": {"type": "string", "minLength": 1},
-        "poverty_column": {"type": "string", "minLength": 1},
-        "enrollment_column": {"type": "string", "minLength": 1},
-        "all_numeric_columns": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"type": "string", "minLength": 1},
-        },
-        # Not pinned to one exercise's years. The grouping values are whatever
-        # the assignment asks for; they are checked against the real column
-        # contents at bind time, which is a stronger guard than a literal.
-        "group_values": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"type": ["integer", "string", "number"]},
-        },
-    }
+def workflow_proposal_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "required": [
@@ -129,16 +78,14 @@ def class3_workflow_proposal_schema() -> dict[str, Any]:
                 },
                 "additionalProperties": False,
             },
-            # Either an Agent-composed plan (the general form) or the legacy
-            # preset binding. The composed form is what a new assignment uses.
+            # An Agent-composed step list is the only accepted form. A named
+            # preset used to be a second one, and its bindings were one
+            # assignment's variables (a "poverty_column", a fixed year set)
+            # frozen into the server. Removing it removes the only place where
+            # a specific exercise could be privileged over any other.
             "changes": {
                 "type": "object",
-                # Exactly one of the two forms must be present; an empty
-                # changes object is not a workflow.
-                "anyOf": [
-                    {"required": ["steps"]},
-                    {"required": ["workflow_template", "bindings"]},
-                ],
+                "required": ["steps"],
                 "properties": {
                     "steps": {
                         "type": "array",
@@ -165,13 +112,6 @@ def class3_workflow_proposal_schema() -> dict[str, Any]:
                             "additionalProperties": False,
                         },
                     },
-                    "workflow_template": {"type": "string", "minLength": 1},
-                    "bindings": {
-                        "type": "object",
-                        "required": sorted(_BINDING_KEYS),
-                        "properties": binding_properties,
-                        "additionalProperties": False,
-                    },
                 },
                 "additionalProperties": False,
             },
@@ -183,7 +123,7 @@ def class3_workflow_proposal_schema() -> dict[str, Any]:
     }
 
 
-def validate_class3_workflow(
+def validate_workflow_operation(
     target: dict[str, Any],
     preconditions: dict[str, Any],
     changes: dict[str, Any],
@@ -208,131 +148,17 @@ def validate_class3_workflow(
             "operation.multi_step preconditions missing: "
             + ", ".join(sorted(missing_preconditions))
         )
-    if "steps" in changes:
-        unknown = set(changes) - {"steps", "workflow_template"}
-        if unknown:
-            raise OperationValidationError(
-                "operation.multi_step changes contain unknown field(s): "
-                + ", ".join(sorted(unknown))
-            )
-        validate_workflow_steps(changes["steps"])
-        return
-    if set(changes) != {"workflow_template", "bindings"}:
-        unknown = set(changes) - {"workflow_template", "bindings"}
+    if "steps" not in changes:
+        raise OperationValidationError(
+            "operation.multi_step changes must contain a steps list"
+        )
+    unknown = set(changes) - {"steps", "workflow_template"}
+    if unknown:
         raise OperationValidationError(
             "operation.multi_step changes contain unknown field(s): "
             + ", ".join(sorted(unknown))
         )
-    if changes.get("workflow_template") != CLASS3_WORKFLOW_TEMPLATE:
-        raise OperationValidationError(
-            "operation.multi_step workflow_template is unsupported"
-        )
-    bindings = changes.get("bindings")
-    if not isinstance(bindings, Mapping):
-        raise OperationValidationError("operation.multi_step bindings must be an object")
-    unknown_bindings = set(bindings) - _BINDING_KEYS
-    if unknown_bindings:
-        raise OperationValidationError(
-            "operation.multi_step bindings contain unknown field(s): "
-            + ", ".join(sorted(unknown_bindings))
-        )
-    missing_bindings = _BINDING_KEYS.difference(bindings)
-    if missing_bindings:
-        raise OperationValidationError(
-            "operation.multi_step bindings missing: "
-            + ", ".join(sorted(missing_bindings))
-        )
-    for key in _BINDING_KEYS - {"all_numeric_columns", "group_values"}:
-        value = bindings[key]
-        if not isinstance(value, str) or not value.strip():
-            raise OperationValidationError(
-                f"operation.multi_step binding {key} must be a non-empty column name"
-            )
-    columns = bindings["all_numeric_columns"]
-    if not isinstance(columns, list) or not columns or any(
-        not isinstance(column, str) or not column.strip() for column in columns
-    ) or len(set(columns)) != len(columns):
-        raise OperationValidationError(
-            "operation.multi_step all_numeric_columns must be unique non-empty names"
-        )
-    group_values = bindings["group_values"]
-    if (
-        not isinstance(group_values, list)
-        or not group_values
-        or len({_group_key(value) for value in group_values}) != len(group_values)
-    ):
-        raise OperationValidationError(
-            "operation.multi_step group_values must be a non-empty list of unique values"
-        )
-
-
-def compile_step_bindings(
-    bindings: Mapping[str, Any],
-    *,
-    available_columns: list[str] | tuple[str, ...] | None = None,
-    group_value_witness: list[Any] | tuple[Any, ...] | None = None,
-) -> dict[str, Any]:
-    """Bind evidence-backed columns to the server-owned Class 3 template.
-
-    The proposal validator checks shape.  This second boundary checks the
-    actual schema witness before a workflow plan is created, so a plausible
-    column name cannot survive into the first artifact-producing step.
-    """
-
-    candidate = dict(bindings)
-    validate_class3_workflow(
-        target={"run_id": "bound", "node_ref": "bound", "artifact_id": "bound"},
-        preconditions={
-            "context_version": "bound",
-            "context_fingerprint": "bound",
-            "active_head_run_id": "bound",
-            "owner_resolution": "bound",
-        },
-        changes={
-            "workflow_template": CLASS3_WORKFLOW_TEMPLATE,
-            "bindings": candidate,
-        },
-    )
-    if available_columns is not None:
-        available = {str(column) for column in available_columns}
-        requested = {
-            str(candidate[key])
-            for key in (
-                "year_column",
-                "spending_column",
-                "black_column",
-                "poverty_column",
-                "enrollment_column",
-            )
-        }
-        requested.update(str(column) for column in candidate["all_numeric_columns"])
-        missing = sorted(requested - available)
-        if missing:
-            raise OperationValidationError(
-                "operation.multi_step source columns missing: " + ", ".join(missing)
-            )
-    if group_value_witness is not None:
-        # The data witness replaces the old hard-coded year list: a group value
-        # the grouping column never takes would otherwise compile into a step
-        # that "succeeds" while summarising nothing.
-        present = {_group_key(value) for value in group_value_witness}
-        absent = [
-            value
-            for value in candidate["group_values"]
-            if _group_key(value) not in present
-        ]
-        if absent:
-            raise OperationValidationError(
-                "operation.multi_step group_values absent from "
-                f"{candidate['year_column']}: "
-                + ", ".join(str(value) for value in absent)
-            )
-    return {
-        **candidate,
-        "group_values": list(candidate["group_values"]),
-        "all_numeric_columns": list(candidate["all_numeric_columns"]),
-    }
-
+    validate_workflow_steps(changes["steps"])
 
 
 # ── generic, plan-shaped workflow contract ──────────────────────────────
@@ -790,12 +616,15 @@ def _topological_order(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 __all__ = [
-    "CLASS3_GROUP_VALUES",
-    "CLASS3_WORKFLOW_TEMPLATE",
     "WORKFLOW_OPERATION_ID",
     "WORKFLOW_OPERATION_VERSION",
-    "class3_workflow_proposal_schema",
-    "compile_step_bindings",
-    "validate_class3_workflow",
+    "WORKFLOW_STEP_OPERATIONS",
+    "WORKFLOW_STEP_SPEC_CONTRACTS",
+    "WORKFLOW_TEMPLATE",
+    "StepSpecContract",
+    "validate_workflow_operation",
+    "validate_workflow_steps",
     "workflow_authorization",
+    "workflow_proposal_schema",
+    "workflow_step_vocabulary",
 ]

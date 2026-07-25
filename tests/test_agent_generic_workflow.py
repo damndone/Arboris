@@ -12,7 +12,7 @@ from workbench.agent.workflow_contracts import (
     _validate_step_spec,
 )
 from workbench.agent.workflow import WorkflowExecutor, compile_workflow
-from workbench.agent.workflow_runtime import build_class3_step_executor
+from workbench.agent.workflow_runtime import build_workflow_step_executor
 
 
 def _frame() -> pd.DataFrame:
@@ -115,7 +115,7 @@ def test_the_arbitrary_plan_executes_its_exploration_steps(tmp_path):
         available_columns=list(_frame().columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_class3_step_executor(project, draft))
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
 
     assert state.status == "completed"
     assert {step.status for step in state.steps.values()} == {"completed"}
@@ -232,7 +232,7 @@ def test_percentile_evidence_is_found_through_an_intermediate_step(tmp_path):
         available_columns=list(_frame().columns),
     )
 
-    state = WorkflowExecutor(project).execute(draft, build_class3_step_executor(project, draft))
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
 
     assert state.status == "completed"
     assert state.steps["step_group"].status == "completed"
@@ -263,11 +263,13 @@ def test_multi_step_contract_is_registry_owned_and_admits_composed_steps() -> No
     definition = OperationRegistry().require("operation.multi_step")
 
     assert definition.contract_owner == "operation_registry"
-    # The editable surface must not demand the legacy preset: a composed plan
-    # is the general form, and requiring workflow_template told the Agent the
-    # opposite of what the proposal schema accepts.
+    # A composed step list is the editable surface, and now the only one: the
+    # schema used to also admit a named preset whose bindings were a single
+    # exercise's variables.
+    assert definition.editable_schema["required"] == ["steps"]
     assert "steps" in definition.editable_schema["properties"]
-    assert "required" not in definition.editable_schema
+    assert "bindings" not in definition.editable_schema["properties"]
+    assert "workflow_template" not in definition.editable_schema["properties"]
 
 
 def test_published_step_vocabulary_covers_every_composable_operation() -> None:

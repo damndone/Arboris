@@ -351,7 +351,7 @@ describe("AskAISection", () => {
         { name: "data_profile.json", mime: "application/json" },
         { name: "statistical_exploration_summary.json", mime: "application/json" },
         { name: "statistical_exploration_corr.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-        { name: "class3_report.pdf", mime: "application/pdf" },
+        { name: "workflow_report.pdf", mime: "application/pdf" },
       ] as never;
     });
 
@@ -369,7 +369,7 @@ describe("AskAISection", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("ask-ai-explain-statistical_exploration_summary.json")).toBeInTheDocument();
     expect(screen.getByTestId("ask-ai-explain-statistical_exploration_corr.xlsx")).toBeInTheDocument();
-    expect(screen.getByTestId("ask-ai-explain-class3_report.pdf")).toBeInTheDocument();
+    expect(screen.getByTestId("ask-ai-explain-workflow_report.pdf")).toBeInTheDocument();
   });
 
   it("shows the read-only LLM provider badge with the configured model (A4)", async () => {
