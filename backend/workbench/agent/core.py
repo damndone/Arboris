@@ -123,6 +123,7 @@ class AgentCore:
         self._final_status: str | None = None
         self._last_tool_call_fingerprint: str | None = None
         self._consecutive_identical_tool_calls = 0
+        self._answered_tool_calls: dict[str, str] = {}
 
     def attach_tools(
         self,
@@ -211,6 +212,7 @@ class AgentCore:
         self._final_status = None
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
+        self._answered_tool_calls = {}
 
     def _end(self) -> None:
         self.repository.update_status(self.session_id, self._final_status or "idle")
@@ -225,6 +227,7 @@ class AgentCore:
         self._steps_used = 0
         self._last_tool_call_fingerprint = None
         self._consecutive_identical_tool_calls = 0
+        self._answered_tool_calls = {}
         self._active_turn_started = False
         self._active_request_id = None
         self._active_message_started = False
@@ -242,6 +245,43 @@ class AgentCore:
             raise AgentCoreContinuationError(
                 "cannot continue when the last message is not user or tool result"
             )
+
+    def _annotate_step_budget(self, payload: Any) -> Any:
+        """Tell the agent how much budget is left once most of it is spent.
+
+        Without this the step budget is invisible: the turn simply stops at
+        ``max_steps_exceeded`` with nothing produced, which is the worst
+        outcome for the user and the one the agent had no way to avoid. A
+        wandering turn that knows it has two steps left can still deliver.
+
+        Deliberately content-free about *what* to propose — it reports budget,
+        not an opinion on the task.
+        """
+
+        max_steps = self._budget.max_steps
+        if max_steps is None or not isinstance(payload, dict):
+            return payload
+        remaining = max_steps - self._steps_used
+        if remaining > max(2, max_steps // 2):
+            return payload
+        if remaining <= 2:
+            guidance = (
+                "Step budget is nearly spent. Stop inspecting: submit your "
+                "proposal now with the evidence you already have, or answer "
+                "the user directly. Another inspection will end the turn with "
+                "nothing delivered."
+            )
+        else:
+            guidance = (
+                "More than half the step budget is spent. Inspect only what a "
+                "required field still depends on, then propose."
+            )
+        # The repeat guard may already have written guidance; both matter, so
+        # keep them rather than letting whichever runs last win.
+        existing = payload.get("guidance")
+        if isinstance(existing, str) and existing:
+            guidance = f"{existing} {guidance}"
+        return {**payload, "steps_remaining": max(remaining, 0), "guidance": guidance}
 
     @staticmethod
     def _tool_call_fingerprint(tool_call: Mapping[str, Any]) -> str:
@@ -353,6 +393,7 @@ class AgentCore:
 
         context = self.context_builder.build(self.session_id)
         self._active_context_fingerprint = context.fingerprint
+
         if (
             self._budget.max_steps is not None
             and self._steps_used >= self._budget.max_steps
@@ -504,6 +545,38 @@ class AgentCore:
                     finally:
                         if self._active_tool_task is tool_task:
                             self._active_tool_task = None
+                    # A turn that re-asks a question it already answered learns
+                    # nothing and spends a provider step doing it. The guard above
+                    # only catches *consecutive* repeats, so an agent alternating
+                    # between two inspections loops until the budget is gone. Hand
+                    # the same evidence back with an explicit "you already have
+                    # this" so the loop converges instead of erroring out.
+                    payload = result.to_payload()
+                    repeat_fingerprint = self._tool_call_fingerprint(tool_call)
+                    if result.ok and repeat_fingerprint in self._answered_tool_calls:
+                        if isinstance(payload, dict):
+                            payload = {
+                                **payload,
+                                "already_answered_this_turn": True,
+                                "guidance": (
+                                    "This exact inspection was already answered in "
+                                    "this turn; its evidence is unchanged. Stop "
+                                    "inspecting and either submit a proposal or "
+                                    "answer the user."
+                                ),
+                            }
+                        self.events.emit(
+                            self.session_id,
+                            "loop_guard",
+                            {
+                                "tool_id": result.tool_id,
+                                "reason": "repeated_inspection_replayed",
+                            },
+                            command_id=command_id,
+                        )
+                    elif result.ok:
+                        self._answered_tool_calls[repeat_fingerprint] = result.tool_id
+                    payload = self._annotate_step_budget(payload)
                     result_entry = self.repository.append(
                         self.session_id,
                         "message",
@@ -513,7 +586,7 @@ class AgentCore:
                             "name": result.tool_id,
                             "command_id": command_id,
                             "content": json.dumps(
-                                result.to_payload(),
+                                payload,
                                 ensure_ascii=False,
                                 sort_keys=True,
                             ),

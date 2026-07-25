@@ -500,8 +500,11 @@ class NotebookPlanningAgent:
                     "put model-specific fields inside one of those objects, never directly in changes. "
                     "For model.genesis, model_params must include an evidence-backed model_type and y; "
                     "all non-time-series genesis models must also include x as a non-empty list. "
-                    "For OLS specifically, put covariance directly in model_params.covariance; OLS has no "
-                    "model_options owner, so never put covariance or any other field in model_options for OLS. "
+                    "For OLS, the server-owned Agent envelope is model_options.covariance and its only "
+                    "published values are robust, clustered, and unadjusted. For model.genesis, the "
+                    "legacy model_params.covariance field is also accepted for human/Draft compatibility, "
+                    "but a typed Agent option should use model_options.covariance so the contract binding "
+                    "and rerun path remain inspectable. "
                     "y and x must be exact column names present in completed profile/sample evidence; "
                     "if the target is not supported by evidence, do not submit the option. "
                     "For every non-empty model_options object, use the exact server-published field names "
@@ -852,13 +855,6 @@ class NotebookPlanningAgent:
                 "model_params or model_options; never put capability_id, params, "
                 "capability, parameters, or raw model fields directly under changes."
             )
-        elif message == "model.genesis ols does not accept model_options":
-            remediation = (
-                "Resubmit the OLS genesis proposal with covariance, when needed, directly inside "
-                "changes.model_params.covariance. OLS does not declare a model_options owner; do not "
-                "send covariance or any other OLS setting in changes.model_options or inside "
-                "model_params.model_options."
-            )
         elif (
             message.startswith("model.genesis model_params must")
             or message.startswith("model.genesis requires completed column evidence")
@@ -1147,12 +1143,6 @@ class NotebookPlanningAgent:
                 if not isinstance(model_type, str) or not model_type:
                     raise NotebookPlanningContractError(
                         "model.genesis model_params must include model_type"
-                    )
-                if model_type == "ols" and (
-                    "model_options" in changes or "model_options" in model_params
-                ):
-                    raise NotebookPlanningContractError(
-                        "model.genesis ols does not accept model_options"
                     )
                 y = model_params.get("y")
                 if not isinstance(y, str) or not y:

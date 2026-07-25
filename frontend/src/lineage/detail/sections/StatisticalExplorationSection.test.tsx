@@ -203,4 +203,78 @@ describe("StatisticalExplorationSection", () => {
     expect(result).not.toHaveTextContent("bdsnew");
     expect(screen.queryByTestId("statistical-exploration-group-0")).not.toBeInTheDocument();
   });
+
+  it("sends the chosen standard errors with the OLS handoff", async () => {
+    // The genesis Draft carries no editable_schema, so this select is the only
+    // place on the whole path where the covariance can be chosen at all.
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+    await waitFor(() => expect(screen.getByTestId("statistical-ols-context")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("statistical-ols-outcome"), { target: { value: "bdsnew" } });
+    fireEvent.click(screen.getByTestId("statistical-ols-predictor-pfl"));
+    fireEvent.change(screen.getByTestId("statistical-ols-covariance"), { target: { value: "unadjusted" } });
+    fireEvent.click(screen.getByTestId("statistical-ols-context-submit"));
+
+    await waitFor(() => expect(screen.getByTestId("statistical-ols-context-link")).toBeInTheDocument());
+    expect(olsMock).toHaveBeenCalledWith(
+      "/tmp/project",
+      expect.objectContaining({ covariance: "unadjusted" }),
+    );
+  });
+
+  it("types a boolean filter value as a boolean, not the string 'true'", async () => {
+    // A derived percentile indicator is a boolean column. Sending "true" made
+    // every row compare unequal and produced a silently empty group.
+    schemaMock.mockResolvedValue({
+      source_run_id: "run-1",
+      source_node_id: "stage:raw",
+      source_artifact_id: "source_data",
+      row_count: 12,
+      columns: [
+        { name: "year", dtype: "int64" },
+        { name: "small_school", dtype: "boolean" },
+      ],
+    });
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("statistical-exploration-add-filter"));
+    fireEvent.change(screen.getByTestId("statistical-filter-column-0"), { target: { value: "small_school" } });
+    fireEvent.change(screen.getByTestId("statistical-filter-value-0"), { target: { value: "true" } });
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-result")).toBeInTheDocument());
+    const request = previewMock.mock.calls[previewMock.mock.calls.length - 1]?.[1] as {
+      filters: Array<{ value: unknown }>;
+    };
+    expect(request.filters[0].value).toBe(true);
+  });
+
+  it("warns when a typed group value matched no row", async () => {
+    previewMock.mockResolvedValueOnce({
+      spec: { operation: "summarize" },
+      preview: {
+        status: "ready",
+        fingerprint: "fp-empty",
+        source_sha256: "sha-1",
+        source_artifact_id: "source_data",
+        result: {
+          filtered_row_count: 4110,
+          groups: [
+            { value: 1998, filtered_row_count: 685, variables: {} },
+            { value: 2061, filtered_row_count: 0, variables: {} },
+          ],
+          empty_group_values: [2061],
+        },
+      },
+    });
+    render(<StatisticalExplorationSection node={node()} />);
+    await waitFor(() => expect(screen.getByTestId("statistical-exploration-section")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-by"), { target: { value: "year" } });
+    fireEvent.change(screen.getByTestId("statistical-exploration-group-values"), { target: { value: "1998, 2061" } });
+    fireEvent.click(screen.getByTestId("statistical-exploration-preview"));
+
+    const warning = await screen.findByTestId("statistical-exploration-empty-groups");
+    expect(warning).toHaveTextContent("2061");
+  });
 });

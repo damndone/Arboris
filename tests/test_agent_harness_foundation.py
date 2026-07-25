@@ -12,6 +12,7 @@ from workbench.agent.core import (
     AgentCoreBusyError,
     AgentCoreBudgetError,
     AgentCoreContinuationError,
+    AgentRunBudget,
 )
 from workbench.agent.context import ContextBuilder, CustomAgentMessage
 from workbench.agent.events import AgentEventStream
@@ -588,10 +589,13 @@ def test_agent_core_blocks_consecutive_identical_tool_calls_before_max_steps(
             "stop_reason": "error",
             "error": "repeated_tool_call_limit",
         }
+        # Filter by reason: replaying an already-answered inspection also emits
+        # a loop_guard, and that is a different, non-terminal signal.
         guard_events = [
             event
             for event in events.replay("session-a")
             if event.event_type == "loop_guard"
+            and event.payload.get("reason") == "identical_tool_call"
         ]
         assert len(guard_events) == 1
         assert guard_events[0].payload == {
@@ -644,10 +648,13 @@ def test_agent_core_resets_identical_tool_call_counter_when_arguments_change(
         assert await agent.prompt("inspect the requested nodes", budget={"max_steps": 6}) == ""
 
         assert len(adapter.requests) == 3
+        # Filter by reason: replaying an already-answered inspection also emits
+        # a loop_guard, and that is a different, non-terminal signal.
         guard_events = [
             event
             for event in events.replay("session-a")
             if event.event_type == "loop_guard"
+            and event.payload.get("reason") == "identical_tool_call"
         ]
         assert guard_events[0].payload["repetition_count"] == 2
         assert guard_events[0].payload["tool_id"] == "inspect_node_context"
@@ -806,3 +813,55 @@ def test_openai_compatible_adapter_normalizes_existing_one_shot_client(monkeypat
         assert calls == [(request.messages, config)]
 
     asyncio.run(scenario())
+
+
+def test_step_budget_becomes_visible_before_it_is_exhausted(tmp_path: Path) -> None:
+    """A turn must be able to see the wall it is about to hit.
+
+    ``max_steps_exceeded`` delivered nothing at all: the agent kept inspecting
+    a large graph with no signal that the budget was running out. Reporting the
+    remaining steps lets a wandering turn still submit what it has.
+    """
+
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(
+        repository, events, RecordingStreamAdapter(["x"]), session_id="session-a"
+    )
+    agent._budget = AgentRunBudget(max_steps=10)
+
+    # Early on the payload is left alone — budget noise on every result would
+    # crowd out the evidence the agent is actually reading.
+    agent._steps_used = 1
+    assert agent._annotate_step_budget({"ok": True}) == {"ok": True}
+
+    agent._steps_used = 6
+    midway = agent._annotate_step_budget({"ok": True})
+    assert midway["steps_remaining"] == 4
+    assert "propose" in midway["guidance"]
+
+    agent._steps_used = 9
+    final = agent._annotate_step_budget({"ok": True})
+    assert final["steps_remaining"] == 1
+    assert "nothing delivered" in final["guidance"]
+
+    # Never reports a negative budget, and keeps the repeat guard's guidance
+    # instead of overwriting it.
+    agent._steps_used = 12
+    overrun = agent._annotate_step_budget({"ok": True, "guidance": "already answered"})
+    assert overrun["steps_remaining"] == 0
+    assert overrun["guidance"].startswith("already answered")
+
+
+def test_step_budget_annotation_is_silent_without_a_budget(tmp_path: Path) -> None:
+    repository = JsonlSessionRepository(tmp_path / "workbench")
+    repository.create_session("session-a", chain_id="chain-a", role="chain")
+    events = AgentEventStream(tmp_path / "workbench")
+    agent = AgentCore(
+        repository, events, RecordingStreamAdapter(["x"]), session_id="session-a"
+    )
+    agent._budget = AgentRunBudget(max_steps=None)
+    agent._steps_used = 99
+
+    assert agent._annotate_step_budget({"ok": True}) == {"ok": True}

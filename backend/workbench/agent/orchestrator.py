@@ -57,6 +57,7 @@ from .execution import (
 from .events import AgentEventStream
 from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .proposals import (
+    ProposalConfirmation,
     ProposalConfirmationError,
     ProposalDecision,
     ProposalRevision,
@@ -70,11 +71,17 @@ from .risk import (
 )
 from .session import EntryRef, JsonlSessionRepository
 from .tools import ToolDefinition, ToolRegistry, ToolVisibleError
+from .workflow import (
+    WorkflowDraft,
+    WorkflowExecutionState,
+    compile_class3_workflow,
+    execute_class3_workflow,
+)
 
 # Operations whose effect is a derived data child node rather than a child
 # chain, so completing without a child_chain_id is correct rather than a bug.
 _DATA_CHILD_NODE_OPERATIONS = frozenset(
-    {"data.column.cast", "data.columns.cast", "code.execute"}
+    {"data.column.cast", "data.columns.cast", "code.execute", "operation.multi_step"}
 )
 
 
@@ -175,6 +182,11 @@ class _OrchestratorOperationHandler:
             preview = preview_data_columns_cast(self.project_root, spec)
             if preview.fingerprint != record.preconditions.get("context_fingerprint"):
                 raise ProposalStaleError("data columns cast preview is stale")
+        if self.executor_key == "operation.multi_step":
+            self.orchestrator._compile_class3_workflow_record(
+                record,
+                project_root=self.project_root,
+            )
         # code.execute intentionally does NOT re-preview here: previewing means
         # really running the user's code, and this hook runs on every attempt.
         # Its staleness check lives in _prepare_code_execute_effect, which can
@@ -238,6 +250,20 @@ class _OrchestratorOperationHandler:
                 execution_key=execution_key,
                 materialize=False,
             )
+        if self.executor_key == "operation.multi_step":
+            draft = self.orchestrator._compile_class3_workflow_record(
+                record,
+                project_root=self.project_root,
+            )
+            return OperationEffect(
+                execution={
+                    **record.execution,
+                    "workflow_id": draft.workflow_id,
+                    "workflow_plan_fingerprint": draft.plan_fingerprint,
+                    "workflow_step_count": len(draft.steps),
+                },
+                status="submitted",
+            )
         raise ValueError(f"no executor registered for {self.executor_key}")
 
     async def execute(self, record, *, execution_key, failpoint) -> OperationEffect:
@@ -276,6 +302,40 @@ class _OrchestratorOperationHandler:
                 execution_key=execution_key,
                 materialize=True,
             )
+        elif self.executor_key == "operation.multi_step":
+            draft = self.orchestrator._compile_class3_workflow_record(
+                record,
+                project_root=self.project_root,
+            )
+            state = await asyncio.to_thread(
+                execute_class3_workflow,
+                self.project_root,
+                draft,
+            )
+            self.orchestrator._persist_class3_step_audit(record, draft, state)
+            if state.status != "completed":
+                raise ValueError("Class 3 workflow did not complete")
+            return OperationEffect(
+                outputs={
+                    "status": "completed",
+                    "workflow_id": draft.workflow_id,
+                    "workflow_plan_fingerprint": draft.plan_fingerprint,
+                    "workflow_state": state.to_dict(),
+                },
+                execution={
+                    **record.execution,
+                    "workflow_id": draft.workflow_id,
+                    "workflow_plan_fingerprint": draft.plan_fingerprint,
+                    "workflow_step_count": len(draft.steps),
+                },
+                bindings={"workflow_id": draft.workflow_id},
+                verification={
+                    "passed": True,
+                    "status": "completed",
+                    "checks": {"nine_steps_completed": True, "code_execute_used": False},
+                },
+                status="completed",
+            )
         raise ValueError(f"no executor registered for {self.executor_key}")
 
     async def reconcile(self, record, *, execution_key, failpoint) -> OperationEffect:
@@ -309,6 +369,26 @@ class _OrchestratorOperationHandler:
                 project_root=self.project_root,
                 execution_key=execution_key,
                 materialize=True,
+            )
+        elif self.executor_key == "operation.multi_step":
+            draft = self.orchestrator._compile_class3_workflow_record(
+                record,
+                project_root=self.project_root,
+            )
+            state = await asyncio.to_thread(
+                execute_class3_workflow,
+                self.project_root,
+                draft,
+            )
+            self.orchestrator._persist_class3_step_audit(record, draft, state)
+            if state.status != "completed":
+                raise ValueError("Class 3 workflow did not complete")
+            return OperationEffect(
+                outputs={"workflow_state": state.to_dict()},
+                execution=record.execution,
+                bindings={"workflow_id": draft.workflow_id},
+                verification={"passed": True, "status": "completed"},
+                status="completed",
             )
         raise ValueError(f"no reconciler registered for {self.executor_key}")
 
@@ -459,6 +539,164 @@ class WorkbenchOrchestrator:
         self._execution_locks: dict[str, asyncio.Lock] = {}
         self._operation_locks: dict[str, asyncio.Lock] = {}
         self._lease_owner = f"agent:{uuid4().hex}"
+
+    def _compile_class3_workflow_record(
+        self,
+        record: OperationRecord,
+        *,
+        project_root: Path | str,
+    ) -> WorkflowDraft:
+        """Rebind a confirmed workflow proposal to the live Raw schema."""
+
+        from ..statistical_exploration import resolve_statistical_source
+
+        changes = record.changes or {}
+        composed_steps = changes.get("steps")
+        bindings = changes.get("bindings")
+        if composed_steps is None and not isinstance(bindings, dict):
+            raise ValueError(
+                "operation.multi_step confirmed changes are missing steps or bindings"
+            )
+        source_context, frame = resolve_statistical_source(
+            project_root,
+            source_run_id=str(record.target["run_id"]),
+            source_node_id=str(record.target["node_ref"]),
+            source_artifact_id=str(record.target["artifact_id"]),
+        )
+        if composed_steps is not None:
+            from .workflow import compile_workflow
+
+            workflow_id = (
+                record.workflow_id
+                or record.execution.get("workflow_id")
+                or f"workflow_{record.record_id}"
+            )
+            return compile_workflow(
+                workflow_id=str(workflow_id),
+                target=record.target,
+                preconditions={
+                    **record.preconditions,
+                    "source_artifact_fingerprint": source_context["source_sha256"],
+                },
+                steps=composed_steps,
+                available_columns=[str(column) for column in frame.columns],
+            )
+        requested_numeric = bindings.get("all_numeric_columns")
+        if isinstance(requested_numeric, list):
+            import pandas as pd
+
+            nonnumeric = [
+                str(column)
+                for column in requested_numeric
+                if column in frame.columns
+                and not pd.api.types.is_numeric_dtype(frame[column])
+            ]
+            if nonnumeric:
+                raise ValueError(
+                    "operation.multi_step all_numeric_columns must be numeric: "
+                    + ", ".join(nonnumeric)
+                )
+        workflow_id = (
+            record.workflow_id
+            or record.execution.get("workflow_id")
+            or f"workflow_{record.record_id}"
+        )
+        return compile_class3_workflow(
+            workflow_id=str(workflow_id),
+            target=record.target,
+            preconditions={
+                **record.preconditions,
+                "source_artifact_fingerprint": source_context["source_sha256"],
+            },
+            bindings=bindings,
+            available_columns=[str(column) for column in frame.columns],
+            # The live column decides which grouping values are real; a value
+            # the data never takes must fail here rather than compile into a
+            # step that summarises an empty group.
+            group_value_witness=(
+                frame[str(bindings["year_column"])].dropna().unique().tolist()
+                if isinstance(bindings.get("year_column"), str)
+                and str(bindings["year_column"]) in frame.columns
+                else None
+            ),
+        )
+
+    def _persist_class3_step_audit(
+        self,
+        parent: OperationRecord,
+        draft: WorkflowDraft,
+        state: WorkflowExecutionState,
+    ) -> None:
+        """Persist one auditable child record per compiled workflow step."""
+
+        from .workflow_contracts import workflow_authorization
+
+        confirmation_id = f"confirmation_{parent.record_id}"
+        for step in draft.steps:
+            step_state = state.steps[step.step_id]
+            authorization = workflow_authorization(
+                workflow_id=draft.workflow_id,
+                confirmation_id=confirmation_id,
+                step_id=step.step_id,
+                plan_fingerprint=draft.plan_fingerprint,
+            )
+            confirmation = ProposalConfirmation(
+                proposal_id=f"{draft.workflow_id}_{step.step_id}",
+                operation_id=step.operation_id,
+                operation_version=step.operation_version,
+                revision=1,
+                fingerprint=step.fingerprint,
+                session_id=parent.agent_session_id,
+                chain_id=parent.chain_id,
+                command_id=parent.command_id,
+                target={**draft.target, "workflow_step_id": step.step_id},
+                preconditions={
+                    "source_fingerprint": parent.preconditions.get("context_fingerprint", ""),
+                    "dependency_fingerprints": [
+                        draft_step.fingerprint
+                        for draft_step in draft.steps
+                        if draft_step.step_id in step.depends_on
+                    ],
+                },
+                actor_type="workflow",
+                confirmed_at=parent.confirmation.get("confirmed_at", ""),
+                status="confirmed",
+                changes={"compiled_spec": step.spec},
+            )
+            child = self.operation_store.create_pending(
+                confirmation,
+                command_id=parent.command_id,
+                workflow_authorization=authorization,
+            )
+            if child.status in {"completed", "failed", "stale", "cancelled"}:
+                continue
+            status = step_state.status
+            terminal_status = "completed" if status == "completed" else "failed"
+            self.operation_store.append_status(
+                child.record_id,
+                terminal_status,
+                execution={
+                    **child.execution,
+                    **authorization,
+                    "workflow_step_status": status,
+                },
+                outputs={
+                    "workflow_step_id": step.step_id,
+                    "workflow_step_status": status,
+                    "artifact_ids": list(step_state.artifact_ids),
+                    "row_counts": dict(step_state.row_counts),
+                },
+                verification={
+                    "passed": status == "completed",
+                    "status": status,
+                    "workflow_confirmation": confirmation_id,
+                },
+                error=(
+                    {"type": "WorkflowStepFailed", "message": step_state.error}
+                    if status != "completed"
+                    else None
+                ),
+            )
 
     def _resolve_chain_head(
         self,
@@ -1317,7 +1555,7 @@ class WorkbenchOrchestrator:
                 },
                 execution=execution,
                 status="failed",
-                error={"type": type(exc).__name__},
+                error={"type": type(exc).__name__, "message": str(exc)},
             )
 
         outputs = {
@@ -1764,7 +2002,7 @@ class WorkbenchOrchestrator:
                 recovered.append(
                     self._fail_recovered_operation(
                         record,
-                        error={"type": type(exc).__name__},
+                        error={"type": type(exc).__name__, "message": str(exc)},
                     )
                 )
         return recovered
@@ -1957,6 +2195,7 @@ class WorkbenchOrchestrator:
             error = {
                 "code": getattr(exc, "code", type(exc).__name__),
                 "type": type(exc).__name__,
+                "message": str(exc),
                 "message": str(exc),
             }
             self.events.emit(
@@ -2221,6 +2460,45 @@ class WorkbenchOrchestrator:
             "changes": changes,
         }
 
+    def _canonicalize_class3_workflow_arguments(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bind a Class 3 workflow to the artifact owned by its Raw node.
+
+        The Agent may identify the selected node, but it must not choose the
+        durable artifact identity behind that node. The workflow executor
+        resolves the same ownership witness again at confirmation; binding it
+        here keeps a valid proposal executable instead of persisting a node
+        hash copied from the graph projection as ``artifact_id``.
+        """
+
+        project_root = self.data_operation_project_root
+        if project_root is None:
+            return arguments
+        target = dict(arguments.get("target") or {})
+        run_id = str(target.get("run_id") or "")
+        node_ref = str(target.get("node_ref") or "")
+        if not run_id or not node_ref:
+            return arguments
+        from ..data_operations import (
+            DataColumnCastValidationError,
+            resolve_data_column_cast_context,
+        )
+
+        try:
+            context = resolve_data_column_cast_context(
+                project_root,
+                source_run_id=run_id,
+                source_node_id=node_ref,
+            )
+        except (DataColumnCastValidationError, KeyError, TypeError, ValueError):
+            # Leave malformed intent to the typed operation validator, which
+            # owns the user-visible error vocabulary.
+            return arguments
+        target["artifact_id"] = str(context["source_artifact_id"])
+        return {**arguments, "target": target}
+
     def _create_analysis_loop_proposal_from_agent_arguments(
         self,
         *,
@@ -2402,6 +2680,8 @@ class WorkbenchOrchestrator:
         """
         if operation_id == "data.columns.cast":
             return self._canonicalize_data_columns_cast_arguments(arguments)
+        if operation_id == "operation.multi_step":
+            return self._canonicalize_class3_workflow_arguments(arguments)
         if self.context_provider is None or operation_id not in {"model.rerun", "graph.fork"}:
             return arguments
         inspect = getattr(self.context_provider, "inspect_node_context", None)

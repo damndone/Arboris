@@ -17,6 +17,7 @@ import {
   type StatisticalOlsContextResponse,
   type StatisticalFilter,
   type StatisticalFilterOperator,
+  type StatisticalOlsCovariance,
 } from "../../statisticalExploration";
 import { DerivedVariableBuilder } from "./DerivedVariableBuilder";
 import { StatisticalPlotSection } from "./StatisticalPlotSection";
@@ -46,9 +47,22 @@ function numericDtype(dtype: string): boolean {
   return /int|float|double|decimal|number|bool/i.test(dtype);
 }
 
+function booleanDtype(dtype: string): boolean {
+  return /bool/i.test(dtype);
+}
+
 function filterValue(value: string, column: string, context: DataColumnCastContext | null): unknown {
   const dtype = context?.columns.find((item) => item.name === column)?.dtype ?? "";
-  if (numericDtype(dtype) && value.trim() !== "") {
+  const trimmed = value.trim();
+  // A derived percentile indicator is a boolean column. `Number("true")` is
+  // NaN, so without this branch the natural spelling fell through to the string
+  // "true", compared unequal against every row, and produced a silently empty
+  // group instead of an error.
+  if (booleanDtype(dtype) && trimmed !== "") {
+    if (/^(true|1)$/i.test(trimmed)) return true;
+    if (/^(false|0)$/i.test(trimmed)) return false;
+  }
+  if (numericDtype(dtype) && trimmed !== "") {
     const number = Number(value);
     return Number.isFinite(number) ? number : value;
   }
@@ -61,14 +75,30 @@ function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) 
   const variableCount = result.variables && typeof result.variables === "object" && !Array.isArray(result.variables)
     ? Object.keys(result.variables).length
     : 0;
+  const emptyGroups = Array.isArray(result.empty_group_values) ? result.empty_group_values : [];
+  const pairs = Array.isArray(result.pairs) ? result.pairs : [];
+  const strongest = pairs
+    .filter((pair) => typeof pair.r === "number")
+    .sort((a, b) => Math.abs(b.r as number) - Math.abs(a.r as number))
+    .slice(0, 3);
   return (
     <div data-testid="statistical-exploration-result" style={{ borderTop: "1px solid var(--separator)", paddingTop: 8 }}>
       <strong>Preview</strong>
       <div>Rows after filters: {String(result.filtered_row_count ?? 0)}</div>
       {result.missing_policy && <div>Missing policy: {result.missing_policy}</div>}
       {groups.length > 0 && <div>{groups.length} {groups.length === 1 ? "group" : "groups"} · {groups.reduce((total, group) => total + (typeof group.filtered_row_count === "number" ? group.filtered_row_count : 0), 0)} grouped rows</div>}
+      {emptyGroups.length > 0 && (
+        <div data-testid="statistical-exploration-empty-groups" style={{ color: "var(--warning, #b06a00)" }}>
+          No rows matched: {emptyGroups.map((value) => String(value)).join(", ")} — check the group values.
+        </div>
+      )}
       {groups.length === 0 && variableCount > 0 && <div>{variableCount} variables summarized; full result will open in Table.</div>}
       {Array.isArray(result.matrix) && <div>Correlation matrix · N={String(result.correlation_n ?? "—")}</div>}
+      {strongest.length > 0 && (
+        <div data-testid="statistical-exploration-top-correlations">
+          Strongest: {strongest.map((pair) => `${pair.a}–${pair.b} ${(pair.r as number).toFixed(3)}`).join(" · ")}
+        </div>
+      )}
     </div>
   );
 }
@@ -112,6 +142,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
   const [exports, setExports] = useState<NonNullable<StatisticalExplorationConfirmResponse["exports"]>>([]);
   const [olsOutcome, setOlsOutcome] = useState("");
   const [olsPredictors, setOlsPredictors] = useState<string[]>([]);
+  const [olsCovariance, setOlsCovariance] = useState<StatisticalOlsCovariance>("robust");
   const [olsDraft, setOlsDraft] = useState<StatisticalOlsContextResponse | null>(null);
   const [olsStatus, setOlsStatus] = useState<"idle" | "creating" | "error">("idle");
   const [olsError, setOlsError] = useState<string | null>(null);
@@ -133,6 +164,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
     setExports([]);
     setOlsOutcome("");
     setOlsPredictors([]);
+    setOlsCovariance("robust");
     setOlsDraft(null);
     setOlsStatus("idle");
     setOlsError(null);
@@ -244,6 +276,7 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
         ...request,
         outcome_column: olsOutcome,
         predictor_columns: olsPredictors,
+        covariance: olsCovariance,
         preview_fingerprint: preview.fingerprint,
       });
       setOlsDraft(response);
@@ -400,10 +433,21 @@ export function StatisticalExplorationSection({ node }: { node: GraphViewNode })
                       </label>
                       ))}
                     </div>
+                    <label className="statistical-ols-outcome">
+                      <span>Standard errors</span>
+                      <select
+                        data-testid="statistical-ols-covariance"
+                        value={olsCovariance}
+                        onChange={(event) => setOlsCovariance(event.target.value as StatisticalOlsCovariance)}
+                      >
+                        <option value="robust">Robust (HC1)</option>
+                        <option value="unadjusted">Unadjusted (Stata reg default)</option>
+                      </select>
+                    </label>
                     <button type="button" data-testid="statistical-ols-context-submit" disabled={!olsOutcome || olsPredictors.length === 0 || olsStatus === "creating"} onClick={() => void handleOlsContext()}>
                       {olsStatus === "creating" ? "Creating Draft…" : "Create OLS Draft"}
                     </button>
-                    <div>Creates a reviewable Draft; it does not run OLS.</div>
+                    <div>Creates a reviewable Draft; it does not run OLS. The Draft cannot be re-edited, so choose the standard errors here.</div>
                     {olsStatus === "error" && <div data-testid="statistical-ols-context-error">{olsError}</div>}
                     {olsDraft && <a data-testid="statistical-ols-context-link" href={`/pipeline-drafts/${encodeURIComponent(olsDraft.draft.draft_id)}?project_root=${encodeURIComponent(projectRoot ?? "")}`}>Open OLS Draft</a>}
                   </fieldset>

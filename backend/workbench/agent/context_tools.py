@@ -647,6 +647,20 @@ class NodeOperationContextProvider:
             vocabulary = build_option_vocabulary(contract.op_type)
             if vocabulary is not None:
                 contract_payload["option_vocabulary"] = vocabulary
+        elif operation.contract_owner == "operation_registry" and operation.editable_schema:
+            # The operation does not act on one node's editable surface, so no
+            # lineage pack can answer for it — this definition is the contract.
+            # Without this an Agent asked to compose a workflow could not read
+            # the shape of the very operation it was told to propose, and spent
+            # its whole step budget guessing.
+            contract_payload = {
+                "op_type": operation.operation_id,
+                "schema_id": f"{operation.operation_id}@{operation.operation_version}",
+                "editable_schema": operation.editable_schema,
+                "contract_owner": "operation_registry",
+            }
+            if operation.vocabulary_builder is not None:
+                contract_payload["step_vocabulary"] = operation.vocabulary_builder()
         elif "data_node" in operation.scope_requirements and operation.editable_schema:
             # Data operations have no per-node lineage contract: `resolve_
             # operation_contract` answers for model nodes only, and a cast's

@@ -512,7 +512,7 @@ def test_model_options_are_an_estimation_only_lineage_input() -> None:
 @pytest.mark.parametrize(
     ("model_type", "code"),
     (
-        ("ols", "MODEL_OPTIONS_UNSUPPORTED"),
+        ("ols", "OLS_MODEL_OPTIONS_UNKNOWN_FIELD"),
         ("auto", "MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED"),
     ),
 )

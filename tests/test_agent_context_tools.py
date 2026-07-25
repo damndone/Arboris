@@ -876,16 +876,22 @@ def test_arma_garch_contract_publishes_its_option_vocabulary(tmp_path: Path) -> 
     assert vocabulary["cross_field_rules"]
 
 
-def test_a_pack_without_a_vocabulary_stays_silent(tmp_path: Path) -> None:
-    # OLS names every field in its own editable schema; a second, hand-written
-    # source of truth there could only drift.
+def test_ols_contract_publishes_its_bounded_option_vocabulary(tmp_path: Path) -> None:
+    # OLS now owns a small Agent envelope; publishing it prevents the Agent
+    # from guessing the nested covariance field or its closed value set.
     project_root = tmp_path / "project"
     _write_project_run(project_root)
 
     contract = _inspect_contract(project_root, _load_provider_type())["contract"]
 
     assert contract["op_type"] == "ols"
-    assert "option_vocabulary" not in contract
+    vocabulary = contract["option_vocabulary"]
+    assert vocabulary["version"] == "ols-model-options/v1"
+    assert vocabulary["fields"]["covariance"]["allowed_values"] == [
+        "robust",
+        "clustered",
+        "unadjusted",
+    ]
 
 
 def test_the_arma_garch_contract_payload_fits_the_tool_output_budget(

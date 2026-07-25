@@ -12,7 +12,7 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   appendAiActivity,
   askAiHistoryForNode,
@@ -40,6 +40,8 @@ import {
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
+import { useWorkbenchOptional } from "../WorkbenchStateProvider";
+import { resolveTableRunScope } from "./tableRunScope";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -87,6 +89,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
       <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
         {model.nobs !== undefined ? `n=${model.nobs}` : null}
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
+        {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>
       <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
         <thead>
@@ -351,14 +354,49 @@ const FIGURE_GRID: React.CSSProperties = {
 export function TableView({ projectRoot: projectRootProp }: { projectRoot?: string }) {
   const { model } = useLineage();
   const forest = useForest();
-  // Follow the active head (the run the graph is highlighting) so the table
-  // reflects a freshly forked/executed run and rail-selected runs — not just
-  // the URL run. Falls back to the URL run in legacy (no forest context).
-  const runId = forest?.activeRunId ?? model.runId;
+  const workbench = useWorkbenchOptional();
   const [searchParams] = useSearchParams();
   const contextProjectRoot = useProjectRootOptional();
   const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root") ?? "";
 
+  // Selecting a node scopes the Table to that node's lineage chain; selecting
+  // nothing shows every run in the project. Previously this view was pinned to
+  // one run, so results saved against a source run looked deleted as soon as
+  // the active head moved on.
+  const runIds = useMemo(
+    () =>
+      resolveTableRunScope({
+        forest: forest?.forest ?? null,
+        activeRunId: forest?.activeRunId ?? null,
+        selectedKey: workbench?.state.selectedKey ?? null,
+        fallbackRunId: forest?.activeRunId ?? model.runId,
+      }),
+    [forest, workbench?.state.selectedKey, model.runId],
+  );
+
+  return (
+    <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+      {runIds.map((runId) => (
+        <RunResultsPanel
+          key={runId}
+          runId={runId}
+          projectRoot={projectRoot}
+          scopeSize={runIds.length}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RunResultsPanel({
+  runId,
+  projectRoot,
+  scopeSize,
+}: {
+  runId: string;
+  projectRoot: string;
+  scopeSize: number;
+}) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
   const [explorations, setExplorations] = useState<Array<{ item: ArtifactItem; payload: unknown }>>([]);
@@ -433,8 +471,12 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
     figures.length === 0 &&
     otherArtifacts.length === 0;
 
+  // An empty run is noise when several runs are on screen; on its own it is the
+  // honest answer to "what did this run produce?".
+  if (isEmpty && scopeSize > 1) return null;
+
   return (
-    <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+    <div data-run-id={runId}>
       <header
         data-testid="table-view-run-header"
         title={runId}

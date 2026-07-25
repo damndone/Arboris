@@ -227,6 +227,13 @@ def run_workflow(
         model_type, {} if model_options is None else model_options
     )
     normalized_model_options = bound_model_options.payload
+    effective_covariance = covariance
+    if model_type == "ols" and normalized_model_options:
+        from ..contracts.model.ols import effective_ols_covariance
+
+        effective_covariance = effective_ols_covariance(
+            covariance, normalized_model_options
+        )
     model_options_binding = (
         bound_model_options.binding.to_dict()
         if bound_model_options.binding is not None
@@ -245,7 +252,7 @@ def run_workflow(
     direct_form = {
         "mode": mode,
         "model_type": model_type,
-        "covariance": covariance,
+        "covariance": effective_covariance,
         "entity_col": entity_col,
         "time_col": time_col,
         "iv_endog": json.dumps(list(iv_endog or [])),
@@ -280,7 +287,7 @@ def run_workflow(
         upload_bytes,
         filename=upload_filename or "upload.csv",
     )
-    requested_covariance = (covariance or "").strip().lower()
+    requested_covariance = (effective_covariance or "").strip().lower()
     wire_covariance = requested_covariance or "robust"
     executable_payload = {
         "model_type": model_type,
@@ -540,6 +547,13 @@ def _run_workflow(
     normalized_model_options = canonicalize_model_options(
         {} if model_options is None else model_options
     )
+    effective_covariance = covariance
+    if model_type == "ols" and normalized_model_options:
+        from ..contracts.model.ols import effective_ols_covariance
+
+        effective_covariance = effective_ols_covariance(
+            covariance, normalized_model_options
+        )
 
     _graph_store = GraphStore(runs_root=run_root.parent)
     _recorder = GraphRecorder(run_id=run_id, store=_graph_store)
@@ -574,7 +588,7 @@ def _run_workflow(
     ctx.artifacts["_imputation_request"] = imputation
     ctx.artifacts["_entity_col"] = entity_col
     ctx.artifacts["_time_col"] = time_col
-    ctx.artifacts["_covariance"] = covariance
+    ctx.artifacts["_covariance"] = effective_covariance
     ctx.artifacts["_prediction_model_type"] = prediction_model_type
     ctx.artifacts["_prediction_cv_folds"] = prediction_cv_folds
     ctx.artifacts["_prediction_sampling_method"] = prediction_sampling_method
@@ -607,7 +621,7 @@ def _run_workflow(
     upload_hash = sha256_bytes(input_files[0].read_bytes()) if input_files else ""
     form = {
         "model_type": model_type,
-        "covariance": covariance,
+        "covariance": effective_covariance,
         "entity_col": entity_col,
         "time_col": time_col,
         "iv_endog": list(iv_endog or []),

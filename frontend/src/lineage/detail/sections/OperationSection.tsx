@@ -29,7 +29,9 @@ import {
 } from "./manualRerunPatch";
 
 export function OperationSection({ node }: { node: GraphViewNode }) {
-  const schema = node.editableSchema;
+  const schema = node.editableSchema?.filter(
+    (control) => !(control.key === "model_options" && String(control.kind) === "object"),
+  );
   const rerun = useRerun();
   const resolved = useResolvedNodeOperationContext();
   if (!schema || schema.length === 0) return null;

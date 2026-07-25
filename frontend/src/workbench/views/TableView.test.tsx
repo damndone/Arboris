@@ -119,6 +119,7 @@ describe("TableView", () => {
           model_id: "m1",
           model_type: "ols",
           r_squared: 0.42,
+          r_squared_adj: 0.41,
           nobs: 100,
           coefficients: {
             education: { estimate: 0.08, std_error: 0.01, p_value: 0.001, p_value_display: "<0.001", ci_lower: 0.0604, ci_upper: 0.0996 },
@@ -137,6 +138,8 @@ describe("TableView", () => {
     expect(screen.getByText("0.08")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "95% CI" })).toBeTruthy();
     expect(screen.getByText("[0.0604, 0.0996]")).toBeTruthy();
+    // Stata `reg` prints Adj R-squared; a reader must not have to compute it.
+    expect(screen.getByText(/adj\. R²=0\.41/)).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
@@ -284,6 +287,50 @@ describe("TableView", () => {
       "run-1",
       "statistical_exploration_years",
     );
+  });
+
+  it("renders a pooled correlation matrix with variable names, not a download hint", async () => {
+    // `corr` returns `variables` as a list; the mapping/group branches skipped
+    // it and the whole matrix reached the user as
+    // "Result is available as the downloadable artifact."
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "statistical_exploration",
+          items: [
+            {
+              artifact_id: "statistical_exploration_corr",
+              path: "artifacts/statistical_exploration/statistical_exploration_corr.json",
+              artifact_type: "statistical_exploration",
+              step: "statistical_exploration",
+              sha256: "corr-sha",
+            },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    artifactJsonMock.mockResolvedValue({
+      spec: { operation: "corr" },
+      result: {
+        operation: "corr",
+        source_row_count: 4110,
+        filtered_row_count: 4110,
+        correlation_n: 4055,
+        variables: ["pfl", "pblack"],
+        matrix: [
+          [1.0, 0.3500236543],
+          [0.3500236543, 1.0],
+        ],
+      },
+    });
+
+    renderTable();
+
+    const table = await screen.findByTestId("table-view-statistical-exploration");
+    expect(table).not.toHaveTextContent("Result is available as the downloadable artifact.");
+    expect(table).toHaveTextContent("pfl");
+    expect(table).toHaveTextContent("pblack");
+    expect(table).toHaveTextContent("0.35");
   });
 
   it("lists non-figure artifacts with download links", async () => {

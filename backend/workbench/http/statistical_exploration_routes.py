@@ -60,6 +60,12 @@ class StatisticalExplorationConfirmRequest(StatisticalExplorationRequest):
 class StatisticalOlsContextRequest(StatisticalExplorationConfirmRequest):
     outcome_column: str = Field(min_length=1, max_length=200)
     predictor_columns: list[str] = Field(min_length=1, max_length=100)
+    # A genesis draft carries no editable_schema, so whatever this endpoint
+    # writes is what the run estimates — there is no later screen to change it.
+    # "clustered" is absent on purpose: the handoff materializes only the
+    # outcome and predictors, so the cluster column would not exist in the
+    # input the draft executes against.
+    covariance: Literal["robust", "unadjusted"] = "robust"
 
 
 def _root(project_root: str):
@@ -298,6 +304,10 @@ def create_statistical_ols_context(
             "spec": spec.to_dict(),
             "outcome_column": body.outcome_column,
             "predictor_columns": list(body.predictor_columns),
+            # Part of the identity, not decoration: two handoffs that differ
+            # only by covariance are different analyses and must not dedupe
+            # onto one draft.
+            "covariance": body.covariance,
             "analysis_row_count": int(len(filtered)),
             "filtered_artifact_id": filtered_artifact_id,
             "filtered_artifact_path": filtered_rel,
@@ -325,6 +335,7 @@ def create_statistical_ols_context(
                 "model_type": "ols",
                 "y": body.outcome_column,
                 "x": list(body.predictor_columns),
+                "covariance": body.covariance,
             },
             exploration_context=exploration_context,
         )

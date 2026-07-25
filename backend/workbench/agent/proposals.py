@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -107,6 +107,7 @@ class ProposalConfirmation:
     actor_type: str
     confirmed_at: str
     status: str
+    changes: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +125,7 @@ class ProposalConfirmation:
             "actor_type": self.actor_type,
             "confirmed_at": self.confirmed_at,
             "status": self.status,
+            "changes": self.changes,
         }
 
     @classmethod
@@ -142,6 +144,7 @@ class ProposalConfirmation:
             actor_type=str(value["actor_type"]),
             confirmed_at=str(value["confirmed_at"]),
             status=str(value["status"]),
+            changes=dict(value.get("changes") or {}),
         )
 
 
@@ -332,6 +335,7 @@ class ProposalStore:
                     actor_type=actor_type,
                     confirmed_at=_now(),
                     status="stale",
+                    changes=latest.changes,
                 )
                 append_jsonl_atomic(self._path(proposal_id), stale.to_dict())
                 raise ProposalStaleError("proposal preconditions changed")
@@ -350,6 +354,7 @@ class ProposalStore:
                 actor_type=actor_type,
                 confirmed_at=_now(),
                 status="confirmed",
+                changes=latest.changes,
             )
             append_jsonl_atomic(self._path(proposal_id), confirmation.to_dict())
             return confirmation

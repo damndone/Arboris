@@ -374,7 +374,9 @@ def test_generic_lifecycle_rejects_high_risk_without_authorization(tmp_path: Pat
     failed = asyncio.run(lifecycle.execute(record.record_id))
 
     assert failed.status == "failed"
-    assert failed.error == {"type": "RiskAuthorizationRequired"}
+    assert failed.error["type"] == "RiskAuthorizationRequired"
+    # The message rides along so the agent can act on the refusal.
+    assert failed.error.get("message")
     assert handler.execute_calls == 0
 
 

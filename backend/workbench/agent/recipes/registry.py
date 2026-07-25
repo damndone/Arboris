@@ -36,11 +36,38 @@ class AgentRecipeRegistry:
 BuildVocabulary = Callable[[], dict[str, Any]]
 
 
+def _build_ols_option_vocabulary() -> dict[str, Any]:
+    from ...contracts.model.ols import OLS_COVARIANCE_VALUES
+
+    return {
+        "version": "ols-model-options/v1",
+        "fields": {
+            "covariance": {
+                "path": "covariance",
+                "type": "enum",
+                "allowed_values": list(OLS_COVARIANCE_VALUES),
+                "description": "OLS standard-error covariance estimator.",
+            }
+        },
+        "cross_field_rules": [
+            "clustered covariance requires the source model's entity_col cluster field.",
+        ],
+        "patch_shape_example": {"covariance": "unadjusted"},
+        "prohibited_claims": [
+            "Do not claim clustered covariance was used unless the source model has an entity_col.",
+            "Do not translate covariance into a different estimator label.",
+        ],
+    }
+
+
 def _option_vocabulary_builders() -> dict[str, BuildVocabulary]:
     from .arma_garch_vocabulary import build_arma_garch_option_vocabulary
     from ...contracts.model.arma_garch import ARMA_GARCH_PACK_ID
 
-    return {ARMA_GARCH_PACK_ID: build_arma_garch_option_vocabulary}
+    return {
+        ARMA_GARCH_PACK_ID: build_arma_garch_option_vocabulary,
+        "ols": _build_ols_option_vocabulary,
+    }
 
 
 def build_option_vocabulary(op_type: str) -> dict[str, Any] | None:
@@ -58,11 +85,25 @@ def build_option_vocabulary(op_type: str) -> dict[str, Any] | None:
 PatchValidator = Callable[..., dict[str, Any]]
 
 
+def _validate_ols_model_options_patch(
+    *, current_contract: Mapping[str, object], patch: Mapping[str, object]
+) -> dict[str, object]:
+    from ...contracts.model.ols import validate_ols_model_options
+    from ...model_options import merge_model_options
+
+    merged = merge_model_options(current_contract, patch)
+    validate_ols_model_options(merged)
+    return merged
+
+
 def _patch_validators() -> dict[str, PatchValidator]:
     from .arma_garch import validate_arma_garch_model_options_patch
     from ...contracts.model.arma_garch import ARMA_GARCH_PACK_ID
 
-    return {ARMA_GARCH_PACK_ID: validate_arma_garch_model_options_patch}
+    return {
+        ARMA_GARCH_PACK_ID: validate_arma_garch_model_options_patch,
+        "ols": _validate_ols_model_options_patch,
+    }
 
 
 def validate_model_options_patch(

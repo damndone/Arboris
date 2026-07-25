@@ -86,6 +86,13 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - You are the Econometrics Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
+- When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
+- Compose that workflow yourself in changes.steps. Each step is {step_id, operation_id, spec, depends_on}. Field names are exact and unknown fields are rejected. The per-step vocabulary below is the registry's own, and inspect_operation_contract on operation.multi_step returns the same thing.
+{step_vocabulary}
+- A composed workflow runs over the dataset, not over one graph node. Once you have the data schema and the operation contract you have everything a plan needs: inspecting further nodes adds nothing and spends the budget that writing the plan requires. Do not walk the graph node by node.
+- Use the columns and grouping values the DATA actually has, taken from inspection — never invented and never copied from an example. depends_on must name the step that produced the evidence a later step relies on; a percentile threshold must depend on the summarize_detail step that produced it.
+- The server owns statistical semantics: percentile method, missing-value policy, covariance validation, diagnostics and artifacts. Choose which steps to run over which columns; do not restate those fixed semantics in changes.
+- The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
 - propose_operation creates a reviewable pending proposal only; it does not execute a Workbench mutation. Never claim that a run, graph, or data change was executed from this tool.
 - A successful propose_operation ends your turn: reply with a short summary of what you proposed and call no further tools. Continuing past it spends the step budget and can end the turn in an error even though the proposal was created.
@@ -110,6 +117,31 @@ MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
 """
 
 
+def _step_vocabulary_lines() -> str:
+    """Render the composable-step vocabulary from its single source.
+
+    The protocol used to restate these field names by hand, so every new step
+    operation had to be remembered in two places and a stale line would teach
+    the Agent a name the validator rejects.
+    """
+
+    from ..agent.workflow_contracts import workflow_step_vocabulary
+
+    vocabulary = workflow_step_vocabulary()
+    lines: list[str] = []
+    for operation_id, entry in vocabulary["step_operations"].items():
+        required = ", ".join(entry["required"]) or "none"
+        lines.append(f"  - {operation_id} -> {entry['summary']} Required: {required}.")
+        for name, description in entry["fields"].items():
+            lines.append(f"      {name}: {description}")
+    grid = ", ".join(str(item) for item in vocabulary["reported_percentiles"])
+    lines.append(
+        f"  - Reported percentile grid: {grid}. Write 25 for the first quartile, never 0.25."
+    )
+    lines.append(f"  - {vocabulary['ordering']}")
+    return "\n".join(lines)
+
+
 def _chain_agent_protocol(registry: OperationRegistry) -> str:
     """Add the registry's current executable operation ids to the protocol."""
 
@@ -117,7 +149,7 @@ def _chain_agent_protocol(registry: OperationRegistry) -> str:
         scope_requirements=("chain", "active_head")
     )
     return (
-        CHAIN_AGENT_PROTOCOL
+        CHAIN_AGENT_PROTOCOL.replace("{step_vocabulary}", _step_vocabulary_lines())
         + "- The currently registered executable operation ids are: "
         + ", ".join(operation_ids)
         + ". Do not propose an id outside this registry.\n"
@@ -533,7 +565,7 @@ def _current_proposal_context_fingerprint(
     )
     if proposal.operation_id == "data.columns.cast":
         return _current_data_columns_cast_fingerprint(root, proposal)
-    if proposal.operation_id not in {"model.rerun", "graph.fork"}:
+    if proposal.operation_id not in {"model.rerun", "graph.fork", "operation.multi_step"}:
         raise WorkbenchAPIError(
             status_code=422,
             code="AGENT_PROPOSAL_OPERATION_UNSUPPORTED",
@@ -557,7 +589,7 @@ def _current_proposal_context_fingerprint(
             message="The proposal target or active head changed before confirmation.",
             details={"proposal_id": proposal.proposal_id, "reason": str(exc)},
         ) from exc
-    if snapshot.get("node_hash") != target.get("node_hash"):
+    if target.get("node_hash") is not None and snapshot.get("node_hash") != target.get("node_hash"):
         raise WorkbenchAPIError(
             status_code=409,
             code="AGENT_PROPOSAL_STALE",

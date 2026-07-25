@@ -22,7 +22,29 @@ function resultOf(payload: unknown): Record<string, unknown> {
     : record;
 }
 
+/** `corr` returns `variables` as a list, so the mapping branches below skip it.
+ *  Without this the matrix reached the table as "available as the downloadable
+ *  artifact" and the correlations were unreadable in the product. */
+function correlationRowsOf(result: Record<string, unknown>): Array<Record<string, TableCell>> | null {
+  const variables = result.variables;
+  const matrix = result.matrix;
+  if (!Array.isArray(variables) || !Array.isArray(matrix)) return null;
+  if (matrix.length !== variables.length) return null;
+  const names = variables.map((name) => String(name));
+  return names.map((name, index) => {
+    const row = matrix[index];
+    const entry: Record<string, TableCell> = { variable: name };
+    names.forEach((column, position) => {
+      const cell = Array.isArray(row) ? row[position] : null;
+      entry[column] = typeof cell === "number" ? Number(cell.toFixed(4)) : scalar(cell);
+    });
+    return entry;
+  });
+}
+
 function rowsOf(result: Record<string, unknown>): Array<Record<string, TableCell>> {
+  const correlation = correlationRowsOf(result);
+  if (correlation) return correlation;
   const groups = Array.isArray(result.groups) ? result.groups : [];
   if (groups.length > 0) {
     return groups.flatMap((group) => {

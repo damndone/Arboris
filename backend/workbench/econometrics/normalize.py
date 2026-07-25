@@ -46,6 +46,15 @@ def _json_safe_sequence(values: Any) -> list[float | None]:
     return [_json_safe_float(value) for value in iterable]
 
 
+# A diagnostic plot of the first 500 rows of a 4110-row model is not the
+# model's diagnostic plot.  The preview stays bounded for compact surfaces, and
+# the full vector is emitted alongside it so plotting describes the analysis
+# sample.  The ceiling only exists so a very large model cannot turn one result
+# JSON into a multi-megabyte file; past it, plots fall back to the preview and
+# say so in their title.
+FULL_SEQUENCE_LIMIT = 200_000
+
+
 def _json_safe_sequence_preview(values: Any, limit: int = 500) -> list[float | None]:
     if limit <= 0:
         return []
@@ -229,6 +238,9 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "model_id": model_id,
         "nobs": int(fitted.nobs),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
+        # Stata's `reg` prints Adj R-squared on every run; omitting it makes a
+        # standard reading of the output impossible from Workbench alone.
+        "r_squared_adj": _json_safe_float(getattr(fitted, "rsquared_adj", None)),
         "pseudo_r2": _json_safe_float(getattr(fitted, "prsquared", None)),
         "llf": _json_safe_float(getattr(fitted, "llf", None)),
         "aic": _json_safe_float(getattr(fitted, "aic", None)),
@@ -239,6 +251,17 @@ def normalize_statsmodels_result(fitted: Any, model_id: str) -> dict[str, Any]:
         "residuals_preview": _json_safe_sequence_preview(getattr(fitted, "resid", [])),
         "coefficients": coefficients,
     }
+
+    full_fitted = _json_safe_sequence_preview(
+        getattr(fitted, "fittedvalues", []), limit=FULL_SEQUENCE_LIMIT
+    )
+    full_residuals = _json_safe_sequence_preview(
+        getattr(fitted, "resid", []), limit=FULL_SEQUENCE_LIMIT
+    )
+    if len(full_fitted) < FULL_SEQUENCE_LIMIT:
+        result["fitted_values"] = full_fitted
+    if len(full_residuals) < FULL_SEQUENCE_LIMIT:
+        result["residuals"] = full_residuals
 
     if has_pr2 or is_count_model:
         if is_count_model:

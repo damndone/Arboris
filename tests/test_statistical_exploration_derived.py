@@ -29,7 +29,7 @@ def test_percentile_derived_boolean_returns_threshold_and_bounded_preview() -> N
     )
 
     assert result["derived"]["source_column"] == "totreg"
-    assert result["derived"]["threshold"] == 17.5
+    assert result["derived"]["threshold"] == 15.0
     assert result["derived"]["comparison"] == "lte"
     assert result["derived"]["output_name"] == "small_school"
     assert result["derived"]["counts"] == {"true": 1, "false": 3, "missing": 0}
@@ -81,12 +81,13 @@ def test_derived_boolean_confirm_creates_one_child_artifact_recipe_and_graph_nod
     assert first.json()["derived"] == second.json()["derived"]
     derived = first.json()["derived"]
     assert derived["child_node_id"].startswith("data-derive:")
-    assert derived["threshold"] == 17.5
+    assert derived["threshold"] == 15.0
     frame = pd.read_csv(project / "runs" / run_id / derived["artifact_path"])
     assert frame["small_school"].tolist() == [True, False, False, False]
     recipe = json.loads((project / "runs" / run_id / derived["recipe_path"]).read_text())
     assert recipe["source"]["artifact_id"] == artifact_id
-    assert recipe["definition"]["threshold"] == 17.5
+    assert recipe["definition"]["threshold"] == 15.0
+    assert recipe["definition"]["quantile_method"] == "stata_summarize_detail_v1"
     graph = GraphStore(project / "runs").read(run_id)
     assert derived["child_node_id"] in graph.nodes
     assert any(

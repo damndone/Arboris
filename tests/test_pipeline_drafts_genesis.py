@@ -631,7 +631,7 @@ def test_execute_genesis_produces_first_run(tmp_path):
 
 
 def test_execute_genesis_normalizes_legacy_ols_covariance_model_options(tmp_path):
-    """A previously materialized Notebook Draft must execute without an OLS options owner."""
+    """A materialized OLS Draft keeps its bound options and legacy projection."""
     root = _mkproject(tmp_path)
     d = _genesis_rich(root)
     did = d["draft"]["draft_id"]
@@ -660,7 +660,7 @@ def test_execute_genesis_normalizes_legacy_ols_covariance_model_options(tmp_path
         )
     )
     assert inputs["form"]["covariance"] == "robust"
-    assert inputs["form"]["model_options"] == {}
+    assert inputs["form"]["model_options"] == {"covariance": "robust"}
     _wait_terminal(root, response.json()["run_id"])
 
 

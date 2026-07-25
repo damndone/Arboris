@@ -344,6 +344,34 @@ describe("AskAISection", () => {
     expect(calls[calls.length - 1][1]).toContain('"data_profile.json"');
   });
 
+  it("collapses long artifact lists into a categorized summary", () => {
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId, (node) => {
+      node.artifacts = [
+        { name: "data_profile.json", mime: "application/json" },
+        { name: "statistical_exploration_summary.json", mime: "application/json" },
+        { name: "statistical_exploration_corr.xlsx", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        { name: "class3_report.pdf", mime: "application/pdf" },
+      ] as never;
+    });
+
+    expect(screen.getByTestId("ask-ai-artifact-count")).toHaveTextContent("4 total");
+    expect(screen.getByTestId("ask-ai-artifact-category-data")).toHaveTextContent("1 data");
+    expect(screen.getByTestId("ask-ai-artifact-category-tables")).toHaveTextContent("1 table");
+    expect(screen.getByTestId("ask-ai-artifact-category-analysis")).toHaveTextContent("2 analysis");
+    expect(screen.getByTestId("ask-ai-explain-data_profile.json")).toBeInTheDocument();
+    expect(screen.queryByTestId("ask-ai-explain-statistical_exploration_summary.json")).not.toBeInTheDocument();
+
+    const toggle = screen.getByTestId("ask-ai-artifacts-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("ask-ai-explain-statistical_exploration_summary.json")).toBeInTheDocument();
+    expect(screen.getByTestId("ask-ai-explain-statistical_exploration_corr.xlsx")).toBeInTheDocument();
+    expect(screen.getByTestId("ask-ai-explain-class3_report.pdf")).toBeInTheDocument();
+  });
+
   it("shows the read-only LLM provider badge with the configured model (A4)", async () => {
     const seed = makeOwnerResolutionSeedFixture();
     renderAskAISection(seed.activeHeadRunId);

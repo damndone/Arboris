@@ -19,6 +19,7 @@
     "diagnostics_poisson_1": [
       "cleaned_dataset"
     ],
+    "fitted_vs_x": [],
     "histograms": [],
     "kde_plots": [],
     "outcome_counts": [],
@@ -30,6 +31,7 @@
     "report_html": [],
     "report_pdf": [],
     "residuals_fitted": [],
+    "residuals_vs_x": [],
     "statistical_tests_anova": [
       "cleaned_dataset"
     ],

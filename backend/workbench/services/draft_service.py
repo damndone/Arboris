@@ -174,8 +174,8 @@ def execute_genesis_draft(
         mp = dict(nodes["model_1"].get("params") or {})
         try:
             # Compatibility adapter for already-materialized Notebook drafts;
-            # new proposals are rejected upstream unless they use the canonical
-            # OLS top-level covariance field.
+            # it preserves the server-owned nested OLS options while projecting
+            # covariance into the legacy top-level execution field.
             mp = normalize_ols_genesis_model_params(mp)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -396,19 +396,23 @@ def _plot_model_diagnostics(model_results, figures_dir, run_root, figures) -> No
     model_result = _first_model_result(model_results or [])
     if model_result is None:
         return
-    residuals = _model_numeric_list(model_result, "residuals_preview", "residuals")
-    fitted = _model_numeric_list(model_result, "fitted_values_preview", "fitted_values")
+    residuals, total = _model_diagnostic_sample(model_result, "residuals")
+    fitted, _fitted_total = _model_diagnostic_sample(model_result, "fitted_values")
     if residuals and fitted and len(residuals) == len(fitted):
+        scope = (
+            f"N={total}" if len(residuals) >= total else f"first {len(residuals)} of {total}"
+        )
         fig, ax = plt.subplots()
         ax.scatter(fitted, residuals, alpha=0.75)
         ax.axhline(0, color="#8a94a6", linewidth=1)
         ax.set_xlabel("Fitted values")
         ax.set_ylabel("Residuals")
+        ax.set_title(f"Residuals vs fitted values ({scope})")
         _save(fig, figures_dir / "residuals_fitted.png", run_root, "residuals_fitted", figures)
 
         fig, ax = plt.subplots()
         stats.probplot(residuals, dist="norm", plot=ax)
-        ax.set_title("Residual Q-Q plot")
+        ax.set_title(f"Residual Q-Q plot ({scope})")
         _save(fig, figures_dir / "qq_residuals.png", run_root, "qq_residuals", figures)
 
     coefficient_rows = _coefficient_rows(model_result)
@@ -443,8 +447,8 @@ def _plot_predictor_diagnostics(
     model_result = _first_model_result(model_results or [])
     if model_result is None:
         return
-    residuals = _model_numeric_list(model_result, "residuals_preview", "residuals")
-    fitted = _model_numeric_list(model_result, "fitted_values_preview", "fitted_values")
+    residuals, residual_total = _model_diagnostic_sample(model_result, "residuals")
+    fitted, _fitted_total = _model_diagnostic_sample(model_result, "fitted_values")
     if not residuals or not fitted:
         return
     n = min(len(residuals), len(fitted), len(frame))
@@ -475,6 +479,7 @@ def _plot_predictor_diagnostics(
             figures,
             y_label="Residuals",
             artifact_prefix="residuals_vs",
+            analysis_rows=residual_total,
         )
         _save_predictor_diagnostic(
             plot_frame,
@@ -485,6 +490,7 @@ def _plot_predictor_diagnostics(
             figures,
             y_label="Fitted values",
             artifact_prefix="fitted_vs",
+            analysis_rows=residual_total,
         )
 
 
@@ -513,6 +519,7 @@ def _save_predictor_diagnostic(
     *,
     y_label: str,
     artifact_prefix: str,
+    analysis_rows: int | None = None,
 ) -> None:
     artifact_suffix = _safe_artifact_suffix(predictor)
     artifact_id = f"{artifact_prefix}_{artifact_suffix}"
@@ -522,7 +529,9 @@ def _save_predictor_diagnostic(
         ax.axhline(0, color="#8a94a6", linewidth=1)
     ax.set_xlabel(predictor)
     ax.set_ylabel(y_label)
-    ax.set_title(f"{y_label} vs {predictor} (N={len(plot_frame)})")
+    plotted = len(plot_frame)
+    total = analysis_rows if isinstance(analysis_rows, int) and analysis_rows > 0 else plotted
+    ax.set_title(_diagnostic_title(y_label, predictor, plotted, total))
     _save(
         fig,
         figures_dir / f"{artifact_id}.png",
@@ -767,6 +776,26 @@ def _model_numeric_list(model_result: dict, *keys: str) -> list[float]:
         if values:
             return values
     return []
+
+
+def _model_diagnostic_sample(model_result: dict, name: str) -> tuple[list[float], int]:
+    """Return the plottable vector plus the model's own analysis-sample size.
+
+    The full vector is preferred so a diagnostic plot describes the estimated
+    model.  When only the bounded preview exists the caller still learns the
+    true ``nobs``, so the figure can say it is showing a prefix instead of
+    presenting 500 points as if they were the sample.
+    """
+    values = _model_numeric_list(model_result, name, f"{name}_preview")
+    total = model_result.get("nobs")
+    if not isinstance(total, int) or isinstance(total, bool) or total < len(values):
+        total = len(values)
+    return values, total
+
+
+def _diagnostic_title(y_label: str, predictor: str, plotted: int, total: int) -> str:
+    scope = f"N={total}" if plotted >= total else f"first {plotted} of {total}"
+    return f"{y_label} vs {predictor} ({scope})"
 
 
 def _coefficient_rows(model_result: dict) -> list[tuple[str, float, float]]:

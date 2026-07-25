@@ -188,6 +188,7 @@ def test_canonicalization_binds_the_artifact_and_the_real_preview_fingerprint(
         ),
     )
     assert canonical["target"]["artifact_id"] == artifact_id
+    assert canonical["preconditions"]["context_fingerprint"] != "f" * 64
     assert canonical["preconditions"]["context_fingerprint"] == expected.fingerprint
     assert canonical["preconditions"]["context_version"] == "data-columns-cast.v1"
     assert canonical["preconditions"]["owner_resolution"] == "typed_data_node"
@@ -229,6 +230,59 @@ def test_a_model_supplied_artifact_id_and_fingerprint_are_overridden(
 
     assert canonical["target"]["artifact_id"] == artifact_id
     assert canonical["preconditions"]["context_fingerprint"] != "f" * 64
+
+
+def test_class3_workflow_binds_the_real_source_artifact_id(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "year": [1998, 2002],
+                "adj_dppupil_comp": [100.0, 110.0],
+                "pblack": [10.0, 20.0],
+                "pfl": [30.0, 40.0],
+                "totreg": [500.0, 600.0],
+            }
+        ),
+    )
+    orchestrator = _orchestrator(project)
+    bindings = {
+        "all_numeric_columns": [
+            "year",
+            "adj_dppupil_comp",
+            "pblack",
+            "pfl",
+            "totreg",
+        ],
+        "black_column": "pblack",
+        "enrollment_column": "totreg",
+        "group_values": [1998, 2002, 2006, 2010, 2014, 2016],
+        "poverty_column": "pfl",
+        "spending_column": "adj_dppupil_comp",
+        "year_column": "year",
+    }
+
+    canonical = orchestrator._canonicalize_proposal_arguments(
+        "operation.multi_step",
+        {
+            "operation_id": "operation.multi_step",
+            "target": {
+                "run_id": run_id,
+                "node_ref": "stage:source",
+                "artifact_id": "model_supplied_node_hash",
+            },
+            "preconditions": {"active_head_run_id": run_id},
+            "changes": {
+                "workflow_template": "class3-stata-v1",
+                "bindings": bindings,
+            },
+        },
+        session_id="s1",
+    )
+
+    assert canonical["target"]["artifact_id"] == artifact_id
 
 
 def test_the_canonical_proposal_passes_the_operation_validator(tmp_path: Path) -> None:

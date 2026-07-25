@@ -1193,10 +1193,10 @@ def test_invalid_model_options_are_rejected_before_option_persistence(tmp_path: 
     assert service.store.option_ids(notebook.notebook_id) == []
 
 
-def test_non_editable_run_model_options_are_rejected_before_draft_creation(
+def test_ols_run_model_options_are_editable_before_draft_creation(
     tmp_path: Path,
 ) -> None:
-    """A generic proposal must not create an orphan Draft at the semantic seam."""
+    """OLS now owns the generic envelope and materializes a bound Draft patch."""
 
     project = make_project(tmp_path)
     service = NotebookService(project)
@@ -1288,18 +1288,19 @@ def test_non_editable_run_model_options_are_rejected_before_draft_creation(
         changes={"model_options": {"covariance": "clustered"}},
     )
 
-    with pytest.raises(OptionMaterializationFailed, match="not editable"):
-        NotebookOptionMaterializer(service)._materialize_run(
-            notebook,
-            proposal.to_dict(),
-            {
-                "notebook_id": notebook.notebook_id,
-                "option_id": "opt_ols_unsupported_options",
-                "option_revision": "1",
-            },
-        )
+    result = NotebookOptionMaterializer(service)._materialize_run(
+        notebook,
+        proposal.to_dict(),
+        {
+            "notebook_id": notebook.notebook_id,
+            "option_id": "opt_ols_options",
+            "option_revision": "1",
+        },
+    )
 
-    assert service.project_root.joinpath("data", "pipeline_drafts").exists() is False
+    model = next(node for node in result.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert model["params"]["model_options"] == {"covariance": "clustered"}
+    assert service.project_root.joinpath("data", "pipeline_drafts").exists()
 
 
 def test_ols_genesis_covariance_model_options_are_materialized_as_covariance(
@@ -1413,4 +1414,4 @@ def test_ols_genesis_covariance_model_options_are_materialized_as_covariance(
     )
     model = next(node for node in result.draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
     assert model["params"]["covariance"] == "robust"
-    assert "model_options" not in model["params"]
+    assert model["params"]["model_options"] == {"covariance": "robust"}

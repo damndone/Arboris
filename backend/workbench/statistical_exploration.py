@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,13 @@ from .graph_model import Edge, Graph, Node, NodeKind, Stage, Trust
 
 
 SCHEMA_VERSION = "statistical-exploration.v1"
+STATA_QUANTILE_METHOD = "stata_summarize_detail_v1"
+
+# Operations whose result is a per-variable summary of a row subset, so running
+# them once per group is well defined. `corr` is excluded on purpose: a grouped
+# correlation is a different result shape, and inventing one silently is how a
+# request for pooled correlations would come back as something else.
+GROUPABLE_OPERATIONS = frozenset({"summarize", "summarize_detail", "misstable"})
 
 
 class StatisticalExplorationValidationError(ValueError):
@@ -163,19 +171,37 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
         "filtered_row_count": int(len(filtered)),
     }
 
+    # Grouping is a property of the request, not of one operation. Handling it
+    # only inside `summarize` meant `summarize_detail` with group_by silently
+    # returned ONE pooled summary: a complete-looking result that answered a
+    # different question than the one asked. Dispatch it once, for every
+    # operation that can express it, and refuse it where it cannot.
+    group_by = spec.options.get("group_by")
+    if group_by is not None:
+        if spec.operation not in GROUPABLE_OPERATIONS:
+            raise StatisticalExplorationValidationError(
+                f"{spec.operation} does not support group_by; "
+                "groupable operations are: " + ", ".join(sorted(GROUPABLE_OPERATIONS))
+            )
+        groups = _summarize_groups(
+            frame,
+            spec,
+            group_by=group_by,
+            group_values=spec.options.get("group_values"),
+        )
+        return {
+            **base,
+            "group_by": _require_column(frame, group_by),
+            "groups": groups,
+            # Group values are typed by hand.  A mistyped year matches no
+            # row and otherwise produces a plausible-looking, entirely
+            # empty group that reads as a real result.
+            "empty_group_values": [
+                group["value"] for group in groups if group["filtered_row_count"] == 0
+            ],
+        }
+
     if spec.operation == "summarize":
-        group_by = spec.options.get("group_by")
-        if group_by is not None:
-            return {
-                **base,
-                "group_by": _require_column(frame, group_by),
-                "groups": _summarize_groups(
-                    frame,
-                    spec,
-                    group_by=group_by,
-                    group_values=spec.options.get("group_values"),
-                ),
-            }
         return {
             **base,
             "missing_policy": "variablewise",
@@ -183,10 +209,12 @@ def execute_exploration(frame: Any, spec: ExplorationSpec) -> dict[str, Any]:
         }
 
     if spec.operation == "summarize_detail":
+        quantile_method = _quantile_method(spec.options)
         return {
             **base,
             "missing_policy": "variablewise",
-            "variables": _detail_variables(filtered, spec.selected_columns),
+            "quantile_method": quantile_method,
+            "variables": _detail_variables(filtered, spec.selected_columns, spec.options),
         }
 
     if spec.operation == "misstable":
@@ -517,7 +545,35 @@ def _exploration_descriptive_rows(result: Mapping[str, Any]) -> list[dict[str, A
     return rows
 
 
+def _correlation_table_rows(result: Mapping[str, Any]) -> list[dict[str, Any]] | None:
+    """Render a correlation result as a named square table.
+
+    ``variables`` is a *list* for ``corr`` (not the mapping every other
+    operation returns), so the generic branches below skip it and the matrix
+    used to reach every surface as an unlabelled JSON array.
+    """
+    variables = result.get("variables")
+    matrix = result.get("matrix")
+    if not isinstance(variables, list) or not isinstance(matrix, list):
+        return None
+    if len(matrix) != len(variables):
+        return None
+    rows: list[dict[str, Any]] = []
+    for index, name in enumerate(variables):
+        row = matrix[index]
+        if not isinstance(row, list) or len(row) != len(variables):
+            return None
+        entry: dict[str, Any] = {"variable": str(name)}
+        for position, column in enumerate(variables):
+            entry[str(column)] = _table_cell(row[position])
+        rows.append(entry)
+    return rows
+
+
 def _result_table_rows(result: Mapping[str, Any]) -> list[dict[str, Any]]:
+    correlation_rows = _correlation_table_rows(result)
+    if correlation_rows is not None:
+        return correlation_rows
     variables = result.get("variables")
     if isinstance(variables, Mapping):
         rows: list[dict[str, Any]] = []
@@ -560,11 +616,18 @@ def _table_cell(value: Any) -> Any:
 
 def _exploration_tables(result: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
     tables = {"result": _result_table_rows(result)}
-    if isinstance(result.get("matrix"), list):
-        tables["correlation_matrix"] = [
-            {"row": index, "values": json.dumps(row, ensure_ascii=False)}
-            for index, row in enumerate(result["matrix"])
-        ]
+    correlation_rows = _correlation_table_rows(result)
+    if correlation_rows is not None:
+        tables["correlation_matrix"] = correlation_rows
+        pairs = result.get("pairs")
+        if isinstance(pairs, list) and pairs:
+            # Ranked pairs answer "most correlated with X" directly; the square
+            # matrix answers "what is corr(a, b)".  Both are cheap, so ship both.
+            tables["correlation_pairs"] = [
+                {str(key): _table_cell(value) for key, value in item.items()}
+                for item in pairs
+                if isinstance(item, Mapping)
+            ]
     return tables
 
 
@@ -843,6 +906,7 @@ def _apply_filters(frame: pd.DataFrame, filters: tuple[FilterSpec, ...]) -> pd.D
     for item in filters:
         column = _require_column(frame, item.column)
         series = frame[column]
+        _validate_filter_value(series, item)
         try:
             if item.operator == "eq":
                 current = series.eq(item.value)
@@ -866,6 +930,18 @@ def _apply_filters(frame: pd.DataFrame, filters: tuple[FilterSpec, ...]) -> pd.D
             ) from exc
         mask &= series.notna() & current.fillna(False)
     return frame.loc[mask]
+
+
+def _validate_filter_value(series: pd.Series, item: FilterSpec) -> None:
+    if not pd.api.types.is_bool_dtype(series):
+        return
+    values = item.value if item.operator in {"in", "not_in"} else [item.value]
+    if not isinstance(values, (list, tuple)) or any(
+        not isinstance(value, bool) and type(value).__name__ != "bool_" for value in values
+    ):
+        raise StatisticalExplorationValidationError(
+            f"boolean filter requires boolean value: {item.column}"
+        )
 
 
 def _safe_number(value: Any) -> int | float | None:
@@ -896,18 +972,46 @@ def _summary_variables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[s
     return summaries
 
 
-def _detail_variables(frame: pd.DataFrame, selected: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+def _quantile_method(options: Mapping[str, Any]) -> str:
+    method = options.get("quantile_method", STATA_QUANTILE_METHOD)
+    if method != STATA_QUANTILE_METHOD:
+        raise StatisticalExplorationValidationError(
+            f"quantile method is unsupported: {method}"
+        )
+    return STATA_QUANTILE_METHOD
+
+
+def _stata_percentile(series: pd.Series, percentile: float) -> float | None:
+    values = sorted(float(value) for value in series.dropna().tolist())
+    if not values:
+        return None
+    if percentile <= 0:
+        return values[0]
+    if percentile >= 100:
+        return values[-1]
+    position = len(values) * float(percentile) / 100.0
+    if math.isclose(position, round(position), rel_tol=0.0, abs_tol=1e-12):
+        index = int(round(position))
+        return (values[index - 1] + values[index]) / 2.0
+    return values[math.ceil(position) - 1]
+
+
+def _detail_variables(
+    frame: pd.DataFrame,
+    selected: tuple[str, ...],
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     columns = _numeric_columns(frame, selected)
     percentiles = (1, 5, 10, 25, 50, 75, 90, 95, 99)
+    quantile_method = _quantile_method(options or {})
     details: dict[str, dict[str, Any]] = {}
     for column, summary in _summary_variables(frame, tuple(columns)).items():
         series = frame[column].dropna()
         details[column] = {
             **summary,
+            "quantile_method": quantile_method,
             "percentiles": {
-                f"p{percentile}": _safe_number(
-                    series.quantile(percentile / 100, interpolation="linear")
-                )
+                f"p{percentile}": _safe_number(_stata_percentile(series, percentile))
                 for percentile in percentiles
             },
         }
@@ -921,6 +1025,13 @@ def _summarize_groups(
     group_by: Any,
     group_values: Any,
 ) -> list[dict[str, Any]]:
+    if group_values is None:
+        # "Group by year" means every year the column has. Demanding an
+        # enumeration makes the ordinary case fail for any caller that has not
+        # separately inspected the distinct values.
+        column = _require_column(frame, group_by)
+        observed = frame[column].dropna().unique().tolist()
+        group_values = sorted(observed, key=lambda value: (str(type(value)), value))
     if not isinstance(group_values, (list, tuple)) or not group_values:
         raise StatisticalExplorationValidationError(
             "group_values must be a non-empty list when group_by is set"
@@ -929,21 +1040,23 @@ def _summarize_groups(
     for value in group_values:
         group_filter = FilterSpec(column=group_by, operator="eq", value=value)
         group_spec = ExplorationSpec(
-            operation="summarize",
+            # Each group runs the operation that was actually asked for. Pinning
+            # this to "summarize" silently downgraded a grouped summarize_detail.
+            operation=spec.operation,
             selected_columns=spec.selected_columns,
             filters=(*spec.filters, group_filter),
             options={key: item for key, item in spec.options.items() if key not in {"group_by", "group_values"}},
         )
         result = execute_exploration(frame, group_spec)
-        groups.append(
-            {
-                "value": value,
-                "filters": result["filters"],
-                "filtered_row_count": result["filtered_row_count"],
-                "missing_policy": result["missing_policy"],
-                "variables": result["variables"],
-            }
-        )
+        # Carry the whole per-group result through: summarize_detail adds
+        # percentiles and quantile_method, misstable reports different counts.
+        # Naming the keys here would drop whatever a groupable operation adds.
+        carried = {
+            key: item
+            for key, item in result.items()
+            if key not in {"schema_version", "operation", "source_row_count"}
+        }
+        groups.append({"value": value, **carried})
     return groups
 
 
@@ -961,12 +1074,29 @@ def _correlation_result(
     columns = _numeric_columns(frame, selected)
     complete = frame[columns].dropna(how="any")
     matrix = complete.corr().to_numpy().tolist()
+    safe_matrix = [[_safe_number(value) for value in row] for row in matrix]
+    correlation_n = int(len(complete))
+    # The matrix stays authoritative, but a nested array carries no names: a
+    # reader asking "which variable correlates most with spending" cannot align
+    # an unlabelled row index against a separate column list.  ``pairs`` is the
+    # labelled projection every presentation surface renders.
+    pairs = [
+        {
+            "a": columns[i],
+            "b": columns[j],
+            "r": safe_matrix[i][j],
+            "n": correlation_n,
+        }
+        for i in range(len(columns))
+        for j in range(i + 1, len(columns))
+    ]
     return {
         **base,
         "missing_policy": missing_policy,
         "variables": columns,
-        "correlation_n": int(len(complete)),
-        "matrix": [[_safe_number(value) for value in row] for row in matrix],
+        "correlation_n": correlation_n,
+        "matrix": safe_matrix,
+        "pairs": pairs,
     }
 
 
@@ -1012,7 +1142,12 @@ def _derived_boolean_series(
         raise StatisticalExplorationValidationError(
             f"derive_boolean source column has no nonmissing values: {source_column}"
         )
-    threshold = float(complete.quantile(percentile / 100, interpolation="linear"))
+    threshold_value = _stata_percentile(complete, percentile)
+    if threshold_value is None:
+        raise StatisticalExplorationValidationError(
+            f"derive_boolean source column has no nonmissing values: {source_column}"
+        )
+    threshold = float(threshold_value)
     derived = pd.Series(pd.NA, index=frame.index, dtype="boolean")
     if comparison == "lte":
         derived.loc[source.notna()] = source.loc[source.notna()] <= threshold
@@ -1029,6 +1164,7 @@ def _derived_boolean_series(
         "comparison": comparison,
         "output_name": output_name,
         "threshold": threshold,
+        "quantile_method": STATA_QUANTILE_METHOD,
         "counts": counts,
         "preview": [None if pd.isna(value) else bool(value) for value in derived.tolist()[:20]],
     }
@@ -1042,6 +1178,7 @@ def _derived_boolean_result(frame: pd.DataFrame, spec: ExplorationSpec) -> dict[
 
 __all__ = [
     "SCHEMA_VERSION",
+    "STATA_QUANTILE_METHOD",
     "ExplorationSpec",
     "FilterSpec",
     "StatisticalExplorationValidationError",

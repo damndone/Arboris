@@ -559,7 +559,9 @@ def test_confirmed_proposal_records_executor_failure_and_is_idempotent(
     )
 
     assert failed.status == "failed"
-    assert failed.error == {"type": "RuntimeError"}
+    # The type is still recorded; the message rides along so a failure is
+    # actionable rather than a bare class name.
+    assert failed.error["type"] == "RuntimeError"
     assert len(executor.requests) == 1
     chain_store = ChainStore(tmp_path / "workbench")
     fork_store = ForkStore(tmp_path / "workbench")

@@ -323,3 +323,57 @@ def test_create_figures_emits_class3_residual_and_fitted_predictor_plots(tmp_pat
     assert expected.issubset(figures)
     for artifact_id in expected:
         assert (run.root / figures[artifact_id]).exists()
+
+
+def test_diagnostic_title_states_the_plotted_scope_against_the_analysis_sample():
+    """`(N=500)` on a 4110-row model reads as the sample size, not a truncation."""
+    from workbench.visualization import _diagnostic_title
+
+    assert _diagnostic_title("Residuals", "pblack", 4110, 4110) == "Residuals vs pblack (N=4110)"
+    assert (
+        _diagnostic_title("Residuals", "pblack", 500, 4110)
+        == "Residuals vs pblack (first 500 of 4110)"
+    )
+
+
+def test_create_figures_plots_predictor_diagnostics_over_the_full_analysis_sample(tmp_path: Path):
+    rows = 900
+    frame = pd.DataFrame(
+        {
+            "adj_dppupil_comp": np.linspace(10.0, 30.0, rows),
+            "pblack": np.linspace(1.0, 90.0, rows),
+        }
+    )
+    project = create_project(tmp_path, "demo")
+    run = create_run(project.root, mode="auto")
+    residuals = list(np.linspace(-1.0, 1.0, rows))
+    fitted_values = list(np.linspace(10.0, 30.0, rows))
+    model_result = {
+        "model_id": "ols_1",
+        "model_type": "ols",
+        "nobs": rows,
+        # The bounded preview is what the old plotting path consumed.
+        "fitted_values_preview": fitted_values[:500],
+        "residuals_preview": residuals[:500],
+        "fitted_values": fitted_values,
+        "residuals": residuals,
+        "coefficients": {"pblack": {"estimate": 0.2, "std_error": 0.03}},
+    }
+
+    figures = create_figures(
+        frame,
+        run.root,
+        numeric_columns=list(frame.columns),
+        time_column=None,
+        model_results=[("ols_1", model_result)],
+        outcome_column="adj_dppupil_comp",
+        regressors=["pblack"],
+        model_type="ols",
+    )
+
+    assert "residuals_vs_pblack" in figures
+    from workbench.visualization import _model_diagnostic_sample
+
+    values, total = _model_diagnostic_sample(model_result, "residuals")
+    assert len(values) == rows
+    assert total == rows

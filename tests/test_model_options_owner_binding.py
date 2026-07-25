@@ -510,7 +510,7 @@ def test_nonempty_options_fail_closed_without_an_explicit_supported_owner() -> N
 
     with pytest.raises(ModelOptionsError) as unsupported:
         bind_new_model_options("ols", {"future_option": True})
-    assert unsupported.value.code == "MODEL_OPTIONS_UNSUPPORTED"
+    assert unsupported.value.code == "OLS_MODEL_OPTIONS_UNKNOWN_FIELD"
 
     with pytest.raises(ModelOptionsError) as secret:
         bind_new_model_options("ols", {"api_key": "not-allowed"})

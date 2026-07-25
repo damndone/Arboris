@@ -37,6 +37,8 @@ export interface StatisticalExplorationResult {
   groups?: Array<Record<string, unknown>>;
   correlation_n?: number;
   matrix?: unknown[][];
+  pairs?: Array<{ a: string; b: string; r: number | null; n: number }>;
+  empty_group_values?: unknown[];
   [key: string]: unknown;
 }
 
@@ -71,10 +73,14 @@ export interface StatisticalExplorationConfirmResponse {
   }>;
 }
 
+export type StatisticalOlsCovariance = "robust" | "unadjusted";
+
 export interface StatisticalOlsContextRequest extends StatisticalExplorationRequest {
   outcome_column: string;
   predictor_columns: string[];
   preview_fingerprint: string;
+  /** A genesis Draft has no editable_schema, so this is the only place to choose. */
+  covariance?: StatisticalOlsCovariance;
 }
 
 export interface StatisticalOlsContextResponse {
