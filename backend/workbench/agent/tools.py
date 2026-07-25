@@ -183,6 +183,20 @@ def validation_details(schema: dict[str, Any], arguments: Any) -> list[dict[str,
     return details
 
 
+def _is_agent_input_fault(exc: BaseException) -> bool:
+    """Whether the model must read this message to make progress.
+
+    Deliberately narrow: only refusals of agent-supplied input qualify.
+    Internal faults keep surfacing a bare class name so no server detail
+    reaches the provider.
+    """
+
+    from .context_tools import OperationContractUnavailableError
+    from .operations import OperationValidationError
+
+    return isinstance(exc, (OperationValidationError, OperationContractUnavailableError))
+
+
 class ToolVisibleError(ValueError):
     """An error whose message is written for the model, not for a log.
 
@@ -325,9 +339,16 @@ class ToolRegistry:
                 error_details=[{"message": str(exc)}],
             )
         except Exception as exc:
+            # A refusal of the AGENT'S OWN submission is useless without its
+            # reason: surfacing only the class name leaves the model nothing to
+            # correct, so it re-submits the same broken payload until the step
+            # budget is gone. That exact loop was observed on a live turn.
             return ToolResult(
                 tool_call_id=call_id,
                 tool_id=tool_id,
                 ok=False,
                 error=type(exc).__name__,
+                error_details=(
+                    [{"message": str(exc)}] if _is_agent_input_fault(exc) else None
+                ),
             )

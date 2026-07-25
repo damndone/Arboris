@@ -48,6 +48,11 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "graph.fork",
         "model.genesis",
         "model.rerun",
+        "operation.multi_step",
+        "report.compose",
+        "statistical.derive_boolean",
+        "statistical.derived_group_summarize",
+        "statistical.explore",
     ]
     assert all(isinstance(item["executor"], str) for item in capabilities)
     assert all("api_key" not in json.dumps(item) for item in capabilities)
@@ -74,7 +79,7 @@ def test_natural_language_allowlist_is_registry_owned() -> None:
 
     assert registry.natural_language_operation_ids(
         scope_requirements=("chain", "active_head")
-    ) == ["data.columns.cast", "graph.fork", "model.rerun"]
+    ) == ["data.columns.cast", "graph.fork", "model.rerun", "operation.multi_step"]
 
 
 def test_batch_cast_asks_the_model_for_intent_and_never_for_the_artifact_id() -> None:
@@ -246,6 +251,7 @@ def test_proposal_tool_schema_excludes_typed_operations_not_enabled_for_natural_
         "data.columns.cast",
         "graph.fork",
         "model.rerun",
+        "operation.multi_step",
     ]
     # The singular cast and code.execute stay off the NL surface: the batch
     # cast is the shape a sentence maps onto ("cast these columns" is one

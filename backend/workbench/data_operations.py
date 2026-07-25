@@ -231,17 +231,29 @@ def resolve_data_column_cast_context(
         raise DataColumnCastValidationError("source graph node was not found") from exc
     if node.kind != NodeKind.DATASET_STAGE:
         raise DataColumnCastValidationError("source node must be a dataset_stage node")
-    if not node.payload_ref:
-        raise DataColumnCastValidationError("source dataset node has no materialized artifact")
-
     index = read_json(run_root / "artifacts_index.json")
     records = index.get("artifacts", [])
-    try:
-        artifact = next(
-            item for item in records if item.get("path") == node.payload_ref
-        )
-    except StopIteration as exc:
-        raise DataColumnCastValidationError("source node artifact was not found") from exc
+    if node.payload_ref:
+        try:
+            artifact = next(
+                item for item in records if item.get("path") == node.payload_ref
+            )
+        except StopIteration as exc:
+            raise DataColumnCastValidationError("source node artifact was not found") from exc
+    elif source_node_id in {"stage:raw", "stage:source"}:
+        raw_artifacts = [
+            item
+            for item in records
+            if item.get("artifact_type") == "raw_data"
+            and str(item.get("path") or "").startswith("raw_snapshot/")
+        ]
+        if len(raw_artifacts) != 1:
+            raise DataColumnCastValidationError(
+                "raw source node does not resolve to exactly one raw artifact"
+            )
+        artifact = raw_artifacts[0]
+    else:
+        raise DataColumnCastValidationError("source dataset node has no materialized artifact")
 
     relative = artifact.get("path")
     if not isinstance(relative, str) or not relative:

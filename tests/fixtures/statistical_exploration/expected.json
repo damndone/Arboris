@@ -1,0 +1,35 @@
+{
+  "schema_version": "statistical-exploration.v1",
+  "fixture": "school_panel.csv",
+  "operations": [
+    "summarize",
+    "summarize_detail",
+    "misstable",
+    "corr",
+    "derive_boolean",
+    "scatter"
+  ],
+  "summarize_1998": {
+    "row_count": 3,
+    "bdsnew_mean": 277863.3333333333
+  },
+  "detail_totreg_percentiles": {
+    "p1": 42.0,
+    "p5": 42.0,
+    "p10": 80.0,
+    "p25": 135.0,
+    "p50": 275.0,
+    "p75": 750.0,
+    "p90": 1100.0,
+    "p95": 2672.0,
+    "p99": 2672.0
+  },
+  "corr": {
+    "n": 10,
+    "matrix": [
+      [1.0, 0.899981748984, 0.785429713744],
+      [0.899981748984, 1.0, 0.934687812427],
+      [0.785429713744, 0.934687812427, 1.0]
+    ]
+  }
+}

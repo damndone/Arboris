@@ -10,6 +10,10 @@ from ..registry import (
     ModelOptionsValidationError,
     resolve,
 )
+from ...contracts.model.ols import (
+    OLS_MODEL_OPTIONS_CONTRACT,
+    validate_ols_model_options,
+)
 
 
 def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -494,7 +498,14 @@ CORE_PACK = AnalysisPack(
         ModelHandler("logit", "logit_1", ("binary",), _fit_logit),
         ModelHandler("poisson_rate", "poisson_1", ("count",), _fit_poisson),
         ModelHandler("poisson", "poisson_1", ("count",), _fit_poisson),
-        ModelHandler("ols", "ols_1", ("continuous",), _fit_ols),
+        ModelHandler(
+            "ols",
+            "ols_1",
+            ("continuous",),
+            _fit_ols,
+            validate_model_options=validate_ols_model_options,
+            model_options_contract=OLS_MODEL_OPTIONS_CONTRACT,
+        ),
         ModelHandler("iv_2sls", "iv_2sls_1", ("continuous",), _fit_iv_2sls),
         ModelHandler("did", "did_1", ("continuous",), _fit_did),
         ModelHandler("cs_did", "cs_did_1", ("continuous",), _fit_cs_did),

@@ -650,6 +650,93 @@ dd {
   font-size: 0.95rem;
 }
 
+.statistical-exploration-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-card-2, rgba(255, 255, 255, 0.04));
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.statistical-exploration-panel fieldset {
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.statistical-exploration-panel button {
+  margin-right: 6px;
+}
+
+.statistical-ols-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.statistical-ols-outcome select {
+  min-width: 150px;
+  min-height: 28px;
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+.statistical-ols-predictors-label {
+  margin-bottom: 4px;
+  color: var(--label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statistical-ols-predictors-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 6px;
+  margin-bottom: 8px;
+}
+
+.statistical-ols-predictor-option {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--separator);
+  border-radius: 5px;
+  background: var(--control-background, transparent);
+  color: var(--label-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.2;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.statistical-ols-predictor-option:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-card-2);
+}
+
+.statistical-ols-predictor-option input {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--tint);
+}
+
+.statistical-ols-predictor-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pagination {
   display: flex;
   align-items: center;

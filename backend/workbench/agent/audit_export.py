@@ -87,6 +87,16 @@ def _operation_view(
         "record_id": record.record_id,
         "operation_id": record.operation_id,
         "status": record.status,
+        "workflow": {
+            "workflow_id": record.workflow_id or record.execution.get("workflow_id"),
+            "workflow_confirmation_id": record.workflow_confirmation_id,
+            "workflow_step_id": record.workflow_step_id,
+            "workflow_plan_fingerprint": (
+                record.workflow_plan_fingerprint
+                or record.execution.get("workflow_plan_fingerprint")
+            ),
+            "confirmation_mode": record.confirmation_mode,
+        },
         "created_at": record.created_at,
         "updated_at": record.updated_at,
         "target": dict(record.target),
@@ -146,6 +156,14 @@ def render_agent_audit_markdown(audit: dict[str, object]) -> str:
         lines.append(
             f"- `{item['operation_id']}` / `{item['record_id']}`: {item['status']}"
         )
+        workflow = item.get("workflow")
+        if isinstance(workflow, dict) and workflow.get("workflow_id"):
+            lines.append(
+                "  - Workflow: `"
+                f"{workflow.get('workflow_id')}` / step `"
+                f"{workflow.get('workflow_step_id') or 'parent'}`"
+                f" ({workflow.get('confirmation_mode') or 'single operation'})"
+            )
         child = item.get("child_session")
         if isinstance(child, dict):
             lines.append(f"  - Child session: `{child.get('session_id')}`")
@@ -274,6 +292,17 @@ def render_agent_audit_html(audit: dict[str, object]) -> str:
             f"<dt>Terminal result</dt><dd>{escape(str(terminal.get('status')))} "
             f"(source: {escape(str(terminal.get('source')))})</dd>"
         )
+        workflow = item.get("workflow")
+        if isinstance(workflow, dict) and workflow.get("workflow_id"):
+            parts.append(
+                "<dt>Workflow authorization</dt><dd><code>"
+                f"{escape(str(workflow.get('workflow_id')))}"
+                "</code> / step <code>"
+                f"{escape(str(workflow.get('workflow_step_id') or 'parent'))}"
+                "</code> — "
+                f"{escape(str(workflow.get('confirmation_mode') or 'single operation'))}"
+                "</dd>"
+            )
         if terminal.get("reason"):
             parts.append(
                 f"<dt>Reason</dt><dd>{escape(str(terminal['reason']))}</dd>"

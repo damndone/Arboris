@@ -1,0 +1,472 @@
+import { useEffect, useMemo, useState } from "react";
+import { artifactDownloadUrl } from "../../../api";
+import { useProjectRootOptional } from "../../../workbench/ProjectRootContext";
+import { useWorkbenchOptional } from "../../../workbench/WorkbenchStateProvider";
+import type { DataColumnCastContext } from "../../dataOperations";
+import { fetchDataColumnCastContext } from "../../dataOperations";
+import type { GraphViewNode } from "../../api/graphViewTypes";
+import { useResolvedNodeOperationContext } from "../NodeOperationContextProvider";
+import {
+  confirmStatisticalExploration,
+  createStatisticalOlsContext,
+  previewStatisticalExploration,
+  type StatisticalExplorationOperation,
+  type StatisticalExplorationPreview,
+  type StatisticalExplorationConfirmResponse,
+  type StatisticalExplorationRequest,
+  type StatisticalOlsContextResponse,
+  type StatisticalFilter,
+  type StatisticalFilterOperator,
+  type StatisticalOlsCovariance,
+} from "../../statisticalExploration";
+import { DerivedVariableBuilder } from "./DerivedVariableBuilder";
+import { StatisticalPlotSection } from "./StatisticalPlotSection";
+import { StatisticalVariablePicker } from "./StatisticalVariablePicker";
+
+interface FilterRowState {
+  column: string;
+  operator: StatisticalFilterOperator;
+  value: string;
+}
+
+const OPERATORS: Array<{ value: StatisticalFilterOperator; label: string }> = [
+  { value: "eq", label: "equals" },
+  { value: "neq", label: "does not equal" },
+  { value: "lt", label: "<" },
+  { value: "lte", label: "≤" },
+  { value: "gt", label: ">" },
+  { value: "gte", label: "≥" },
+];
+
+function backendNodeId(node: GraphViewNode): string {
+  const raw = node.raw as { id?: unknown } | null;
+  return raw && typeof raw.id === "string" ? raw.id : node.id;
+}
+
+function numericDtype(dtype: string): boolean {
+  return /int|float|double|decimal|number|bool/i.test(dtype);
+}
+
+function booleanDtype(dtype: string): boolean {
+  return /bool/i.test(dtype);
+}
+
+function filterValue(value: string, column: string, context: DataColumnCastContext | null): unknown {
+  const dtype = context?.columns.find((item) => item.name === column)?.dtype ?? "";
+  const trimmed = value.trim();
+  // A derived percentile indicator is a boolean column. `Number("true")` is
+  // NaN, so without this branch the natural spelling fell through to the string
+  // "true", compared unequal against every row, and produced a silently empty
+  // group instead of an error.
+  if (booleanDtype(dtype) && trimmed !== "") {
+    if (/^(true|1)$/i.test(trimmed)) return true;
+    if (/^(false|0)$/i.test(trimmed)) return false;
+  }
+  if (numericDtype(dtype) && trimmed !== "") {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : value;
+  }
+  return value;
+}
+
+function ResultSummary({ preview }: { preview: StatisticalExplorationPreview }) {
+  const result = preview.result;
+  const groups = Array.isArray(result.groups) ? result.groups : [];
+  const variableCount = result.variables && typeof result.variables === "object" && !Array.isArray(result.variables)
+    ? Object.keys(result.variables).length
+    : 0;
+  const emptyGroups = Array.isArray(result.empty_group_values) ? result.empty_group_values : [];
+  const pairs = Array.isArray(result.pairs) ? result.pairs : [];
+  const strongest = pairs
+    .filter((pair) => typeof pair.r === "number")
+    .sort((a, b) => Math.abs(b.r as number) - Math.abs(a.r as number))
+    .slice(0, 3);
+  return (
+    <div data-testid="statistical-exploration-result" style={{ borderTop: "1px solid var(--separator)", paddingTop: 8 }}>
+      <strong>Preview</strong>
+      <div>Rows after filters: {String(result.filtered_row_count ?? 0)}</div>
+      {result.missing_policy && <div>Missing policy: {result.missing_policy}</div>}
+      {groups.length > 0 && <div>{groups.length} {groups.length === 1 ? "group" : "groups"} · {groups.reduce((total, group) => total + (typeof group.filtered_row_count === "number" ? group.filtered_row_count : 0), 0)} grouped rows</div>}
+      {emptyGroups.length > 0 && (
+        <div data-testid="statistical-exploration-empty-groups" style={{ color: "var(--warning, #b06a00)" }}>
+          No rows matched: {emptyGroups.map((value) => String(value)).join(", ")} — check the group values.
+        </div>
+      )}
+      {groups.length === 0 && variableCount > 0 && <div>{variableCount} variables summarized; full result will open in Table.</div>}
+      {Array.isArray(result.matrix) && <div>Correlation matrix · N={String(result.correlation_n ?? "—")}</div>}
+      {strongest.length > 0 && (
+        <div data-testid="statistical-exploration-top-correlations">
+          Strongest: {strongest.map((pair) => `${pair.a}–${pair.b} ${(pair.r as number).toFixed(3)}`).join(" · ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExportLinks({
+  projectRoot,
+  runId,
+  exports,
+}: {
+  projectRoot: string;
+  runId: string;
+  exports: NonNullable<StatisticalExplorationConfirmResponse["exports"]>;
+}) {
+  if (exports.length === 0) return null;
+  return (
+    <div data-testid="statistical-exploration-exports">
+      Exports: {exports.map((item) => (
+        <a
+          key={item.artifact_id}
+          href={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+          download
+          style={{ marginLeft: 8 }}
+        >
+          {item.format.toUpperCase()}
+        </a>
+      ))}
+    </div>
+  );
+}
+
+export function StatisticalExplorationSection({ node }: { node: GraphViewNode }) {
+  const isDatasetNode = node.kind === "dataset_stage";
+  const projectRoot = useProjectRootOptional();
+  const resolved = useResolvedNodeOperationContext();
+  const workbench = useWorkbenchOptional();
+  const [sourceContext, setSourceContext] = useState<DataColumnCastContext | null>(null);
+  const [operation, setOperation] = useState<StatisticalExplorationOperation>("summarize");
+  const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
+  const [filters, setFilters] = useState<FilterRowState[]>([]);
+  const [preview, setPreview] = useState<StatisticalExplorationPreview | null>(null);
+  const [exports, setExports] = useState<NonNullable<StatisticalExplorationConfirmResponse["exports"]>>([]);
+  const [olsOutcome, setOlsOutcome] = useState("");
+  const [olsPredictors, setOlsPredictors] = useState<string[]>([]);
+  const [olsCovariance, setOlsCovariance] = useState<StatisticalOlsCovariance>("robust");
+  const [olsDraft, setOlsDraft] = useState<StatisticalOlsContextResponse | null>(null);
+  const [olsStatus, setOlsStatus] = useState<"idle" | "creating" | "error">("idle");
+  const [olsError, setOlsError] = useState<string | null>(null);
+  const [savedExplorationArtifactId, setSavedExplorationArtifactId] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState("");
+  const [groupValues, setGroupValues] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "previewing" | "confirming" | "complete" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const sourceRunId = resolved?.ok ? resolved.context.ownership.owner_run_id : null;
+  const sourceNodeId = resolved?.ok ? resolved.context.operation_target.op_node_id : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceContext(null);
+    setSelectedColumns([]);
+    setFilters([]);
+    setPreview(null);
+    setExports([]);
+    setOlsOutcome("");
+    setOlsPredictors([]);
+    setOlsCovariance("robust");
+    setOlsDraft(null);
+    setOlsStatus("idle");
+    setOlsError(null);
+    setSavedExplorationArtifactId(null);
+    setGroupBy("");
+    setGroupValues("");
+    setError(null);
+    if (!isDatasetNode || !projectRoot || !sourceRunId || !sourceNodeId) return;
+    setStatus("loading");
+    void fetchDataColumnCastContext(projectRoot, sourceRunId, sourceNodeId)
+      .then((context) => {
+        if (cancelled) return;
+        setSourceContext(context);
+        setSelectedColumns(context.columns.map((column) => column.name));
+        setStatus("idle");
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setStatus("error");
+        setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDatasetNode, projectRoot, sourceRunId, sourceNodeId]);
+
+  const request = useMemo<StatisticalExplorationRequest | null>(() => {
+    if (!sourceContext || !sourceRunId || !sourceNodeId) return null;
+    const typedFilters: StatisticalFilter[] = filters.map((filter) => ({
+      column: filter.column,
+      operator: filter.operator,
+      value: filterValue(filter.value, filter.column, sourceContext),
+    }));
+    return {
+      source_run_id: sourceRunId,
+      source_node_id: sourceNodeId,
+      source_artifact_id: sourceContext.source_artifact_id,
+      operation,
+      selected_columns: selectedColumns,
+      filters: typedFilters,
+      options: operation === "summarize" && groupBy
+        ? {
+            group_by: groupBy,
+            group_values: groupValues.split(",").map((value) => value.trim()).filter(Boolean).map((value) => filterValue(value, groupBy, sourceContext)),
+          }
+        : {},
+    };
+  }, [filters, groupBy, groupValues, operation, selectedColumns, sourceContext, sourceNodeId, sourceRunId]);
+
+  const numericColumns = useMemo(
+    () => sourceContext?.columns.filter((column) => numericDtype(column.dtype)).map((column) => column.name) ?? [],
+    [sourceContext],
+  );
+
+  function addFilter() {
+    const first = sourceContext?.columns[0]?.name ?? "";
+    setFilters((current) => [...current, { column: first, operator: "eq", value: "" }]);
+    setPreview(null);
+  }
+
+  function updateFilter(index: number, patch: Partial<FilterRowState>) {
+    setFilters((current) => current.map((filter, i) => (i === index ? { ...filter, ...patch } : filter)));
+    setPreview(null);
+  }
+
+  function removeFilter(index: number) {
+    setFilters((current) => current.filter((_, i) => i !== index));
+    setPreview(null);
+  }
+
+  async function handlePreview() {
+    if (!projectRoot || !request) return;
+    setStatus("previewing");
+    setError(null);
+    try {
+      const response = await previewStatisticalExploration(projectRoot, request);
+      setPreview(response.preview);
+      setStatus("idle");
+    } catch (reason: unknown) {
+      setStatus("error");
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function handleConfirm() {
+    if (!projectRoot || !request || !preview || preview.status !== "ready") return;
+    setStatus("confirming");
+    setError(null);
+    try {
+      const response = await confirmStatisticalExploration(projectRoot, {
+        ...request,
+        preview_fingerprint: preview.fingerprint,
+      });
+      setExports(response.exports ?? []);
+      setSavedExplorationArtifactId(response.exploration.artifact_id);
+      setStatus("complete");
+    } catch (reason: unknown) {
+      setStatus("error");
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  async function handleOlsContext() {
+    if (!projectRoot || !request || !preview || preview.status !== "ready" || !olsOutcome || olsPredictors.length === 0) return;
+    setOlsStatus("creating");
+    setOlsError(null);
+    try {
+      const response = await createStatisticalOlsContext(projectRoot, {
+        ...request,
+        outcome_column: olsOutcome,
+        predictor_columns: olsPredictors,
+        covariance: olsCovariance,
+        preview_fingerprint: preview.fingerprint,
+      });
+      setOlsDraft(response);
+      setOlsStatus("idle");
+    } catch (reason: unknown) {
+      setOlsStatus("error");
+      setOlsError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  if (!isDatasetNode) return null;
+
+  return (
+    <section aria-label="Statistical exploration" data-testid="statistical-exploration-section" style={{ marginTop: 18 }}>
+      <div className="ln-section-label" style={{ marginBottom: 6 }}>Statistical exploration</div>
+      <div className="statistical-exploration-panel">
+        {sourceContext && (
+          <div data-testid="statistical-exploration-source" style={{ color: "var(--label-tertiary)" }}>
+            Source artifact: <strong>{sourceContext.source_artifact_id}</strong> · {sourceContext.row_count} rows
+          </div>
+        )}
+        {status === "loading" && <div>Loading typed data context…</div>}
+        {status === "error" && <div data-testid="statistical-exploration-error">{error}</div>}
+        {sourceContext && (
+          <>
+            <label>
+              <span>Action </span>
+              <select
+                data-testid="statistical-exploration-operation"
+                value={operation}
+                onChange={(event) => {
+                  setOperation(event.target.value as StatisticalExplorationOperation);
+                  setPreview(null);
+                }}
+              >
+                <option value="summarize">Summarize</option>
+                <option value="summarize_detail">Summarize detail</option>
+                <option value="misstable">Missing values</option>
+                <option value="corr">Correlation</option>
+                <option value="derive_boolean">Derived percentile variable</option>
+                <option value="scatter">Scatter plot</option>
+              </select>
+            </label>
+            {operation === "summarize" && (
+              <div className="statistical-exploration-grouping">
+                <label>Group by <select data-testid="statistical-exploration-group-by" value={groupBy} onChange={(event) => { setGroupBy(event.target.value); setPreview(null); }}>
+                  <option value="">No grouping</option>
+                  {sourceContext.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+                </select></label>
+                {groupBy && <label>Group values <input data-testid="statistical-exploration-group-values" value={groupValues} onChange={(event) => { setGroupValues(event.target.value); setPreview(null); }} placeholder="leave empty for every observed value" /></label>}
+              </div>
+            )}
+            <fieldset>
+              <legend>Variables</legend>
+              <StatisticalVariablePicker
+                columns={sourceContext.columns}
+                selectedColumns={selectedColumns}
+                onChange={(columns) => {
+                  setSelectedColumns(columns);
+                  setPreview(null);
+                }}
+              />
+            </fieldset>
+            <div data-testid="statistical-exploration-filters">
+              <strong>Filters (AND)</strong>
+              {filters.map((filter, index) => (
+                <div key={index} data-testid={`statistical-filter-row-${index}`} style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <select
+                    data-testid={`statistical-filter-column-${index}`}
+                    value={filter.column}
+                    onChange={(event) => updateFilter(index, { column: event.target.value })}
+                  >
+                    {sourceContext.columns.map((column) => <option key={column.name} value={column.name}>{column.name}</option>)}
+                  </select>
+                  <select
+                    aria-label={`Filter operator ${index + 1}`}
+                    value={filter.operator}
+                    onChange={(event) => updateFilter(index, { operator: event.target.value as StatisticalFilterOperator })}
+                  >
+                    {OPERATORS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                  <input
+                    data-testid={`statistical-filter-value-${index}`}
+                    value={filter.value}
+                    onChange={(event) => updateFilter(index, { value: event.target.value })}
+                    placeholder="value"
+                  />
+                  <button type="button" onClick={() => removeFilter(index)} aria-label={`Remove filter ${index + 1}`}>×</button>
+                  {index < filters.length - 1 && <span aria-label="AND">AND</span>}
+                </div>
+              ))}
+              <button type="button" data-testid="statistical-exploration-add-filter" onClick={addFilter}>+ Add AND filter</button>
+            </div>
+            <div style={{ color: "var(--label-tertiary)" }}>
+              Preview applies every filter as AND. The source data and model state are unchanged.
+            </div>
+            {operation === "derive_boolean" && request ? (
+              <DerivedVariableBuilder
+                projectRoot={projectRoot ?? ""}
+                request={request}
+                numericColumns={numericColumns}
+              />
+            ) : operation === "scatter" && request ? (
+              <StatisticalPlotSection
+                projectRoot={projectRoot ?? ""}
+                request={request}
+                numericColumns={numericColumns}
+              />
+            ) : (
+              <>
+                <div>
+                  <button
+                    type="button"
+                    data-testid="statistical-exploration-preview"
+                    disabled={!request || request.selected_columns.length === 0 || status === "previewing" || status === "confirming"}
+                    onClick={() => void handlePreview()}
+                  >
+                    {status === "previewing" ? "Previewing…" : "Preview"}
+                  </button>
+                  {preview?.status === "ready" && (
+                    <button
+                      type="button"
+                      data-testid="statistical-exploration-confirm"
+                      disabled={status === "confirming"}
+                      onClick={() => void handleConfirm()}
+                    >
+                      {status === "confirming" ? "Saving…" : "Save exploration"}
+                    </button>
+                  )}
+                </div>
+                {preview && <ResultSummary preview={preview} />}
+                {preview?.status === "ready" && (
+                  <fieldset className="statistical-exploration-derived" data-testid="statistical-ols-context">
+                    <legend>Use filtered context for OLS</legend>
+                    <label className="statistical-ols-outcome">
+                      <span>Outcome</span>
+                      <select data-testid="statistical-ols-outcome" value={olsOutcome} onChange={(event) => setOlsOutcome(event.target.value)}>
+                        <option value="">Choose outcome</option>
+                        {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+                      </select>
+                    </label>
+                    <div className="statistical-ols-predictors-label">Predictors</div>
+                    <div data-testid="statistical-ols-predictors" className="statistical-ols-predictors-grid">
+                      {numericColumns.map((column) => (
+                      <label key={column} className="statistical-ols-predictor-option">
+                        <input
+                          type="checkbox"
+                          data-testid={`statistical-ols-predictor-${column}`}
+                          checked={olsPredictors.includes(column)}
+                          disabled={column === olsOutcome}
+                          onChange={(event) => setOlsPredictors((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))}
+                        />
+                        <span>{column}</span>
+                      </label>
+                      ))}
+                    </div>
+                    <label className="statistical-ols-outcome">
+                      <span>Standard errors</span>
+                      <select
+                        data-testid="statistical-ols-covariance"
+                        value={olsCovariance}
+                        onChange={(event) => setOlsCovariance(event.target.value as StatisticalOlsCovariance)}
+                      >
+                        <option value="robust">Robust (HC1)</option>
+                        <option value="unadjusted">Unadjusted (Stata reg default)</option>
+                      </select>
+                    </label>
+                    <button type="button" data-testid="statistical-ols-context-submit" disabled={!olsOutcome || olsPredictors.length === 0 || olsStatus === "creating"} onClick={() => void handleOlsContext()}>
+                      {olsStatus === "creating" ? "Creating Draft…" : "Create OLS Draft"}
+                    </button>
+                    <div>Creates a reviewable Draft; it does not run OLS. The Draft cannot be re-edited, so choose the standard errors here.</div>
+                    {olsStatus === "error" && <div data-testid="statistical-ols-context-error">{olsError}</div>}
+                    {olsDraft && <a data-testid="statistical-ols-context-link" href={`/pipeline-drafts/${encodeURIComponent(olsDraft.draft.draft_id)}?project_root=${encodeURIComponent(projectRoot ?? "")}`}>Open OLS Draft</a>}
+                  </fieldset>
+                )}
+              </>
+            )}
+            {status === "complete" && (
+              <>
+                <div data-testid="statistical-exploration-complete">Exploration saved as an artifact.</div>
+                <button type="button" data-testid="statistical-exploration-open-table" onClick={() => workbench?.dispatch.setView("table")}>
+                  Open in Table
+                </button>
+                {savedExplorationArtifactId && <div style={{ color: "var(--label-tertiary)", fontSize: 11 }}>Table artifact: {savedExplorationArtifactId}</div>}
+                {projectRoot && sourceRunId && <ExportLinks projectRoot={projectRoot} runId={sourceRunId} exports={exports} />}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}

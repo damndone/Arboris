@@ -188,6 +188,7 @@ def test_canonicalization_binds_the_artifact_and_the_real_preview_fingerprint(
         ),
     )
     assert canonical["target"]["artifact_id"] == artifact_id
+    assert canonical["preconditions"]["context_fingerprint"] != "f" * 64
     assert canonical["preconditions"]["context_fingerprint"] == expected.fingerprint
     assert canonical["preconditions"]["context_version"] == "data-columns-cast.v1"
     assert canonical["preconditions"]["owner_resolution"] == "typed_data_node"
@@ -229,6 +230,50 @@ def test_a_model_supplied_artifact_id_and_fingerprint_are_overridden(
 
     assert canonical["target"]["artifact_id"] == artifact_id
     assert canonical["preconditions"]["context_fingerprint"] != "f" * 64
+
+
+def test_a_workflow_proposal_binds_the_real_source_artifact_id(
+    tmp_path: Path,
+) -> None:
+    project, run_id, artifact_id = _source_project(
+        tmp_path,
+        pd.DataFrame(
+            {
+                "wave": [1, 2],
+                "outcome": [100.0, 110.0],
+                "rate": [10.0, 20.0],
+            }
+        ),
+    )
+    orchestrator = _orchestrator(project)
+
+    canonical = orchestrator._canonicalize_proposal_arguments(
+        "operation.multi_step",
+        {
+            "operation_id": "operation.multi_step",
+            "target": {
+                "run_id": run_id,
+                "node_ref": "stage:source",
+                "artifact_id": "model_supplied_node_hash",
+            },
+            "preconditions": {"active_head_run_id": run_id},
+            "changes": {
+                "steps": [
+                    {
+                        "step_id": "describe",
+                        "operation_id": "statistical.explore",
+                        "spec": {
+                            "operation": "summarize",
+                            "selected_columns": ["outcome", "rate"],
+                        },
+                    }
+                ]
+            },
+        },
+        session_id="s1",
+    )
+
+    assert canonical["target"]["artifact_id"] == artifact_id
 
 
 def test_the_canonical_proposal_passes_the_operation_validator(tmp_path: Path) -> None:

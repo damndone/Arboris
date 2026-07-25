@@ -105,3 +105,47 @@ test("shows a changed-fields summary vs source params (§6.5)", () => {
   expect(summary).toHaveTextContent("covariance");
   expect(summary).toHaveTextContent(/robust/);
 });
+
+test("keeps the OLS Agent envelope out of the human covariance editor", () => {
+  render(
+    <ModelNodeInspector
+      draftHash="h1"
+      node={{
+        node_id: "model_1",
+        node_type: "model",
+        model_family: "regression",
+        model_type: "ols",
+        schema_id: "ols@v1",
+        editable_schema: [
+          {
+            key: "covariance",
+            kind: "select",
+            label: "Covariance",
+            value: "robust",
+            options: ["robust", "clustered", "unadjusted"],
+          },
+          {
+            key: "model_options",
+            kind: "object",
+            label: "OLS model options",
+            value: { covariance: "robust" },
+          } as never,
+        ],
+        editable_schema_hash: "schema",
+        source_ref: {},
+        source_params: {
+          covariance: "robust",
+          model_options: { covariance: "robust" },
+        },
+        params: {
+          covariance: "robust",
+          model_options: { covariance: "robust" },
+        },
+      }}
+      onSave={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByLabelText("Covariance")).toBeInTheDocument();
+  expect(screen.queryByText("OLS model options")).not.toBeInTheDocument();
+});

@@ -430,7 +430,7 @@ class WorkbenchOperationLifecycle:
             failure = OperationEffect(
                 execution=record.execution,
                 status="failed",
-                error={"type": type(exc).__name__},
+                error={"type": type(exc).__name__, "message": str(exc)},
             )
             commit_domain_state = getattr(handler, "commit_domain_state", None)
             if commit_domain_state is not None:
@@ -459,7 +459,7 @@ class WorkbenchOperationLifecycle:
                 outputs=failure.outputs,
                 diff_ref=failure.diff_ref,
                 verification=failure.verification,
-                error=failure.error or {"type": type(exc).__name__},
+                error=failure.error or {"type": type(exc).__name__, "message": str(exc)},
                 effect_status=(
                     record.effect_status
                     if record.effect_status != "pending"

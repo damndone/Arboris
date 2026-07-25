@@ -13,6 +13,7 @@ def build_report_view_model(
     *,
     descriptive_stats: list[dict[str, Any]] | None = None,
     statistical_tests: dict[str, Any] | None = None,
+    exploration: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     diagnostics = summary.get("diagnostics", {})
 
@@ -94,10 +95,26 @@ def build_report_view_model(
             except Exception:
                 pass
 
+    critical_errors = _render_issues(diagnostics.get("blockers", []))
+    if exploration is not None and exploration.get("status") != "completed":
+        # Report text is read by whoever ran the workflow, so it must describe
+        # the workflow, not the exercise this feature was first built for.
+        critical_errors.append(
+            {
+                "text": (
+                    "The statistical workflow did not complete; "
+                    "the final report is blocked."
+                ),
+                "code": "WORKFLOW_INCOMPLETE",
+                "severity": "BLOCKER",
+                "variables": [],
+            }
+        )
+
     return {
         "title": summary.get("model_identity", {}).get("model_label", "Econometrics Report"),
         "facts": _build_facts_list(summary),
-        "critical_errors": _render_issues(diagnostics.get("blockers", [])),
+        "critical_errors": critical_errors,
         "warnings": _render_issues(diagnostics.get("warnings", [])),
         "cautions": _render_issues(diagnostics.get("cautions", [])),
         "system_notes": _render_issues(diagnostics.get("info", [])),
@@ -105,6 +122,7 @@ def build_report_view_model(
         "causal_caution": causal_text,
         "descriptive_stats": ds,
         "statistical_tests": st,
+        "exploration": exploration,
         "model_diagnostics": model_diag,
         "model_quality": summary.get("model_quality"),
     }

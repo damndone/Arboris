@@ -406,6 +406,19 @@ def _submit_run(
         if bound_model_options.binding is not None
         else None
     )
+    if form.get("model_type", "auto") == "ols" and model_options:
+        from ..contracts.model.ols import effective_ols_covariance
+
+        # A rerun patch arrives in the Agent-owned envelope while the legacy
+        # form still carries the source run's top-level default. Materialize
+        # the effective choice into that legacy field before dispatch so the
+        # estimator, metadata, and Draft reader all observe the same value.
+        form = {
+            **form,
+            "covariance": effective_ols_covariance(
+                form.get("covariance", ""), model_options
+            ),
+        }
     # This must happen before uploads or runs are materialized.  A rejected
     # LMM request therefore leaves neither executable evidence nor a run that
     # another boundary could later mistake for a C2-approved candidate.

@@ -428,11 +428,9 @@ def _supports_rerun_model_options(declaration: Mapping[str, Any]) -> bool:
     """Whether a registered model pack owns the rerun ``model_options`` envelope.
 
     ``model.rerun`` is intentionally narrower than Genesis: it may only patch
-    a model pack's server-owned options.  Legacy model declarations such as
-    OLS expose editable ``x``/``covariance`` form fields, but do not own a
-    ``model_options`` contract; advertising them as rerun Notebook
-    capabilities produces a typed proposal that can only fail at Draft
-    materialization. Filter them from the Agent catalog up front.
+    a model pack's server-owned options. A capability is eligible only when
+    its declaration explicitly publishes that envelope; this keeps the Agent
+    catalog aligned with the Draft materialization seam.
     """
 
     params = declaration.get("params") if isinstance(declaration, Mapping) else None

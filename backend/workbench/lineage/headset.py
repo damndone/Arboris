@@ -54,28 +54,48 @@ _PROFILE_CORRELATION_MAX_COLS = 12
 
 
 def _dataset_artifacts(runs_dir: Path, run_id: str, node_id: str) -> list[dict] | None:
-    if node_id == "stage:raw":
+    if node_id in {"stage:raw", "stage:source"}:
+        artifacts: list[dict] = []
         try:
             profile = read_json(runs_dir / run_id / "staged" / "data_profile.json")
         except (FileNotFoundError, OSError, ValueError):
-            return None
-        preview: dict[str, Any] = {
-            "row_count": profile.get("row_count"),
-            "column_count": profile.get("column_count"),
-            "columns": profile.get("columns"),
-        }
-        columns = profile.get("columns") or {}
-        if len(columns) <= _PROFILE_CORRELATION_MAX_COLS and profile.get("correlations"):
-            preview["correlations"] = profile["correlations"]
-        return [{
-            "name": "data_profile.json",
-            "mime": "application/json",
-            "summary": {
+            profile = None
+        if profile is not None:
+            preview: dict[str, Any] = {
                 "row_count": profile.get("row_count"),
                 "column_count": profile.get("column_count"),
-            },
-            "preview": preview,
-        }]
+                "columns": profile.get("columns"),
+            }
+            columns = profile.get("columns") or {}
+            if len(columns) <= _PROFILE_CORRELATION_MAX_COLS and profile.get("correlations"):
+                preview["correlations"] = profile["correlations"]
+            artifacts.append({
+                "name": "data_profile.json",
+                "mime": "application/json",
+                "summary": {
+                    "row_count": profile.get("row_count"),
+                    "column_count": profile.get("column_count"),
+                },
+                "preview": preview,
+            })
+        try:
+            index = read_json(runs_dir / run_id / "artifacts_index.json")
+        except (FileNotFoundError, OSError, ValueError):
+            index = {}
+        for record in index.get("artifacts", []):
+            if not isinstance(record, dict) or record.get("artifact_type") != "statistical_exploration":
+                continue
+            artifact_id = record.get("artifact_id")
+            if not isinstance(artifact_id, str):
+                continue
+            artifacts.append({
+                "name": artifact_id,
+                "artifact_id": artifact_id,
+                "mime": "application/json",
+                "sha256": record.get("sha256"),
+                "summary": {"artifact_type": "statistical_exploration"},
+            })
+        return artifacts or None
     if node_id == "stage:cleaned":
         try:
             actions = read_json(runs_dir / run_id / "processed" / "cleaning_actions.json")
@@ -129,6 +149,32 @@ def _model_stats(runs_dir: Path, run_id: str, node_id: str) -> dict[str, Any] | 
         coefficients.append({k: row.get(k) for k in _COEFFICIENT_ROW_KEYS})
     if coefficients:
         stats["coefficients"] = coefficients
+    try:
+        index = read_json(runs_dir / run_id / "artifacts_index.json")
+    except (FileNotFoundError, OSError, ValueError):
+        index = {}
+    diagnostic_artifacts = []
+    for record in index.get("artifacts", []):
+        if not isinstance(record, dict) or record.get("artifact_type") != "figure":
+            continue
+        artifact_id = record.get("artifact_id")
+        if not isinstance(artifact_id, str):
+            continue
+        if not (
+            artifact_id in {"residuals_fitted", "qq_residuals", "coef_plot"}
+            or artifact_id.startswith("residuals_vs_")
+            or artifact_id.startswith("fitted_vs_")
+        ):
+            continue
+        path = str(record.get("path") or "")
+        mime = "image/png" if path.lower().endswith(".png") else "application/octet-stream"
+        diagnostic_artifacts.append({
+            "artifact_id": artifact_id,
+            "mime": mime,
+            "sha256": record.get("sha256"),
+        })
+    if diagnostic_artifacts:
+        stats["diagnostic_artifacts"] = diagnostic_artifacts
     return stats or None
 
 

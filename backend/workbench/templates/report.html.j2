@@ -130,6 +130,26 @@
     </section>
     {% endif %}
 
+    {% if view_model.exploration %}
+    <section id="statistical-exploration">
+      <h2>Statistical Exploration</h2>
+      <p>Operation: {{ view_model.exploration.operation }} · Source rows: {{ view_model.exploration.source_row_count }} · Filtered rows: {{ view_model.exploration.filtered_row_count }}</p>
+      {% if view_model.exploration.missing_policy %}<p>Missing policy: {{ view_model.exploration.missing_policy }}</p>{% endif %}
+      {% if view_model.exploration.rows %}
+      <table>
+        <thead><tr><th>Field</th><th>Value</th></tr></thead>
+        <tbody>
+        {% for row in view_model.exploration.rows %}
+          {% for key, value in row.items() %}
+          <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
+          {% endfor %}
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+    {% endif %}
+
     {% if view_model.statistical_tests %}
     <section id="statistical-tests">
       <h2>Statistical Tests</h2>

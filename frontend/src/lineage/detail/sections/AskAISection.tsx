@@ -11,7 +11,7 @@ import {
   type AskAiActivityRecord,
 } from "../../../aiActivity/aiActivityLog";
 import { renderMarkdown } from "../../../report/markdown";
-import type { GraphViewNode } from "../../api/graphViewTypes";
+import type { ArtifactRef, GraphViewNode } from "../../api/graphViewTypes";
 import {
   fetchAnalysisLoopPackets,
   type AnalysisLoopPacketsResponse,
@@ -22,6 +22,45 @@ import { askAiForNode, fetchLlmConfig, type LlmConfigInfo } from "./askAiClient"
 import { buildAskAIContextPacket } from "./askAiContextPacket";
 
 const DEFAULT_QUESTION = "Explain this node and its risks.";
+
+type ArtifactCategory = "data" | "tables" | "analysis";
+
+const ARTIFACT_CATEGORY_LABELS: Record<ArtifactCategory, string> = {
+  data: "data",
+  tables: "tables",
+  analysis: "analysis",
+};
+
+function classifyArtifact(artifact: ArtifactRef): ArtifactCategory {
+  const haystack = `${artifact.name} ${artifact.mime}`.toLowerCase();
+  if (
+    /(?:data|raw|clean|dataset|profile)/.test(haystack) ||
+    /(?:text\/csv|application\/csv|parquet|stata|\.dta\b)/.test(haystack)
+  ) {
+    return "data";
+  }
+  if (
+    /(?:spreadsheet|excel|xlsx|xls|table|tabular)/.test(haystack)
+  ) {
+    return "tables";
+  }
+  return "analysis";
+}
+
+function countArtifactsByCategory(artifacts: readonly ArtifactRef[]) {
+  return artifacts.reduce<Record<ArtifactCategory, number>>(
+    (counts, artifact) => {
+      counts[classifyArtifact(artifact)] += 1;
+      return counts;
+    },
+    { data: 0, tables: 0, analysis: 0 },
+  );
+}
+
+function artifactCategoryLabel(category: ArtifactCategory, count: number) {
+  const label = ARTIFACT_CATEGORY_LABELS[category];
+  return `${count} ${category === "tables" && count === 1 ? "table" : label}`;
+}
 
 export function AskAISection({ node }: { node: GraphViewNode }) {
   const askAIEnabled = isAskAIEnabled();
@@ -119,6 +158,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
+  const [showAllArtifacts, setShowAllArtifacts] = useState(false);
   // v1.6.12 (V6): per-node Q&A history — regenerating no longer erases the
   // previous answer; every exchange lands in the typed AI activity log.
   const nodeKey = packet?.selection.forest_node_key ?? null;
@@ -129,10 +169,18 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     setAnswer(null);
     setError(null);
     setIsSubmitting(false);
+    setShowAllArtifacts(false);
     setHistory(
       projectRoot && nodeKey ? askAiHistoryForNode(projectRoot, nodeKey) : [],
     );
   }, [contextIdentity, projectRoot, nodeKey]);
+
+  const artifacts = node.artifacts ?? [];
+  const artifactCategoryCounts = useMemo(
+    () => countArtifactsByCategory(artifacts),
+    [artifacts],
+  );
+  const visibleArtifacts = showAllArtifacts ? artifacts : artifacts.slice(0, 1);
 
   if (!askAIEnabled) return null;
 
@@ -276,47 +324,143 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
             )}
           </>
         )}
-        {packet && (node.artifacts ?? []).length > 0 && (
+        {packet && artifacts.length > 0 && (
           <div
             data-testid="ask-ai-artifacts"
-            style={{ display: "flex", flexDirection: "column", gap: 4 }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 7,
+              paddingTop: 2,
+            }}
           >
-            <span style={{ color: "var(--label-tertiary)", fontSize: 11 }}>
-              Attached artifacts (in the AI's context):
-            </span>
-            {(node.artifacts ?? []).map((artifact) => (
-              <div
-                key={artifact.name}
-                style={{ display: "flex", alignItems: "center", gap: 8 }}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
+            >
+              <span style={{ color: "var(--label-tertiary)", fontSize: 11 }}>
+                Attached artifacts
+              </span>
+              <span
+                data-testid="ask-ai-artifact-count"
+                style={{ color: "var(--label-tertiary)", fontSize: 10.5 }}
               >
-                <code style={{ fontSize: 11 }}>{artifact.name}</code>
-                {/* v1.6.12 T4 (A3) — one-click focused explanation. The
-                 * artifact's preview already travels in the packet; the
-                 * focused question makes the model explain THAT artifact. */}
-                <button
-                  type="button"
-                  data-testid={`ask-ai-explain-${artifact.name}`}
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    const q = `Explain the artifact "${artifact.name}" from this node's context: what does it contain, what does it tell us about the data, and what should I watch out for?`;
-                    setQuestion(q);
-                    void ask(q);
-                  }}
+                {artifacts.length} total
+              </span>
+            </div>
+            <div
+              aria-label="Artifact categories"
+              style={{ display: "flex", flexWrap: "wrap", gap: 5 }}
+            >
+              {(Object.keys(ARTIFACT_CATEGORY_LABELS) as ArtifactCategory[]).map(
+                (category) => (
+                  <span
+                    key={category}
+                    data-testid={`ask-ai-artifact-category-${category}`}
+                    style={{
+                      padding: "3px 7px",
+                      borderRadius: 999,
+                      border: "1px solid var(--separator)",
+                      background: "var(--bg-card, rgba(255,255,255,0.03))",
+                      color: "var(--label-tertiary)",
+                      fontSize: 10.5,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {artifactCategoryLabel(
+                      category,
+                      artifactCategoryCounts[category],
+                    )}
+                  </span>
+                ),
+              )}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 0,
+                borderTop: "1px solid var(--separator)",
+              }}
+            >
+              {visibleArtifacts.map((artifact) => (
+                <div
+                  key={artifact.name}
                   style={{
-                    padding: "1px 8px",
-                    minHeight: 0,
-                    borderRadius: 999,
-                    border: "1px solid var(--separator)",
-                    background: "var(--bg-card-2, rgba(0,0,0,0.05))",
-                    color: "var(--label)",
-                    fontSize: 10.5,
-                    cursor: isSubmitting ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    padding: "6px 0",
+                    borderBottom: "1px solid var(--separator)",
                   }}
                 >
-                  Explain
-                </button>
-              </div>
-            ))}
+                  <code
+                    title={artifact.name}
+                    style={{
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      fontSize: 11,
+                    }}
+                  >
+                    {artifact.name}
+                  </code>
+                  {/* v1.6.12 T4 (A3) — one-click focused explanation. The
+                   * artifact's preview already travels in the packet; the
+                   * focused question makes the model explain THAT artifact. */}
+                  <button
+                    type="button"
+                    data-testid={`ask-ai-explain-${artifact.name}`}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      const q = `Explain the artifact "${artifact.name}" from this node's context: what does it contain, what does it tell us about the data, and what should I watch out for?`;
+                      setQuestion(q);
+                      void ask(q);
+                    }}
+                    style={{
+                      flexShrink: 0,
+                      padding: "1px 8px",
+                      minHeight: 0,
+                      borderRadius: 999,
+                      border: "1px solid var(--separator)",
+                      background: "var(--bg-card-2, rgba(0,0,0,0.05))",
+                      color: "var(--label)",
+                      fontSize: 10.5,
+                      cursor: isSubmitting ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Explain
+                  </button>
+                </div>
+              ))}
+            </div>
+            {artifacts.length > 1 && (
+              <button
+                type="button"
+                data-testid="ask-ai-artifacts-toggle"
+                aria-expanded={showAllArtifacts}
+                onClick={() => setShowAllArtifacts((expanded) => !expanded)}
+                style={{
+                  alignSelf: "flex-start",
+                  padding: "2px 0",
+                  border: 0,
+                  background: "transparent",
+                  color: "var(--label-secondary)",
+                  fontSize: 10.5,
+                  cursor: "pointer",
+                }}
+              >
+                {showAllArtifacts
+                  ? "Show fewer"
+                  : `+ ${artifacts.length - visibleArtifacts.length} more artifacts`}
+              </button>
+            )}
           </div>
         )}
         <form

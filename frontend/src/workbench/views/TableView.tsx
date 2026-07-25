@@ -12,7 +12,7 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   appendAiActivity,
   askAiHistoryForNode,
@@ -24,6 +24,7 @@ import { useForest } from "../ForestContext";
 import { useProjectRootOptional } from "../ProjectRootContext";
 import {
   artifactDownloadUrl,
+  fetchArtifactJson,
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
@@ -38,6 +39,9 @@ import {
   ARMA_GARCH_CHART_IDS,
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
+import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
+import { useWorkbenchOptional } from "../WorkbenchStateProvider";
+import { resolveTableRunScope } from "./tableRunScope";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
  *  the unique tail, matching the run-rail's short label so the two line up. */
@@ -49,6 +53,17 @@ function shortRunId(id: string): string {
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   return String(Number(n.toPrecision(4)));
+}
+
+function confidenceIntervalText(coefficient: {
+  ci_lower?: number | null;
+  ci_upper?: number | null;
+  confidence_interval?: readonly [number, number] | null;
+}): string {
+  const lower = typeof coefficient.ci_lower === "number" ? coefficient.ci_lower : coefficient.confidence_interval?.[0];
+  const upper = typeof coefficient.ci_upper === "number" ? coefficient.ci_upper : coefficient.confidence_interval?.[1];
+  if (typeof lower !== "number" || typeof upper !== "number") return "—";
+  return `[${fmt(lower)}, ${fmt(upper)}]`;
 }
 
 /** "correlation_heatmap" → "Correlation heatmap" for captions/alt text. */
@@ -74,6 +89,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
       <div style={{ fontSize: 11, color: "var(--label-tertiary)", marginBottom: 6 }}>
         {model.nobs !== undefined ? `n=${model.nobs}` : null}
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
+        {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>
       <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
         <thead>
@@ -82,6 +98,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
             <th style={{ padding: "2px 8px" }}>estimate</th>
             <th style={{ padding: "2px 8px" }}>std. error</th>
             <th style={{ padding: "2px 8px" }}>p-value</th>
+            <th style={{ padding: "2px 8px" }}>95% CI</th>
           </tr>
         </thead>
         <tbody>
@@ -93,6 +110,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
               <td style={{ padding: "2px 8px" }}>
                 {("p_value_display" in c ? c.p_value_display : undefined) ?? fmt(c.p_value)}
               </td>
+              <td style={{ padding: "2px 8px", whiteSpace: "nowrap" }}>{confidenceIntervalText(c)}</td>
             </tr>
           ))}
         </tbody>
@@ -336,16 +354,52 @@ const FIGURE_GRID: React.CSSProperties = {
 export function TableView({ projectRoot: projectRootProp }: { projectRoot?: string }) {
   const { model } = useLineage();
   const forest = useForest();
-  // Follow the active head (the run the graph is highlighting) so the table
-  // reflects a freshly forked/executed run and rail-selected runs — not just
-  // the URL run. Falls back to the URL run in legacy (no forest context).
-  const runId = forest?.activeRunId ?? model.runId;
+  const workbench = useWorkbenchOptional();
   const [searchParams] = useSearchParams();
   const contextProjectRoot = useProjectRootOptional();
   const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root") ?? "";
 
+  // Selecting a node scopes the Table to that node's lineage chain; selecting
+  // nothing shows every run in the project. Previously this view was pinned to
+  // one run, so results saved against a source run looked deleted as soon as
+  // the active head moved on.
+  const runIds = useMemo(
+    () =>
+      resolveTableRunScope({
+        forest: forest?.forest ?? null,
+        activeRunId: forest?.activeRunId ?? null,
+        selectedKey: workbench?.state.selectedKey ?? null,
+        fallbackRunId: forest?.activeRunId ?? model.runId,
+      }),
+    [forest, workbench?.state.selectedKey, model.runId],
+  );
+
+  return (
+    <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+      {runIds.map((runId) => (
+        <RunResultsPanel
+          key={runId}
+          runId={runId}
+          projectRoot={projectRoot}
+          scopeSize={runIds.length}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RunResultsPanel({
+  runId,
+  projectRoot,
+  scopeSize,
+}: {
+  runId: string;
+  projectRoot: string;
+  scopeSize: number;
+}) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [explorations, setExplorations] = useState<Array<{ item: ArtifactItem; payload: unknown }>>([]);
   const [artifactGroups, setArtifactGroups] = useState<ArtifactGroup[] | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -364,15 +418,29 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
     setLoading(true);
     setError(null);
     setArtifactGroups(undefined);
+    setExplorations([]);
     Promise.all([
       fetchRunDetail(projectRoot, runId),
       fetchRunArtifacts(projectRoot, runId),
     ])
-      .then(([d, a]) => {
+      .then(async ([d, a]) => {
+        const explorationItems = a.groups
+          .filter((group) => group.artifact_type === "statistical_exploration")
+          .flatMap((group) => group.items);
+        const explorationResults = (await Promise.all(
+          explorationItems.map(async (item) => {
+            try {
+              return { item, payload: await fetchArtifactJson(projectRoot, runId, item.artifact_id) };
+            } catch {
+              return null;
+            }
+          }),
+        )).filter((entry): entry is { item: ArtifactItem; payload: unknown } => entry !== null);
         if (cancelled) return;
         setDetail(d);
         setArtifactGroups(a.groups);
         setArtifacts(a.groups.flatMap((g) => g.items));
+        setExplorations(explorationResults);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -387,7 +455,10 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
 
   const models = detail?.model_results ?? [];
   const figures = artifacts.filter((a) => a.artifact_type === "figure");
-  const otherArtifacts = artifacts.filter((a) => a.artifact_type !== "figure");
+  const loadedExplorationIds = new Set(explorations.map(({ item }) => item.artifact_id));
+  const otherArtifacts = artifacts.filter((a) =>
+    a.artifact_type !== "figure" && !loadedExplorationIds.has(a.artifact_id),
+  );
   const chartArtifactIds = new Set<string>(Object.values(ARMA_GARCH_CHART_IDS));
   const hasArmaGarchChartArtifacts = artifacts.some((artifact) =>
     chartArtifactIds.has(artifact.artifact_id),
@@ -396,11 +467,16 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
     !loading &&
     !error &&
     models.length === 0 &&
+    explorations.length === 0 &&
     figures.length === 0 &&
     otherArtifacts.length === 0;
 
+  // An empty run is noise when several runs are on screen; on its own it is the
+  // honest answer to "what did this run produce?".
+  if (isEmpty && scopeSize > 1) return null;
+
   return (
-    <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
+    <div data-run-id={runId}>
       <header
         data-testid="table-view-run-header"
         title={runId}
@@ -445,6 +521,10 @@ export function TableView({ projectRoot: projectRootProp }: { projectRoot?: stri
             <CoefficientTable key={m.model_id} model={m} />
           ))}
         </section>
+      )}
+
+      {!loading && !error && explorations.length > 0 && (
+        <StatisticalExplorationTable explorations={explorations} />
       )}
 
       {!loading && !error && figures.length > 0 && (

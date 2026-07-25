@@ -204,6 +204,18 @@ _OLS_MODEL_PARAMS = _COMMON_MODEL_PARAMS + [
         "required": False,
         "role": "cluster",
     },
+    {
+        # The generic Agent envelope is a server-owned contract. Human OLS
+        # users keep editing the visible top-level covariance select above;
+        # the envelope exists so Notebook run projections can issue typed
+        # model.rerun patches without inventing a second execution channel.
+        "key": "model_options",
+        "kind": "object",
+        "label": "OLS model options",
+        "required": False,
+        "role": "model_options",
+        "value": {},
+    },
 ]
 
 _MODEL_PARAMS: dict[str, list[dict]] = {

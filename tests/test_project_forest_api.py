@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from workbench.api import app
+from workbench.artifacts import register_artifact
 
 # Shared genesis-run helpers (upload / draft / configure / validate / wait).
 from test_pipeline_drafts_genesis import (
@@ -165,6 +166,17 @@ def test_forest_model_node_carries_stats(tmp_path):
     # graph.json on disk stays undecorated.
     root = _mkproject(tmp_path)
     run_id = _execute_genesis_run(root)
+    figure_path = Path(root) / "runs" / run_id / "figures" / "residuals_vs_pfl.png"
+    figure_path.parent.mkdir(parents=True, exist_ok=True)
+    figure_path.write_bytes(b"png-placeholder")
+    register_artifact(
+        Path(root) / "runs" / run_id,
+        "residuals_vs_pfl",
+        figure_path,
+        "figure",
+        "visualization",
+        [],
+    )
     body = client.get("/graph", params={"project_root": root}).json()
 
     model_nodes = [
@@ -179,6 +191,13 @@ def test_forest_model_node_carries_stats(tmp_path):
     first = coefficients[0]
     assert first["variable"] and isinstance(first["estimate"], (int, float))
     assert "p_value" in first and "significance_label" in first
+    diagnostic_artifacts = stats.get("diagnostic_artifacts")
+    assert diagnostic_artifacts
+    assert {
+        "artifact_id": "residuals_vs_pfl",
+        "mime": "image/png",
+        "sha256": next(item["sha256"] for item in diagnostic_artifacts if item["artifact_id"] == "residuals_vs_pfl"),
+    } in diagnostic_artifacts
     # Fit metrics from model_quality flow through as scalars.
     summary = json.loads(
         (Path(root) / "runs" / run_id / "diagnostic_summary.json").read_text()

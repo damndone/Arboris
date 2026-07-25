@@ -45,6 +45,17 @@ class OperationDefinition:
     confirmation_policy: str = "required"
     proposal_schema: dict[str, Any] = field(default_factory=dict)
     editable_schema: dict[str, Any] = field(default_factory=dict)
+    # Who answers `inspect_operation_contract` for this operation. "lineage"
+    # means the node's own pack publishes the editable shape; "operation_
+    # registry" means this definition is the contract, because the operation
+    # does not act on a single node's editable surface. An operation an agent
+    # may propose must be able to state its own contract, so this is declared
+    # rather than inferred from scope_requirements.
+    contract_owner: str = "lineage"
+    # Optional extra vocabulary published alongside the contract: closed value
+    # sets, field meanings, composition rules. A schema says `spec: object`;
+    # this is what says what may go inside it.
+    vocabulary_builder: Callable[[], dict[str, Any]] | None = None
     executor_key: str = ""
     reconciler_key: str = ""
     diff_builder_key: str = ""
@@ -80,6 +91,15 @@ class OperationRegistry:
 
     def __init__(self) -> None:
         self._definitions: dict[tuple[str, str], OperationDefinition] = {}
+        # The workflow contracts import the registry's validation error type.
+        # Keep this import local so importing this module does not create a
+        # module-initialization cycle.
+        from .workflow_contracts import (
+            workflow_proposal_schema,
+            validate_workflow_operation,
+            workflow_step_vocabulary,
+        )
+
         self.register(
             OperationDefinition(
                 operation_id="model.rerun",
@@ -295,6 +315,50 @@ class OperationRegistry:
                 validator=_validate_code_execute,
             )
         )
+        # ``operation.multi_step`` is the natural-language entry point for a
+        # multi-step statistical workflow. The Agent composes which steps run
+        # over which columns; every step's statistical semantics are still
+        # validated and executed by the same server-owned validators the manual
+        # UI uses. A named preset is one accepted shape, not the only one.
+        self.register(
+            OperationDefinition(
+                operation_id="operation.multi_step",
+                operation_version="v1",
+                effect_level="mutation",
+                scope_requirements=("chain", "active_head"),
+                scope="dataset workflow",
+                risk_level="mutating",
+                confirmation_policy="required",
+                proposal_schema=workflow_proposal_schema(),
+                # The editable surface is the proposal's `changes` object, which
+                # is a composed step list OR a preset binding. Requiring the
+                # preset here contradicted the proposal schema and told an Agent
+                # that composing steps was illegal.
+                editable_schema=workflow_proposal_schema()["properties"]["changes"],
+                contract_owner="operation_registry",
+                vocabulary_builder=workflow_step_vocabulary,
+                executor_key="operation.multi_step",
+                reconciler_key="operation.multi_step",
+                diff_builder_key="workflow.diff.v1",
+                verification_builder_key="workflow.verification.v1",
+                ui_description=(
+                    "Compile and execute a multi-step statistical workflow with one "
+                    "confirmation and auditable per-step artifacts."
+                ),
+                example_prompts=(
+                    "Summarize every variable by year, then correlate them, then "
+                    "regress spending on the demographic shares.",
+                ),
+                natural_language_enabled=True,
+                validator=validate_workflow_operation,
+            )
+        )
+        # These identities describe the only operations a compiled workflow
+        # may use.  They are intentionally typed but not Agent-facing: the
+        # user confirms the parent workflow once, while the executor records
+        # each child step with the parent's authorization metadata.
+        for definition in _workflow_step_operation_definitions():
+            self.register(definition)
 
     def register(self, definition: OperationDefinition) -> None:
         key = (definition.operation_id, definition.operation_version)
@@ -371,6 +435,14 @@ class OperationRegistry:
                     "label": "Suggest the next analysis step",
                     "description": "Get recommendations without automatically executing a multi-step plan.",
                 },
+                {
+                    "id": "operation.multi_step",
+                    "label": "Run a multi-step statistical workflow",
+                    "description": (
+                        "Compile the selected Raw data into nine typed steps under one "
+                        "confirmation; the Agent cannot change statistical semantics."
+                    ),
+                },
             ],
             "unsupported": [
                 {
@@ -382,11 +454,6 @@ class OperationRegistry:
                     "id": "workspace.arbitrary",
                     "label": "Arbitrary file, code, or network operations",
                     "description": "The Agent has no arbitrary shell, file, Python, or network tools.",
-                },
-                {
-                    "id": "operation.multi_step",
-                    "label": "Multi-step automatic execution",
-                    "description": "Only individually confirmed typed operations are supported.",
                 },
             ],
         }
@@ -471,6 +538,181 @@ class OperationRegistry:
             raise UnknownOperationError(
                 f"operation is not registered: {operation_id}@{operation_version}"
             ) from exc
+
+
+def _workflow_step_operation_definitions() -> tuple[OperationDefinition, ...]:
+    """Return the closed set of typed operations a compiled workflow may use."""
+
+    return (
+        OperationDefinition(
+            operation_id="statistical.explore",
+            operation_version="v1",
+            effect_level="read_only",
+            scope_requirements=("chain", "active_head"),
+            scope="Raw data statistical exploration",
+            risk_level="none",
+            confirmation_policy="workflow_parent",
+            proposal_schema=_workflow_step_schema(
+                "statistical.explore",
+                changes={
+                    "operation": {"type": "string"},
+                    "variables": {"type": "array", "items": {"type": "string"}},
+                    "filters": {"type": "array", "items": {"type": "object"}},
+                },
+                required_changes=["operation"],
+            ),
+            executor_key="statistical.explore",
+            reconciler_key="statistical.explore",
+            diff_builder_key="exploration.diff.v1",
+            verification_builder_key="exploration.verification.v1",
+            ui_description="Run one server-defined statistical exploration step.",
+            natural_language_enabled=False,
+            validator=_validate_workflow_step,
+        ),
+        OperationDefinition(
+            operation_id="statistical.derive_boolean",
+            operation_version="v1",
+            effect_level="mutation",
+            scope_requirements=("chain", "active_head"),
+            scope="Raw data derived grouping",
+            risk_level="mutating",
+            confirmation_policy="workflow_parent",
+            proposal_schema=_workflow_step_schema(
+                "statistical.derive_boolean",
+                changes={"recipe": {"type": "object"}},
+                required_changes=["recipe"],
+            ),
+            executor_key="statistical.derive_boolean",
+            reconciler_key="statistical.derive_boolean",
+            diff_builder_key="exploration.derived_diff.v1",
+            verification_builder_key="exploration.derived_verification.v1",
+            ui_description="Create one server-defined boolean grouping node.",
+            natural_language_enabled=False,
+            validator=_validate_workflow_step,
+        ),
+        OperationDefinition(
+            # A composed plan could name this step, but nothing declared it, so
+            # the registry silently stopped being the closed set it claims to
+            # be and audit records carried an unregistered identity.
+            operation_id="statistical.derived_group_summarize",
+            operation_version="v1",
+            effect_level="mutation",
+            scope_requirements=("chain", "active_head"),
+            scope="derived group comparison",
+            risk_level="mutating",
+            confirmation_policy="workflow_parent",
+            proposal_schema=_workflow_step_schema(
+                "statistical.derived_group_summarize",
+                changes={
+                    "groups": {"type": "array", "items": {"type": "object"}},
+                    "summarize_columns": {"type": "array", "items": {"type": "string"}},
+                },
+                required_changes=["groups"],
+            ),
+            executor_key="statistical.derived_group_summarize",
+            reconciler_key="statistical.derived_group_summarize",
+            diff_builder_key="exploration.derived_diff.v1",
+            verification_builder_key="exploration.derived_verification.v1",
+            ui_description="Summarize columns within each derived group.",
+            natural_language_enabled=False,
+            validator=_validate_workflow_step,
+        ),
+        OperationDefinition(
+            operation_id="report.compose",
+            operation_version="v1",
+            effect_level="mutation",
+            scope_requirements=("chain", "active_head"),
+            scope="workflow report",
+            risk_level="mutating",
+            confirmation_policy="workflow_parent",
+            proposal_schema=_workflow_step_schema(
+                "report.compose",
+                changes={"report_contract": {"type": "object"}},
+                required_changes=["report_contract"],
+            ),
+            executor_key="report.compose",
+            reconciler_key="report.compose",
+            diff_builder_key="report.compose.diff.v1",
+            verification_builder_key="report.compose.verification.v1",
+            ui_description="Assemble the compiled workflow's report.",
+            natural_language_enabled=False,
+            validator=_validate_workflow_step,
+        ),
+    )
+
+
+def _workflow_step_schema(
+    operation_id: str,
+    *,
+    changes: dict[str, Any],
+    required_changes: list[str],
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": [
+            "operation_id",
+            "operation_version",
+            "target",
+            "preconditions",
+            "changes",
+            "evidence_refs",
+            "expected_effect",
+            "risks",
+        ],
+        "properties": {
+            "operation_id": {"const": operation_id},
+            "operation_version": {"const": "v1"},
+            "target": {
+                "type": "object",
+                "required": ["run_id", "node_ref", "artifact_id", "workflow_id", "step_id"],
+                "properties": {
+                    key: {"type": "string", "minLength": 1}
+                    for key in ("run_id", "node_ref", "artifact_id", "workflow_id", "step_id")
+                },
+                "additionalProperties": False,
+            },
+            "preconditions": {
+                "type": "object",
+                "required": ["source_fingerprint", "dependency_fingerprints"],
+                "properties": {
+                    "source_fingerprint": {"type": "string", "minLength": 1},
+                    "dependency_fingerprints": {"type": "array", "items": {"type": "string"}},
+                },
+                "additionalProperties": False,
+            },
+            "changes": {
+                "type": "object",
+                "required": required_changes,
+                "properties": changes,
+                "additionalProperties": False,
+            },
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "expected_effect": {"type": "array", "items": {"type": "string"}},
+            "risks": {"type": "array", "items": {"type": "string"}},
+        },
+        "additionalProperties": False,
+    }
+
+
+def _validate_workflow_step(
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    required_target = {"run_id", "node_ref", "artifact_id", "workflow_id", "step_id"}
+    missing_target = {key for key in required_target if not target.get(key)}
+    if missing_target:
+        raise OperationValidationError(
+            "workflow step target missing: " + ", ".join(sorted(missing_target))
+        )
+    if not preconditions.get("source_fingerprint"):
+        raise OperationValidationError("workflow step source_fingerprint is required")
+    if not isinstance(preconditions.get("dependency_fingerprints"), list):
+        raise OperationValidationError(
+            "workflow step dependency_fingerprints must be a list"
+        )
+    if not isinstance(changes, dict) or not changes:
+        raise OperationValidationError("workflow step changes must not be empty")
 
 
 def _proposal_schema(
@@ -944,6 +1186,7 @@ class OperationRecord:
     diff_ref: dict[str, Any] | None = None
     verification: dict[str, Any] = field(default_factory=dict)
     error: dict[str, Any] | None = None
+    changes: dict[str, Any] = field(default_factory=dict)
     # The domain effect and its read-model projection have separate durable
     # states.  A crash after domain commit must be recoverable without
     # re-running the effect or mistaking an unfinished projection for a second
@@ -952,6 +1195,11 @@ class OperationRecord:
     projection_status: str = "pending"
     created_at: str = ""
     updated_at: str = ""
+    workflow_id: str | None = None
+    workflow_confirmation_id: str | None = None
+    workflow_step_id: str | None = None
+    workflow_plan_fingerprint: str | None = None
+    confirmation_mode: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -975,10 +1223,16 @@ class OperationRecord:
             "diff_ref": self.diff_ref,
             "verification": self.verification,
             "error": self.error,
+            "changes": self.changes,
             "effect_status": self.effect_status,
             "projection_status": self.projection_status,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "workflow_id": self.workflow_id,
+            "workflow_confirmation_id": self.workflow_confirmation_id,
+            "workflow_step_id": self.workflow_step_id,
+            "workflow_plan_fingerprint": self.workflow_plan_fingerprint,
+            "confirmation_mode": self.confirmation_mode,
         }
 
     @classmethod
@@ -1003,10 +1257,16 @@ class OperationRecord:
             diff_ref=dict(value["diff_ref"]) if value.get("diff_ref") else None,
             verification=dict(value.get("verification") or {}),
             error=dict(value["error"]) if value.get("error") else None,
+            changes=dict(value.get("changes") or {}),
             effect_status=str(value.get("effect_status") or "pending"),
             projection_status=str(value.get("projection_status") or "pending"),
             created_at=str(value["created_at"]),
             updated_at=str(value["updated_at"]),
+            workflow_id=value.get("workflow_id"),
+            workflow_confirmation_id=value.get("workflow_confirmation_id"),
+            workflow_step_id=value.get("workflow_step_id"),
+            workflow_plan_fingerprint=value.get("workflow_plan_fingerprint"),
+            confirmation_mode=value.get("confirmation_mode"),
         )
 
 
@@ -1025,6 +1285,7 @@ class OperationRecordStore:
         confirmation: ProposalConfirmation,
         *,
         command_id: str | None = None,
+        workflow_authorization: dict[str, str] | None = None,
     ) -> OperationRecord:
         with self._lock:
             record_id = self._record_id(confirmation, command_id=command_id)
@@ -1047,6 +1308,16 @@ class OperationRecordStore:
                 actor_type=confirmation.actor_type,
                 status="pending",
                 confirmation=confirmation.to_dict(),
+                changes=dict(getattr(confirmation, "changes", {}) or {}),
+                workflow_id=(workflow_authorization or {}).get("workflow_id"),
+                workflow_confirmation_id=(workflow_authorization or {}).get(
+                    "workflow_confirmation_id"
+                ),
+                workflow_step_id=(workflow_authorization or {}).get("workflow_step_id"),
+                workflow_plan_fingerprint=(workflow_authorization or {}).get(
+                    "workflow_plan_fingerprint"
+                ),
+                confirmation_mode=(workflow_authorization or {}).get("confirmation_mode"),
                 created_at=now,
                 updated_at=now,
             )

@@ -99,30 +99,35 @@ def _source_params_from_schema(editable_schema: list[dict[str, Any]]) -> dict[st
 
 
 def normalize_ols_genesis_model_params(model_params: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalize the historical nested covariance spelling for OLS Genesis.
+    """Keep the OLS Agent envelope and project it to legacy covariance.
 
-    OLS owns the legacy top-level ``covariance`` form, not the generic
-    ``model_options`` contract. Early Notebook providers nevertheless put
-    ``{"covariance": ...}`` in ``model_options``. Keep this adapter narrow and
-    explicit: only that one known field is migrated; every other nested option
-    remains fail-closed instead of being guessed or forwarded to execution.
+    The top-level field remains part of the executable Draft schema for human
+    controls and backward-compatible run inputs. It is a projection of the
+    validated nested Agent option, not a replacement for that option. Keeping
+    both prevents Genesis from accepting a typed option and then silently
+    dropping the server-owned contract before execution.
     """
     normalized = dict(model_params)
     if normalized.get("model_type") != "ols" or "model_options" not in normalized:
         return normalized
+    from ..contracts.model.ols import validate_ols_model_options
+
     options = normalized.get("model_options")
     if not isinstance(options, Mapping):
         raise ValueError("MODEL_OPTIONS_UNSUPPORTED_FOR_OLS_GENESIS")
-    unknown = set(options) - {"covariance"}
-    if unknown:
-        raise ValueError("MODEL_OPTIONS_UNSUPPORTED_FOR_OLS_GENESIS")
+    options = dict(options)
+    if options:
+        try:
+            validate_ols_model_options(options)
+        except ValueError as exc:
+            raise ValueError(getattr(exc, "error_code", str(exc))) from exc
+    normalized["model_options"] = options
     if "covariance" in options:
         nested_covariance = options["covariance"]
         current_covariance = normalized.get("covariance")
         if current_covariance is not None and current_covariance != nested_covariance:
             raise ValueError("MODEL_OPTIONS_COVARIANCE_CONFLICT")
         normalized["covariance"] = nested_covariance
-    normalized.pop("model_options", None)
     return normalized
 
 
@@ -289,6 +294,8 @@ def create_genesis_draft(
     filename: str,
     sheet_names: tuple[str, ...],
     columns: tuple[str, ...],
+    model_params: Mapping[str, Any] | None = None,
+    exploration_context: Mapping[str, Any] | None = None,
     notebook_provenance: Mapping[str, str] | None = None,
 ) -> StoredDraft:
     """Create one parentless, upload-bound genesis Draft without executing it."""
@@ -304,6 +311,15 @@ def create_genesis_draft(
     if not filename or Path(filename).name != filename:
         raise ValueError("FILENAME_INVALID")
     safe_columns = tuple(str(column) for column in columns if str(column))
+    requested_model_type = (model_params or {}).get("model_type") if model_params else None
+    model_node: dict[str, Any] = {
+        "node_id": "model_1",
+        "node_type": "model",
+        "model_family": "regression",
+        "model_type": requested_model_type if isinstance(requested_model_type, str) else None,
+        "params": dict(model_params or {}),
+        "status": "pending",
+    }
     draft: dict[str, Any] = {
         "draft_id": new_draft_id(),
         "schema_version": "pipeline_draft.v1",
@@ -330,14 +346,7 @@ def create_genesis_draft(
                     "columns": list(safe_columns),
                     "status": "pending",
                 },
-                {
-                    "node_id": "model_1",
-                    "node_type": "model",
-                    "model_family": "regression",
-                    "model_type": None,
-                    "params": {},
-                    "status": "pending",
-                },
+                model_node,
             ],
             "edges": [
                 {"from": "source_1", "to": "table_1"},
@@ -346,6 +355,8 @@ def create_genesis_draft(
         },
         "default_execution_mode": "genesis",
     }
+    if exploration_context is not None:
+        draft["exploration_context"] = dict(exploration_context)
     provenance = _provenance_payload(notebook_provenance)
     if provenance is not None:
         draft["notebook_provenance"] = provenance

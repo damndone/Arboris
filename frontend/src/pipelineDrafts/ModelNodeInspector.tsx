@@ -46,7 +46,13 @@ export function ModelNodeInspector({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  const controls = (node.editable_schema ?? []) as EditableControl[];
+  // OLS keeps its human-facing covariance select as the editable control.
+  // The object-shaped Agent envelope is still present in the backend schema
+  // for typed Notebook reruns, but rendering it here would expose a duplicate
+  // opaque JSON field beside the real covariance control.
+  const controls = ((node.editable_schema ?? []) as EditableControl[]).filter(
+    (control) => !(control.key === "model_options" && String(control.kind) === "object"),
+  );
   const controlsWithValues = controls.map((control) => ({
     ...control,
     value: params[control.key] ?? control.value,

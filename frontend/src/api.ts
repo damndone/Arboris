@@ -158,6 +158,8 @@ export type CoefficientRecord = {
   std_error?: number | null;
   p_value?: number | null;
   p_value_display?: string | null;
+  ci_lower?: number | null;
+  ci_upper?: number | null;
   source_id?: string;
 };
 
@@ -165,6 +167,7 @@ export type ModelResult = {
   model_id: string;
   model_type?: string;
   r_squared?: number | null;
+  r_squared_adj?: number | null;
   pseudo_r2?: number | null;
   llf?: number | null;
   aic?: number | null;

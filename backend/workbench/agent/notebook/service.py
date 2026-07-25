@@ -1612,10 +1612,10 @@ class NotebookService:
             if payload is None:
                 payload = model_params.get("model_options")
             if payload:
-                # OLS owns the historical top-level covariance field, while
-                # early Notebook providers nested it under model_options.  Use
-                # the same narrow, explicit adapter as Draft materialization;
-                # never invent a generic OLS model-options contract.
+                # OLS owns a bounded model_options contract. The adapter also
+                # projects its covariance into the legacy top-level field so
+                # Genesis and the human Draft editor retain one executable
+                # covariance meaning.
                 if model_type == "ols":
                     from ...services.draft_materialization import (
                         normalize_ols_genesis_model_params,

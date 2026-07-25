@@ -31,7 +31,14 @@ def test_run_probit_binary_y_returns_normalized_result():
     assert result["nobs"] == n
     assert "x1" in result["coefficients"]
     assert len(result["fitted_values_preview"]) <= 500
-    assert "fitted_values" not in result
+    # The original guard here was `"fitted_values" not in result`, protecting
+    # against an unbounded vector in the payload. The full vector is now emitted
+    # so diagnostic plots describe the analysis sample rather than its first 500
+    # rows — but the bound it was protecting still holds.
+    from workbench.econometrics.normalize import FULL_SEQUENCE_LIMIT
+
+    assert len(result["fitted_values"]) == n
+    assert len(result["fitted_values"]) < FULL_SEQUENCE_LIMIT
 
 
 def test_run_negative_binomial_count_y_returns_irr():
@@ -168,10 +175,18 @@ def test_advanced_model_fit_errors_include_root_cause(monkeypatch, name, fit_cal
 
 
 class _GuardedValues:
+    """A finite source of exactly ``nobs`` values.
+
+    The normalizer makes two bounded passes over this (the 500-row preview and
+    the full analysis-sample vector).  Runaway consumption is guarded by
+    ``test_full_sequence_conversion_stays_bounded_for_an_oversized_model``,
+    which feeds a genuinely infinite generator — a stricter check than the
+    fixed 500-element trap this class used to carry.
+    """
+
     def __iter__(self):
-        for _ in range(500):
+        for _ in range(1000):
             yield 1.0
-        raise AssertionError("preview conversion should not consume beyond the cap")
 
 
 class _FakeModel:
@@ -193,6 +208,19 @@ def test_normalize_statsmodels_result_caps_preview_conversion():
 
     assert len(result["fitted_values_preview"]) == 500
     assert len(result["residuals_preview"]) == 500
+    assert len(result["fitted_values"]) == 1000
+    assert len(result["residuals"]) == 1000
+
+
+def test_full_sequence_conversion_stays_bounded_for_an_oversized_model():
+    """Past the ceiling the payload keeps only the preview, so plots say so."""
+    from workbench.econometrics.normalize import _json_safe_sequence_preview
+
+    def endless():
+        while True:
+            yield 1.0
+
+    assert len(_json_safe_sequence_preview(endless(), limit=64)) == 64
 
 
 def test_run_workflow_explicit_probit_writes_model_result(tmp_path):
@@ -756,3 +784,28 @@ def test_prediction_missing_dependency_in_workflow_continues_workflow(
     assert evidence["extra"] == "ml"
     assert evidence["package"] == "sklearn"
     assert "install" in evidence
+
+
+def test_normalize_reports_adjusted_r_squared_and_the_full_analysis_sample():
+    """Stata `reg` prints Adj R-squared and plots residuals over every row.
+
+    Without `r_squared_adj` a reader cannot answer "what is the adjusted R2"
+    from Workbench output at all; without the full residual/fitted vectors the
+    diagnostic plots silently describe the first 500 observations only.
+    """
+    import statsmodels.formula.api as smf
+
+    rng = np.random.default_rng(7)
+    n = 900
+    x1 = rng.normal(size=n)
+    frame = pd.DataFrame({"y": 2.0 + 1.5 * x1 + rng.normal(size=n), "x1": x1})
+    fitted = smf.ols("y ~ x1", data=frame).fit()
+
+    result = normalize_statsmodels_result(fitted, "ols_1")
+
+    assert result["r_squared_adj"] == pytest.approx(fitted.rsquared_adj)
+    assert result["r_squared_adj"] < result["r_squared"]
+    assert len(result["residuals"]) == n
+    assert len(result["fitted_values"]) == n
+    # The bounded preview stays for compact surfaces that never wanted 900 rows.
+    assert len(result["residuals_preview"]) == 500

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+import re
 
 import matplotlib
 
@@ -81,6 +82,14 @@ def create_figures(
 
     # ── model-fit diagnostics (any model exposing residuals/coefficients) ─
     _plot_model_diagnostics(model_results, figures_dir, run_root, figures)
+    _plot_predictor_diagnostics(
+        frame,
+        regressors or [],
+        model_results,
+        figures_dir,
+        run_root,
+        figures,
+    )
 
     # ── model-type-specific plots ───────────────────────────────────────
     _plot_model_specific(
@@ -170,6 +179,40 @@ def _save(fig, path: Path, run_root: Path, artifact_id: str, figures: dict[str, 
     plt.close(fig)
     record = register_artifact(run_root, artifact_id, path, "figure", "visualization", [])
     figures[artifact_id] = record.path
+
+
+def write_statistical_scatter(
+    frame: pd.DataFrame,
+    path: Path,
+    *,
+    x_column: str,
+    y_column: str,
+) -> int:
+    """Write one explicit x/y scatter figure and return the plotted N.
+
+    Registration is intentionally owned by the caller so a repeated
+    source-bound exploration can use the same idempotent artifact helper as
+    its JSON result.
+    """
+    aligned = pd.concat(
+        [
+            pd.to_numeric(frame[x_column], errors="coerce").rename("x"),
+            pd.to_numeric(frame[y_column], errors="coerce").rename("y"),
+        ],
+        axis=1,
+    ).dropna()
+    if aligned.empty:
+        raise ValueError("scatter requires at least one complete x/y row")
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    ax.scatter(aligned["x"], aligned["y"], alpha=0.65, s=18, color="#54a24b")
+    ax.set_xlabel(x_column)
+    ax.set_ylabel(y_column)
+    ax.set_title(f"{y_column} versus {x_column} (N={len(aligned)})")
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path)
+    plt.close(fig)
+    return int(len(aligned))
 
 
 def _new_grid(n: int):
@@ -353,19 +396,23 @@ def _plot_model_diagnostics(model_results, figures_dir, run_root, figures) -> No
     model_result = _first_model_result(model_results or [])
     if model_result is None:
         return
-    residuals = _model_numeric_list(model_result, "residuals_preview", "residuals")
-    fitted = _model_numeric_list(model_result, "fitted_values_preview", "fitted_values")
+    residuals, total = _model_diagnostic_sample(model_result, "residuals")
+    fitted, _fitted_total = _model_diagnostic_sample(model_result, "fitted_values")
     if residuals and fitted and len(residuals) == len(fitted):
+        scope = (
+            f"N={total}" if len(residuals) >= total else f"first {len(residuals)} of {total}"
+        )
         fig, ax = plt.subplots()
         ax.scatter(fitted, residuals, alpha=0.75)
         ax.axhline(0, color="#8a94a6", linewidth=1)
         ax.set_xlabel("Fitted values")
         ax.set_ylabel("Residuals")
+        ax.set_title(f"Residuals vs fitted values ({scope})")
         _save(fig, figures_dir / "residuals_fitted.png", run_root, "residuals_fitted", figures)
 
         fig, ax = plt.subplots()
         stats.probplot(residuals, dist="norm", plot=ax)
-        ax.set_title("Residual Q-Q plot")
+        ax.set_title(f"Residual Q-Q plot ({scope})")
         _save(fig, figures_dir / "qq_residuals.png", run_root, "qq_residuals", figures)
 
     coefficient_rows = _coefficient_rows(model_result)
@@ -380,6 +427,123 @@ def _plot_model_diagnostics(model_results, figures_dir, run_root, figures) -> No
         ax.set_yticks(list(y_positions), labels)
         ax.set_xlabel("Estimate")
         _save(fig, figures_dir / "coef_plot.png", run_root, "coef_plot", figures)
+
+
+def _plot_predictor_diagnostics(
+    frame: pd.DataFrame,
+    regressors: list[str],
+    model_results,
+    figures_dir: Path,
+    run_root: Path,
+    figures: dict[str, str],
+) -> None:
+    """Plot model residuals/fitted values against the model predictors.
+
+    The model result preview is aligned through ``analysis_sample.row_order``
+    when the OLS contract provides it.  This keeps a missing-value drop from
+    silently pairing a residual with the wrong source row; a positional
+    fallback is retained for older model results that predate that contract.
+    """
+    model_result = _first_model_result(model_results or [])
+    if model_result is None:
+        return
+    residuals, residual_total = _model_diagnostic_sample(model_result, "residuals")
+    fitted, _fitted_total = _model_diagnostic_sample(model_result, "fitted_values")
+    if not residuals or not fitted:
+        return
+    n = min(len(residuals), len(fitted), len(frame))
+    if n == 0:
+        return
+    aligned = _align_model_preview_frame(frame, model_result, n)
+    residual_values = residuals[:n]
+    fitted_values = fitted[:n]
+    for predictor in dict.fromkeys(regressors):
+        if predictor not in aligned.columns:
+            continue
+        values = pd.to_numeric(aligned[predictor], errors="coerce")
+        plot_frame = pd.DataFrame(
+            {
+                predictor: values.to_numpy(),
+                "residuals": residual_values,
+                "fitted_values": fitted_values,
+            }
+        ).dropna()
+        if plot_frame.empty:
+            continue
+        _save_predictor_diagnostic(
+            plot_frame,
+            predictor,
+            "residuals",
+            figures_dir,
+            run_root,
+            figures,
+            y_label="Residuals",
+            artifact_prefix="residuals_vs",
+            analysis_rows=residual_total,
+        )
+        _save_predictor_diagnostic(
+            plot_frame,
+            predictor,
+            "fitted_values",
+            figures_dir,
+            run_root,
+            figures,
+            y_label="Fitted values",
+            artifact_prefix="fitted_vs",
+            analysis_rows=residual_total,
+        )
+
+
+def _align_model_preview_frame(
+    frame: pd.DataFrame,
+    model_result: dict,
+    n: int,
+) -> pd.DataFrame:
+    sample = model_result.get("analysis_sample")
+    row_order = sample.get("row_order") if isinstance(sample, dict) else None
+    if isinstance(row_order, list) and len(row_order) >= n:
+        positions = {str(value): position for position, value in enumerate(frame.index)}
+        selected = [positions.get(str(value)) for value in row_order[:n]]
+        if all(position is not None for position in selected):
+            return frame.iloc[[int(position) for position in selected]]
+    return frame.iloc[:n]
+
+
+def _save_predictor_diagnostic(
+    plot_frame: pd.DataFrame,
+    predictor: str,
+    y_column: str,
+    figures_dir: Path,
+    run_root: Path,
+    figures: dict[str, str],
+    *,
+    y_label: str,
+    artifact_prefix: str,
+    analysis_rows: int | None = None,
+) -> None:
+    artifact_suffix = _safe_artifact_suffix(predictor)
+    artifact_id = f"{artifact_prefix}_{artifact_suffix}"
+    fig, ax = plt.subplots()
+    ax.scatter(plot_frame[predictor], plot_frame[y_column], alpha=0.75)
+    if y_column == "residuals":
+        ax.axhline(0, color="#8a94a6", linewidth=1)
+    ax.set_xlabel(predictor)
+    ax.set_ylabel(y_label)
+    plotted = len(plot_frame)
+    total = analysis_rows if isinstance(analysis_rows, int) and analysis_rows > 0 else plotted
+    ax.set_title(_diagnostic_title(y_label, predictor, plotted, total))
+    _save(
+        fig,
+        figures_dir / f"{artifact_id}.png",
+        run_root,
+        artifact_id,
+        figures,
+    )
+
+
+def _safe_artifact_suffix(column: str) -> str:
+    suffix = re.sub(r"[^0-9A-Za-z_]+", "_", str(column)).strip("_")
+    return suffix or "predictor"
 
 
 # ─── model-type-specific plots ──────────────────────────────────────────
@@ -612,6 +776,26 @@ def _model_numeric_list(model_result: dict, *keys: str) -> list[float]:
         if values:
             return values
     return []
+
+
+def _model_diagnostic_sample(model_result: dict, name: str) -> tuple[list[float], int]:
+    """Return the plottable vector plus the model's own analysis-sample size.
+
+    The full vector is preferred so a diagnostic plot describes the estimated
+    model.  When only the bounded preview exists the caller still learns the
+    true ``nobs``, so the figure can say it is showing a prefix instead of
+    presenting 500 points as if they were the sample.
+    """
+    values = _model_numeric_list(model_result, name, f"{name}_preview")
+    total = model_result.get("nobs")
+    if not isinstance(total, int) or isinstance(total, bool) or total < len(values):
+        total = len(values)
+    return values, total
+
+
+def _diagnostic_title(y_label: str, predictor: str, plotted: int, total: int) -> str:
+    scope = f"N={total}" if plotted >= total else f"first {plotted} of {total}"
+    return f"{y_label} vs {predictor} ({scope})"
 
 
 def _coefficient_rows(model_result: dict) -> list[tuple[str, float, float]]:

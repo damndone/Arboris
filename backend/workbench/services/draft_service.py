@@ -31,6 +31,52 @@ from .run_service import _submit_run, merge_form_overrides
 from .draft_materialization import normalize_ols_genesis_model_params
 
 
+def validate_exploration_context(root: Path, draft: dict[str, Any]) -> None:
+    """Revalidate a pre-model exploration binding before OLS execution."""
+    context = draft.get("exploration_context")
+    if not isinstance(context, dict):
+        return
+    from ..statistical_exploration import (
+        ExplorationSpec,
+        FilterSpec,
+        StatisticalExplorationValidationError,
+        exploration_fingerprint,
+        resolve_statistical_source,
+    )
+
+    spec_payload = context.get("spec")
+    if not isinstance(spec_payload, dict):
+        raise HTTPException(status_code=409, detail="STATISTICAL_EXPLORATION_STALE")
+    try:
+        spec = ExplorationSpec(
+            operation=str(spec_payload["operation"]),
+            selected_columns=tuple(spec_payload.get("selected_columns") or ()),
+            filters=tuple(
+                FilterSpec(
+                    column=str(item["column"]),
+                    operator=str(item["operator"]),
+                    value=item.get("value"),
+                )
+                for item in spec_payload.get("filters") or ()
+            ),
+            options=spec_payload.get("options") or {},
+            derived_definitions=tuple(spec_payload.get("derived_definitions") or ()),
+        )
+        resolved, _ = resolve_statistical_source(
+            root,
+            source_run_id=str(context["source_run_id"]),
+            source_node_id=str(context["source_node_id"]),
+            source_artifact_id=str(context["source_artifact_id"]),
+        )
+        if resolved.get("source_sha256") != context.get("source_sha256"):
+            raise ValueError("source artifact fingerprint changed")
+        expected = exploration_fingerprint(str(context["source_sha256"]), spec)
+        if expected != context.get("exploration_fingerprint"):
+            raise ValueError("exploration fingerprint changed")
+    except (KeyError, TypeError, ValueError, StatisticalExplorationValidationError) as exc:
+        raise HTTPException(status_code=409, detail="STATISTICAL_EXPLORATION_STALE") from exc
+
+
 def _draft_run_family_id(draft: dict[str, Any]) -> str | None:
     """Read an explicit Notebook line pin from the Draft handoff."""
 
@@ -112,6 +158,7 @@ def execute_genesis_draft(
             }
 
         draft = current.draft
+        validate_exploration_context(root, draft)
         # --- genesis: synthesize the full form (no parent run to merge) ---
         nodes = {n["node_id"]: n for n in draft["graph"]["nodes"]}
         sha = nodes["source_1"]["upload"]["sha256"]
@@ -127,8 +174,8 @@ def execute_genesis_draft(
         mp = dict(nodes["model_1"].get("params") or {})
         try:
             # Compatibility adapter for already-materialized Notebook drafts;
-            # new proposals are rejected upstream unless they use the canonical
-            # OLS top-level covariance field.
+            # it preserves the server-owned nested OLS options while projecting
+            # covariance into the legacy top-level execution field.
             mp = normalize_ols_genesis_model_params(mp)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

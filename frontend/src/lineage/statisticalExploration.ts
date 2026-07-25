@@ -1,0 +1,132 @@
+import { apiUrl, readResponse } from "../api";
+
+export type StatisticalExplorationOperation =
+  | "summarize"
+  | "summarize_detail"
+  | "misstable"
+  | "corr"
+  | "derive_boolean"
+  | "scatter";
+
+export type StatisticalFilterOperator = "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "not_in";
+
+export interface StatisticalFilter {
+  column: string;
+  operator: StatisticalFilterOperator;
+  value: unknown;
+}
+
+export interface StatisticalExplorationRequest {
+  source_run_id: string;
+  source_node_id: string;
+  source_artifact_id: string;
+  operation: StatisticalExplorationOperation;
+  selected_columns: string[];
+  filters: StatisticalFilter[];
+  options?: Record<string, unknown>;
+  derived_definitions?: Array<Record<string, unknown>>;
+}
+
+export interface StatisticalExplorationResult {
+  schema_version?: string;
+  operation?: StatisticalExplorationOperation;
+  source_row_count?: number;
+  filtered_row_count?: number;
+  missing_policy?: string;
+  variables?: Record<string, unknown> | string[];
+  groups?: Array<Record<string, unknown>>;
+  correlation_n?: number;
+  matrix?: unknown[][];
+  pairs?: Array<{ a: string; b: string; r: number | null; n: number }>;
+  empty_group_values?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface StatisticalExplorationPreview {
+  status: "ready" | "blocked";
+  fingerprint: string;
+  source_sha256: string;
+  source_artifact_id: string;
+  result: StatisticalExplorationResult;
+}
+
+export interface StatisticalExplorationPreviewResponse {
+  spec: Record<string, unknown>;
+  preview: StatisticalExplorationPreview;
+}
+
+export interface StatisticalExplorationConfirmResponse {
+  status: string;
+  exploration: {
+    artifact_id: string;
+    path?: string;
+    transcript_artifact_id?: string;
+    transcript_path?: string;
+    fingerprint?: string;
+    source_sha256?: string;
+  };
+  result?: StatisticalExplorationResult;
+  exports?: Array<{
+    format: "html" | "pdf" | "xlsx";
+    artifact_id: string;
+    path: string;
+  }>;
+}
+
+export type StatisticalOlsCovariance = "robust" | "unadjusted";
+
+export interface StatisticalOlsContextRequest extends StatisticalExplorationRequest {
+  outcome_column: string;
+  predictor_columns: string[];
+  preview_fingerprint: string;
+  /** A genesis Draft has no editable_schema, so this is the only place to choose. */
+  covariance?: StatisticalOlsCovariance;
+}
+
+export interface StatisticalOlsContextResponse {
+  status: "draft_created";
+  draft: { draft_id: string } & Record<string, unknown>;
+  draft_hash: string;
+  exploration: StatisticalExplorationConfirmResponse["exploration"];
+}
+
+function projectQuery(projectRoot: string): string {
+  const params = new URLSearchParams({ project_root: projectRoot });
+  return `?${params.toString()}`;
+}
+
+export async function previewStatisticalExploration(
+  projectRoot: string,
+  request: StatisticalExplorationRequest,
+): Promise<StatisticalExplorationPreviewResponse> {
+  const response = await fetch(apiUrl(`/statistical-explorations/preview${projectQuery(projectRoot)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readResponse<StatisticalExplorationPreviewResponse>(response);
+}
+
+export async function confirmStatisticalExploration(
+  projectRoot: string,
+  request: StatisticalExplorationRequest & { preview_fingerprint: string },
+): Promise<StatisticalExplorationConfirmResponse> {
+  const response = await fetch(apiUrl(`/statistical-explorations/confirm${projectQuery(projectRoot)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readResponse<StatisticalExplorationConfirmResponse>(response);
+}
+
+export async function createStatisticalOlsContext(
+  projectRoot: string,
+  request: StatisticalOlsContextRequest,
+): Promise<StatisticalOlsContextResponse> {
+  const response = await fetch(apiUrl(`/statistical-explorations/ols-context${projectQuery(projectRoot)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readResponse<StatisticalOlsContextResponse>(response);
+}
