@@ -1,295 +1,663 @@
-# `model.custom` 契约设计
+# 通用自定义能力运行时与 `model.custom` 适配器设计
 
-**状态**：B 阶段已批准；本轮只实现第 1–3 步，Agent 接入仍未实现
+**状态**：设计重写完成，等待用户复审；实现尚未开始
+
 **日期**：2026-07-25
-**背景**：`code.execute` 作为「Agent 补齐缺失算法」的预留口子已存在且沙箱扎实，但签名是 DataFrame→DataFrame，只能表达派生数据，无法表达一个**估计量**。本设计补上这一层。
 
-### 本轮开发线边界（B：通用执行底座）
+**替代**：本文件此前的“单一自定义模型结果契约”设计
 
-本轮只交付第 1–3 步：
+**设计原则**：先建立可复用的自定义能力运行时，再把 `model.custom` 作为第一个类型化适配器接入；不得用某个示例模型、某个软件输出或逐字节相等的结果反推通用契约。
 
-1. `custom_model_result_contract_v1` 及其 fail-closed 校验器；
-2. 复用现有 `run_python_sandboxed` 的模型 handler runner，使用模型专用额度、固定 harness 和双跑确定性闸门；
-3. 在正式数据估计前执行有已知答案的 `validation_case`。
-
-本轮不实现 `dependency.request`、chain 作用域 handler registry、服务端身份/信任装配、`model.custom` Agent 操作、自然语言接入、UI，或把 `model.custom` 加入 `WORKFLOW_STEP_SPEC_CONTRACTS`。后续 workflow 只能编排已经独立注册并验证通过的 custom model，不能用普通多步确认替代高风险确认。
-
-本轮新增的模块边界保持可复用：结果契约只负责作者结果的结构和数值可信性；runner 只负责受限执行、输入注入和双跑；validation case 只负责已知答案闸门。服务端身份、artifact、registry 和 Agent proposal 仍由后续开发线装配。
+**正式开发目标**：`docs/superpowers/specs/2026-07-25-custom-capability-foundation-objective.md`
 
 ---
 
-## 0. 一句话定位
+## 0. 决策摘要
 
-**`model.custom` 不是第二条执行路径，而是「Agent 撰写的 `ModelHandler`，在沙箱里跑」。**
+Workbench 需要支持 Agent 在现有能力不足时：
 
-它接入的是 `arma_garch` / `ets` / `linear_mixed_effects` 三个内置 pack 用的**同一个** `MODEL_REGISTRY` 扩展点。这个决定是整份设计的支点：一旦自定义模型是个正常的 handler，它就**自动**继承血缘、诊断、图表、报告、对比、rerun、fork —— 不需要为它重建任何一样。
+1. 使用已经批准并密封的依赖实现新算法；
+2. 没有现成依赖时编写算法；
+3. 在隔离环境中产生有界、可验证、可追溯的结果；
+4. 经独立证据与人工授权后，在限定作用域内复用。
 
-反面做法（另起一套「自定义模型结果」的存储和渲染）会立刻分叉出第二套契约，然后是第二套报告、第二套对比逻辑，最后没人知道哪套是真的。
+为此，本设计不把 Agent 代码伪装成一个进程内 `ModelHandler`，也不建立第二套平行的 lineage。采用四层结构：
+
+1. **可信控制层**：解析输入、持有身份、授权、证据等级、lineage 与消费者策略；
+2. **通用自定义能力运行时**：在严格隔离中执行 `input bundle -> output bundle`；
+3. **类型化适配器**：`model.custom` 是第一个适配器，未来可增加其他统计或数据能力；
+4. **消费者适配层**：报告、诊断、图表、Compare、rerun 分别显式声明支持，不因“注册成功”自动获得。
+
+当前开发线只建立第 1–3 项所需的**通用基础契约、严格运行边界和验证语义**。它不接 Agent、不下载依赖、不动态注册模型，也不改 workflow。
 
 ---
 
-## 1. 签名
+## 1. 目标与非目标
 
-### 1.1 作者写什么
+### 1.1 目标
 
-Agent 提交的是一段 Python，沙箱内以固定协议调用：
+- 结果根契约不依赖单方程、系数表、经典标准误或 p-value。
+- 同一运行时以后能承载模型、统计检验、算法和其他有界分析能力。
+- 服务端独占所有可信身份、样本指纹、授权状态和信任等级。
+- “可复现”区分身份一致、数值等价和统计等价，不强迫合法随机算法逐字节相等。
+- 自测、独立 oracle、性质检验和模拟校准拥有不同证据等级。
+- Agent 代码及第三方依赖不能读取未声明的宿主文件。
+- 运行身份覆盖代码、依赖、解释器、ABI、原生库、harness、契约和运行策略。
+- 内置模型和自定义模型继续进入同一 lineage 与结果存储体系，但通过可信适配器进入，不直接导入 Agent 代码。
 
-```python
-# 沙箱注入的名字：
-#   data  : pandas.DataFrame —— 已完成角色解析和缺失处理的分析样本
-#   spec  : dict            —— 声明的角色列与选项（只读）
-#
-# 必须绑定：
-#   result : dict           —— 见 §2 结果契约
+### 1.2 当前开发线明确不做
 
-def fit(data, spec):
-    ...
-    return {...}
+- `dependency.request` 的解析、下载、安装或 UI；
+- chain-scoped handler registry；
+- `model.custom` Agent operation、自然语言入口或确认 UI；
+- 项目级 `pack.promote`；
+- 报告、诊断、图表和 Compare 的具体适配实现；
+- 把 `model.custom` 加入 `WORKFLOW_STEP_SPEC_CONTRACTS`；
+- 对任一具体新模型作产品级承诺。
 
-result = fit(data, spec)
-```
+这些功能依赖本开发线的基础，但不能被普通多步确认或一次自测绕过。
 
-与 `code.execute` 的 `df`→`result: DataFrame` 相比，唯一变化是 `result` 的类型从 DataFrame 变成受契约约束的 dict。沙箱机制、harness 注入方式、确定性闸门**原样复用**，不新写一套。
+---
 
-### 1.2 声明面（提案里的 typed 字段，非代码）
+## 2. 架构边界
+
+### 2.1 `custom_capability_runtime`
+
+通用运行时只理解以下概念：
+
+- 密封输入 bundle；
+- 不可信作者代码；
+- 密封运行环境；
+- 版本化 runtime policy；
+- 有界 output bundle；
+- bundle 身份；
+- 可复现性与证据检查。
+
+它不理解 OLS、Tobit、面板、贝叶斯或任何具体算法。它也不决定结果能否进入 Compare、能否作为下游 source、或能否提升为项目能力。
+
+### 2.2 `model.custom` 适配器
+
+`model.custom` 负责把模型语义映射到通用运行时：
+
+- 声明模型所需角色；
+- 将已解析的分析样本封装成输入 bundle；
+- 选择允许的输出 facet；
+- 将通过校验的作者输出投影到 Workbench 模型结果；
+- 声明报告、诊断、图表和 Compare 能力。
+
+Agent 代码不是 `ModelHandler`。未来接入时，全局 `MODEL_REGISTRY` 只注册一个可信的 custom dispatcher；dispatcher 根据服务端持有的 chain-local bundle 引用调用沙箱，不把作者代码 import 到服务端进程。
+
+### 2.3 消费者不自动继承
+
+自定义能力注册成功只表示“这个 bundle 可以在声明的作用域运行”。以下能力分别显式声明：
 
 ```json
 {
-  "operation_id": "model.custom",
-  "changes": {
-    "model_type": "tobit_ml",
-    "label": "Tobit (ML, left-censored)",
-    "roles": {
-      "outcome":    {"column": "wage",  "required": true},
-      "predictors": {"columns": ["educ", "exper"], "min": 1},
-      "censor_point": {"value": 0.0}
-    },
-    "serves_y_types": ["continuous"],
-    "code": "<python>",
-    "dependencies": [],
-    "validation_case": { ... },
-    "budget": {"cpu_seconds": 120, "wall_seconds": 300, "memory_mb": 4096}
+  "consumer_capabilities": {
+    "report_projection": "parameter_table_v1",
+    "diagnostic_adapter": null,
+    "figure_provider": null,
+    "compare_adapter": null
   }
 }
 ```
 
-`roles` 用现有的角色层（variable role layer, v1.6.5）解析，**不让代码自己从 `data` 里猜列名**。代码拿到的 `data` 已经是选好列、对齐好行的分析样本，`spec["roles"]` 告诉它哪列是什么。这样列名错误在提案校验期就暴露，而不是在沙箱里抛 KeyError。
+值为 `null` 时，消费者必须显示“该能力未声明”，不能猜测、静默降级或复用不匹配的内置逻辑。
 
 ---
 
-## 2. 结果 schema
+## 3. 通用输入契约
 
-### 2.1 最关键的一条：作者供给 vs 服务端独占
+### 3.1 作者入口
 
-现有 `ols_1.json` 有 40+ 个顶层字段，但其中绝大多数是**身份与指纹**，由 `econometrics/runner.py` 独占生成。自定义代码**一个都不能写**。
-
-| 分类 | 字段 | 谁写 |
-|---|---|---|
-| 估计量 | `estimate` `std_error` `p_value` `ci_lower` `ci_upper` | **作者** |
-| 拟合统计 | `nobs` `llf` `aic` `bic` `r_squared`(可选) | **作者** |
-| 序列 | `fitted_values` `residuals`（可选，长度须 == nobs） | **作者** |
-| 推断元数据 | `inference_distribution` `effective_df` `confidence_level` `covariance_estimator` | **作者声明** |
-| 身份 | `result_id` `candidate_result_id` `coefficient_id` `coefficient_identity` `source_id` `result_id_by_source_id` `stable_result_ids` | **服务端** |
-| 指纹 | `dataset_snapshot_fingerprint` `analysis_sample_fingerprint` `point_estimation_fingerprint` `coefficient_schema_fingerprint` `inference_config_fingerprint` | **服务端** |
-| 样本 | `analysis_sample.row_set` `row_order` `fingerprint` | **服务端** |
-| 契约 | `contract_version` `schema_version` `source_eligible` `engine` | **服务端** |
-
-**为什么这条不能松**：如果自定义代码能写 `result_id` 或任何 `*_fingerprint`，它就能让一个编造的结果看起来像一个经过校验的结果 —— 引用系统、对比系统、报告的 verified chip 全部依赖这些 id 的可信度。同理 `source_eligible` 决定该结果能否作为下游操作的源，必须由服务端按策略判定。
-
-作者写的 dict 会被服务端**改写进**一个全新的结果对象，而不是被 merge 进去；任何服务端字段出现在作者输出里 → 直接拒绝，不是忽略。
-
-### 2.2 作者结果契约（`custom_model_result_contract_v1`）
+固定 harness 调用：
 
 ```python
-{
-  "model_type": "tobit_ml",              # 必须等于声明的 model_type
-  "nobs": 4110,                          # int > 0
-  "terms": [                             # 顺序即报告顺序
-    {"name": "Intercept", "estimate": 1.23, "std_error": 0.45,
-     "p_value": 0.006, "ci_lower": 0.35, "ci_upper": 2.11},
+def run(input_bundle, capability_spec):
     ...
-  ],
-  "fit_statistics": {"llf": -123.4, "aic": 256.8, "bic": 271.2},
-  "inference": {
-    "distribution": "normal",            # normal | t
-    "effective_df": null,                # t 时必填
-    "confidence_level": 0.95,
-    "covariance_estimator": "opg",       # 自由文本，进 covariance_evidence
-    "library": "statsmodels",            # 用了什么算的
-    "library_version": "0.14.2"
-  },
-  "fitted_values": [...],                # 可选
-  "residuals": [...],                    # 可选
-  "diagnostics": {"converged": true, "iterations": 42}   # 可选，自由 dict
-}
+    return output_bundle
+
+result = run(input_bundle, capability_spec)
 ```
 
-### 2.3 服务端 fail-closed 校验（沙箱返回后立即执行）
+作者代码不能自行打开用户文件、扫描目录、联网或调用包管理器。输入只能来自服务端封装的 bundle。
 
-不通过则整个 run 失败，不写任何产物：
+### 3.2 类型化角色
 
-1. `terms` 非空；`name` 唯一、非空、可作列名
-2. 每个 term 的 `estimate` / `std_error` 必须是有限浮点（**拒绝 NaN/Inf**）
-3. `std_error > 0`
-4. `p_value ∈ [0, 1]`
-5. `ci_lower <= estimate <= ci_upper`
-6. `nobs > 0` 且 `nobs <= len(分析样本)`
-7. `fitted_values` / `residuals` 若提供，长度必须 == `nobs`
-8. `inference.distribution == "t"` 时 `effective_df` 必须是正有限数
-9. 作者输出里不得出现 §2.1 服务端字段名的**任何一个**
-10. `model_type` 与声明一致
-
-第 2、4、5 条是重点：一个不收敛的 ML 估计器最典型的产物就是 NaN 标准误和 `[nan, nan]` 区间，而那会在报告里渲染成一个看起来完整的空结果 —— 这正是本仓库反复堵的「非空但无用」失败模式。
-
-### 2.4 可信度标记（不可关闭）
-
-自定义模型的结果**必须**带上：
-
-- `engine: "agent_custom"`
-- `custom_model_code_sha256`
-- `trust` 标记 —— UI 上与原生模型视觉可区分
-
-**自定义模型的结果绝不能看起来像一个经过验证的原生模型。** 这不是保守，是诚实：Workbench 对 OLS/DID 的数值正确性做过 R/Stata 交叉验证，对 Agent 现写的 Tobit 没有。
-
----
-
-## 3. 强制校验案例（`validation_case`）
-
-这是本设计里唯一一条「比现有 code.execute 更严」的要求，理由是估计量的错误比变换的错误隐蔽得多。
-
-提案**必须**附一个已知答案的校验案例：
+角色不能固定为 `outcome/predictors/censor_point`。适配器声明：
 
 ```json
-"validation_case": {
-  "data_csv": "<内联小样本，≤ 200 行>",
-  "expected": [
-    {"term": "educ", "estimate": 0.0742, "std_error": 0.0065}
-  ],
-  "tolerance": 1e-4,
-  "authority": "Stata 18 `tobit wage educ exper, ll(0)`"
+{
+  "roles": [
+    {
+      "role_id": "response",
+      "kind": "column",
+      "cardinality": {"min": 1, "max": 1},
+      "data_types": ["numeric"],
+      "required": true,
+      "missing_policy": "complete_case"
+    },
+    {
+      "role_id": "features",
+      "kind": "columns",
+      "cardinality": {"min": 1, "max": null},
+      "data_types": ["numeric", "categorical"],
+      "required": true,
+      "missing_policy": "complete_case"
+    },
+    {
+      "role_id": "threshold",
+      "kind": "scalar",
+      "data_types": ["numeric"],
+      "required": false
+    }
+  ]
 }
 ```
 
-服务端在正式估计**之前**，先用同一段代码跑这个案例，与 `expected` 逐项比对；不通过则拒绝执行，正式数据一行都不碰。
+允许的 `kind` 首版为 `column | columns | scalar`。增加新 kind 必须升级契约，不能让作者代码通过自由 dict 猜语义。现有 `y/x` 角色只是兼容投影，不是通用根契约。
 
-这与本仓库既有做法一致 —— DID 的三个估计量（CS / SA / dCDH）都是对着 R 包逐元素验到 1e-13 才发版的。Agent 写的估计量不该有更低的门槛。`authority` 字段进审计留痕：这个数是谁给的。
+### 3.3 样本身份
 
----
+服务端为每个输入观测分配不可变 `observation_id`。默认要求作者输出覆盖全部注入观测。
 
-## 4. 沙箱额度
+若算法合法排除观测，作者必须返回：
 
-复用 `run_python_sandboxed`，但额度另设 —— 估计不是变换。
+- 被使用的 `observation_id` 集合或 mask；
+- 每个排除的类型化 reason code；
+- 必要时声明 group、time 或重复测量映射。
 
-| | `code.execute` 现值 | `model.custom` 建议 | 上限（不可超） |
-|---|---|---|---|
-| CPU | 10 s | 120 s | 600 s |
-| 墙钟 | 30 s | 300 s | 900 s |
-| 内存 | 1 GiB | 4 GiB | 8 GiB |
-| 输出 | 64 MiB | 256 MiB | 256 MiB |
+服务端据此计算最终分析样本指纹。仅返回 `nobs <= 输入行数` 不足以证明样本身份。
 
-不变的部分（**全部照搬，不放宽**）：
-
-- 无沙箱后端 → 拒绝执行，无降级路径
-- 网络：seatbelt `(deny network*)` / `bwrap --unshare-net`
-- 写盘：只放开本次输出目录
-- `_scrubbed_env`：宿主 API key 不继承
-- `python -I`：不读用户 site-packages
-- 代码以 JSON 数据送入子进程，不拼模板
-- 超时按进程组 SIGKILL
-
-**额度由提案声明、受上限约束、确认前对用户可见** —— 用户批准的是「这个模型最多花 5 分钟 4G」，不是一张空白支票。
-
-### 4.1 确定性闸门的成本（需要决策）
-
-`code.execute` 的做法是 preview 跑一次、execute 再跑一次、指纹必须一致。这条对 Agent 写的估计量**价值更高**（不确定性估计器、未播种的随机初值、并行归约顺序都会漂），但在 120s CPU 下意味着 **2× 成本**。
-
-三个选项，我推荐 A：
-
-- **A（推荐）**：保留双跑等值。额度按双跑预算，用户看到的就是真实成本。理由：一个不可复现的估计量，其结果不该进血缘系统 —— 这正是 `NondeterministicCodeError` 存在的意义。
-- B：单跑 + 强制声明 RNG 种子。成本减半，但只覆盖显式随机性，盖不住 BLAS 线程序等来源。
-- C：preview 在子样本上跑。**否决** —— 子样本与全样本的指纹本就不同，等值检查失去意义，等于把闸门拆了还留个壳。
+序列输出必须声明 `index_ref` 和 `semantic_kind`；不能把任意同长度数组默认当成 fitted value 或普通 residual。
 
 ---
 
-## 5. 与 `model.genesis` 的关系
+## 4. 通用输出契约
 
-两者**不重叠**，是「注册」与「使用」：
+### 4.1 作者输出与服务端 envelope 分离
 
-| | `model.genesis` | `model.custom` |
+作者只能返回 `custom_capability_output_v1` 的内容字段。以下字段由服务端独占，作者一旦提供就拒绝整个结果：
+
+- 所有 result、source、coefficient、artifact 身份；
+- 数据集与样本指纹；
+- bundle、环境与授权身份；
+- `engine`、`trust_tier`、`source_eligible`；
+- lineage、rerun、fork 和 promotion 状态；
+- consumer capability 的最终 admission。
+
+服务端创建新对象，不把作者 dict merge 到可信 envelope。
+
+### 4.2 根结构
+
+```json
+{
+  "contract_version": "custom_capability_output_v1",
+  "outputs": [
+    {"kind": "parameter_table", "output_id": "primary", "...": "..."},
+    {"kind": "metric_set", "output_id": "fit_metrics", "...": "..."}
+  ],
+  "diagnostics": [
+    {
+      "code": "OPTIMIZER_CONVERGED",
+      "status": "pass",
+      "severity": "info",
+      "evidence": {"iterations": 14}
+    }
+  ]
+}
+```
+
+根契约不要求 `terms`、p-value、标准误、AIC、fitted value 或 residual。所有浮点必须有限；若某类算法需要表达无穷边界或缺失量，必须通过类型化状态表达，不能写 NaN/Inf。
+
+### 4.3 首版 output facets
+
+#### `parameter_table`
+
+表示一个或多个方程、component、response、quantile 或其他轴上的参数：
+
+```json
+{
+  "kind": "parameter_table",
+  "output_id": "primary",
+  "estimate_semantic": "point_estimate",
+  "axes": ["equation"],
+  "rows": [
+    {
+      "parameter_id": "slope_a",
+      "label": "Slope A",
+      "coordinates": {"equation": "selection"},
+      "estimate": 0.42,
+      "inference": {
+        "kind": "frequentist",
+        "standard_error": 0.08,
+        "p_value": 0.001,
+        "interval": {
+          "level": 0.95,
+          "lower": 0.26,
+          "upper": 0.58
+        }
+      }
+    }
+  ]
+}
+```
+
+`inference` 可省略。提供时使用判别联合：
+
+- `frequentist`
+- `bayesian`
+- `set_identified`
+- `none`
+
+各分支只校验自己的语义。正则化或纯预测模型不必伪造 p-value；贝叶斯结果不必伪装成频率学派标准误；多方程模型通过 axes 表达，不拼接带特殊含义的 term 名。
+
+#### `metric_set`
+
+每个指标必须携带：
+
+- 稳定 `metric_id`；
+- 数值与单位；
+- `sample_ref`；
+- `comparability_scope`；
+- 可选的方向性和计算定义。
+
+两个结果只有在服务端判定 estimand、样本、尺度、似然基础、预测 horizon 等兼容时才能 Compare。名称同为 `rmse` 或 `aic` 不自动可比。
+
+#### `indexed_series`
+
+每个序列声明：
+
+- `series_id`
+- `index_ref`
+- `semantic_kind`
+- `scale`
+- 有界值载荷或 artifact 引用
+
+例如 response residual、Pearson residual、posterior mean、state estimate 必须是不同的 `semantic_kind`。
+
+#### `structured_artifact`
+
+用于不能安全压扁为表或序列的有界结构。必须提供受信任适配器认识的 `schema_id`；自由 JSON 不自动进入 UI、报告或 Compare。
+
+### 4.4 诊断不是自由 dict
+
+诊断项必须包含 `code/status/severity/evidence`。`evidence` 仍需通过有限浮点、深度、列表、字符串和总字节限制。迭代次数等易漂移信息是观察证据，不默认进入结果等价指纹。
+
+### 4.5 全面有界
+
+输出限制属于版本化 `runtime_policy_id`，不硬编码进算法契约。策略至少限制：
+
+- 总结果字节；
+- JSON 深度；
+- facet 数量；
+- 表行数、序列长度和 artifact 数量；
+- 字符串、列表和 diagnostics 数量；
+- stdout、stderr；
+- 输出文件总量、文件数量和单文件大小。
+
+超限直接拒绝，不截断成一个看似成功的统计结果。大载荷以后通过内容寻址 artifact 引用解决，不通过无限增大 inline JSON 上限解决。
+
+---
+
+## 5. Bundle 身份与历史 rerun
+
+`code_sha256` 只证明源码文本，不是可执行能力身份。正式身份为 `handler_bundle_sha256`，至少覆盖：
+
+- 作者代码及规范化入口；
+- 所有直接与传递依赖的 wheel 名称、tag、SHA-256 和持久化 blob；
+- Python binary SHA、实现、版本、cache tag、SOABI；
+- OS、架构、libc 或 macOS target；
+- 安装树 manifest；
+- BLAS/LAPACK 和其他原生动态库身份；
+- harness；
+- 输入、输出与角色契约版本；
+- `runtime_policy_id`；
+- 线程、RNG 和其他会影响结果的执行环境。
+
+preview、validation、execute、结果 envelope、chain registry 和 rerun 必须绑定同一 bundle digest。任一组成部分变化都产生新身份。
+
+身份相同仍不等于结果逐字节相同；结果等价由下一节的 reproducibility profile 判定。
+
+---
+
+## 6. 可复现性：身份、数值和统计性质分离
+
+### 6.1 三种 profile
+
+#### `exact`
+
+用于真正离散、规范化且应完全一致的结果。比较 canonical output，但排除运行时长、日志时间和诊断迭代次数等非语义字段。
+
+#### `numeric`
+
+用于确定性数值算法。每个 assertion 自带：
+
+- 字段路径；
+- `atol`；
+- `rtol`；
+- 可选矩阵范数、对称性、PSD 或约束条件。
+
+不能用一个全局 tolerance 同时比较估计、标准误、概率、对数似然和预测序列。
+
+#### `statistical`
+
+用于 bootstrap、MCMC、随机优化、随机森林和其他合法随机算法。验证：
+
+- RNG 算法、seed 与 stream 身份；
+- Monte Carlo standard error；
+- R-hat、ESS、覆盖率或校准性质；
+- 目标函数、KKT、约束和稳定性；
+- 预测排序或分布距离；
+- 算法声明的其他性质。
+
+posterior draws、bootstrap replicates、迭代次数、等价多解和 tied hyperparameters 不做逐字节比较。
+
+### 6.2 双跑的真实语义
+
+双跑可以是某个 evidence check，但不是所有能力的统一 admission 条件。验证器根据 profile 比较语义结果；生命周期成本按实际执行次数累计，并在确认前展示。
+
+后续 HTTP 流程应以单次消费 receipt 绑定已完成的 preview/validation，避免 risk-authorize、confirm、apply 无意义地重复昂贵执行。
+
+---
+
+## 7. 证据等级与防特判
+
+作者提供的 fixture、expected 和文字 authority 只能构成自测，不能独立证明算法正确。
+
+证据等级由服务端根据可验证材料派生：
+
+| 等级 | 含义 | 可获得的信任 |
 |---|---|---|
-| 语义 | 用**已注册**的 model_type 估计 | **注册**一个新 model_type，然后估计 |
-| 代码 | 无（服务端 handler） | 有（Agent 撰写，沙箱运行） |
-| 风险 | `mutating` | `high`（`explicit_single_use` 授权） |
-| 校验 | 参数契约 | 参数契约 + §3 校验案例 |
-| 结果可信度 | 原生 | `engine: agent_custom` + trust 标记 |
+| E0 | 契约、边界和运行隔离通过 | 结构可运行 |
+| E1 | 作者自测通过 | `experimental`，不可 promotion |
+| E2 | 独立 oracle 或独立实现可复现 | 限定作用域 verified candidate |
+| E3 | 多案例、对抗、性质、模拟校准及独立复核通过 | 可进入人工 promotion 审查 |
 
-### 5.1 注册后的复用
+独立 evidence packet 至少绑定：
 
-自定义 handler 一经确认，以 `code_sha256` 为身份登记到**该 chain 作用域**的 handler 表。之后：
+- fixture hash；
+- expected output hash；
+- 产生 expected 的工具、版本、命令与选项；
+- 输入、样本和输出身份；
+- evidence producer；
+- 与待测作者代码的独立性来源。
 
-- 同一 chain 内再次估计 → 按 hash 引用，不重新提案、不重新授权
-- 代码变一个字符 → hash 变 → 新身份 → 重新走高风险确认
-- rerun / fork 沿用 hash，历史结果可复现
+当没有外部 oracle 时，应组合：
 
-**不做全局注册。** 一个 chain 里 Agent 写的 Tobit 不应该悄悄成为整个项目的 `tobit` 实现 —— 提升为项目级能力应当是一个显式的、人工的动作（未来的 `pack.promote`，本设计不覆盖）。
+- DGP 参数回收；
+- invariant/property checks；
+- metamorphic tests；
+- adversarial cases；
+- regression cases；
+- 独立复核。
 
-### 5.2 与 `operation.multi_step` 的关系
-
-`model.custom` **不进** `WORKFLOW_STEP_OPERATIONS`。多步工作流可以编排已注册的模型，但不能在一次确认里夹带一段新代码 —— 高风险授权必须是它自己那一次确认，不能搭便车。顺序是：先 `model.custom` 注册并验证通过，再在工作流里按 model_type 使用。
-
----
-
-## 6. 依赖机制的边界
-
-这是最需要划清的一块。
-
-### 6.1 硬约束：装和跑必须分离
-
-沙箱无网络是它安全的**根本原因**，不是可调参数。因此「Agent 自己下载依赖」**不能**通过放宽 `model.custom` 的沙箱实现 —— 那等于拆掉沙箱。
-
-依赖需要一条独立机制，`dependency.request`（本设计不实现，只定边界）：
-
-1. Agent **提议**包名 + 版本区间 + 用途
-2. 服务端从**配置好的索引**解析出确切版本、wheel sha256、完整传递依赖集、许可证
-3. 把这份清单呈给用户 —— 用户批准的是一个**具体的、带哈希的**依赖集
-4. 批准后在沙箱**之外**装进受管环境
-5. 后续沙箱运行以**只读**方式挂载该环境
-
-### 6.2 必须拒绝的
-
-- VCS / URL / 本地路径安装（`git+`、`http://`、`file:`）
-- 未固定版本、`--pre`、非配置索引的包
-- 安装期执行任意代码的源码包（`sdist` 且带 `setup.py`）——**只接受 wheel**
-- 「批准一次，以后同类自动放行」的泛化授权
-
-### 6.3 边界的本质
-
-你的原话是「自己去下载现成的依赖并做好全方位的适配」。这句话里有两件事，**必须分开**：
-
-- **下载** = 供应链决策。引入第三方代码到用户机器上，这不能委托给 Agent，无论它多确信。人工授权 + 哈希固定是唯一负责任的做法。
-- **适配** = 写一个 handler 把那个库接进 Workbench 的契约。**这恰恰就是 `model.custom` 要做的事**，而且是 Agent 能做得又快又好的部分。
-
-所以 `model.custom` 和 `dependency.request` 是互补的两半：后者把库安全地放进环境，前者把库变成 Workbench 的一等公民。先做前者 —— 因为 statsmodels / scipy / linearmodels 已经在环境里，**大量「Stata 有而 Workbench 没有」的模型（Tobit、Heckman、有序 Probit、分位数回归、负二项)根本不需要新依赖**，只需要一个 handler。
+服务器持有的 holdout 或变形案例不能提前暴露给作者代码。仅 E1 的 bundle 始终保持 `experimental` 和 `source_eligible=false`。
 
 ---
 
-## 7. 建议的实施顺序
+## 8. 严格隔离运行时
 
-1. `custom_model_result_contract_v1` + §2.3 校验器 + 单元测试（无沙箱、无 Agent，纯契约）
-2. 沙箱 handler runner：`SandboxLimits` 新档位 + §1.1 harness + 双跑确定性
-3. `validation_case` 执行器（先于正式估计）
-4. 注册表接入：chain 作用域 handler 表，按 `code_sha256` 寻址
-5. 服务端身份/指纹装配 + trust 标记 + UI 可区分
-6. 注册 `model.custom` 操作（`natural_language_enabled=True`，`risk_level="high"`）
-7. 真机验收：拿一个 Stata 有而 Workbench 没有的模型（建议 **Tobit**，statsmodels 已有实现，可对 Stata `tobit` 交叉验证）
+现有 `code.execute` G3 允许读取宿主文件系统，不能原样用于 Agent 模型代码或第三方依赖。本设计新增独立的 `untrusted_capability_v1` profile，不改变既有 G3 语义。
 
-第 1–3 步不碰 Agent，可独立验收 —— 契约和沙箱先立住，再把 Agent 接上去。
+### 8.1 文件系统
+
+默认拒绝所有宿主读取与写入，只挂载：
+
+- 固定解释器与必要 stdlib；
+- 经过校验的只读依赖环境；
+- 固定 harness；
+- 单个密封输入目录；
+- 单个私有输出目录；
+- 最小 `/dev` 与受控运行设施。
+
+禁止读取 repository、用户 home、SSH、云配置、浏览器数据、其他项目和未声明临时目录。canary 必须证明宿主 sentinel 既不能读取，也不能通过目录枚举发现。
+
+### 8.2 Python 启动与依赖载入
+
+专用解释器以隔离模式启动，至少达到 `-B -I -S` 的效果。运行时显式加入经过 manifest 校验的 purelib/platlib 路径，不调用会执行 `.pth` 的机制。
+
+受管环境拒绝：
+
+- executable `.pth`；
+- `sitecustomize.py` / `usercustomize.py`；
+- 未出现在 bundle manifest 的路径；
+- 运行时包管理器；
+- writable dependency tree。
+
+wheel-only 只减少构建期风险，不等于运行安全。
+
+### 8.3 网络与进程
+
+- 无网络；
+- 固定环境变量白名单；
+- 固定 BLAS/线程数；
+- 关闭继承文件描述符；
+- 子进程和整个进程树受同一预算；
+- 领导进程退出后仍清理后代。
+
+### 8.4 资源硬上限
+
+CPU、内存、PID、墙钟和输出预算必须覆盖整个进程树。若某宿主无法提供声明的硬保证，则该 profile 不获得 admission，不能静默退化为当前 G3 或仅依赖可失败的 `RLIMIT_AS`。
+
+输出由父进程通过 no-follow descriptor 读取；拒绝符号链接、额外文件和总 quota 超限。
 
 ---
 
-## 8. 本设计明确不覆盖
+## 9. `dependency.request` 的后续边界
 
-- `dependency.request` 的实现（只定边界，见 §6）
-- `pack.promote`（chain 作用域 → 项目作用域的提升）
-- 非截面模型（面板/时序自定义估计量的角色层更复杂，需单独设计）
-- 自定义**图表**（本设计只产出结果契约；诊断图沿用现有按预测变量生成的机制）
+下载与运行必须分离：
+
+1. Agent 提议需求和用途；
+2. 可信解析器产生确定版本和完整传递依赖图；
+3. 用户批准具体 lock manifest；
+4. 低权限 staging 环境离线安装；
+5. 生成 CAS 存储的只读 bundle；
+6. `model.custom` 只引用 bundle digest，运行时无网络。
+
+manifest 后续至少记录：
+
+- canonical package 与 index 身份；
+- wheel filename、platform tag、hash；
+- resolver/installer 版本；
+- yanked 状态；
+- 许可证；
+- SBOM 与漏洞快照；
+- 可用的签名或 provenance。
+
+不接受 VCS、任意 URL、本地路径、未固定版本或源码构建。批准一个 lock manifest 不构成以后自动批准同名包的新版本。
+
+---
+
+## 10. Registry、作用域与 promotion
+
+后续 registry 采用可信 dispatcher 加作用域 overlay：
+
+```text
+MODEL_REGISTRY["custom"] -> trusted dispatcher
+                              |
+                              +-- resolve(run_family_id, chain_id, handler_bundle_id)
+                                      |
+                                      +-- immutable sandboxed bundle
+```
+
+- 不动态修改全局 `MODEL_REGISTRY`；
+- 不允许自定义 bundle 覆盖原生 model type；
+- fork 显式继承 bundle 引用与授权范围；
+- rerun 绑定原 bundle、输入、runtime policy 和 evidence；
+- `pack.promote` 只能产生待审核、签名的发布候选；
+- 正式发布前，Agent 或第三方代码仍不得 import 到服务端进程。
+
+---
+
+## 11. 与 workflow 的关系
+
+`model.custom` 不进入本开发线的 `WORKFLOW_STEP_SPEC_CONTRACTS`。
+
+未来允许的顺序是：
+
+1. 独立完成 dependency admission；
+2. 独立完成 custom capability proposal、验证和高风险授权；
+3. 服务端生成 chain-scoped `handler_bundle_id`；
+4. workflow 只引用已经 admission 的 bundle。
+
+普通 `operation.multi_step` 不能携带代码、依赖请求或 promotion，也不能把多个低风险步骤组合成对高风险授权的绕过。
+
+---
+
+## 12. 错误语义
+
+当前基础应提供稳定、通用且不含具体算法名的错误码：
+
+- `CUSTOM_CAPABILITY_CONTRACT_INVALID`
+- `CUSTOM_CAPABILITY_OUTPUT_BOUNDS_EXCEEDED`
+- `CUSTOM_CAPABILITY_SAMPLE_IDENTITY_MISMATCH`
+- `CUSTOM_CAPABILITY_SANDBOX_UNAVAILABLE`
+- `CUSTOM_CAPABILITY_HOST_READ_ISOLATION_UNAVAILABLE`
+- `CUSTOM_CAPABILITY_ENVIRONMENT_IDENTITY_MISMATCH`
+- `CUSTOM_CAPABILITY_EVIDENCE_INSUFFICIENT`
+- `CUSTOM_CAPABILITY_EQUIVALENCE_FAILED`
+- `CUSTOM_CAPABILITY_FORBIDDEN_SERVER_FIELD`
+
+失败时不写成功 result、artifact、registry 或 lineage 记录；只写有界、去敏的失败证据。
+
+---
+
+## 13. 当前开发线：B0 通用基础
+
+本开发线只交付以下三个切片：
+
+### B0.1 通用契约与身份
+
+- `custom_capability_contract_v1`
+- 输入角色契约
+- output facets 与全面边界校验
+- 服务端保留字段拒绝
+- observation identity
+- `handler_bundle_sha256` 纯契约与确定性构造
+
+首版实现 facets 为 `parameter_table`、`metric_set`、`indexed_series`、`structured_artifact`。这不表示所有消费者都已支持它们。
+
+### B0.2 可复现性与证据
+
+- `exact | numeric | statistical` profile；
+- 分字段 comparator；
+- E0/E1/E2/E3 服务端派生规则；
+- 作者自测与独立 evidence packet 分离；
+- E1 强制 `experimental`、`source_eligible=false`。
+
+### B0.3 严格运行边界
+
+- 新 `untrusted_capability_v1` profile；
+- deny-by-default 文件读取；
+- 密封解释器、依赖、输入、harness 和输出；
+- host-read canary；
+- 进程树资源策略与 fail-closed admission；
+- 有界 stdout、stderr、JSON 和输出文件。
+
+本开发线只需用一个最小 `parameter_table` 作者函数证明端到端基础，不把任何具体估计器写进产品契约。
+
+---
+
+## 14. 后续开发顺序
+
+1. **B0**：本设计的通用契约、证据语义和严格运行边界；
+2. **B1**：`model.custom` 可信适配器与 parameter-table 投影；
+3. **B2**：`dependency.request`、CAS bundle 与供应链审计；
+4. **B3**：chain-scoped dispatcher、Agent high-risk operation 与 UI；
+5. **B4**：报告/诊断/图表/Compare 适配与已注册 bundle 的 workflow 引用；
+6. **Research promotion**：E3 证据和人工审查后的项目级候选流程。
+
+每个阶段独立验收。B0 不能以“某个示例模型结果对上了”为完成标准。
+
+---
+
+## 15. 验收与测试策略
+
+### 15.1 契约通用性
+
+至少覆盖以下互不等价的 fixture：
+
+- 带频率学派推断的单表参数；
+- 无推断的正则化参数；
+- 带 axes 的多 component 参数；
+- 贝叶斯推断；
+- set-identified 区间；
+- 纯 metric 与 indexed series；
+- schema-known structured artifact。
+
+测试目的不是实现这些算法，而是证明根契约没有强迫它们伪装成 OLS。
+
+### 15.2 负面与边界
+
+- NaN/Inf；
+- 作者伪造服务端字段；
+- 重复 output/parameter/metric 身份；
+- 未声明 axis；
+- 样本行被静默丢弃；
+- series index 不匹配；
+- JSON 深度、列表、字符串、总字节和输出文件超限；
+- 自由 diagnostics 绕过边界；
+- 未知 facet 或 schema。
+
+### 15.3 可复现性
+
+- exact profile 排除非语义运行字段后稳定；
+- numeric profile 同时验证 `atol` 与 `rtol`；
+- statistical profile 接受不同 draws 但拒绝性质失配；
+- 迭代次数变化不导致错误的结果漂移；
+- bundle 任一身份成分变化都会改变 digest。
+
+### 15.4 防特判
+
+- 作者自测只能得到 E1；
+- server-owned holdout 不暴露给作者；
+- expected、代码和 fixture 同源不能伪装成独立 oracle；
+- evidence producer、工具版本、命令或 hash 缺失时拒绝 E2；
+- E1 不得产生 `source_eligible=true`。
+
+### 15.5 隔离
+
+- 宿主 sentinel 不可读、不可列目录；
+- 网络不可用；
+- 依赖与 harness 只读；
+- executable `.pth` 与 custom site hook 被拒；
+- 子进程树、内存、PID、CPU、墙钟和输出总量受限；
+- 不具备所需宿主能力时 fail closed；
+- 现有 `code.execute` G3 行为不被本开发线静默改变。
+
+### 15.6 仓库通用约束
+
+- `tests/test_no_exercise_specific_naming.py`
+- 现有 sandbox 与 `code.execute` 回归测试
+- FMS Context Pack 与事件流验证
+- `git diff --check`
+
+---
+
+## 16. 完成定义
+
+B0 只有同时满足以下条件才算完成：
+
+- 通用 fixture 证明契约不依赖特定模型家族；
+- 服务端身份和作者输出边界 fail closed；
+- 样本身份可验证；
+- exact/numeric/statistical 三种 profile 都有正反测试；
+- E1 不能越权为 verified 或 source-eligible；
+- host-read canary、网络与写盘 canary 全部通过；
+- runtime bundle 身份覆盖全部声明组成；
+- 无支持的隔离后端时诚实拒绝；
+- 未接 Agent、registry、dependency、workflow 或 promotion；
+- 当前开发线的正式 FMS scope、事件流和 Context Pack 验证通过。
+
+---
+
+## 17. 设计取舍
+
+本设计刻意接受三项成本：
+
+1. **首个 `model.custom` 可见功能会更晚**：先补运行时和证据基础；
+2. **部分宿主暂时无法运行**：安全保证不足时拒绝，而不是降级；
+3. **自研算法长期保持 experimental**：没有独立证据时不假装 verified。
+
+换来的收益是：未来扩展到新的模型家族、随机算法、贝叶斯方法、统计检验或其他自定义能力时，不需要推翻一个围绕 OLS/Tobit 和逐字节相等建立的根契约。
