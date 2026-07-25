@@ -1,8 +1,20 @@
 # `model.custom` 契约设计
 
-**状态**：设计草案，未实现
+**状态**：B 阶段已批准；本轮只实现第 1–3 步，Agent 接入仍未实现
 **日期**：2026-07-25
 **背景**：`code.execute` 作为「Agent 补齐缺失算法」的预留口子已存在且沙箱扎实，但签名是 DataFrame→DataFrame，只能表达派生数据，无法表达一个**估计量**。本设计补上这一层。
+
+### 本轮开发线边界（B：通用执行底座）
+
+本轮只交付第 1–3 步：
+
+1. `custom_model_result_contract_v1` 及其 fail-closed 校验器；
+2. 复用现有 `run_python_sandboxed` 的模型 handler runner，使用模型专用额度、固定 harness 和双跑确定性闸门；
+3. 在正式数据估计前执行有已知答案的 `validation_case`。
+
+本轮不实现 `dependency.request`、chain 作用域 handler registry、服务端身份/信任装配、`model.custom` Agent 操作、自然语言接入、UI，或把 `model.custom` 加入 `WORKFLOW_STEP_SPEC_CONTRACTS`。后续 workflow 只能编排已经独立注册并验证通过的 custom model，不能用普通多步确认替代高风险确认。
+
+本轮新增的模块边界保持可复用：结果契约只负责作者结果的结构和数值可信性；runner 只负责受限执行、输入注入和双跑；validation case 只负责已知答案闸门。服务端身份、artifact、registry 和 Agent proposal 仍由后续开发线装配。
 
 ---
 
