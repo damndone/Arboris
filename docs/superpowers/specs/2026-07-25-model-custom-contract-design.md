@@ -1,6 +1,6 @@
 # 通用自定义能力运行时与 `model.custom` 适配器设计
 
-**状态**：设计重写完成，等待用户复审；实现尚未开始
+**状态**：B0 设计已批准；实现尚未开始
 
 **日期**：2026-07-25
 
@@ -10,7 +10,18 @@
 
 **正式开发目标**：`docs/superpowers/specs/2026-07-25-custom-capability-foundation-objective.md`
 
+**上游 v1.8.3 范围**：[`v1.8.3/README.md`](./v1.8.3/README.md)
+
 ---
+
+## 上游产品定位
+
+本文件只定义 v1.8.3 的 B0 通用运行时地基。能力需求解析、可信实现优先级、依赖构建、Adapter Factory、算法验证与准入、Notebook 接入和双层领域记忆由独立的 v1.8.3 规格目录定义：
+
+- [`v1.8.3/capability-factory-design.md`](./v1.8.3/capability-factory-design.md)
+- [`v1.8.3/domain-memory-design.md`](./v1.8.3/domain-memory-design.md)
+
+这些上游设计不扩大当前 B0 开发线。B0 仍然不接 Agent、不下载依赖、不修改 workflow、不动态注册模型，也不实现 memory；它只提供后续 Capability Factory 可复用的密封运行、身份、结果、证据与隔离基础。
 
 ## 0. 决策摘要
 
@@ -561,14 +572,16 @@ MODEL_REGISTRY["custom"] -> trusted dispatcher
 
 ## 14. 后续开发顺序
 
-1. **B0**：本设计的通用契约、证据语义和严格运行边界；
-2. **B1**：`model.custom` 可信适配器与 parameter-table 投影；
-3. **B2**：`dependency.request`、CAS bundle 与供应链审计；
-4. **B3**：chain-scoped dispatcher、Agent high-risk operation 与 UI；
-5. **B4**：报告/诊断/图表/Compare 适配与已注册 bundle 的 workflow 引用；
-6. **Research promotion**：E3 证据和人工审查后的项目级候选流程。
+B0 之后的版本切片以 [`v1.8.3/README.md`](./v1.8.3/README.md) 为权威范围地图：
 
-每个阶段独立验收。B0 不能以“某个示例模型结果对上了”为完成标准。
+1. **CF1**：Capability Requirement、可信 Registry 与实现解析；
+2. **CF2**：`dependency.request`、隔离构建、CAS bundle 与供应链审计；
+3. **CF3**：Adapter Factory、Agent 自研算法最后级和独立验证；
+4. **CF4**：`model.custom`、Notebook、Graph、消费者与通用 workflow 接入；
+5. **MEM1–MEM3**：Project/RunFamily 可重建索引、跨项目领域记忆和受限后台审阅；
+6. **Research promotion**：E3 证据和人工审查后的更宽作用域候选流程。
+
+每个阶段使用独立正式开发线和验收边界。B0 不能以“某个示例模型结果对上了”为完成标准，也不能提前实现任何后续切片。
 
 ---
 
