@@ -16,9 +16,11 @@ from .local_profile import (
     LocalProfileIdentityStore,
     _IdentityStoreAdmission,
     _append_jsonl,
+    _canonical_bytes,
     _create_content_addressed,
     _list_record_names,
     _open_store_admission,
+    _parse_json_object,
     _parse_jsonl,
     _process_lock,
     _read_child,
@@ -46,10 +48,30 @@ class ProjectIdentityStore:
         self.authority_root = Path(authority_root).expanduser()
         if not self.authority_root.is_absolute():
             raise IdentityStoreError("identity authority root must be absolute")
+        if profile_store is not None:
+            if not isinstance(profile_store, LocalProfileIdentityStore):
+                raise IdentityStoreError("project profile store must be a local identity store")
+            try:
+                project_path = self.authority_root.resolve(strict=False)
+                profile_path = profile_store.authority_root.resolve(strict=False)
+            except (OSError, RuntimeError) as exc:
+                raise IdentityStoreError("identity authority roots cannot be compared") from exc
+            if project_path != profile_path:
+                raise IdentityStoreError(
+                    "project and profile stores must share one authority root"
+                )
         self.profile_store = profile_store or LocalProfileIdentityStore(
             self.authority_root
         )
         self._lock = _process_lock(Path(self.authority_root))
+
+    def _assert_profile_store_authority(
+        self, admission: _IdentityStoreAdmission
+    ) -> None:
+        if self.profile_store._authority_binding() != admission.authority_binding:
+            raise IdentityStoreError(
+                "project and profile stores must share one authority binding"
+            )
 
     def get_or_create(
         self,
@@ -70,6 +92,7 @@ class ProjectIdentityStore:
         # Root resolution and fstat happen only after the project scope lock is
         # held.  The open FD remains the binding authority for this operation.
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
             with open_validated_project_root(project_root) as root_admission:
                 authoritative_profile = self.profile_store.get_or_create()
                 if profile is not None and profile != authoritative_profile:
@@ -124,6 +147,7 @@ class ProjectIdentityStore:
 
     def get_current(self, project_root: Path | str) -> ProjectIdentityRevision | None:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
             with open_validated_project_root(project_root) as root_admission:
                 records = self._read_records(admission)
                 if not records:
@@ -149,6 +173,7 @@ class ProjectIdentityStore:
 
     def get(self, project_id: str) -> tuple[ProjectIdentityRevision, ...]:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
             records = self._read_records(admission)
             if records:
                 authoritative_profile = self.profile_store.get_current()
@@ -173,18 +198,31 @@ class ProjectIdentityStore:
 
     def read_record_bytes(self, revision: ProjectIdentityRevision) -> bytes:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
+            records = self._validated_records(admission, recover_invalid_orphans=False)
+            if not isinstance(revision, ProjectIdentityRevision) or not any(
+                record == revision for record in records
+            ):
+                raise IdentityCollisionError("project identity record is outside the current scope")
             raw = _read_child(admission.records_fd, self.record_name(revision))
             if raw is None:
                 raise IdentityRecordCorruptError("project identity record is missing")
+            parsed = self._parse_record(_parse_json_object(raw))
+            if parsed != revision or raw != _canonical_bytes(parsed.to_dict()):
+                raise IdentityRecordCorruptError("project identity record is not canonical")
             return raw
 
     def read_records_log_bytes(self) -> bytes:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
+            self._validated_records(admission, recover_invalid_orphans=False)
             raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
             return raw or b""
 
     def content_addressed_record_names(self) -> tuple[str, ...]:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._assert_profile_store_authority(admission)
+            self._validated_records(admission, recover_invalid_orphans=False)
             return _list_record_names(admission)
 
     def _append_revision(
@@ -222,7 +260,10 @@ class ProjectIdentityStore:
         )
 
     def _read_records(
-        self, admission: _IdentityStoreAdmission
+        self,
+        admission: _IdentityStoreAdmission,
+        *,
+        recover_invalid_orphans: bool = True,
     ) -> list[ProjectIdentityRevision]:
         log_raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
         pointers: list[dict[str, str]] = []
@@ -250,6 +291,7 @@ class ProjectIdentityStore:
             admission,
             self._parse_record,
             referenced,
+            recover_invalid_orphans=recover_invalid_orphans,
         )
         by_hash: dict[str, ProjectIdentityRevision] = {}
         for item in objects:
@@ -283,6 +325,24 @@ class ProjectIdentityStore:
                 },
             )
         return all_records
+
+    def _validated_records(
+        self,
+        admission: _IdentityStoreAdmission,
+        *,
+        recover_invalid_orphans: bool = True,
+    ) -> list[ProjectIdentityRevision]:
+        records = self._read_records(
+            admission, recover_invalid_orphans=recover_invalid_orphans
+        )
+        if records:
+            authoritative_profile = self.profile_store.get_current()
+            if authoritative_profile is None:
+                raise IdentityRecordCorruptError(
+                    "project records exist without a local profile identity"
+                )
+            self._validate_profile_scope(records, authoritative_profile.profile_id)
+        return records
 
     @staticmethod
     def _parse_record(value: dict[str, Any]) -> ProjectIdentityRevision:

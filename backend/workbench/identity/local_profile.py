@@ -29,6 +29,7 @@ from .contracts import (
 
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 _RECORD_NAME = re.compile(r"^[0-9a-f]{64}\.json\Z")
 _ADMISSION_ISSUER = object()
 
@@ -90,6 +91,7 @@ def _require_fd_primitives() -> None:
     if (
         not _O_DIRECTORY
         or not _O_NOFOLLOW
+        or not _O_NONBLOCK
         or os.open not in os.supports_dir_fd
         or os.mkdir not in os.supports_dir_fd
         or os.unlink not in os.supports_dir_fd
@@ -250,6 +252,13 @@ def _parse_json_object(content: bytes) -> dict[str, Any]:
     return value
 
 
+def _parse_local_profile_record(value: dict[str, Any]) -> LocalProfileIdentity:
+    try:
+        return LocalProfileIdentity.from_dict(value)
+    except (TypeError, ValueError) as exc:
+        raise IdentityRecordCorruptError("local profile record is invalid") from exc
+
+
 def _parse_jsonl(content: bytes) -> tuple[list[dict[str, Any]], int]:
     records: list[dict[str, Any]] = []
     complete_bytes = 0
@@ -260,7 +269,11 @@ def _parse_jsonl(content: bytes) -> tuple[list[dict[str, Any]], int]:
         complete = line.endswith((b"\n", b"\r"))
         if not complete:
             break
-        records.append(_parse_json_object(line.rstrip(b"\r\n")))
+        line_content = line.rstrip(b"\r\n")
+        parsed = _parse_json_object(line_content)
+        if line_content != _canonical_bytes(parsed).rstrip(b"\n"):
+            raise IdentityRecordCorruptError("identity log line is not canonical")
+        records.append(parsed)
         complete_bytes += len(line)
     if complete_bytes != len(content) and content[complete_bytes:].strip():
         return records, complete_bytes
@@ -276,7 +289,12 @@ def _open_child_file(
 ) -> int:
     _validate_component(name)
     try:
-        return os.open(name, flags | _O_NOFOLLOW, mode, dir_fd=parent_fd)
+        return os.open(
+            name,
+            flags | _O_NOFOLLOW | _O_NONBLOCK,
+            mode,
+            dir_fd=parent_fd,
+        )
     except (OSError, ValueError) as exc:
         raise IdentityRecordCorruptError("identity file is missing or unsafe") from exc
 
@@ -289,7 +307,11 @@ def _read_child(
 ) -> bytes | None:
     _validate_component(name)
     try:
-        fd = os.open(name, os.O_RDONLY | _O_NOFOLLOW, dir_fd=parent_fd)
+        fd = os.open(
+            name,
+            os.O_RDONLY | _O_NOFOLLOW | _O_NONBLOCK,
+            dir_fd=parent_fd,
+        )
     except FileNotFoundError:
         if missing_is_none:
             return None
@@ -386,7 +408,7 @@ def _append_jsonl(
     try:
         fd = os.open(
             "records.jsonl",
-            os.O_WRONLY | os.O_CREAT | os.O_APPEND | _O_NOFOLLOW,
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND | _O_NOFOLLOW | _O_NONBLOCK,
             0o600,
             dir_fd=admission.scope_fd,
         )
@@ -407,7 +429,7 @@ def _truncate_jsonl(
     try:
         fd = os.open(
             "records.jsonl",
-            os.O_WRONLY | _O_NOFOLLOW,
+            os.O_WRONLY | _O_NOFOLLOW | _O_NONBLOCK,
             dir_fd=admission.scope_fd,
         )
         os.ftruncate(fd, complete_bytes)
@@ -431,18 +453,19 @@ def _list_record_names(admission: "_IdentityStoreAdmission") -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
-def _reject_record_symlink(admission: "_IdentityStoreAdmission", name: str) -> None:
+def _reject_record_special(admission: "_IdentityStoreAdmission", name: str) -> None:
     try:
         record_stat = os.lstat(name, dir_fd=admission.records_fd)
     except (OSError, ValueError) as exc:
         raise IdentityRecordCorruptError("identity record cannot be inspected safely") from exc
-    if stat.S_ISLNK(record_stat.st_mode):
-        raise IdentityRecordCorruptError("identity record symlinks are not accepted")
+    if not stat.S_ISREG(record_stat.st_mode):
+        raise IdentityRecordCorruptError("identity records must be regular files")
 
 
 @dataclass
 class _IdentityStoreAdmission:
     token: object
+    authority_binding: tuple[int, int]
     scope_fd: int
     records_fd: int
 
@@ -473,7 +496,13 @@ def _open_store_admission(
             )
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             records_fd = _open_or_create_directory(scope_fd, "records")
-            admission = _IdentityStoreAdmission(_ADMISSION_ISSUER, scope_fd, records_fd)
+            authority_stat = os.fstat(authority_fd)
+            admission = _IdentityStoreAdmission(
+                _ADMISSION_ISSUER,
+                (authority_stat.st_dev, authority_stat.st_ino),
+                scope_fd,
+                records_fd,
+            )
             try:
                 yield admission
             finally:
@@ -491,17 +520,19 @@ def _read_record_objects(
     admission: _IdentityStoreAdmission,
     parser: Callable[[dict[str, Any]], object],
     referenced_hashes: set[str],
+    *,
+    recover_invalid_orphans: bool = True,
 ) -> tuple[dict[str, object], ...]:
     records: list[dict[str, object]] = []
     for name in _list_record_names(admission):
-        _reject_record_symlink(admission, name)
+        _reject_record_special(admission, name)
         try:
             raw = _read_child(admission.records_fd, name)
             assert raw is not None
             value = parser(_parse_json_object(raw))
         except (IdentityRecordCorruptError, AssertionError):
             record_hash = name[:-5]
-            if record_hash in referenced_hashes:
+            if record_hash in referenced_hashes or not recover_invalid_orphans:
                 raise
             try:
                 os.unlink(name, dir_fd=admission.records_fd)
@@ -523,6 +554,15 @@ class LocalProfileIdentityStore:
         if not self.authority_root.is_absolute():
             raise IdentityStoreError("identity authority root must be absolute")
         self._lock = _process_lock(Path(os.path.normpath(os.fspath(self.authority_root))))
+
+    def _authority_binding(self) -> tuple[int, int]:
+        with self._lock:
+            authority_fd = _open_absolute_directory(self.authority_root)
+            try:
+                authority_stat = os.fstat(authority_fd)
+                return authority_stat.st_dev, authority_stat.st_ino
+            finally:
+                _close(authority_fd)
 
     def get_or_create(
         self,
@@ -550,18 +590,34 @@ class LocalProfileIdentityStore:
 
     def read_record_bytes(self, identity: LocalProfileIdentity) -> bytes:
         with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+            current = self._load_or_recover(
+                admission, create=False, recover_invalid_orphans=False
+            )
+            if not isinstance(identity, LocalProfileIdentity):
+                raise IdentityRecordCorruptError("local profile identity is invalid")
+            if current is None or current.content_hash != identity.content_hash:
+                raise IdentityCollisionError("local profile record is outside the current scope")
             raw = _read_child(admission.records_fd, self.record_name(identity))
             if raw is None:
                 raise IdentityRecordCorruptError("local profile record is missing")
+            parsed = _parse_local_profile_record(_parse_json_object(raw))
+            if parsed != current or raw != _canonical_bytes(parsed.to_dict()):
+                raise IdentityRecordCorruptError("local profile record is not canonical")
             return raw
 
     def read_records_log_bytes(self) -> bytes:
         with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+            self._load_or_recover(
+                admission, create=False, recover_invalid_orphans=False
+            )
             raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
             return raw or b""
 
     def content_addressed_record_names(self) -> tuple[str, ...]:
         with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+            self._load_or_recover(
+                admission, create=False, recover_invalid_orphans=False
+            )
             return _list_record_names(admission)
 
     def _load_or_recover(
@@ -569,6 +625,7 @@ class LocalProfileIdentityStore:
         admission: _IdentityStoreAdmission,
         *,
         create: bool = True,
+        recover_invalid_orphans: bool = True,
     ) -> LocalProfileIdentity | None:
         log_raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
         lifecycle: list[LocalProfileIdentityRevision] = []
@@ -584,8 +641,9 @@ class LocalProfileIdentityStore:
         referenced = {item.identity_hash for item in lifecycle}
         objects = _read_record_objects(
             admission,
-            lambda value: LocalProfileIdentity.from_dict(value),
+            _parse_local_profile_record,
             referenced,
+            recover_invalid_orphans=recover_invalid_orphans,
         )
         identities = [item["value"] for item in objects]
         for item in objects:
@@ -603,7 +661,10 @@ class LocalProfileIdentityStore:
             matching = [item for item in identities if item.content_hash == current_hash]
             if len(matching) != 1:
                 raise IdentityRecordCorruptError("local profile lifecycle points to missing identity")
-            identity = matching[0]
+            candidate = matching[0]
+            if any(item.profile_id != candidate.profile_id for item in lifecycle):
+                raise IdentityCollisionError("local profile lifecycle scope is inconsistent")
+            identity = candidate
             if any(item.identity_hash != identity.content_hash for item in lifecycle):
                 raise IdentityCollisionError("local profile lifecycle changes stable identity")
         if identity is None:

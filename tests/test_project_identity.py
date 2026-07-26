@@ -8,6 +8,9 @@ from workbench.identity.contracts import LocalProfileIdentity, ProjectIdentityRe
 from workbench.identity.local_profile import (
     IdentityClientClaimError,
     IdentityCollisionError,
+    IdentityRecordCorruptError,
+    IdentityStoreError,
+    LocalProfileIdentityStore,
 )
 from workbench.identity.project_identity import ProjectIdentityStore
 from workbench.identity.root import InvalidProjectRootError, ProjectRootRelocatedError
@@ -181,6 +184,8 @@ def test_project_storage_rejects_symlinked_records_directory(tmp_path: Path) -> 
 
     with pytest.raises(Exception):
         ProjectIdentityStore(authority_root).get_current(project_root)
+    with pytest.raises(Exception):
+        ProjectIdentityStore(authority_root).content_addressed_record_names()
 
 
 def test_project_creation_recovers_complete_record_after_log_fault(
@@ -206,3 +211,74 @@ def test_project_creation_recovers_complete_record_after_log_fault(
     assert recovered.revision == 1
     assert len(ProjectIdentityStore(authority_root).content_addressed_record_names()) == 1
     assert len(ProjectIdentityStore(authority_root).read_records_log_bytes().splitlines()) == 1
+
+
+def test_project_store_rejects_a_profile_store_from_another_authority(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(IdentityStoreError):
+        ProjectIdentityStore(
+            tmp_path / "project-authority",
+            profile_store=LocalProfileIdentityStore(tmp_path / "other-authority"),
+        )
+
+
+def test_project_public_raw_reads_fail_closed_on_corrupt_record(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    revision = store.get_or_create(project_root)
+    record_path = (
+        authority_root
+        / "identity"
+        / "projects"
+        / "records"
+        / f"{revision.content_hash}.json"
+    )
+    record_path.write_bytes(b"{}\n")
+
+    with pytest.raises(IdentityRecordCorruptError):
+        store.read_record_bytes(revision)
+    with pytest.raises(IdentityRecordCorruptError):
+        store.read_records_log_bytes()
+    with pytest.raises(IdentityRecordCorruptError):
+        store.content_addressed_record_names()
+
+
+def test_project_public_raw_log_rejects_noncanonical_json(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    store.get_or_create(project_root)
+    log_path = authority_root / "identity" / "projects" / "records.jsonl"
+    log_path.write_bytes(b" " + store.read_records_log_bytes())
+
+    with pytest.raises(IdentityRecordCorruptError):
+        store.read_records_log_bytes()
+
+
+def test_project_public_raw_reads_reject_invalid_orphan_record(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    store.get_or_create(project_root)
+    orphan_path = (
+        authority_root
+        / "identity"
+        / "projects"
+        / "records"
+        / ("0" * 64 + ".json")
+    )
+    orphan_path.write_bytes(b"{}\n")
+
+    with pytest.raises(IdentityRecordCorruptError):
+        store.content_addressed_record_names()
