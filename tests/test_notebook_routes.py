@@ -17,10 +17,12 @@ from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
     NOTEBOOK_OPTION_CONTRACT_VERSION,
     NotebookOptionRevision,
+    NotebookOptionRevisionV12,
     RecommendationDecision,
 )
 from workbench.lineage.upload_store import store_upload_bytes
 from workbench.http.notebook_routes import _supports_rerun_model_options
+from workbench.app import configure_notebook_capability_bindings
 
 
 def _persisted_run(project: Path, run_id: str, *, rerun_of: str | None = None) -> None:
@@ -572,6 +574,155 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     )
     assert listed.status_code == 200, listed.text
     assert listed.json()["materializations"][option.option_id]["draft_id"] == packet["draft"]["draft_id"]
+
+
+def test_notebook_route_uses_server_owned_catalog_for_v12_options(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from test_notebook_capability_binding import _binding_and_verifier
+    from workbench.agent.context_compiler import (
+        freshness_dependency_fingerprint,
+        generation_context_hash,
+    )
+    from workbench.agent.notebook import OptionDraft, TypedProposal
+    from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+
+    project = make_project(tmp_path, name="project.alpha")
+    upload_sha = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    notebook = client.post(
+        "/notebooks/projection",
+        params=params,
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "data.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    notebook_id = notebook["notebook_id"]
+
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register("ols", binding)
+
+    option = OptionDraft(
+        rank=1,
+        rationale="The admitted capability is available for this notebook.",
+        assumptions=("the capability admission remains current",),
+        proposal=TypedProposal(
+            proposal_id="p_http_registered",
+            operation_id="model.genesis",
+            target={"dataset_source_id": upload_sha},
+            preconditions={
+                "context_version": "notebook-planning-context/v1",
+                "owner_resolution": "dataset_projection",
+            },
+            changes={
+                "model_params": {
+                    "model_type": "ols",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                }
+            },
+        ),
+        expected_artifacts=(
+            ExpectedArtifact("ols_1", "model_result", required=True, count=1),
+        ),
+        capability_id="ols",
+        option_id="opt_http_registered",
+        evidence_refs=(),
+        comparative_claims=(),
+    )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del initial_evidence
+            planned_option = replace(
+                option,
+                proposal=replace(
+                    option.proposal,
+                    preconditions={
+                        **option.proposal.preconditions,
+                        "context_fingerprint": context.context_id,
+                    },
+                ),
+            )
+            decision = RecommendationDecision(
+                recommendation_decision_id="rec_http_registered",
+                batch_id="batch_http_registered",
+                generation_context_hash=generation_context_hash(context),
+                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                evidence_pack_hashes=(),
+                comparison_protocol_refs=(),
+                candidate_option_ids=(planned_option.option_id,),
+                outcome="recommended",
+                recommended_option_id=planned_option.option_id,
+                reason_refs=(),
+            )
+            return SimpleNamespace(
+                option_drafts=(
+                    replace(
+                        planned_option,
+                        recommendation_decision_id=decision.recommendation_decision_id,
+                        recommendation_status=decision.outcome,
+                    ),
+                ),
+                decision=decision,
+            )
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    configure_notebook_capability_bindings(catalog)
+    try:
+        response = client.post(
+            f"/notebooks/{notebook_id}/options/propose",
+            params=params,
+            json={"count": 1},
+        )
+        assert response.status_code == 200, response.text
+        [persisted] = response.json()["options"]
+        assert persisted["contract_version"] == "1.2"
+        assert persisted["capability_resolution_binding_ref"] == binding.content_digest
+        assert persisted["execution_modes"] == ["materialize_only"]
+        parsed = NotebookOptionRevisionV12.from_dict(persisted)
+        assert parsed.execution_allowed is False
+        assert parsed.capability_resolution_binding_ref == binding.content_digest
+        listed = client.get(
+            f"/notebooks/{notebook_id}/options",
+            params=params,
+        )
+        assert listed.status_code == 200, listed.text
+        [reloaded] = listed.json()["options"]
+        assert reloaded["contract_version"] == "1.2"
+        assert reloaded["capability_resolution_binding_ref"] == binding.content_digest
+    finally:
+        configure_notebook_capability_bindings(None)
+
+
+def test_notebook_route_rejects_invalid_server_catalog_configuration(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    app.state.notebook_capability_bindings = object()
+    try:
+        response = client.post(
+            "/notebooks",
+            params={"project_root": str(project)},
+            json={"title": "invalid provider", "created_by": "test"},
+        )
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID"
+    finally:
+        configure_notebook_capability_bindings(None)
 
 
 def test_replan_route_returns_replanned_option_and_deferred_sibling(

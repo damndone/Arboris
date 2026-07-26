@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.context_compiler import (
@@ -31,6 +31,7 @@ from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
 from ..agent.notebook.vocabulary import capability_artifact_types
 from ..agent.recipes.registry import build_option_vocabulary
+from ..capability_factory.notebook_catalog import CapabilityBindingCatalog
 
 router = APIRouter()
 
@@ -136,9 +137,16 @@ def _project_root(raw: str) -> Path:
     return root
 
 
-def _service(project_root: str) -> tuple[Path, NotebookService]:
+def _service(request: Request, project_root: str) -> tuple[Path, NotebookService]:
     root = _project_root(project_root)
-    return root, NotebookService(root)
+    catalog = getattr(request.app.state, "notebook_capability_bindings", None)
+    if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID",
+            message="The server-owned Notebook capability binding provider is invalid.",
+        )
+    return root, NotebookService(root, capability_bindings=catalog)
 
 
 def _trace(
@@ -498,9 +506,9 @@ def _request_error(exc: Exception) -> WorkbenchAPIError:
 
 @router.post("/notebooks", status_code=201)
 def create_notebook_endpoint(
-    project_root: str, body: NotebookCreateRequest
+    request: Request, project_root: str, body: NotebookCreateRequest
 ) -> dict[str, Any]:
-    _root, service = _service(project_root)
+    _root, service = _service(request, project_root)
     try:
         return service.create_notebook(
             title=body.title,
@@ -518,11 +526,11 @@ def create_notebook_endpoint(
 
 @router.post("/notebooks/projection")
 def ensure_notebook_projection_endpoint(
-    project_root: str, body: NotebookProjectionRequest
+    request: Request, project_root: str, body: NotebookProjectionRequest
 ) -> dict[str, Any]:
     """Ensure a source-bound default projection; this is the new UI boundary."""
 
-    _root, service = _service(project_root)
+    _root, service = _service(request, project_root)
     if (body.from_run_id is None) == (body.dataset is None):
         raise WorkbenchAPIError(
             status_code=422,
@@ -560,14 +568,16 @@ def ensure_notebook_projection_endpoint(
 
 
 @router.get("/notebooks")
-def list_notebooks_endpoint(project_root: str) -> list[dict[str, Any]]:
-    _root, service = _service(project_root)
+def list_notebooks_endpoint(request: Request, project_root: str) -> list[dict[str, Any]]:
+    _root, service = _service(request, project_root)
     return [notebook.to_dict() for notebook in service.list_notebooks()]
 
 
 @router.get("/notebooks/{notebook_id}")
-def get_notebook_endpoint(project_root: str, notebook_id: str) -> dict[str, Any]:
-    _root, service = _service(project_root)
+def get_notebook_endpoint(
+    request: Request, project_root: str, notebook_id: str
+) -> dict[str, Any]:
+    _root, service = _service(request, project_root)
     try:
         return service.get_notebook(notebook_id).to_dict()
     except NotebookOptionError as exc:
@@ -576,9 +586,12 @@ def get_notebook_endpoint(project_root: str, notebook_id: str) -> dict[str, Any]
 
 @router.post("/notebooks/{notebook_id}/context/compile")
 def compile_notebook_context_endpoint(
-    project_root: str, notebook_id: str, focused_run_id: str | None = None
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    focused_run_id: str | None = None,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
         return _context_packet(context)
@@ -590,9 +603,12 @@ def compile_notebook_context_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/propose")
 def propose_options_endpoint(
-    project_root: str, notebook_id: str, body: ProposeOptionsRequest
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    body: ProposeOptionsRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         drafts = (
@@ -687,7 +703,10 @@ def propose_options_endpoint(
 
 @router.get("/notebooks/{notebook_id}/options")
 def list_options_endpoint(
-    project_root: str, notebook_id: str, focused_run_id: str | None = None
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    focused_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the current options against one freshly compiled context.
 
@@ -697,7 +716,7 @@ def list_options_endpoint(
     into a new agent-generation event.
     """
 
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
         options = service.list_options(notebook_id, context=context)
@@ -725,11 +744,11 @@ def list_options_endpoint(
 
 @router.get("/notebooks/{notebook_id}/traces/{trace_id}")
 def get_notebook_trace_endpoint(
-    project_root: str, notebook_id: str, trace_id: str
+    request: Request, project_root: str, notebook_id: str, trace_id: str
 ) -> dict[str, Any]:
     """Replay the typed trace for a notebook without exposing other scopes."""
 
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         events = TraceWriter.replay(root, trace_id)
@@ -752,12 +771,13 @@ def get_notebook_trace_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/revalidate")
 def revalidate_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: RevalidateOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         revision = service.revalidate_option(
@@ -780,12 +800,13 @@ def revalidate_option_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/confirm")
 def confirm_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: ConfirmOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         current = service.store.read_option(notebook_id, option_id).current_revision
@@ -827,11 +848,12 @@ def confirm_option_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/materialize")
 def materialize_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         result = service.materialize_option(
@@ -849,12 +871,13 @@ def materialize_option_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/decision")
 def record_decision_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: DecisionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         trace = _notebook_trace(root, service, notebook.notebook_id)
@@ -880,12 +903,13 @@ def record_decision_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/execute")
 def complete_option_execution_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: ExecuteOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         trace = _notebook_trace(root, service, notebook.notebook_id)

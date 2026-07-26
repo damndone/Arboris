@@ -13,6 +13,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from .api_errors import register_error_handlers
+from .capability_factory.notebook_catalog import CapabilityBindingCatalog
 from .control_plane import control_plane_capability, validate_control_plane
 from .services.execution_profile import current_execution_profile
 from .http.agent_routes import router as agent_router
@@ -28,6 +29,23 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
+app.state.notebook_capability_bindings = None
+
+
+def configure_notebook_capability_bindings(
+    catalog: CapabilityBindingCatalog | None,
+) -> None:
+    """Install the server-owned Notebook binding catalog for this app.
+
+    This is an application bootstrap seam, not an HTTP operation.  Authority
+    construction and registration remain outside the Notebook/Agent route;
+    the route can only consume an already-created catalog or the legacy native
+    path when no catalog is configured.
+    """
+
+    if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
+        raise TypeError("catalog must be a CapabilityBindingCatalog or None")
+    app.state.notebook_capability_bindings = catalog
 
 
 @app.on_event("startup")
