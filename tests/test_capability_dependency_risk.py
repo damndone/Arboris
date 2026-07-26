@@ -94,3 +94,123 @@ def test_dependency_acquisition_cannot_skip_confirmation_or_change_lock_binding(
             ),
             confirmation_ref="not-a-digest",
         )
+
+
+def test_dependency_lifecycle_uses_existing_proposal_and_risk_stores_without_execution(
+    tmp_path,
+):
+    from workbench.agent.dependency_control import DependencyAcquisitionControl
+    from workbench.agent.proposals import ProposalStore
+    from workbench.agent.risk import RiskAuthorizationStore
+
+    control = DependencyAcquisitionControl()
+    proposal = control.create_proposal(
+        lock=_lock(),
+        index_snapshot_ref="c" * 64,
+        proposal_id="proposal_dependency_durable",
+    )
+    revision = control.persist_proposal(
+        proposal,
+        root=tmp_path,
+        session_id="session-dependency",
+        chain_id="chain-dependency",
+        active_head_run_id="run-1",
+    )
+    receipt = control.authorize_persisted_proposal(
+        proposal,
+        root=tmp_path,
+        revision=revision.revision,
+        fingerprint=revision.fingerprint,
+        actor_type="human_ui",
+        current_context_fingerprint=proposal.content_digest,
+        current_active_head_run_id="run-1",
+    )
+    confirmation = receipt.confirmation
+    grant = receipt.risk_authorization
+
+    assert confirmation.status == "confirmed"
+    assert grant.status == "issued"
+    assert grant.operation_id == proposal.operation_id
+    assert grant.proposal_id == proposal.proposal_id
+    assert grant.fingerprint == revision.fingerprint
+    assert receipt.proposal.status == "confirmed"
+    assert receipt.execution_allowed is False
+    assert RiskAuthorizationStore(tmp_path, create=False).read(grant.authorization_id)["status"] == "issued"
+    assert ProposalStore(tmp_path, create=False).latest_status(proposal.proposal_id) == "confirmed"
+    assert proposal.execution_allowed is False
+
+
+def test_dependency_lifecycle_rejects_stale_confirmation_and_unregistered_execution_surface(
+    tmp_path,
+):
+    from workbench.agent.dependency_control import DependencyAcquisitionControl
+    from workbench.agent.operations import OperationRegistry, UnknownOperationError
+    from workbench.agent.proposals import ProposalStaleError
+
+    control = DependencyAcquisitionControl()
+    proposal = control.create_proposal(
+        lock=_lock(),
+        index_snapshot_ref="c" * 64,
+        proposal_id="proposal_dependency_stale",
+    )
+    revision = control.persist_proposal(
+        proposal,
+        root=tmp_path,
+        session_id="session-dependency",
+        chain_id="chain-dependency",
+        active_head_run_id="run-1",
+    )
+    with pytest.raises(ProposalStaleError):
+        control.confirm_persisted_proposal(
+            proposal,
+            root=tmp_path,
+            revision=revision.revision,
+            fingerprint=revision.fingerprint,
+            actor_type="human_ui",
+            current_context_fingerprint=proposal.content_digest,
+            current_active_head_run_id="run-2",
+        )
+
+    with pytest.raises(UnknownOperationError):
+        OperationRegistry().require("capability.dependency.acquire", "v1")
+
+
+def test_dependency_risk_grant_requires_the_durable_confirmation_record(tmp_path):
+    from dataclasses import replace
+
+    from workbench.agent.dependency_control import (
+        DependencyAcquisitionControl,
+        DependencyControlError,
+    )
+
+    control = DependencyAcquisitionControl()
+    proposal = control.create_proposal(
+        lock=_lock(),
+        index_snapshot_ref="c" * 64,
+        proposal_id="proposal_dependency_forged_confirmation",
+    )
+    revision = control.persist_proposal(
+        proposal,
+        root=tmp_path,
+        session_id="session-dependency",
+        chain_id="chain-dependency",
+        active_head_run_id="run-1",
+    )
+    confirmation = control.confirm_persisted_proposal(
+        proposal,
+        root=tmp_path,
+        revision=revision.revision,
+        fingerprint=revision.fingerprint,
+        actor_type="human_ui",
+        current_context_fingerprint=proposal.content_digest,
+        current_active_head_run_id="run-1",
+    )
+    forged = replace(confirmation, fingerprint="e" * 64)
+
+    with pytest.raises(DependencyControlError):
+        control.issue_risk_authorization(
+            forged,
+            root=tmp_path,
+            current_active_head_run_id="run-1",
+            actor_type="human_ui",
+        )

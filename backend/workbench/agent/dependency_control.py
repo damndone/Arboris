@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ..capability_factory.contracts import _digest, _sequence, _text
 from ..capability_factory.dependency_contract import DependencyLock
 from ..custom_capability.canonical import domain_digest
+from .proposals import (
+    ProposalConfirmation,
+    ProposalError,
+    ProposalRevision,
+    ProposalStore,
+)
+from .risk import RiskAuthorization, RiskAuthorizationStore
 
 
 DEPENDENCY_ACQUISITION_OPERATION = "capability.dependency.acquire"
@@ -110,6 +118,27 @@ class DependencyAcquisitionProposal:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class DependencyAuthorizationReceipt:
+    """The durable proposal/risk boundary; it intentionally has no executor."""
+
+    proposal: DependencyAcquisitionProposal
+    proposal_revision: ProposalRevision
+    confirmation: ProposalConfirmation
+    risk_authorization: RiskAuthorization
+
+    @property
+    def execution_allowed(self) -> bool:
+        return False
+
+
+def _require_context(value: str, field: str) -> str:
+    try:
+        return _text(value, field)
+    except ValueError as error:
+        raise DependencyControlError(str(error)) from error
+
+
 class DependencyAcquisitionControl:
     """Produce a high-risk proposal without registering an executable tool."""
 
@@ -154,11 +183,185 @@ class DependencyAcquisitionControl:
             confirmation_ref=confirmation_ref,
         )
 
+    def persist_proposal(
+        self,
+        proposal: DependencyAcquisitionProposal,
+        *,
+        root: Path | str,
+        session_id: str,
+        chain_id: str,
+        active_head_run_id: str,
+        command_id: str | None = None,
+    ) -> ProposalRevision:
+        """Persist one dependency proposal in the existing append-only store."""
+
+        if not isinstance(proposal, DependencyAcquisitionProposal):
+            raise DependencyControlError("proposal must be a DependencyAcquisitionProposal")
+        session_id = _require_context(session_id, "session_id")
+        chain_id = _require_context(chain_id, "chain_id")
+        active_head_run_id = _require_context(active_head_run_id, "active_head_run_id")
+        return ProposalStore(root).create(
+            session_id=session_id,
+            chain_id=chain_id,
+            operation_id=proposal.operation_id,
+            operation_version=proposal.operation_version,
+            target={
+                "dependency_proposal_digest": proposal.content_digest,
+                "lock_ref": proposal.lock_ref,
+                "index_snapshot_ref": proposal.index_snapshot_ref,
+            },
+            preconditions={
+                "context_fingerprint": proposal.content_digest,
+                "active_head_run_id": active_head_run_id,
+            },
+            changes={
+                "artifact_refs": list(proposal.artifact_refs),
+                "policy_ref": proposal.policy_ref,
+            },
+            evidence_refs=[
+                f"dependency-lock:{proposal.lock_ref}",
+                f"index-snapshot:{proposal.index_snapshot_ref}",
+            ],
+            expected_effect=["fetch locked artifacts into quarantine only"],
+            risks=[
+                "external dependency acquisition requires explicit high-risk authorization",
+                "no user data access",
+                "no fetched-code execution",
+            ],
+            command_id=command_id,
+            proposal_id=proposal.proposal_id,
+        )
+
+    def confirm_persisted_proposal(
+        self,
+        proposal: DependencyAcquisitionProposal,
+        *,
+        root: Path | str,
+        revision: int,
+        fingerprint: str,
+        actor_type: str,
+        current_context_fingerprint: str | None,
+        current_active_head_run_id: str | None,
+    ) -> ProposalConfirmation:
+        """Use ProposalStore's stale-checking confirmation gate."""
+
+        if not isinstance(proposal, DependencyAcquisitionProposal):
+            raise DependencyControlError("proposal must be a DependencyAcquisitionProposal")
+        store = ProposalStore(root, create=False)
+        latest = store.latest_revision(proposal.proposal_id)
+        if latest.target.get("dependency_proposal_digest") != proposal.content_digest:
+            raise DependencyControlError("persisted proposal is not bound to this dependency proposal")
+        confirmation = store.confirm(
+            proposal.proposal_id,
+            revision=revision,
+            fingerprint=fingerprint,
+            actor_type=_require_context(actor_type, "actor_type"),
+            current_context_fingerprint=current_context_fingerprint,
+            current_active_head_run_id=current_active_head_run_id,
+        )
+        return store.validate_confirmation_preconditions(
+            proposal.proposal_id,
+            current_context_fingerprint=current_context_fingerprint,
+            current_active_head_run_id=current_active_head_run_id,
+        )
+
+    def issue_risk_authorization(
+        self,
+        confirmation: ProposalConfirmation,
+        *,
+        root: Path | str,
+        current_active_head_run_id: str,
+        actor_type: str,
+        ttl_seconds: int = 300,
+    ) -> RiskAuthorization:
+        """Issue the existing one-time high-risk grant, but never consume it."""
+
+        if not isinstance(confirmation, ProposalConfirmation) or confirmation.status != "confirmed":
+            raise DependencyControlError("a confirmed ProposalConfirmation is required")
+        if confirmation.operation_id != DEPENDENCY_ACQUISITION_OPERATION:
+            raise DependencyControlError("confirmation is not for dependency acquisition")
+        current_active_head_run_id = _require_context(
+            current_active_head_run_id,
+            "current_active_head_run_id",
+        )
+        expected_head = confirmation.preconditions.get("active_head_run_id")
+        if expected_head != current_active_head_run_id:
+            raise DependencyControlError("active head changed before risk authorization")
+        try:
+            stored = ProposalStore(root, create=False).validate_confirmation_preconditions(
+                confirmation.proposal_id,
+                current_context_fingerprint=confirmation.preconditions.get(
+                    "context_fingerprint"
+                ),
+                current_active_head_run_id=current_active_head_run_id,
+            )
+        except (KeyError, OSError, ProposalError, ValueError) as error:
+            raise DependencyControlError(
+                "durable proposal confirmation is unavailable"
+            ) from error
+        if stored != confirmation:
+            raise DependencyControlError(
+                "risk authorization confirmation does not match the durable proposal"
+            )
+        return RiskAuthorizationStore(root).issue(
+            operation_id=confirmation.operation_id,
+            operation_version=confirmation.operation_version,
+            proposal_id=confirmation.proposal_id,
+            revision=confirmation.revision,
+            fingerprint=confirmation.fingerprint,
+            session_id=confirmation.session_id,
+            chain_id=confirmation.chain_id,
+            active_head_run_id=current_active_head_run_id,
+            actor_type=_require_context(actor_type, "actor_type"),
+            ttl_seconds=ttl_seconds,
+        )
+
+    def authorize_persisted_proposal(
+        self,
+        proposal: DependencyAcquisitionProposal,
+        *,
+        root: Path | str,
+        revision: int,
+        fingerprint: str,
+        actor_type: str,
+        current_context_fingerprint: str | None,
+        current_active_head_run_id: str | None,
+        ttl_seconds: int = 300,
+    ) -> DependencyAuthorizationReceipt:
+        """Run proposal confirmation and risk issuance as one bounded lifecycle."""
+
+        confirmation = self.confirm_persisted_proposal(
+            proposal,
+            root=root,
+            revision=revision,
+            fingerprint=fingerprint,
+            actor_type=actor_type,
+            current_context_fingerprint=current_context_fingerprint,
+            current_active_head_run_id=current_active_head_run_id,
+        )
+        grant = self.issue_risk_authorization(
+            confirmation,
+            root=root,
+            current_active_head_run_id=str(current_active_head_run_id or ""),
+            actor_type=actor_type,
+            ttl_seconds=ttl_seconds,
+        )
+        confirmed = self.confirm(proposal, confirmation_ref=confirmation.fingerprint)
+        return DependencyAuthorizationReceipt(
+            proposal=confirmed,
+            proposal_revision=ProposalStore(root, create=False).latest_revision(
+                proposal.proposal_id
+            ),
+            confirmation=confirmation,
+            risk_authorization=grant,
+        )
+
 
 __all__ = [
     "DEPENDENCY_ACQUISITION_OPERATION",
     "DEPENDENCY_OPERATION_VERSION",
     "DependencyAcquisitionControl",
     "DependencyAcquisitionProposal",
+    "DependencyAuthorizationReceipt",
     "DependencyControlError",
 ]
