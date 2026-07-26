@@ -89,3 +89,48 @@ def test_dependency_service_does_not_admit_when_static_assembly_fails():
             policy=policy,
             artifacts={},
         )
+
+
+def test_dependency_store_rebuilds_lock_bundle_and_admission_across_instances(tmp_path):
+    from workbench.capability_factory.dependency_service import DependencyService
+    from workbench.capability_factory.dependency_store import DependencyStore
+
+    requirements, snapshot, policy, artifacts = _inputs()
+    prepared = DependencyService(store=DependencyStore(tmp_path)).prepare_quarantine(
+        requirements=requirements,
+        snapshot=snapshot,
+        policy=policy,
+        artifacts=artifacts,
+    )
+    reopened = DependencyStore(tmp_path, create=False)
+
+    assert reopened.get_lock(prepared.lock.content_digest) == prepared.lock
+    assert reopened.get_bundle(prepared.bundle.bundle_ref) == prepared.bundle
+    assert reopened.admission_history(prepared.bundle.bundle_ref) == (prepared.admission,)
+
+
+def test_dependency_store_rejects_tampered_persisted_lock(tmp_path):
+    import json
+
+    import pytest
+
+    from workbench.capability_factory.dependency_service import DependencyService
+    from workbench.capability_factory.dependency_store import (
+        DependencyStore,
+        DependencyStoreError,
+    )
+
+    requirements, snapshot, policy, artifacts = _inputs()
+    prepared = DependencyService(store=DependencyStore(tmp_path)).prepare_quarantine(
+        requirements=requirements,
+        snapshot=snapshot,
+        policy=policy,
+        artifacts=artifacts,
+    )
+    path = tmp_path / "locks" / f"{prepared.lock.content_digest}.jsonl"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["lock"]["lock_id"] = "tampered"
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+    with pytest.raises(DependencyStoreError):
+        DependencyStore(tmp_path, create=False).get_lock(prepared.lock.content_digest)

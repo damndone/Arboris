@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from ..custom_capability.canonical import domain_digest
+from .contracts import _digest, _sequence
 from .dependency_contract import DependencyLock
 from .wheel_inspection import WheelInspectionError, inspect_wheel_bytes
 
@@ -22,6 +23,27 @@ class BundleCandidate:
     status: str
     manifest_digest: str
     artifact_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle_ref", _digest(self.bundle_ref, "bundle_ref"))
+        object.__setattr__(self, "lock_ref", _digest(self.lock_ref, "lock_ref"))
+        if self.status != "quarantined":
+            raise BundleAssemblyError("bundle candidates must start in quarantine")
+        object.__setattr__(self, "manifest_digest", _digest(self.manifest_digest, "manifest_digest"))
+        object.__setattr__(
+            self,
+            "artifact_refs",
+            tuple(_digest(item, "artifact_ref") for item in _sequence(self.artifact_refs, "artifact_refs")),
+        )
+        if self.bundle_ref != self.content_digest:
+            raise BundleAssemblyError("bundle_ref does not match the bundle candidate content")
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.bundle_candidate/v1",
+            {"lock_ref": self.lock_ref, "manifest_digest": self.manifest_digest},
+        )
 
 
 class BundleAssembler:
