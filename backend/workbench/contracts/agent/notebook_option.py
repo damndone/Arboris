@@ -13,6 +13,8 @@ Three packets are locked here:
   notebook's existing options, so a new option would stale itself).
 - `OptionExecution@1.0` — the five-tuple execution pins, so a user confirming
   revision 2 cannot execute revision 3.
+- `NotebookOptionRevision@1.2` — a capability-bound successor that carries an
+  immutable resolution binding reference and explicitly bounded execution mode.
 - `ArtifactContract@1.0` — expected artifacts in the strict form DEC-ART-001
   allows: artifact_id + artifact_type + count + optional step. No `role`, no
   `schema_ref`; the registry persists neither, and a contract naming fields the
@@ -29,6 +31,7 @@ from ..common.envelope import ContractError, freeze_json, require_exact_keys, th
 
 NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1"
 NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0"
+NOTEBOOK_OPTION_V12_CONTRACT_VERSION = "1.2"
 OPTION_EXECUTION_CONTRACT_VERSION = "1.1"
 OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0"
@@ -65,6 +68,13 @@ def _require_str(value: Any, field: str) -> str:
     if type(value) is not str or not value:
         raise NotebookContractError(f"{field} must be a non-empty string")
     return value
+
+
+def _require_digest(value: Any, field: str) -> str:
+    text = _require_str(value, field)
+    if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+        raise NotebookContractError(f"{field} must be a lowercase SHA-256 digest")
+    return text
 
 
 def _require_choice(value: Any, allowed: tuple[str, ...], field: str) -> str:
@@ -364,16 +374,19 @@ class NotebookOptionRevision:
     @classmethod
     def from_dict(
         cls, value: Mapping[str, Any]
-    ) -> "NotebookOptionRevision | NotebookOptionRevisionV11":
+    ) -> "NotebookOptionRevision | NotebookOptionRevisionV11 | NotebookOptionRevisionV12":
         payload = _require_mapping(value, "notebook_option_revision")
         version = payload.get("contract_version", NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION)
         if version == NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION:
             return cls._from_v10_dict(payload)
         if version == NOTEBOOK_OPTION_CONTRACT_VERSION:
             return NotebookOptionRevisionV11.from_dict(payload)
+        if version == NOTEBOOK_OPTION_V12_CONTRACT_VERSION:
+            return NotebookOptionRevisionV12.from_dict(payload)
         raise NotebookContractError(
             f"NotebookOptionRevision contract_version must be one of "
-            f"[{NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_CONTRACT_VERSION!r}], "
+            f"[{NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_CONTRACT_VERSION!r}, "
+            f"{NOTEBOOK_OPTION_V12_CONTRACT_VERSION!r}], "
             f"got {version!r}"
         )
 
@@ -531,6 +544,109 @@ class NotebookOptionRevisionV11:
             recommendation_decision_id=value["recommendation_decision_id"],
             recommendation_status=value["recommendation_status"],
             supersedes_option_revision=value["supersedes_option_revision"],
+            contract_version=value["contract_version"],
+        )
+
+
+@dataclass(frozen=True)
+class NotebookOptionRevisionV12(NotebookOptionRevisionV11):
+    """NotebookOptionRevision@1.2 for an admitted capability binding.
+
+    This first implementation deliberately exposes only ``materialize_only``.
+    The later execution-authorization slice may add ``confirm_and_execute``
+    with its own receipt and replay gates; it must not be inferred here.
+    """
+
+    capability_resolution_binding_ref: str | None = None
+    execution_modes: tuple[str, ...] = ("materialize_only",)
+    contract_version: str = NOTEBOOK_OPTION_V12_CONTRACT_VERSION
+
+    _V12_KEYS = NotebookOptionRevisionV11._V11_KEYS | frozenset(
+        {"capability_resolution_binding_ref", "execution_modes"}
+    )
+
+    def __post_init__(self) -> None:
+        if self.contract_version != NOTEBOOK_OPTION_V12_CONTRACT_VERSION:
+            raise NotebookContractError(
+                f"contract_version must be {NOTEBOOK_OPTION_V12_CONTRACT_VERSION}"
+            )
+        _validate_option_fields(self, LIFECYCLE_STATUSES)
+        _require_str(self.rationale, "rationale")
+        object.__setattr__(self, "assumptions", _require_string_tuple(self.assumptions, "assumptions"))
+        object.__setattr__(
+            self,
+            "capability_resolution_binding_ref",
+            _require_digest(
+                self.capability_resolution_binding_ref,
+                "capability_resolution_binding_ref",
+            ),
+        )
+        modes = _require_string_tuple(self.execution_modes, "execution_modes")
+        if modes != ("materialize_only",):
+            raise NotebookContractError(
+                "execution_modes currently supports only materialize_only"
+            )
+        object.__setattr__(self, "execution_modes", modes)
+        object.__setattr__(
+            self,
+            "comparative_claims",
+            _require_string_tuple(self.comparative_claims, "comparative_claims"),
+        )
+        _require_str(self.recommendation_decision_id, "recommendation_decision_id")
+        _require_choice(self.recommendation_status, RECOMMENDATION_OUTCOMES, "recommendation_status")
+        _require_optional_int(self.supersedes_option_revision, "supersedes_option_revision")
+
+    @property
+    def execution_allowed(self) -> bool:
+        return False
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _option_wire_dict(self)
+        payload.update(
+            {
+                "evidence_refs": [item.to_dict() for item in self.evidence_refs],
+                "comparative_claims": list(self.comparative_claims),
+                "recommendation_decision_id": self.recommendation_decision_id,
+                "recommendation_status": self.recommendation_status,
+                "capability_resolution_binding_ref": self.capability_resolution_binding_ref,
+                "execution_modes": list(self.execution_modes),
+            }
+        )
+        return payload
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "NotebookOptionRevisionV12":
+        require_exact_keys(value, cls._V12_KEYS, "notebook_option_revision")
+        evidence_refs = value["evidence_refs"]
+        if not isinstance(evidence_refs, (tuple, list)):
+            raise NotebookContractError("evidence_refs must be a tuple or list")
+        return cls(
+            option_id=value["option_id"],
+            option_revision=value["option_revision"],
+            notebook_id=value["notebook_id"],
+            run_family_id=value["run_family_id"],
+            generation_context_id=value["generation_context_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            typed_proposal_id=value["typed_proposal_id"],
+            typed_proposal_revision=value["typed_proposal_revision"],
+            artifact_contract=ArtifactContract.from_dict(value["artifact_contract"]),
+            rationale=value["rationale"],
+            assumptions=_require_string_tuple(value["assumptions"], "assumptions"),
+            risk_level=value["risk_level"],
+            lifecycle_status=value["lifecycle_status"],
+            freshness_status=value["freshness_status"],
+            validation_status=value["validation_status"],
+            rank=value["rank"],
+            batch_id=value["batch_id"],
+            created_at=value["created_at"],
+            evidence_refs=tuple(EvidenceRef.from_dict(item) for item in evidence_refs),
+            comparative_claims=_require_string_tuple(value["comparative_claims"], "comparative_claims"),
+            recommendation_decision_id=value["recommendation_decision_id"],
+            recommendation_status=value["recommendation_status"],
+            supersedes_option_revision=value["supersedes_option_revision"],
+            capability_resolution_binding_ref=value["capability_resolution_binding_ref"],
+            execution_modes=_require_string_tuple(value["execution_modes"], "execution_modes"),
             contract_version=value["contract_version"],
         )
 
@@ -899,9 +1015,11 @@ __all__ = [
     "LIFECYCLE_STATUSES",
     "NOTEBOOK_OPTION_CONTRACT_VERSION",
     "NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION",
+    "NOTEBOOK_OPTION_V12_CONTRACT_VERSION",
     "NotebookContractError",
     "NotebookOptionRevision",
     "NotebookOptionRevisionV11",
+    "NotebookOptionRevisionV12",
     "OPTION_EXECUTION_LEGACY_CONTRACT_VERSION",
     "OPTION_EXECUTION_CONTRACT_VERSION",
     "OPTION_MATERIALIZATION_CONTRACT_VERSION",
