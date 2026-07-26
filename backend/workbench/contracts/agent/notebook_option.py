@@ -38,6 +38,7 @@ OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0"
 FEASIBILITY_DECISION_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_V11_CONTRACT_VERSION = "1.1"
+MAX_RECOMMENDATION_CANDIDATES = 3
 OPTION_MATERIALIZATION_CONTRACT_VERSION = "1.0"
 ARTIFACT_CONTRACT_VERSION = "1.0"
 
@@ -877,6 +878,8 @@ class FeasibilityDecision:
             raise NotebookContractError("evidence_pack_hashes must not be empty")
         if not candidate_option_ids:
             raise NotebookContractError("candidate_option_ids must not be empty")
+        if len(candidate_option_ids) > MAX_RECOMMENDATION_CANDIDATES:
+            raise NotebookContractError("candidate_option_ids allow at most 3 options")
         if len(set(candidate_option_ids)) != len(candidate_option_ids):
             raise NotebookContractError("candidate_option_ids must be unique")
         _require_digest(self.candidate_cohort_hash, "candidate_cohort_hash")
@@ -983,6 +986,8 @@ class RecommendationDecisionV11:
             object.__setattr__(self, field, _require_string_tuple(getattr(self, field), field))
         if not self.evidence_pack_hashes or not self.candidate_option_ids:
             raise NotebookContractError("v1.1 decisions require evidence and candidates")
+        if len(self.candidate_option_ids) > MAX_RECOMMENDATION_CANDIDATES:
+            raise NotebookContractError("candidate_option_ids allow at most 3 options")
         if len(set(self.candidate_option_ids)) != len(self.candidate_option_ids):
             raise NotebookContractError("candidate_option_ids must be unique")
         _require_digest(self.candidate_cohort_hash, "candidate_cohort_hash")
@@ -1311,6 +1316,7 @@ __all__ = [
     "FeasibilityCandidateDecision",
     "FeasibilityDecision",
     "LEGACY_LIFECYCLE_STATUSES",
+    "MAX_RECOMMENDATION_CANDIDATES",
     "LegacyNotebookOptionRevision",
     "LegacyOptionExecution",
     "LIFECYCLE_STATUSES",

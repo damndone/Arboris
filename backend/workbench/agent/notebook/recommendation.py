@@ -9,6 +9,7 @@ from ...canonical import sha256_canonical
 from ...contracts.agent.notebook_option import (
     FeasibilityCandidateDecision,
     FeasibilityDecision,
+    MAX_RECOMMENDATION_CANDIDATES,
     RecommendationDecision,
     RecommendationDecisionV11,
     _candidate_cohort_hash,
@@ -29,6 +30,8 @@ def candidate_cohort_hash(option_ids: Sequence[str]) -> str:
         raise RecommendationValidationError("candidate cohort must contain option ids")
     if len(set(ids)) != len(ids):
         raise RecommendationValidationError("candidate cohort option ids must be unique")
+    if len(ids) > MAX_RECOMMENDATION_CANDIDATES:
+        raise RecommendationValidationError("candidate cohort allows at most 3 options")
     return _candidate_cohort_hash(ids)
 
 
@@ -135,6 +138,7 @@ class ServerDecisionRegistry:
         )
         if decision.feasibility_decision_ref is not None:
             source = self.feasibility(decision.feasibility_decision_ref)
+            self._assert_recommendation_binding(decision, source)
             self._assert_common_binding(
                 source.batch_id,
                 source.generation_context_hash,
@@ -150,6 +154,7 @@ class ServerDecisionRegistry:
                 raise RecommendationValidationError("recommendation does not match feasibility decision")
         else:
             source = self.comparison(decision.comparison_decision_ref or "")
+            self._assert_recommendation_binding(decision, source)
             self._assert_common_binding(
                 source.batch_id,
                 source.generation_context_hash,
@@ -163,6 +168,24 @@ class ServerDecisionRegistry:
                 source.recommended_option_id,
             ):
                 raise RecommendationValidationError("recommendation does not match comparison decision")
+
+    @staticmethod
+    def _assert_recommendation_binding(
+        decision: RecommendationDecisionV11,
+        source: FeasibilityDecision | ComparisonDecisionRecord,
+    ) -> None:
+        if (
+            decision.batch_id != source.batch_id
+            or decision.generation_context_hash != source.generation_context_hash
+            or decision.freshness_dependency_fingerprint
+            != source.freshness_dependency_fingerprint
+            or decision.evidence_pack_hashes != source.evidence_pack_hashes
+            or set(decision.candidate_option_ids) != set(source.candidate_option_ids)
+            or decision.candidate_cohort_hash != source.candidate_cohort_hash
+        ):
+            raise RecommendationValidationError(
+                "recommendation binding does not match server decision"
+            )
 
     @staticmethod
     def _assert_common_binding(

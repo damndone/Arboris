@@ -325,3 +325,43 @@ def test_registry_rejects_a_wire_recommendation_with_a_forged_comparison_ref() -
 
     with pytest.raises(ValueError, match="unavailable"):
         registry.validate_recommendation(forged)
+
+
+def test_registry_rejects_a_registered_decision_with_mismatched_binding() -> None:
+    registry = ServerDecisionRegistry()
+    registry.register_comparison(
+        ComparisonDecisionRecord(
+            comparison_decision_id="comparison_1",
+            batch_id="batch_2",
+            generation_context_hash="sha256:context_2",
+            freshness_dependency_fingerprint="fresh1:fingerprint_2",
+            evidence_pack_hashes=("sha256:evidence_2",),
+            candidate_option_ids=("opt_ets",),
+            candidate_cohort_hash=candidate_cohort_hash(("opt_ets",)),
+            outcome="recommended",
+            recommended_option_id="opt_ets",
+            protocol_ref="comparison.v1",
+        )
+    )
+    forged = RecommendationDecisionV11(
+        recommendation_decision_id="forged_bound",
+        batch_id="batch_1",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        candidate_option_ids=("opt_ets",),
+        candidate_cohort_hash=candidate_cohort_hash(("opt_ets",)),
+        outcome="recommended",
+        recommended_option_id="opt_ets",
+        feasibility_decision_ref=None,
+        comparison_decision_ref="comparison_1",
+        reason_refs=(),
+    )
+
+    with pytest.raises(ValueError, match="binding"):
+        registry.validate_recommendation(forged)
+
+
+def test_v11_candidate_cohort_is_bounded_to_three_options() -> None:
+    with pytest.raises(ValueError, match="at most 3"):
+        candidate_cohort_hash(("opt_1", "opt_2", "opt_3", "opt_4"))
