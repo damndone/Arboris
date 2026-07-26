@@ -14,6 +14,9 @@ _EVENT_FIELDS = {
     "capability.requirement.created": frozenset({"requirement_digest", "revision"}),
     "capability.registry.registered": frozenset({"implementation_ref", "profile_digest"}),
     "capability.resolution.decided": frozenset({"decision_digest", "outcome"}),
+    "capability.dependency.proposed": frozenset({"proposal_digest", "lock_ref", "risk_level"}),
+    "capability.dependency.quarantined": frozenset({"bundle_ref", "lock_ref", "status"}),
+    "capability.dependency.admission.changed": frozenset({"bundle_ref", "status", "validity_ref"}),
 }
 
 
@@ -30,7 +33,7 @@ class CapabilityTraceEvent:
 
 def build_trace_event(*, event_type: str, payload: Mapping[str, Any]) -> CapabilityTraceEvent:
     if event_type not in _EVENT_FIELDS:
-        raise TraceContractError("event_type is not registered by CF1")
+        raise TraceContractError("event_type is not registered by the capability factory")
     if not isinstance(payload, Mapping):
         raise TraceContractError("trace payload must be an object")
     expected = _EVENT_FIELDS[event_type]
