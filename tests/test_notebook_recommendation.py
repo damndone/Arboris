@@ -1,7 +1,7 @@
 """Batch-level evidence gate tests."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -9,8 +9,12 @@ import pytest
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
 from workbench.agent.notebook.proposal import OptionDraft, TypedProposal
 from workbench.agent.notebook.recommendation import (
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
     ProtocolResult,
     RecommendationValidator,
+    RecommendationDecisionV11,
+    candidate_cohort_hash,
 )
 
 
@@ -118,4 +122,106 @@ def test_duplicate_candidate_ids_are_rejected_before_decision() -> None:
             batch_id="batch_1",
             candidates=(_candidate("opt_same"), _candidate("opt_same")),
             evidence_pack=_pack(scores={}),
+        )
+
+
+def _feasibility(
+    *results: tuple[str, str],
+    batch_id: str = "batch_1",
+    generation_context_hash: str = "sha256:context",
+    freshness_dependency_fingerprint: str = "fresh1:fingerprint",
+    evidence_pack_hashes: tuple[str, ...] = ("sha256:evidence",),
+) -> FeasibilityDecision:
+    decisions = tuple(
+        FeasibilityCandidateDecision(
+            option_id=option_id,
+            protocol_id="feasibility.v1",
+            protocol_version="feasibility/v1",
+            inspection_refs=(f"inspection:{option_id}",),
+            evidence_refs=(f"evidence:{option_id}",),
+            outcome=outcome,
+            reason_code="PASS" if outcome == "feasible" else "INPUT_CONTRACT_INVALID",
+        )
+        for option_id, outcome in results
+    )
+    ids = tuple(item.option_id for item in decisions)
+    return FeasibilityDecision(
+        feasibility_decision_id="feasibility_1",
+        batch_id=batch_id,
+        generation_context_hash=generation_context_hash,
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint,
+        evidence_pack_hashes=evidence_pack_hashes,
+        candidate_option_ids=ids,
+        candidate_cohort_hash=candidate_cohort_hash(ids),
+        candidates=decisions,
+        validator_revision="feasibility-validator/v1",
+    )
+
+
+def test_server_feasibility_decision_requires_the_complete_candidate_cohort() -> None:
+    with pytest.raises(ValueError, match="candidate_cohort_hash"):
+        decision = _feasibility(("opt_ets", "feasible"), ("opt_arma", "blocked"))
+        replace(decision, candidate_cohort_hash=candidate_cohort_hash(("opt_ets",)))
+
+
+def test_v11_recommendation_uses_server_feasibility_not_agent_blocked_reason() -> None:
+    decision = RecommendationValidator().decide_v11(
+        batch_id="batch_1",
+        candidate_option_ids=("opt_bad", "opt_ets"),
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        feasibility_decision=_feasibility(
+            ("opt_bad", "blocked"),
+            ("opt_ets", "feasible"),
+        ),
+    )
+
+    assert decision.outcome == "recommended"
+    assert decision.recommended_option_id == "opt_ets"
+    assert decision.feasibility_decision_ref == "feasibility_1"
+    assert decision.comparison_decision_ref is None
+    assert RecommendationDecisionV11.from_dict(decision.to_dict()) == decision
+
+
+def test_v11_wire_contract_rejects_unknown_fields() -> None:
+    decision = RecommendationValidator().decide_v11(
+        batch_id="batch_1",
+        candidate_option_ids=("opt_ets",),
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        feasibility_decision=_feasibility(("opt_ets", "feasible")),
+    )
+    payload = decision.to_dict()
+    payload["agent_blocked_reason"] = "pretend that alternatives were blocked"
+    with pytest.raises(ValueError, match="unknown"):
+        RecommendationDecisionV11.from_dict(payload)
+
+
+def test_v11_does_not_choose_between_multiple_feasible_candidates_without_comparison() -> None:
+    decision = RecommendationValidator().decide_v11(
+        batch_id="batch_1",
+        candidate_option_ids=("opt_ets", "opt_arma"),
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        feasibility_decision=_feasibility(
+            ("opt_ets", "feasible"),
+            ("opt_arma", "feasible"),
+        ),
+    )
+
+    assert decision.outcome == "insufficient_evidence"
+    assert decision.recommended_option_id is None
+
+
+def test_v11_requires_exactly_one_server_decision_reference() -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        RecommendationValidator().decide_v11(
+            batch_id="batch_1",
+            candidate_option_ids=("opt_ets",),
+            generation_context_hash="sha256:context",
+            freshness_dependency_fingerprint="fresh1:fingerprint",
+            evidence_pack_hashes=("sha256:evidence",),
         )

@@ -6,13 +6,30 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import RecommendationDecision
+from ...contracts.agent.notebook_option import (
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
+    RecommendationDecision,
+    RecommendationDecisionV11,
+    _candidate_cohort_hash,
+)
 from .evidence import DataEvidencePackV1, EvidenceRecord
 from .proposal import OptionDraft
 
 
 class RecommendationValidationError(ValueError):
     """A recommendation protocol or candidate batch is not comparable."""
+
+
+def candidate_cohort_hash(option_ids: Sequence[str]) -> str:
+    """Return the order-independent identity of a complete candidate cohort."""
+
+    ids = tuple(option_ids)
+    if not ids or any(not isinstance(option_id, str) or not option_id for option_id in ids):
+        raise RecommendationValidationError("candidate cohort must contain option ids")
+    if len(set(ids)) != len(ids):
+        raise RecommendationValidationError("candidate cohort option ids must be unique")
+    return _candidate_cohort_hash(ids)
 
 
 @dataclass(frozen=True)
@@ -210,6 +227,93 @@ class RecommendationValidator:
             reason_refs=reason_refs,
         )
 
+    def decide_v11(
+        self,
+        *,
+        batch_id: str,
+        candidate_option_ids: tuple[str, ...],
+        generation_context_hash: str,
+        freshness_dependency_fingerprint: str,
+        evidence_pack_hashes: tuple[str, ...],
+        feasibility_decision: FeasibilityDecision | None = None,
+        comparison_decision_ref: str | None = None,
+    ) -> RecommendationDecisionV11:
+        """Build the server-owned recommendation successor.
+
+        The method accepts only candidate identities and a decision produced by
+        a registered server protocol.  It deliberately has no ``OptionDraft``
+        input, so an Agent's ``blocked_reason`` or preference cannot become a
+        trusted feasibility fact.
+        """
+
+        ids = tuple(candidate_option_ids)
+        cohort_hash = candidate_cohort_hash(ids)
+        if not evidence_pack_hashes:
+            raise RecommendationValidationError("v1.1 requires evidence pack hashes")
+        if (feasibility_decision is None) == (comparison_decision_ref is None):
+            raise RecommendationValidationError(
+                "exactly one server feasibility or comparison decision is required"
+            )
+
+        recommended: str | None = None
+        outcome = "insufficient_evidence"
+        reason_refs: tuple[str, ...] = ()
+        feasibility_ref: str | None = None
+        if feasibility_decision is not None:
+            if (
+                feasibility_decision.batch_id != batch_id
+                or feasibility_decision.generation_context_hash != generation_context_hash
+                or feasibility_decision.freshness_dependency_fingerprint
+                != freshness_dependency_fingerprint
+                or feasibility_decision.evidence_pack_hashes != tuple(evidence_pack_hashes)
+                or set(feasibility_decision.candidate_option_ids) != set(ids)
+                or feasibility_decision.candidate_cohort_hash != cohort_hash
+            ):
+                raise RecommendationValidationError(
+                    "feasibility decision does not cover the requested candidate cohort"
+                )
+            feasibility_ref = feasibility_decision.feasibility_decision_id
+            feasible = tuple(
+                item.option_id
+                for item in feasibility_decision.candidates
+                if item.outcome == "feasible"
+            )
+            if len(feasible) == 1:
+                outcome = "recommended"
+                recommended = feasible[0]
+            reason_refs = tuple(
+                sorted(
+                    {
+                        ref
+                        for item in feasibility_decision.candidates
+                        for ref in (*item.inspection_refs, *item.evidence_refs)
+                    }
+                )
+            )
+        seed = {
+            "batch_id": batch_id,
+            "candidate_cohort_hash": cohort_hash,
+            "outcome": outcome,
+            "recommended_option_id": recommended,
+            "feasibility_decision_ref": feasibility_ref,
+            "comparison_decision_ref": comparison_decision_ref,
+            "evidence_pack_hashes": tuple(evidence_pack_hashes),
+        }
+        return RecommendationDecisionV11(
+            recommendation_decision_id=f"rec11_{sha256_canonical(seed)[:24]}",
+            batch_id=batch_id,
+            generation_context_hash=generation_context_hash,
+            freshness_dependency_fingerprint=freshness_dependency_fingerprint,
+            evidence_pack_hashes=tuple(evidence_pack_hashes),
+            candidate_option_ids=ids,
+            candidate_cohort_hash=cohort_hash,
+            outcome=outcome,
+            recommended_option_id=recommended,
+            feasibility_decision_ref=feasibility_ref,
+            comparison_decision_ref=comparison_decision_ref,
+            reason_refs=reason_refs,
+        )
+
     @staticmethod
     def _decision(
         *,
@@ -264,9 +368,13 @@ class RecommendationValidator:
 
 
 __all__ = [
+    "candidate_cohort_hash",
+    "FeasibilityCandidateDecision",
+    "FeasibilityDecision",
     "ForecastRollingOriginProtocol",
     "ProtocolResult",
     "RecommendationProtocol",
+    "RecommendationDecisionV11",
     "RecommendationValidationError",
     "RecommendationValidator",
 ]

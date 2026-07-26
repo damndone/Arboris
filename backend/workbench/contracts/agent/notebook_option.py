@@ -27,6 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ...canonical import sha256_canonical
 from ..common.envelope import ContractError, freeze_json, require_exact_keys, thaw_json
 
 NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1"
@@ -35,6 +36,8 @@ NOTEBOOK_OPTION_V12_CONTRACT_VERSION = "1.2"
 OPTION_EXECUTION_CONTRACT_VERSION = "1.1"
 OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0"
+FEASIBILITY_DECISION_CONTRACT_VERSION = "1.0"
+RECOMMENDATION_DECISION_V11_CONTRACT_VERSION = "1.1"
 OPTION_MATERIALIZATION_CONTRACT_VERSION = "1.0"
 ARTIFACT_CONTRACT_VERSION = "1.0"
 
@@ -55,6 +58,7 @@ FRESHNESS_STATUSES = ("fresh", "stale", "revalidating")
 VALIDATION_STATUSES = ("valid", "invalid", "unvalidated")
 RISK_LEVELS = ("low", "medium", "high")
 RECOMMENDATION_OUTCOMES = ("recommended", "tied", "insufficient_evidence")
+FEASIBILITY_OUTCOMES = ("feasible", "blocked")
 
 # DEC-ART-001: only dimensions the artifact registry actually persists.
 ARTIFACT_MATCH_DIMENSIONS = ("artifact_id", "artifact_type", "count", "step")
@@ -115,6 +119,10 @@ def _require_optional_int(value: Any, field: str) -> int | None:
     if value is None:
         return None
     return _require_int(value, field, minimum=1)
+
+
+def _candidate_cohort_hash(option_ids: tuple[str, ...]) -> str:
+    return sha256_canonical({"candidate_option_ids": sorted(option_ids)})
 
 
 @dataclass(frozen=True)
@@ -749,6 +757,295 @@ class RecommendationDecision:
 
 
 @dataclass(frozen=True)
+class FeasibilityCandidateDecision:
+    """One server-owned feasibility result for a complete option cohort."""
+
+    option_id: str
+    protocol_id: str
+    protocol_version: str
+    inspection_refs: tuple[str, ...]
+    evidence_refs: tuple[str, ...]
+    outcome: str
+    reason_code: str
+
+    _KEYS = frozenset(
+        {
+            "option_id",
+            "protocol_id",
+            "protocol_version",
+            "inspection_refs",
+            "evidence_refs",
+            "outcome",
+            "reason_code",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        _require_str(self.option_id, "option_id")
+        _require_str(self.protocol_id, "protocol_id")
+        _require_str(self.protocol_version, "protocol_version")
+        inspection_refs = _require_string_tuple(self.inspection_refs, "inspection_refs")
+        evidence_refs = _require_string_tuple(self.evidence_refs, "evidence_refs")
+        if not inspection_refs or not evidence_refs:
+            raise NotebookContractError(
+                "feasibility candidates require inspection and evidence references"
+            )
+        object.__setattr__(self, "inspection_refs", inspection_refs)
+        object.__setattr__(self, "evidence_refs", evidence_refs)
+        _require_choice(self.outcome, FEASIBILITY_OUTCOMES, "outcome")
+        _require_str(self.reason_code, "reason_code")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "option_id": self.option_id,
+            "protocol_id": self.protocol_id,
+            "protocol_version": self.protocol_version,
+            "inspection_refs": list(self.inspection_refs),
+            "evidence_refs": list(self.evidence_refs),
+            "outcome": self.outcome,
+            "reason_code": self.reason_code,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "FeasibilityCandidateDecision":
+        require_exact_keys(value, cls._KEYS, "feasibility_candidate")
+        return cls(
+            option_id=value["option_id"],
+            protocol_id=value["protocol_id"],
+            protocol_version=value["protocol_version"],
+            inspection_refs=value["inspection_refs"],
+            evidence_refs=value["evidence_refs"],
+            outcome=value["outcome"],
+            reason_code=value["reason_code"],
+        )
+
+
+@dataclass(frozen=True)
+class FeasibilityDecision:
+    """Server-owned evidence that covers every candidate in one batch.
+
+    Agent payloads never populate this record.  A registered feasibility
+    protocol creates it after validating the complete cohort and its evidence.
+    """
+
+    feasibility_decision_id: str
+    batch_id: str
+    generation_context_hash: str
+    freshness_dependency_fingerprint: str
+    evidence_pack_hashes: tuple[str, ...]
+    candidate_option_ids: tuple[str, ...]
+    candidate_cohort_hash: str
+    candidates: tuple[FeasibilityCandidateDecision, ...]
+    validator_revision: str
+    contract_version: str = FEASIBILITY_DECISION_CONTRACT_VERSION
+
+    _KEYS = frozenset(
+        {
+            "contract_version",
+            "feasibility_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "evidence_pack_hashes",
+            "candidate_option_ids",
+            "candidate_cohort_hash",
+            "candidates",
+            "validator_revision",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        if self.contract_version != FEASIBILITY_DECISION_CONTRACT_VERSION:
+            raise NotebookContractError(
+                f"contract_version must be {FEASIBILITY_DECISION_CONTRACT_VERSION}"
+            )
+        for field in (
+            "feasibility_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "validator_revision",
+        ):
+            _require_str(getattr(self, field), field)
+        evidence_pack_hashes = _require_string_tuple(
+            self.evidence_pack_hashes, "evidence_pack_hashes"
+        )
+        candidate_option_ids = _require_string_tuple(
+            self.candidate_option_ids, "candidate_option_ids"
+        )
+        if not evidence_pack_hashes:
+            raise NotebookContractError("evidence_pack_hashes must not be empty")
+        if not candidate_option_ids:
+            raise NotebookContractError("candidate_option_ids must not be empty")
+        if len(set(candidate_option_ids)) != len(candidate_option_ids):
+            raise NotebookContractError("candidate_option_ids must be unique")
+        _require_digest(self.candidate_cohort_hash, "candidate_cohort_hash")
+        if self.candidate_cohort_hash != _candidate_cohort_hash(candidate_option_ids):
+            raise NotebookContractError(
+                "candidate_cohort_hash does not cover the complete candidate cohort"
+            )
+        if not isinstance(self.candidates, (tuple, list)):
+            raise NotebookContractError("candidates must be a tuple or list")
+        candidates = tuple(self.candidates)
+        if not candidates or any(not isinstance(item, FeasibilityCandidateDecision) for item in candidates):
+            raise NotebookContractError("candidates must contain feasibility decisions")
+        if tuple(item.option_id for item in candidates) != candidate_option_ids:
+            raise NotebookContractError(
+                "candidates must cover candidate_option_ids in the same order"
+            )
+        object.__setattr__(self, "evidence_pack_hashes", evidence_pack_hashes)
+        object.__setattr__(self, "candidate_option_ids", candidate_option_ids)
+        object.__setattr__(self, "candidates", candidates)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "feasibility_decision_id": self.feasibility_decision_id,
+            "batch_id": self.batch_id,
+            "generation_context_hash": self.generation_context_hash,
+            "freshness_dependency_fingerprint": self.freshness_dependency_fingerprint,
+            "evidence_pack_hashes": list(self.evidence_pack_hashes),
+            "candidate_option_ids": list(self.candidate_option_ids),
+            "candidate_cohort_hash": self.candidate_cohort_hash,
+            "candidates": [item.to_dict() for item in self.candidates],
+            "validator_revision": self.validator_revision,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "FeasibilityDecision":
+        require_exact_keys(value, cls._KEYS, "feasibility_decision")
+        candidates = value["candidates"]
+        if not isinstance(candidates, (tuple, list)):
+            raise NotebookContractError("candidates must be a tuple or list")
+        return cls(
+            feasibility_decision_id=value["feasibility_decision_id"],
+            batch_id=value["batch_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            evidence_pack_hashes=value["evidence_pack_hashes"],
+            candidate_option_ids=value["candidate_option_ids"],
+            candidate_cohort_hash=value["candidate_cohort_hash"],
+            candidates=tuple(FeasibilityCandidateDecision.from_dict(item) for item in candidates),
+            validator_revision=value["validator_revision"],
+            contract_version=value["contract_version"],
+        )
+
+
+@dataclass(frozen=True)
+class RecommendationDecisionV11:
+    """Recommendation successor with a server-owned decision reference."""
+
+    recommendation_decision_id: str
+    batch_id: str
+    generation_context_hash: str
+    freshness_dependency_fingerprint: str
+    evidence_pack_hashes: tuple[str, ...]
+    candidate_option_ids: tuple[str, ...]
+    candidate_cohort_hash: str
+    outcome: str
+    recommended_option_id: str | None
+    feasibility_decision_ref: str | None
+    comparison_decision_ref: str | None
+    reason_refs: tuple[str, ...]
+    contract_version: str = RECOMMENDATION_DECISION_V11_CONTRACT_VERSION
+
+    _KEYS = frozenset(
+        {
+            "contract_version",
+            "recommendation_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "evidence_pack_hashes",
+            "candidate_option_ids",
+            "candidate_cohort_hash",
+            "outcome",
+            "recommended_option_id",
+            "feasibility_decision_ref",
+            "comparison_decision_ref",
+            "reason_refs",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        if self.contract_version != RECOMMENDATION_DECISION_V11_CONTRACT_VERSION:
+            raise NotebookContractError(
+                f"contract_version must be {RECOMMENDATION_DECISION_V11_CONTRACT_VERSION}"
+            )
+        for field in (
+            "recommendation_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+        ):
+            _require_str(getattr(self, field), field)
+        for field in ("evidence_pack_hashes", "candidate_option_ids", "reason_refs"):
+            object.__setattr__(self, field, _require_string_tuple(getattr(self, field), field))
+        if not self.evidence_pack_hashes or not self.candidate_option_ids:
+            raise NotebookContractError("v1.1 decisions require evidence and candidates")
+        if len(set(self.candidate_option_ids)) != len(self.candidate_option_ids):
+            raise NotebookContractError("candidate_option_ids must be unique")
+        _require_digest(self.candidate_cohort_hash, "candidate_cohort_hash")
+        if self.candidate_cohort_hash != _candidate_cohort_hash(self.candidate_option_ids):
+            raise NotebookContractError("candidate_cohort_hash does not match candidates")
+        _require_choice(self.outcome, RECOMMENDATION_OUTCOMES, "outcome")
+        if self.outcome == "recommended":
+            selected = _require_str(self.recommended_option_id, "recommended_option_id")
+            if selected not in self.candidate_option_ids:
+                raise NotebookContractError("recommended_option_id must name a candidate option")
+        elif self.recommended_option_id is not None:
+            raise NotebookContractError(
+                "recommended_option_id must be null for tied or insufficient_evidence outcomes"
+            )
+        feasibility_ref = self.feasibility_decision_ref
+        comparison_ref = self.comparison_decision_ref
+        if feasibility_ref is not None:
+            _require_str(feasibility_ref, "feasibility_decision_ref")
+        if comparison_ref is not None:
+            _require_str(comparison_ref, "comparison_decision_ref")
+        if (feasibility_ref is None) == (comparison_ref is None):
+            raise NotebookContractError(
+                "exactly one of feasibility_decision_ref or comparison_decision_ref is required"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "recommendation_decision_id": self.recommendation_decision_id,
+            "batch_id": self.batch_id,
+            "generation_context_hash": self.generation_context_hash,
+            "freshness_dependency_fingerprint": self.freshness_dependency_fingerprint,
+            "evidence_pack_hashes": list(self.evidence_pack_hashes),
+            "candidate_option_ids": list(self.candidate_option_ids),
+            "candidate_cohort_hash": self.candidate_cohort_hash,
+            "outcome": self.outcome,
+            "recommended_option_id": self.recommended_option_id,
+            "feasibility_decision_ref": self.feasibility_decision_ref,
+            "comparison_decision_ref": self.comparison_decision_ref,
+            "reason_refs": list(self.reason_refs),
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "RecommendationDecisionV11":
+        require_exact_keys(value, cls._KEYS, "recommendation_decision_v11")
+        return cls(
+            recommendation_decision_id=value["recommendation_decision_id"],
+            batch_id=value["batch_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            evidence_pack_hashes=value["evidence_pack_hashes"],
+            candidate_option_ids=value["candidate_option_ids"],
+            candidate_cohort_hash=value["candidate_cohort_hash"],
+            outcome=value["outcome"],
+            recommended_option_id=value["recommended_option_id"],
+            feasibility_decision_ref=value["feasibility_decision_ref"],
+            comparison_decision_ref=value["comparison_decision_ref"],
+            reason_refs=value["reason_refs"],
+            contract_version=value["contract_version"],
+        )
+
+
+@dataclass(frozen=True)
 class OptionMaterialization:
     materialization_id: str
     option_id: str
@@ -1008,7 +1305,11 @@ __all__ = [
     "ArtifactContract",
     "EvidenceRef",
     "ExpectedArtifact",
+    "FEASIBILITY_DECISION_CONTRACT_VERSION",
+    "FEASIBILITY_OUTCOMES",
     "FRESHNESS_STATUSES",
+    "FeasibilityCandidateDecision",
+    "FeasibilityDecision",
     "LEGACY_LIFECYCLE_STATUSES",
     "LegacyNotebookOptionRevision",
     "LegacyOptionExecution",
@@ -1027,8 +1328,10 @@ __all__ = [
     "OptionExecution",
     "OptionExecutionV11",
     "RECOMMENDATION_DECISION_CONTRACT_VERSION",
+    "RECOMMENDATION_DECISION_V11_CONTRACT_VERSION",
     "RECOMMENDATION_OUTCOMES",
     "RecommendationDecision",
+    "RecommendationDecisionV11",
     "RISK_LEVELS",
     "VALIDATION_STATUSES",
     "freeze_json",
