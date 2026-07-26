@@ -61,7 +61,7 @@ def _admitted_records():
         scope_ref="project.alpha",
         minimum_evidence_tier="E2",
         allowed_operations=("fit",),
-        allowed_consumers=("report_projection",),
+        allowed_consumers=("report_projection", "notebook_option_planner"),
     )
     admitted = controller.admit(
         proposed.admission_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,11 @@ from workbench.agent.context_compiler import (
     generation_context_hash,
 )
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
-from workbench.agent.notebook.errors import OptionBatchInvalid, OptionRevisionStale
+from workbench.agent.notebook.errors import (
+    OptionBatchInvalid,
+    OptionRevisionStale,
+    OptionValidationFailed,
+)
 from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
 from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
@@ -139,6 +144,179 @@ def test_registered_capability_generates_a_materialize_only_v12_option(tmp_path:
         service.option_view(notebook.notebook_id, revision.option_id).current_revision,
         NotebookOptionRevisionV12,
     )
+
+
+def test_catalog_rejects_mismatched_or_unbounded_planner_projection(tmp_path: Path) -> None:
+    del tmp_path
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+
+    with pytest.raises(ValueError, match="key must match capability_id"):
+        catalog.register(
+            "custom.ols",
+            binding,
+            planner_projection={
+                "key": "other.capability",
+                "label": "wrong owner",
+                "artifact_types": {"result": "custom_json"},
+            },
+        )
+
+    with pytest.raises(ValueError, match="unsupported field"):
+        catalog.register(
+            "custom.ols",
+            binding,
+            planner_projection={
+                "key": "custom.ols",
+                "label": "wrong field",
+                "artifact_types": {"result": "custom_json"},
+                "entrypoint_ref": "secret-ref",
+            },
+        )
+
+    with pytest.raises(ValueError, match="notebook_proposal_adapters is invalid"):
+        catalog.register(
+            "custom.ols",
+            binding,
+            planner_projection={
+                "key": "custom.ols",
+                "label": "unhashable adapter",
+                "model_type": "ols",
+                "notebook_proposal_adapters": [[]],
+                "artifact_types": {"result": "custom_json"},
+            },
+        )
+
+    with pytest.raises(ValueError, match="planner_projection.params.value must be scalar"):
+        catalog.register(
+            "custom.ols",
+            binding,
+            planner_projection={
+                "key": "custom.ols",
+                "label": "nested authority data",
+                "model_type": "ols",
+                "params": [
+                    {
+                        "key": "model_options",
+                        "value": {"entrypoint_ref": "secret-ref"},
+                    }
+                ],
+                "artifact_types": {"result": "custom_json"},
+            },
+        )
+
+    restricted = replace(binding, allowed_operations=("inspect",))
+    restricted_catalog = CapabilityBindingCatalog(verifier=lambda _candidate: None)
+    restricted_catalog.register(
+        "custom.restricted",
+        restricted,
+        planner_projection={
+            "key": "custom.restricted",
+            "label": "not fit-authorized",
+            "model_type": "custom.restricted",
+            "artifact_types": {"result": "custom_json"},
+        },
+    )
+    with pytest.raises(ValueError, match="fit operation"):
+        restricted_catalog.planner_projection("custom.restricted")
+
+    consumer_restricted = replace(
+        binding,
+        allowed_consumers=("report_projection",),
+    )
+    consumer_catalog = CapabilityBindingCatalog(verifier=lambda _candidate: None)
+    consumer_catalog.register(
+        "custom.consumer_restricted",
+        consumer_restricted,
+        planner_projection={
+            "key": "custom.consumer_restricted",
+            "label": "not planner-authorized",
+            "model_type": "custom.consumer_restricted",
+            "artifact_types": {"result": "custom_json"},
+        },
+    )
+    with pytest.raises(ValueError, match="notebook_option_planner consumer"):
+        consumer_catalog.planner_projection("custom.consumer_restricted")
+
+
+def test_custom_projection_artifact_types_reach_service_contract(tmp_path: Path) -> None:
+    from workbench.capability_factory.notebook_binding import CapabilityResolutionBinding
+
+    project = make_project(tmp_path, name="project.alpha")
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.ols",
+        binding,
+        planner_projection={
+            "key": "custom.ols",
+            "label": "Verified custom OLS",
+            "model_type": "ols",
+            "params": [],
+            "artifact_types": {"custom.ols.result": "custom_json"},
+        },
+    )
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.create_notebook(
+        title="Custom projection",
+        created_by="test",
+        available_capabilities=["custom.ols"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    draft = OptionDraft(
+        rank=1,
+        rationale="custom projection artifact is server declared",
+        assumptions=("the admitted binding remains current",),
+        proposal=TypedProposal(
+            proposal_id="proposal_custom_projection",
+            operation_id="model.genesis",
+            target={"dataset_source_id": "a" * 64},
+            preconditions={
+                "context_version": "notebook-planning-context/v1",
+                "context_fingerprint": context.context_id,
+                "owner_resolution": "dataset_projection",
+            },
+            changes={
+                "model_params": {
+                    "model_type": "ols",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                }
+            },
+        ),
+        expected_artifacts=(
+            ExpectedArtifact(
+                "custom.ols.result",
+                "custom_json",
+                required=True,
+                count=1,
+            ),
+        ),
+        capability_id="custom.ols",
+        option_id="custom_projection_option",
+    )
+
+    _proposal, contract, _risk = service._prepare(notebook, context, draft)
+
+    assert contract.expected[0].artifact_id == "custom.ols.result"
+    assert isinstance(binding, CapabilityResolutionBinding)
+
+    mismatched = replace(
+        draft,
+        proposal=replace(
+            draft.proposal,
+            proposal_id="proposal_mismatched_model_identity",
+            changes={
+                "model_params": {
+                    "model_type": "logit",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                }
+            },
+        ),
+    )
+    with pytest.raises(OptionValidationFailed, match="model identity"):
+        service._prepare(notebook, context, mismatched)
 
 
 def test_unregistered_capability_keeps_the_existing_v11_path(tmp_path: Path) -> None:
@@ -295,3 +473,98 @@ def test_current_binding_is_rechecked_before_execution_callback(tmp_path: Path) 
             execution_status="succeeded",
             produced_artifacts=(),
         )
+
+
+def test_bound_option_revalidation_rechecks_current_binding_before_prepare(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    binding, verifier = _binding_and_verifier()
+    state = {"revoked": False}
+
+    def current_verifier(candidate):
+        if state["revoked"]:
+            raise ValueError("admission is no longer current")
+        verifier(candidate)
+
+    catalog = CapabilityBindingCatalog(verifier=current_verifier)
+    catalog.register("capability.registered", binding)
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.create_notebook(
+        title="Capability options",
+        created_by="user_1",
+        available_capabilities=["capability.registered"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    decision = _decision(context)
+    (first,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[_draft(capability_id="capability.registered")],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+
+    http_style_revision = service.revalidate_option(
+        notebook.notebook_id,
+        first.option_id,
+        context=context,
+        draft=_draft(
+            capability_id=None,
+            option_id=first.option_id,
+            proposal_id="proposal_http_style_revalidate",
+        ),
+    )
+    assert (
+        http_style_revision.capability_resolution_binding_ref
+        == binding.content_digest
+    )
+
+    state["revoked"] = True
+    with pytest.raises(OptionBatchInvalid) as caught:
+        service.revalidate_option(
+            notebook.notebook_id,
+            first.option_id,
+            context=context,
+            draft=_draft(
+                capability_id="capability.registered",
+                option_id=first.option_id,
+                proposal_id="proposal_revalidate",
+            ),
+        )
+
+    assert caught.value.code == "OPTION_CAPABILITY_BINDING_UNAVAILABLE"
+
+
+def test_service_rejects_bound_capability_without_fit_authorization(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    binding, _verifier = _binding_and_verifier()
+    restricted = replace(binding, allowed_operations=("inspect",))
+    catalog = CapabilityBindingCatalog(verifier=lambda _candidate: None)
+    catalog.register("capability.restricted", restricted)
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.create_notebook(
+        title="Restricted capability",
+        created_by="user_1",
+        available_capabilities=["capability.restricted"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    decision = _decision(context, option_id="opt_restricted")
+
+    with pytest.raises(OptionBatchInvalid) as caught:
+        service.propose_batch(
+            notebook.notebook_id,
+            context=context,
+            drafts=[
+                _draft(
+                    capability_id="capability.restricted",
+                    option_id="opt_restricted",
+                )
+            ],
+            batch_id=decision.batch_id,
+            recommendation_decision=decision,
+        )
+
+    assert caught.value.code == "OPTION_CAPABILITY_BINDING_UNAVAILABLE"

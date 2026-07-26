@@ -35,6 +35,7 @@ from ...contracts.agent.notebook_option import (
 from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
     CapabilityBindingCatalogError,
+    NOTEBOOK_OPTION_PLANNER_CONSUMER,
 )
 from ...capability_factory.notebook_binding import CapabilityResolutionBinding
 from ...lineage.run_family import (
@@ -1025,6 +1026,63 @@ class NotebookService:
         notebook = self.get_notebook(notebook_id)
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        current_binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        if current_binding_ref is not None:
+            if self.capability_bindings is None:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "a bound capability option requires a current server-owned binding",
+                    capability_id=draft.capability_id,
+                )
+            effective_draft = draft
+            if effective_draft.capability_id is None:
+                try:
+                    capability_id = self.capability_bindings.capability_id_for_reference(
+                        current_binding_ref,
+                        scope_candidates=(
+                            ("project", notebook.project_id),
+                            ("run_family", notebook.run_family_id),
+                        ),
+                    )
+                except CapabilityBindingCatalogError as error:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                        "the persisted capability binding cannot be resolved",
+                    ) from error
+                if capability_id is None:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                        "the persisted capability binding cannot be resolved",
+                    )
+                effective_draft = replace(draft, capability_id=capability_id)
+            else:
+                capability_id = effective_draft.capability_id
+            try:
+                current_binding = self.capability_bindings.resolve(
+                    capability_id,
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                )
+            except CapabilityBindingCatalogError as error:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not currently usable",
+                    capability_id=capability_id,
+                ) from error
+            if (
+                current_binding is None
+                or current_binding.content_digest != current_binding_ref
+            ):
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_REVALIDATION_MISMATCH",
+                    "a bound capability option must retain the same current binding",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                )
+            draft = effective_draft
+
         proposal, contract, risk_level = self._prepare(notebook, context, draft)
 
         if trace is not None:
@@ -1598,6 +1656,21 @@ class NotebookService:
                     "the server-owned capability binding is not currently usable",
                     capability_id=draft.capability_id,
                 ) from error
+            if binding is not None and "fit" not in binding.allowed_operations:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not authorized for fit",
+                    capability_id=draft.capability_id,
+                )
+            if (
+                binding is not None
+                and NOTEBOOK_OPTION_PLANNER_CONSUMER not in binding.allowed_consumers
+            ):
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not authorized for the Notebook option planner",
+                    capability_id=draft.capability_id,
+                )
             if binding is not None and recommendation_decision is None:
                 raise OptionBatchInvalid(
                     "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",
@@ -1606,6 +1679,61 @@ class NotebookService:
                 )
             resolved.append(binding)
         return tuple(resolved)
+
+    def _published_artifact_types(
+        self,
+        capability_id: str,
+        *,
+        scope_candidates: Sequence[tuple[str, str]] | None = None,
+    ) -> Mapping[str, str]:
+        """Merge native and current server-owned capability vocabulary."""
+
+        published = dict(capability_artifact_types(capability_id))
+        if self.capability_bindings is None:
+            return published
+        dynamic = self.capability_bindings.planner_artifact_types(
+            capability_id,
+            scope_candidates=scope_candidates,
+        )
+        if dynamic is not None:
+            published.update(dynamic)
+        return published
+
+    def _assert_capability_model_identity(
+        self,
+        notebook: Notebook,
+        draft: OptionDraft,
+        proposal: TypedProposal,
+    ) -> None:
+        """Keep a server-declared capability mapping explicit at the write seam."""
+
+        if self.capability_bindings is None or draft.capability_id is None:
+            return
+        projection = self.capability_bindings.planner_projection(
+            draft.capability_id,
+            scope_candidates=(
+                ("project", notebook.project_id),
+                ("run_family", notebook.run_family_id),
+            ),
+        )
+        if projection is None:
+            return
+        declared_model_type = projection["model_type"]
+        actual_model_type: Any = None
+        if proposal.operation_id == "model.genesis":
+            actual_model_type = (proposal.changes.get("model_params") or {}).get(
+                "model_type"
+            )
+        elif proposal.operation_id == "model.rerun":
+            from ...lineage.run_inputs import read_run_inputs
+            from ...repository.run_repository import _resolve_run_root
+
+            inputs = read_run_inputs(
+                _resolve_run_root(str(self.project_root), str(proposal.target["run_id"]))
+            )
+            actual_model_type = (inputs.get("form") or {}).get("model_type")
+        if actual_model_type != declared_model_type:
+            raise ValueError("CAPABILITY_MODEL_IDENTITY_MISMATCH")
 
     def _assert_current_capability_binding(self, revision: Any) -> None:
         """Re-check v1.2 authority before materialization or execution callbacks."""
@@ -1675,11 +1803,29 @@ class NotebookService:
                 operation_id=proposal.operation_id,
                 validation_issues=[{"code": code, "detail": str(error)}],
             ) from error
+        try:
+            self._assert_capability_model_identity(notebook, draft, proposal)
+        except Exception as error:
+            raise OptionValidationFailed(
+                "option capability model identity does not match the server declaration",
+                option_id=draft.option_id,
+                operation_id=proposal.operation_id,
+                validation_issues=[
+                    {
+                        "code": "CAPABILITY_MODEL_IDENTITY_MISMATCH",
+                        "detail": str(error),
+                    }
+                ],
+            ) from error
 
         contract = build_artifact_contract(
             draft.expected_artifacts,
-            additional_artifact_types=capability_artifact_types(
-                draft.capability_id or ""
+            additional_artifact_types=self._published_artifact_types(
+                draft.capability_id or "",
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
             ),
         )
         risk_level = _REGISTRY_RISK_TO_OPTION_RISK.get(definition.risk_level)

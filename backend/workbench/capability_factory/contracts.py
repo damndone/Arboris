@@ -11,7 +11,9 @@ from ..custom_capability.canonical import domain_digest
 
 
 CAPABILITY_FACTORY_SCHEMA_VERSION = "workbench_capability_factory_v1"
+NOTEBOOK_OPTION_PLANNER_CONSUMER = "notebook_option_planner"
 CONSUMER_SLOTS = (
+    NOTEBOOK_OPTION_PLANNER_CONSUMER,
     "report_projection",
     "diagnostic_adapter",
     "figure_provider",
@@ -109,6 +111,10 @@ def _content_digest(value: Any) -> str:
 def _consumer_map(value: Any, field: str) -> Mapping[str, str | None]:
     if not isinstance(value, Mapping):
         raise ContractError(f"{field} must declare every consumer slot")
+    # A new consumer slot is backward-compatible for persisted profiles: an
+    # omitted slot means explicit unsupported/null, never implicit support.
+    if NOTEBOOK_OPTION_PLANNER_CONSUMER not in value:
+        value = {**value, NOTEBOOK_OPTION_PLANNER_CONSUMER: None}
     keys = set(value)
     expected = set(CONSUMER_SLOTS)
     if keys != expected:
@@ -353,6 +359,7 @@ class ResolutionBinding:
 __all__ = [
     "CAPABILITY_FACTORY_SCHEMA_VERSION",
     "CONSUMER_SLOTS",
+    "NOTEBOOK_OPTION_PLANNER_CONSUMER",
     "TRUST_ORDER",
     "CandidateSet",
     "CapabilityRequirementRevision",

@@ -31,7 +31,10 @@ from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
 from ..agent.notebook.vocabulary import capability_artifact_types
 from ..agent.recipes.registry import build_option_vocabulary
-from ..capability_factory.notebook_catalog import CapabilityBindingCatalog
+from ..capability_factory.notebook_catalog import (
+    CapabilityBindingCatalog,
+    CapabilityBindingCatalogError,
+)
 
 router = APIRouter()
 
@@ -322,22 +325,71 @@ def _planning_agent(
         else "model.rerun"
     )
     source_model_type = _source_model_type(root, context)
+    server_projections: tuple[dict[str, Any], ...] = ()
+    if service.capability_bindings is not None:
+        notebook = service.get_notebook(notebook_id)
+        try:
+            server_projections = service.capability_bindings.planner_projections(
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                )
+            )
+        except CapabilityBindingCatalogError as error:
+            raise NotebookPlanningUnavailable(
+                "a server-owned capability planner projection is unavailable"
+            ) from error
+    server_manifest = {
+        str(item["key"]): dict(item)
+        for item in server_projections
+        if isinstance(item, Mapping) and isinstance(item.get("key"), str)
+    }
+    server_model_types = {
+        capability: str(item["model_type"])
+        for capability, item in server_manifest.items()
+    }
+    dynamic_artifact_types = {
+        capability: dict(item["artifact_types"])
+        for capability, item in server_manifest.items()
+        if isinstance(item.get("artifact_types"), Mapping)
+    }
+    candidate_capabilities = tuple(
+        dict.fromkeys((*context.available_capabilities, *server_manifest))
+    )
     catalog = {
         capability: {
-            **manifest[capability],
+            **(
+                manifest[capability]
+                if capability in manifest
+                else server_manifest[capability]
+            ),
+            "model_type": server_model_types.get(capability, capability),
             "notebook_proposal_adapters": [proposal_adapter],
             **_model_options_catalog_metadata(root, context, capability),
         }
-        for capability in context.available_capabilities
-        if capability in manifest
-        and capability_artifact_types(capability)
+        for capability in candidate_capabilities
+        if (
+            capability in manifest
+            or capability in server_manifest
+        )
         and (
-            proposal_adapter == "model.genesis"
-            or source_model_type is None
-            or capability == source_model_type
+            capability_artifact_types(capability)
+            or capability in dynamic_artifact_types
+        )
+        and (
+            capability not in server_manifest
+            or proposal_adapter in server_manifest[capability].get(
+                "notebook_proposal_adapters", [proposal_adapter]
+            )
         )
         and (
             proposal_adapter == "model.genesis"
+            or source_model_type is None
+            or server_model_types.get(capability, capability) == source_model_type
+        )
+        and (
+            proposal_adapter == "model.genesis"
+            or capability not in manifest
             or _supports_rerun_model_options(manifest[capability])
         )
     }
@@ -398,6 +450,7 @@ def _planning_agent(
     return NotebookPlanningAgent(
         adapter=OpenAICompatibleModelAdapter(config),
         capability_catalog=catalog,
+        capability_artifact_types=dynamic_artifact_types,
         inspection_executor=execute_inspections,
         proposal_validator=validate_proposal,
         available_inspections=tuple(INSPECTIONS),

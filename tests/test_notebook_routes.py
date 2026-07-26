@@ -21,7 +21,11 @@ from workbench.contracts.agent.notebook_option import (
     RecommendationDecision,
 )
 from workbench.lineage.upload_store import store_upload_bytes
-from workbench.http.notebook_routes import _supports_rerun_model_options
+from workbench.http.notebook_routes import (
+    _planning_agent,
+    _supports_rerun_model_options,
+    _trace,
+)
 from workbench.app import configure_notebook_capability_bindings
 
 
@@ -60,6 +64,71 @@ def test_run_notebook_catalog_only_advertises_model_packs_with_options_owner() -
     assert not _supports_rerun_model_options(
         {"params": [{"key": "x"}, {"key": "covariance"}]}
     )
+
+
+def test_real_planner_reads_current_server_owned_custom_projection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from test_notebook_capability_binding import _binding_and_verifier
+    from workbench.agent.notebook import NotebookService
+    from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+    from workbench.llm.config import LLMConfig
+
+    project = make_project(tmp_path, name="project.alpha")
+    upload_sha = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
+    )
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.ols",
+        binding,
+        planner_projection={
+            "key": "custom.ols",
+            "label": "Verified custom OLS",
+            "model_type": "ols",
+            "notebook_proposal_adapters": ["model.genesis"],
+            "params": [],
+            "artifact_types": {"custom.ols.result": "custom_json"},
+        },
+    )
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "data.csv",
+            "sheet_names": [],
+        },
+        created_by="test",
+        available_capabilities=["custom.ols"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    trace = _trace(project, notebook.notebook_id, notebook.run_family_id)
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes.load_llm_config",
+        lambda: LLMConfig(
+            base_url="https://provider.invalid",
+            api_key="test-key",
+            model="test-model",
+        ),
+    )
+
+    planner = _planning_agent(
+        project,
+        service,
+        notebook.notebook_id,
+        context,
+        trace,
+    )
+
+    assert "custom.ols" in planner.capability_catalog
+    assert planner.capability_catalog["custom.ols"]["label"] == "Verified custom OLS"
+    assert planner.capability_catalog["custom.ols"]["artifact_types"] == {
+        "custom.ols.result": "custom_json"
+    }
+    assert "binding" not in planner.capability_catalog["custom.ols"]
+    assert "entrypoint_ref" not in planner.capability_catalog["custom.ols"]
 
 
 def _drafts() -> list[dict]:

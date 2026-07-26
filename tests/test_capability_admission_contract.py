@@ -21,6 +21,7 @@ def _adapter():
         output_facets=("parameters", "predictions"),
         assumptions=(),
         consumers={
+            "notebook_option_planner": "planner.notebook_option.v1",
             "report_projection": "report.generic.v1",
             "diagnostic_adapter": None,
             "figure_provider": None,
@@ -46,6 +47,7 @@ def _adapter():
         trust_tier="generated_adapter",
         operations=("fit", "predict"),
         consumer_support={
+            "notebook_option_planner": "planner.notebook_option.v1",
             "report_projection": "report.generic.v1",
             "diagnostic_adapter": None,
             "figure_provider": None,
@@ -60,6 +62,7 @@ def _adapter():
         entrypoint_ref="b" * 64,
         operations=("fit", "predict"),
         consumer_support={
+            "notebook_option_planner": "adapter.planner.notebook_option.v1",
             "report_projection": "adapter.report.v1",
             "diagnostic_adapter": None,
             "figure_provider": None,

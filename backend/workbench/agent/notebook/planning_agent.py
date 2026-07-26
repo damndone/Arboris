@@ -419,6 +419,7 @@ class NotebookPlanningAgent:
         *,
         adapter: ModelAdapter,
         capability_catalog: Mapping[str, Any] | None = None,
+        capability_artifact_types: Mapping[str, Mapping[str, str]] | None = None,
         inspection_executor: InspectionExecutor | None = None,
         recommendation_validator: RecommendationValidator | None = None,
         operation_registry: OperationRegistry | None = None,
@@ -430,6 +431,11 @@ class NotebookPlanningAgent:
     ) -> None:
         self.adapter = adapter
         self.capability_catalog = dict(capability_catalog or {})
+        self._capability_artifact_types = {
+            str(capability_id): dict(artifact_types)
+            for capability_id, artifact_types in (capability_artifact_types or {}).items()
+            if isinstance(capability_id, str) and isinstance(artifact_types, Mapping)
+        }
         self.inspection_executor = inspection_executor
         self.recommendation_validator = recommendation_validator or RecommendationValidator(
             protocols={"forecast.v1": ForecastRollingOriginProtocol()}
@@ -448,6 +454,12 @@ class NotebookPlanningAgent:
         if model_timeout_s <= 0:
             raise ValueError("model_timeout_s must be positive")
         self.model_timeout_s = float(model_timeout_s)
+
+    def _published_artifact_types(self, capability_id: str) -> Mapping[str, str]:
+        dynamic = self._capability_artifact_types.get(capability_id)
+        if dynamic is not None:
+            return dynamic
+        return capability_artifact_types(capability_id)
 
     def plan(
         self,
@@ -477,9 +489,9 @@ class NotebookPlanningAgent:
             "declared_artifact_types": dict(DECLARED_ARTIFACT_TYPES),
             "capability_version": CAPABILITY_ARTIFACT_VOCABULARY_VERSION,
             "capability_artifact_types": {
-                capability_id: dict(capability_artifact_types(capability_id))
+                capability_id: dict(self._published_artifact_types(capability_id))
                 for capability_id in sorted(catalog)
-                if capability_artifact_types(capability_id)
+                if self._published_artifact_types(capability_id)
             },
             "required_expectations_must_use_declared_ids": True,
         }
@@ -1144,6 +1156,15 @@ class NotebookPlanningAgent:
                     raise NotebookPlanningContractError(
                         "model.genesis model_params must include model_type"
                     )
+                declaration = catalog.get(submission.capability_id) or {}
+                declared_model_type = declaration.get(
+                    "model_type", submission.capability_id
+                )
+                if model_type != declared_model_type:
+                    raise NotebookPlanningContractError(
+                        "model.genesis model_type does not match the server-declared "
+                        "capability model identity"
+                    )
                 y = model_params.get("y")
                 if not isinstance(y, str) or not y:
                     raise NotebookPlanningContractError(
@@ -1189,7 +1210,7 @@ class NotebookPlanningAgent:
                     )
             if not submission.evidence_refs:
                 raise NotebookPlanningContractError("every option needs at least one evidence ref")
-            published_artifacts = capability_artifact_types(submission.capability_id)
+            published_artifacts = self._published_artifact_types(submission.capability_id)
             if published_artifacts and not submission.expected_artifacts:
                 raise NotebookPlanningContractError(
                     "capability required artifact(s) missing: "
