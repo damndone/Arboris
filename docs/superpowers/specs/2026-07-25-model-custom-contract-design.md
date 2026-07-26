@@ -168,17 +168,23 @@ result = run(input_bundle, capability_spec)
 
 允许的 `kind` 首版为 `column | columns | scalar`。增加新 kind 必须升级契约，不能让作者代码通过自由 dict 猜语义。现有 `y/x` 角色只是兼容投影，不是通用根契约。
 
+首版边界必须诚实：graph、tensor、sparse matrix、event stream 等非表格输入，以及 `test | transform | solve` 等未注册 operation，返回版本化 typed gap（例如 `CUSTOM_CAPABILITY_INPUT_KIND_UNSUPPORTED` 或 `CUSTOM_CAPABILITY_OPERATION_UNSUPPORTED`）。不得把它们压平成 columns，也不得伪装成 `fit`/`predict` 来追求表面接入。扩展只能新增版本化 input-kind/operation vocabulary 及其校验、风险、输出和消费者语义。
+
 ### 3.3 样本身份
 
-服务端为每个输入观测分配不可变 `observation_id`。默认要求作者输出覆盖全部注入观测。
+服务端为每个输入观测分配不可变 `observation_id`。执行前只注册有界的 `InputObservationDeclaration`、输入 `IndexDeclaration` 与 `SampleSelectionPolicyRevision`：前两者绑定输入 bundle、角色、完整 observation-id 集合及顺序；selection policy 声明哪些执行期排除规则、reason code 和验证证据是允许的。执行前不假装知道运行期才确定的最终样本。
 
 若算法合法排除观测，作者必须返回：
 
-- 被使用的 `observation_id` 集合或 mask；
+- 本地 sample/index claim id；
+- 使用的 `SampleSelectionPolicyRevision`；
+- 被使用的精确 observation-id 集合或 mask；
 - 每个排除的类型化 reason code；
 - 必要时声明 group、time 或重复测量映射。
 
-服务端据此计算最终分析样本指纹。仅返回 `nobs <= 输入行数` 不足以证明样本身份。
+作者返回的是不受信任 `SampleClaim`/`IndexClaim`，不直接成为可信引用。服务端先验证集合、顺序、重复、越界和角色，再根据注册 selection policy 重新计算可确定的 hold-back/缺失规则，或验证执行期排除所需的有界证据；无法由服务端验证的 data-dependent exclusion 拒绝。通过后服务端签发 `TrustedSampleIdentity`/`TrustedIndexIdentity`，计算最终指纹，并把所有 output facet 的本地 refs 重写为可信 identity。仅返回 `nobs <= 输入行数` 或作者自报 reason 不足以证明样本身份。
+
+B0 v1 每次 invocation 只允许一个分析样本。所有 facet 的 `sample_ref` 必须解析到该样本；`index_ref` 只能表达同一 observation 集合的受信任顺序/映射。不同缺失处理、fold、horizon 或 posterior subset 需要多个样本语义时，整个输出以 `CUSTOM_CAPABILITY_MULTI_SAMPLE_UNSUPPORTED` 拒绝。多样本支持需要新的版本化声明契约，不能留给实现临场决定。
 
 序列输出必须声明 `index_ref` 和 `semantic_kind`；不能把任意同长度数组默认当成 fitted value 或普通 residual。
 
@@ -364,6 +370,8 @@ preview、validation、execute、结果 envelope、chain registry 和 rerun 必�
 
 posterior draws、bootstrap replicates、迭代次数、等价多解和 tied hyperparameters 不做逐字节比较。
 
+统计验证协议由服务端注册并版本化，至少固定 seed/stream 生成方式、最小重复次数、区间或 MCSE 计算、coverage/power、最大误接受率、允许失败率和 tolerance ceiling。作者只能声明能力性质和返回观测材料，不能提供或放宽 admission threshold；未知协议、低于最小重复数或超过 tolerance ceiling 一律 fail closed。
+
 ### 6.2 双跑的真实语义
 
 双跑可以是某个 evidence check，但不是所有能力的统一 admission 条件。验证器根据 profile 比较语义结果；生命周期成本按实际执行次数累计，并在确认前展示。
@@ -404,6 +412,8 @@ posterior draws、bootstrap replicates、迭代次数、等价多解和 tied hyp
 - 独立复核。
 
 服务器持有的 holdout 或变形案例不能提前暴露给作者代码。仅 E1 的 bundle 始终保持 `experimental` 和 `source_eligible=false`。
+
+E2/E3 独立性由服务端依据 provenance DAG 判断。与作者实现共享作者、生成会话、源码、expected 来源或关键依赖的材料不能仅凭不同文件名成为独立 oracle。最终 holdout 应隔离、轮换、限制尝试次数并只返回粗粒度反馈；泄漏或自适应探测会使对应 assessment 失效。
 
 ---
 
@@ -452,6 +462,24 @@ wheel-only 只减少构建期风险，不等于运行安全。
 CPU、内存、PID、墙钟和输出预算必须覆盖整个进程树。若某宿主无法提供声明的硬保证，则该 profile 不获得 admission，不能静默退化为当前 G3 或仅依赖可失败的 `RLIMIT_AS`。
 
 输出由父进程通过 no-follow descriptor 读取；拒绝符号链接、额外文件和总 quota 超限。
+
+### 8.5 支持宿主评估
+
+隔离后端“可发现”不等于宿主已受支持。服务端先计算稳定 `host_containment_subject_id`，覆盖 OS/kernel/架构、隔离后端绝对身份、profile、mount/runtime policy 与 harness；随后生成内容寻址、不可变的 `HostContainmentAssessment`，至少绑定：
+
+- OS、kernel、架构及其规范化身份；
+- 隔离后端的绝对路径、版本和 executable SHA；
+- profile、mount policy、runtime policy 与 harness digest；
+- 文件读取/枚举、网络、越界写、进程树、资源与输出摄取 canary 的完整结果；
+- assessment 规则版本和评估时间。
+
+Assessment 不携带可变 validity。服务端为同一 subject/assessment 追加 `HostContainmentValidityRecord`，包含单调 `validity_revision`、`effective_control_sequence`、authority、reason 与 evidence refs：
+
+```text
+valid → expired | revoked | superseded
+```
+
+终态不能恢复；重验通过会产生新 assessment 和新的 validity stream。每次真实执行前重新校验当前宿主 subject identity、assessment identity 与最新 validity revision；任一漂移或失效都在 dispatch reservation 前拒绝。B0 负责生成/验证这些对象；等 Capability Factory 接入 Core Trace 时，由 CF1 注册 `host_containment.assessed` 与 `host_containment.validity.changed` exact events，B0 不因此提前修改 Agent Trace。没有目标支持宿主上的真实全套 canary 证据时，B0 只能报告实现/单元测试完成，不能关闭 supported-host 验收，也不能静默降级到较弱 profile。
 
 ---
 
@@ -523,6 +551,9 @@ MODEL_REGISTRY["custom"] -> trusted dispatcher
 - `CUSTOM_CAPABILITY_CONTRACT_INVALID`
 - `CUSTOM_CAPABILITY_OUTPUT_BOUNDS_EXCEEDED`
 - `CUSTOM_CAPABILITY_SAMPLE_IDENTITY_MISMATCH`
+- `CUSTOM_CAPABILITY_MULTI_SAMPLE_UNSUPPORTED`
+- `CUSTOM_CAPABILITY_INPUT_KIND_UNSUPPORTED`
+- `CUSTOM_CAPABILITY_OPERATION_UNSUPPORTED`
 - `CUSTOM_CAPABILITY_SANDBOX_UNAVAILABLE`
 - `CUSTOM_CAPABILITY_HOST_READ_ISOLATION_UNAVAILABLE`
 - `CUSTOM_CAPABILITY_ENVIRONMENT_IDENTITY_MISMATCH`
@@ -545,6 +576,7 @@ MODEL_REGISTRY["custom"] -> trusted dispatcher
 - output facets 与全面边界校验
 - 服务端保留字段拒绝
 - observation identity
+- server-owned sample/index declarations 与可信引用重写
 - `handler_bundle_sha256` 纯契约与确定性构造
 
 首版实现 facets 为 `parameter_table`、`metric_set`、`indexed_series`、`structured_artifact`。这不表示所有消费者都已支持它们。
@@ -553,6 +585,7 @@ MODEL_REGISTRY["custom"] -> trusted dispatcher
 
 - `exact | numeric | statistical` profile；
 - 分字段 comparator；
+- server-owned statistical protocol thresholds；
 - E0/E1/E2/E3 服务端派生规则；
 - 作者自测与独立 evidence packet 分离；
 - E1 强制 `experimental`、`source_eligible=false`。
@@ -563,6 +596,7 @@ MODEL_REGISTRY["custom"] -> trusted dispatcher
 - deny-by-default 文件读取；
 - 密封解释器、依赖、输入、harness 和输出；
 - host-read canary；
+- 不可变 `HostContainmentAssessment`、append-only `HostContainmentValidityRecord` 与 execute 前身份重验；
 - 进程树资源策略与 fail-closed admission；
 - 有界 stdout、stderr、JSON 和输出文件。
 
@@ -655,11 +689,14 @@ B0 只有同时满足以下条件才算完成：
 - 通用 fixture 证明契约不依赖特定模型家族；
 - 服务端身份和作者输出边界 fail closed；
 - 样本身份可验证；
+- 作者提供的 sample/index 本地引用只能经服务端声明校验后重写；
 - exact/numeric/statistical 三种 profile 都有正反测试；
+- statistical admission threshold 不能由作者放宽；
 - E1 不能越权为 verified 或 source-eligible；
-- host-read canary、网络与写盘 canary 全部通过；
+- 目标支持宿主上的 host-read、目录枚举、网络、写盘、进程树与资源 canary 全部通过，并固化不可变 `HostContainmentAssessment` 与有效 `HostContainmentValidityRecord`；
 - runtime bundle 身份覆盖全部声明组成；
 - 无支持的隔离后端时诚实拒绝；
+- 非表格 input kind 与未注册 operation 返回 typed gap，不做隐式压平或伪装；
 - 未接 Agent、registry、dependency、workflow 或 promotion；
 - 当前开发线的正式 FMS scope、事件流和 Context Pack 验证通过。
 

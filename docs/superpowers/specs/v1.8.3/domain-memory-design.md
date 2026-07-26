@@ -140,11 +140,18 @@ Workbench 不把“Agent 记忆”实现成一个不断追加、默认跨项目�
 
 ## 4. 领域记忆契约
 
-示意结构：
+正式条目拆成四类对象：
+
+1. 不可变 `DomainMemoryContentRevision`：lesson、作用域、适用谓词、provenance summary refs 与冲突；
+2. 不可变 `SourceAccessBinding` + append-only `SourceAccessValidityRecord`：服务端可解析的来源授权身份，与去敏 snapshot payload 分离；
+3. 不可变 `DomainMemoryApprovalRecord`：对确切 content hash/revision/scope 的批准；
+4. append-only `MemoryValidityRecord`：表达该批准内容当前是否仍可检索。
+
+内容 revision 示意结构：
 
 ```json
 {
-  "contract_version": "domain_memory_entry_v1",
+  "contract_version": "domain_memory_content_revision_v1",
   "memory_id": "server-issued-stable-id",
   "revision": 4,
   "namespace_id": "server-owned-namespace",
@@ -168,19 +175,15 @@ Workbench 不把“Agent 记忆”实现成一个不断追加、默认跨项目�
     "kind": "candidate_retrieval_hint",
     "target_refs": ["registered-capability-or-inspection-id"]
   },
-  "source_trace_refs": [
+  "source_summary_refs": [
     {
       "project_pseudonym": "scoped-reference",
-      "trace_summary_hash": "sha256",
-      "evidence_refs": ["content-addressed-ref"]
+      "summary_snapshot_ref": "content-addressed-redacted-summary",
+      "summary_schema_version": "bounded-summary-v1",
+      "source_access_binding_ref": "opaque-server-control-ref"
     }
   ],
   "evidence_status": "observed_repeatedly",
-  "approved_by": "user-or-authority-ref",
-  "approved_at": "timestamp",
-  "approval_signature_ref": "server-owned-approval-record",
-  "status": "active",
-  "valid_from": "timestamp",
   "review_after": "timestamp",
   "supersedes_revision": 3,
   "conflicts_with": ["memory-id@revision"],
@@ -197,13 +200,35 @@ Workbench 不把“Agent 记忆”实现成一个不断追加、默认跨项目�
 - `applicability_predicates` 是检索 hard gate，不只是一段文本；
 - `compact_lesson` 有字数与敏感信息上限；
 - `recommended_effect` 只能使用注册的有限 effect 类型；
-- `source_trace_refs` 必须能回到有界证据摘要；
+- `source_summary_refs` 只能引用独立去敏、内容寻址、不可反向展开为 raw Artifact/Trace payload 的有界 summary snapshot；
 - `evidence_status` 只描述记忆材料，不等于 capability E0–E3；
-- `status` 为 `active | stale | archived`；
 - `conflicts_with` 显式表达不能同时无条件应用的条目；
 - 任一语义字段变化产生新 revision 和 content hash。
 
-`content_hash` 覆盖待批准内容、作用域和 provenance，但排除 `approved_by`、`approved_at` 与 `approval_signature_ref`，避免循环身份；批准记录签署 `content_hash + revision + scope + approver + timestamp`。扩大 visibility 或 promotion scope 必须产生新 revision，并在目标 scope 通过独立授权。复制相同正文到更宽 namespace 不能复用原批准签名。
+`content_hash` 覆盖待批准内容、作用域和 provenance summary refs，不包含 approval 或 lifecycle。批准记录签署 `content_hash + revision + scope + approver + timestamp`。扩大 visibility 或 promotion scope 必须产生新 content revision，并在目标 scope 通过独立授权。复制相同正文到更宽 namespace 不能复用原批准签名。
+
+`SourceAccessBinding` 不暴露 raw payload、项目路径或可下载对象；它只由服务端解析，并不可变地钉住：
+
+- 确切 `summary_snapshot_ref`、snapshot hash 与 summary schema revision；
+- redaction assessment ref、其 subject hash 与 PII review；
+- 来源对象的服务端 identity、owner/organization/profile、namespace/scope；
+- grant identity 与 source tombstone/deletion identity。
+
+其 `SourceAccessValidityRecord` 在 scope control stream 中 append-only：
+
+```text
+valid → revoked | deleted | tainted | superseded
+```
+
+snapshot hash 证明去敏内容身份，SourceAccessBinding 证明该确切 snapshot 当前是否仍有权使用；两者缺一不可。dereference 必须交叉验证 content revision 中的 snapshot ref/hash/schema 与 binding identity，拒绝把 S1 binding 与 S2 snapshot 混配。内容相同或 hash 相同不能复用其他 namespace 的 access binding。
+
+每个 `(memory_id, namespace_id, visibility_scope, promotion_scope)` 具有服务端 scope control stream。`DomainMemoryApprovalRecord` 通过 compare-and-swap 钉住 `expected_current_approval_ref`，获得单调 `grant_control_sequence` 并显式 `supersedes_approval_ref`。`MemoryValidityRecord` 绑定 approval/content identity、单调 per-approval revision、scope `control_sequence`、`effective_at`、reason、authority 和 evidence refs，状态只允许：
+
+```text
+active → stale | archived
+```
+
+检索时先选择 scope control stream 中最高 `grant_control_sequence` 的 current approval，再读取只属于该 approval 的最新 validity；延迟到达的旧 approval validity 不能改变 current grant。`stale` 或 `archived` 不能原地恢复为 active。复核后恢复必须以 CAS 创建 superseding approval 和新的 active validity stream；若正文、谓词、scope 或 provenance 变化，还必须先创建新的 content revision。
 
 ### 4.2 首版 `memory_kind`
 
@@ -311,7 +336,7 @@ proposed → needs_review → approved | rejected | expired
 当 `cross_project_domain_memory_use=true`：
 
 1. 按用户、组织、项目策略和 store namespace 做硬隔离；
-2. 只取 `active` 且未过 review/expiry gate 的 revision；
+2. 只取最新 `MemoryValidityRecord=active` 且未过 review/expiry gate 的 content/approval revision；
 3. 计算 applicability predicates；
 4. 排除与当前事实冲突或依赖已撤销能力的条目；
 5. 检测 `conflicts_with` 和同主题互斥规则；
@@ -320,6 +345,8 @@ proposed → needs_review → approved | rejected | expired
 8. Context Compiler 将实际注入内容写入 manifest/hash。
 
 结构化适用谓词是 hard gate。语义检索或全文检索只可在通过 hard gate 的集合内帮助排序，不能把不适用条目拉进上下文。
+
+每次读取条目或解引用 `source_summary_refs` 都必须重新执行 current approval、memory validity、`SourceAccessBinding`/validity 与 owner/organization/profile/visibility ACL 检查；entry 被命中不授予其来源对象访问权。summary snapshot 不得携带 raw Artifact ref、可恢复项目路径、原始 row id 或可展开到未去敏 payload 的引用。来源删除、授权撤销、PII taint 或 scope 改变会使 SourceAccess validity 与 memory validity fail closed，并追加 stale；相同 content hash 不能跨 namespace 复用 ACL 结果。
 
 ### 7.2 排序信号
 
@@ -367,9 +394,9 @@ Agent 必须把记忆当作待当前项目证据验证的提示。
 ### 8.1 状态
 
 ```text
-active → stale → active
-active | stale → archived
-archived → new revision under explicit restore
+active → stale | archived
+stale → new approval + new active validity stream after explicit re-review
+archived → new approval + new active validity stream after explicit restore
 ```
 
 `stale` 表示可能仍有历史价值，但不能自动注入正常规划。触发条件包括：
@@ -380,6 +407,8 @@ archived → new revision under explicit restore
 - 适用谓词 schema 变化；
 - 来源 Trace 或 evidence 被依法删除；
 - 用户标记不再适用。
+
+restore/re-review 不修改旧 validity。正文、谓词、scope 与 provenance 完全不变时可复用同一 immutable content revision，但必须创建 superseding approval/current grant；任一语义字段变化才创建新 content revision。
 
 ### 8.2 冲突处理
 
@@ -400,6 +429,8 @@ archived → new revision under explicit restore
 - 每次查询都带 scope predicate，store 层拒绝无 scope 查询；
 - 项目 pseudonym 不能反推出本地路径、客户名或原始标识；
 - source summary 在候选生成前执行敏感信息扫描和预算限制；
+- 正式 memory 只保留独立去敏、不可反向展开的 summary snapshot；禁止 raw Artifact/Trace payload ref；
+- 每次 summary 解引用重新执行 owner/organization/profile ACL、latest validity、删除/撤销与 PII taint 检查；
 - 跨项目条目默认不携带具体数值，确有必要时使用去标识、带单位和适用范围的有界统计；
 - 组织共享需要独立的提升和撤销授权，个人批准不能自动变成组织记忆；
 - 导出、删除、停用、查看 provenance 和查看使用记录是用户可操作能力。
@@ -461,6 +492,30 @@ Workbench 增加更强边界：
 
 最后一项说明仅依赖路径或 profile 目录做隔离存在泄漏风险。Workbench 把它当作边界测试输入，不把公开 issue 当成 Hermes 全部版本都必然存在同一缺陷的证明。
 
+### 11.1 Versioned Trace event catalog
+
+现有 Core Trace 拒绝未知 event type 与额外字段。任何 MEM 切片写 Trace 前必须冻结 exact payload schema。v1 catalog 的稳定事件名和最小 payload refs 为：
+
+| Owner | Event type | Required payload refs |
+|---|---|---|
+| MEM1 | `project_memory.index.built` | `index_ref`, `source_manifest_ref`, `outcome` |
+| MEM1 | `project_memory.index.freshness_checked` | `index_ref`, `freshness_ref`, `outcome` |
+| MEM1 | `project_memory.context_fallback` | `source_manifest_ref`, `reason`, `outcome` |
+| MEM2 | `domain_memory.preference.changed` | `preference_ref`, `scope_ref`, `to_status` |
+| MEM2 | `domain_memory.candidate.created` | `candidate_ref`, `summary_manifest_ref` |
+| MEM2 | `domain_memory.content.created` | `content_revision_ref`, `content_hash` |
+| MEM2 | `domain_memory.source_access.validity_changed` | `source_access_binding_ref`, `validity_ref`, `to_status` |
+| MEM2 | `domain_memory.approval.recorded` | `approval_ref`, `content_revision_ref`, `outcome` |
+| MEM2 | `domain_memory.validity.changed` | `approval_ref`, `validity_ref`, `to_status` |
+| MEM2 | `domain_memory.retrieval.completed` | `retrieval_ref`, `scope_ref`, `outcome` |
+| MEM3 | `domain_memory.review.completed` | `review_ref`, `candidate_or_content_ref`, `outcome` |
+| MEM3 | `domain_memory.conflict.recorded` | `conflict_ref`, `content_revision_refs` |
+| MEM3 | `domain_memory.usage.recorded` | `content_revision_ref`, `context_manifest_ref`, `effect_kind` |
+
+每个事件的 `payload_schema` 使用对应的 kebab-case `/v1` 标识；表中字段是 required exact keys，只有 implementation plan 预先冻结的 bounded optional keys 可进入实现。正文与大对象只使用 content-addressed refs。
+
+每条 schema 声明 bounded fields、redaction projection、content refs、scope、producer 和 replay/idempotency key。各切片只增加自己拥有的事件，并测试未知字段、未知版本、跨 scope replay、超限与敏感字段拒绝。Trace 只引用 memory identity/summary，不复制正文、raw Artifact 或任意 curator payload；如需统一 Trace v2，必须先作为独立 prerequisite 验收。
+
 ## 12. 失败语义
 
 稳定错误类别：
@@ -474,6 +529,8 @@ Workbench 增加更强边界：
 - `DOMAIN_MEMORY_ENTRY_STALE`
 - `DOMAIN_MEMORY_ENTRY_CONFLICTED`
 - `DOMAIN_MEMORY_SOURCE_UNAVAILABLE`
+- `DOMAIN_MEMORY_SOURCE_ACCESS_REVOKED`
+- `DOMAIN_MEMORY_SOURCE_TAINTED`
 - `DOMAIN_MEMORY_CANDIDATE_REDACTION_FAILED`
 - `DOMAIN_MEMORY_APPROVAL_REQUIRED`
 - `DOMAIN_MEMORY_BUDGET_EXCEEDED`
@@ -497,11 +554,15 @@ Workbench 增加更强边界：
 - `cross_project_domain_memory_iteration` 关闭时不生成候选；
 - `cross_project_domain_memory_use` 关闭时 context manifest 不含领域条目；
 - 未批准候选不能被检索；
-- revision append-only，旧 revision 可追踪；
-- active/stale/archived 转换与恢复有明确授权；
+- content/approval revision 与 validity stream 各自 append-only，旧对象可追踪；
+- scope control sequence、approval supersession 与 current-grant CAS 保证每个 scope 恰有一个当前批准；旧流延迟事件不影响新批准；
+- stale/archived 不可原地变回 active；恢复需要复审和新的 approval/validity，正文不变可复用 content revision，内容或 scope 变化才需新 content revision；
 - scope 缺失或不匹配 fail closed；
 - path/profile 名相同不能造成跨 namespace 泄漏；
-- source refs 缺失、删除或冲突时条目 stale；
+- 每次 summary dereference 重新执行 owner/organization/profile ACL；
+- snapshot payload 与 `SourceAccessBinding` 分离；binding validity 撤销/删除/taint 会阻止相同 snapshot 继续使用；
+- binding 必须钉住确切 snapshot/hash/schema/redaction subject/source/scope；S1 binding 与 S2 snapshot 交叉替换 fail closed；
+- raw Artifact ref、可展开 payload、跨 scope 同 hash 复用、已删除/撤销或 PII-tainted 来源均 fail closed，并使条目 stale；
 - 预算、敏感信息和过长文本被拒绝而非静默截断成错误结论。
 
 ### 13.3 不越权
@@ -525,17 +586,17 @@ Workbench 增加更强边界：
 
 ### MEM2
 
-- 定义 domain entry、candidate、revision 和 store scope；
+- 定义 domain content revision、SourceAccess binding/validity、approval/current-grant control、memory validity、candidate 和 store scope；
 - 实现两个用户开关；
 - 实现手动创建/批准/归档/删除；
-- 实现有 provenance 的 bounded retrieval；
-- 完成跨 namespace 隔离测试。
+- 实现只引用独立去敏 summary snapshot 的 bounded retrieval 与每次解引用 ACL；
+- 完成跨 namespace、同 hash、删除/撤销和 PII taint 隔离测试。
 
 ### MEM3
 
 - 增加无 shell/network/raw-data 的后台审阅器；
 - 只提交候选；
-- 增加冲突检测、review_after 和 stale workflow；
+- 增加冲突检测、review_after、stale 与显式复审恢复 workflow；
 - 增加用户可见的来源与使用记录。
 
 ### 后续而非 v1.8.3 默认范围

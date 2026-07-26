@@ -1,3 +1,9 @@
+# Frozen Context Pack
+
+Line: `v1-8-3-design-review-corrections`
+Baseline SHA: `285461693a5938b4602d5976a7b8579294b3db6a`
+
+## Objective
 # v1.8.3 Capability Factory 与双层领域记忆范围目标
 
 **状态**：范围已批准；本文件用于冻结设计开发线，不代表产品能力已实现
@@ -43,7 +49,20 @@
 - 推荐“首选”必须来自已注册的支配/比较协议；并列或不可比时不得伪造唯一首选；
 - Project/RunFamily 记忆是 Graph/Trace/Option 的可重建索引，不是隐藏事实源；
 - 跨项目记忆具有 provenance、作用域、修订、状态、冲突和显式用户批准；
-- capability admission 与 domain memory 都把不可变内容/决定和 append-only validity 分离；
-- CF1/CF2 可在没有 CF4 Option/Draft/Run 消费者时独立验收，真实负面传播统一由 CF4 验收；
-- 非表格输入、未注册 operation 和未声明 consumer 返回 typed gap，不为表面接入做隐式压平或能力伪装；
 - 所有新增文档通过结构、链接、边界和反过拟合自审，正式 FMS 记录可验证。
+
+## Boundary
+- Affected paths: `docs/superpowers/specs/2026-07-25-model-custom-contract-design.md`, `docs/superpowers/specs/2026-07-25-custom-capability-foundation-objective.md`, `docs/superpowers/specs/v1.8.3/README.md`, `docs/superpowers/specs/v1.8.3/capability-factory-design.md`, `docs/superpowers/specs/v1.8.3/domain-memory-design.md`, `docs/superpowers/specs/v1.8.3/scope-objective.md`
+- Allowed paths: `docs/superpowers/specs/2026-07-25-model-custom-contract-design.md`, `docs/superpowers/specs/2026-07-25-custom-capability-foundation-objective.md`, `docs/superpowers/specs/v1.8.3/README.md`, `docs/superpowers/specs/v1.8.3/capability-factory-design.md`, `docs/superpowers/specs/v1.8.3/domain-memory-design.md`, `docs/superpowers/specs/v1.8.3/scope-objective.md`
+- Protected paths: `backend`, `frontend`, `scripts`, `tests`, `docs/superpowers/plans`, `.agent/devlines/v1-8-3-b0-runtime-implementation`, `.agent/devlines/v1-8-3-implementation-planning-review`
+- Dependencies: `backend/workbench/agent/workflow_contracts.py`, `backend/workbench/agent/notebook/recommendation.py`, `backend/workbench/agent/notebook/materialization.py`, `backend/workbench/agent/notebook/artifact_contract.py`, `backend/workbench/agent/trace.py`, `backend/workbench/contracts/agent/notebook_option.py`
+- Tests: `PYTHONPATH=backend .venv/bin/pytest -q tests/test_no_exercise_specific_naming.py`, `git diff --check`, `LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 .venv/bin/python scripts/devline_control.py verify --line v1-8-3-design-review-corrections`
+- Known gates: `Resolve the double-review findings without modifying product code, tests, implementation plans, or the B0 implementation line.`, `CF1 and CF2 completion criteria must not depend on CF4-only Option, Draft, or Run consumers.`, `All mutable validity and lifecycle state must be append-only and separate from immutable content identity.`, `Do not push, open a PR, merge, tag, or release without explicit user authorization.`
+
+## Rules
+```json
+{"candidate_rules":[],"candidate_rules_sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945","global_rules":{"rules":[],"schema_version":1},"global_rules_sha256":"994a863c694e05021d65d0f8b862f24a28da461080286b7b35d1695ee0775fdc","rules_sha256":"c43d07b614106c511776da60664c80b2b1d5f27cc62ddece26aa4e6761474c5c"}
+```
+
+## Selected historical lessons
+No matching completed retrospective was selected.

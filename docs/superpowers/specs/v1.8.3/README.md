@@ -77,7 +77,10 @@ Draft → Graph → Run → Artifact → Trace
 - 实现来源、适用条件、消费者能力、比较协议；
 - 确定性可行性过滤与固定优先级解析；
 - 同级实现并列时保存 ResolutionSet，并由独立实现选择决议产生唯一 binding；
-- 证据等级和准入状态分轴。
+- 证据等级和准入状态分轴；
+- 以独立 binding/freshness API 和通用 serializable control-plane CAS primitive 对无效 host、bundle、evidence、admission 或 runtime policy fail closed。
+
+CF1 的完成不依赖 Notebook Option、Draft 或 Run。它证明 Registry、Resolver、不可变 binding、统一 validity cursor 和通用 compare-and-append primitive 自身闭合；CF4 是唯一把该 primitive 用于真实 `DispatchReservation` 的消费者。
 
 ### CF2 — 依赖构建与 Bundle Admission
 
@@ -85,7 +88,10 @@ Draft → Graph → Run → Artifact → Trace
 - 版本、哈希、平台和传递依赖锁定；
 - 许可证、漏洞、来源和 SBOM 检查；
 - 隔离构建、CAS bundle、离线适配测试；
-- 明确的人类批准与撤销。
+- 明确的人类批准与撤销；
+- 以 bundle admission/runner gate 证明 lock drift、撤销或安装树身份变化会阻止后续 dispatch。
+
+CF2 的完成不依赖 Option stale 或 Draft execute。真实 Option/Draft/Run 的负面传播只在 CF4 验收。
 
 ### CF3 — Adapter Factory 与算法验证
 
@@ -98,8 +104,9 @@ Draft → Graph → Run → Artifact → Trace
 
 - `model.custom` 作为首个可信类型化适配器；
 - 复用现有 RecommendationDecision，并以版本化 Notebook Option/执行授权扩展接入；
+- 冻结并消费 CF1–CF3 已验收的 binding、validity、bundle、evidence 和 consumer adapter contracts，不在接入层重新解释；
 - 已准入能力可在一次普通“确认并运行”中走完受限全流程；
-- 组合授权使用原子 receipt、唯一 Run intent 和可恢复重放语义；
+- 组合授权使用原子 receipt、序列化 dispatch reservation、唯一 Run intent、durable executor handle 和可恢复重放语义；
 - dependency、作者代码、准入和 promotion 继续使用独立高风险确认；
 - materialize 后仍走 Draft → Run → Artifact，不建立 Notebook 执行器。
 
@@ -139,13 +146,17 @@ Draft → Graph → Run → Artifact → Trace
 
 ## 6. 与 `WORKFLOW_STEP_SPEC_CONTRACTS` 的关系
 
-`WORKFLOW_STEP_SPEC_CONTRACTS` 继续是通用 workflow 的单一协议来源，统一生成：
+`WORKFLOW_STEP_SPEC_CONTRACTS` 继续是通用 workflow 的单一协议来源。CF4 接入前必须先把 contract record 一次性泛化为同时持有：
 
-- 校验器允许的 step type 与字段；
+- step type、required/optional 字段、字段类型与 exact-key schema；
+- 语义 validator、引用解析器、列/角色提取器；
+- 风险分类、确认要求、output schema 与受信任 dispatcher；
 - 拒绝消息中的合法词表；
 - 发布给 Agent 的协议提示。
 
-Capability Factory 不建立平行的自由 step 入口。只有已经准入、具有稳定 operation contract、风险边界和服务端 dispatcher 的能力，才可在后续切片中通过修改这一处进入通用 workflow。
+在完成这次泛化之前，不得声称“新增 step 只改一处”，现有 validator/runtime 中的硬编码分支仍是待迁移事实。泛化完成后，contract table 是唯一**注册与协议投影入口**：新 operation 仍需要实现受信任 validator/dispatcher/column extractor，但只能由一条 contract record 引用并接入生成链；错误消息、Agent 词表、风险与 runtime dispatch 不得另建注册表或 `if operation_id` 旁路。
+
+Capability Factory 不建立平行的自由 step 入口。只有已经准入、具有稳定 operation contract、风险边界和服务端 dispatcher 的能力，才可在 CF4 进入通用 workflow。
 
 以下对象永远不能作为普通 workflow step 的自由 payload：
 
@@ -166,3 +177,5 @@ v1.8.3 的“设计完成”与“产品完成”必须分开报告。
 - 没有为某一示例结果或单一算法收窄根契约。
 
 产品完成仍需每个切片各自建立正式开发线、实现、测试、隔离验证、浏览器验收（如有 UI）和发布授权。任何切片通过都不能代替其他切片的验收。
+
+各切片完成标准必须只引用该切片已存在的 producer API 或其上游冻结契约。CF1/CF2 不得用 CF4 才存在的 Option、Draft、Run 行为证明完成；CF4 负责真实消费者负面传播和端到端接入。
