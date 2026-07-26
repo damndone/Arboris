@@ -28,9 +28,15 @@ import pandas as pd
 from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
+    NotebookOptionRevisionV12,
     OptionExecution,
     RecommendationDecision,
 )
+from ...capability_factory.notebook_catalog import (
+    CapabilityBindingCatalog,
+    CapabilityBindingCatalogError,
+)
+from ...capability_factory.notebook_binding import CapabilityResolutionBinding
 from ...lineage.run_family import (
     RunFamilyStore,
     assert_run_in_family,
@@ -180,10 +186,16 @@ class NotebookService:
         project_root: Path | str,
         *,
         registry: OperationRegistry | None = None,
+        capability_bindings: CapabilityBindingCatalog | None = None,
     ) -> None:
         self.project_root = Path(project_root)
         self.store = NotebookStore(self.project_root)
         self.registry = registry or OperationRegistry()
+        if capability_bindings is not None and not isinstance(
+            capability_bindings, CapabilityBindingCatalog
+        ):
+            raise TypeError("capability_bindings must be a CapabilityBindingCatalog")
+        self.capability_bindings = capability_bindings
 
     # ------------------------------------------------------------------
     # Notebooks
@@ -532,6 +544,11 @@ class NotebookService:
             )
 
         self._assert_batch_shape(drafts)
+        bindings = self._resolve_capability_bindings(
+            notebook,
+            drafts,
+            recommendation_decision=recommendation_decision,
+        )
         prepared = [self._prepare(notebook, context, draft) for draft in drafts]
 
         # An explicit Agent replan is a revalidation episode for any provider
@@ -557,6 +574,7 @@ class NotebookService:
                     drafts=drafts,
                     prepared=prepared,
                     existing=existing,
+                    bindings=bindings,
                     batch_id=batch_id,
                     recommendation_decision=recommendation_decision,
                     trace=trace,
@@ -567,7 +585,9 @@ class NotebookService:
         # append another option@rev1; replay the exact same semantic revision
         # and reject a conflicting reuse so the append-only log stays foldable.
         replayed: list[NotebookOptionRevision] = []
-        for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
+        for draft, (proposal, contract, risk_level), binding in zip(
+            drafts, prepared, bindings
+        ):
             if not draft.option_id:
                 replayed = []
                 break
@@ -594,6 +614,8 @@ class NotebookService:
                     if recommendation_decision is not None
                     else draft.recommendation_status
                 )
+                and getattr(current, "capability_resolution_binding_ref", None)
+                == (binding.content_digest if binding is not None else None)
             )
             if not same_semantics:
                 raise OptionBatchInvalid(
@@ -642,35 +664,48 @@ class NotebookService:
         )
         created_at = _now()
         revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
-        for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
+        for draft, (proposal, contract, risk_level), binding in zip(
+            drafts, prepared, bindings
+        ):
             option_id = draft.option_id or f"opt_{uuid4().hex}"
             revision: NotebookOptionRevision | NotebookOptionRevisionV11
             if recommendation_decision is not None:
-                revision = NotebookOptionRevisionV11(
-                    option_id=option_id,
-                    option_revision=1,
-                    notebook_id=notebook.notebook_id,
-                    run_family_id=notebook.run_family_id,
-                    generation_context_id=context.context_id,
-                    generation_context_hash=generation_context_hash(context),
-                    freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-                    typed_proposal_id=proposal.proposal_id,
-                    typed_proposal_revision=proposal.proposal_revision,
-                    artifact_contract=contract,
-                    rationale=draft.rationale,
-                    assumptions=tuple(draft.assumptions),
-                    risk_level=risk_level,
-                    lifecycle_status="proposed",
-                    freshness_status=FRESH,
-                    validation_status="valid",
-                    rank=draft.rank,
-                    batch_id=batch,
-                    created_at=created_at,
-                    evidence_refs=tuple(draft.evidence_refs),
-                    comparative_claims=tuple(draft.comparative_claims),
-                    recommendation_decision_id=recommendation_decision.recommendation_decision_id,
-                    recommendation_status=recommendation_decision.outcome,
+                revision_type = (
+                    NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
                 )
+                revision_kwargs = {
+                    "option_id": option_id,
+                    "option_revision": 1,
+                    "notebook_id": notebook.notebook_id,
+                    "run_family_id": notebook.run_family_id,
+                    "generation_context_id": context.context_id,
+                    "generation_context_hash": generation_context_hash(context),
+                    "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+                    "typed_proposal_id": proposal.proposal_id,
+                    "typed_proposal_revision": proposal.proposal_revision,
+                    "artifact_contract": contract,
+                    "rationale": draft.rationale,
+                    "assumptions": tuple(draft.assumptions),
+                    "risk_level": risk_level,
+                    "lifecycle_status": "proposed",
+                    "freshness_status": FRESH,
+                    "validation_status": "valid",
+                    "rank": draft.rank,
+                    "batch_id": batch,
+                    "created_at": created_at,
+                    "evidence_refs": tuple(draft.evidence_refs),
+                    "comparative_claims": tuple(draft.comparative_claims),
+                    "recommendation_decision_id": recommendation_decision.recommendation_decision_id,
+                    "recommendation_status": recommendation_decision.outcome,
+                }
+                if binding is not None:
+                    revision_kwargs.update(
+                        {
+                            "capability_resolution_binding_ref": binding.content_digest,
+                            "execution_modes": ("materialize_only",),
+                        }
+                    )
+                revision = revision_type(**revision_kwargs)
             else:
                 revision = NotebookOptionRevision(
                     option_id=option_id,
@@ -789,6 +824,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         prepared: Sequence[tuple[TypedProposal, Any, str]],
         existing: Sequence[OptionView | None],
+        bindings: Sequence[CapabilityResolutionBinding | None],
         batch_id: str | None,
         recommendation_decision: RecommendationDecision | None,
         trace: TraceWriter | None,
@@ -825,8 +861,8 @@ class NotebookService:
         created_at = _now()
         revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
         stored: list[StoredRevision | None] = []
-        for draft, (proposal, contract, risk_level), prior in zip(
-            drafts, prepared, existing
+        for draft, (proposal, contract, risk_level), prior, binding in zip(
+            drafts, prepared, existing, bindings
         ):
             if prior is None:
                 option_id = draft.option_id or f"opt_{uuid4().hex}"
@@ -845,36 +881,59 @@ class NotebookService:
                     stored.append(None)
                     continue
                 current = prior.current_revision
+                previous_binding_ref = getattr(
+                    current, "capability_resolution_binding_ref", None
+                )
+                if previous_binding_ref is not None and (
+                    binding is None or binding.content_digest != previous_binding_ref
+                ):
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_REVALIDATION_MISMATCH",
+                        "a bound capability option cannot be revalidated without the same current binding",
+                        option_id=prior.option_id,
+                        option_revision=current.option_revision,
+                    )
                 option_id = prior.option_id
                 revision_number = current.option_revision + 1
                 lifecycle_status = prior.lifecycle_status
                 supersedes = current.option_revision
-            revision = NotebookOptionRevisionV11(
-                option_id=option_id,
-                option_revision=revision_number,
-                notebook_id=notebook.notebook_id,
-                run_family_id=notebook.run_family_id,
-                generation_context_id=context.context_id,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-                typed_proposal_id=proposal.proposal_id,
-                typed_proposal_revision=proposal.proposal_revision,
-                artifact_contract=contract,
-                rationale=draft.rationale,
-                assumptions=tuple(draft.assumptions),
-                risk_level=risk_level,
-                lifecycle_status=lifecycle_status,
-                freshness_status=FRESH,
-                validation_status="valid",
-                rank=draft.rank,
-                batch_id=batch,
-                created_at=created_at,
-                evidence_refs=tuple(draft.evidence_refs),
-                comparative_claims=tuple(draft.comparative_claims),
-                recommendation_decision_id=recommendation_decision.recommendation_decision_id,
-                recommendation_status=recommendation_decision.outcome,
-                supersedes_option_revision=supersedes,
+            revision_type = (
+                NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
             )
+            revision_kwargs = {
+                "option_id": option_id,
+                "option_revision": revision_number,
+                "notebook_id": notebook.notebook_id,
+                "run_family_id": notebook.run_family_id,
+                "generation_context_id": context.context_id,
+                "generation_context_hash": generation_context_hash(context),
+                "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+                "typed_proposal_id": proposal.proposal_id,
+                "typed_proposal_revision": proposal.proposal_revision,
+                "artifact_contract": contract,
+                "rationale": draft.rationale,
+                "assumptions": tuple(draft.assumptions),
+                "risk_level": risk_level,
+                "lifecycle_status": lifecycle_status,
+                "freshness_status": FRESH,
+                "validation_status": "valid",
+                "rank": draft.rank,
+                "batch_id": batch,
+                "created_at": created_at,
+                "evidence_refs": tuple(draft.evidence_refs),
+                "comparative_claims": tuple(draft.comparative_claims),
+                "recommendation_decision_id": recommendation_decision.recommendation_decision_id,
+                "recommendation_status": recommendation_decision.outcome,
+                "supersedes_option_revision": supersedes,
+            }
+            if binding is not None:
+                revision_kwargs.update(
+                    {
+                        "capability_resolution_binding_ref": binding.content_digest,
+                        "execution_modes": ("materialize_only",),
+                    }
+                )
+            revision = revision_type(**revision_kwargs)
             revisions.append(revision)
             stored.append(
                 StoredRevision(
@@ -1098,6 +1157,9 @@ class NotebookService:
 
         from .materialization import NotebookOptionMaterializer
 
+        self._assert_current_capability_binding(
+            self.store.read_option(notebook_id, option_id).current_revision
+        )
         return NotebookOptionMaterializer(self).materialize(
             notebook_id,
             option_id,
@@ -1297,6 +1359,7 @@ class NotebookService:
 
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        self._assert_current_capability_binding(current)
         if current.materializable:
             materialization = self.store.read_materialization(
                 notebook_id, option_id, current.option_revision
@@ -1503,6 +1566,69 @@ class NotebookService:
                 "a parameter-identical pair is one option, not two (spec §6)",
                 canonical_proposal_hashes=duplicated,
             )
+
+    def _resolve_capability_bindings(
+        self,
+        notebook: Notebook,
+        drafts: Sequence[OptionDraft],
+        *,
+        recommendation_decision: RecommendationDecision | None,
+    ) -> tuple[CapabilityResolutionBinding | None, ...]:
+        """Resolve Agent names through the server-owned catalog before writes."""
+
+        if self.capability_bindings is None:
+            return tuple(None for _ in drafts)
+
+        resolved: list[CapabilityResolutionBinding | None] = []
+        for draft in drafts:
+            if draft.capability_id is None:
+                resolved.append(None)
+                continue
+            try:
+                binding = self.capability_bindings.resolve(
+                    draft.capability_id,
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                )
+            except CapabilityBindingCatalogError as error:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not currently usable",
+                    capability_id=draft.capability_id,
+                ) from error
+            if binding is not None and recommendation_decision is None:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",
+                    "an admitted capability option requires a recommendation decision",
+                    capability_id=draft.capability_id,
+                )
+            resolved.append(binding)
+        return tuple(resolved)
+
+    def _assert_current_capability_binding(self, revision: Any) -> None:
+        """Re-check v1.2 authority before materialization or execution callbacks."""
+
+        reference = getattr(revision, "capability_resolution_binding_ref", None)
+        if reference is None:
+            return
+        if self.capability_bindings is None:
+            raise OptionRevisionStale(
+                "the persisted capability binding cannot be revalidated by this service",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_authority_unavailable",
+            )
+        try:
+            self.capability_bindings.assert_current_reference(reference)
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "the persisted capability binding is no longer currently usable",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_not_current",
+            ) from error
 
     def _prepare(
         self,
