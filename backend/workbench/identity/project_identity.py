@@ -145,14 +145,16 @@ class ProjectIdentityStore:
 
     ensure = get_or_create
 
-    def get_current(self, project_root: Path | str) -> ProjectIdentityRevision | None:
+    def get_current(
+        self, project_root: Path | str, *, recover: bool = False
+    ) -> ProjectIdentityRevision | None:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
             self._assert_profile_store_authority(admission)
             with open_validated_project_root(project_root) as root_admission:
-                records = self._read_records(admission)
+                records = self._read_records(admission, recover=recover)
                 if not records:
                     return None
-                authoritative_profile = self.profile_store.get_current()
+                authoritative_profile = self.profile_store.get_current(recover=recover)
                 if authoritative_profile is None:
                     raise IdentityRecordCorruptError(
                         "project records exist without a local profile identity"
@@ -171,12 +173,14 @@ class ProjectIdentityStore:
 
     current = get_current
 
-    def get(self, project_id: str) -> tuple[ProjectIdentityRevision, ...]:
+    def get(
+        self, project_id: str, *, recover: bool = False
+    ) -> tuple[ProjectIdentityRevision, ...]:
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
             self._assert_profile_store_authority(admission)
-            records = self._read_records(admission)
+            records = self._read_records(admission, recover=recover)
             if records:
-                authoritative_profile = self.profile_store.get_current()
+                authoritative_profile = self.profile_store.get_current(recover=recover)
                 if authoritative_profile is None:
                     raise IdentityRecordCorruptError(
                         "project records exist without a local profile identity"
@@ -263,13 +267,20 @@ class ProjectIdentityStore:
         self,
         admission: _IdentityStoreAdmission,
         *,
+        recover: bool = True,
         recover_invalid_orphans: bool = True,
     ) -> list[ProjectIdentityRevision]:
+        if not recover:
+            recover_invalid_orphans = False
         log_raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
         pointers: list[dict[str, str]] = []
         if log_raw is not None:
             parsed, complete_bytes = _parse_jsonl(log_raw)
             if complete_bytes != len(log_raw):
+                if not recover:
+                    raise IdentityRecordCorruptError(
+                        "project identity log is incomplete"
+                    )
                 _truncate_jsonl(admission, complete_bytes)
             for item in parsed:
                 if set(item) != {"contract_version", "record_hash"}:
@@ -316,6 +327,10 @@ class ProjectIdentityStore:
         missing_pointers = sorted(set(by_hash) - referenced)
         all_records = records + [by_hash[record_hash] for record_hash in missing_pointers]
         self._validate_records(all_records)
+        if missing_pointers and not recover:
+            raise IdentityRecordCorruptError(
+                "project identity records are not fully committed"
+            )
         for record_hash in missing_pointers:
             _append_jsonl(
                 admission,
@@ -330,13 +345,16 @@ class ProjectIdentityStore:
         self,
         admission: _IdentityStoreAdmission,
         *,
-        recover_invalid_orphans: bool = True,
+        recover: bool = False,
+        recover_invalid_orphans: bool = False,
     ) -> list[ProjectIdentityRevision]:
         records = self._read_records(
-            admission, recover_invalid_orphans=recover_invalid_orphans
+            admission,
+            recover=recover,
+            recover_invalid_orphans=recover_invalid_orphans,
         )
         if records:
-            authoritative_profile = self.profile_store.get_current()
+            authoritative_profile = self.profile_store.get_current(recover=recover)
             if authoritative_profile is None:
                 raise IdentityRecordCorruptError(
                     "project records exist without a local profile identity"

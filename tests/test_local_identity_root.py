@@ -50,6 +50,19 @@ def test_validate_project_root_rejects_missing_paths_and_files(tmp_path: Path) -
         validate_project_root(file_path)
 
 
+def test_validate_project_root_reports_unsupported_host_without_fcntl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.identity.root as module
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(module, "fcntl", None)
+
+    with pytest.raises(InvalidProjectRootError, match="unsupported"):
+        module.validate_project_root(project)
+
+
 def test_renaming_a_directory_preserves_binding_key_but_changes_observed_path(
     tmp_path: Path,
 ) -> None:

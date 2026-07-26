@@ -10,6 +10,7 @@ from workbench.identity.local_profile import (
     IdentityClientClaimError,
     IdentityCollisionError,
     IdentityRecordCorruptError,
+    IdentityStoreError,
     LocalProfileIdentityStore,
 )
 
@@ -72,7 +73,7 @@ def test_profile_storage_rejects_symlinked_records_and_pointer(tmp_path: Path) -
     shutil.copy2(current_path, outside / "current.json")
     records_path.rename(tmp_path / "records.saved")
     records_path.symlink_to(outside, target_is_directory=True)
-    with pytest.raises(Exception):
+    with pytest.raises(IdentityRecordCorruptError):
         LocalProfileIdentityStore(authority_root).get_or_create()
 
     records_path.unlink()
@@ -82,7 +83,7 @@ def test_profile_storage_rejects_symlinked_records_and_pointer(tmp_path: Path) -
     pointer = current_path
     pointer.unlink()
     pointer.symlink_to(outside / "current.json")
-    with pytest.raises(Exception):
+    with pytest.raises(IdentityRecordCorruptError):
         LocalProfileIdentityStore(authority_root).get_or_create()
 
 
@@ -122,7 +123,7 @@ def test_profile_creation_recovers_a_complete_record_after_pointer_fault(
     assert len(LocalProfileIdentityStore(authority_root).content_addressed_record_names()) == 1
 
 
-def test_profile_creation_recovers_a_partial_derived_pointer(
+def test_profile_creation_rejects_a_partial_derived_pointer(
     tmp_path: Path,
 ) -> None:
     authority_root = tmp_path / "server-authority"
@@ -131,7 +132,49 @@ def test_profile_creation_recovers_a_partial_derived_pointer(
     current_path = authority_root / "identity" / "local_profile" / "current.json"
     current_path.write_bytes(b'{"identity_hash":')
 
-    assert LocalProfileIdentityStore(authority_root).get_or_create() == identity
+    with pytest.raises(IdentityRecordCorruptError):
+        LocalProfileIdentityStore(authority_root).get_or_create()
+    assert current_path.read_bytes() == b'{"identity_hash":'
+
+
+def test_profile_creation_rejects_noncanonical_derived_pointer(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    store = LocalProfileIdentityStore(authority_root)
+    store.get_or_create()
+    current_path = authority_root / "identity" / "local_profile" / "current.json"
+    canonical = current_path.read_bytes()
+    current_path.write_bytes(b" " + canonical)
+
+    with pytest.raises(IdentityRecordCorruptError):
+        LocalProfileIdentityStore(authority_root).get_or_create()
+    assert current_path.read_bytes() == b" " + canonical
+
+
+def test_profile_get_current_is_read_only_by_default(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    store = LocalProfileIdentityStore(authority_root)
+    identity = store.get_or_create()
+    current_path = authority_root / "identity" / "local_profile" / "current.json"
+    current_path.unlink()
+
+    with pytest.raises(IdentityRecordCorruptError):
+        LocalProfileIdentityStore(authority_root).get_current()
+    assert not current_path.exists()
+    assert LocalProfileIdentityStore(authority_root).get_current(recover=True) == identity
+
+
+def test_profile_store_reports_unsupported_host_without_fcntl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.identity.local_profile as module
+
+    monkeypatch.setattr(module, "fcntl", None)
+    with pytest.raises(IdentityStoreError, match="unsupported"):
+        LocalProfileIdentityStore(tmp_path / "server-authority").get_or_create()
 
 
 @pytest.mark.parametrize("special_file", ["current", "log", "record"])

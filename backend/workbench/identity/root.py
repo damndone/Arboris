@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import stat
 from contextlib import contextmanager
@@ -10,10 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised through the capability test
+    fcntl = None  # type: ignore[assignment]
+
 
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
-_F_GETPATH = getattr(fcntl, "F_GETPATH", 50)
+_F_GETPATH = getattr(fcntl, "F_GETPATH", 50) if fcntl is not None else None
 
 
 class ProjectRootError(ValueError):
@@ -74,6 +78,15 @@ def _component(value: str) -> str:
     return value
 
 
+def _require_root_fd_primitives() -> None:
+    if fcntl is None or not hasattr(fcntl, "fcntl") or _F_GETPATH is None:
+        raise InvalidProjectRootError(
+            "safe project-root FD binding is unsupported on this host"
+        )
+    if not _O_DIRECTORY or not _O_NOFOLLOW or os.open not in os.supports_dir_fd:
+        raise InvalidProjectRootError("safe project-root FD binding is unsupported")
+
+
 def _path_value(project_root: Path | str) -> Path:
     if not isinstance(project_root, (Path, str)):
         raise InvalidProjectRootError("project root must be an absolute path")
@@ -87,8 +100,7 @@ def _path_value(project_root: Path | str) -> Path:
 
 
 def _open_canonical_directory(path: Path) -> int:
-    if not _O_DIRECTORY or not _O_NOFOLLOW or os.open not in os.supports_dir_fd:
-        raise InvalidProjectRootError("safe project-root FD binding is unsupported")
+    _require_root_fd_primitives()
     current: int | None = None
     try:
         current = os.open(os.path.sep, os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW)
@@ -121,6 +133,7 @@ def _open_canonical_directory(path: Path) -> int:
 
 
 def _observed_path(fd: int, canonical_hint: Path) -> str:
+    _require_root_fd_primitives()
     try:
         raw = fcntl.fcntl(fd, _F_GETPATH, b"\0" * 1024)
         observed = raw.split(b"\0", 1)[0].decode("utf-8")
