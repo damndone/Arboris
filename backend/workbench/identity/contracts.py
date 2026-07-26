@@ -240,10 +240,11 @@ class ProjectIdentityRevision:
         _require_revision(self.revision, "revision")
         if self.previous_revision is not None:
             _require_revision(self.previous_revision, "previous_revision")
-            if self.previous_revision >= self.revision:
-                raise IdentityContractError(
-                    "previous_revision must be lower than revision"
-                )
+        expected_previous = None if self.revision == 1 else self.revision - 1
+        if self.previous_revision != expected_previous:
+            raise IdentityContractError(
+                "previous_revision must be absent for revision one and point to the preceding revision"
+            )
         if self.contract_version != PROJECT_IDENTITY_REVISION_CONTRACT:
             raise IdentityContractError(
                 f"unsupported project identity contract: {self.contract_version!r}"

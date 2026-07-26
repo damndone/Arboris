@@ -146,6 +146,27 @@ def test_same_filesystem_binding_with_two_project_ids_is_a_collision(
         store.get(first.project_id)
 
 
+@pytest.mark.parametrize("invalid_project_id", ["", None, 42])
+def test_get_invalid_project_id_still_fails_closed_on_corrupt_storage(
+    tmp_path: Path, invalid_project_id: object
+) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    first = store.get_or_create(project_root)
+    forged_second = ProjectIdentityRevision(
+        project_id="project_collision",
+        profile_id=first.profile_id,
+        revision=1,
+        root_binding=first.root_binding,
+    )
+    store._persist(forged_second)  # type: ignore[attr-defined]
+
+    with pytest.raises(IdentityCollisionError):
+        store.get(invalid_project_id)  # type: ignore[arg-type]
+
+
 def test_project_storage_rejects_symlinked_records_directory(tmp_path: Path) -> None:
     authority_root = tmp_path / "server-authority"
     project_root = tmp_path / "project"

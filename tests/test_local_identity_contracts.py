@@ -130,6 +130,17 @@ def test_contract_hash_changes_for_revision_or_binding_but_not_mapping_order() -
     assert first.content_hash != second.content_hash
 
 
+def test_project_revision_two_requires_the_immediate_previous_revision() -> None:
+    with pytest.raises(IdentityContractError):
+        ProjectIdentityRevision(
+            project_id="project_abc",
+            profile_id="profile_abc",
+            revision=2,
+            previous_revision=None,
+            root_binding=ROOT_BINDING,
+        )
+
+
 def test_identity_package_exposes_one_authority_surface(tmp_path) -> None:
     import workbench.identity as identity
 

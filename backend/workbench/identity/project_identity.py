@@ -148,25 +148,23 @@ class ProjectIdentityStore:
     current = get_current
 
     def get(self, project_id: str) -> tuple[ProjectIdentityRevision, ...]:
-        if not isinstance(project_id, str) or not project_id:
-            return ()
         with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
             records = self._read_records(admission)
-            selected = tuple(
+            if records:
+                authoritative_profile = self.profile_store.get_current()
+                if authoritative_profile is None:
+                    raise IdentityRecordCorruptError(
+                        "project records exist without a local profile identity"
+                    )
+                self._validate_profile_scope(records, authoritative_profile.profile_id)
+            if not isinstance(project_id, str) or not project_id:
+                return ()
+            return tuple(
                 sorted(
                     (record for record in records if record.project_id == project_id),
                     key=lambda record: record.revision,
                 )
             )
-            if not records:
-                return ()
-            authoritative_profile = self.profile_store.get_current()
-            if authoritative_profile is None:
-                raise IdentityRecordCorruptError(
-                    "project records exist without a local profile identity"
-                )
-            self._validate_profile_scope(records, authoritative_profile.profile_id)
-            return selected
 
     revisions = get
 
