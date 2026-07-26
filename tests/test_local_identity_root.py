@@ -64,3 +64,28 @@ def test_renaming_a_directory_preserves_binding_key_but_changes_observed_path(
     assert after.binding_key == before.binding_key
     assert after.canonical_path == str(moved)
     assert after.canonical_path != before.canonical_path
+
+
+def test_root_replacement_during_fd_admission_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.identity.root as module
+
+    project = tmp_path / "project"
+    project.mkdir()
+    replacement = tmp_path / "replacement"
+    original_open = module._open_canonical_directory
+    calls = 0
+
+    def replace_after_open(path: Path) -> int:
+        nonlocal calls
+        fd = original_open(path)
+        calls += 1
+        if calls == 1:
+            project.rename(replacement)
+            project.mkdir()
+        return fd
+
+    monkeypatch.setattr(module, "_open_canonical_directory", replace_after_open)
+    with pytest.raises(InvalidProjectRootError):
+        validate_project_root(project)

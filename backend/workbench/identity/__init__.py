@@ -7,9 +7,11 @@ from pathlib import Path
 from .contracts import (
     IDENTITY_CONTRACTS,
     LOCAL_PROFILE_IDENTITY_CONTRACT,
+    LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT,
     PROJECT_IDENTITY_REVISION_CONTRACT,
     IdentityContractError,
     LocalProfileIdentity,
+    LocalProfileIdentityRevision,
     ProjectIdentityRevision,
 )
 from .local_profile import (
@@ -58,6 +60,7 @@ class IdentityAuthority:
 __all__ = [
     "IDENTITY_CONTRACTS",
     "LOCAL_PROFILE_IDENTITY_CONTRACT",
+    "LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT",
     "PROJECT_IDENTITY_REVISION_CONTRACT",
     "IdentityAuthority",
     "IdentityClientClaimError",
@@ -67,6 +70,7 @@ __all__ = [
     "IdentityStoreError",
     "InvalidProjectRootError",
     "LocalProfileIdentity",
+    "LocalProfileIdentityRevision",
     "LocalProfileIdentityStore",
     "LocalProfileStore",
     "ProjectIdentityRevision",

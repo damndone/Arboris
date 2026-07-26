@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from ..canonical import canonical_json_v1, sha256_canonical
 from ..contracts.common.envelope import freeze_json, thaw_json
 
 LOCAL_PROFILE_IDENTITY_CONTRACT = "local-profile-identity/v1"
+LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT = "local-profile-identity-revision/v1"
 PROJECT_IDENTITY_REVISION_CONTRACT = "project-identity-revision/v1"
 
 
@@ -32,6 +34,16 @@ def _require_opaque_id(value: object, field_name: str) -> str:
 def _require_revision(value: object, field_name: str) -> int:
     if type(value) is not int or value < 1:
         raise IdentityContractError(f"{field_name} must be a positive integer")
+    return value
+
+
+def _require_hash(value: object, field_name: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+    ):
+        raise IdentityContractError(f"{field_name} must be a lowercase sha256 hex digest")
     return value
 
 
@@ -61,11 +73,16 @@ def _freeze_root_binding(value: object) -> Any:
         fields={"binding_key", "canonical_path", "device", "inode"},
         field_name="root_binding",
     )
-    _require_opaque_id(raw["binding_key"], "root_binding.binding_key")
+    binding_key = _require_opaque_id(raw["binding_key"], "root_binding.binding_key")
     canonical_path = raw["canonical_path"]
-    if type(canonical_path) is not str or not canonical_path.startswith("/"):
+    if (
+        type(canonical_path) is not str
+        or not canonical_path.startswith("/")
+        or "\x00" in canonical_path
+        or os.path.normpath(canonical_path) != canonical_path
+    ):
         raise IdentityContractError(
-            "root_binding.canonical_path must be an absolute path"
+            "root_binding.canonical_path must be a normalized absolute path"
         )
     for field_name in ("device", "inode"):
         value = raw[field_name]
@@ -73,6 +90,11 @@ def _freeze_root_binding(value: object) -> Any:
             raise IdentityContractError(
                 f"root_binding.{field_name} must be a non-negative integer"
             )
+    expected_binding_key = f"fs:{raw['device']}:{raw['inode']}"
+    if binding_key != expected_binding_key:
+        raise IdentityContractError(
+            "root_binding.binding_key must match its device and inode"
+        )
     return freeze_json(dict(raw), "root_binding")
 
 
@@ -85,12 +107,10 @@ class LocalProfileIdentity:
     """
 
     profile_id: str
-    revision: int = 1
     contract_version: str = LOCAL_PROFILE_IDENTITY_CONTRACT
 
     def __post_init__(self) -> None:
         _require_opaque_id(self.profile_id, "profile_id")
-        _require_revision(self.revision, "revision")
         if self.contract_version != LOCAL_PROFILE_IDENTITY_CONTRACT:
             raise IdentityContractError(
                 f"unsupported local profile contract: {self.contract_version!r}"
@@ -100,19 +120,17 @@ class LocalProfileIdentity:
         return {
             "contract_version": self.contract_version,
             "profile_id": self.profile_id,
-            "revision": self.revision,
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "LocalProfileIdentity":
         raw = _require_exact_mapping(
             value,
-            fields={"contract_version", "profile_id", "revision"},
+            fields={"contract_version", "profile_id"},
             field_name="local_profile_identity",
         )
         return cls(
             profile_id=raw["profile_id"],
-            revision=raw["revision"],
             contract_version=raw["contract_version"],
         )
 
@@ -127,6 +145,78 @@ class LocalProfileIdentity:
     @property
     def identity_hash(self) -> str:
         return self.content_hash
+
+    @property
+    def record_hash(self) -> str:
+        return self.content_hash
+
+
+@dataclass(frozen=True)
+class LocalProfileIdentityRevision:
+    """Append-only lifecycle record for one stable local profile identity."""
+
+    profile_id: str
+    revision: int
+    identity_hash: str
+    previous_revision: int | None = None
+    contract_version: str = LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT
+
+    def __post_init__(self) -> None:
+        _require_opaque_id(self.profile_id, "profile_id")
+        _require_revision(self.revision, "revision")
+        _require_hash(self.identity_hash, "identity_hash")
+        if self.previous_revision is not None:
+            _require_revision(self.previous_revision, "previous_revision")
+            if self.previous_revision != self.revision - 1:
+                raise IdentityContractError(
+                    "previous_revision must point to the preceding revision"
+                )
+        elif self.revision != 1:
+            raise IdentityContractError(
+                "revision greater than one must point to a previous revision"
+            )
+        if self.contract_version != LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT:
+            raise IdentityContractError(
+                f"unsupported local profile revision contract: {self.contract_version!r}"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "identity_hash": self.identity_hash,
+            "previous_revision": self.previous_revision,
+            "profile_id": self.profile_id,
+            "revision": self.revision,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "LocalProfileIdentityRevision":
+        raw = _require_exact_mapping(
+            value,
+            fields={
+                "contract_version",
+                "identity_hash",
+                "previous_revision",
+                "profile_id",
+                "revision",
+            },
+            field_name="local_profile_identity_revision",
+        )
+        return cls(
+            profile_id=raw["profile_id"],
+            revision=raw["revision"],
+            identity_hash=raw["identity_hash"],
+            previous_revision=raw["previous_revision"],
+            contract_version=raw["contract_version"],
+        )
+
+    @property
+    def canonical_json(self) -> str:
+        return canonical_json_v1(self.to_dict())
+
+    @property
+    def content_hash(self) -> str:
+        return sha256_canonical(self.to_dict())
 
     @property
     def record_hash(self) -> str:
@@ -213,13 +303,16 @@ class ProjectIdentityRevision:
 __all__ = [
     "IDENTITY_CONTRACTS",
     "LOCAL_PROFILE_IDENTITY_CONTRACT",
+    "LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT",
     "PROJECT_IDENTITY_REVISION_CONTRACT",
     "IdentityContractError",
     "LocalProfileIdentity",
+    "LocalProfileIdentityRevision",
     "ProjectIdentityRevision",
 ]
 
 IDENTITY_CONTRACTS = {
     "local_profile": LOCAL_PROFILE_IDENTITY_CONTRACT,
+    "local_profile_revision": LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT,
     "project_revision": PROJECT_IDENTITY_REVISION_CONTRACT,
 }

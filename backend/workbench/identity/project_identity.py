@@ -2,23 +2,36 @@
 
 from __future__ import annotations
 
-import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-from .contracts import ProjectIdentityRevision
+from .contracts import PROJECT_IDENTITY_REVISION_CONTRACT, ProjectIdentityRevision
 from .local_profile import (
     IdentityClientClaimError,
     IdentityCollisionError,
     IdentityRecordCorruptError,
+    IdentityStoreError,
     LocalProfileIdentityStore,
+    _IdentityStoreAdmission,
     _append_jsonl,
     _create_content_addressed,
-    _file_lock,
+    _list_record_names,
+    _open_store_admission,
+    _parse_jsonl,
     _process_lock,
+    _read_child,
+    _read_record_objects,
+    _truncate_jsonl,
 )
-from .root import ProjectRootRelocatedError, validate_project_root
+from .root import (
+    ProjectRootRelocatedError,
+    open_validated_project_root,
+)
+
+
+_HASH = re.compile(r"^[0-9a-f]{64}\Z")
 
 
 class ProjectIdentityStore:
@@ -30,15 +43,13 @@ class ProjectIdentityStore:
         *,
         profile_store: LocalProfileIdentityStore | None = None,
     ) -> None:
-        self.authority_root = Path(authority_root).expanduser().resolve()
-        self.root = self.authority_root / "identity" / "projects"
-        self.records_dir = self.root / "records"
-        self.records_log_path = self.root / "records.jsonl"
-        self.lock_path = self.root / ".lock"
+        self.authority_root = Path(authority_root).expanduser()
+        if not self.authority_root.is_absolute():
+            raise IdentityStoreError("identity authority root must be absolute")
         self.profile_store = profile_store or LocalProfileIdentityStore(
             self.authority_root
         )
-        self._lock = _process_lock(self.authority_root)
+        self._lock = _process_lock(Path(self.authority_root))
 
     def get_or_create(
         self,
@@ -50,57 +61,52 @@ class ProjectIdentityStore:
         client_profile_id: str | None = None,
         profile: object | None = None,
     ) -> ProjectIdentityRevision:
-        if any(
-            value is not None
-            for value in (
-                project_id,
-                client_project_id,
-                profile_id,
-                client_profile_id,
-            )
-        ):
-            raise IdentityClientClaimError(
-                "project identity and profile identity are issued by the server"
-            )
-        validated_root = validate_project_root(project_root)
-        with self._lock:
-            with _file_lock(self.lock_path):
+        self._reject_client_claims(
+            project_id=project_id,
+            client_project_id=client_project_id,
+            profile_id=profile_id,
+            client_profile_id=client_profile_id,
+        )
+        # Root resolution and fstat happen only after the project scope lock is
+        # held.  The open FD remains the binding authority for this operation.
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            with open_validated_project_root(project_root) as root_admission:
                 authoritative_profile = self.profile_store.get_or_create()
-                if profile is not None:
-                    if profile != authoritative_profile:
-                        raise IdentityCollisionError(
-                            "project identity was supplied with a non-authoritative profile"
-                        )
-                records = self._read_records()
+                if profile is not None and profile != authoritative_profile:
+                    raise IdentityCollisionError(
+                        "project identity was supplied with a non-authoritative profile"
+                    )
+                records = self._read_records(admission)
+                self._validate_profile_scope(records, authoritative_profile.profile_id)
+                binding = root_admission.validated.to_binding_dict()
                 same_binding = [
                     record
                     for record in records
-                    if record.root_binding["binding_key"] == validated_root.binding_key
+                    if record.root_binding["binding_key"] == binding["binding_key"]
                 ]
                 if same_binding:
                     project_ids = {record.project_id for record in same_binding}
-                    profile_ids = {record.profile_id for record in same_binding}
-                    if len(project_ids) != 1 or len(profile_ids) != 1:
+                    if len(project_ids) != 1:
                         raise IdentityCollisionError(
-                            "one filesystem root has conflicting project identity records"
+                            "one filesystem root has conflicting project identities"
                         )
-                    current = max(
-                        same_binding,
-                        key=lambda record: (record.project_id, record.revision),
-                    )
+                    project_id_for_binding = next(iter(project_ids))
+                    project_records = [
+                        record
+                        for record in records
+                        if record.project_id == project_id_for_binding
+                    ]
+                    current = max(project_records, key=lambda record: record.revision)
                     if current.profile_id != authoritative_profile.profile_id:
                         raise IdentityCollisionError(
-                            "one filesystem root is bound to another local profile"
+                            "project identity belongs to another local profile"
                         )
-                    if current.root_binding["canonical_path"] == validated_root.canonical_path:
+                    if current.root_binding == binding:
                         return current
-                    return self._append_revision(
-                        current,
-                        validated_root.to_binding_dict(),
-                    )
+                    return self._append_revision(admission, current, binding)
 
                 for record in records:
-                    if record.root_binding["canonical_path"] == validated_root.canonical_path:
+                    if record.root_binding["canonical_path"] == binding["canonical_path"]:
                         raise ProjectRootRelocatedError(
                             "project path is already bound to a different filesystem root"
                         )
@@ -109,51 +115,83 @@ class ProjectIdentityStore:
                     project_id=f"project_{uuid4().hex}",
                     profile_id=authoritative_profile.profile_id,
                     revision=1,
-                    root_binding=validated_root.to_binding_dict(),
+                    root_binding=binding,
                 )
-                self._persist(identity)
+                self._persist_in_admission(admission, identity)
                 return identity
 
     ensure = get_or_create
 
     def get_current(self, project_root: Path | str) -> ProjectIdentityRevision | None:
-        validated_root = validate_project_root(project_root)
-        with self._lock:
-            with _file_lock(self.lock_path):
-                records = [
-                    record
-                    for record in self._read_records()
-                    if record.root_binding["binding_key"] == validated_root.binding_key
-                ]
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            with open_validated_project_root(project_root) as root_admission:
+                records = self._read_records(admission)
                 if not records:
                     return None
-                return max(records, key=lambda record: record.revision)
+                authoritative_profile = self.profile_store.get_current()
+                if authoritative_profile is None:
+                    raise IdentityRecordCorruptError(
+                        "project records exist without a local profile identity"
+                    )
+                self._validate_profile_scope(records, authoritative_profile.profile_id)
+                binding = root_admission.validated.to_binding_dict()
+                matches = [record for record in records if record.root_binding == binding]
+                if not matches:
+                    return None
+                project_ids = {record.project_id for record in matches}
+                if len(project_ids) != 1:
+                    raise IdentityCollisionError(
+                        "one filesystem root has conflicting project identities"
+                    )
+                return max(matches, key=lambda record: record.revision)
 
     current = get_current
 
     def get(self, project_id: str) -> tuple[ProjectIdentityRevision, ...]:
         if not isinstance(project_id, str) or not project_id:
             return ()
-        with self._lock:
-            with _file_lock(self.lock_path):
-                return tuple(
-                    sorted(
-                        (
-                            record
-                            for record in self._read_records()
-                            if record.project_id == project_id
-                        ),
-                        key=lambda record: record.revision,
-                    )
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            records = self._read_records(admission)
+            selected = tuple(
+                sorted(
+                    (record for record in records if record.project_id == project_id),
+                    key=lambda record: record.revision,
                 )
+            )
+            if not records:
+                return ()
+            authoritative_profile = self.profile_store.get_current()
+            if authoritative_profile is None:
+                raise IdentityRecordCorruptError(
+                    "project records exist without a local profile identity"
+                )
+            self._validate_profile_scope(records, authoritative_profile.profile_id)
+            return selected
 
     revisions = get
 
-    def record_path(self, revision: ProjectIdentityRevision) -> Path:
-        return self.records_dir / f"{revision.content_hash}.json"
+    def record_name(self, revision: ProjectIdentityRevision) -> str:
+        return f"{revision.content_hash}.json"
+
+    def read_record_bytes(self, revision: ProjectIdentityRevision) -> bytes:
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            raw = _read_child(admission.records_fd, self.record_name(revision))
+            if raw is None:
+                raise IdentityRecordCorruptError("project identity record is missing")
+            return raw
+
+    def read_records_log_bytes(self) -> bytes:
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
+            return raw or b""
+
+    def content_addressed_record_names(self) -> tuple[str, ...]:
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            return _list_record_names(admission)
 
     def _append_revision(
         self,
+        admission: _IdentityStoreAdmission,
         current: ProjectIdentityRevision,
         root_binding: Mapping[str, Any],
     ) -> ProjectIdentityRevision:
@@ -164,67 +202,140 @@ class ProjectIdentityStore:
             previous_revision=current.revision,
             root_binding=root_binding,
         )
-        self._persist(revision)
+        self._persist_in_admission(admission, revision)
         return revision
 
     def _persist(self, revision: ProjectIdentityRevision) -> None:
-        _create_content_addressed(
-            self.record_path(revision), revision.to_dict()
-        )
+        """Persist a testable immutable record through the same FD admission."""
+
+        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+            self._persist_in_admission(admission, revision)
+
+    def _persist_in_admission(
+        self, admission: _IdentityStoreAdmission, revision: ProjectIdentityRevision
+    ) -> None:
+        _create_content_addressed(admission, self.record_name(revision), revision.to_dict())
         _append_jsonl(
-            self.records_log_path,
+            admission,
             {
                 "contract_version": revision.contract_version,
                 "record_hash": revision.content_hash,
             },
         )
 
-    def _read_records(self) -> list[ProjectIdentityRevision]:
-        if not self.records_log_path.exists():
-            return []
-        try:
-            lines = self.records_log_path.read_text(encoding="utf-8").splitlines()
-        except OSError as exc:
-            raise IdentityRecordCorruptError(
-                f"cannot read project identity log: {self.records_log_path}"
-            ) from exc
-        records: list[ProjectIdentityRevision] = []
-        seen: set[str] = set()
-        for line_number, line in enumerate(lines, start=1):
-            if not line.strip():
-                continue
-            try:
-                pointer = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise IdentityRecordCorruptError(
-                    f"invalid project identity log line {line_number}"
-                ) from exc
-            if (
-                not isinstance(pointer, dict)
-                or set(pointer) != {"contract_version", "record_hash"}
-                or type(pointer["record_hash"]) is not str
-            ):
-                raise IdentityRecordCorruptError(
-                    f"invalid project identity pointer at line {line_number}"
-                )
-            record_hash = pointer["record_hash"]
-            if record_hash in seen:
-                continue
-            seen.add(record_hash)
-            record_path = self.records_dir / f"{record_hash}.json"
-            try:
-                payload = json.loads(record_path.read_text(encoding="utf-8"))
-                record = ProjectIdentityRevision.from_dict(payload)
-            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-                raise IdentityRecordCorruptError(
-                    f"invalid project identity record: {record_path}"
-                ) from exc
+    def _read_records(
+        self, admission: _IdentityStoreAdmission
+    ) -> list[ProjectIdentityRevision]:
+        log_raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
+        pointers: list[dict[str, str]] = []
+        if log_raw is not None:
+            parsed, complete_bytes = _parse_jsonl(log_raw)
+            if complete_bytes != len(log_raw):
+                _truncate_jsonl(admission, complete_bytes)
+            for item in parsed:
+                if set(item) != {"contract_version", "record_hash"}:
+                    raise IdentityRecordCorruptError("invalid project identity pointer")
+                if item["contract_version"] != PROJECT_IDENTITY_REVISION_CONTRACT:
+                    raise IdentityRecordCorruptError("unsupported project identity pointer")
+                record_hash = item["record_hash"]
+                if type(record_hash) is not str or not _HASH.fullmatch(record_hash):
+                    raise IdentityRecordCorruptError("invalid project identity record hash")
+                pointer = {
+                    "contract_version": item["contract_version"],
+                    "record_hash": record_hash,
+                }
+                if pointer not in pointers:
+                    pointers.append(pointer)
+
+        referenced = {item["record_hash"] for item in pointers}
+        objects = _read_record_objects(
+            admission,
+            self._parse_record,
+            referenced,
+        )
+        by_hash: dict[str, ProjectIdentityRevision] = {}
+        for item in objects:
+            name = str(item["name"])
+            record_hash = name[:-5]
+            record = item["value"]
+            assert isinstance(record, ProjectIdentityRevision)
             if record.content_hash != record_hash:
                 raise IdentityCollisionError(
-                    f"project identity record does not match its content address: {record_hash}"
+                    f"project identity record does not match its content address: {name}"
                 )
-            records.append(record)
-        return records
+            by_hash[record_hash] = record
+
+        records: list[ProjectIdentityRevision] = []
+        for pointer in pointers:
+            try:
+                records.append(by_hash[pointer["record_hash"]])
+            except KeyError as exc:
+                raise IdentityRecordCorruptError(
+                    "project identity pointer references a missing record"
+                ) from exc
+        missing_pointers = sorted(set(by_hash) - referenced)
+        all_records = records + [by_hash[record_hash] for record_hash in missing_pointers]
+        self._validate_records(all_records)
+        for record_hash in missing_pointers:
+            _append_jsonl(
+                admission,
+                {
+                    "contract_version": PROJECT_IDENTITY_REVISION_CONTRACT,
+                    "record_hash": record_hash,
+                },
+            )
+        return all_records
+
+    @staticmethod
+    def _parse_record(value: dict[str, Any]) -> ProjectIdentityRevision:
+        try:
+            return ProjectIdentityRevision.from_dict(value)
+        except (TypeError, ValueError) as exc:
+            raise IdentityRecordCorruptError("project identity record is invalid") from exc
+
+    @staticmethod
+    def _validate_records(records: list[ProjectIdentityRevision]) -> None:
+        by_project: dict[str, list[ProjectIdentityRevision]] = {}
+        binding_projects: dict[str, set[str]] = {}
+        for record in records:
+            by_project.setdefault(record.project_id, []).append(record)
+            binding_key = record.root_binding["binding_key"]
+            binding_projects.setdefault(str(binding_key), set()).add(record.project_id)
+        if any(len(projects) > 1 for projects in binding_projects.values()):
+            raise IdentityCollisionError(
+                "one filesystem root has conflicting project identities"
+            )
+        for project_records in by_project.values():
+            ordered = sorted(project_records, key=lambda record: record.revision)
+            if [record.revision for record in ordered] != list(
+                range(1, len(ordered) + 1)
+            ):
+                raise IdentityCollisionError("project identity revisions have a gap or fork")
+            profiles = {record.profile_id for record in ordered}
+            if len(profiles) != 1:
+                raise IdentityCollisionError(
+                    "project identity revisions conflict on local profile scope"
+                )
+            for expected, record in enumerate(ordered, start=1):
+                expected_previous = None if expected == 1 else expected - 1
+                if record.previous_revision != expected_previous:
+                    raise IdentityCollisionError("project identity revision chain is broken")
+
+    @staticmethod
+    def _validate_profile_scope(
+        records: list[ProjectIdentityRevision], profile_id: str
+    ) -> None:
+        if any(record.profile_id != profile_id for record in records):
+            raise IdentityCollisionError(
+                "project identity records are outside the authoritative profile scope"
+            )
+
+    @staticmethod
+    def _reject_client_claims(**claims: object) -> None:
+        if any(value is not None for value in claims.values()):
+            raise IdentityClientClaimError(
+                "project identity and profile identity are issued by the server"
+            )
 
 
 ProjectIdentityRevisionStore = ProjectIdentityStore

@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -27,9 +28,7 @@ def test_project_identity_is_stable_across_restart_and_does_not_use_path_as_id(
     assert first.revision == 1
     assert first.project_id != project_root.name
     assert first.project_id not in first.root_binding["canonical_path"]
-    assert first.profile_id == LocalProfileIdentity(
-        profile_id=first.profile_id
-    ).profile_id
+    assert first.profile_id == LocalProfileIdentity(profile_id=first.profile_id).profile_id
 
 
 def test_renamed_root_gets_a_new_revision_but_keeps_project_identity(
@@ -40,7 +39,7 @@ def test_renamed_root_gets_a_new_revision_but_keeps_project_identity(
     original.mkdir()
     store = ProjectIdentityStore(authority_root)
     first = store.get_or_create(original)
-    first_record_bytes = store.record_path(first).read_bytes()
+    first_record_bytes = store.read_record_bytes(first)
 
     moved = tmp_path / "project-moved"
     original.rename(moved)
@@ -51,9 +50,9 @@ def test_renamed_root_gets_a_new_revision_but_keeps_project_identity(
     assert relocated.revision == 2
     assert relocated.previous_revision == 1
     assert relocated.root_binding["canonical_path"] == str(moved)
-    assert store.record_path(first).read_bytes() == first_record_bytes
-    assert len(list(store.records_dir.glob("*.json"))) == 2
-    assert len(store.records_log_path.read_text(encoding="utf-8").splitlines()) == 2
+    assert store.read_record_bytes(first) == first_record_bytes
+    assert len(store.content_addressed_record_names()) == 2
+    assert len(store.read_records_log_bytes().splitlines()) == 2
 
 
 def test_different_directory_with_same_contents_does_not_reuse_identity(
@@ -119,8 +118,8 @@ def test_concurrent_first_project_creation_has_one_revision(
 
     assert set(identities) == {(identities[0][0], 1)}
     store = ProjectIdentityStore(authority_root)
-    assert len(list(store.records_dir.glob("*.json"))) == 1
-    assert len(store.records_log_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(store.content_addressed_record_names()) == 1
+    assert len(store.read_records_log_bytes().splitlines()) == 1
 
 
 def test_same_filesystem_binding_with_two_project_ids_is_a_collision(
@@ -141,3 +140,48 @@ def test_same_filesystem_binding_with_two_project_ids_is_a_collision(
 
     with pytest.raises(IdentityCollisionError):
         store.get_or_create(project_root)
+    with pytest.raises(IdentityCollisionError):
+        store.get_current(project_root)
+    with pytest.raises(IdentityCollisionError):
+        store.get(first.project_id)
+
+
+def test_project_storage_rejects_symlinked_records_directory(tmp_path: Path) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    store.get_or_create(project_root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    records_path = authority_root / "identity" / "projects" / "records"
+    records_path.rename(tmp_path / "records.saved")
+    records_path.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(Exception):
+        ProjectIdentityStore(authority_root).get_current(project_root)
+
+
+def test_project_creation_recovers_complete_record_after_log_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import workbench.identity.project_identity as module
+
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+    original_append = module._append_jsonl
+
+    def fail_log(*args: object, **kwargs: object) -> None:
+        raise OSError("injected log crash")
+
+    monkeypatch.setattr(module, "_append_jsonl", fail_log)
+    with pytest.raises(OSError, match="injected log crash"):
+        store.get_or_create(project_root)
+    monkeypatch.setattr(module, "_append_jsonl", original_append)
+
+    recovered = ProjectIdentityStore(authority_root).get_or_create(project_root)
+    assert recovered.revision == 1
+    assert len(ProjectIdentityStore(authority_root).content_addressed_record_names()) == 1
+    assert len(ProjectIdentityStore(authority_root).read_records_log_bytes().splitlines()) == 1

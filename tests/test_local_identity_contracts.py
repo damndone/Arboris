@@ -5,9 +5,11 @@ import pytest
 from workbench.canonical import canonical_json_v1, sha256_canonical
 from workbench.identity.contracts import (
     LOCAL_PROFILE_IDENTITY_CONTRACT,
+    LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT,
     PROJECT_IDENTITY_REVISION_CONTRACT,
     IdentityContractError,
     LocalProfileIdentity,
+    LocalProfileIdentityRevision,
     ProjectIdentityRevision,
 )
 
@@ -21,12 +23,11 @@ ROOT_BINDING = {
 
 
 def test_local_profile_identity_is_immutable_and_canonical() -> None:
-    identity = LocalProfileIdentity(profile_id="profile_abc", revision=1)
+    identity = LocalProfileIdentity(profile_id="profile_abc")
 
     assert identity.to_dict() == {
         "contract_version": LOCAL_PROFILE_IDENTITY_CONTRACT,
         "profile_id": "profile_abc",
-        "revision": 1,
     }
     assert identity.canonical_json == canonical_json_v1(identity.to_dict())
     assert identity.content_hash == sha256_canonical(identity.to_dict())
@@ -57,7 +58,7 @@ def test_project_identity_revision_is_immutable_and_hashes_root_binding() -> Non
 
 
 def test_contract_round_trip_is_strict_and_rejects_client_identity_fields() -> None:
-    profile = LocalProfileIdentity(profile_id="profile_abc", revision=1)
+    profile = LocalProfileIdentity(profile_id="profile_abc")
     project = ProjectIdentityRevision(
         project_id="project_abc",
         profile_id=profile.profile_id,
@@ -77,6 +78,31 @@ def test_contract_round_trip_is_strict_and_rejects_client_identity_fields() -> N
     forged_project["project_name"] = "client supplied name"
     with pytest.raises(IdentityContractError):
         ProjectIdentityRevision.from_dict(forged_project)
+
+    forged_binding = project.to_dict()
+    forged_binding["root_binding"]["binding_key"] = "client-controlled-binding"
+    with pytest.raises(IdentityContractError):
+        ProjectIdentityRevision.from_dict(forged_binding)
+
+
+def test_local_profile_lifecycle_revision_is_a_separate_contract() -> None:
+    identity = LocalProfileIdentity(profile_id="profile_abc")
+    lifecycle = LocalProfileIdentityRevision(
+        profile_id=identity.profile_id,
+        revision=1,
+        identity_hash=identity.content_hash,
+        previous_revision=None,
+    )
+
+    assert "revision" not in identity.to_dict()
+    assert lifecycle.to_dict() == {
+        "contract_version": LOCAL_PROFILE_IDENTITY_REVISION_CONTRACT,
+        "identity_hash": identity.content_hash,
+        "previous_revision": None,
+        "profile_id": "profile_abc",
+        "revision": 1,
+    }
+    assert LocalProfileIdentityRevision.from_dict(lifecycle.to_dict()) == lifecycle
 
 
 def test_contract_hash_changes_for_revision_or_binding_but_not_mapping_order() -> None:
