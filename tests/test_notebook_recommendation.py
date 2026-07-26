@@ -9,11 +9,13 @@ import pytest
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
 from workbench.agent.notebook.proposal import OptionDraft, TypedProposal
 from workbench.agent.notebook.recommendation import (
+    ComparisonDecisionRecord,
     FeasibilityCandidateDecision,
     FeasibilityDecision,
     ProtocolResult,
     RecommendationValidator,
     RecommendationDecisionV11,
+    ServerDecisionRegistry,
     candidate_cohort_hash,
 )
 
@@ -165,16 +167,21 @@ def test_server_feasibility_decision_requires_the_complete_candidate_cohort() ->
 
 
 def test_v11_recommendation_uses_server_feasibility_not_agent_blocked_reason() -> None:
+    registry = ServerDecisionRegistry()
+    registry.register_feasibility(
+        _feasibility(
+            ("opt_bad", "blocked"),
+            ("opt_ets", "feasible"),
+        )
+    )
     decision = RecommendationValidator().decide_v11(
         batch_id="batch_1",
         candidate_option_ids=("opt_bad", "opt_ets"),
         generation_context_hash="sha256:context",
         freshness_dependency_fingerprint="fresh1:fingerprint",
         evidence_pack_hashes=("sha256:evidence",),
-        feasibility_decision=_feasibility(
-            ("opt_bad", "blocked"),
-            ("opt_ets", "feasible"),
-        ),
+        decision_registry=registry,
+        feasibility_decision_ref="feasibility_1",
     )
 
     assert decision.outcome == "recommended"
@@ -185,13 +192,16 @@ def test_v11_recommendation_uses_server_feasibility_not_agent_blocked_reason() -
 
 
 def test_v11_wire_contract_rejects_unknown_fields() -> None:
+    registry = ServerDecisionRegistry()
+    registry.register_feasibility(_feasibility(("opt_ets", "feasible")))
     decision = RecommendationValidator().decide_v11(
         batch_id="batch_1",
         candidate_option_ids=("opt_ets",),
         generation_context_hash="sha256:context",
         freshness_dependency_fingerprint="fresh1:fingerprint",
         evidence_pack_hashes=("sha256:evidence",),
-        feasibility_decision=_feasibility(("opt_ets", "feasible")),
+        decision_registry=registry,
+        feasibility_decision_ref="feasibility_1",
     )
     payload = decision.to_dict()
     payload["agent_blocked_reason"] = "pretend that alternatives were blocked"
@@ -200,16 +210,21 @@ def test_v11_wire_contract_rejects_unknown_fields() -> None:
 
 
 def test_v11_does_not_choose_between_multiple_feasible_candidates_without_comparison() -> None:
+    registry = ServerDecisionRegistry()
+    registry.register_feasibility(
+        _feasibility(
+            ("opt_ets", "feasible"),
+            ("opt_arma", "feasible"),
+        )
+    )
     decision = RecommendationValidator().decide_v11(
         batch_id="batch_1",
         candidate_option_ids=("opt_ets", "opt_arma"),
         generation_context_hash="sha256:context",
         freshness_dependency_fingerprint="fresh1:fingerprint",
         evidence_pack_hashes=("sha256:evidence",),
-        feasibility_decision=_feasibility(
-            ("opt_ets", "feasible"),
-            ("opt_arma", "feasible"),
-        ),
+        decision_registry=registry,
+        feasibility_decision_ref="feasibility_1",
     )
 
     assert decision.outcome == "insufficient_evidence"
@@ -217,6 +232,7 @@ def test_v11_does_not_choose_between_multiple_feasible_candidates_without_compar
 
 
 def test_v11_requires_exactly_one_server_decision_reference() -> None:
+    registry = ServerDecisionRegistry()
     with pytest.raises(ValueError, match="exactly one"):
         RecommendationValidator().decide_v11(
             batch_id="batch_1",
@@ -224,4 +240,88 @@ def test_v11_requires_exactly_one_server_decision_reference() -> None:
             generation_context_hash="sha256:context",
             freshness_dependency_fingerprint="fresh1:fingerprint",
             evidence_pack_hashes=("sha256:evidence",),
+            decision_registry=registry,
         )
+
+
+def test_v11_rejects_unregistered_or_mismatched_server_decisions() -> None:
+    registry = ServerDecisionRegistry()
+    with pytest.raises(ValueError, match="unavailable"):
+        RecommendationValidator().decide_v11(
+            batch_id="batch_1",
+            candidate_option_ids=("opt_ets",),
+            generation_context_hash="sha256:context",
+            freshness_dependency_fingerprint="fresh1:fingerprint",
+            evidence_pack_hashes=("sha256:evidence",),
+            decision_registry=registry,
+            feasibility_decision_ref="missing",
+        )
+
+    registry.register_feasibility(
+        _feasibility(
+            ("opt_ets", "feasible"),
+            batch_id="batch_other",
+        )
+    )
+    with pytest.raises(ValueError, match="does not cover"):
+        RecommendationValidator().decide_v11(
+            batch_id="batch_1",
+            candidate_option_ids=("opt_ets",),
+            generation_context_hash="sha256:context",
+            freshness_dependency_fingerprint="fresh1:fingerprint",
+            evidence_pack_hashes=("sha256:evidence",),
+            decision_registry=registry,
+            feasibility_decision_ref="feasibility_1",
+        )
+
+
+def test_v11_comparison_reference_is_validated_against_the_same_cohort() -> None:
+    registry = ServerDecisionRegistry()
+    registry.register_comparison(
+        ComparisonDecisionRecord(
+            comparison_decision_id="comparison_1",
+            batch_id="batch_1",
+            generation_context_hash="sha256:context",
+            freshness_dependency_fingerprint="fresh1:fingerprint",
+            evidence_pack_hashes=("sha256:evidence",),
+            candidate_option_ids=("opt_ets", "opt_arma"),
+            candidate_cohort_hash=candidate_cohort_hash(("opt_ets", "opt_arma")),
+            outcome="recommended",
+            recommended_option_id="opt_ets",
+            protocol_ref="comparison.v1",
+        )
+    )
+    decision = RecommendationValidator().decide_v11(
+        batch_id="batch_1",
+        candidate_option_ids=("opt_ets", "opt_arma"),
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        decision_registry=registry,
+        comparison_decision_ref="comparison_1",
+    )
+
+    assert decision.outcome == "recommended"
+    assert decision.recommended_option_id == "opt_ets"
+    registry.validate_recommendation(decision)
+
+
+def test_registry_rejects_a_wire_recommendation_with_a_forged_comparison_ref() -> None:
+    registry = ServerDecisionRegistry()
+    forged = RecommendationDecisionV11(
+        recommendation_decision_id="forged",
+        batch_id="batch_1",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        candidate_option_ids=("opt_ets",),
+        candidate_cohort_hash=candidate_cohort_hash(("opt_ets",)),
+        outcome="recommended",
+        recommended_option_id="opt_ets",
+        feasibility_decision_ref=None,
+        comparison_decision_ref="not_registered",
+        reason_refs=(),
+    )
+
+    with pytest.raises(ValueError, match="unavailable"):
+        registry.validate_recommendation(forged)
