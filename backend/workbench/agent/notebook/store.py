@@ -25,6 +25,7 @@ from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from ...contracts.agent.notebook_option import (
+    FeasibilityDecision,
     NotebookOptionRevision,
     OptionMaterialization,
     RecommendationDecision,
@@ -33,6 +34,7 @@ from ..events import AgentEventStream
 from ..storage import append_jsonl_atomic, read_jsonl
 from .errors import NotebookNotFound, OptionLegacyUnverified, OptionNotFound
 from .proposal import TypedProposal
+from .recommendation import ComparisonDecisionRecord, ServerDecisionRegistry
 
 NOTEBOOK_SCHEMA_VERSION = "notebook.v1"
 NOTEBOOK_DIRNAME = "notebooks"
@@ -48,6 +50,8 @@ RECORD_EXECUTION = "execution"
 RECORD_EXECUTION_RESULT = "execution_result"
 RECORD_EVIDENCE_PACK = "evidence_pack"
 RECORD_RECOMMENDATION_DECISION = "recommendation_decision"
+RECORD_FEASIBILITY_DECISION = "feasibility_decision"
+RECORD_COMPARISON_DECISION = "comparison_decision"
 RECORD_OPTION_MATERIALIZATION = "option_materialization"
 
 @dataclass
@@ -681,6 +685,76 @@ class NotebookStore:
     ) -> RecommendationDecision | None:
         with self._lock:
             return self._decisions(notebook_id).get(batch_id)
+
+    def _server_decision_registry(self, notebook_id: str) -> ServerDecisionRegistry:
+        registry = ServerDecisionRegistry()
+        for record in self._notebook_records(notebook_id):
+            record_type = record.get("record_type")
+            if record_type not in {
+                RECORD_FEASIBILITY_DECISION,
+                RECORD_COMPARISON_DECISION,
+            }:
+                continue
+            value = record.get("decision")
+            if not isinstance(value, Mapping):
+                raise ValueError("server decision record is malformed")
+            if record_type == RECORD_FEASIBILITY_DECISION:
+                registry.register_feasibility(FeasibilityDecision.from_dict(value))
+            else:
+                registry.register_comparison(ComparisonDecisionRecord.from_dict(value))
+        return registry
+
+    def append_server_decision(
+        self,
+        notebook_id: str,
+        decision: FeasibilityDecision | ComparisonDecisionRecord,
+    ) -> None:
+        """Persist one server-owned source decision exactly once.
+
+        This method never accepts an Agent recommendation or a free-form
+        payload. The decision contract is parsed again when the registry is
+        reconstructed after a process restart.
+        """
+
+        if not isinstance(decision, (FeasibilityDecision, ComparisonDecisionRecord)):
+            raise ValueError("server decision must be a supported contract")
+        record_type = (
+            RECORD_FEASIBILITY_DECISION
+            if isinstance(decision, FeasibilityDecision)
+            else RECORD_COMPARISON_DECISION
+        )
+        decision_ref = (
+            decision.feasibility_decision_id
+            if isinstance(decision, FeasibilityDecision)
+            else decision.comparison_decision_id
+        )
+        with self._lock:
+            registry = self._server_decision_registry(notebook_id)
+            existing = registry.get(decision_ref)
+            if existing is not None:
+                if existing != decision:
+                    raise ValueError(
+                        f"conflicting server decision for reference {decision_ref}"
+                    )
+                return
+            if isinstance(decision, FeasibilityDecision):
+                registry.register_feasibility(decision)
+            else:
+                registry.register_comparison(decision)
+            append_jsonl_atomic(
+                self._notebook_path(notebook_id),
+                {
+                    "record_type": record_type,
+                    "recorded_at": _now(),
+                    "decision": decision.to_dict(),
+                },
+            )
+
+    def read_server_decision_registry(self, notebook_id: str) -> ServerDecisionRegistry:
+        """Rebuild the trusted source registry from append-only Notebook records."""
+
+        with self._lock:
+            return self._server_decision_registry(notebook_id)
 
     def _materializations(
         self, notebook_id: str

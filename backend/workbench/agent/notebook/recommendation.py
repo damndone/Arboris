@@ -14,12 +14,16 @@ from ...contracts.agent.notebook_option import (
     RecommendationDecisionV11,
     _candidate_cohort_hash,
 )
+from ...contracts.common.envelope import require_exact_keys
 from .evidence import DataEvidencePackV1, EvidenceRecord
 from .proposal import OptionDraft
 
 
 class RecommendationValidationError(ValueError):
     """A recommendation protocol or candidate batch is not comparable."""
+
+
+COMPARISON_DECISION_CONTRACT_VERSION = "1.0"
 
 
 def candidate_cohort_hash(option_ids: Sequence[str]) -> str:
@@ -55,8 +59,29 @@ class ComparisonDecisionRecord:
     outcome: str
     recommended_option_id: str | None
     protocol_ref: str
+    contract_version: str = COMPARISON_DECISION_CONTRACT_VERSION
+
+    _KEYS = frozenset(
+        {
+            "contract_version",
+            "comparison_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "evidence_pack_hashes",
+            "candidate_option_ids",
+            "candidate_cohort_hash",
+            "outcome",
+            "recommended_option_id",
+            "protocol_ref",
+        }
+    )
 
     def __post_init__(self) -> None:
+        if self.contract_version != COMPARISON_DECISION_CONTRACT_VERSION:
+            raise RecommendationValidationError(
+                f"contract_version must be {COMPARISON_DECISION_CONTRACT_VERSION}"
+            )
         for field in (
             "comparison_decision_id",
             "batch_id",
@@ -83,14 +108,45 @@ class ComparisonDecisionRecord:
         object.__setattr__(self, "evidence_pack_hashes", evidence_pack_hashes)
         object.__setattr__(self, "candidate_option_ids", candidate_option_ids)
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "comparison_decision_id": self.comparison_decision_id,
+            "batch_id": self.batch_id,
+            "generation_context_hash": self.generation_context_hash,
+            "freshness_dependency_fingerprint": self.freshness_dependency_fingerprint,
+            "evidence_pack_hashes": list(self.evidence_pack_hashes),
+            "candidate_option_ids": list(self.candidate_option_ids),
+            "candidate_cohort_hash": self.candidate_cohort_hash,
+            "outcome": self.outcome,
+            "recommended_option_id": self.recommended_option_id,
+            "protocol_ref": self.protocol_ref,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ComparisonDecisionRecord":
+        require_exact_keys(value, cls._KEYS, "comparison_decision")
+        return cls(
+            comparison_decision_id=value["comparison_decision_id"],
+            batch_id=value["batch_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            evidence_pack_hashes=value["evidence_pack_hashes"],
+            candidate_option_ids=value["candidate_option_ids"],
+            candidate_cohort_hash=value["candidate_cohort_hash"],
+            outcome=value["outcome"],
+            recommended_option_id=value["recommended_option_id"],
+            protocol_ref=value["protocol_ref"],
+            contract_version=value["contract_version"],
+        )
+
 
 class ServerDecisionRegistry:
-    """Trusted process-local bridge for server-owned decision records.
+    """Trusted bridge for server-owned decision records.
 
     Registration is a control-plane operation.  Agent payload parsers must not
-    expose it; the registry is intentionally not a Notebook route or tool.
-    A durable implementation will replace this process-local store before any
-    decision is used by materialization or execution consumers.
+    expose it; the registry is intentionally not a Notebook route or tool. A
+    NotebookStore may reconstruct this registry from its append-only records.
     """
 
     def __init__(self) -> None:
@@ -124,6 +180,15 @@ class ServerDecisionRegistry:
             return self._comparison[ref]
         except (KeyError, TypeError) as error:
             raise RecommendationValidationError("comparison decision is unavailable") from error
+
+    def get(
+        self, ref: str
+    ) -> FeasibilityDecision | ComparisonDecisionRecord | None:
+        """Return one registered source by opaque reference, if present."""
+
+        if type(ref) is not str or not ref:
+            raise RecommendationValidationError("server decision reference is invalid")
+        return self._feasibility.get(ref) or self._comparison.get(ref)
 
     def validate_recommendation(self, decision: RecommendationDecisionV11) -> None:
         if not isinstance(decision, RecommendationDecisionV11):

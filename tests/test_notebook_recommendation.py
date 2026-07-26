@@ -306,6 +306,27 @@ def test_v11_comparison_reference_is_validated_against_the_same_cohort() -> None
     registry.validate_recommendation(decision)
 
 
+def test_comparison_decision_has_a_strict_persisted_wire_contract() -> None:
+    record = ComparisonDecisionRecord(
+        comparison_decision_id="comparison_1",
+        batch_id="batch_1",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        candidate_option_ids=("opt_ets", "opt_arma"),
+        candidate_cohort_hash=candidate_cohort_hash(("opt_ets", "opt_arma")),
+        outcome="recommended",
+        recommended_option_id="opt_ets",
+        protocol_ref="comparison.v1",
+    )
+
+    assert ComparisonDecisionRecord.from_dict(record.to_dict()) == record
+    payload = record.to_dict()
+    payload["untrusted_field"] = "must not survive persistence"
+    with pytest.raises(ValueError, match="unknown"):
+        ComparisonDecisionRecord.from_dict(payload)
+
+
 def test_registry_rejects_a_wire_recommendation_with_a_forged_comparison_ref() -> None:
     registry = ServerDecisionRegistry()
     forged = RecommendationDecisionV11(

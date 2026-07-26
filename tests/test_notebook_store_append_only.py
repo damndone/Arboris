@@ -8,13 +8,25 @@ so the assertions look at the file.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
+from workbench.agent.notebook.recommendation import (
+    ComparisonDecisionRecord,
+    ServerDecisionRegistry,
+    candidate_cohort_hash,
+)
 from workbench.agent.notebook.store import NotebookStore
 from workbench.agent.trace import TraceWriter
 from workbench.agent.notebook.vocabulary import DECLARED_ARTIFACT_TYPES
-from workbench.contracts.agent.notebook_option import ExpectedArtifact
+from workbench.contracts.agent.notebook_option import (
+    ExpectedArtifact,
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
+)
 
 from tests.test_notebook_support import make_project, model_rerun_proposal
 
@@ -39,6 +51,108 @@ def _draft(proposal_id: str, covariance: str, option_id: str | None = None) -> O
 
 def _option_log(project: Path, notebook_id: str, option_id: str) -> Path:
     return project / "notebooks" / notebook_id / "options" / f"{option_id}.jsonl"
+
+
+def _server_feasibility_decision() -> FeasibilityDecision:
+    candidates = (
+        FeasibilityCandidateDecision(
+            option_id="opt_ets",
+            protocol_id="feasibility.v1",
+            protocol_version="feasibility/v1",
+            inspection_refs=("inspection:opt_ets",),
+            evidence_refs=("evidence:opt_ets",),
+            outcome="feasible",
+            reason_code="PASS",
+        ),
+        FeasibilityCandidateDecision(
+            option_id="opt_arma",
+            protocol_id="feasibility.v1",
+            protocol_version="feasibility/v1",
+            inspection_refs=("inspection:opt_arma",),
+            evidence_refs=("evidence:opt_arma",),
+            outcome="blocked",
+            reason_code="INPUT_CONTRACT_INVALID",
+        ),
+    )
+    option_ids = tuple(item.option_id for item in candidates)
+    return FeasibilityDecision(
+        feasibility_decision_id="feasibility_1",
+        batch_id="batch_1",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        candidate_option_ids=option_ids,
+        candidate_cohort_hash=candidate_cohort_hash(option_ids),
+        candidates=candidates,
+        validator_revision="feasibility-validator/v1",
+    )
+
+
+def _server_comparison_decision() -> ComparisonDecisionRecord:
+    option_ids = ("opt_ets", "opt_arma")
+    return ComparisonDecisionRecord(
+        comparison_decision_id="comparison_1",
+        batch_id="batch_1",
+        generation_context_hash="sha256:context",
+        freshness_dependency_fingerprint="fresh1:fingerprint",
+        evidence_pack_hashes=("sha256:evidence",),
+        candidate_option_ids=option_ids,
+        candidate_cohort_hash=candidate_cohort_hash(option_ids),
+        outcome="recommended",
+        recommended_option_id="opt_ets",
+        protocol_ref="comparison.v1",
+    )
+
+
+def test_server_decisions_survive_store_restart_without_duplicate_records(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Decision store", created_by="u")
+    feasibility = _server_feasibility_decision()
+    comparison = _server_comparison_decision()
+    store = NotebookStore(project)
+
+    store.append_server_decision(notebook.notebook_id, feasibility)
+    store.append_server_decision(notebook.notebook_id, feasibility)
+    store.append_server_decision(notebook.notebook_id, comparison)
+
+    reopened = NotebookStore(project)
+    registry = reopened.read_server_decision_registry(notebook.notebook_id)
+    assert isinstance(registry, ServerDecisionRegistry)
+    assert registry.feasibility(feasibility.feasibility_decision_id) == feasibility
+    assert registry.comparison(comparison.comparison_decision_id) == comparison
+
+    records = [
+        json.loads(line)
+        for line in (project / "notebooks" / notebook.notebook_id / "notebook.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    assert [record["record_type"] for record in records].count("feasibility_decision") == 1
+    assert [record["record_type"] for record in records].count("comparison_decision") == 1
+
+
+def test_server_decision_persistence_rejects_conflicting_reuse_of_a_reference(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Decision conflict", created_by="u")
+    store = NotebookStore(project)
+    decision = _server_feasibility_decision()
+    store.append_server_decision(notebook.notebook_id, decision)
+
+    conflict = replace(decision, batch_id="batch_other")
+    with pytest.raises(ValueError, match="conflicting server decision"):
+        store.append_server_decision(notebook.notebook_id, conflict)
+
+    assert (
+        store.read_server_decision_registry(notebook.notebook_id).feasibility(
+            decision.feasibility_decision_id
+        )
+        == decision
+    )
 
 
 def test_the_option_log_only_ever_grows(tmp_path: Path) -> None:
