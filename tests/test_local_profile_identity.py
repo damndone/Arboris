@@ -44,6 +44,16 @@ def test_local_profile_creation_rejects_client_identity_claims(
         store.get_or_create(client_profile_id="profile-client-forgery")
 
 
+def test_default_reads_do_not_create_an_empty_authority(tmp_path: Path) -> None:
+    authority_root = tmp_path / "server-authority"
+    store = LocalProfileIdentityStore(authority_root)
+
+    assert store.get_current() is None
+    assert store.read_records_log_bytes() == b""
+    assert store.content_addressed_record_names() == ()
+    assert not authority_root.exists()
+
+
 def test_concurrent_first_creation_has_one_server_issued_profile_record(
     tmp_path: Path,
 ) -> None:

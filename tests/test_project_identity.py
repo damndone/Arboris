@@ -116,6 +116,19 @@ def test_project_identity_rejects_invalid_root_and_client_claims(tmp_path: Path)
         store.get_or_create(project_root, profile_id="profile-client-forgery")
 
 
+def test_default_reads_do_not_create_an_empty_authority(tmp_path: Path) -> None:
+    authority_root = tmp_path / "server-authority"
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    store = ProjectIdentityStore(authority_root)
+
+    assert store.get_current(project_root) is None
+    assert store.get("project_missing") == ()
+    assert store.read_records_log_bytes() == b""
+    assert store.content_addressed_record_names() == ()
+    assert not authority_root.exists()
+
+
 def test_concurrent_first_project_creation_has_one_revision(
     tmp_path: Path,
 ) -> None:

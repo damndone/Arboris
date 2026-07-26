@@ -148,7 +148,14 @@ class ProjectIdentityStore:
     def get_current(
         self, project_root: Path | str, *, recover: bool = False
     ) -> ProjectIdentityRevision | None:
-        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root,
+            "projects",
+            self._lock,
+            create=recover,
+        ) as admission:
+            if admission is None:
+                return None
             self._assert_profile_store_authority(admission)
             with open_validated_project_root(project_root) as root_admission:
                 records = self._read_records(admission, recover=recover)
@@ -176,7 +183,14 @@ class ProjectIdentityStore:
     def get(
         self, project_id: str, *, recover: bool = False
     ) -> tuple[ProjectIdentityRevision, ...]:
-        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root,
+            "projects",
+            self._lock,
+            create=recover,
+        ) as admission:
+            if admission is None:
+                return ()
             self._assert_profile_store_authority(admission)
             records = self._read_records(admission, recover=recover)
             if records:
@@ -201,7 +215,13 @@ class ProjectIdentityStore:
         return f"{revision.content_hash}.json"
 
     def read_record_bytes(self, revision: ProjectIdentityRevision) -> bytes:
-        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "projects", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                raise IdentityCollisionError(
+                    "project identity record is outside the current scope"
+                )
             self._assert_profile_store_authority(admission)
             records = self._validated_records(admission, recover_invalid_orphans=False)
             if not isinstance(revision, ProjectIdentityRevision) or not any(
@@ -217,14 +237,22 @@ class ProjectIdentityStore:
             return raw
 
     def read_records_log_bytes(self) -> bytes:
-        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "projects", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                return b""
             self._assert_profile_store_authority(admission)
             self._validated_records(admission, recover_invalid_orphans=False)
             raw = _read_child(admission.scope_fd, "records.jsonl", missing_is_none=True)
             return raw or b""
 
     def content_addressed_record_names(self) -> tuple[str, ...]:
-        with _open_store_admission(self.authority_root, "projects", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "projects", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                return ()
             self._assert_profile_store_authority(admission)
             self._validated_records(admission, recover_invalid_orphans=False)
             return _list_record_names(admission)

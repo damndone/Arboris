@@ -128,13 +128,17 @@ def _open_directory(parent_fd: int, name: str) -> int:
         raise
 
 
-def _open_or_create_directory(parent_fd: int, name: str) -> int:
+def _open_or_create_directory(
+    parent_fd: int, name: str, *, create: bool = True
+) -> int | None:
     _validate_component(name)
     try:
         return _open_directory(parent_fd, name)
     except IdentityRecordCorruptError as exc:
         if not isinstance(exc.__cause__, FileNotFoundError):
             raise
+        if not create:
+            return None
     try:
         os.mkdir(name, 0o700, dir_fd=parent_fd)
     except FileExistsError:
@@ -144,7 +148,7 @@ def _open_or_create_directory(parent_fd: int, name: str) -> int:
     return _open_directory(parent_fd, name)
 
 
-def _open_absolute_directory(path: Path) -> int:
+def _open_absolute_directory(path: Path, *, create: bool = True) -> int | None:
     _require_fd_primitives()
     if not path.is_absolute():
         raise IdentityStoreError("identity authority root must be absolute")
@@ -163,6 +167,9 @@ def _open_absolute_directory(path: Path) -> int:
                     dir_fd=current,
                 )
             except FileNotFoundError:
+                if not create:
+                    _close(current)
+                    return None
                 try:
                     os.mkdir(part, 0o700, dir_fd=current)
                 except FileExistsError:
@@ -489,8 +496,12 @@ class _IdentityStoreAdmission:
 
 @contextmanager
 def _open_store_admission(
-    authority_root: Path, scope_name: str, process_lock: RLock
-) -> Iterator[_IdentityStoreAdmission]:
+    authority_root: Path,
+    scope_name: str,
+    process_lock: RLock,
+    *,
+    create: bool = True,
+) -> Iterator[_IdentityStoreAdmission | None]:
     _require_fd_primitives()
     authority_fd: int | None = None
     identity_fd: int | None = None
@@ -499,19 +510,43 @@ def _open_store_admission(
     records_fd: int | None = None
     with process_lock:
         try:
-            authority_fd = _open_absolute_directory(authority_root)
-            identity_fd = _open_or_create_directory(authority_fd, "identity")
-            scope_fd = _open_or_create_directory(identity_fd, scope_name)
-            lock_fd = _open_child_file(
-                scope_fd,
-                ".lock",
-                flags=os.O_RDWR | os.O_CREAT,
+            authority_fd = _open_absolute_directory(authority_root, create=create)
+            if authority_fd is None:
+                yield None
+                return
+            identity_fd = _open_or_create_directory(
+                authority_fd, "identity", create=create
             )
+            if identity_fd is None:
+                yield None
+                return
+            scope_fd = _open_or_create_directory(
+                identity_fd, scope_name, create=create
+            )
+            if scope_fd is None:
+                yield None
+                return
+            try:
+                lock_fd = _open_child_file(
+                    scope_fd,
+                    ".lock",
+                    flags=os.O_RDWR | (os.O_CREAT if create else 0),
+                )
+            except IdentityRecordCorruptError as exc:
+                if not create and isinstance(exc.__cause__, FileNotFoundError):
+                    yield None
+                    return
+                raise
             lock_stat = os.fstat(lock_fd)
             if not stat.S_ISREG(lock_stat.st_mode):
                 raise IdentityRecordCorruptError("identity lock is not a regular file")
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            records_fd = _open_or_create_directory(scope_fd, "records")
+            records_fd = _open_or_create_directory(
+                scope_fd, "records", create=create
+            )
+            if records_fd is None:
+                yield None
+                return
             authority_stat = os.fstat(authority_fd)
             admission = _IdentityStoreAdmission(
                 _ADMISSION_ISSUER,
@@ -601,7 +636,14 @@ class LocalProfileIdentityStore:
     ensure = get_or_create
 
     def get_current(self, *, recover: bool = False) -> LocalProfileIdentity | None:
-        with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root,
+            "local_profile",
+            self._lock,
+            create=recover,
+        ) as admission:
+            if admission is None:
+                return None
             return self._load_or_recover(admission, create=False, recover=recover)
 
     current = get_current
@@ -610,7 +652,13 @@ class LocalProfileIdentityStore:
         return f"{identity.content_hash}.json"
 
     def read_record_bytes(self, identity: LocalProfileIdentity) -> bytes:
-        with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "local_profile", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                raise IdentityCollisionError(
+                    "local profile record is outside the current scope"
+                )
             current = self._load_or_recover(
                 admission,
                 create=False,
@@ -630,7 +678,11 @@ class LocalProfileIdentityStore:
             return raw
 
     def read_records_log_bytes(self) -> bytes:
-        with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "local_profile", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                return b""
             self._load_or_recover(
                 admission,
                 create=False,
@@ -641,7 +693,11 @@ class LocalProfileIdentityStore:
             return raw or b""
 
     def content_addressed_record_names(self) -> tuple[str, ...]:
-        with _open_store_admission(self.authority_root, "local_profile", self._lock) as admission:
+        with _open_store_admission(
+            self.authority_root, "local_profile", self._lock, create=False
+        ) as admission:
+            if admission is None:
+                return ()
             self._load_or_recover(
                 admission,
                 create=False,
