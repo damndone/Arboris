@@ -561,9 +561,10 @@ class NotebookOptionRevisionV11:
 class NotebookOptionRevisionV12(NotebookOptionRevisionV11):
     """NotebookOptionRevision@1.2 for an admitted capability binding.
 
-    This first implementation deliberately exposes only ``materialize_only``.
-    The later execution-authorization slice may add ``confirm_and_execute``
-    with its own receipt and replay gates; it must not be inferred here.
+    ``materialize_only`` remains the default. A server may additionally declare
+    ``confirm_and_execute`` for a low-risk option, but that declaration is only a
+    capability of the option contract: it is not an execution grant. The separate
+    server-owned authorization receipt and existing Run gates remain mandatory.
     """
 
     capability_resolution_binding_ref: str | None = None
@@ -591,9 +592,15 @@ class NotebookOptionRevisionV12(NotebookOptionRevisionV11):
             ),
         )
         modes = _require_string_tuple(self.execution_modes, "execution_modes")
-        if modes != ("materialize_only",):
+        if (
+            not modes
+            or modes[0] != "materialize_only"
+            or len(set(modes)) != len(modes)
+            or any(mode not in {"materialize_only", "confirm_and_execute"} for mode in modes)
+        ):
             raise NotebookContractError(
-                "execution_modes currently supports only materialize_only"
+                "execution_modes must start with materialize_only and may optionally "
+                "include confirm_and_execute"
             )
         object.__setattr__(self, "execution_modes", modes)
         object.__setattr__(

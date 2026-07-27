@@ -34,6 +34,12 @@ from ...contracts.agent.notebook_option import (
     RecommendationDecision,
     RecommendationDecisionV11,
 )
+from ...capability_factory.execution_authorization import (
+    ExecutionAuthorizationError,
+    OptionExecutionAuthorization,
+    OptionExecutionAuthorizationStore,
+)
+from ...custom_capability.canonical import domain_digest
 from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
     CapabilityBindingCatalogError,
@@ -112,11 +118,31 @@ MAX_OPTIONS_PER_BATCH = 3
 # passed through, so a new registry level fails loudly instead of quietly
 # becoming "low".
 _REGISTRY_RISK_TO_OPTION_RISK = {
+    "none": "low",
     "read": "low",
     "readonly": "low",
     "mutating": "medium",
     "high": "high",
 }
+
+
+def _execution_modes_for(risk_level: str) -> tuple[str, ...]:
+    """Expose the fast path only for server-classified low-risk options."""
+
+    if risk_level == "low":
+        return ("materialize_only", "confirm_and_execute")
+    return ("materialize_only",)
+
+
+def _artifact_contract_ref(contract: Any) -> str:
+    return domain_digest("workbench.notebook.artifact_contract/v1", contract.to_dict())
+
+
+def _consumer_projection_ref(binding: CapabilityResolutionBinding) -> str:
+    return domain_digest(
+        "workbench.capability_factory.consumer_projection/v1",
+        {"allowed_consumers": list(binding.allowed_consumers)},
+    )
 
 # spec §3.5. `executed`, `rejected` and `archived` have no outgoing edges.
 _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -735,7 +761,7 @@ class NotebookService:
                     revision_kwargs.update(
                         {
                             "capability_resolution_binding_ref": binding.content_digest,
-                            "execution_modes": ("materialize_only",),
+                            "execution_modes": _execution_modes_for(risk_level),
                         }
                     )
                 revision = revision_type(**revision_kwargs)
@@ -965,7 +991,7 @@ class NotebookService:
                 revision_kwargs.update(
                     {
                         "capability_resolution_binding_ref": binding.content_digest,
-                        "execution_modes": ("materialize_only",),
+                        "execution_modes": _execution_modes_for(risk_level),
                     }
                 )
             revision = revision_type(**revision_kwargs)
@@ -1260,6 +1286,158 @@ class NotebookService:
             context=context,
             trace=trace,
         )
+
+    def authorize_option_execution(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        authorization: OptionExecutionAuthorization,
+    ) -> OptionExecutionAuthorization:
+        """Bind a user-confirmed low-risk option to a durable receipt.
+
+        This is deliberately a control-plane operation.  It validates the
+        current recommendation, binding, risk, and freshness, then persists
+        the already-prepared server authorization.  It does not transition
+        the Option, materialize a Draft, create a Run intent, or dispatch
+        anything.
+        """
+
+        if not isinstance(authorization, OptionExecutionAuthorization):
+            raise TypeError("authorization must be OptionExecutionAuthorization")
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if authorization.notebook_id != notebook_id or authorization.option_id != option_id:
+            raise OptionRevisionStale(
+                "authorization does not identify the current notebook option",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_option_identity",
+            )
+        if authorization.option_revision != current.option_revision:
+            raise OptionRevisionStale(
+                "authorization option revision is stale",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_option_revision",
+            )
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "confirm_and_execute requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_contract_version",
+            )
+        if "confirm_and_execute" not in current.execution_modes:
+            raise OptionRevisionStale(
+                "the current option does not offer confirm_and_execute",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_mode_not_offered",
+            )
+        if current.risk_level != "low" or authorization.risk_level != "low":
+            raise OptionRevisionStale(
+                "confirm_and_execute is limited to low-risk options",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_risk",
+            )
+        if view.lifecycle_status != "selected":
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; user confirmation "
+                "requires the selected lifecycle state",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        assert_executable(current, context)
+
+        reference = current.capability_resolution_binding_ref
+        if self.capability_bindings is None or reference is None:
+            raise OptionRevisionStale(
+                "authorization requires a current server-owned capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_unavailable",
+            )
+        try:
+            capability_id = self.capability_bindings.capability_id_for_reference(
+                reference,
+                scope_candidates=(
+                    ("project", self.get_notebook(notebook_id).project_id),
+                    ("run_family", self.get_notebook(notebook_id).run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise CapabilityBindingCatalogError(
+                    "authorization binding reference is not registered"
+                )
+            binding = self.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", self.get_notebook(notebook_id).project_id),
+                    ("run_family", self.get_notebook(notebook_id).run_family_id),
+                ),
+            )
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "authorization binding is not currently usable",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_not_current",
+            ) from error
+
+        expected = {
+            "capability_resolution_binding_ref": binding.content_digest,
+            "capability_ref": binding.implementation_ref,
+            "bundle_ref": binding.validation_bundle_ref,
+            "evidence_ref": binding.assessment_ref,
+            "admission_ref": binding.admission_ref,
+            "runtime_policy_ref": binding.runtime_policy_ref,
+            "freshness_cursor_ref": binding.validity_cursor_ref,
+            "input_graph_fingerprint": current.generation_context_hash,
+            "freshness_dependency_fingerprint": current.freshness_dependency_fingerprint,
+            "artifact_contract_ref": _artifact_contract_ref(current.artifact_contract),
+            "consumer_projection_ref": _consumer_projection_ref(binding),
+        }
+        mismatches = [
+            field
+            for field, value in expected.items()
+            if getattr(authorization, field) != value
+        ]
+        if authorization.binding_revision != 1:
+            mismatches.append("binding_revision")
+        if mismatches:
+            raise OptionRevisionStale(
+                "authorization binding does not match the current option: "
+                + ", ".join(sorted(mismatches)),
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding",
+            )
+        if authorization.operation_id not in binding.allowed_operations:
+            raise OptionRevisionStale(
+                "authorization operation is not allowed by the current binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_operation",
+            )
+
+        try:
+            return OptionExecutionAuthorizationStore(self.project_root).issue(
+                authorization
+            )
+        except ExecutionAuthorizationError as error:
+            raise OptionRevisionStale(
+                "authorization receipt could not be persisted",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_receipt_invalid",
+            ) from error
 
     # ------------------------------------------------------------------
     # Decisions
