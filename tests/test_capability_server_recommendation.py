@@ -9,8 +9,10 @@ from test_notebook_capability_binding import _draft, _service_with_catalog
 from tests.test_notebook_support import make_project
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
 from workbench.agent.notebook.errors import OptionBatchInvalid
+from workbench.canonical import sha256_canonical
 from workbench.contracts.agent.notebook_option import EvidenceRef
 from workbench.contracts.agent.notebook_option import RecommendationDecisionV11
+from workbench.capability_factory.trace_contracts import CapabilityTraceEvent
 
 
 def _evidence() -> DataEvidencePackV1:
@@ -91,6 +93,29 @@ def test_single_server_validated_candidate_gets_v11_recommendation(tmp_path: Pat
     assert decision.recommended_option_id == "opt.alpha"
     assert normalized[0].recommendation_decision_id == decision.recommendation_decision_id
     assert normalized[0].recommendation_status == "recommended"
+
+
+def test_server_feasibility_emits_a_bounded_capability_trace_event(tmp_path: Path) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, _binding, _catalog = _service_with_catalog(project)
+    events: list[CapabilityTraceEvent] = []
+
+    context = service.compile_context(notebook.notebook_id)
+    _normalized, decision = service.derive_server_recommendation(
+        notebook.notebook_id,
+        context=context,
+        drafts=(_draft(capability_id="capability.registered", option_id="opt.alpha"),),
+        batch_id="batch.trace",
+        evidence_pack=_evidence(),
+        capability_trace_sink=events.append,
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "option.feasibility.decided"
+    assert event.payload["decision_ref"] == sha256_canonical(decision.to_dict())
+    assert event.payload["candidate_cohort_ref"] == decision.candidate_cohort_hash
+    assert event.payload["outcome"] == decision.outcome
 
 
 def test_server_stage_rejects_uncovered_candidate_evidence_before_source_write(

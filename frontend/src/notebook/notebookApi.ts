@@ -242,6 +242,23 @@ export function materializeNotebookOption(
   );
 }
 
+export function authorizeNotebookOptionExecution(
+  projectRoot: string,
+  notebookId: string,
+  optionId: string,
+  authorization: Record<string, unknown>,
+): Promise<{ authorization: Record<string, unknown>; trace_id: string }> {
+  return readNotebookResponse<{ authorization: Record<string, unknown>; trace_id: string }>(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/authorize-execution`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ authorization }),
+    },
+  );
+}
+
 export function completeNotebookOptionExecution(
   projectRoot: string,
   notebookId: string,

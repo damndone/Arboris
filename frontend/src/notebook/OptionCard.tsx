@@ -9,6 +9,7 @@ export interface OptionCardProps {
   onDefer?: (option: NotebookOptionRevision) => void;
   onReject?: (option: NotebookOptionRevision) => void;
   onRevalidate?: (option: NotebookOptionRevision) => void;
+  onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
 }
 
 function Axis({
@@ -40,6 +41,7 @@ export function OptionCard({
   onDefer,
   onReject,
   onRevalidate,
+  onConfirmAndExecute,
 }: OptionCardProps) {
   const gate = executability(option);
   const notes = axisNote(option);
@@ -108,6 +110,12 @@ export function OptionCard({
         </p>
       </section>
 
+      {option.confirmAndExecute ? (
+        <p data-testid="option-capability-binding" className="nb-option-capability-binding">
+          server-bound capability · explicit confirmation required
+        </p>
+      ) : null}
+
       {outcome ? (
         <section className="nb-option-outcome" data-testid="option-contract-outcome">
           <span className="nb-outcome-headline">
@@ -158,6 +166,17 @@ export function OptionCard({
               ? "Review and prepare Draft"
               : "Review and confirm"}
         </button>
+        {option.confirmAndExecute ? (
+          <button
+            type="button"
+            data-testid="option-confirm-and-execute"
+            className="nb-button nb-button-primary"
+            disabled={!gate.executable}
+            onClick={() => onConfirmAndExecute?.(option)}
+          >
+            Confirm and execute
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="option-revalidate"

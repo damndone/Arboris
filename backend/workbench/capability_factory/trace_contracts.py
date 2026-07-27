@@ -31,7 +31,27 @@ _EVENT_FIELDS = {
     "capability.evidence.assessed": frozenset({"assessment_ref", "tier", "protocol_ref"}),
     "capability.evidence.validity.changed": frozenset({"assessment_ref", "validity_ref", "to_status"}),
     "capability.validation_attempt.recorded": frozenset({"attempt_ledger_ref", "protocol_ref", "outcome"}),
+    "option.feasibility.decided": frozenset(
+        {"decision_ref", "candidate_cohort_ref", "outcome"}
+    ),
+    "option.authorization.changed": frozenset(
+        {"authorization_ref", "from_status", "to_status", "receipt_ref"}
+    ),
+    "option.dispatch.reserved": frozenset(
+        {"authorization_ref", "reservation_ref", "control_sequence"}
+    ),
+    "capability.consumer_projection.validated": frozenset(
+        {"adapter_revision_ref", "projection_ref", "outcome"}
+    ),
+    "artifact_contract.v11.validation.completed": frozenset(
+        {"aggregate_ref", "option_revision_ref", "run_attempt_ref", "outcome"}
+    ),
+    "option.execution.reconciled": frozenset(
+        {"authorization_ref", "lease_epoch", "outcome", "object_graph_ref"}
+    ),
 }
+
+_POSITIVE_INTEGER_FIELDS = frozenset({"control_sequence", "lease_epoch"})
 
 
 class TraceContractError(ValueError):
@@ -64,9 +84,9 @@ def build_trace_event(*, event_type: str, payload: Mapping[str, Any]) -> Capabil
                 normalized[key] = _digest(value, key)
             except ValueError as error:
                 raise TraceContractError(str(error)) from error
-        elif key == "revision":
+        elif key == "revision" or key in _POSITIVE_INTEGER_FIELDS:
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-                raise TraceContractError("revision must be a positive integer")
+                raise TraceContractError(f"{key} must be a positive integer")
             normalized[key] = value
         else:
             normalized[key] = _text(value, key)

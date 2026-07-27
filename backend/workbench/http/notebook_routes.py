@@ -41,6 +41,10 @@ from ..capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
     CapabilityBindingCatalogError,
 )
+from ..capability_factory.execution_authorization import (
+    ExecutionAuthorizationError,
+    OptionExecutionAuthorization,
+)
 
 router = APIRouter()
 
@@ -111,6 +115,12 @@ class ConfirmOptionRequest(_StrictModel):
     option_revision: int = Field(ge=1)
     proposal_id: str = Field(min_length=1, max_length=200)
     proposal_revision: int = Field(ge=1)
+
+
+class AuthorizeOptionExecutionRequest(_StrictModel):
+    """Untrusted receipt envelope; the service rechecks every server-owned pin."""
+
+    authorization: dict[str, Any]
 
 
 class DecisionRequest(_StrictModel):
@@ -1023,6 +1033,41 @@ def materialize_option_endpoint(
         return {**result.to_dict(), "trace_id": trace.trace_id}
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
+@router.post("/notebooks/{notebook_id}/options/{option_id}/authorize-execution")
+def authorize_option_execution_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    option_id: str,
+    body: AuthorizeOptionExecutionRequest,
+) -> dict[str, Any]:
+    """Persist a verified one-time authorization, without dispatching it.
+
+    This is intentionally separate from ``confirm`` and from any executor
+    route. The request may carry a client-produced envelope, but
+    ``NotebookService`` compares its option, binding, freshness, risk and
+    proposal pins against the server-owned current records before issuing it.
+    """
+
+    root, service = _service(request, project_root)
+    try:
+        context, trace = _compile(root, service, notebook_id)
+        authorization = OptionExecutionAuthorization.from_dict(body.authorization)
+        persisted = service.authorize_option_execution(
+            notebook_id,
+            option_id,
+            context=context,
+            authorization=authorization,
+        )
+        return {"authorization": persisted.to_dict(), "trace_id": trace.trace_id}
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except ExecutionAuthorizationError as exc:
+        raise _request_error(exc) from exc
     except (OSError, ValueError, KeyError) as exc:
         raise _request_error(exc) from exc
 

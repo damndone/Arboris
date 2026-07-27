@@ -11,8 +11,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import fcntl
+from pathlib import Path
 from typing import Any, ClassVar, Mapping
 
+from ..agent.storage import append_jsonl_atomic, read_jsonl
 from ..custom_capability.canonical import domain_digest
 from .dispatch import DispatchReservation
 
@@ -50,6 +54,10 @@ _PROOF_ISSUER_ROLES = frozenset({"trusted_supervisor", "trusted_containment"})
 
 class SupervisorStateError(ValueError):
     """Raised whenever a supervisor contract cannot be trusted."""
+
+
+class DurableSupervisorError(SupervisorStateError):
+    """Raised when the supervisor journal cannot be replayed safely."""
 
 
 def _text(value: Any, field: str, *, maximum: int = 512) -> str:
@@ -175,8 +183,8 @@ class ExecutionAttemptRecord:
             raise SupervisorStateError(f"{self.status} requires a process/job handle identity")
         if self.status in {"reserved", "spawn_requested"} and self.process_handle_ref is not None:
             raise SupervisorStateError(f"{self.status} cannot carry a process/job handle identity")
-        if self.status == "reserved" and self.state_revision != 1:
-            raise SupervisorStateError("reserved attempt must be the first state revision")
+        if self.status == "reserved" and self.state_revision < 1:
+            raise SupervisorStateError("reserved attempt must have a positive state revision")
 
     @classmethod
     def from_reservation(cls, reservation: DispatchReservation) -> "ExecutionAttemptRecord":
@@ -483,10 +491,172 @@ class QuiescenceAssessment:
         return result
 
 
+class DurableSupervisorStore:
+    """Append-only supervisor state with deterministic crash recovery.
+
+    The store persists complete immutable attempt revisions.  A restart loads
+    the same attempt and handle identity; it never derives a new spawn key.
+    This is a control-plane journal only: it does not start processes or
+    inspect the host.  A trusted B1 executor remains the only component that
+    can provide a handle or quiescence proof.
+    """
+
+    _RECORD_TYPE = "capability_execution_attempt"
+    _JOURNAL_NAME = "supervisor-attempts.jsonl"
+
+    def __init__(self, root: Path | str, *, create: bool = True) -> None:
+        self.root = Path(root)
+        self.directory = self.root / "capability-supervisor"
+        if create:
+            self.directory.mkdir(parents=True, exist_ok=True)
+        self.journal = self.directory / self._JOURNAL_NAME
+        self._history: dict[str, list[ExecutionAttemptRecord]] = {}
+        self._reload()
+
+    def create(self, reservation: DispatchReservation) -> ExecutionAttemptRecord:
+        if not isinstance(reservation, DispatchReservation):
+            raise DurableSupervisorError("reservation must be a DispatchReservation")
+        with self._locked():
+            self._reload()
+            history = self._history.get(reservation.attempt_id, [])
+            if history:
+                current = history[-1]
+                if current.reservation_id != reservation.reservation_id:
+                    raise DurableSupervisorError("attempt identity is already bound to another reservation")
+                return current
+            record = ExecutionAttemptRecord.from_reservation(reservation)
+            self._append(record)
+            self._history[record.attempt_id] = [record]
+            return record
+
+    def read(self, attempt_id: str) -> ExecutionAttemptRecord:
+        history = self.history(attempt_id)
+        if not history:
+            raise DurableSupervisorError("execution attempt was not found")
+        return history[-1]
+
+    def history(self, attempt_id: str) -> tuple[ExecutionAttemptRecord, ...]:
+        self._reload()
+        return tuple(self._history.get(attempt_id, ()))
+
+    def transition(
+        self,
+        attempt_id: str,
+        *,
+        target_status: str,
+        transition_id: str,
+        owner_id: str,
+        lease_epoch: int,
+        reason: str,
+        process_handle_ref: str | None = None,
+    ) -> ExecutionAttemptRecord:
+        with self._locked():
+            self._reload()
+            current = self.read(attempt_id)
+            next_record = current.transition(
+                target_status=target_status,
+                transition_id=transition_id,
+                owner_id=owner_id,
+                lease_epoch=lease_epoch,
+                reason=reason,
+                process_handle_ref=process_handle_ref,
+            )
+            if next_record == current:
+                return current
+            self._append(next_record)
+            self._history.setdefault(attempt_id, []).append(next_record)
+            return next_record
+
+    def take_over_lease(
+        self,
+        attempt_id: str,
+        *,
+        owner_id: str,
+        transition_id: str,
+        reason: str = "lease takeover after supervisor recovery",
+    ) -> ExecutionAttemptRecord:
+        """Fence the previous worker while retaining the same attempt/handle."""
+
+        with self._locked():
+            self._reload()
+            current = self.read(attempt_id)
+            if current.status in {"dispatch_unknown", "failed", "consumed", "terminated"}:
+                raise DurableSupervisorError("lease takeover is not valid for this attempt state")
+            owner = _identifier(owner_id, "owner_id")
+            transition = _identifier(transition_id, "transition_id")
+            if transition == current.transition_id:
+                if current.lease_owner_id == owner:
+                    return current
+                raise DurableSupervisorError("lease takeover replay has a different owner")
+            next_record = replace(
+                current,
+                lease_epoch=current.lease_epoch + 1,
+                state_revision=current.state_revision + 1,
+                lease_owner_id=owner,
+                transition_id=transition,
+                prior_state_digest=current.content_digest,
+                transition_reason=_text(reason, "reason", maximum=256),
+            )
+            self._append(next_record)
+            self._history.setdefault(attempt_id, []).append(next_record)
+            return next_record
+
+    def assess_quiescence(
+        self, attempt_id: str, proof: AttemptQuiescenceProof
+    ) -> QuiescenceAssessment:
+        return self.read(attempt_id).assess_quiescence(proof)
+
+    def _reload(self) -> None:
+        self._history = {}
+        try:
+            events = read_jsonl(self.journal)
+        except (OSError, ValueError) as error:
+            raise DurableSupervisorError("supervisor journal cannot be read") from error
+        for index, event in enumerate(events, start=1):
+            if set(event) != {"record_type", "attempt"} or event["record_type"] != self._RECORD_TYPE:
+                raise DurableSupervisorError(f"supervisor journal event {index} has invalid fields")
+            try:
+                record = ExecutionAttemptRecord.from_dict(event["attempt"])
+            except SupervisorStateError as error:
+                raise DurableSupervisorError(f"supervisor attempt event {index} is invalid") from error
+            history = self._history.setdefault(record.attempt_id, [])
+            if not history:
+                if record.status != "reserved" or record.state_revision != 1:
+                    raise DurableSupervisorError("supervisor attempt history must start at reserved revision one")
+            else:
+                previous = history[-1]
+                if record.prior_state_digest != previous.content_digest:
+                    raise DurableSupervisorError("supervisor attempt history has a broken digest chain")
+                if record.state_revision != previous.state_revision + 1:
+                    raise DurableSupervisorError("supervisor attempt revisions are not contiguous")
+                if record.reservation_id != previous.reservation_id or record.intent_digest != previous.intent_digest:
+                    raise DurableSupervisorError("supervisor attempt identity changed across a revision")
+            history.append(record)
+
+    def _append(self, record: ExecutionAttemptRecord) -> None:
+        append_jsonl_atomic(
+            self.journal,
+            {"record_type": self._RECORD_TYPE, "attempt": record.to_dict()},
+        )
+
+    @contextmanager
+    def _locked(self):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        lock_path = self.directory / ".supervisor.lock"
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 __all__ = [
     "AttemptQuiescenceProof",
     "EXECUTION_ATTEMPT_CONTRACT_VERSION",
     "ExecutionAttemptRecord",
+    "DurableSupervisorError",
+    "DurableSupervisorStore",
     "QUIESCENCE_ASSESSMENT_CONTRACT_VERSION",
     "QUIESCENCE_PROOF_CONTRACT_VERSION",
     "QuiescenceAssessment",

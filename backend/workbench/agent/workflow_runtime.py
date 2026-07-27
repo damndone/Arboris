@@ -34,6 +34,7 @@ from ..statistical_exploration import (
 from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
+from .workflow_contracts import workflow_dispatcher_key
 
 
 def _exploration_spec(spec: Mapping[str, Any]) -> ExplorationSpec:
@@ -193,7 +194,8 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
         # Dispatch on the declared operation identity, never on a step number:
         # a plan with a different shape or length must run on the same runtime.
         operation_id = step.operation_id
-        if operation_id == "statistical.explore" and "plots" not in step.spec:
+        dispatcher_key = workflow_dispatcher_key(operation_id)
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
                 draft=draft,
@@ -201,7 +203,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 source_frame=source_frame,
                 spec=_exploration_spec(step.spec),
             )
-        if operation_id == "statistical.derive_boolean":
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_boolean":
             detail, detail_step_id, detail_fingerprint = _detail_result(
                 previous, source_run_root, step.depends_on, dependency_graph
             )
@@ -268,7 +270,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                     },
                 },
             )
-        if operation_id == "statistical.derived_group_summarize":
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derived_group_summarize":
             detail, detail_step_id, _detail_fp = _detail_result(
                 previous, source_run_root, step.depends_on, dependency_graph
             )
@@ -316,7 +318,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 row_counts=row_counts,
                 payload={"groups": row_counts},
             )
-        if operation_id == "statistical.explore" and "plots" in step.spec:
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" in step.spec:
             artifact_ids: list[str] = []
             row_counts: dict[str, int] = {}
             for plot in step.spec["plots"]:
@@ -346,11 +348,11 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 artifact_ids=list(dict.fromkeys(artifact_ids)),
                 row_counts=row_counts,
             )
-        if operation_id == "model.genesis":
+        if dispatcher_key == "workbench.services.genesis":
             return _execute_ols_branches(
                 root, draft, source_context, source_frame, step
             )
-        if operation_id.startswith("report."):
+        if dispatcher_key == "workbench.agent.workflow_runtime.report":
             return _execute_workflow_report(root, draft, previous)
         raise WorkflowExecutionError(
             f"unsupported workflow operation: {step.operation_id}"

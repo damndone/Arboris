@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import pandas as pd
@@ -48,6 +48,10 @@ from ...capability_factory.notebook_catalog import (
     NOTEBOOK_OPTION_PLANNER_CONSUMER,
 )
 from ...capability_factory.notebook_binding import CapabilityResolutionBinding
+from ...capability_factory.trace_contracts import (
+    CapabilityTraceEvent,
+    build_trace_event,
+)
 from ...lineage.run_family import (
     RunFamilyStore,
     assert_run_in_family,
@@ -385,6 +389,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         batch_id: str,
         evidence_pack: DataEvidencePackV1,
+        capability_trace_sink: Callable[[CapabilityTraceEvent], None] | None = None,
     ) -> tuple[tuple[OptionDraft, ...], RecommendationDecisionV11]:
         """Revalidate an Agent cohort and derive one server-owned decision.
 
@@ -505,6 +510,17 @@ class NotebookService:
             decision_registry=self.read_server_decision_registry(notebook_id),
             feasibility_decision_ref=feasibility.feasibility_decision_id,
         )
+        if capability_trace_sink is not None:
+            capability_trace_sink(
+                build_trace_event(
+                    event_type="option.feasibility.decided",
+                    payload={
+                        "decision_ref": sha256_canonical(decision.to_dict()),
+                        "candidate_cohort_ref": feasibility.candidate_cohort_hash,
+                        "outcome": decision.outcome,
+                    },
+                )
+            )
         normalized = tuple(
             replace(
                 draft,

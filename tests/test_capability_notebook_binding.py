@@ -376,7 +376,7 @@ def _execution_authorization_for(revision, binding, *, notebook_id: str):
 
 
 def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
-    from test_notebook_capability_binding import _decision, _service_with_catalog
+    from test_notebook_capability_binding import _server_decision, _service_with_catalog
     from workbench.capability_factory.execution_authorization import (
         OptionExecutionAuthorizationStore,
     )
@@ -384,7 +384,9 @@ def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
     project = make_project(tmp_path, name="project.alpha")
     service, notebook, binding, _catalog = _service_with_catalog(project)
     context = service.compile_context(notebook.notebook_id)
-    decision = _decision(
+    decision = _server_decision(
+        service,
+        notebook,
         context,
         option_id="opt_exploration",
         decision_id="rec_exploration",
@@ -429,12 +431,14 @@ def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
 
 
 def test_confirmation_rejects_receipt_with_stale_binding(tmp_path):
-    from test_notebook_capability_binding import _decision, _service_with_catalog
+    from test_notebook_capability_binding import _server_decision, _service_with_catalog
 
     project = make_project(tmp_path, name="project.alpha")
     service, notebook, binding, _catalog = _service_with_catalog(project)
     context = service.compile_context(notebook.notebook_id)
-    decision = _decision(
+    decision = _server_decision(
+        service,
+        notebook,
         context,
         option_id="opt_exploration",
         decision_id="rec_exploration",

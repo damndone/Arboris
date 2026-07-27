@@ -9,6 +9,8 @@ from workbench.capability_factory.dispatch import DispatchReservation
 from workbench.capability_factory.control import ControlSubjectCursor
 from workbench.capability_factory.supervisor import (
     AttemptQuiescenceProof,
+    DurableSupervisorError,
+    DurableSupervisorStore,
     ExecutionAttemptRecord,
     SupervisorStateError,
 )
@@ -282,3 +284,65 @@ def test_contract_has_no_execution_surface() -> None:
     assert not hasattr(module, "subprocess")
     assert not hasattr(module, "socket")
     assert not hasattr(module, "Popen")
+
+
+def test_durable_supervisor_reopens_the_same_attempt_and_fences_old_epoch(tmp_path) -> None:
+    store = DurableSupervisorStore(tmp_path)
+    reserved = store.create(_reservation())
+    requested = store.transition(
+        reserved.attempt_id,
+        target_status="spawn_requested",
+        transition_id="transition.request",
+        owner_id="supervisor.alpha",
+        lease_epoch=3,
+        reason="recorded",
+    )
+    reopened = DurableSupervisorStore(tmp_path)
+    assert reopened.read(reserved.attempt_id) == requested
+
+    recovered = reopened.take_over_lease(
+        reserved.attempt_id,
+        owner_id="supervisor.beta",
+        transition_id="transition.takeover",
+    )
+    assert recovered.attempt_id == reserved.attempt_id
+    assert recovered.lease_epoch == 4
+    assert recovered.status == "spawn_requested"
+
+    with pytest.raises(SupervisorStateError, match="epoch"):
+        reopened.transition(
+            reserved.attempt_id,
+            target_status="spawn_acknowledged",
+            transition_id="transition.old-ack",
+            owner_id="supervisor.alpha",
+            lease_epoch=3,
+            process_handle_ref="handle.alpha",
+            reason="old worker",
+        )
+
+
+def test_durable_supervisor_is_idempotent_for_same_reservation_and_transition(tmp_path) -> None:
+    store = DurableSupervisorStore(tmp_path)
+    first = store.create(_reservation())
+    replay = store.create(_reservation())
+    assert replay == first
+    requested = store.transition(
+        first.attempt_id,
+        target_status="spawn_requested",
+        transition_id="transition.request",
+        owner_id="supervisor.alpha",
+        lease_epoch=3,
+        reason="recorded",
+    )
+    assert store.transition(
+        first.attempt_id,
+        target_status="spawn_requested",
+        transition_id="transition.request",
+        owner_id="supervisor.alpha",
+        lease_epoch=3,
+        reason="recorded",
+    ) == requested
+    assert len(store.history(first.attempt_id)) == 2
+
+    with pytest.raises(DurableSupervisorError, match="another reservation"):
+        store.create(replace(_reservation(), reservation_id="reservation.other"))

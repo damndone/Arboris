@@ -12,6 +12,7 @@
 import type { DomainMemoryRetrievalProjection } from "./domainMemoryContracts";
 
 export const NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1";
+export const NOTEBOOK_OPTION_V12_CONTRACT_VERSION = "1.2";
 export const NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0";
 export const OPTION_EXECUTION_CONTRACT_VERSION = "1.1";
 export const OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0";
@@ -300,13 +301,16 @@ export interface EvidenceRef {
 
 /** Common consumer shape. New parser outputs are the narrower union below. */
 export interface NotebookOptionRevision extends NotebookOptionRevisionBase {
-  contract_version: "1.0" | "1.1";
+  contract_version: "1.0" | "1.1" | "1.2";
   lifecycle_projection: LifecycleStatus | "legacy_unverified";
   materializable: boolean;
   evidence_refs?: EvidenceRef[];
   comparative_claims?: string[];
   recommendation_decision_id?: string;
   recommendation_status?: RecommendationOutcome;
+  capability_resolution_binding_ref?: string;
+  execution_modes?: ReadonlyArray<"materialize_only" | "confirm_and_execute">;
+  confirmAndExecute?: boolean;
 }
 
 export interface LegacyNotebookOptionRevision extends NotebookOptionRevision {
@@ -330,9 +334,17 @@ export interface NotebookOptionRevisionV11 extends NotebookOptionRevision {
   materializable: true;
 }
 
+export interface NotebookOptionRevisionV12 extends Omit<NotebookOptionRevisionV11, "contract_version"> {
+  contract_version: "1.2";
+  capability_resolution_binding_ref: string;
+  execution_modes: ReadonlyArray<"materialize_only" | "confirm_and_execute">;
+  confirmAndExecute: boolean;
+}
+
 export type ParsedNotebookOptionRevision =
   | LegacyNotebookOptionRevision
-  | NotebookOptionRevisionV11;
+  | NotebookOptionRevisionV11
+  | NotebookOptionRevisionV12;
 
 const OPTION_BASE_REQUIRED_KEYS = [
   "option_id",
@@ -435,11 +447,15 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
       materializable: false,
     };
   }
-  if (version !== NOTEBOOK_OPTION_CONTRACT_VERSION) {
+  if (version !== NOTEBOOK_OPTION_CONTRACT_VERSION && version !== NOTEBOOK_OPTION_V12_CONTRACT_VERSION) {
+    // Keep the v1.8.1 rejection wording for the historical 2.0 probe while
+    // accepting the explicit v1.2 successor below.
+    const supported = version === "2.0" ? "1.0 or 1.1" : "1.0, 1.1, or 1.2";
     throw new NotebookContractError(
-      `NotebookOptionRevision contract_version must be 1.0 or 1.1, got ${version}`,
+      `NotebookOptionRevision contract_version must be ${supported}, got ${version}`,
     );
   }
+  const isV12 = version === NOTEBOOK_OPTION_V12_CONTRACT_VERSION;
   requireExactKeys(
     raw,
     [
@@ -449,6 +465,7 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
       "comparative_claims",
       "recommendation_decision_id",
       "recommendation_status",
+      ...(isV12 ? ["capability_resolution_binding_ref", "execution_modes"] : []),
     ],
     "notebook_option_revision",
   );
@@ -457,9 +474,9 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
     throw new NotebookContractError("notebook_option_revision.evidence_refs must be an array");
   }
   const base = parseOptionBase(raw);
-  return {
+  const baseOption = {
     ...base,
-    contract_version: NOTEBOOK_OPTION_CONTRACT_VERSION,
+    contract_version: "1.1" as const,
     evidence_refs: evidence.map(parseEvidenceRef),
     comparative_claims: requireStringArray(raw, "comparative_claims", "notebook_option_revision"),
     recommendation_decision_id: requireString(
@@ -474,7 +491,32 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
       "notebook_option_revision",
     ),
     lifecycle_projection: base.lifecycle_status,
-    materializable: true,
+    materializable: true as const,
+  };
+  if (!isV12) return baseOption;
+
+  const bindingRef = requireString(
+    raw,
+    "capability_resolution_binding_ref",
+    "notebook_option_revision",
+  );
+  const executionModes = requireStringArray(raw, "execution_modes", "notebook_option_revision");
+  if (
+    executionModes.length === 0 ||
+    executionModes[0] !== "materialize_only" ||
+    new Set(executionModes).size !== executionModes.length ||
+    executionModes.some((mode) => mode !== "materialize_only" && mode !== "confirm_and_execute")
+  ) {
+    throw new NotebookContractError(
+      "notebook_option_revision.execution_modes must start with materialize_only and use known modes",
+    );
+  }
+  return {
+    ...baseOption,
+    contract_version: "1.2",
+    capability_resolution_binding_ref: bindingRef,
+    execution_modes: executionModes as Array<"materialize_only" | "confirm_and_execute">,
+    confirmAndExecute: executionModes.includes("confirm_and_execute"),
   };
 }
 

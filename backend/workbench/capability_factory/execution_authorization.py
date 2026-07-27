@@ -720,7 +720,7 @@ class OptionExecutionAuthorizationStore:
             raise ExecutionAuthorizationTransitionError(
                 f"transition {expected} -> {target} is not permitted"
             )
-        if target in {"dispatch_unknown", "failed"} and not dict(normalized_metadata).get("reason"):
+        if target in {"invalidated", "dispatch_unknown", "failed"} and not dict(normalized_metadata).get("reason"):
             raise ExecutionAuthorizationTransitionError(
                 f"{target} transition requires a bounded reason"
             )
@@ -783,10 +783,71 @@ class OptionExecutionAuthorizationStore:
             next_record = replace(
                 current,
                 status=target,
-                rejection_reason=reason if target in {"dispatch_unknown", "failed"} else None,
+                rejection_reason=reason if target in {"invalidated", "dispatch_unknown", "failed"} else None,
                 transition_id=transition,
                 prior_receipt_digest=prior,
                 transition_metadata=normalized_metadata,
+            )
+            self._append_locked(next_record)
+            return next_record
+
+    def take_over_lease(
+        self,
+        authorization_id: str,
+        *,
+        owner_id: str,
+        transition_id: str,
+        lease_seconds: int,
+        reason: str,
+    ) -> OptionExecutionAuthorization:
+        """Recover the same authorization under a strictly newer lease epoch."""
+
+        identifier = _identifier(authorization_id, "authorization_id")
+        owner = _identifier(owner_id, "owner_id")
+        transition = _identifier(transition_id, "transition_id")
+        lease = _positive_int(lease_seconds, "lease_seconds")
+        bounded_reason = _text(reason, "reason", maximum=_MAX_REASON)
+        with self._lock, self._journal_lock():
+            records = self._records()
+            current = self._latest_by_id(records).get(identifier)
+            if current is None:
+                raise ExecutionAuthorizationRejected("authorization was not found")
+            if current.status not in {"claimed", "dispatch_reserved", "running"}:
+                raise ExecutionAuthorizationTransitionError(
+                    f"lease takeover is not valid for authorization status {current.status}"
+                )
+            existing = next(
+                (
+                    record
+                    for record in reversed(records)
+                    if record.authorization_id == identifier
+                    and record.transition_id == transition
+                ),
+                None,
+            )
+            if existing is not None:
+                if (
+                    existing.claim_owner_id != owner
+                    or dict(existing.transition_metadata).get("reason") != bounded_reason
+                ):
+                    raise ExecutionAuthorizationReplay(
+                        "lease takeover id is already bound to another owner or reason"
+                    )
+                return existing
+            if current.lease_expires_at is None:
+                raise ExecutionAuthorizationTransitionError("current receipt has no lease expiry")
+            now = _utc(self._clock(), "clock")
+            if now < current.lease_expires_at:
+                raise ExecutionAuthorizationTransitionError("lease is still active")
+            next_record = replace(
+                current,
+                claim_owner_id=owner,
+                lease_epoch=(current.lease_epoch or 0) + 1,
+                lease_expires_at=now + timedelta(seconds=lease),
+                transition_id=transition,
+                prior_receipt_digest=current.receipt_digest,
+                rejection_reason=None,
+                transition_metadata={"reason": bounded_reason},
             )
             self._append_locked(next_record)
             return next_record
