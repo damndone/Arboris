@@ -93,6 +93,12 @@ class ValidationExecutionResult:
     def content_digest(self) -> str:
         return _content_digest(self)
 
+    @property
+    def execution_allowed(self) -> bool:
+        """A validation result is evidence input, never an execution grant."""
+
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class ValidationHarnessResult:
@@ -100,6 +106,7 @@ class ValidationHarnessResult:
     validation_bundle: ValidationBundle
     outcome: str
     reason_code: str
+    verified: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.execution, ValidationExecutionResult):
@@ -109,10 +116,20 @@ class ValidationHarnessResult:
         if self.outcome not in {"passed", "failed", "inconclusive"}:
             raise ValidationRunnerError("validation harness outcome is unsupported")
         object.__setattr__(self, "reason_code", _text(self.reason_code, "reason_code"))
+        if not isinstance(self.verified, bool):
+            raise ValidationRunnerError("validation verified flag must be boolean")
+        if self.verified and self.outcome != "passed":
+            raise ValidationRunnerError("only a passed validation can be verified")
 
     @property
     def content_digest(self) -> str:
         return _content_digest(self)
+
+    @property
+    def execution_allowed(self) -> bool:
+        """Verification state never grants an execution primitive."""
+
+        return False
 
 
 class ValidationRunner:
@@ -302,11 +319,36 @@ class ValidationRunner:
         else:
             outcome = "inconclusive"
             reason_code = "VALIDATION_PROTOCOL_CASE_COVERAGE_INCOMPLETE"
+        protocol_case_coverage_complete = set(protocol.check_kinds) <= {
+            item.check_kind for item in validation_bundle.cases
+        }
+        evidence_floor_is_satisfied = (
+            (
+                protocol.evidence_floor == "E2"
+                and all(item.tier in {"E2", "E3"} for item in evidence)
+            )
+            or (
+                protocol.evidence_floor == "E3"
+                and all(
+                    item.tier == "E3" and item.fixture_visibility == "service_holdout"
+                    for item in evidence
+                )
+            )
+        )
+        verified = (
+            outcome == "passed"
+            and evidence_floor_is_satisfied
+            and all(item.source_eligible for item in evidence)
+            and protocol_case_coverage_complete
+        )
+        if not verified and outcome == "passed":
+            reason_code = "VALIDATION_VERIFICATION_REQUIREMENTS_INCOMPLETE"
         return ValidationHarnessResult(
             execution=execution,
             validation_bundle=enriched,
             outcome=outcome,
             reason_code=reason_code,
+            verified=verified,
         )
 
 

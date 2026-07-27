@@ -188,6 +188,9 @@ def test_adapter_candidate_factory_emits_typed_candidate_and_empty_validation_bu
     assert generated.candidate.status == "submitted"
     assert generated.validation_bundle.evidence == ()
     assert generated.validation_bundle.adapter_ref == generated.adapter.content_digest
+    assert generated.promotion_state == "experimental"
+    assert generated.source_eligible is False
+    assert generated.execution_allowed is False
 
 
 def test_adapter_candidate_factory_rejects_a_fabricated_source_reference():
@@ -287,3 +290,19 @@ def test_adapter_source_generator_stores_bounded_agent_output_without_executing_
             "implementation_ref": implementation.content_digest,
         }
     ]
+
+
+def test_adapter_contract_never_grants_execution_capability():
+    from workbench.capability_factory.adapter_contract import AdapterContract
+
+    implementation = _implementation()
+    adapter = AdapterContract.from_implementation(
+        implementation=implementation,
+        adapter_id="adapter.execution-closed",
+        revision=1,
+        entrypoint_ref="f" * 64,
+        operations=("fit",),
+        consumer_support=_consumer_support(),
+    )
+
+    assert adapter.execution_allowed is False

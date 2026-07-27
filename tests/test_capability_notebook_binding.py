@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -428,6 +429,151 @@ def test_low_risk_confirmation_binds_a_receipt_without_execution(tmp_path):
     assert OptionExecutionAuthorizationStore(project).read(
         authorization.authorization_id
     ) == authorization
+
+
+def test_confirm_and_execute_retries_after_gateway_failure_from_materialized_state(
+    tmp_path, monkeypatch
+):
+    from test_notebook_capability_binding import _server_decision, _service_with_catalog
+    from workbench.agent.notebook.errors import OptionExecutionGatewayUnavailable
+    from workbench.capability_factory.execution_authorization import (
+        OptionExecutionAuthorizationStore,
+    )
+    from workbench.capability_factory.notebook_bridge import NotebookExecutionDispatch
+
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, binding, _catalog = _service_with_catalog(project)
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_retry_gateway",
+        decision_id="rec_retry_gateway",
+        batch_id="batch_retry_gateway",
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            _exploration_draft(
+                capability_id="capability.registered",
+                option_id="opt_retry_gateway",
+                proposal_id="proposal_retry_gateway",
+                decision_id=decision.recommendation_decision_id,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="user_1",
+    )
+
+    materialization = SimpleNamespace(
+        materialization_id="mat_retry_gateway",
+        option_id=revision.option_id,
+        option_revision=revision.option_revision,
+        capability_resolution_binding_ref=binding.content_digest,
+        draft_id="draft_retry_gateway",
+        draft_hash="sha256:" + "d" * 64,
+    )
+    draft = SimpleNamespace(
+        draft={"draft_id": "draft_retry_gateway", "graph": {"nodes": []}},
+        draft_hash=materialization.draft_hash,
+    )
+    monkeypatch.setattr(
+        service.store,
+        "read_materialization",
+        lambda *_args: materialization,
+    )
+
+    def fake_materialize(*_args, **_kwargs):
+        current = service.option_view(notebook.notebook_id, revision.option_id)
+        if current.lifecycle_status == "selected":
+            service._transition(
+                notebook.notebook_id,
+                current,
+                to_status="materialized",
+                actor="agent",
+                reason="draft_materialized",
+            )
+        return SimpleNamespace(materialization=materialization, draft=draft)
+
+    monkeypatch.setattr(service, "materialize_option", fake_materialize)
+
+    class FlakyGateway:
+        def __init__(self):
+            self.calls = 0
+
+        def dispatch(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary executor outage")
+            authorization = kwargs["authorization"]
+            if self.calls == 2:
+                store = OptionExecutionAuthorizationStore(project)
+                claimed = store.claim(
+                    authorization.authorization_id,
+                    idempotency_key=authorization.idempotency_key,
+                    current_binding_ref=authorization.capability_resolution_binding_ref,
+                    current_freshness_cursor_ref=authorization.freshness_cursor_ref,
+                    owner_id="test_gateway",
+                    lease_seconds=300,
+                )
+                store.transition(
+                    authorization.authorization_id,
+                    transition_id=f"reserved-{authorization.authorization_id}",
+                    idempotency_key=authorization.idempotency_key,
+                    expected_status="claimed",
+                    target_status="dispatch_reserved",
+                    owner_id="test_gateway",
+                    lease_epoch=claimed.lease_epoch or 1,
+                    prior_receipt_digest=claimed.receipt_digest,
+                    metadata={"reason": "test_dispatch_reserved"},
+                )
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="dispatch_reserved",
+                run_id="run_retry_gateway",
+                attempt_id="attempt_retry_gateway",
+                receipt_ref="a" * 64,
+            )
+
+    gateway = FlakyGateway()
+    service.execution_gateway = gateway
+
+    with pytest.raises(OptionExecutionGatewayUnavailable):
+        service.confirm_and_execute(
+            notebook.notebook_id,
+            revision.option_id,
+            context=context,
+        )
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == (
+        "materialized"
+    )
+
+    dispatch = service.confirm_and_execute(
+        notebook.notebook_id,
+        revision.option_id,
+        context=context,
+    )
+
+    assert dispatch.status == "dispatch_reserved"
+    assert gateway.calls == 2
+
+    replay = service.confirm_and_execute(
+        notebook.notebook_id,
+        revision.option_id,
+        context=context,
+    )
+
+    assert replay == dispatch
+    assert gateway.calls == 3
 
 
 def test_confirmation_rejects_receipt_with_stale_binding(tmp_path):

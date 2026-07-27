@@ -1664,10 +1664,10 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="execution_risk",
             )
-        if view.lifecycle_status != "selected":
+        if view.lifecycle_status not in {"selected", "materialized"}:
             raise OptionLifecycleTransitionInvalid(
                 f"option {option_id} is {view.lifecycle_status}; explicit execution "
-                "requires a selected option",
+                "requires a selected or materialized option",
                 option_id=option_id,
                 lifecycle_status=view.lifecycle_status,
             )
@@ -1846,6 +1846,14 @@ class NotebookService:
                 "binding_ref": reference,
             },
         ).split(":", 1)[-1]
+        authorization_id = f"auth_{seed}"
+        idempotency_key = f"confirm-and-execute-{seed}"
+        try:
+            existing = OptionExecutionAuthorizationStore(self.project_root).read(
+                authorization_id
+            )
+        except KeyError:
+            existing = None
         draft_hash = persisted_materialization.draft_hash
         if isinstance(draft_hash, str) and not draft_hash.startswith("sha256:"):
             if len(draft_hash) != 64 or any(
@@ -1858,9 +1866,10 @@ class NotebookService:
                     reason="authorization_draft_hash_invalid",
                 )
             draft_hash = f"sha256:{draft_hash}"
-        now = datetime.now(timezone.utc)
+        issued_at = existing.issued_at if existing is not None else datetime.now(timezone.utc)
+        expires_at = existing.expires_at if existing is not None else issued_at + timedelta(minutes=5)
         authorization = OptionExecutionAuthorization(
-            authorization_id=f"auth_{seed}",
+            authorization_id=authorization_id,
             notebook_id=notebook_id,
             option_id=option_id,
             option_revision=current.option_revision,
@@ -1883,10 +1892,33 @@ class NotebookService:
             risk_level=current.risk_level,
             artifact_contract_ref=_artifact_contract_ref(current.artifact_contract),
             consumer_projection_ref=_consumer_projection_ref(binding),
-            idempotency_key=f"confirm-and-execute-{seed}",
-            issued_at=now,
-            expires_at=now + timedelta(minutes=5),
+            idempotency_key=idempotency_key,
+            issued_at=issued_at,
+            expires_at=expires_at,
         )
+        if existing is not None:
+            if existing.payload_digest != authorization.payload_digest:
+                raise OptionRevisionStale(
+                    "the deterministic capability authorization is bound to different server facts",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_payload_mismatch",
+                )
+            if existing.status == "issued":
+                return self.authorize_option_execution(
+                    notebook_id,
+                    option_id,
+                    context=context,
+                    authorization=existing,
+                )
+            if existing.status in {"dispatch_reserved", "running"}:
+                return existing
+            raise OptionRevisionStale(
+                "the deterministic capability authorization has reached a terminal state",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_already_progressed",
+            )
         return self.authorize_option_execution(
             notebook_id,
             option_id,

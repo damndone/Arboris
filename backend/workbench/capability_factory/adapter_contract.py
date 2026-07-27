@@ -138,6 +138,12 @@ class AdapterContract:
     def content_digest(self) -> str:
         return _content_digest(self)
 
+    @property
+    def execution_allowed(self) -> bool:
+        """Adapter metadata never grants an execution primitive."""
+
+        return False
+
 
 @dataclass(frozen=True, slots=True)
 class AdapterSourceArtifact:
@@ -166,6 +172,12 @@ class AdapterSourceArtifact:
         if len(raw) != self.size_bytes or hashlib.sha256(raw).hexdigest() != self.source_ref:
             raise AdapterSourceGenerationError("generated source artifact content does not match its reference")
         object.__setattr__(self, "path", path)
+
+    @property
+    def execution_allowed(self) -> bool:
+        """A source artifact is not an execution authorization."""
+
+        return False
 
 
 class AdapterSourceGenerator:
@@ -269,6 +281,12 @@ class GeneratedAdapterCandidate:
     @property
     def source_eligible(self) -> bool:
         return False
+
+    @property
+    def promotion_state(self) -> str:
+        """Generated candidates always begin in the experimental state."""
+
+        return "experimental"
 
 
 class AdapterCandidateFactory:

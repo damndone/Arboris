@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..custom_capability.canonical import domain_digest
-from .contracts import _digest
+from .admission_contract import ScopedAdmissionRecord
+from .contracts import _content_digest, _digest
 from .evidence_assessment import EvidenceAssessment
 from .implementation_sealer import ImplementationBundleRevision
 from .provenance import EvidenceProvenance
@@ -22,6 +23,69 @@ class ValidationServiceError(ValueError):
 class ValidationServiceResult:
     assessment: EvidenceAssessment
     attempt: ValidationAttempt
+    adapter_ref: str
+    validation_bundle_ref: str
+    verified: bool
+
+    @property
+    def execution_allowed(self) -> bool:
+        """Assessment state never grants an execution primitive."""
+
+        return False
+
+    @property
+    def promotion(self) -> "CapabilityPromotion":
+        """Return the pre-admission promotion projection."""
+
+        return CapabilityPromotion(
+            adapter_ref=self.adapter_ref,
+            validation_bundle_ref=self.validation_bundle_ref,
+            assessment_ref=self.assessment.content_digest,
+            state="verified" if self.verified else "experimental",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityPromotion:
+    """Server-derived lifecycle projection for one validated adapter."""
+
+    adapter_ref: str
+    validation_bundle_ref: str
+    assessment_ref: str
+    state: str
+    admission_ref: str | None = None
+    approval_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "adapter_ref", _digest(self.adapter_ref, "adapter_ref"))
+        object.__setattr__(self, "validation_bundle_ref", _digest(self.validation_bundle_ref, "validation_bundle_ref"))
+        object.__setattr__(self, "assessment_ref", _digest(self.assessment_ref, "assessment_ref"))
+        if self.state not in {"experimental", "verified", "approved"}:
+            raise ValidationServiceError("unsupported capability promotion state")
+        if self.admission_ref is not None:
+            object.__setattr__(self, "admission_ref", _digest(self.admission_ref, "admission_ref"))
+        if self.approval_ref is not None:
+            object.__setattr__(self, "approval_ref", _digest(self.approval_ref, "approval_ref"))
+        if self.state == "approved" and (self.admission_ref is None or self.approval_ref is None):
+            raise ValidationServiceError("approved promotion requires a server admission and approval")
+        if self.state != "approved" and (self.admission_ref is not None or self.approval_ref is not None):
+            raise ValidationServiceError("admission approval identity is only valid for approved promotion")
+
+    @property
+    def execution_allowed(self) -> bool:
+        """Promotion is descriptive control-plane state, never execution authority."""
+
+        return False
+
+    @property
+    def source_eligible(self) -> bool:
+        """Only verified or approved projections may enter source selection."""
+
+        return self.state in {"verified", "approved"}
+
+    @property
+    def content_digest(self) -> str:
+        return _content_digest(self)
 
 
 class ValidationService:
@@ -92,8 +156,25 @@ class ValidationService:
         protocol_checks = set(protocol.check_kinds)
         covered_checks = {item.check_kind for item in validation_bundle.cases}
         protocol_coverage_is_complete = protocol_checks <= covered_checks
+        all_evidence_is_independent = bool(evidence) and all(
+            item.source_eligible for item in evidence
+        )
+        holdout_requirement_is_satisfied = (
+            protocol.evidence_floor != "E3"
+            or all(item.fixture_visibility == "service_holdout" for item in evidence)
+        )
+        verification_requirements_are_complete = (
+            evidence_is_complete
+            and protocol_coverage_is_complete
+            and all_evidence_is_independent
+            and holdout_requirement_is_satisfied
+        )
         statuses = {item.status for item in evidence}
-        if not evidence or not evidence_is_complete or not protocol_coverage_is_complete:
+        if (
+            not evidence
+            or not evidence_is_complete
+            or not protocol_coverage_is_complete
+        ):
             outcome = "inconclusive"
         elif "failed" in statuses:
             outcome = "failed"
@@ -136,11 +217,82 @@ class ValidationService:
             evidence_refs=tuple(item.content_digest for item in evidence) or (result_ref,),
             producer_ref=producer_ref,
         )
-        return ValidationServiceResult(assessment=assessment, attempt=attempt)
+        verified = (
+            outcome == "passed"
+            and _tier_rank(tier) >= _tier_rank("E2")
+            and verification_requirements_are_complete
+        )
+        return ValidationServiceResult(
+            assessment=assessment,
+            attempt=attempt,
+            adapter_ref=sealed_bundle.adapter_ref,
+            validation_bundle_ref=validation_bundle.content_digest,
+            verified=verified,
+        )
+
+    def promotion(
+        self,
+        result: ValidationServiceResult,
+        *,
+        admission: ScopedAdmissionRecord | None = None,
+    ) -> CapabilityPromotion:
+        """Project validation plus server admission into explicit lifecycle state.
+
+        ``approved`` is only a projection of an admitted server record with
+        approver and approval identities bound to this exact adapter and
+        validation bundle.  Neither validation nor admission exposes execution
+        authority; the returned state is descriptive control-plane data.
+        """
+
+        if not isinstance(result, ValidationServiceResult):
+            raise ValidationServiceError("result must be a ValidationServiceResult")
+        if admission is not None and not isinstance(admission, ScopedAdmissionRecord):
+            raise ValidationServiceError("admission must be a server admission record")
+        if admission is not None:
+            if admission.adapter_ref != result.adapter_ref:
+                raise ValidationServiceError("admission is bound to another adapter")
+            if admission.validation_bundle_ref != result.validation_bundle_ref:
+                raise ValidationServiceError("admission is bound to another validation bundle")
+            if admission.assessment_ref != result.assessment.content_digest:
+                raise ValidationServiceError("admission is bound to another validation assessment")
+            if admission.status == "admitted" and not result.verified:
+                raise ValidationServiceError("an unverified capability cannot be approved")
+
+        if not result.verified:
+            return CapabilityPromotion(
+                adapter_ref=result.adapter_ref,
+                validation_bundle_ref=result.validation_bundle_ref,
+                assessment_ref=result.assessment.content_digest,
+                state="experimental",
+            )
+        if admission is None or admission.status != "admitted":
+            return CapabilityPromotion(
+                adapter_ref=result.adapter_ref,
+                validation_bundle_ref=result.validation_bundle_ref,
+                assessment_ref=result.assessment.content_digest,
+                state="verified",
+            )
+        if admission.approver_ref is None or admission.approval_ref is None:
+            raise ValidationServiceError("admitted capability is missing server approval identity")
+        if _tier_rank(result.assessment.tier) < _tier_rank(admission.minimum_evidence_tier):
+            raise ValidationServiceError("server admission evidence floor is not met")
+        return CapabilityPromotion(
+            adapter_ref=result.adapter_ref,
+            validation_bundle_ref=result.validation_bundle_ref,
+            assessment_ref=result.assessment.content_digest,
+            state="approved",
+            admission_ref=admission.content_digest,
+            approval_ref=admission.approval_ref,
+        )
 
 
 def _tier_rank(tier: str) -> int:
     return {"E0": 0, "E1": 1, "E2": 2, "E3": 3}[tier]
 
 
-__all__ = ["ValidationService", "ValidationServiceError", "ValidationServiceResult"]
+__all__ = [
+    "CapabilityPromotion",
+    "ValidationService",
+    "ValidationServiceError",
+    "ValidationServiceResult",
+]

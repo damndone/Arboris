@@ -7,20 +7,32 @@ from typing import Any, Literal, Mapping, Protocol
 
 from .dispatch import PreparedRunIntent
 from .execution_authorization import OptionExecutionAuthorization
-from .execution_receipt import ExecutionReceiptError
+
+
+def _receipt_error(message: str) -> ValueError:
+    """Load the aggregate error only after the notebook package is initialized.
+
+    ``execution_receipt`` imports the notebook artifact contract.  Importing
+    its error class eagerly here would re-enter ``agent.notebook.__init__``
+    while that package is importing ``service``.
+    """
+
+    from .execution_receipt import ExecutionReceiptError
+
+    return ExecutionReceiptError(message)
 
 
 def _identifier(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value or len(value) > 512:
-        raise ExecutionReceiptError(f"{field} must be bounded non-empty text")
+        raise _receipt_error(f"{field} must be bounded non-empty text")
     if value in {".", ".."} or "/" in value or "\\" in value:
-        raise ExecutionReceiptError(f"{field} must be path-safe")
+        raise _receipt_error(f"{field} must be path-safe")
     return value
 
 
 def _revision(value: Any, field: str) -> int:
     if type(value) is not int or value < 1:
-        raise ExecutionReceiptError(f"{field} must be a positive integer")
+        raise _receipt_error(f"{field} must be a positive integer")
     return value
 
 
@@ -59,7 +71,7 @@ class NotebookExecutionDispatch:
             "unsupported",
             "dispatch_unknown",
         }:
-            raise ExecutionReceiptError("unsupported Notebook execution dispatch status")
+            raise _receipt_error("unsupported Notebook execution dispatch status")
         if self.run_id is not None:
             _identifier(self.run_id, "run_id")
         if self.attempt_id is not None:
@@ -69,11 +81,11 @@ class NotebookExecutionDispatch:
         if self.status in {"dispatch_reserved", "running"} and not all(
             (self.run_id, self.attempt_id, self.receipt_ref)
         ):
-            raise ExecutionReceiptError(
+            raise _receipt_error(
                 "successful Notebook dispatch requires run, attempt, and receipt refs"
             )
         if self.status in {"unsupported", "dispatch_unknown"} and self.run_id is not None:
-            raise ExecutionReceiptError(
+            raise _receipt_error(
                 "unsupported or unknown Notebook dispatch cannot expose a run id"
             )
 
@@ -128,9 +140,9 @@ class NotebookCapabilityBridge:
         protocol_revision: int = 1,
     ) -> PreparedCapabilityRun:
         if not isinstance(authorization, OptionExecutionAuthorization):
-            raise ExecutionReceiptError("authorization must be an OptionExecutionAuthorization")
+            raise _receipt_error("authorization must be an OptionExecutionAuthorization")
         if authorization.status not in {"issued", "claimed", "dispatch_reserved", "running"}:
-            raise ExecutionReceiptError("authorization is not usable for intent preparation")
+            raise _receipt_error("authorization is not usable for intent preparation")
         run_id = _identifier(run_id, "run_id")
         draft_id = _identifier(authorization.draft_id, "draft_id")
         intent_id = _identifier(authorization.run_intent_id, "intent_id")

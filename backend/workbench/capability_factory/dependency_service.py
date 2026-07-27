@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import base64
+import csv
+import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +36,12 @@ class DependencyPreparationError(ValueError):
 
 class SupplyChainAttestationError(DependencyPreparationError):
     """Raised when a bundle lacks server-bound license or vulnerability facts."""
+
+
+def _require_non_placeholder_digest(value: str, field: str) -> str:
+    if len(set(value)) == 1:
+        raise SupplyChainAttestationError(f"{field} cannot be a placeholder reference")
+    return value
 
 
 class SupplyChainVerifier(Protocol):
@@ -72,6 +81,7 @@ class DependencyPreparation:
 class QuarantineBuild:
     """A read-only dependency tree assembled without importing wheel code."""
 
+    lock_ref: str
     bundle_ref: str
     tree_manifest_ref: str
     sbom_ref: str
@@ -82,6 +92,7 @@ class QuarantineBuild:
     def __post_init__(self) -> None:
         from .contracts import _digest
 
+        object.__setattr__(self, "lock_ref", _digest(self.lock_ref, "lock_ref"))
         object.__setattr__(self, "bundle_ref", _digest(self.bundle_ref, "bundle_ref"))
         object.__setattr__(self, "tree_manifest_ref", _digest(self.tree_manifest_ref, "tree_manifest_ref"))
         object.__setattr__(self, "sbom_ref", _digest(self.sbom_ref, "sbom_ref"))
@@ -98,6 +109,7 @@ class QuarantineBuild:
             "workbench.capability_factory.quarantine_build/v1",
             {
                 "bundle_ref": self.bundle_ref,
+                "lock_ref": self.lock_ref,
                 "tree_manifest_ref": self.tree_manifest_ref,
                 "sbom_ref": self.sbom_ref,
                 "license_status": self.license_status,
@@ -129,6 +141,7 @@ class SupplyChainAttestation:
 
         for field in ("bundle_ref", "tree_manifest_ref", "sbom_ref", "authority_ref"):
             object.__setattr__(self, field, _digest(getattr(self, field), field))
+        _require_non_placeholder_digest(self.authority_ref, "authority_ref")
         for field in ("license_status", "vulnerability_status"):
             if getattr(self, field) not in {"passed", "blocked", "not_assessed"}:
                 raise SupplyChainAttestationError(f"{field} status is unsupported")
@@ -136,6 +149,7 @@ class SupplyChainAttestation:
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _digest(value, field))
+                _require_non_placeholder_digest(getattr(self, field), field)
         if self.license_status == "passed" and self.license_report_ref is None:
             raise SupplyChainAttestationError("passed license status requires a report")
         if self.vulnerability_status == "passed" and self.vulnerability_report_ref is None:
@@ -173,6 +187,8 @@ class SupplyChainVerification:
 
         for field in ("authority_ref", "decision_ref", "attestation_ref", "build_ref"):
             object.__setattr__(self, field, _digest(getattr(self, field), field))
+        _require_non_placeholder_digest(self.authority_ref, "authority_ref")
+        _require_non_placeholder_digest(self.decision_ref, "decision_ref")
         if self.status not in {"passed", "blocked"}:
             raise SupplyChainAttestationError("supply-chain verification status is unsupported")
 
@@ -186,6 +202,43 @@ class SupplyChainVerification:
                 "status": self.status,
                 "attestation_ref": self.attestation_ref,
                 "build_ref": self.build_ref,
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SupplyChainReport:
+    """Immutable, trusted-verifier input for one license or vulnerability fact."""
+
+    report_kind: str
+    build_ref: str
+    sbom_ref: str
+    authority_ref: str
+    status: str
+    evidence_ref: str
+
+    def __post_init__(self) -> None:
+        from .contracts import _digest
+
+        if self.report_kind not in {"license", "vulnerability"}:
+            raise SupplyChainAttestationError("supply-chain report kind is unsupported")
+        for field in ("build_ref", "sbom_ref", "authority_ref", "evidence_ref"):
+            object.__setattr__(self, field, _digest(getattr(self, field), field))
+            _require_non_placeholder_digest(getattr(self, field), field)
+        if self.status not in {"passed", "blocked"}:
+            raise SupplyChainAttestationError("supply-chain report status is unsupported")
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.supply_chain_report/v1",
+            {
+                "report_kind": self.report_kind,
+                "build_ref": self.build_ref,
+                "sbom_ref": self.sbom_ref,
+                "authority_ref": self.authority_ref,
+                "status": self.status,
+                "evidence_ref": self.evidence_ref,
             },
         )
 
@@ -206,6 +259,8 @@ class OfflineRuntimeBuilder:
     ) -> QuarantineBuild:
         if not isinstance(lock, DependencyLock) or not isinstance(bundle, BundleCandidate):
             raise DependencyPreparationError("lock and bundle are required for quarantine build")
+        if bundle.lock_ref != lock.content_digest:
+            raise DependencyPreparationError("bundle is bound to another lock")
         destination = Path(root)
         if not destination.is_absolute():
             raise DependencyPreparationError("quarantine build root must be an absolute non-symlink path")
@@ -213,7 +268,7 @@ class OfflineRuntimeBuilder:
         destination.mkdir(parents=True, exist_ok=True)
         if destination.is_symlink() or not destination.is_dir():
             raise DependencyPreparationError("quarantine build root is not a directory")
-        members: list[dict[str, str | int]] = []
+        expected_members: dict[str, dict[str, str | int]] = {}
         total_bytes = 0
         seen: set[str] = set()
         try:
@@ -223,6 +278,7 @@ class OfflineRuntimeBuilder:
                     raise DependencyPreparationError("locked artifact bytes are missing for quarantine build")
                 report = inspect_wheel_bytes(raw, expected_digest=requirement.artifact_digest)
                 with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                    self._validate_record_manifest(archive)
                     for member in archive.infolist():
                         if member.is_dir():
                             continue
@@ -246,7 +302,12 @@ class OfflineRuntimeBuilder:
                         self._assert_no_symlink_ancestors(target, stop=destination)
                         payload = archive.read(member)
                         if target.exists():
-                            if target.is_symlink() or not target.is_file() or target.read_bytes() != payload:
+                            if (
+                                target.is_symlink()
+                                or not target.is_file()
+                                or target.stat().st_nlink != 1
+                                or target.read_bytes() != payload
+                            ):
                                 raise DependencyPreparationError(
                                     "dependency tree existing file does not match the locked artifact"
                                 )
@@ -261,23 +322,14 @@ class OfflineRuntimeBuilder:
                             with os.fdopen(descriptor, "wb") as handle:
                                 handle.write(payload)
                         os.chmod(target, 0o444)
-                        members.append(
-                            {
-                                "path": member.filename,
-                                "digest": hashlib.sha256(payload).hexdigest(),
-                                "size": len(payload),
-                                "distribution": report.distribution,
-                                "version": report.version,
-                            }
-                        )
-            actual_files: set[str] = set()
-            for item in destination.rglob("*"):
-                if item.is_symlink():
-                    raise DependencyPreparationError("dependency tree contains a symlink")
-                if item.is_file():
-                    actual_files.add(item.relative_to(destination).as_posix())
-            if actual_files != seen:
-                raise DependencyPreparationError("dependency tree contains undeclared files")
+                        expected_members[member.filename] = {
+                            "path": member.filename,
+                            "digest": hashlib.sha256(payload).hexdigest(),
+                            "size": len(payload),
+                            "distribution": report.distribution,
+                            "version": report.version,
+                        }
+            members = self._recompute_manifest(destination, expected_members, seen)
             manifest_ref = domain_digest(
                 "workbench.capability_factory.installation_tree_manifest/v1",
                 {"bundle_ref": bundle.bundle_ref, "members": members},
@@ -301,6 +353,7 @@ class OfflineRuntimeBuilder:
                 os.chmod(directory, 0o555)
             os.chmod(destination, 0o555)
             return QuarantineBuild(
+                lock_ref=lock.content_digest,
                 bundle_ref=bundle.bundle_ref,
                 tree_manifest_ref=manifest_ref,
                 sbom_ref=sbom_ref,
@@ -308,6 +361,104 @@ class OfflineRuntimeBuilder:
             )
         except (OSError, zipfile.BadZipFile, WheelInspectionError) as error:
             raise DependencyPreparationError("offline quarantine assembly failed") from error
+
+    @staticmethod
+    def _validate_record_manifest(archive: zipfile.ZipFile) -> None:
+        members = [item for item in archive.infolist() if not item.is_dir()]
+        records = [item for item in members if item.filename.endswith(".dist-info/RECORD")]
+        if len(records) != 1 or len({item.filename for item in members}) != len(members):
+            raise DependencyPreparationError("wheel RECORD is missing or duplicated")
+        record = records[0]
+        try:
+            rows = list(csv.reader(archive.read(record).decode("utf-8").splitlines()))
+        except (UnicodeDecodeError, csv.Error, zipfile.BadZipFile) as error:
+            raise DependencyPreparationError("wheel RECORD is unreadable") from error
+        expected = {item.filename: item for item in members}
+        declared: set[str] = set()
+        for row in rows:
+            if len(row) != 3:
+                raise DependencyPreparationError("wheel RECORD has an invalid row")
+            name, digest, size = row
+            if name in declared or name not in expected:
+                raise DependencyPreparationError("wheel RECORD does not match archive members")
+            declared.add(name)
+            if name == record.filename:
+                if digest or size:
+                    raise DependencyPreparationError("wheel RECORD self-entry must be empty")
+                continue
+            if not digest.startswith("sha256=") or not size.isdigit():
+                raise DependencyPreparationError("wheel RECORD has an unsupported digest")
+            encoded = digest.removeprefix("sha256=")
+            padding = "=" * ((4 - len(encoded) % 4) % 4)
+            try:
+                expected_digest = base64.b64decode(
+                    (encoded + padding).encode("ascii"),
+                    altchars=b"-_",
+                    validate=True,
+                )
+            except (ValueError, UnicodeEncodeError) as error:
+                raise DependencyPreparationError("wheel RECORD has an invalid digest") from error
+            if len(expected_digest) != hashlib.sha256().digest_size:
+                raise DependencyPreparationError("wheel RECORD has an invalid digest")
+            payload = archive.read(expected[name])
+            if (
+                hashlib.sha256(payload).digest() != expected_digest
+                or len(payload) != int(size)
+            ):
+                raise DependencyPreparationError("wheel RECORD does not match archive content")
+        if declared != set(expected):
+            raise DependencyPreparationError("wheel RECORD does not declare every archive member")
+
+    @staticmethod
+    def _read_file_no_follow(path: Path) -> bytes:
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(path, flags)
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise DependencyPreparationError("dependency tree contains a non-regular file")
+            with os.fdopen(descriptor, "rb") as handle:
+                descriptor = -1
+                return handle.read()
+        finally:
+            if descriptor != -1:
+                os.close(descriptor)
+
+    @classmethod
+    def _recompute_manifest(
+        cls,
+        destination: Path,
+        expected_members: dict[str, dict[str, str | int]],
+        seen: set[str],
+    ) -> list[dict[str, str | int]]:
+        actual_members: list[dict[str, str | int]] = []
+        for item in destination.rglob("*"):
+            if item.is_symlink():
+                raise DependencyPreparationError("dependency tree contains a symlink")
+            if not item.is_file():
+                continue
+            relative = item.relative_to(destination).as_posix()
+            expected = expected_members.get(relative)
+            if expected is None:
+                raise DependencyPreparationError("dependency tree contains undeclared files")
+            payload = cls._read_file_no_follow(item)
+            actual_digest = hashlib.sha256(payload).hexdigest()
+            if actual_digest != expected["digest"] or len(payload) != expected["size"]:
+                raise DependencyPreparationError("installation-tree manifest does not match disk")
+            actual_members.append(
+                {
+                    "path": relative,
+                    "digest": actual_digest,
+                    "size": len(payload),
+                    "distribution": expected["distribution"],
+                    "version": expected["version"],
+                }
+            )
+        if set(expected_members) != seen or {item["path"] for item in actual_members} != set(expected_members):
+            raise DependencyPreparationError("dependency tree contains undeclared files")
+        return sorted(actual_members, key=lambda item: str(item["path"]))
 
     @staticmethod
     def _assert_no_symlink_ancestors(path: Path, *, stop: Path | None = None) -> None:
@@ -447,6 +598,7 @@ class DependencyService:
                 artifacts=artifacts,
                 root=Path(quarantine_root) / "tree",
             )
+            self.store.put_quarantine_build(build)
             return DependencyPreparation(
                 lock=preparation.lock,
                 bundle=preparation.bundle,
@@ -595,6 +747,29 @@ class DependencyService:
         if verifier is None:
             raise SupplyChainAttestationError("trusted supply-chain verifier is unavailable")
         try:
+            persisted_build = self.store.get_quarantine_build(
+                build.bundle_ref,
+                root=build.root,
+            )
+        except DependencyStoreError as error:
+            raise SupplyChainAttestationError(
+                "quarantine build is not durably bound to the dependency store"
+            ) from error
+        if persisted_build != build:
+            raise SupplyChainAttestationError("quarantine build binding is stale")
+        self._require_trusted_report(
+            report_ref=attestation.license_report_ref,
+            report_kind="license",
+            attestation=attestation,
+            build=build,
+        )
+        self._require_trusted_report(
+            report_ref=attestation.vulnerability_report_ref,
+            report_kind="vulnerability",
+            attestation=attestation,
+            build=build,
+        )
+        try:
             verification = verifier.verify(attestation=attestation, build=build)
         except Exception as error:
             raise SupplyChainAttestationError("trusted supply-chain verifier failed") from error
@@ -625,6 +800,36 @@ class DependencyService:
             quarantine_build=build,
         )
 
+    def _require_trusted_report(
+        self,
+        *,
+        report_ref: str | None,
+        report_kind: str,
+        attestation: SupplyChainAttestation,
+        build: QuarantineBuild,
+    ) -> None:
+        if report_ref is None:
+            raise SupplyChainAttestationError(
+                f"passed {report_kind} status requires a trusted report"
+            )
+        try:
+            report = self.store.get_supply_chain_report(report_ref)
+        except DependencyStoreError as error:
+            raise SupplyChainAttestationError(
+                f"{report_kind} report is not trusted or was not persisted"
+            ) from error
+        if (
+            report.report_kind != report_kind
+            or report.status != "passed"
+            or report.build_ref != build.content_digest
+            or report.sbom_ref != build.sbom_ref
+            or report.authority_ref != attestation.authority_ref
+            or report.content_digest != report_ref
+        ):
+            raise SupplyChainAttestationError(
+                f"{report_kind} report is bound to another build or authority"
+            )
+
 
 __all__ = [
     "DependencyPreparation",
@@ -634,6 +839,7 @@ __all__ = [
     "QuarantineBuild",
     "SupplyChainAttestation",
     "SupplyChainAttestationError",
+    "SupplyChainReport",
     "SupplyChainVerification",
     "SupplyChainVerifier",
 ]
