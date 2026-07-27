@@ -204,6 +204,14 @@ raise SystemExit(0 if ok else 1)
 
         return apply_limits
 
+    @staticmethod
+    def _classify_probe_failure(diagnostic: str, returncode: int) -> str | None:
+        if "sandbox_apply" in diagnostic:
+            return "NATIVE_CONTAINMENT_SANDBOX_APPLY_FAILED"
+        if returncode in {134, -signal.SIGABRT}:
+            return "NATIVE_CONTAINMENT_SANDBOX_PROFILE_ABORTED"
+        return None
+
     def _run_case(self, policy: ContainmentPolicy, case: str, profile: str, output_root: Path) -> bool:
         if case not in self.CANARY_CASES:
             return False
@@ -245,8 +253,9 @@ raise SystemExit(0 if ok else 1)
         if stderr_path.stat().st_size > policy.budget.stderr_bytes:
             return False
         diagnostic = stderr_path.read_bytes()[:4096].decode("utf-8", errors="replace").lower()
-        if "operation not permitted" in diagnostic or "sandbox_apply" in diagnostic:
-            self._probe_reason = "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+        failure_reason = self._classify_probe_failure(diagnostic, process.returncode)
+        if failure_reason is not None:
+            self._probe_reason = failure_reason
         return process.returncode == 0
 
     @staticmethod

@@ -69,3 +69,18 @@ def test_darwin_backend_identity_is_content_addressed():
     identity = harness.discover_identity()
     assert identity.backend_digest
     assert identity.backend_executable == sys.executable
+
+
+def test_darwin_canary_classifies_seatbelt_apply_failure_separately_from_limits():
+    from workbench.native_containment.platform_darwin import DarwinCanaryHarness
+
+    assert (
+        DarwinCanaryHarness._classify_probe_failure(
+            "sandbox-exec: sandbox_apply: Operation not permitted", 71
+        )
+        == "NATIVE_CONTAINMENT_SANDBOX_APPLY_FAILED"
+    )
+    assert (
+        DarwinCanaryHarness._classify_probe_failure("", 134)
+        == "NATIVE_CONTAINMENT_SANDBOX_PROFILE_ABORTED"
+    )
