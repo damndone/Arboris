@@ -110,9 +110,11 @@ export function OptionCard({
         </p>
       </section>
 
-      {option.confirmAndExecute ? (
+      {option.capability_resolution_binding_ref ? (
         <p data-testid="option-capability-binding" className="nb-option-capability-binding">
-          server-bound capability · explicit confirmation required
+          {option.confirmAndExecute
+            ? "server-bound capability · explicit confirmation required"
+            : "server-bound capability · materialization only until execution gates are satisfied"}
         </p>
       ) : null}
 

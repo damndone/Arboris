@@ -1,4 +1,4 @@
-"""Execution-free CF4 preflight for a generic custom capability."""
+"""CF4 preflight and broker-only handoff for a generic custom capability."""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from ..custom_capability.canonical import domain_digest
+from ..native_containment.broker import ContainmentBroker
+from ..native_containment.contracts import ContainmentReport, ContainmentRequest
+from ..native_containment.policy import ContainmentPolicy
 from .adapter_contract import AdapterContract, AdapterContractError
 from .contracts import CONSUMER_SLOTS, ImplementationRevision
 from .dispatch import PreparedRunIntent
@@ -19,6 +22,59 @@ _HEX = frozenset("0123456789abcdef")
 
 class CustomDispatchPreflightError(ValueError):
     """The immutable preflight join cannot be admitted to the next stage."""
+
+
+@dataclass(frozen=True, slots=True)
+class CustomDispatchResult:
+    """A broker report bound to one already-running authorized attempt."""
+
+    plan_digest: str
+    attempt_id: str
+    request_ref: str
+    report_ref: str
+    status: str
+    reason_code: str
+    assessment_ref: str | None = None
+    output_bundle_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "plan_digest", _digest(self.plan_digest, "plan_digest"))
+        object.__setattr__(self, "attempt_id", _text(self.attempt_id, "attempt_id"))
+        object.__setattr__(self, "request_ref", _digest(self.request_ref, "request_ref"))
+        object.__setattr__(self, "report_ref", _digest(self.report_ref, "report_ref"))
+        if self.status not in {"completed", "failed", "unsupported", "dispatch_unknown"}:
+            raise CustomDispatchPreflightError("broker report status is unsupported")
+        object.__setattr__(self, "reason_code", _text(self.reason_code, "reason_code"))
+        for field in ("assessment_ref", "output_bundle_ref"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, _digest(value, field))
+        if self.status == "completed" and (
+            self.assessment_ref is None or self.output_bundle_ref is None
+        ):
+            raise CustomDispatchPreflightError(
+                "completed custom dispatch requires assessment and output refs"
+            )
+        if self.status != "completed" and self.output_bundle_ref is not None:
+            raise CustomDispatchPreflightError(
+                "non-completed custom dispatch cannot expose output"
+            )
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.custom_dispatch_result/v1",
+            {
+                "plan_digest": self.plan_digest,
+                "attempt_id": self.attempt_id,
+                "request_ref": self.request_ref,
+                "report_ref": self.report_ref,
+                "status": self.status,
+                "reason_code": self.reason_code,
+                "assessment_ref": self.assessment_ref,
+                "output_bundle_ref": self.output_bundle_ref,
+            },
+        )
 
 
 def _text(value: Any, field: str, *, maximum: int = 512) -> str:
@@ -155,7 +211,12 @@ class CustomDispatchPlan:
 
 
 class CustomCapabilityDispatcher:
-    """Only creates a validated plan; it intentionally has no runner method."""
+    """Join exact records, then hand off only through the trusted B1 broker.
+
+    The handoff accepts a receipt already in ``running`` state. It cannot
+    claim authorization, create a reservation, spawn a process, load source,
+    or fall back to an in-process implementation.
+    """
 
     @staticmethod
     def prepare(
@@ -214,10 +275,73 @@ class CustomCapabilityDispatcher:
             consumer_support=support,
         )
 
+    @staticmethod
+    def dispatch(
+        *,
+        intent: PreparedRunIntent,
+        plan: CustomDispatchPlan,
+        receipt: Any,
+        request: ContainmentRequest,
+        policy: ContainmentPolicy,
+        broker: ContainmentBroker,
+    ) -> CustomDispatchResult:
+        """Delegate one exact running attempt to B1 without an unsafe fallback."""
+
+        from .execution_receipt import CapabilityDispatchReceipt
+
+        if not isinstance(intent, PreparedRunIntent):
+            raise CustomDispatchPreflightError("intent must be a PreparedRunIntent")
+        if not isinstance(plan, CustomDispatchPlan):
+            raise CustomDispatchPreflightError("plan must be a CustomDispatchPlan")
+        if not isinstance(receipt, CapabilityDispatchReceipt):
+            raise CustomDispatchPreflightError("receipt must be a CapabilityDispatchReceipt")
+        if not isinstance(request, ContainmentRequest):
+            raise CustomDispatchPreflightError("request must be a ContainmentRequest")
+        if not isinstance(policy, ContainmentPolicy):
+            raise CustomDispatchPreflightError("policy must be a ContainmentPolicy")
+        if not isinstance(broker, ContainmentBroker):
+            raise CustomDispatchPreflightError("broker must be a ContainmentBroker")
+        if receipt.status != "running":
+            raise CustomDispatchPreflightError(
+                "custom dispatch requires a supervisor-acknowledged running receipt"
+            )
+        if receipt.intent_digest != intent.content_digest or plan.intent_digest != intent.content_digest:
+            raise CustomDispatchPreflightError("dispatch intent binding does not match")
+        if receipt.plan_digest != plan.content_digest:
+            raise CustomDispatchPreflightError("dispatch receipt is bound to another plan")
+        if request.attempt_id != receipt.attempt_id:
+            raise CustomDispatchPreflightError("containment request is bound to another attempt")
+        if request.intent_digest != intent.content_digest:
+            raise CustomDispatchPreflightError("containment request is bound to another intent")
+        if request.input_bundle_ref != intent.bundle_ref:
+            raise CustomDispatchPreflightError("containment request input is not the admitted bundle")
+        if request.policy_digest != policy.content_digest:
+            raise CustomDispatchPreflightError("containment request policy is not the supplied policy")
+
+        try:
+            report = broker.run(request, policy)
+        except Exception as error:
+            raise CustomDispatchPreflightError("trusted containment broker failed") from error
+        if not isinstance(report, ContainmentReport):
+            raise CustomDispatchPreflightError("trusted containment broker returned an invalid report")
+        if report.attempt_id != receipt.attempt_id or report.request_digest != request.content_digest:
+            raise CustomDispatchPreflightError("containment report is not bound to the attempt")
+        return CustomDispatchResult(
+            plan_digest=plan.content_digest,
+            attempt_id=receipt.attempt_id,
+            request_ref=request.content_digest,
+            report_ref=report.content_digest,
+            status=report.status,
+            reason_code=report.reason_code,
+            assessment_ref=report.assessment_ref,
+            output_bundle_ref=report.output_bundle_ref,
+        )
+
 
 __all__ = [
     "CUSTOM_DISPATCH_PREFLIGHT_CONTRACT_VERSION",
     "CustomCapabilityDispatcher",
     "CustomDispatchPlan",
     "CustomDispatchPreflightError",
+    "CustomDispatchResult",
 ]

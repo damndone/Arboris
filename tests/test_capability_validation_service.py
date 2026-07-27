@@ -120,3 +120,140 @@ def test_service_requires_independent_provenance_for_source_eligibility():
     )
     assert result.assessment.tier == "E2"
     assert result.assessment.source_eligible is True
+
+
+def test_validation_runner_fails_closed_when_containment_is_unsupported():
+    from workbench.capability_factory.validation_runner import ValidationRunner
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    sealed = _sealed()
+    protocol = _protocol()
+    policy = ContainmentPolicy(
+        profile_id="strict-readonly-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(1, 1, 1, 1, 1, 1),
+        allow_weaker_fallback=False,
+    )
+    request = ContainmentRequest(
+        request_id="request.validation",
+        attempt_id="attempt.validation",
+        intent_digest=sealed.bundle_ref,
+        input_bundle_ref=sealed.bundle_ref,
+        output_namespace_ref="9" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="8" * 64,
+    )
+    broker = ContainmentBroker(
+        host_assessor=lambda _policy: CanaryResult.unsupported("NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"),
+        executor=lambda *_args: ContainmentReport(
+            attempt_id="attempt.validation",
+            request_digest=request.content_digest,
+            status="completed",
+            reason_code="should-not-run",
+            assessment_ref="7" * 64,
+            output_bundle_ref="6" * 64,
+        ),
+    )
+
+    result = ValidationRunner().run(
+        sealed_bundle=sealed,
+        protocol=protocol,
+        request=request,
+        policy=policy,
+        broker=broker,
+    )
+
+    assert result.status == "unsupported"
+    assert result.reason_code == "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+    assert result.output_bundle_ref is None
+
+
+def test_validation_harness_uses_server_oracle_and_derives_evidence_server_side():
+    from workbench.capability_factory.validation_runner import (
+        OracleObservation,
+        ValidationRunner,
+    )
+    from workbench.capability_factory.validation_contract import ValidationBundle
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    sealed = _sealed()
+    case = _case()
+    bundle = ValidationBundle(
+        bundle_id="validation.harness",
+        revision=1,
+        adapter_ref=sealed.adapter_ref,
+        cases=(case,),
+    )
+    protocol = _protocol()
+    policy = ContainmentPolicy(
+        profile_id="strict-readonly-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(1, 1, 1, 1, 1, 1),
+        allow_weaker_fallback=False,
+    )
+    request = ContainmentRequest(
+        request_id="request.harness",
+        attempt_id="attempt.harness",
+        intent_digest=sealed.bundle_ref,
+        input_bundle_ref=sealed.bundle_ref,
+        output_namespace_ref="9" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="8" * 64,
+    )
+    report = ContainmentReport(
+        attempt_id=request.attempt_id,
+        request_digest=request.content_digest,
+        status="completed",
+        reason_code="contained_validation_completed",
+        assessment_ref="7" * 64,
+        output_bundle_ref="6" * 64,
+    )
+    broker = ContainmentBroker(
+        host_assessor=lambda _policy: CanaryResult("supported", "canary_passed"),
+        executor=lambda *_args: report,
+    )
+
+    class Oracle:
+        def evaluate(self, **kwargs):
+            assert kwargs["output_bundle_ref"] == report.output_bundle_ref
+            return OracleObservation(
+                observed_ref="5" * 64,
+                oracle_ref="4" * 64,
+                oracle_kind="independent_implementation",
+                status="passed",
+            )
+
+    result = ValidationRunner().run_with_oracle(
+        sealed_bundle=sealed,
+        validation_bundle=bundle,
+        protocol=protocol,
+        request=request,
+        policy=policy,
+        broker=broker,
+        oracle=Oracle(),
+    )
+
+    assert result.execution.status == "completed"
+    assert len(result.validation_bundle.evidence) == 1
+    assert result.validation_bundle.evidence[0].tier == "E2"
+    assert result.validation_bundle.evidence[0].oracle_ref == "4" * 64

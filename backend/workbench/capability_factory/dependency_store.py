@@ -32,6 +32,8 @@ class DependencyStore:
         self._locks: dict[str, DependencyLock] = {}
         self._bundles: dict[str, BundleCandidate] = {}
         self._admissions: dict[str, list[BundleAdmission]] = {}
+        self._supply_chain: dict[str, Any] = {}
+        self._supply_chain_verifications: dict[str, Any] = {}
         self._lock = RLock()
 
     def put_lock(self, lock: DependencyLock) -> DependencyLock:
@@ -135,6 +137,91 @@ class DependencyStore:
             if any(item.bundle_ref != bundle_ref for item in history):
                 raise DependencyStoreError("dependency admission history has a mismatched bundle")
             return history
+
+    def put_supply_chain_attestation(self, attestation: Any) -> Any:
+        """Persist one exact external supply-chain attestation by bundle."""
+
+        from .dependency_service import SupplyChainAttestation
+
+        if not isinstance(attestation, SupplyChainAttestation):
+            raise DependencyStoreError("only SupplyChainAttestation records can be stored")
+        with self._lock:
+            reference = attestation.bundle_ref
+            if self.root is None:
+                existing = self._supply_chain.get(reference)
+                if existing is not None and existing != attestation:
+                    raise DependencyStoreError("supply-chain attestation is already bound")
+                self._supply_chain[reference] = attestation
+                return attestation
+            self._put_once(
+                self._path("supply-chain", reference),
+                self._supply_chain_record(attestation),
+                expected_digest=attestation.content_digest,
+            )
+            return self.get_supply_chain_attestation(reference)
+
+    def get_supply_chain_attestation(self, bundle_ref: str) -> Any:
+        from .dependency_service import SupplyChainAttestation
+
+        bundle_ref = _digest(bundle_ref, "bundle_ref")
+        with self._lock:
+            if self.root is None:
+                try:
+                    return self._supply_chain[bundle_ref]
+                except KeyError as error:
+                    raise DependencyStoreError("supply-chain attestation was not found") from error
+            try:
+                record = self._read_single(self._path("supply-chain", bundle_ref))
+                attestation = SupplyChainAttestation(**record["attestation"])
+            except (KeyError, OSError, TypeError, ValueError) as error:
+                raise DependencyStoreError("supply-chain attestation is missing or corrupt") from error
+            if attestation.bundle_ref != bundle_ref or record.get("content_digest") != attestation.content_digest:
+                raise DependencyStoreError("supply-chain attestation reference does not match content")
+            return attestation
+
+    def put_supply_chain_verification(self, verification: Any) -> Any:
+        """Persist the verifier's decision bound to one attestation and build."""
+
+        from .dependency_service import SupplyChainVerification
+
+        if not isinstance(verification, SupplyChainVerification):
+            raise DependencyStoreError("only SupplyChainVerification records can be stored")
+        with self._lock:
+            reference = verification.attestation_ref
+            if self.root is None:
+                existing = self._supply_chain_verifications.get(reference)
+                if existing is not None and existing != verification:
+                    raise DependencyStoreError("supply-chain verification is already bound")
+                self._supply_chain_verifications[reference] = verification
+                return verification
+            self._put_once(
+                self._path("supply-chain-verifications", reference),
+                self._supply_chain_verification_record(verification),
+                expected_digest=verification.content_digest,
+            )
+            return self.get_supply_chain_verification(reference)
+
+    def get_supply_chain_verification(self, attestation_ref: str) -> Any:
+        from .dependency_service import SupplyChainVerification
+
+        attestation_ref = _digest(attestation_ref, "attestation_ref")
+        with self._lock:
+            if self.root is None:
+                try:
+                    return self._supply_chain_verifications[attestation_ref]
+                except KeyError as error:
+                    raise DependencyStoreError("supply-chain verification was not found") from error
+            try:
+                record = self._read_single(self._path("supply-chain-verifications", attestation_ref))
+                verification = SupplyChainVerification(**record["verification"])
+            except (KeyError, OSError, TypeError, ValueError) as error:
+                raise DependencyStoreError("supply-chain verification is missing or corrupt") from error
+            if (
+                verification.attestation_ref != attestation_ref
+                or record.get("content_digest") != verification.content_digest
+            ):
+                raise DependencyStoreError("supply-chain verification reference does not match content")
+            return verification
 
     def _path(self, kind: str, reference: str) -> Path:
         if self.root is None:
@@ -248,6 +335,37 @@ class DependencyStore:
         if record.get("content_digest") != admission.content_digest:
             raise DependencyStoreError("dependency admission content digest mismatch")
         return admission
+
+    @staticmethod
+    def _supply_chain_record(attestation: Any) -> dict[str, Any]:
+        return {
+            "record_type": "supply_chain_attestation",
+            "content_digest": attestation.content_digest,
+            "attestation": {
+                "bundle_ref": attestation.bundle_ref,
+                "tree_manifest_ref": attestation.tree_manifest_ref,
+                "sbom_ref": attestation.sbom_ref,
+                "license_status": attestation.license_status,
+                "vulnerability_status": attestation.vulnerability_status,
+                "authority_ref": attestation.authority_ref,
+                "license_report_ref": attestation.license_report_ref,
+                "vulnerability_report_ref": attestation.vulnerability_report_ref,
+            },
+        }
+
+    @staticmethod
+    def _supply_chain_verification_record(verification: Any) -> dict[str, Any]:
+        return {
+            "record_type": "supply_chain_verification",
+            "content_digest": verification.content_digest,
+            "verification": {
+                "authority_ref": verification.authority_ref,
+                "decision_ref": verification.decision_ref,
+                "status": verification.status,
+                "attestation_ref": verification.attestation_ref,
+                "build_ref": verification.build_ref,
+            },
+        }
 
 
 __all__ = ["DependencyStore", "DependencyStoreError"]

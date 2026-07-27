@@ -147,3 +147,106 @@ def test_adapter_contract_cannot_claim_an_undeclared_operation_or_consumer():
             operations=("fit",),
             consumer_support=unsupported,
         )
+
+
+def test_adapter_candidate_factory_emits_typed_candidate_and_empty_validation_bundle():
+    from workbench.capability_factory.adapter_contract import AdapterCandidateFactory
+    from workbench.capability_factory.validation_contract import ValidationCase
+
+    implementation = _implementation()
+    generated = AdapterCandidateFactory().generate(
+        implementation=implementation,
+        adapter_id="adapter.generated",
+        adapter_revision=1,
+        entrypoint_ref="b" * 64,
+        operations=("fit", "summarize"),
+        consumer_support=_consumer_support(),
+        candidate_id="candidate.generated",
+        capability_kind="model",
+        source_ref="c" * 64,
+        author_lineage_ref="d" * 64,
+        validation_bundle_id="validation.generated",
+        validation_cases=(
+            ValidationCase(
+                case_id="case.generated.1",
+                fixture_ref="e" * 64,
+                fixture_visibility="author_visible",
+            ),
+        ),
+    )
+
+    assert generated.candidate.source_kind == "generated_adapter"
+    assert generated.candidate.status == "submitted"
+    assert generated.validation_bundle.evidence == ()
+    assert generated.validation_bundle.adapter_ref == generated.adapter.content_digest
+
+
+def test_adapter_candidate_factory_binds_generated_source_and_entrypoint(tmp_path):
+    from workbench.capability_factory.adapter_contract import (
+        AdapterCandidateFactory,
+        AdapterSourceGenerator,
+    )
+
+    from workbench.capability_factory.validation_contract import ValidationCase
+
+    implementation = _implementation()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: "def adapter():\n    return None\n",
+        output_root=tmp_path / "source",
+    )
+    cases = (
+        ValidationCase(
+            case_id="case.bound-source",
+            fixture_ref="8" * 64,
+            fixture_visibility="author_visible",
+        ),
+    )
+    generated = AdapterCandidateFactory().generate(
+        implementation=implementation,
+        adapter_id="adapter.bound-source",
+        adapter_revision=1,
+        entrypoint_ref=source.entrypoint_ref,
+        operations=("fit",),
+        consumer_support=_consumer_support(),
+        candidate_id="candidate.bound-source",
+        capability_kind="custom.model",
+        source_ref=source.source_ref,
+        author_lineage_ref="9" * 64,
+        validation_bundle_id="validation.bound-source",
+        validation_cases=cases,
+        source_artifact=source,
+    )
+
+    assert generated.candidate.source_ref == source.source_ref
+    assert generated.adapter.entrypoint_ref == source.entrypoint_ref
+    assert generated.execution_allowed is False
+
+
+def test_adapter_source_generator_stores_bounded_agent_output_without_executing_it(tmp_path):
+    from workbench.capability_factory.adapter_contract import AdapterSourceGenerator
+
+    implementation = _implementation()
+    seen = []
+
+    def provider(context):
+        seen.append(context)
+        return "def fit(input_bundle, parameters):\n    return None\n"
+
+    artifact = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=provider,
+        output_root=tmp_path,
+    )
+
+    assert artifact.path.read_text(encoding="utf-8").startswith("def fit")
+    assert artifact.path.name == f"{artifact.source_ref}.py"
+    assert artifact.source_ref != artifact.entrypoint_ref
+    assert seen == [
+        {
+            "profile_ref": implementation.profile_digest,
+            "input_schema_ref": implementation.input_schema_digest,
+            "operations": list(implementation.operations),
+            "implementation_ref": implementation.content_digest,
+        }
+    ]

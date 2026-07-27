@@ -160,3 +160,82 @@ def test_preflight_rejects_operation_and_adapter_implementation_mismatch() -> No
             operation_id="fit",
             requested_consumers=("notebook_option_planner",),
         )
+
+
+def test_dispatch_only_delegates_a_running_attempt_to_b1_and_preserves_unsupported() -> None:
+    from workbench.capability_factory.execution_receipt import CapabilityDispatchReceipt
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    intent, implementation, adapter, binding = _intent_and_records()
+    plan = CustomCapabilityDispatcher.prepare(
+        intent=intent,
+        binding=binding,
+        adapter=adapter,
+        implementation=implementation,
+        operation_id="fit",
+        requested_consumers=("notebook_option_planner", "report_projection"),
+    )
+    receipt = CapabilityDispatchReceipt(
+        authorization_id="authorization.dispatch",
+        authorization_payload_digest="1" * 64,
+        intent_digest=intent.content_digest,
+        reservation_id="reservation.dispatch",
+        attempt_id="attempt.dispatch",
+        lease_epoch=1,
+        status="running",
+        plan_digest=plan.content_digest,
+    )
+    policy = ContainmentPolicy(
+        profile_id="strict-readonly-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+    )
+    request = ContainmentRequest(
+        request_id="request.dispatch",
+        attempt_id=receipt.attempt_id,
+        intent_digest=intent.content_digest,
+        input_bundle_ref=intent.bundle_ref,
+        output_namespace_ref="9" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="a" * 64,
+    )
+    broker = ContainmentBroker(
+        host_assessor=lambda _policy: CanaryResult.unsupported(
+            "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+        ),
+        executor=None,
+    )
+
+    result = CustomCapabilityDispatcher.dispatch(
+        intent=intent,
+        plan=plan,
+        receipt=receipt,
+        request=request,
+        policy=policy,
+        broker=broker,
+    )
+
+    assert result.status == "unsupported"
+    assert result.output_bundle_ref is None
+    assert result.attempt_id == receipt.attempt_id
+
+    with pytest.raises(CustomDispatchPreflightError, match="running"):
+        CustomCapabilityDispatcher.dispatch(
+            intent=intent,
+            plan=plan,
+            receipt=replace(receipt, status="dispatch_reserved"),
+            request=request,
+            policy=policy,
+            broker=broker,
+        )

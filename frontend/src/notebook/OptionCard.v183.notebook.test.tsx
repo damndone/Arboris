@@ -39,4 +39,21 @@ describe("OptionCard — capability-bound execution declaration", () => {
     render(<OptionCard option={canonicalOptionRevision()} />);
     expect(screen.queryByTestId("option-confirm-and-execute")).toBeNull();
   });
+
+  it("shows a bound custom capability even when execution remains materialize-only", () => {
+    const option = {
+      ...canonicalOptionRevision(),
+      contract_version: "1.2" as const,
+      capability_resolution_binding_ref: "b".repeat(64),
+      execution_modes: ["materialize_only"] as Array<"materialize_only" | "confirm_and_execute">,
+      confirmAndExecute: false,
+    };
+
+    render(<OptionCard option={option} />);
+
+    expect(screen.getByTestId("option-capability-binding")).toHaveTextContent(
+      "materialization only",
+    );
+    expect(screen.queryByTestId("option-confirm-and-execute")).toBeNull();
+  });
 });
