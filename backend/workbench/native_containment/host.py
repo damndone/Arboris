@@ -197,6 +197,20 @@ class HostContainmentValidityStore:
         except (KeyError, IndexError) as error:
             raise HostAssessmentError("host validity was not found") from error
 
+    def require_current(self, validity_ref: str) -> HostContainmentValidityRecord:
+        """Resolve an exact validity record and require that it is still valid."""
+
+        validity_ref = _digest(validity_ref, "validity_ref")
+        with self._lock:
+            for history in self._history.values():
+                for record in history:
+                    if record.content_digest != validity_ref:
+                        continue
+                    if history[-1] != record or record.status != "valid":
+                        raise HostAssessmentError("host validity record is not current")
+                    return record
+        raise HostAssessmentError("host validity record was not found")
+
 
 __all__ = [
     "CanaryAssertion",

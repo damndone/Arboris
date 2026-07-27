@@ -44,3 +44,23 @@ def test_trace_contracts_bound_event_types_and_digest_shape():
             event_type="capability.resolution.decided",
             payload={"decision_digest": "not-a-digest", "outcome": "selected"},
         )
+
+
+def test_cf3b_trace_contracts_bind_registration_and_admission_refs():
+    trace = _trace()
+    registered = trace.build_trace_event(
+        event_type="capability.implementation.registered",
+        payload={
+            "implementation_ref": "a" * 64,
+            "adapter_ref": "b" * 64,
+            "validation_bundle_ref": "c" * 64,
+            "evidence_assessment_ref": "d" * 64,
+            "host_containment_ref": "e" * 64,
+        },
+    )
+    assert registered.payload["host_containment_ref"] == "e" * 64
+    changed = trace.build_trace_event(
+        event_type="capability.admission.changed",
+        payload={"admission_id": "admission.alpha", "admission_ref": "f" * 64, "status": "admitted"},
+    )
+    assert changed.payload["status"] == "admitted"

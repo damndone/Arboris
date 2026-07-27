@@ -13,6 +13,16 @@ TRACE_CONTRACT_VERSION = "workbench.capability_factory.trace/v1"
 _EVENT_FIELDS = {
     "capability.requirement.created": frozenset({"requirement_digest", "revision"}),
     "capability.registry.registered": frozenset({"implementation_ref", "profile_digest"}),
+    "capability.implementation.registered": frozenset(
+        {
+            "implementation_ref",
+            "adapter_ref",
+            "validation_bundle_ref",
+            "evidence_assessment_ref",
+            "host_containment_ref",
+        }
+    ),
+    "capability.admission.changed": frozenset({"admission_id", "admission_ref", "status"}),
     "capability.resolution.decided": frozenset({"decision_digest", "outcome"}),
     "capability.dependency.proposed": frozenset({"proposal_digest", "lock_ref", "risk_level"}),
     "capability.dependency.quarantined": frozenset({"bundle_ref", "lock_ref", "status"}),
