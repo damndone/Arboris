@@ -62,6 +62,8 @@ class NotebookOptionMaterializer:
         *,
         context: NotebookPlanningContextV1,
         trace: TraceWriter | None = None,
+        materialization_id: str | None = None,
+        draft_id: str | None = None,
     ) -> MaterializationResult:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
@@ -79,6 +81,21 @@ class NotebookOptionMaterializer:
             notebook_id, option_id, current.option_revision
         )
         if existing is not None:
+            if (
+                materialization_id is not None
+                and materialization_id != existing.materialization_id
+            ):
+                raise _fail(
+                    "the requested materialization id conflicts with the persisted materialization",
+                    option_id=option_id,
+                    reason="MATERIALIZATION_ID_CONFLICT",
+                )
+            if draft_id is not None and draft_id != existing.draft_id:
+                raise _fail(
+                    "the requested draft id conflicts with the persisted materialization",
+                    option_id=option_id,
+                    reason="DRAFT_ID_CONFLICT",
+                )
             draft = PipelineDraftStore(self.service.project_root).get(existing.draft_id)
             return MaterializationResult(existing, draft)
         if view.lifecycle_status == "executed":
@@ -121,6 +138,7 @@ class NotebookOptionMaterializer:
                     notebook,
                     proposal.to_dict(),
                     provenance,
+                    draft_id=draft_id,
                 )
                 mode = "rerun_child"
                 pins = {
@@ -137,6 +155,7 @@ class NotebookOptionMaterializer:
                     notebook,
                     proposal.to_dict(),
                     provenance,
+                    draft_id=draft_id,
                 )
                 mode = "genesis"
                 pins = {
@@ -160,7 +179,11 @@ class NotebookOptionMaterializer:
             ) from exc
 
         materialization = OptionMaterialization(
-            materialization_id=f"mat_{uuid4().hex}",
+            materialization_id=(
+                f"mat_{uuid4().hex}"
+                if materialization_id is None
+                else materialization_id
+            ),
             option_id=option_id,
             option_revision=current.option_revision,
             proposal_id=current.typed_proposal_id,
@@ -257,6 +280,8 @@ class NotebookOptionMaterializer:
         notebook: Any,
         proposal: Mapping[str, Any],
         provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
     ) -> StoredDraft:
         if proposal["target"]["run_id"] != notebook.active_head_run_id:
             raise OptionRevisionStale(
@@ -288,6 +313,7 @@ class NotebookOptionMaterializer:
                 source_context_fingerprint=proposal["preconditions"]["context_fingerprint"],
                 notebook_provenance=provenance,
                 persist=False,
+                draft_id=draft_id,
             )
             model = next(
                 node
@@ -335,6 +361,7 @@ class NotebookOptionMaterializer:
                 source_forest_node_key=proposal["target"]["forest_node_key"],
                 source_context_fingerprint=proposal["preconditions"]["context_fingerprint"],
                 notebook_provenance=provenance,
+                draft_id=draft_id,
             )
         # An empty typed model-options patch is the explicit “retain the
         # verified active model path” option. It must still produce a pinned
@@ -362,6 +389,8 @@ class NotebookOptionMaterializer:
         notebook: Any,
         proposal: Mapping[str, Any],
         provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
     ) -> StoredDraft:
         source = notebook.projection_source
         if proposal["target"]["dataset_source_id"] != source.upload_sha256:
@@ -453,6 +482,7 @@ class NotebookOptionMaterializer:
             sheet_names=tuple(source.sheet_names),
             columns=columns,
             notebook_provenance=provenance,
+            draft_id=draft_id,
         )
         store = PipelineDraftStore(self.service.project_root)
         try:

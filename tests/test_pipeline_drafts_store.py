@@ -7,6 +7,7 @@ import pytest
 
 from workbench.lineage.pipeline_drafts import (
     DRAFT_SCHEMA_VERSION,
+    DraftPathError,
     DraftHashConflict,
     DraftLockedForExecution,
     PipelineDraftStore,
@@ -15,6 +16,7 @@ from workbench.lineage.pipeline_drafts import (
     schema_hash,
     validate_draft_for_execution,
 )
+from workbench.services.draft_materialization import _resolved_draft_id
 
 
 def _draft() -> dict:
@@ -112,6 +114,40 @@ def test_store_roundtrip_and_base_hash_conflict(tmp_path: Path) -> None:
             base_draft_hash="stale",
             params={"x": ["x2"]},
         )
+
+
+def test_create_is_idempotent_for_same_id_and_executable_content(tmp_path: Path) -> None:
+    store = PipelineDraftStore(tmp_path)
+    draft = _draft()
+    first = store.create(draft)
+
+    retry = copy.deepcopy(draft)
+    retry["created_at"] = "2030-01-01T00:00:00Z"
+    retry["updated_at"] = "2030-01-01T00:00:00Z"
+    retry["status"] = "saving"
+
+    second = store.create(retry)
+
+    assert second == first
+    assert store.get(draft["draft_id"]) == first
+
+    conflicting = copy.deepcopy(draft)
+    conflicting["graph"]["nodes"][1]["params"] = {"x": ["x2"]}
+    with pytest.raises(DraftHashConflict):
+        store.create(conflicting)
+
+    provenance_conflict = copy.deepcopy(draft)
+    provenance_conflict["notebook_provenance"] = {
+        "notebook_id": "notebook.other",
+        "option_id": "option.other",
+    }
+    with pytest.raises(DraftHashConflict):
+        store.create(provenance_conflict)
+
+
+def test_empty_caller_supplied_draft_id_is_rejected() -> None:
+    with pytest.raises(DraftPathError):
+        _resolved_draft_id("")
 
 
 def test_store_locks_are_shared_across_instances(tmp_path: Path) -> None:
