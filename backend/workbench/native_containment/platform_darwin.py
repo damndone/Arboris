@@ -89,12 +89,14 @@ raise SystemExit(0 if ok else 1)
         canary_probe: Callable[[ContainmentPolicy], Mapping[str, bool]] | None = None,
         host_supported: Callable[[], bool] | None = None,
         backend_available: Callable[[], bool] | None = None,
+        resource_limit_probe: Callable[[ContainmentPolicy], str | None] | None = None,
     ) -> None:
         self.python_executable = python_executable
         self.backend_executable = backend_executable
         self.canary_probe = canary_probe
         self.host_supported = host_supported or (lambda: platform.system() == "Darwin")
         self.backend_available = backend_available or (lambda: Path(self.backend_executable).is_file())
+        self.resource_limit_probe = resource_limit_probe or self._default_resource_limit_probe
         self._probe_reason: str | None = None
 
     def discover_identity(self) -> HostIdentity:
@@ -121,6 +123,9 @@ raise SystemExit(0 if ok else 1)
             return CanaryResult.unsupported("NATIVE_CONTAINMENT_INTERPRETER_UNAVAILABLE")
         try:
             self._probe_reason = None
+            resource_reason = self.resource_limit_probe(policy)
+            if resource_reason is not None:
+                return CanaryResult.unsupported(resource_reason)
             results = self.canary_probe(policy) if self.canary_probe is not None else self._default_probe(policy)
         except (OSError, subprocess.SubprocessError):
             return CanaryResult.unsupported("NATIVE_CONTAINMENT_CANARY_FAILED")
@@ -135,6 +140,45 @@ raise SystemExit(0 if ok else 1)
             self._probe_reason or "NATIVE_CONTAINMENT_CANARY_FAILED",
             assertions,
         )
+
+    def _default_resource_limit_probe(self, policy: ContainmentPolicy) -> str | None:
+        script = """
+import resource
+import sys
+
+limits = (
+    (resource.RLIMIT_CPU, int(sys.argv[1])),
+    (resource.RLIMIT_FSIZE, int(sys.argv[2])),
+    (resource.RLIMIT_AS, int(sys.argv[3])),
+)
+for kind, value in limits:
+    resource.setrlimit(kind, (value, value))
+"""
+        budget = policy.budget
+        try:
+            completed = subprocess.run(
+                [
+                    self.python_executable,
+                    "-I",
+                    "-c",
+                    script,
+                    str(max(1, math.ceil(budget.cpu_millis / 1000))),
+                    str(max(budget.stdout_bytes, budget.stderr_bytes)),
+                    str(budget.memory_bytes),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self._environment(policy),
+                close_fds=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return "NATIVE_CONTAINMENT_RESOURCE_LIMIT_PROBE_FAILED"
+        if completed.returncode != 0:
+            return "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+        return None
 
     def _default_probe(self, policy: ContainmentPolicy) -> Mapping[str, bool]:
         if not self.backend_executable.startswith("/"):
@@ -157,6 +201,7 @@ raise SystemExit(0 if ok else 1)
         return "\n".join(
             (
                 "(version 1)",
+                '(import "system.sb")',
                 "(deny default)",
                 "(deny network*)",
                 "(allow process-exec)",
@@ -197,10 +242,7 @@ raise SystemExit(0 if ok else 1)
                 resource.RLIMIT_FSIZE,
                 (max(budget.stdout_bytes, budget.stderr_bytes), max(budget.stdout_bytes, budget.stderr_bytes)),
             )
-            try:
-                resource.setrlimit(resource.RLIMIT_AS, (budget.memory_bytes, budget.memory_bytes))
-            except (ValueError, OSError):
-                self._probe_reason = "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+            resource.setrlimit(resource.RLIMIT_AS, (budget.memory_bytes, budget.memory_bytes))
 
         return apply_limits
 
