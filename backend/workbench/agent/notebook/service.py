@@ -971,18 +971,23 @@ class NotebookService:
                 reason="generated",
             )
             if trace is not None:
+                revision_trace_payload = {
+                    "option_id": option_id,
+                    "option_revision": 1,
+                    "generation_context_hash": revision.generation_context_hash,
+                    "freshness_dependency_fingerprint": (
+                        revision.freshness_dependency_fingerprint
+                    ),
+                    "rank": draft.rank,
+                    "risk_level": risk_level,
+                }
+                if binding is not None:
+                    revision_trace_payload["capability_resolution_binding_ref"] = (
+                        binding.content_digest
+                    )
                 trace.emit(
                     "option.revision.created",
-                    payload={
-                        "option_id": option_id,
-                        "option_revision": 1,
-                        "generation_context_hash": revision.generation_context_hash,
-                        "freshness_dependency_fingerprint": (
-                            revision.freshness_dependency_fingerprint
-                        ),
-                        "rank": draft.rank,
-                        "risk_level": risk_level,
-                    },
+                    payload=revision_trace_payload,
                 )
                 trace.emit(
                     "proposal.validation.completed",
@@ -1186,17 +1191,22 @@ class NotebookService:
                 )
             self._append_revision(notebook.notebook_id, stored_revision)
             if trace is not None:
+                revision_trace_payload = {
+                    "option_id": revision.option_id,
+                    "option_revision": revision.option_revision,
+                    "generation_context_hash": revision.generation_context_hash,
+                    "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
+                    "rank": revision.rank,
+                    "risk_level": revision.risk_level,
+                    "supersedes_option_revision": revision.supersedes_option_revision,
+                }
+                if binding is not None:
+                    revision_trace_payload["capability_resolution_binding_ref"] = (
+                        binding.content_digest
+                    )
                 trace.emit(
                     "option.revision.created",
-                    payload={
-                        "option_id": revision.option_id,
-                        "option_revision": revision.option_revision,
-                        "generation_context_hash": revision.generation_context_hash,
-                        "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
-                        "rank": revision.rank,
-                        "risk_level": revision.risk_level,
-                        "supersedes_option_revision": revision.supersedes_option_revision,
-                    },
+                    payload=revision_trace_payload,
                 )
                 trace.emit(
                     "proposal.validation.completed",
@@ -2383,16 +2393,22 @@ class NotebookService:
             reason=reason,
         )
         if trace is not None:
+            lifecycle_trace_payload = {
+                "option_id": view.option_id,
+                "option_revision": view.current_revision.option_revision,
+                "from_status": current,
+                "to_status": to_status,
+                "axis": "lifecycle",
+                "reason": reason,
+            }
+            binding_ref = getattr(
+                view.current_revision, "capability_resolution_binding_ref", None
+            )
+            if binding_ref is not None:
+                lifecycle_trace_payload["capability_resolution_binding_ref"] = binding_ref
             trace.emit(
                 "option.lifecycle.changed",
-                payload={
-                    "option_id": view.option_id,
-                    "option_revision": view.current_revision.option_revision,
-                    "from_status": current,
-                    "to_status": to_status,
-                    "axis": "lifecycle",
-                    "reason": reason,
-                },
+                payload=lifecycle_trace_payload,
             )
 
     def _read_run_artifacts(self, run_id: str | None) -> list[dict[str, Any]]:

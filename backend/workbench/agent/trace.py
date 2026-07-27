@@ -152,12 +152,17 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
             "generation_context_hash",
             "freshness_dependency_fingerprint",
         ),
-        optional=("supersedes_option_revision", "rank", "risk_level"),
+        optional=(
+            "supersedes_option_revision",
+            "rank",
+            "risk_level",
+            "capability_resolution_binding_ref",
+        ),
     ),
     "option.lifecycle.changed": _Schema(
         "option-lifecycle-changed/v1",
         required=("option_id", "option_revision", "from_status", "to_status", "axis"),
-        optional=("reason",),
+        optional=("reason", "capability_resolution_binding_ref"),
     ),
     "user.decision.recorded": _Schema(
         "user-decision-recorded/v1",

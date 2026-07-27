@@ -40,6 +40,7 @@ FEASIBILITY_DECISION_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_V11_CONTRACT_VERSION = "1.1"
 MAX_RECOMMENDATION_CANDIDATES = 3
 OPTION_MATERIALIZATION_CONTRACT_VERSION = "1.0"
+OPTION_MATERIALIZATION_V11_CONTRACT_VERSION = "1.1"
 ARTIFACT_CONTRACT_VERSION = "1.0"
 
 LIFECYCLE_STATUSES = (
@@ -1116,6 +1117,9 @@ class OptionMaterialization:
             raise NotebookContractError(
                 f"contract_version must be {OPTION_MATERIALIZATION_CONTRACT_VERSION}"
             )
+        self._validate_fields()
+
+    def _validate_fields(self) -> None:
         for field in (
             "materialization_id",
             "option_id",
@@ -1168,9 +1172,60 @@ class OptionMaterialization:
         }
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "OptionMaterialization":
+    def from_dict(
+        cls, value: Mapping[str, Any]
+    ) -> "OptionMaterialization | OptionMaterializationV11":
+        if (
+            isinstance(value, Mapping)
+            and value.get("contract_version")
+            == OPTION_MATERIALIZATION_V11_CONTRACT_VERSION
+        ):
+            return OptionMaterializationV11.from_dict(value)
         require_exact_keys(value, cls._KEYS, "option_materialization")
         return cls(**{key: value[key] for key in cls._KEYS})
+
+
+@dataclass(frozen=True)
+class OptionMaterializationV11(OptionMaterialization):
+    """OptionMaterialization@1.1 with an immutable capability binding pin.
+
+    The legacy materialization remains the wire contract for native/unbound
+    options.  A capability-bound option must use this successor so a later
+    Draft or replay cannot silently detach from the binding that produced it.
+    """
+
+    capability_resolution_binding_ref: str = ""
+    contract_version: str = OPTION_MATERIALIZATION_V11_CONTRACT_VERSION
+
+    _V11_KEYS = OptionMaterialization._KEYS | frozenset(
+        {"capability_resolution_binding_ref"}
+    )
+
+    def __post_init__(self) -> None:
+        if self.contract_version != OPTION_MATERIALIZATION_V11_CONTRACT_VERSION:
+            raise NotebookContractError(
+                f"contract_version must be {OPTION_MATERIALIZATION_V11_CONTRACT_VERSION}"
+            )
+        self._validate_fields()
+        _require_digest(
+            self.capability_resolution_binding_ref,
+            "capability_resolution_binding_ref",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = super().to_dict()
+        payload["contract_version"] = self.contract_version
+        payload["capability_resolution_binding_ref"] = self.capability_resolution_binding_ref
+        return payload
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "OptionMaterializationV11":
+        require_exact_keys(value, cls._V11_KEYS, "option_materialization_v11")
+        payload = {key: value[key] for key in OptionMaterialization._KEYS}
+        payload["capability_resolution_binding_ref"] = value[
+            "capability_resolution_binding_ref"
+        ]
+        return cls(**payload)
 
 
 @dataclass(frozen=True)

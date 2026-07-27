@@ -7,7 +7,11 @@ from typing import Any, Mapping, TYPE_CHECKING
 from uuid import uuid4
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import NotebookOptionRevisionV11, OptionMaterialization
+from ...contracts.agent.notebook_option import (
+    NotebookOptionRevisionV11,
+    OptionMaterialization,
+    OptionMaterializationV11,
+)
 from ...engine.capabilities import COVARIANCE_UI, build_capabilities
 from ...lineage.pipeline_drafts import PipelineDraftStore, StoredDraft
 from ...model_options import (
@@ -68,6 +72,9 @@ class NotebookOptionMaterializer:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        if binding_ref is not None:
+            self.service._assert_current_capability_binding(current)
         if not isinstance(current, NotebookOptionRevisionV11):
             self.service.assert_materializable(notebook_id, option_id)
         if view.lifecycle_status not in {"selected", "materialized", "executed"}:
@@ -97,6 +104,7 @@ class NotebookOptionMaterializer:
                     reason="DRAFT_ID_CONFLICT",
                 )
             draft = PipelineDraftStore(self.service.project_root).get(existing.draft_id)
+            self._validate_binding_provenance(current, existing, draft)
             return MaterializationResult(existing, draft)
         if view.lifecycle_status == "executed":
             raise _fail("an executed option cannot be materialized again", option_id=option_id)
@@ -131,6 +139,8 @@ class NotebookOptionMaterializer:
             # handoff so a Genesis run is born in the Notebook's family.
             "run_family_id": notebook.run_family_id,
         }
+        if binding_ref is not None:
+            provenance["capability_resolution_binding_ref"] = binding_ref
         source = notebook.projection_source
         try:
             if source is not None and source.kind == "run":
@@ -178,24 +188,30 @@ class NotebookOptionMaterializer:
                 reason=str(exc),
             ) from exc
 
-        materialization = OptionMaterialization(
-            materialization_id=(
+        materialization_kwargs: dict[str, Any] = {
+            "materialization_id": (
                 f"mat_{uuid4().hex}"
                 if materialization_id is None
                 else materialization_id
             ),
-            option_id=option_id,
-            option_revision=current.option_revision,
-            proposal_id=current.typed_proposal_id,
-            proposal_revision=current.typed_proposal_revision,
-            freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
-            generation_context_id=current.generation_context_id,
-            draft_id=draft.draft["draft_id"],
-            draft_hash=draft.draft_hash,
-            draft_execution_mode=mode,
-            run_family_id=notebook.run_family_id,
+            "option_id": option_id,
+            "option_revision": current.option_revision,
+            "proposal_id": current.typed_proposal_id,
+            "proposal_revision": current.typed_proposal_revision,
+            "freshness_dependency_fingerprint": current.freshness_dependency_fingerprint,
+            "generation_context_id": current.generation_context_id,
+            "draft_id": draft.draft["draft_id"],
+            "draft_hash": draft.draft_hash,
+            "draft_execution_mode": mode,
+            "run_family_id": notebook.run_family_id,
             **pins,
-        )
+        }
+        if binding_ref is not None:
+            materialization_kwargs["capability_resolution_binding_ref"] = binding_ref
+            materialization = OptionMaterializationV11(**materialization_kwargs)
+        else:
+            materialization = OptionMaterialization(**materialization_kwargs)
+        self._validate_binding_provenance(current, materialization, draft)
         self.service.store.append_materialization(notebook_id, materialization)
         if view.lifecycle_status == "selected":
             self.service._transition(
@@ -207,18 +223,51 @@ class NotebookOptionMaterializer:
                 trace=trace,
             )
         if trace is not None:
+            lifecycle_payload = {
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "from_status": "selected",
+                "to_status": "materialized",
+                "axis": "lifecycle",
+                "reason": "draft_materialized",
+            }
+            if binding_ref is not None:
+                lifecycle_payload["capability_resolution_binding_ref"] = binding_ref
             trace.emit(
                 "option.lifecycle.changed",
-                payload={
-                    "option_id": option_id,
-                    "option_revision": current.option_revision,
-                    "from_status": "selected",
-                    "to_status": "materialized",
-                    "axis": "lifecycle",
-                    "reason": "draft_materialized",
-                },
+                payload=lifecycle_payload,
             )
         return MaterializationResult(materialization, draft)
+
+    def _validate_binding_provenance(
+        self,
+        revision: Any,
+        materialization: OptionMaterialization,
+        draft: StoredDraft,
+    ) -> None:
+        """Require one binding identity across Option, Materialization, Draft."""
+
+        expected = getattr(revision, "capability_resolution_binding_ref", None)
+        materialization_ref = getattr(
+            materialization, "capability_resolution_binding_ref", None
+        )
+        draft_provenance = draft.draft.get("notebook_provenance") or {}
+        draft_ref = draft_provenance.get("capability_resolution_binding_ref")
+        if expected is None:
+            if materialization_ref is not None or draft_ref is not None:
+                raise _fail(
+                    "an unbound option cannot carry capability binding provenance",
+                    option_id=revision.option_id,
+                    reason="CAPABILITY_BINDING_PROVENANCE_UNEXPECTED",
+                )
+            return
+        if materialization_ref != expected or draft_ref != expected:
+            raise OptionRevisionStale(
+                "capability binding provenance does not match the current option",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_provenance_mismatch",
+            )
 
     def _validate_evidence_pins(
         self,
