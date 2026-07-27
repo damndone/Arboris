@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, ClassVar, Mapping
 
 from ..custom_capability.canonical import domain_digest
+from .control import ControlSubjectCursor, ExecutionControlRecord
 
 
 PREPARED_RUN_INTENT_CONTRACT_VERSION = "PreparedRunIntent@1.0"
@@ -210,7 +212,216 @@ class PreparedRunIntent:
         return result
 
 
+class DispatchReservationError(ValueError):
+    """Raised when a reservation record is not bound to its control snapshot."""
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchReservation:
+    """Immutable unique-start record derived from one control append."""
+
+    reservation_id: str
+    authorization_id: str
+    authorization_payload_digest: str
+    intent_id: str
+    intent_digest: str
+    run_id: str
+    attempt_id: str
+    lease_epoch: int
+    executor_idempotency_key: str
+    control_sequence: int
+    subject_snapshot: tuple[ControlSubjectCursor, ...]
+
+    _FIELDS: ClassVar[tuple[str, ...]] = (
+        "reservation_id",
+        "authorization_id",
+        "authorization_payload_digest",
+        "intent_id",
+        "intent_digest",
+        "run_id",
+        "attempt_id",
+        "lease_epoch",
+        "executor_idempotency_key",
+        "control_sequence",
+        "subject_snapshot",
+    )
+
+    def __post_init__(self) -> None:
+        for field in (
+            "reservation_id",
+            "authorization_id",
+            "intent_id",
+            "run_id",
+            "attempt_id",
+            "executor_idempotency_key",
+        ):
+            object.__setattr__(self, field, _identifier(getattr(self, field), field))
+        for field in ("authorization_payload_digest", "intent_digest"):
+            object.__setattr__(self, field, _digest(getattr(self, field), field))
+        if not isinstance(self.lease_epoch, int) or isinstance(self.lease_epoch, bool) or self.lease_epoch < 1:
+            raise DispatchReservationError("lease_epoch must be a positive integer")
+        if not isinstance(self.control_sequence, int) or isinstance(self.control_sequence, bool) or self.control_sequence < 1:
+            raise DispatchReservationError("control_sequence must be a positive integer")
+        if not isinstance(self.subject_snapshot, tuple) or not self.subject_snapshot:
+            raise DispatchReservationError("subject_snapshot must be a non-empty tuple")
+        if any(not isinstance(item, ControlSubjectCursor) for item in self.subject_snapshot):
+            raise DispatchReservationError("subject_snapshot contains an invalid cursor")
+
+    @classmethod
+    def from_control_record(
+        cls,
+        *,
+        intent: PreparedRunIntent,
+        control_record: ExecutionControlRecord,
+    ) -> "DispatchReservation":
+        if not isinstance(intent, PreparedRunIntent):
+            raise DispatchReservationError("intent must be a PreparedRunIntent")
+        if not isinstance(control_record, ExecutionControlRecord):
+            raise DispatchReservationError("control_record must be an ExecutionControlRecord")
+        if control_record.request.record_type != "dispatch_reservation":
+            raise DispatchReservationError("control record is not a dispatch reservation")
+        value = control_record.request.value
+        expected = {
+            "authorization_id",
+            "authorization_payload_digest",
+            "intent_id",
+            "intent_digest",
+            "run_id",
+            "attempt_id",
+            "lease_epoch",
+            "executor_idempotency_key",
+        }
+        if set(value) != expected:
+            raise DispatchReservationError("dispatch reservation payload fields are invalid")
+        if value["intent_id"] != intent.intent_id or value["intent_digest"] != intent.content_digest:
+            raise DispatchReservationError("dispatch reservation is bound to another intent")
+        if value["run_id"] != intent.run_id:
+            raise DispatchReservationError("dispatch reservation run identity does not match intent")
+        try:
+            return cls(
+                reservation_id=control_record.request.record_id,
+                authorization_id=value["authorization_id"],
+                authorization_payload_digest=value["authorization_payload_digest"],
+                intent_id=value["intent_id"],
+                intent_digest=value["intent_digest"],
+                run_id=value["run_id"],
+                attempt_id=value["attempt_id"],
+                lease_epoch=value["lease_epoch"],
+                executor_idempotency_key=value["executor_idempotency_key"],
+                control_sequence=control_record.control_sequence,
+                subject_snapshot=control_record.subject_snapshot,
+            )
+        except (TypeError, ValueError) as error:
+            if isinstance(error, DispatchReservationError):
+                raise
+            raise DispatchReservationError("dispatch reservation payload is invalid") from error
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "reservation_id": self.reservation_id,
+            "authorization_id": self.authorization_id,
+            "authorization_payload_digest": self.authorization_payload_digest,
+            "intent_id": self.intent_id,
+            "intent_digest": self.intent_digest,
+            "run_id": self.run_id,
+            "attempt_id": self.attempt_id,
+            "lease_epoch": self.lease_epoch,
+            "executor_idempotency_key": self.executor_idempotency_key,
+            "control_sequence": self.control_sequence,
+            "subject_snapshot": [item.to_dict() for item in self.subject_snapshot],
+        }
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.dispatch_reservation/v1",
+            {"contract_version": "DispatchReservation@1.0", **self._payload()},
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": "DispatchReservation@1.0",
+            **self._payload(),
+            "content_digest": self.content_digest,
+        }
+
+    @staticmethod
+    def _cursor_from_dict(value: Any) -> ControlSubjectCursor:
+        if not isinstance(value, Mapping):
+            raise DispatchReservationError("subject snapshot item is not an object")
+        expected = {
+            "subject_kind",
+            "subject_ref",
+            "validity_revision",
+            "status",
+            "effective_at",
+            "expires_at",
+            "authority",
+            "reason",
+            "source_record_ref",
+            "control_sequence",
+        }
+        if set(value) != expected:
+            raise DispatchReservationError("subject snapshot fields are invalid")
+        try:
+            def parse_time(item: Any, field: str) -> datetime:
+                if not isinstance(item, str):
+                    raise DispatchReservationError(f"{field} must be a timestamp")
+                return datetime.fromisoformat(item.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+            return ControlSubjectCursor(
+                subject_kind=value["subject_kind"],
+                subject_ref=value["subject_ref"],
+                validity_revision=value["validity_revision"],
+                status=value["status"],
+                effective_at=parse_time(value["effective_at"], "effective_at"),
+                expires_at=(None if value["expires_at"] is None else parse_time(value["expires_at"], "expires_at")),
+                authority=value["authority"],
+                reason=value["reason"],
+                source_record_ref=value["source_record_ref"],
+                control_sequence=value["control_sequence"],
+            )
+        except (TypeError, ValueError) as error:
+            if isinstance(error, DispatchReservationError):
+                raise
+            raise DispatchReservationError("subject snapshot item is invalid") from error
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "DispatchReservation":
+        if not isinstance(value, Mapping):
+            raise DispatchReservationError("dispatch reservation must be an object")
+        expected = {"contract_version", *cls._FIELDS, "content_digest"}
+        if set(value) != expected or value["contract_version"] != "DispatchReservation@1.0":
+            raise DispatchReservationError("dispatch reservation fields or version are invalid")
+        snapshot = value["subject_snapshot"]
+        if not isinstance(snapshot, list) or not snapshot:
+            raise DispatchReservationError("dispatch reservation subject snapshot is invalid")
+        try:
+            result = cls(
+                reservation_id=value["reservation_id"],
+                authorization_id=value["authorization_id"],
+                authorization_payload_digest=value["authorization_payload_digest"],
+                intent_id=value["intent_id"],
+                intent_digest=value["intent_digest"],
+                run_id=value["run_id"],
+                attempt_id=value["attempt_id"],
+                lease_epoch=value["lease_epoch"],
+                executor_idempotency_key=value["executor_idempotency_key"],
+                control_sequence=value["control_sequence"],
+                subject_snapshot=tuple(cls._cursor_from_dict(item) for item in snapshot),
+            )
+        except (TypeError, ValueError) as error:
+            if isinstance(error, DispatchReservationError):
+                raise
+            raise DispatchReservationError("dispatch reservation fields are invalid") from error
+        if value["content_digest"] != result.content_digest:
+            raise DispatchReservationError("dispatch reservation content digest mismatch")
+        return result
+
+
 __all__ = [
+    "DispatchReservation",
+    "DispatchReservationError",
     "PREPARED_RUN_INTENT_CONTRACT_VERSION",
     "PreparedRunIntent",
     "PreparedRunIntentError",
