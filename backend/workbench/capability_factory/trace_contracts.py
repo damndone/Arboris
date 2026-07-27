@@ -17,6 +17,10 @@ _EVENT_FIELDS = {
     "capability.dependency.proposed": frozenset({"proposal_digest", "lock_ref", "risk_level"}),
     "capability.dependency.quarantined": frozenset({"bundle_ref", "lock_ref", "status"}),
     "capability.dependency.admission.changed": frozenset({"bundle_ref", "status", "validity_ref"}),
+    "capability.validation.completed": frozenset({"validation_run_ref", "plan_ref", "outcome"}),
+    "capability.evidence.assessed": frozenset({"assessment_ref", "tier", "protocol_ref"}),
+    "capability.evidence.validity.changed": frozenset({"assessment_ref", "validity_ref", "to_status"}),
+    "capability.validation_attempt.recorded": frozenset({"attempt_ledger_ref", "protocol_ref", "outcome"}),
 }
 
 
