@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.context_compiler import (
     NotebookPlanningContextV1,
+    attach_domain_memory_projection,
     freshness_dependency_fingerprint,
     generation_context_hash,
 )
@@ -25,7 +26,12 @@ from ..agent.notebook.planning_agent import (
     NotebookPlanningUnavailable,
 )
 from ..llm.config import load_llm_config
-from ..agent.trace import TraceWriter, record_compiled_context
+from ..agent.trace import (
+    TraceWriter,
+    record_compiled_context,
+    record_domain_memory_retrieval,
+)
+from ..domain_memory.preferences import DomainMemoryPreferences
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
@@ -185,15 +191,79 @@ def _notebook_trace(root: Path, service: NotebookService, notebook_id: str) -> T
 
 
 def _compile(
-    root: Path, service: NotebookService, notebook_id: str, *, focused_run_id: str | None = None
+    root: Path,
+    service: NotebookService,
+    notebook_id: str,
+    *,
+    focused_run_id: str | None = None,
+    request: Request | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> tuple[NotebookPlanningContextV1, TraceWriter]:
     notebook = service.get_notebook(notebook_id)
     trace = _notebook_trace(root, service, notebook.notebook_id)
     context = replace(
         service.compile_context(notebook_id, focused_run_id=focused_run_id), trace_id=trace.trace_id
     )
+    projection = _domain_memory_projection(
+        request,
+        root,
+        service,
+        notebook_id,
+        use=domain_memory_use,
+        iteration=domain_memory_iteration,
+    )
+    if projection is not None:
+        context = attach_domain_memory_projection(context, projection)
+        record_domain_memory_retrieval(trace, projection)
     record_compiled_context(trace, context)
     return context, trace
+
+
+def _domain_memory_projection(
+    request: Request | None,
+    root: Path,
+    service: NotebookService,
+    notebook_id: str,
+    *,
+    use: bool,
+    iteration: bool,
+) -> dict[str, Any] | None:
+    """Ask only the server-owned provider for an already-bounded projection."""
+
+    if not use:
+        return None
+    provider = getattr(request.app.state, "domain_memory_context_provider", None) if request else None
+    if provider is None:
+        return {
+            "contract_version": "domain-memory-context-input/v1",
+            "retrieval_ref": "retrieval:unavailable",
+            "scope_ref": "scope:unavailable",
+            "outcome": "blocked",
+            "reason": "DOMAIN_MEMORY_UNAVAILABLE",
+            "entries": [],
+            "omissions": [],
+            "bounded": True,
+            "preference_ref": "preference:unavailable",
+            "memory_authority": "non_authoritative",
+        }
+    projection = provider(
+        request=request,
+        project_root=root,
+        notebook_service=service,
+        notebook_id=notebook_id,
+        preferences=DomainMemoryPreferences(
+            cross_project_domain_memory_use=use,
+            cross_project_domain_memory_iteration=iteration,
+        ),
+    )
+    if projection is not None and not isinstance(projection, dict):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="DOMAIN_MEMORY_PROVIDER_INVALID",
+            message="The server-owned domain-memory provider returned an invalid projection.",
+        )
+    return projection
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:
@@ -643,10 +713,20 @@ def compile_notebook_context_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            focused_run_id=focused_run_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
         return _context_packet(context)
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
@@ -660,10 +740,19 @@ def propose_options_endpoint(
     project_root: str,
     notebook_id: str,
     body: ProposeOptionsRequest,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
         recommendation_decision = None
         drafts = (
             [_draft(item) for item in body.drafts]
@@ -695,8 +784,13 @@ def propose_options_endpoint(
             # Inspection calls persist Evidence Packs. Recompile the context
             # before pinning the v1.1 revision so evidence_pack_refs belong to
             # the same freshness fingerprint that the Draft gate will observe.
-            context = replace(
-                service.compile_context(notebook_id), trace_id=trace.trace_id
+            context, trace = _compile(
+                root,
+                service,
+                notebook_id,
+                request=request,
+                domain_memory_use=domain_memory_use,
+                domain_memory_iteration=domain_memory_iteration,
             )
             drafts, recommendation_decision = service.derive_server_recommendation(
                 notebook_id,
@@ -761,6 +855,8 @@ def list_options_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     """Return the current options against one freshly compiled context.
 
@@ -772,7 +868,15 @@ def list_options_endpoint(
 
     root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            focused_run_id=focused_run_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
         options = service.list_options(notebook_id, context=context)
         revisions = [
             replace(

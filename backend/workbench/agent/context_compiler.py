@@ -82,9 +82,18 @@ class NotebookPlanningContextV1:
     evidence_pack_refs: list[str] = field(default_factory=list)
     context_profile: str = CONTEXT_PROFILE
     schema_version: str = CONTEXT_SCHEMA_VERSION
+    # Optional, bounded output from the domain-memory control plane. It is part
+    # of what the Agent saw, but never part of the upstream freshness inputs.
+    domain_memory_projection: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        # Preserve the pre-integration wire shape and hashes for the default
+        # off path. The field appears only when the user explicitly enabled
+        # memory and a server-owned provider returned a projection.
+        if self.domain_memory_projection is None:
+            payload.pop("domain_memory_projection", None)
+        return payload
 
     def hashable_payload(self) -> dict[str, Any]:
         """The content view: everything except this compilation's own metadata."""
@@ -152,6 +161,107 @@ def freshness_dependency_fingerprint(context: NotebookPlanningContextV1) -> str:
     return "fresh1:" + sha256_canonical(
         {field: payload[field] for field in FRESHNESS_DEPENDENCY_FIELDS}
     )
+
+
+def attach_domain_memory_projection(
+    context: NotebookPlanningContextV1,
+    projection: dict[str, Any] | None,
+) -> NotebookPlanningContextV1:
+    """Attach one service-owned, non-authoritative memory projection.
+
+    The compiler accepts only the already-redacted retrieval contract. It does
+    not retrieve memory, infer identity, or turn a hint into a capability. The
+    explicit field remains inside the generation hash while the freshness
+    whitelist above intentionally excludes it.
+    """
+
+    if projection is None:
+        return context
+    if not isinstance(projection, dict):
+        raise ValueError("domain memory projection must be an object")
+    required = {
+        "contract_version",
+        "retrieval_ref",
+        "scope_ref",
+        "outcome",
+        "reason",
+        "entries",
+        "omissions",
+        "bounded",
+        "preference_ref",
+        "memory_authority",
+    }
+    if set(projection) != required:
+        raise ValueError("domain memory projection has an invalid contract shape")
+    if projection["contract_version"] != "domain-memory-context-input/v1":
+        raise ValueError("domain memory projection contract_version is unsupported")
+    if projection["memory_authority"] != "non_authoritative":
+        raise ValueError("domain memory projection must declare non_authoritative")
+    if projection["bounded"] is not True:
+        raise ValueError("domain memory projection must be bounded")
+    if not isinstance(projection["entries"], list) or not isinstance(projection["omissions"], list):
+        raise ValueError("domain memory projection entries and omissions must be lists")
+    if len(projection["entries"]) > 32 or len(projection["omissions"]) > 32:
+        raise ValueError("domain memory projection exceeds its entry budget")
+    entry_fields = {
+        "memory_id",
+        "revision",
+        "content_hash",
+        "memory_kind",
+        "domain_tags",
+        "compact_lesson",
+        "recommended_effect_kind",
+        "recommended_target_refs",
+        "source_summary_refs",
+        "match_reason",
+        "memory_authority",
+    }
+    for entry in projection["entries"]:
+        if not isinstance(entry, dict) or set(entry) != entry_fields:
+            raise ValueError("domain memory entry has an invalid contract shape")
+        if entry["memory_authority"] != "non_authoritative_hint":
+            raise ValueError("domain memory entry must be a non_authoritative_hint")
+        if type(entry["revision"]) is not int or entry["revision"] < 1:
+            raise ValueError("domain memory entry revision is invalid")
+        if not all(isinstance(entry[key], str) and entry[key] for key in (
+            "memory_id",
+            "content_hash",
+            "memory_kind",
+            "compact_lesson",
+            "recommended_effect_kind",
+        )):
+            raise ValueError("domain memory entry contains an invalid text field")
+        if not all(isinstance(entry[key], list) for key in (
+            "domain_tags",
+            "recommended_target_refs",
+            "source_summary_refs",
+            "match_reason",
+        )):
+            raise ValueError("domain memory entry list fields are invalid")
+    omission_fields = {"memory_id", "revision", "reason"}
+    for omission in projection["omissions"]:
+        if not isinstance(omission, dict) or set(omission) != omission_fields:
+            raise ValueError("domain memory omission has an invalid contract shape")
+        if type(omission["revision"]) is not int or omission["revision"] < 1:
+            raise ValueError("domain memory omission revision is invalid")
+        if not all(isinstance(omission[key], str) and omission[key] for key in omission_fields - {"revision"}):
+            raise ValueError("domain memory omission contains an invalid text field")
+    if len(canonical_json_v1(projection)) > 8192:
+        raise ValueError("domain memory projection exceeds its byte budget")
+
+    attached = replace(context, domain_memory_projection=dict(projection))
+    report = dict(context.budget_report)
+    if report:
+        content_chars = attached.content_chars()
+        budget = report.get("content_chars_budget")
+        report.update(
+            {
+                "content_chars": content_chars,
+                "within_budget": isinstance(budget, int) and content_chars <= budget,
+            }
+        )
+        attached = replace(attached, budget_report=report)
+    return attached
 
 
 @dataclass(frozen=True)

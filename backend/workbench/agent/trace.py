@@ -212,6 +212,11 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
         "evidence-inspection-failed/v1",
         required=("inspection_id", "failure_code", "evidence_id"),
     ),
+    "domain_memory.retrieval.completed": _Schema(
+        "domain-memory-retrieval-completed/v1",
+        required=("retrieval_ref", "scope_ref", "preference_ref", "outcome"),
+        optional=("entry_count", "omission_count"),
+    ),
 }
 
 
@@ -410,4 +415,41 @@ def record_compiled_context(
             "content_chars": context.content_chars(),
         },
         refs={"context_id": context.context_id},
+    )
+
+
+def record_domain_memory_retrieval(
+    writer: TraceWriter,
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Record memory retrieval provenance without copying memory content.
+
+    The trace stores references and bounded counts only. Compact lessons,
+    predicates, source summaries, and user preferences never enter the Core
+    Trace payload, so trace replay cannot become an accidental memory export.
+    """
+
+    if not isinstance(projection, dict):
+        raise TracePayloadError("domain memory projection must be an object")
+    required = ("retrieval_ref", "scope_ref", "preference_ref", "outcome")
+    if any(not isinstance(projection.get(key), str) or not projection[key] for key in required):
+        raise TracePayloadError("domain memory retrieval is missing a required reference")
+    entries = projection.get("entries", [])
+    omissions = projection.get("omissions", [])
+    if not isinstance(entries, list) or not isinstance(omissions, list):
+        raise TracePayloadError("domain memory retrieval counts must be list-backed")
+    return writer.emit(
+        "domain_memory.retrieval.completed",
+        payload={
+            "retrieval_ref": projection["retrieval_ref"],
+            "scope_ref": projection["scope_ref"],
+            "preference_ref": projection["preference_ref"],
+            "outcome": projection["outcome"],
+            "entry_count": len(entries),
+            "omission_count": len(omissions),
+        },
+        refs={
+            "retrieval_ref": projection["retrieval_ref"],
+            "scope_ref": projection["scope_ref"],
+        },
     )

@@ -1,5 +1,8 @@
 import "./notebook.css";
 import { ContextSlicePanel } from "./ContextSlicePanel";
+import { DomainMemoryControls } from "./DomainMemoryControls";
+import { DomainMemoryEntryList } from "./DomainMemoryEntryList";
+import { DomainMemoryReviewQueue } from "./DomainMemoryReviewQueue";
 import { OptionCard } from "./OptionCard";
 import { PlanDiffConfirmation } from "./PlanDiffConfirmation";
 import { SelectionActions } from "./SelectionActions";
@@ -12,6 +15,7 @@ import {
   type NotebookView,
   type PendingConfirmation,
 } from "./contracts";
+import type { DomainMemoryCandidate, DomainMemoryPreferences } from "./domainMemoryContracts";
 
 /**
  * The Notebook surface: a narrative stream, persisted option batches, the
@@ -49,6 +53,14 @@ export interface NotebookSurfaceProps {
   onSelectionFollowUp?: (selection: NotebookSelection) => void;
   onSelectionSaveNote?: (selection: NotebookSelection) => void;
   onSelectionDefer?: (selection: NotebookSelection) => void;
+  domainMemoryPreferences?: DomainMemoryPreferences;
+  onDomainMemoryPreferencesChange?: (preferences: DomainMemoryPreferences) => void;
+  domainMemoryCandidates?: DomainMemoryCandidate[];
+  onDomainMemoryCandidateReview?: (
+    candidateId: string,
+    decision: "approved" | "rejected",
+    revision: number,
+  ) => void;
 }
 
 function exclusionSummary(reasons: Record<string, number>): string {
@@ -388,6 +400,22 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       ) : null}
 
       {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} /> : null}
+
+      {props.domainMemoryPreferences && props.onDomainMemoryPreferencesChange ? (
+        <DomainMemoryControls
+          preferences={props.domainMemoryPreferences}
+          onChange={props.onDomainMemoryPreferencesChange}
+        />
+      ) : null}
+      {notebook.contextSlice?.domain_memory_projection ? (
+        <DomainMemoryEntryList projection={notebook.contextSlice.domain_memory_projection} />
+      ) : null}
+      {props.domainMemoryCandidates && props.onDomainMemoryCandidateReview ? (
+        <DomainMemoryReviewQueue
+          candidates={props.domainMemoryCandidates}
+          onReview={props.onDomainMemoryCandidateReview}
+        />
+      ) : null}
     </div>
   );
 }

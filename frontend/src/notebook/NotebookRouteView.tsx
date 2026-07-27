@@ -39,6 +39,10 @@ import {
   type PlanDiffLine,
   type TraceEvent,
 } from "./contracts";
+import type {
+  DomainMemoryPreferences,
+  DomainMemoryRetrievalProjection,
+} from "./domainMemoryContracts";
 
 type ApiErrorLike = Error & { code?: string | null };
 
@@ -67,6 +71,24 @@ function requiredNumber(value: unknown, field: string): number {
     throw new Error(`Notebook context field ${field} is not a number`);
   }
   return value;
+}
+
+function optionalDomainMemoryProjection(value: unknown): DomainMemoryRetrievalProjection | null {
+  if (value === null || value === undefined) return null;
+  const item = recordValue(value);
+  if (
+    item.contract_version !== "domain-memory-context-input/v1" ||
+    item.memory_authority !== "non_authoritative" ||
+    item.bounded !== true ||
+    typeof item.retrieval_ref !== "string" ||
+    typeof item.scope_ref !== "string" ||
+    typeof item.preference_ref !== "string" ||
+    !Array.isArray(item.entries) ||
+    !Array.isArray(item.omissions)
+  ) {
+    throw new Error("Notebook context domain-memory projection is invalid");
+  }
+  return item as unknown as DomainMemoryRetrievalProjection;
 }
 
 function contextSlice(
@@ -199,6 +221,7 @@ function contextSlice(
     },
     source_manifest: sourceManifest,
     trace,
+    domain_memory_projection: optionalDomainMemoryProjection(response.domain_memory_projection),
   };
 }
 
@@ -309,6 +332,10 @@ export function NotebookRouteView({
   const [view, setView] = useState<NotebookView>({ status: "loading" });
   const [busy, setBusy] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [domainMemoryPreferences, setDomainMemoryPreferences] = useState<DomainMemoryPreferences>({
+    cross_project_domain_memory_use: false,
+    cross_project_domain_memory_iteration: false,
+  });
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const initializationClaimedRef = useRef(false);
@@ -342,16 +369,34 @@ export function NotebookRouteView({
         setSearchParams(next, { replace: true });
       }
 
-      const compiled = await compileNotebookContext(projectRoot, notebook.notebook_id);
+      const memoryRequestPreferences =
+        domainMemoryPreferences.cross_project_domain_memory_use ||
+        domainMemoryPreferences.cross_project_domain_memory_iteration
+          ? domainMemoryPreferences
+          : undefined;
+      const compiled = memoryRequestPreferences
+        ? await compileNotebookContext(projectRoot, notebook.notebook_id, memoryRequestPreferences)
+        : await compileNotebookContext(projectRoot, notebook.notebook_id);
       // Agent planning is the slow leg (real providers take tens of seconds);
       // surface it as its own phase so the loading state does not read as a hang.
       if (refreshToken > 0) setView({ status: "loading", phase: "planning" });
       let snapshot = refreshToken > 0
-        ? await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3)
-        : await listNotebookOptions(projectRoot, notebook.notebook_id);
+        ? memoryRequestPreferences
+          ? await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3, memoryRequestPreferences)
+          : await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3)
+        : memoryRequestPreferences
+          ? await listNotebookOptions(projectRoot, notebook.notebook_id, memoryRequestPreferences)
+          : await listNotebookOptions(projectRoot, notebook.notebook_id);
       if (snapshot.options.length === 0) {
         setView({ status: "loading", phase: "planning" });
-        snapshot = await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3);
+        snapshot = memoryRequestPreferences
+          ? await proposeNotebookOptions(
+              projectRoot,
+              notebook.notebook_id,
+              3,
+              memoryRequestPreferences,
+            )
+          : await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3);
       }
       const traceId = snapshot.trace_id ?? compiled.trace_id;
       const trace = traceId
@@ -383,7 +428,15 @@ export function NotebookRouteView({
       if (!notebookId) initializationClaimedRef.current = false;
       setView({ status: "error", error: failurePacket(error) });
     }
-  }, [activeRunId, notebookId, projectRoot, refreshToken, searchParams, setSearchParams]);
+  }, [
+    activeRunId,
+    domainMemoryPreferences,
+    notebookId,
+    projectRoot,
+    refreshToken,
+    searchParams,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     // React StrictMode may invoke this effect twice before the first async
@@ -647,6 +700,11 @@ export function NotebookRouteView({
         onSelectionFollowUp={askInSideChat}
         onSelectionSaveNote={(selection) => onSelectionAction(selection, "note")}
         onSelectionDefer={(selection) => onSelectionAction(selection, "defer")}
+        domainMemoryPreferences={domainMemoryPreferences}
+        onDomainMemoryPreferencesChange={(preferences) => {
+          setDomainMemoryPreferences(preferences);
+          setRefreshToken((token) => token + 1);
+        }}
       />
       {selectionDraft ? (
         <section className="nb-selection-composer" data-testid="notebook-selection-composer">

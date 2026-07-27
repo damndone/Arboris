@@ -9,6 +9,8 @@
  * coerced into a half-populated card (ADR-PD-001 §7C).
  */
 
+import type { DomainMemoryRetrievalProjection } from "./domainMemoryContracts";
+
 export const NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1";
 export const NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0";
 export const OPTION_EXECUTION_CONTRACT_VERSION = "1.1";
@@ -1035,6 +1037,8 @@ export interface NotebookContextSlice {
   budget_report: BudgetReport;
   source_manifest: SourceManifestEntry[];
   trace: TraceEvent[];
+  /** Optional approved hints; never a recommendation or authorization input. */
+  domain_memory_projection?: DomainMemoryRetrievalProjection | null;
 }
 
 /* ------------------------------------------------------------------ */

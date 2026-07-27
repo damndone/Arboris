@@ -31,6 +31,7 @@ export interface DomainMemoryHint {
 }
 
 export interface DomainMemoryRetrievalProjection {
+  contract_version?: "domain-memory-context-input/v1";
   retrieval_ref?: string;
   scope_ref?: string;
   outcome: "used" | "not_used" | "empty" | "blocked";
@@ -39,6 +40,7 @@ export interface DomainMemoryRetrievalProjection {
   omissions: Array<{ memory_id: string; revision: number; reason: string }>;
   bounded: boolean;
   preference_ref?: string;
+  memory_authority?: "non_authoritative";
 }
 
 export interface DomainMemoryCandidate {
