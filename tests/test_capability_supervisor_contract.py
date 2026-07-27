@@ -346,3 +346,17 @@ def test_durable_supervisor_is_idempotent_for_same_reservation_and_transition(tm
 
     with pytest.raises(DurableSupervisorError, match="another reservation"):
         store.create(replace(_reservation(), reservation_id="reservation.other"))
+
+
+def test_durable_supervisor_rejects_reusing_an_executor_idempotency_key_for_another_attempt(tmp_path) -> None:
+    store = DurableSupervisorStore(tmp_path)
+    store.create(_reservation())
+
+    with pytest.raises(DurableSupervisorError, match="executor idempotency key"):
+        store.create(
+            replace(
+                _reservation(),
+                attempt_id="attempt.other",
+                reservation_id="reservation.other",
+            )
+        )

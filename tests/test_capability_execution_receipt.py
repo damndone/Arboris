@@ -20,10 +20,11 @@ from workbench.capability_factory.execution_receipt import (
     ArtifactContractValidationV11,
     CapabilityDispatchCoordinator,
     ExecutionReceiptError,
+    TerminalSideEffectReconciliation,
     validate_artifact_contract_v11,
 )
 from workbench.contracts.agent.notebook_option import ArtifactContract, ExpectedArtifact
-from workbench.capability_factory.supervisor import DurableSupervisorStore
+from workbench.capability_factory.supervisor import AttemptQuiescenceProof, DurableSupervisorStore
 
 from test_capability_custom_dispatcher import _intent_and_records
 
@@ -93,6 +94,44 @@ def _store_subjects(store: ExecutionControlStore, intent: PreparedRunIntent, aut
                 source_record_ref=f"source.{kind}",
             )
         )
+
+
+def _termination_proof(attempt, authorization_id: str) -> AttemptQuiescenceProof:
+    return AttemptQuiescenceProof(
+        proof_id=f"proof.{attempt.attempt_id}",
+        attempt_id=attempt.attempt_id,
+        reservation_id=attempt.reservation_id,
+        authorization_id=authorization_id,
+        lease_epoch=attempt.lease_epoch,
+        proof_kind="terminated_clean",
+        process_handle_ref=attempt.process_handle_ref,
+        process_tree_digest="1" * 64,
+        resource_cleanup_digest="2" * 64,
+        output_cleanup_digest="3" * 64,
+        issued_by="trusted.supervisor",
+        issuer_role="trusted_supervisor",
+        issued_at=datetime(2026, 7, 27, 9, 1, tzinfo=timezone.utc),
+        authority_attestation_digest="4" * 64,
+    )
+
+
+def _terminal_reconciliation(
+    attempt,
+    authorization_id: str,
+    validation: ArtifactContractValidationV11,
+    object_graph_ref: str,
+) -> TerminalSideEffectReconciliation:
+    return TerminalSideEffectReconciliation(
+        attempt_ref=attempt.content_digest,
+        authorization_id=authorization_id,
+        lease_epoch=attempt.lease_epoch,
+        artifact_aggregate_ref=validation.aggregate_ref,
+        object_graph_ref=object_graph_ref,
+        trace_event_ref="5" * 64,
+        artifact_reconciled=True,
+        graph_reconciled=True,
+        trace_reconciled=True,
+    )
 
 
 def _fixture(tmp_path, *, trace_sink=None):
@@ -222,6 +261,33 @@ def test_executor_acknowledgement_requires_a_trusted_handle_and_fences_attempt(t
     assert auth_store.read(authorization.authorization_id).status == "running"
 
 
+def test_executor_acknowledgement_rejects_a_receipt_with_mismatched_intent_digest(tmp_path) -> None:
+    intent, authorization, plan, coordinator, _control_store, _auth_store, _supervisor, now = _fixture(tmp_path)
+    receipt = coordinator.reserve(
+        authorization=authorization,
+        intent=intent,
+        plan=plan,
+        expectations=_expectations(intent, authorization.authorization_id),
+        owner_id="supervisor.coordinator",
+        lease_seconds=60,
+        attempt_id="attempt.mismatched-receipt",
+        lease_epoch=1,
+        executor_idempotency_key="executor.mismatched-receipt",
+        reservation_id="reservation.mismatched-receipt",
+        reservation_idempotency_key="reservation-mismatched-receipt-idem",
+        now=now,
+    )
+
+    with pytest.raises(ExecutionReceiptError, match="intent"):
+        coordinator.acknowledge_executor(
+            replace(receipt, intent_digest="0" * 64),
+            owner_id="supervisor.coordinator",
+            process_handle_ref="trusted-handle.mismatched-receipt",
+        )
+
+    assert coordinator.supervisor_store.read(receipt.attempt_id).status == "reserved"
+
+
 def test_reconciliation_consumes_only_after_the_v11_artifact_gate(tmp_path) -> None:
     intent, authorization, plan, coordinator, control_store, auth_store, supervisor, now = _fixture(tmp_path)
     receipt = coordinator.reserve(
@@ -267,11 +333,22 @@ def test_reconciliation_consumes_only_after_the_v11_artifact_gate(tmp_path) -> N
         allowed_facets=("parameters",),
     )
 
+    termination_proof = _termination_proof(
+        supervisor.read(running.attempt_id), authorization.authorization_id
+    )
+    terminal_reconciliation = _terminal_reconciliation(
+        supervisor.read(running.attempt_id),
+        authorization.authorization_id,
+        validation,
+        "f" * 64,
+    )
     consumed = coordinator.reconcile(
         running,
         owner_id="supervisor.coordinator",
         artifact_validation=validation,
         object_graph_ref="f" * 64,
+        termination_proof=termination_proof,
+        terminal_reconciliation=terminal_reconciliation,
     )
 
     assert isinstance(validation, ArtifactContractValidationV11)
@@ -279,6 +356,86 @@ def test_reconciliation_consumes_only_after_the_v11_artifact_gate(tmp_path) -> N
     assert consumed.status == "consumed"
     assert auth_store.read(authorization.authorization_id).status == "consumed"
     assert supervisor.read(running.attempt_id).status == "consumed"
+    assert supervisor.read_termination_proof(termination_proof.proof_id) == termination_proof
+    assert TerminalSideEffectReconciliation.from_dict(
+        terminal_reconciliation.to_dict()
+    ) == terminal_reconciliation
+
+
+def test_reconciliation_requires_termination_proof_before_marking_failure(tmp_path) -> None:
+    intent, authorization, plan, coordinator, _control_store, _auth_store, supervisor, now = _fixture(tmp_path)
+    receipt = coordinator.reserve(
+        authorization=authorization,
+        intent=intent,
+        plan=plan,
+        expectations=_expectations(intent, authorization.authorization_id),
+        owner_id="supervisor.coordinator",
+        lease_seconds=60,
+        attempt_id="attempt.failed-proof",
+        lease_epoch=1,
+        executor_idempotency_key="executor.failed-proof",
+        reservation_id="reservation.failed-proof",
+        reservation_idempotency_key="reservation-failed-proof-idem",
+        now=now,
+    )
+    running = coordinator.acknowledge_executor(
+        receipt,
+        owner_id="supervisor.coordinator",
+        process_handle_ref="trusted-handle.failed-proof",
+    )
+    attempt_ref = supervisor.read(running.attempt_id).content_digest
+    failed_validation = validate_artifact_contract_v11(
+        ArtifactContract(
+            expected=(ExpectedArtifact("custom.parameters", "custom_json", step="fit"),)
+        ),
+        [
+            {
+                "artifact_id": "custom.parameters",
+                "artifact_type": "custom_json",
+                "step": "fit",
+                "lineage_ref": "0" * 64,
+                "consumer_projection_ref": authorization.consumer_projection_ref,
+                "run_attempt_ref": attempt_ref,
+                "option_revision_ref": "a" * 64,
+                "artifact_ref": "e" * 64,
+                "facet": "parameters",
+            }
+        ],
+        option_revision_ref="a" * 64,
+        run_attempt_ref=attempt_ref,
+        consumer_projection_ref=authorization.consumer_projection_ref,
+        lineage_ref="c" * 64,
+        allowed_facets=("parameters",),
+    )
+    assert failed_validation.validation_status == "failed"
+
+    with pytest.raises(ExecutionReceiptError, match="termination proof"):
+        coordinator.reconcile(
+            running,
+            owner_id="supervisor.coordinator",
+            artifact_validation=failed_validation,
+            object_graph_ref="f" * 64,
+        )
+
+    termination_proof = _termination_proof(
+        supervisor.read(running.attempt_id), authorization.authorization_id
+    )
+    terminal_reconciliation = _terminal_reconciliation(
+        supervisor.read(running.attempt_id),
+        authorization.authorization_id,
+        failed_validation,
+        "f" * 64,
+    )
+    failed = coordinator.reconcile(
+        running,
+        owner_id="supervisor.coordinator",
+        artifact_validation=failed_validation,
+        object_graph_ref="f" * 64,
+        termination_proof=termination_proof,
+        terminal_reconciliation=terminal_reconciliation,
+    )
+    assert failed.status == "failed"
+    assert supervisor.read(running.attempt_id).status == "failed"
 
 
 def test_reservation_emits_only_bounded_capability_trace_events(tmp_path) -> None:

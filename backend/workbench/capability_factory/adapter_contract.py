@@ -157,6 +157,14 @@ class AdapterSourceArtifact:
         path = Path(self.path)
         if not path.is_absolute() or path.name != f"{self.source_ref}.py":
             raise AdapterSourceGenerationError("generated source path is not content-addressed")
+        if path.is_symlink() or not path.is_file():
+            raise AdapterSourceGenerationError("generated source artifact is not a regular file")
+        try:
+            raw = path.read_bytes()
+        except OSError as error:
+            raise AdapterSourceGenerationError("generated source artifact cannot be read") from error
+        if len(raw) != self.size_bytes or hashlib.sha256(raw).hexdigest() != self.source_ref:
+            raise AdapterSourceGenerationError("generated source artifact content does not match its reference")
         object.__setattr__(self, "path", path)
 
 
@@ -199,6 +207,7 @@ class AdapterSourceGenerator:
         root = Path(output_root)
         if not root.is_absolute() or root.exists() and root.is_symlink():
             raise AdapterSourceGenerationError("source output root must be absolute and not a symlink")
+        self._assert_no_symlink_ancestors(root)
         root.mkdir(parents=True, exist_ok=True)
         if root.is_symlink() or not root.is_dir():
             raise AdapterSourceGenerationError("source output root is not a directory")
@@ -232,6 +241,17 @@ class AdapterSourceGenerator:
             except FileNotFoundError:
                 pass
         return AdapterSourceArtifact(source_ref, entrypoint_ref, "python", len(raw), destination)
+
+    @staticmethod
+    def _assert_no_symlink_ancestors(path: Path) -> None:
+        current = path
+        while True:
+            if current.is_symlink():
+                raise AdapterSourceGenerationError("source output path contains a symlink ancestor")
+            parent = current.parent
+            if parent == current:
+                return
+            current = parent
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,17 +302,20 @@ class AdapterCandidateFactory:
             raise AdapterContractError("implementation must be an ImplementationRevision")
         if implementation.source_kind != "generated_adapter":
             raise AdapterContractError("adapter generation requires generated_adapter trust tier")
+        if source_artifact is None:
+            raise AdapterContractError(
+                "source_artifact is required to bind generated adapter source"
+            )
         if not isinstance(validation_cases, (tuple, list)) or not validation_cases:
             raise AdapterContractError("adapter generation requires bounded validation cases")
         if any(not isinstance(item, ValidationCase) for item in validation_cases):
             raise AdapterContractError("validation_cases must contain ValidationCase values")
-        if source_artifact is not None:
-            if not isinstance(source_artifact, AdapterSourceArtifact):
-                raise AdapterContractError("source_artifact must be an AdapterSourceArtifact")
-            if source_ref != source_artifact.source_ref:
-                raise AdapterContractError("candidate source_ref does not match generated source")
-            if entrypoint_ref != source_artifact.entrypoint_ref:
-                raise AdapterContractError("candidate entrypoint_ref does not match generated source")
+        if not isinstance(source_artifact, AdapterSourceArtifact):
+            raise AdapterContractError("source_artifact must be an AdapterSourceArtifact")
+        if source_ref != source_artifact.source_ref:
+            raise AdapterContractError("candidate source_ref does not match generated source")
+        if entrypoint_ref != source_artifact.entrypoint_ref:
+            raise AdapterContractError("candidate entrypoint_ref does not match generated source")
         adapter = AdapterContract.from_implementation(
             implementation=implementation,
             adapter_id=adapter_id,

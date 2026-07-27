@@ -171,6 +171,20 @@ class ValidationRunner:
             )
         if not isinstance(report, ContainmentReport):
             raise ValidationRunnerError("containment broker returned an invalid report")
+        if report.attempt_id != request.attempt_id or report.request_digest != request.content_digest:
+            # The concrete B1 broker already enforces this binding. Keep the
+            # check here as a second boundary so a trusted broker replacement
+            # or recovery wrapper cannot accidentally route another attempt's
+            # completed output into this validation run.
+            return ValidationExecutionResult(
+                sealed_bundle_ref=sealed_bundle.bundle_ref,
+                protocol_ref=protocol.content_digest,
+                attempt_id=request.attempt_id,
+                request_ref=request.content_digest,
+                report_ref=None,
+                status="failed",
+                reason_code="NATIVE_CONTAINMENT_REPORT_MISMATCH",
+            )
         status = report.status
         if status == "completed":
             return ValidationExecutionResult(

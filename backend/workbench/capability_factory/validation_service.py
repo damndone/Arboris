@@ -77,8 +77,15 @@ class ValidationService:
                 if item.tier == "E3" and item.fixture_visibility != "service_holdout":
                     raise ValidationServiceError("E3 evidence requires a service holdout")
 
+        case_refs = {item.content_digest for item in validation_bundle.cases}
+        evidence_case_refs = tuple(item.case_ref for item in evidence)
+        evidence_is_complete = (
+            len(evidence_case_refs) == len(case_refs)
+            and len(set(evidence_case_refs)) == len(evidence_case_refs)
+            and set(evidence_case_refs) == case_refs
+        )
         statuses = {item.status for item in evidence}
-        if not evidence:
+        if not evidence or not evidence_is_complete:
             outcome = "inconclusive"
         elif "failed" in statuses:
             outcome = "failed"

@@ -319,6 +319,124 @@ def validate_artifact_contract_v11(
     return result
 
 
+TERMINAL_RECONCILIATION_CONTRACT_VERSION = "TerminalSideEffectReconciliation@1.0"
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalSideEffectReconciliation:
+    """Trusted proof that all terminal side-effect families were reconciled."""
+
+    attempt_ref: str
+    authorization_id: str
+    lease_epoch: int
+    artifact_aggregate_ref: str
+    object_graph_ref: str
+    trace_event_ref: str
+    artifact_reconciled: bool
+    graph_reconciled: bool
+    trace_reconciled: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attempt_ref", _digest(self.attempt_ref, "attempt_ref"))
+        object.__setattr__(self, "authorization_id", _identifier(self.authorization_id, "authorization_id"))
+        if type(self.lease_epoch) is not int or self.lease_epoch < 1:
+            raise ExecutionReceiptError("lease_epoch must be a positive integer")
+        for field in ("artifact_aggregate_ref", "object_graph_ref", "trace_event_ref"):
+            object.__setattr__(self, field, _digest(getattr(self, field), field))
+        for field in ("artifact_reconciled", "graph_reconciled", "trace_reconciled"):
+            if type(getattr(self, field)) is not bool:
+                raise ExecutionReceiptError(f"{field} must be boolean")
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.terminal_side_effect_reconciliation/v1",
+            {
+                "contract_version": TERMINAL_RECONCILIATION_CONTRACT_VERSION,
+                "attempt_ref": self.attempt_ref,
+                "authorization_id": self.authorization_id,
+                "lease_epoch": self.lease_epoch,
+                "artifact_aggregate_ref": self.artifact_aggregate_ref,
+                "object_graph_ref": self.object_graph_ref,
+                "trace_event_ref": self.trace_event_ref,
+                "artifact_reconciled": self.artifact_reconciled,
+                "graph_reconciled": self.graph_reconciled,
+                "trace_reconciled": self.trace_reconciled,
+            },
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": TERMINAL_RECONCILIATION_CONTRACT_VERSION,
+            "attempt_ref": self.attempt_ref,
+            "authorization_id": self.authorization_id,
+            "lease_epoch": self.lease_epoch,
+            "artifact_aggregate_ref": self.artifact_aggregate_ref,
+            "object_graph_ref": self.object_graph_ref,
+            "trace_event_ref": self.trace_event_ref,
+            "artifact_reconciled": self.artifact_reconciled,
+            "graph_reconciled": self.graph_reconciled,
+            "trace_reconciled": self.trace_reconciled,
+            "content_digest": self.content_digest,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "TerminalSideEffectReconciliation":
+        expected = {
+            "contract_version",
+            "attempt_ref",
+            "authorization_id",
+            "lease_epoch",
+            "artifact_aggregate_ref",
+            "object_graph_ref",
+            "trace_event_ref",
+            "artifact_reconciled",
+            "graph_reconciled",
+            "trace_reconciled",
+            "content_digest",
+        }
+        if not isinstance(value, Mapping) or set(value) != expected:
+            raise ExecutionReceiptError("terminal reconciliation fields are invalid")
+        if value["contract_version"] != TERMINAL_RECONCILIATION_CONTRACT_VERSION:
+            raise ExecutionReceiptError("terminal reconciliation contract is unsupported")
+        result = cls(
+            attempt_ref=value["attempt_ref"],
+            authorization_id=value["authorization_id"],
+            lease_epoch=value["lease_epoch"],
+            artifact_aggregate_ref=value["artifact_aggregate_ref"],
+            object_graph_ref=value["object_graph_ref"],
+            trace_event_ref=value["trace_event_ref"],
+            artifact_reconciled=value["artifact_reconciled"],
+            graph_reconciled=value["graph_reconciled"],
+            trace_reconciled=value["trace_reconciled"],
+        )
+        if value["content_digest"] != result.content_digest:
+            raise ExecutionReceiptError("terminal reconciliation content digest mismatch")
+        return result
+
+    def assert_matches(
+        self,
+        *,
+        attempt_ref: str,
+        authorization_id: str,
+        lease_epoch: int,
+        artifact_aggregate_ref: str,
+        object_graph_ref: str,
+    ) -> None:
+        if self.attempt_ref != _digest(attempt_ref, "attempt_ref"):
+            raise ExecutionReceiptError("terminal reconciliation is bound to another attempt")
+        if self.authorization_id != _identifier(authorization_id, "authorization_id"):
+            raise ExecutionReceiptError("terminal reconciliation is bound to another authorization")
+        if self.lease_epoch != lease_epoch:
+            raise ExecutionReceiptError("terminal reconciliation lease epoch does not match")
+        if self.artifact_aggregate_ref != _digest(artifact_aggregate_ref, "artifact_aggregate_ref"):
+            raise ExecutionReceiptError("terminal reconciliation artifact aggregate does not match")
+        if self.object_graph_ref != _digest(object_graph_ref, "object_graph_ref"):
+            raise ExecutionReceiptError("terminal reconciliation graph reference does not match")
+        if not (self.artifact_reconciled and self.graph_reconciled and self.trace_reconciled):
+            raise ExecutionReceiptError("terminal reconciliation has unreconciled side effects")
+
+
 @dataclass(frozen=True, slots=True)
 class CapabilityDispatchReceipt:
     """The unique control-plane handoff from authorization to one attempt."""
@@ -411,6 +529,49 @@ class CapabilityDispatchCoordinator:
     def _emit_trace(self, event_type: str, payload: Mapping[str, Any]) -> None:
         if self.trace_sink is not None:
             self.trace_sink(build_trace_event(event_type=event_type, payload=payload))
+
+    def _assert_receipt_binding(self, receipt: CapabilityDispatchReceipt) -> tuple[Any, Any]:
+        """Join the receipt to the current authorization and attempt journals.
+
+        A receipt is an untrusted transport value even when it originated from
+        this coordinator.  Every consumer must rejoin it to both durable
+        records before changing either journal; otherwise a valid handle or
+        artifact could be attached to a different authorization or intent.
+        """
+
+        from .execution_authorization import OptionExecutionAuthorization
+
+        if not isinstance(receipt, CapabilityDispatchReceipt):
+            raise ExecutionReceiptError("dispatch receipt is invalid")
+        try:
+            authorization = self.authorization_store.read(receipt.authorization_id)
+            attempt = self.supervisor_store.read(receipt.attempt_id)
+        except Exception as error:
+            raise ExecutionReceiptError("dispatch receipt references an unavailable journal record") from error
+        if not isinstance(authorization, OptionExecutionAuthorization):
+            raise ExecutionReceiptError("authorization receipt is invalid")
+        if authorization.payload_digest != receipt.authorization_payload_digest:
+            raise ExecutionReceiptError("dispatch receipt authorization payload does not match")
+        if authorization.status != receipt.status:
+            raise ExecutionReceiptError("dispatch receipt status does not match authorization")
+        if attempt.authorization_id != receipt.authorization_id:
+            raise ExecutionReceiptError("dispatch receipt attempt is bound to another authorization")
+        if attempt.reservation_id != receipt.reservation_id:
+            raise ExecutionReceiptError("dispatch receipt reservation does not match attempt")
+        if attempt.intent_digest != receipt.intent_digest:
+            raise ExecutionReceiptError("dispatch receipt intent does not match attempt")
+        if attempt.lease_epoch != receipt.lease_epoch:
+            raise ExecutionReceiptError("dispatch receipt lease epoch does not match attempt")
+        allowed_attempt_statuses = {
+            "dispatch_reserved": frozenset({"reserved", "spawn_requested", "spawn_acknowledged"}),
+            "running": frozenset({"spawn_acknowledged", "running", "terminated", "failed", "dispatch_unknown", "consumed"}),
+            "dispatch_unknown": frozenset({"dispatch_unknown"}),
+            "failed": frozenset({"failed"}),
+            "consumed": frozenset({"consumed"}),
+        }
+        if attempt.status not in allowed_attempt_statuses[receipt.status]:
+            raise ExecutionReceiptError("dispatch receipt status does not match attempt")
+        return authorization, attempt
 
     def reserve(
         self,
@@ -558,8 +719,7 @@ class CapabilityDispatchCoordinator:
     ) -> CapabilityDispatchReceipt:
         """Record a trusted B1 executor handle; never create one here."""
 
-        if not isinstance(receipt, CapabilityDispatchReceipt):
-            raise ExecutionReceiptError("dispatch receipt is invalid")
+        self._assert_receipt_binding(receipt)
         requested = self.supervisor_store.transition(
             receipt.attempt_id,
             target_status="spawn_requested",
@@ -628,22 +788,15 @@ class CapabilityDispatchCoordinator:
         same takeover transition instead of creating a second attempt.
         """
 
-        from .execution_authorization import (
-            ExecutionAuthorizationError,
-            OptionExecutionAuthorization,
-        )
+        from .execution_authorization import ExecutionAuthorizationError
 
-        if not isinstance(receipt, CapabilityDispatchReceipt):
-            raise ExecutionReceiptError("dispatch receipt is invalid")
+        _authorization, attempt = self._assert_receipt_binding(receipt)
         transition = _identifier(transition_id, "transition_id")
         authorization = self.authorization_store.read(receipt.authorization_id)
-        if not isinstance(authorization, OptionExecutionAuthorization):
-            raise ExecutionReceiptError("authorization receipt is invalid")
         if authorization.status not in {"dispatch_reserved", "running"}:
             raise ExecutionReceiptError(
                 f"authorization cannot be recovered from status {authorization.status}"
             )
-        attempt = self.supervisor_store.read(receipt.attempt_id)
         if attempt.authorization_id != authorization.authorization_id:
             raise ExecutionReceiptError("supervisor attempt is bound to another authorization")
         if attempt.lease_epoch != authorization.lease_epoch:
@@ -684,6 +837,8 @@ class CapabilityDispatchCoordinator:
         owner_id: str,
         artifact_validation: ArtifactContractValidationV11,
         object_graph_ref: str,
+        termination_proof: Any | None = None,
+        terminal_reconciliation: TerminalSideEffectReconciliation | None = None,
     ) -> CapabilityDispatchReceipt:
         """Close one running attempt only after the v1.1 aggregate gate.
 
@@ -693,22 +848,31 @@ class CapabilityDispatchCoordinator:
         advances the already-authorized journals exactly once.
         """
 
-        from .execution_authorization import OptionExecutionAuthorization
-
-        if not isinstance(receipt, CapabilityDispatchReceipt):
-            raise ExecutionReceiptError("dispatch receipt is invalid")
+        _authorization, attempt = self._assert_receipt_binding(receipt)
         if not isinstance(artifact_validation, ArtifactContractValidationV11):
             raise ExecutionReceiptError("artifact validation aggregate is invalid")
         _digest(object_graph_ref, "object_graph_ref")
-        attempt = self.supervisor_store.read(receipt.attempt_id)
         if artifact_validation.run_attempt_ref != attempt.content_digest:
             raise ExecutionReceiptError("artifact validation is bound to another attempt state")
         authorization = self.authorization_store.read(receipt.authorization_id)
-        if not isinstance(authorization, OptionExecutionAuthorization):
-            raise ExecutionReceiptError("authorization receipt is invalid")
+
+        if attempt.status in {"spawn_acknowledged", "running"}:
+            try:
+                self.supervisor_store.record_termination_proof(termination_proof)
+            except Exception as error:
+                raise ExecutionReceiptError(str(error)) from error
+            if not isinstance(terminal_reconciliation, TerminalSideEffectReconciliation):
+                raise ExecutionReceiptError("terminal side-effect reconciliation proof is required")
+            terminal_reconciliation.assert_matches(
+                attempt_ref=attempt.content_digest,
+                authorization_id=authorization.authorization_id,
+                lease_epoch=attempt.lease_epoch,
+                artifact_aggregate_ref=artifact_validation.aggregate_ref,
+                object_graph_ref=object_graph_ref,
+            )
 
         if artifact_validation.validation_status == FAILED:
-            if attempt.status == "running":
+            if attempt.status in {"spawn_acknowledged", "running"}:
                 attempt = self.supervisor_store.transition(
                     attempt.attempt_id,
                     target_status="failed",
@@ -767,7 +931,7 @@ class CapabilityDispatchCoordinator:
 
         if artifact_validation.validation_status not in {PASSED, PASSED_WITH_WARNINGS}:
             raise ExecutionReceiptError("artifact validation did not reach a terminal pass")
-        if attempt.status == "running":
+        if attempt.status in {"spawn_acknowledged", "running"}:
             attempt = self.supervisor_store.transition(
                 attempt.attempt_id,
                 target_status="terminated",
@@ -870,6 +1034,8 @@ __all__ = [
     "CapabilityDispatchCoordinator",
     "CapabilityDispatchReceipt",
     "ExecutionReceiptError",
+    "TERMINAL_RECONCILIATION_CONTRACT_VERSION",
+    "TerminalSideEffectReconciliation",
     "derive_stable_side_effect_ref",
     "validate_artifact_contract_v11",
 ]

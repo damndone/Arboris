@@ -122,6 +122,65 @@ def test_service_requires_independent_provenance_for_source_eligibility():
     assert result.assessment.source_eligible is True
 
 
+def test_service_does_not_pass_a_validation_bundle_with_missing_or_duplicate_case_evidence():
+    from workbench.capability_factory.validation_contract import ValidationBundle, ValidationEvidence
+    from workbench.capability_factory.validation_service import ValidationService
+
+    first = _case()
+    second = _case()
+    second = type(second)(
+        case_id="case.two",
+        fixture_ref="1" * 64,
+        fixture_visibility="author_visible",
+    )
+    evidence = ValidationEvidence(
+        evidence_id="evidence.partial",
+        case_ref=first.content_digest,
+        tier="E1",
+        status="passed",
+        observed_ref="f" * 64,
+    )
+    partial = ValidationBundle(
+        bundle_id="validation.partial",
+        revision=1,
+        adapter_ref="e" * 64,
+        cases=(first, second),
+        evidence=(evidence,),
+    )
+    result = ValidationService().assess(
+        sealed_bundle=_sealed(),
+        validation_bundle=partial,
+        protocol=_protocol(),
+        producer_ref="2" * 64,
+    )
+    assert result.assessment.status == "inconclusive"
+    assert result.assessment.source_eligible is False
+
+    duplicate = ValidationBundle(
+        bundle_id="validation.duplicate",
+        revision=1,
+        adapter_ref="e" * 64,
+        cases=(first,),
+        evidence=(
+            evidence,
+            ValidationEvidence(
+                evidence_id="evidence.duplicate",
+                case_ref=first.content_digest,
+                tier="E1",
+                status="passed",
+                observed_ref="0" * 64,
+            ),
+        ),
+    )
+    duplicate_result = ValidationService().assess(
+        sealed_bundle=_sealed(),
+        validation_bundle=duplicate,
+        protocol=_protocol(),
+        producer_ref="2" * 64,
+    )
+    assert duplicate_result.assessment.status == "inconclusive"
+
+
 def test_validation_runner_fails_closed_when_containment_is_unsupported():
     from workbench.capability_factory.validation_runner import ValidationRunner
     from workbench.native_containment.broker import ContainmentBroker
@@ -175,6 +234,68 @@ def test_validation_runner_fails_closed_when_containment_is_unsupported():
 
     assert result.status == "unsupported"
     assert result.reason_code == "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
+    assert result.output_bundle_ref is None
+
+
+def test_validation_runner_rejects_a_report_bound_to_another_attempt_or_request():
+    from workbench.capability_factory.validation_runner import ValidationRunner
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    sealed = _sealed()
+    protocol = _protocol()
+    policy = ContainmentPolicy(
+        profile_id="strict-readonly-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(1, 1, 1, 1, 1, 1),
+        allow_weaker_fallback=False,
+    )
+    request = ContainmentRequest(
+        request_id="request.mismatch",
+        attempt_id="attempt.expected",
+        intent_digest=sealed.bundle_ref,
+        input_bundle_ref=sealed.bundle_ref,
+        output_namespace_ref="9" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="8" * 64,
+    )
+    report = ContainmentReport(
+        attempt_id="attempt.other",
+        request_digest="0" * 64,
+        status="completed",
+        reason_code="forged_or_misrouted_report",
+        assessment_ref="7" * 64,
+        output_bundle_ref="6" * 64,
+    )
+    class MisroutingBroker(ContainmentBroker):
+        def run(self, _request, _policy):
+            return report
+
+    broker = MisroutingBroker(
+        host_assessor=lambda _policy: CanaryResult("supported", "canary_passed"),
+        executor=None,
+    )
+
+    result = ValidationRunner().run(
+        sealed_bundle=sealed,
+        protocol=protocol,
+        request=request,
+        policy=policy,
+        broker=broker,
+    )
+
+    assert result.status == "failed"
+    assert result.reason_code == "NATIVE_CONTAINMENT_REPORT_MISMATCH"
+    assert result.report_ref is None
     assert result.output_bundle_ref is None
 
 

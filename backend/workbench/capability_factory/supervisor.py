@@ -318,6 +318,24 @@ class ExecutionAttemptRecord:
             execution_allowed=False,
         )
 
+    def assert_terminated_clean(self, proof: "AttemptQuiescenceProof") -> None:
+        """Require an attested process-tree termination before terminal close."""
+
+        if not isinstance(proof, AttemptQuiescenceProof):
+            raise SupervisorStateError("termination proof is required")
+        if self.status not in {"spawn_acknowledged", "running"}:
+            raise SupervisorStateError("termination proof applies only to an active attempt")
+        if proof.proof_kind != "terminated_clean":
+            raise SupervisorStateError("termination proof must prove a clean termination")
+        if proof.attempt_id != self.attempt_id or proof.reservation_id != self.reservation_id:
+            raise SupervisorStateError("termination proof does not match attempt identity")
+        if proof.authorization_id != self.authorization_id:
+            raise SupervisorStateError("termination proof does not match authorization")
+        if proof.lease_epoch != self.lease_epoch:
+            raise SupervisorStateError("termination proof has a stale lease epoch")
+        if proof.process_handle_ref != self.process_handle_ref:
+            raise SupervisorStateError("termination proof handle does not match attempt")
+
 
 @dataclass(frozen=True, slots=True)
 class AttemptQuiescenceProof:
@@ -503,6 +521,8 @@ class DurableSupervisorStore:
 
     _RECORD_TYPE = "capability_execution_attempt"
     _JOURNAL_NAME = "supervisor-attempts.jsonl"
+    _PROOF_RECORD_TYPE = "capability_termination_proof"
+    _PROOF_JOURNAL_NAME = "supervisor-termination-proofs.jsonl"
 
     def __init__(self, root: Path | str, *, create: bool = True) -> None:
         self.root = Path(root)
@@ -510,6 +530,7 @@ class DurableSupervisorStore:
         if create:
             self.directory.mkdir(parents=True, exist_ok=True)
         self.journal = self.directory / self._JOURNAL_NAME
+        self.proof_journal = self.directory / self._PROOF_JOURNAL_NAME
         self._history: dict[str, list[ExecutionAttemptRecord]] = {}
         self._reload()
 
@@ -518,6 +539,17 @@ class DurableSupervisorStore:
             raise DurableSupervisorError("reservation must be a DispatchReservation")
         with self._locked():
             self._reload()
+            for existing_history in self._history.values():
+                existing = existing_history[-1]
+                if existing.executor_idempotency_key == reservation.executor_idempotency_key:
+                    if (
+                        existing.attempt_id != reservation.attempt_id
+                        or existing.reservation_id != reservation.reservation_id
+                        or existing.intent_digest != reservation.intent_digest
+                    ):
+                        raise DurableSupervisorError(
+                            "executor idempotency key is already bound to another reservation or attempt"
+                        )
             history = self._history.get(reservation.attempt_id, [])
             if history:
                 current = history[-1]
@@ -605,6 +637,58 @@ class DurableSupervisorStore:
         self, attempt_id: str, proof: AttemptQuiescenceProof
     ) -> QuiescenceAssessment:
         return self.read(attempt_id).assess_quiescence(proof)
+
+    def record_termination_proof(self, proof: AttemptQuiescenceProof) -> AttemptQuiescenceProof:
+        """Persist one clean-termination proof before terminal reconciliation."""
+
+        if not isinstance(proof, AttemptQuiescenceProof):
+            raise DurableSupervisorError("termination proof is invalid")
+        if proof.proof_kind != "terminated_clean":
+            raise DurableSupervisorError("only terminated_clean proofs can be recorded here")
+        with self._locked():
+            self._reload()
+            try:
+                records = read_jsonl(self.proof_journal)
+            except (OSError, ValueError) as error:
+                raise DurableSupervisorError("termination proof journal cannot be read") from error
+            for index, event in enumerate(records, start=1):
+                if set(event) != {"record_type", "proof"} or event["record_type"] != self._PROOF_RECORD_TYPE:
+                    raise DurableSupervisorError(f"termination proof event {index} has invalid fields")
+                try:
+                    existing = AttemptQuiescenceProof.from_dict(event["proof"])
+                except SupervisorStateError as error:
+                    raise DurableSupervisorError(f"termination proof event {index} is invalid") from error
+                if existing.proof_id == proof.proof_id:
+                    if existing != proof:
+                        raise DurableSupervisorError("termination proof id is already bound to different data")
+                    return existing
+            try:
+                attempt = self.read(proof.attempt_id)
+                attempt.assert_terminated_clean(proof)
+            except SupervisorStateError as error:
+                raise DurableSupervisorError(str(error)) from error
+            append_jsonl_atomic(
+                self.proof_journal,
+                {"record_type": self._PROOF_RECORD_TYPE, "proof": proof.to_dict()},
+            )
+            return proof
+
+    def read_termination_proof(self, proof_id: str) -> AttemptQuiescenceProof:
+        proof_id = _identifier(proof_id, "proof_id")
+        try:
+            records = read_jsonl(self.proof_journal)
+        except (OSError, ValueError) as error:
+            raise DurableSupervisorError("termination proof journal cannot be read") from error
+        for index, event in enumerate(records, start=1):
+            if set(event) != {"record_type", "proof"} or event["record_type"] != self._PROOF_RECORD_TYPE:
+                raise DurableSupervisorError(f"termination proof event {index} has invalid fields")
+            try:
+                proof = AttemptQuiescenceProof.from_dict(event["proof"])
+            except SupervisorStateError as error:
+                raise DurableSupervisorError(f"termination proof event {index} is invalid") from error
+            if proof.proof_id == proof_id:
+                return proof
+        raise DurableSupervisorError("termination proof was not found")
 
     def _reload(self) -> None:
         self._history = {}

@@ -149,21 +149,29 @@ def test_adapter_contract_cannot_claim_an_undeclared_operation_or_consumer():
         )
 
 
-def test_adapter_candidate_factory_emits_typed_candidate_and_empty_validation_bundle():
-    from workbench.capability_factory.adapter_contract import AdapterCandidateFactory
+def test_adapter_candidate_factory_emits_typed_candidate_and_empty_validation_bundle(tmp_path):
+    from workbench.capability_factory.adapter_contract import (
+        AdapterCandidateFactory,
+        AdapterSourceGenerator,
+    )
     from workbench.capability_factory.validation_contract import ValidationCase
 
     implementation = _implementation()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: "def adapter():\n    return None\n",
+        output_root=tmp_path / "source",
+    )
     generated = AdapterCandidateFactory().generate(
         implementation=implementation,
         adapter_id="adapter.generated",
         adapter_revision=1,
-        entrypoint_ref="b" * 64,
+        entrypoint_ref=source.entrypoint_ref,
         operations=("fit", "summarize"),
         consumer_support=_consumer_support(),
         candidate_id="candidate.generated",
         capability_kind="model",
-        source_ref="c" * 64,
+        source_ref=source.source_ref,
         author_lineage_ref="d" * 64,
         validation_bundle_id="validation.generated",
         validation_cases=(
@@ -173,12 +181,41 @@ def test_adapter_candidate_factory_emits_typed_candidate_and_empty_validation_bu
                 fixture_visibility="author_visible",
             ),
         ),
+        source_artifact=source,
     )
 
     assert generated.candidate.source_kind == "generated_adapter"
     assert generated.candidate.status == "submitted"
     assert generated.validation_bundle.evidence == ()
     assert generated.validation_bundle.adapter_ref == generated.adapter.content_digest
+
+
+def test_adapter_candidate_factory_rejects_a_fabricated_source_reference():
+    from workbench.capability_factory.adapter_contract import AdapterCandidateFactory, AdapterContractError
+    from workbench.capability_factory.validation_contract import ValidationCase
+
+    implementation = _implementation()
+    with pytest.raises(AdapterContractError, match="source_artifact is required"):
+        AdapterCandidateFactory().generate(
+            implementation=implementation,
+            adapter_id="adapter.unbound-source",
+            adapter_revision=1,
+            entrypoint_ref="b" * 64,
+            operations=("fit",),
+            consumer_support=_consumer_support(),
+            candidate_id="candidate.unbound-source",
+            capability_kind="model",
+            source_ref="c" * 64,
+            author_lineage_ref="d" * 64,
+            validation_bundle_id="validation.unbound-source",
+            validation_cases=(
+                ValidationCase(
+                    case_id="case.unbound-source",
+                    fixture_ref="e" * 64,
+                    fixture_visibility="author_visible",
+                ),
+            ),
+        )
 
 
 def test_adapter_candidate_factory_binds_generated_source_and_entrypoint(tmp_path):
