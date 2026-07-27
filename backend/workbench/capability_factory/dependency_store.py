@@ -584,8 +584,6 @@ class DependencyStore:
             try:
                 value = json.loads(line)
             except json.JSONDecodeError as error:
-                if index == len(lines) - 1 and not line.endswith(("\n", "\r")):
-                    break
                 raise DependencyStoreError(
                     f"dependency store contains invalid JSONL at line {index + 1}"
                 ) from error

@@ -535,3 +535,21 @@ def test_dependency_store_rejects_tampered_persisted_lock(tmp_path):
 
     with pytest.raises(DependencyStoreError):
         DependencyStore(tmp_path, create=False).get_lock(prepared.lock.content_digest)
+
+
+def test_dependency_store_rejects_a_truncated_jsonl_tail(tmp_path):
+    from workbench.capability_factory.dependency_service import DependencyService
+    from workbench.capability_factory.dependency_store import DependencyStore, DependencyStoreError
+
+    requirements, snapshot, policy, artifacts = _inputs()
+    prepared = DependencyService(store=DependencyStore(tmp_path)).prepare_quarantine(
+        requirements=requirements,
+        snapshot=snapshot,
+        policy=policy,
+        artifacts=artifacts,
+    )
+    path = tmp_path / "locks" / f"{prepared.lock.content_digest}.jsonl"
+    path.write_bytes(path.read_bytes() + b'{"truncated":')
+
+    with pytest.raises(DependencyStoreError, match="corrupt|invalid JSONL"):
+        DependencyStore(tmp_path, create=False).get_lock(prepared.lock.content_digest)
