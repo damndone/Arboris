@@ -19,6 +19,7 @@ _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _ALLOWED_ENV_NAMES = frozenset(
     {"LANG", "LC_ALL", "PYTHONHASHSEED", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"}
 )
+_RESOURCE_ENFORCEMENT_MODES = frozenset({"hard_limits", "observed_memory"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,7 @@ class ContainmentPolicy:
     thread_count: int
     budget: ResourceBudget
     allow_weaker_fallback: bool
+    resource_enforcement: str = "hard_limits"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "profile_id", _text(self.profile_id, "profile_id"))
@@ -49,6 +51,17 @@ class ContainmentPolicy:
             raise ContainmentPolicyError("dependency tree must be read-only")
         if self.allow_weaker_fallback is not False:
             raise ContainmentPolicyError("weaker containment fallback is forbidden")
+        if not isinstance(self.resource_enforcement, str) or self.resource_enforcement not in _RESOURCE_ENFORCEMENT_MODES:
+            raise ContainmentPolicyError("resource_enforcement is unsupported")
+        if self.profile_id == "strict-readonly-v1" and self.resource_enforcement != "hard_limits":
+            raise ContainmentPolicyError("strict-readonly-v1 requires hard_limits resource enforcement")
+        if self.profile_id == "darwin-seatbelt-experimental-v1" and self.resource_enforcement != "observed_memory":
+            raise ContainmentPolicyError(
+                "darwin-seatbelt-experimental-v1 requires observed_memory resource enforcement"
+            )
+        if self.resource_enforcement == "observed_memory" and self.profile_id != "darwin-seatbelt-experimental-v1":
+            raise ContainmentPolicyError("observed_memory is reserved for the explicit Darwin experimental profile")
+        object.__setattr__(self, "resource_enforcement", self.resource_enforcement)
         if not isinstance(self.budget, ResourceBudget):
             raise ContainmentPolicyError("budget must be a ResourceBudget")
         if not isinstance(self.thread_count, int) or isinstance(self.thread_count, bool) or self.thread_count != 1:

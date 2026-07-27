@@ -136,3 +136,35 @@ def test_darwin_canary_fails_closed_before_running_cases_when_limits_are_unavail
     assert result.status == "unsupported"
     assert result.reason_code == "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE"
     assert called is False
+
+
+def test_darwin_experimental_canary_uses_explicit_observed_memory_mode():
+    from workbench.native_containment.platform_darwin import DarwinCanaryHarness
+    from workbench.native_containment.policy import ContainmentPolicy
+    from workbench.native_containment.contracts import ResourceBudget
+
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    harness = DarwinCanaryHarness(
+        python_executable="/usr/bin/python3",
+        backend_executable="/usr/bin/sandbox-exec",
+        canary_probe=lambda _policy: {case: True for case in DarwinCanaryHarness.CANARY_CASES},
+        host_supported=lambda: True,
+        resource_limit_probe=lambda _policy: "NATIVE_CONTAINMENT_RESOURCE_LIMIT_UNAVAILABLE",
+    )
+
+    result = harness.run(policy)
+
+    assert result.status == "supported"

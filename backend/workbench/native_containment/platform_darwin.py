@@ -123,9 +123,10 @@ raise SystemExit(0 if ok else 1)
             return CanaryResult.unsupported("NATIVE_CONTAINMENT_INTERPRETER_UNAVAILABLE")
         try:
             self._probe_reason = None
-            resource_reason = self.resource_limit_probe(policy)
-            if resource_reason is not None:
-                return CanaryResult.unsupported(resource_reason)
+            if policy.resource_enforcement == "hard_limits":
+                resource_reason = self.resource_limit_probe(policy)
+                if resource_reason is not None:
+                    return CanaryResult.unsupported(resource_reason)
             results = self.canary_probe(policy) if self.canary_probe is not None else self._default_probe(policy)
         except (OSError, subprocess.SubprocessError):
             return CanaryResult.unsupported("NATIVE_CONTAINMENT_CANARY_FAILED")
@@ -193,13 +194,18 @@ for kind, value in limits:
                 results[case] = self._run_case(policy, case, profile, output_root)
             return results
 
-    def _seatbelt_profile(self, output_root: Path) -> str:
+    def _seatbelt_profile(
+        self,
+        output_root: Path,
+        *,
+        input_root: Path | None = None,
+        executable_parent: Path | None = None,
+    ) -> str:
         """Build the fixed deny-by-default profile used only by trusted canaries."""
 
         output = output_root.resolve()
-        python_parent = Path(self.python_executable).resolve().parent
-        return "\n".join(
-            (
+        python_parent = Path(executable_parent or self.python_executable).resolve().parent
+        rules = [
                 "(version 1)",
                 '(import "system.sb")',
                 "(deny default)",
@@ -215,8 +221,11 @@ for kind, value in limits:
                 f'(allow file-read* (subpath "{output}"))',
                 f'(allow file-write* (subpath "{output}"))',
                 '(allow file-write-data (literal "/dev/null"))',
-            )
-        )
+        ]
+        if input_root is not None:
+            input_path = input_root.resolve()
+            rules.insert(-2, f'(allow file-read* (subpath "{input_path}"))')
+        return "\n".join(rules)
 
     def _environment(self, policy: ContainmentPolicy) -> dict[str, str]:
         environment = dict(policy.environment_allowlist)
@@ -242,7 +251,8 @@ for kind, value in limits:
                 resource.RLIMIT_FSIZE,
                 (max(budget.stdout_bytes, budget.stderr_bytes), max(budget.stdout_bytes, budget.stderr_bytes)),
             )
-            resource.setrlimit(resource.RLIMIT_AS, (budget.memory_bytes, budget.memory_bytes))
+            if policy.resource_enforcement == "hard_limits":
+                resource.setrlimit(resource.RLIMIT_AS, (budget.memory_bytes, budget.memory_bytes))
 
         return apply_limits
 
