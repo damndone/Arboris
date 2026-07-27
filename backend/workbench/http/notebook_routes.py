@@ -356,6 +356,32 @@ def _execution_results_packet(
             continue
         validation = raw.get("artifact_validation")
         if not isinstance(validation, dict):
+            capability_execution = raw.get("capability_execution")
+            if isinstance(capability_execution, dict):
+                # CF4 has already committed the full ArtifactContract@1.1
+                # aggregate in its own durable store.  The Notebook route
+                # exposes only its server-owned refs; it never accepts or
+                # reconstructs adapter payloads here.
+                results[revision.option_id] = {
+                    "option_id": revision.option_id,
+                    "option_revision": revision.option_revision,
+                    "run_id": raw.get("run_id"),
+                    "execution_status": raw.get("execution_status"),
+                    "committed": raw.get("committed"),
+                    "capability_execution": {
+                        key: capability_execution.get(key)
+                        for key in (
+                            "dispatch_status",
+                            "attempt_id",
+                            "receipt_ref",
+                            "completion_ref",
+                            "artifact_validation_ref",
+                            "object_graph_ref",
+                            "assessment_ref",
+                            "output_bundle_ref",
+                        )
+                    },
+                }
             continue
         raw_issues = [dict(issue) for issue in validation.get("issues", [])]
         bounded_issues = raw_issues[:64]

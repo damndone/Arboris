@@ -387,13 +387,21 @@ class PythonAdapterExecutionBinding:
             read_roots=self.dependency_roots,
         )
 
-    def validate_result(self, request: Any, report: Any) -> None:
+    def read_result(self, request: Any, report: Any) -> dict[str, Any]:
+        """Read one completed, request-bound adapter result for trusted mapping.
+
+        This is the only server-side result read seam.  It returns bounded
+        finite JSON after rechecking the request/report identity; it does not
+        turn the payload into Workbench artifacts or grant execution rights.
+        A server-owned completion factory must perform that semantic mapping.
+        """
+
         from ..native_containment.contracts import ContainmentReport, ContainmentRequest
 
         if not isinstance(request, ContainmentRequest) or not isinstance(report, ContainmentReport):
             raise PythonAdapterExecutionError("adapter result binding is invalid")
         if report.status != "completed":
-            return
+            raise PythonAdapterExecutionError("adapter result is not completed")
         if report.attempt_id != request.attempt_id or report.request_digest != request.content_digest:
             raise PythonAdapterExecutionError("adapter result report is not bound to request")
         path = self.result_path
@@ -408,6 +416,16 @@ class PythonAdapterExecutionBinding:
             raise PythonAdapterExecutionError("adapter result is not finite JSON") from error
         if not isinstance(result, dict):
             raise PythonAdapterExecutionError("adapter result must be a JSON object")
+        return result
+
+    def validate_result(self, request: Any, report: Any) -> None:
+        from ..native_containment.contracts import ContainmentReport, ContainmentRequest
+
+        if not isinstance(request, ContainmentRequest) or not isinstance(report, ContainmentReport):
+            raise PythonAdapterExecutionError("adapter result binding is invalid")
+        if report.status != "completed":
+            return
+        self.read_result(request, report)
 
     @staticmethod
     def _reject_json_constant(value: str) -> None:

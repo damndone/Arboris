@@ -12,13 +12,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..custom_capability.canonical import domain_digest
 from ..native_containment.broker import ContainmentBroker, ContainmentBrokerError
 from ..native_containment.contracts import ContainmentRequest, ContainmentReport
 from ..native_containment.policy import ContainmentPolicy
 from .contracts import _content_digest, _digest, _text
 from .implementation_sealer import ImplementationBundleRevision
+from .provenance import EvidenceProvenance, ProvenanceNode
 from .validation_contract import ValidationBundle, ValidationEvidence
 from .validation_protocols import ValidationProtocol
+from .validation_service import ValidationService, ValidationServiceResult
 
 
 class ValidationRunnerError(ValueError):
@@ -107,6 +110,8 @@ class ValidationHarnessResult:
     outcome: str
     reason_code: str
     verified: bool = False
+    assessment_ref: str | None = None
+    promotion_state: str = "experimental"
 
     def __post_init__(self) -> None:
         if not isinstance(self.execution, ValidationExecutionResult):
@@ -120,6 +125,12 @@ class ValidationHarnessResult:
             raise ValidationRunnerError("validation verified flag must be boolean")
         if self.verified and self.outcome != "passed":
             raise ValidationRunnerError("only a passed validation can be verified")
+        if self.assessment_ref is not None:
+            object.__setattr__(self, "assessment_ref", _digest(self.assessment_ref, "assessment_ref"))
+        if self.promotion_state not in {"experimental", "verified", "approved"}:
+            raise ValidationRunnerError("validation promotion state is unsupported")
+        if self.verified and self.promotion_state != "verified":
+            raise ValidationRunnerError("verified validation must expose a verified promotion state")
 
     @property
     def content_digest(self) -> str:
@@ -235,6 +246,8 @@ class ValidationRunner:
         policy: ContainmentPolicy,
         broker: ContainmentBroker,
         oracle: ValidationOracle | None,
+        assessment_service: ValidationService | None = None,
+        producer_ref: str | None = None,
     ) -> ValidationHarnessResult:
         """Run the contained suite and derive evidence from a server oracle.
 
@@ -248,6 +261,34 @@ class ValidationRunner:
             raise ValidationRunnerError("validation_bundle must be a ValidationBundle")
         if validation_bundle.adapter_ref != sealed_bundle.adapter_ref:
             raise ValidationRunnerError("validation bundle is not bound to the sealed adapter")
+        service = assessment_service or ValidationService()
+        if not isinstance(service, ValidationService):
+            raise ValidationRunnerError("assessment_service must be a ValidationService")
+        if producer_ref is None:
+            producer_ref = domain_digest(
+                "workbench.capability_factory.validation_runner/v1",
+                {
+                    "runner": "contained-oracle-runner",
+                    "sealed_bundle_ref": sealed_bundle.bundle_ref,
+                    "protocol_ref": protocol.content_digest,
+                },
+            )
+        else:
+            producer_ref = _digest(producer_ref, "producer_ref")
+
+        def assess(
+            bundle: ValidationBundle,
+            *,
+            provenance_by_evidence: dict[str, EvidenceProvenance] | None = None,
+        ) -> ValidationServiceResult:
+            return service.assess(
+                sealed_bundle=sealed_bundle,
+                validation_bundle=bundle,
+                protocol=protocol,
+                producer_ref=producer_ref or "",
+                provenance_by_evidence=provenance_by_evidence,
+            )
+
         execution = self.run(
             sealed_bundle=sealed_bundle,
             protocol=protocol,
@@ -256,21 +297,30 @@ class ValidationRunner:
             broker=broker,
         )
         if execution.status != "completed":
+            assessed = assess(validation_bundle)
             return ValidationHarnessResult(
                 execution=execution,
                 validation_bundle=validation_bundle,
-                outcome="inconclusive",
+                outcome=assessed.assessment.status,
                 reason_code=execution.reason_code,
+                verified=assessed.verified,
+                assessment_ref=assessed.assessment.content_digest,
+                promotion_state=assessed.promotion.state,
             )
         if oracle is None:
+            assessed = assess(validation_bundle)
             return ValidationHarnessResult(
                 execution=execution,
                 validation_bundle=validation_bundle,
-                outcome="inconclusive",
+                outcome=assessed.assessment.status,
                 reason_code="VALIDATION_ORACLE_UNAVAILABLE",
+                verified=assessed.verified,
+                assessment_ref=assessed.assessment.content_digest,
+                promotion_state=assessed.promotion.state,
             )
 
         evidence: list[ValidationEvidence] = []
+        provenance_by_evidence: dict[str, EvidenceProvenance] = {}
         try:
             for case in validation_bundle.cases:
                 observation = oracle.evaluate(
@@ -286,24 +336,38 @@ class ValidationRunner:
                     and case.fixture_visibility == "service_holdout"
                     and all(item.fixture_visibility == "service_holdout" for item in validation_bundle.cases)
                 ) else "E2"
-                evidence.append(
-                    ValidationEvidence(
-                        evidence_id=f"evidence.{case.case_id}.{execution.attempt_id}",
-                        case_ref=case.content_digest,
-                        tier=tier,
-                        status=observation.status,
-                        observed_ref=observation.observed_ref,
-                        oracle_ref=observation.oracle_ref,
-                        oracle_kind=observation.oracle_kind,
-                        fixture_visibility=case.fixture_visibility,
-                    )
+                item = ValidationEvidence(
+                    evidence_id=f"evidence.{case.case_id}.{execution.attempt_id}",
+                    case_ref=case.content_digest,
+                    tier=tier,
+                    status=observation.status,
+                    observed_ref=observation.observed_ref,
+                    oracle_ref=observation.oracle_ref,
+                    oracle_kind=observation.oracle_kind,
+                    fixture_visibility=case.fixture_visibility,
+                )
+                evidence.append(item)
+                author_node_id = f"author.{sealed_bundle.bundle_ref[:16]}"
+                oracle_node_id = f"oracle.{case.case_id}.{execution.attempt_id}"
+                provenance_by_evidence[item.content_digest] = EvidenceProvenance(
+                    evidence_ref=item.content_digest,
+                    author_root=author_node_id,
+                    oracle_root=oracle_node_id,
+                    nodes=(
+                        ProvenanceNode(author_node_id, "author", sealed_bundle.bundle_ref),
+                        ProvenanceNode(oracle_node_id, "oracle", observation.oracle_ref),
+                    ),
                 )
         except Exception as error:
+            assessed = assess(validation_bundle)
             return ValidationHarnessResult(
                 execution=execution,
                 validation_bundle=validation_bundle,
-                outcome="inconclusive",
+                outcome=assessed.assessment.status,
                 reason_code="VALIDATION_ORACLE_FAILED",
+                verified=assessed.verified,
+                assessment_ref=assessed.assessment.content_digest,
+                promotion_state=assessed.promotion.state,
             )
         enriched = ValidationBundle(
             bundle_id=validation_bundle.bundle_id,
@@ -312,43 +376,15 @@ class ValidationRunner:
             cases=validation_bundle.cases,
             evidence=tuple(evidence),
         )
-        statuses = {item.status for item in evidence}
-        if set(protocol.check_kinds) <= {item.check_kind for item in validation_bundle.cases}:
-            outcome = "failed" if "failed" in statuses else "inconclusive" if "inconclusive" in statuses else "passed"
-            reason_code = "VALIDATION_ORACLE_ASSESSED"
-        else:
-            outcome = "inconclusive"
-            reason_code = "VALIDATION_PROTOCOL_CASE_COVERAGE_INCOMPLETE"
-        protocol_case_coverage_complete = set(protocol.check_kinds) <= {
-            item.check_kind for item in validation_bundle.cases
-        }
-        evidence_floor_is_satisfied = (
-            (
-                protocol.evidence_floor == "E2"
-                and all(item.tier in {"E2", "E3"} for item in evidence)
-            )
-            or (
-                protocol.evidence_floor == "E3"
-                and all(
-                    item.tier == "E3" and item.fixture_visibility == "service_holdout"
-                    for item in evidence
-                )
-            )
-        )
-        verified = (
-            outcome == "passed"
-            and evidence_floor_is_satisfied
-            and all(item.source_eligible for item in evidence)
-            and protocol_case_coverage_complete
-        )
-        if not verified and outcome == "passed":
-            reason_code = "VALIDATION_VERIFICATION_REQUIREMENTS_INCOMPLETE"
+        assessed = assess(enriched, provenance_by_evidence=provenance_by_evidence)
         return ValidationHarnessResult(
             execution=execution,
             validation_bundle=enriched,
-            outcome=outcome,
-            reason_code=reason_code,
-            verified=verified,
+            outcome=assessed.assessment.status,
+            reason_code="VALIDATION_SERVICE_ASSESSED",
+            verified=assessed.verified,
+            assessment_ref=assessed.assessment.content_digest,
+            promotion_state=assessed.promotion.state,
         )
 
 

@@ -1786,7 +1786,122 @@ class NotebookService:
                     "dispatch_receipt_ref": dispatch.receipt_ref,
                 },
             )
+        elif dispatch.status in {"completed", "failed"}:
+            self._record_capability_dispatch_completion(
+                notebook_id,
+                option_id,
+                current=current,
+                dispatch=dispatch,
+                trace=trace,
+            )
         return dispatch
+
+    def _record_capability_dispatch_completion(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        current: NotebookOptionRevisionV12,
+        dispatch: NotebookExecutionDispatch,
+        trace: TraceWriter | None,
+    ) -> None:
+        """Project a trusted CF4 terminal receipt into the Notebook log.
+
+        This method accepts only refs already produced by the trusted gateway;
+        it has no parameter for client artifacts, raw adapter output, or an
+        execution status supplied by Agent.  CF4 has already consumed/failed
+        the exact attempt before this projection is written.
+        """
+
+        if dispatch.status not in {"completed", "failed"}:
+            raise OptionRevisionStale(
+                "capability completion requires a terminal dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_dispatch_not_terminal",
+            )
+        required = (
+            dispatch.run_id,
+            dispatch.attempt_id,
+            dispatch.receipt_ref,
+            dispatch.completion_ref,
+            dispatch.artifact_validation_ref,
+            dispatch.object_graph_ref,
+        )
+        if any(value is None for value in required):
+            raise OptionRevisionStale(
+                "capability completion receipt is missing server-owned refs",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_dispatch_completion_refs",
+            )
+
+        view = self.store.read_option(notebook_id, option_id)
+        if view.lifecycle_status == "materialized":
+            self._transition(
+                notebook_id,
+                view,
+                to_status="executing",
+                actor="system",
+                reason="capability_dispatch_terminal",
+                trace=trace,
+            )
+            view = self.store.read_option(notebook_id, option_id)
+        if view.lifecycle_status != "executing":
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; terminal capability "
+                "projection requires an executing option",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        succeeded = dispatch.status == "completed"
+        self._transition(
+            notebook_id,
+            view,
+            to_status="executed" if succeeded else "materialized",
+            actor="system",
+            reason="capability_cf4_reconciled",
+            trace=trace,
+        )
+        if not succeeded:
+            self._transition(
+                notebook_id,
+                self.store.read_option(notebook_id, option_id),
+                to_status="selected",
+                actor="system",
+                reason="capability_cf4_retry",
+                trace=trace,
+            )
+        self.store.append_option_record(
+            notebook_id,
+            option_id,
+            {
+                "record_type": RECORD_EXECUTION_RESULT,
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "run_id": dispatch.run_id,
+                "execution_status": "succeeded" if succeeded else "failed",
+                "committed": succeeded,
+                "capability_execution": {
+                    "dispatch_status": dispatch.status,
+                    "attempt_id": dispatch.attempt_id,
+                    "receipt_ref": dispatch.receipt_ref,
+                    "completion_ref": dispatch.completion_ref,
+                    "artifact_validation_ref": dispatch.artifact_validation_ref,
+                    "object_graph_ref": dispatch.object_graph_ref,
+                    "assessment_ref": dispatch.assessment_ref,
+                    "output_bundle_ref": dispatch.output_bundle_ref,
+                },
+            },
+        )
+        if succeeded:
+            self.set_active_head(
+                notebook_id,
+                dispatch.run_id,
+                reason="capability_cf4_reconciled",
+                trace=trace,
+            )
 
     def _build_server_execution_authorization(
         self,

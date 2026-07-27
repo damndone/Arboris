@@ -606,6 +606,8 @@ def test_validation_harness_marks_e2_independent_oracle_verified_without_holdout
     assert result.validation_bundle.evidence[0].tier == "E2"
     assert result.validation_bundle.evidence[0].oracle_ref == "4" * 64
     assert result.verified is True
+    assert result.assessment_ref
+    assert result.promotion_state == "verified"
     assert result.execution_allowed is False
 
 

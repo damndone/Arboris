@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Mapping, Protocol
 
+from ..custom_capability.canonical import domain_digest
 from .dispatch import PreparedRunIntent
 from .execution_authorization import OptionExecutionAuthorization
 
@@ -36,6 +37,14 @@ def _revision(value: Any, field: str) -> int:
     return value
 
 
+def _digest(value: Any, field: str) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(
+        char not in "0123456789abcdef" for char in value
+    ):
+        raise _receipt_error(f"{field} must be a lowercase SHA-256 digest")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedCapabilityRun:
     """The pure output of the Draft/authorization preparation stage."""
@@ -47,20 +56,76 @@ class PreparedCapabilityRun:
 
 
 @dataclass(frozen=True, slots=True)
+class CapabilityExecutionCompletion:
+    """Trusted server-owned inputs for the CF4 terminal commit gate.
+
+    The adapter result is intentionally absent.  A server-owned completion
+    factory must first map that result to the Workbench ArtifactContract and
+    lineage/trace proofs.  The gateway then asks CF4 to reconcile those facts;
+    no successful Notebook status can be manufactured from an output bundle
+    reference alone.
+    """
+
+    artifact_validation: Any
+    object_graph_ref: str
+    termination_proof: Any
+    terminal_reconciliation: Any
+
+    def __post_init__(self) -> None:
+        from .execution_receipt import (
+            ArtifactContractValidationV11,
+            TerminalSideEffectReconciliation,
+        )
+
+        if not isinstance(self.artifact_validation, ArtifactContractValidationV11):
+            raise _receipt_error("capability completion artifact validation is invalid")
+        _digest(self.object_graph_ref, "object_graph_ref")
+        if not callable(getattr(self.termination_proof, "to_dict", None)):
+            raise _receipt_error("capability completion termination proof is invalid")
+        _digest(self.termination_proof.content_digest, "termination_proof_ref")
+        if not isinstance(self.terminal_reconciliation, TerminalSideEffectReconciliation):
+            raise _receipt_error("capability completion reconciliation proof is invalid")
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.capability_execution_completion/v1",
+            {
+                "artifact_validation_ref": self.artifact_validation.aggregate_ref,
+                "object_graph_ref": self.object_graph_ref,
+                "termination_proof_ref": self.termination_proof.content_digest,
+                "terminal_reconciliation_ref": self.terminal_reconciliation.content_digest,
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class NotebookExecutionDispatch:
     """Server-owned result of one explicit CF4 dispatch request.
 
-    This is deliberately a dispatch receipt, not an artifact/result callback.
-    Only the trusted gateway may construct it; Notebook never accepts these
-    fields from the Agent or browser.
+    This is deliberately a server dispatch receipt plus bounded CF4 completion
+    references. Only the trusted gateway may construct it; Notebook never
+    accepts these fields from the Agent or browser.
     """
 
     authorization_id: str
     run_intent_id: str
-    status: Literal["dispatch_reserved", "running", "unsupported", "dispatch_unknown"]
+    status: Literal[
+        "dispatch_reserved",
+        "running",
+        "completed",
+        "failed",
+        "unsupported",
+        "dispatch_unknown",
+    ]
     run_id: str | None = None
     attempt_id: str | None = None
     receipt_ref: str | None = None
+    completion_ref: str | None = None
+    artifact_validation_ref: str | None = None
+    object_graph_ref: str | None = None
+    assessment_ref: str | None = None
+    output_bundle_ref: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.authorization_id, "authorization_id")
@@ -68,6 +133,8 @@ class NotebookExecutionDispatch:
         if self.status not in {
             "dispatch_reserved",
             "running",
+            "completed",
+            "failed",
             "unsupported",
             "dispatch_unknown",
         }:
@@ -78,7 +145,17 @@ class NotebookExecutionDispatch:
             _identifier(self.attempt_id, "attempt_id")
         if self.receipt_ref is not None:
             _identifier(self.receipt_ref, "receipt_ref")
-        if self.status in {"dispatch_reserved", "running"} and not all(
+        for field in (
+            "completion_ref",
+            "artifact_validation_ref",
+            "object_graph_ref",
+            "assessment_ref",
+            "output_bundle_ref",
+        ):
+            value = getattr(self, field)
+            if value is not None:
+                _digest(value, field)
+        if self.status in {"dispatch_reserved", "running", "completed", "failed"} and not all(
             (self.run_id, self.attempt_id, self.receipt_ref)
         ):
             raise _receipt_error(
@@ -88,6 +165,22 @@ class NotebookExecutionDispatch:
             raise _receipt_error(
                 "unsupported or unknown Notebook dispatch cannot expose a run id"
             )
+        if self.status in {"completed", "failed"} and not all(
+            (self.completion_ref, self.artifact_validation_ref, self.object_graph_ref)
+        ):
+            raise _receipt_error(
+                "terminal Notebook dispatch requires CF4 completion refs"
+            )
+        if self.status == "completed" and not all(
+            (self.assessment_ref, self.output_bundle_ref)
+        ):
+            raise _receipt_error(
+                "completed Notebook dispatch requires assessment and output refs"
+            )
+        if self.status == "failed" and any(
+            (self.assessment_ref, self.output_bundle_ref)
+        ):
+            raise _receipt_error("failed Notebook dispatch cannot expose output refs")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +190,11 @@ class NotebookExecutionDispatch:
             "run_id": self.run_id,
             "attempt_id": self.attempt_id,
             "receipt_ref": self.receipt_ref,
+            "completion_ref": self.completion_ref,
+            "artifact_validation_ref": self.artifact_validation_ref,
+            "object_graph_ref": self.object_graph_ref,
+            "assessment_ref": self.assessment_ref,
+            "output_bundle_ref": self.output_bundle_ref,
         }
 
 
@@ -142,6 +240,7 @@ class NotebookCapabilityDispatchBinding:
     reservation_id: str
     reservation_idempotency_key: str
     now: Any = None
+    completion_factory: Callable[..., CapabilityExecutionCompletion] | None = None
 
     def __post_init__(self) -> None:
         from ..native_containment.broker import ContainmentBroker
@@ -175,6 +274,8 @@ class NotebookCapabilityDispatchBinding:
             getattr(self.executor, "terminate", None)
         ):
             raise _receipt_error("dispatch binding executor lacks lifecycle methods")
+        if self.completion_factory is not None and not callable(self.completion_factory):
+            raise _receipt_error("dispatch binding completion factory is invalid")
         if not isinstance(self.lease_seconds, int) or self.lease_seconds < 1:
             raise _receipt_error("dispatch binding lease_seconds is invalid")
         if not isinstance(self.lease_epoch, int) or self.lease_epoch < 1:
@@ -333,6 +434,47 @@ class AuthorizedCapabilityExecutionGateway:
                     run_intent_id=authorization.run_intent_id,
                     status="dispatch_unknown",
                 )
+            if binding.completion_factory is None:
+                binding.coordinator.isolate_dispatch_unknown(
+                    running,
+                    reason="completed capability has no trusted artifact completion binding",
+                )
+                return NotebookExecutionDispatch(
+                    authorization_id=authorization.authorization_id,
+                    run_intent_id=authorization.run_intent_id,
+                    status="dispatch_unknown",
+                )
+            completion = binding.completion_factory(
+                result=result,
+                receipt=running,
+                binding=binding,
+            )
+            if not isinstance(completion, CapabilityExecutionCompletion):
+                raise _receipt_error("completion factory returned an invalid completion")
+            reconciled = binding.coordinator.reconcile(
+                running,
+                owner_id=binding.owner_id,
+                artifact_validation=completion.artifact_validation,
+                object_graph_ref=completion.object_graph_ref,
+                termination_proof=completion.termination_proof,
+                terminal_reconciliation=completion.terminal_reconciliation,
+            )
+            if reconciled.status not in {"consumed", "failed"}:
+                raise _receipt_error("CF4 reconciliation did not reach a terminal state")
+            terminal_status = "completed" if reconciled.status == "consumed" else "failed"
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status=terminal_status,
+                run_id=binding.intent.run_id,
+                attempt_id=reconciled.attempt_id,
+                receipt_ref=reconciled.content_digest,
+                completion_ref=completion.content_digest,
+                artifact_validation_ref=completion.artifact_validation.aggregate_ref,
+                object_graph_ref=completion.object_graph_ref,
+                assessment_ref=result.assessment_ref if terminal_status == "completed" else None,
+                output_bundle_ref=result.output_bundle_ref if terminal_status == "completed" else None,
+            )
         except Exception as error:
             try:
                 binding.coordinator.isolate_dispatch_unknown(
@@ -348,14 +490,7 @@ class AuthorizedCapabilityExecutionGateway:
                 run_intent_id=authorization.run_intent_id,
                 status="dispatch_unknown",
             )
-        return NotebookExecutionDispatch(
-            authorization_id=authorization.authorization_id,
-            run_intent_id=authorization.run_intent_id,
-            status="running",
-            run_id=binding.intent.run_id,
-            attempt_id=running.attempt_id,
-            receipt_ref=running.content_digest,
-        )
+        raise _receipt_error("unreachable capability dispatch state")
 
 
 class NotebookCapabilityBridge:
@@ -432,6 +567,7 @@ class NotebookCapabilityBridge:
 
 __all__ = [
     "AuthorizedCapabilityExecutionGateway",
+    "CapabilityExecutionCompletion",
     "NotebookCapabilityBridge",
     "NotebookCapabilityDispatchBinding",
     "NotebookCapabilityExecutionGateway",

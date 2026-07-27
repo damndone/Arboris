@@ -24,10 +24,68 @@ from workbench.contracts.agent.notebook_option import (
 )
 from workbench.lineage.upload_store import store_upload_bytes
 from workbench.http.notebook_routes import (
+    _execution_results_packet,
     _planning_agent,
     _supports_rerun_model_options,
     _trace,
 )
+
+
+def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
+    from types import SimpleNamespace
+
+    capability_execution = {
+        "dispatch_status": "completed",
+        "attempt_id": "attempt.custom",
+        "receipt_ref": "a" * 64,
+        "completion_ref": "b" * 64,
+        "artifact_validation_ref": "c" * 64,
+        "object_graph_ref": "d" * 64,
+        "assessment_ref": "e" * 64,
+        "output_bundle_ref": "f" * 64,
+        "ignored_payload": {"coefficient": 99},
+    }
+    service = SimpleNamespace(
+        store=SimpleNamespace(
+            read_option=lambda _notebook_id, _option_id: SimpleNamespace(
+                execution_results=(
+                    {
+                        "option_revision": 1,
+                        "run_id": "run.custom",
+                        "execution_status": "succeeded",
+                        "committed": True,
+                        "capability_execution": capability_execution,
+                    },
+                )
+            )
+        )
+    )
+
+    result = _execution_results_packet(
+        service,
+        "notebook.custom",
+        [SimpleNamespace(option_id="option.custom", option_revision=1)],
+    )
+
+    assert result == {
+        "option.custom": {
+            "option_id": "option.custom",
+            "option_revision": 1,
+            "run_id": "run.custom",
+            "execution_status": "succeeded",
+            "committed": True,
+            "capability_execution": {
+                "dispatch_status": "completed",
+                "attempt_id": "attempt.custom",
+                "receipt_ref": "a" * 64,
+                "completion_ref": "b" * 64,
+                "artifact_validation_ref": "c" * 64,
+                "object_graph_ref": "d" * 64,
+                "assessment_ref": "e" * 64,
+                "output_bundle_ref": "f" * 64,
+            },
+        }
+    }
 from workbench.app import configure_notebook_capability_bindings
 
 

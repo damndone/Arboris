@@ -317,7 +317,7 @@ def test_python_adapter_binding_prepares_a_digest_bound_offline_invocation(tmp_p
         AdapterSourceGenerator,
         PythonAdapterExecutionBinding,
     )
-    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
     from workbench.native_containment.policy import ContainmentPolicy
 
     implementation = _implementation()
@@ -389,6 +389,15 @@ def test_python_adapter_binding_prepares_a_digest_bound_offline_invocation(tmp_p
     )
     assert completed.returncode == 0
     assert (binding.result_path).read_text(encoding="utf-8") == '{"ok":true,"operation":"fit"}'
+    report = ContainmentReport(
+        attempt_id=request.attempt_id,
+        request_digest=request.content_digest,
+        status="completed",
+        reason_code="NATIVE_CONTAINMENT_COMPLETED",
+        assessment_ref="5" * 64,
+        output_bundle_ref="6" * 64,
+    )
+    assert binding.read_result(request, report) == {"ok": True, "operation": "fit"}
 
 
 def test_python_adapter_gateway_rejects_invalid_adapter_output_without_fallback(tmp_path):
