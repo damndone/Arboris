@@ -140,3 +140,14 @@ def test_validation_evidence_cannot_bind_to_an_unknown_case():
     )
     with pytest.raises(ValidationContractError, match="case"):
         bundle.append_evidence(evidence)
+
+
+def test_validation_case_rejects_an_unregistered_check_kind():
+    from workbench.capability_factory.validation_contract import ValidationCase, ValidationContractError
+
+    with pytest.raises(ValidationContractError, match="check kind"):
+        ValidationCase(
+            case_id="case.unknown-check",
+            fixture_ref="a" * 64,
+            check_kind="not-a-registered-check",
+        )

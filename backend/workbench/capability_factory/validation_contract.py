@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .contracts import ContractError, _content_digest, _digest, _positive_int, _text
+from .validation_protocols import CHECK_KINDS
 
 
 VALIDATION_TIERS = frozenset({"E0", "E1", "E2", "E3"})
@@ -29,6 +30,7 @@ class ValidationCase:
     case_id: str
     fixture_ref: str
     fixture_visibility: str = "author_visible"
+    check_kind: str = "known_truth"
 
     def __post_init__(self) -> None:
         try:
@@ -36,6 +38,9 @@ class ValidationCase:
             object.__setattr__(self, "fixture_ref", _digest(self.fixture_ref, "fixture_ref"))
             if self.fixture_visibility not in FIXTURE_VISIBILITIES:
                 raise ValidationContractError("unsupported fixture visibility")
+            object.__setattr__(self, "check_kind", _text(self.check_kind, "check_kind"))
+            if self.check_kind not in CHECK_KINDS:
+                raise ValidationContractError("unsupported validation check kind")
         except ContractError as error:
             if isinstance(error, ValidationContractError):
                 raise

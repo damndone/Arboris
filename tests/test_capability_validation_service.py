@@ -181,6 +181,48 @@ def test_service_does_not_pass_a_validation_bundle_with_missing_or_duplicate_cas
     assert duplicate_result.assessment.status == "inconclusive"
 
 
+def test_service_requires_validation_case_coverage_for_every_protocol_check():
+    from workbench.capability_factory.validation_contract import ValidationBundle, ValidationEvidence
+    from workbench.capability_factory.validation_protocols import ValidationProtocol
+    from workbench.capability_factory.validation_service import ValidationService
+
+    case = _case()
+    bundle = ValidationBundle(
+        bundle_id="validation.missing-check",
+        revision=1,
+        adapter_ref="e" * 64,
+        cases=(case,),
+        evidence=(
+            ValidationEvidence(
+                evidence_id="evidence.only-known-truth",
+                case_ref=case.content_digest,
+                tier="E1",
+                status="passed",
+                observed_ref="f" * 64,
+            ),
+        ),
+    )
+    protocol = ValidationProtocol(
+        protocol_id="protocol.requires-two-checks",
+        revision=1,
+        check_kinds=("known_truth", "boundary_error"),
+        evidence_floor="E1",
+        max_attempts=2,
+        seed_policy_ref="b" * 64,
+        threshold_policy_ref="c" * 64,
+        holdout_policy_ref="d" * 64,
+    )
+
+    result = ValidationService().assess(
+        sealed_bundle=_sealed(),
+        validation_bundle=bundle,
+        protocol=protocol,
+        producer_ref="2" * 64,
+    )
+
+    assert result.assessment.status == "inconclusive"
+
+
 def test_validation_runner_fails_closed_when_containment_is_unsupported():
     from workbench.capability_factory.validation_runner import ValidationRunner
     from workbench.native_containment.broker import ContainmentBroker

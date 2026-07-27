@@ -296,12 +296,17 @@ class ValidationRunner:
             evidence=tuple(evidence),
         )
         statuses = {item.status for item in evidence}
-        outcome = "failed" if "failed" in statuses else "inconclusive" if "inconclusive" in statuses else "passed"
+        if set(protocol.check_kinds) <= {item.check_kind for item in validation_bundle.cases}:
+            outcome = "failed" if "failed" in statuses else "inconclusive" if "inconclusive" in statuses else "passed"
+            reason_code = "VALIDATION_ORACLE_ASSESSED"
+        else:
+            outcome = "inconclusive"
+            reason_code = "VALIDATION_PROTOCOL_CASE_COVERAGE_INCOMPLETE"
         return ValidationHarnessResult(
             execution=execution,
             validation_bundle=enriched,
             outcome=outcome,
-            reason_code="VALIDATION_ORACLE_ASSESSED",
+            reason_code=reason_code,
         )
 
 

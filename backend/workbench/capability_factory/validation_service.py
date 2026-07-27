@@ -71,7 +71,12 @@ class ValidationService:
                     raise ValidationServiceError("independent evidence requires an independent oracle lineage")
                 if item.oracle_ref is None:
                     raise ValidationServiceError("independent evidence requires oracle_ref")
-                oracle_node = next(node for node in provenance.nodes if node.node_id == provenance.oracle_root)
+                oracle_node = next(
+                    (node for node in provenance.nodes if node.node_id == provenance.oracle_root),
+                    None,
+                )
+                if oracle_node is None:
+                    raise ValidationServiceError("oracle provenance root is missing")
                 if oracle_node.artifact_ref != item.oracle_ref:
                     raise ValidationServiceError("oracle provenance does not match evidence")
                 if item.tier == "E3" and item.fixture_visibility != "service_holdout":
@@ -84,8 +89,11 @@ class ValidationService:
             and len(set(evidence_case_refs)) == len(evidence_case_refs)
             and set(evidence_case_refs) == case_refs
         )
+        protocol_checks = set(protocol.check_kinds)
+        covered_checks = {item.check_kind for item in validation_bundle.cases}
+        protocol_coverage_is_complete = protocol_checks <= covered_checks
         statuses = {item.status for item in evidence}
-        if not evidence or not evidence_is_complete:
+        if not evidence or not evidence_is_complete or not protocol_coverage_is_complete:
             outcome = "inconclusive"
         elif "failed" in statuses:
             outcome = "failed"
