@@ -158,3 +158,35 @@ def test_experimental_executor_terminates_when_observed_memory_exceeds_budget(tm
     assert report.status == "failed"
     assert report.reason_code == "NATIVE_CONTAINMENT_MEMORY_LIMIT_OBSERVED"
     assert process.returncode == -9
+
+
+def test_experimental_executor_reuses_one_spawned_handle_for_the_same_attempt(tmp_path):
+    from workbench.native_containment.executor_darwin import DarwinExperimentalExecutor
+    from workbench.native_containment.host import CanaryResult
+
+    policy = _policy()
+    request = _request(policy)
+    canary = CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED")
+    spec = _spec(request, tmp_path)
+    processes = []
+
+    def process_factory(*_args, **_kwargs):
+        process = _FakeProcess()
+        processes.append(process)
+        return process
+
+    executor = DarwinExperimentalExecutor(
+        resolver=lambda _current: spec,
+        assessment_ref=canary.content_digest,
+        process_factory=process_factory,
+        process_snapshot=lambda _pid: None,
+    )
+
+    first = executor.spawn(request, policy, canary)
+    second = executor.spawn(request, policy, canary)
+    report = executor.collect(first)
+
+    assert first is second
+    assert first.handle_ref == second.handle_ref
+    assert len(processes) == 1
+    assert report.status == "completed"

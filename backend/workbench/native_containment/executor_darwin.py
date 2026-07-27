@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import signal
 import subprocess
+from threading import RLock
 import time
-from typing import Callable, Sequence
+from typing import Any, Callable
 
 from .contracts import ContainmentReport, ContainmentRequest
 from .host import CanaryResult
@@ -89,6 +90,36 @@ class DarwinExecutionSpec:
         if self.input_root == self.output_root:
             raise DarwinExecutionError("input and output roots must be distinct")
 
+    @property
+    def content_digest(self) -> str:
+        payload = "\x00".join(
+            (
+                self.input_bundle_ref,
+                self.output_namespace_ref,
+                str(self.executable),
+                self.executable_digest,
+                *self.arguments,
+                str(self.input_root),
+                str(self.output_root),
+            )
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class DarwinSpawnedProcess:
+    """One idempotently spawned process awaiting trusted supervisor collection."""
+
+    handle_ref: str
+    request: ContainmentRequest
+    policy: ContainmentPolicy
+    spec: DarwinExecutionSpec
+    process: Any
+    stdout_path: Path
+    stderr_path: Path
+    stdout_file: Any
+    stderr_file: Any
+
 
 Resolver = Callable[[ContainmentRequest], DarwinExecutionSpec | None]
 ProcessFactory = Callable[..., subprocess.Popen]
@@ -126,6 +157,12 @@ class DarwinExperimentalExecutor:
         self.process_snapshot = process_snapshot or self._default_process_snapshot
         self.sleeper = sleeper
         self.clock = clock
+        self._lock = RLock()
+        self._active: dict[str, DarwinSpawnedProcess] = {}
+        self._completed: dict[str, ContainmentReport] = {}
+        self._request_handles: dict[str, tuple[str, str]] = {}
+        self._spawning: set[str] = set()
+        self._collecting: set[str] = set()
 
     def __call__(
         self,
@@ -146,27 +183,55 @@ class DarwinExperimentalExecutor:
         if not Path(self.backend_executable).is_file() or not Path(self.backend_executable).is_absolute():
             return self._report(request, "unsupported", "NATIVE_CONTAINMENT_BACKEND_UNAVAILABLE")
         try:
-            spec = self.resolver(request)
-            if spec is None:
-                return self._report(request, "failed", "NATIVE_CONTAINMENT_EXECUTION_SPEC_UNAVAILABLE")
-            self._validate_binding(request, spec)
-            if self.assessment_ref is None:
-                return self._report(request, "failed", "NATIVE_CONTAINMENT_ASSESSMENT_UNBOUND")
-            return self._run(request, policy, canary, spec)
+            cached = self._completed_for_request(request)
+            if cached is not None:
+                return cached
+            spawned = self.spawn(request, policy, canary)
+            return self.collect(spawned)
         except DarwinExecutionError:
             return self._report(request, "failed", "NATIVE_CONTAINMENT_EXECUTION_SPEC_INVALID")
         except (OSError, subprocess.SubprocessError):
             return self._report(request, "failed", "NATIVE_CONTAINMENT_EXECUTOR_FAILED")
 
-    def _run(
+    def spawn(
         self,
         request: ContainmentRequest,
         policy: ContainmentPolicy,
         canary: CanaryResult,
-        spec: DarwinExecutionSpec,
-    ) -> ContainmentReport:
+    ) -> DarwinSpawnedProcess:
+        if not isinstance(request, ContainmentRequest):
+            raise DarwinExecutionError("request must be a ContainmentRequest")
+        if not isinstance(policy, ContainmentPolicy):
+            raise DarwinExecutionError("policy must be a ContainmentPolicy")
+        if not isinstance(canary, CanaryResult) or canary.status != "supported":
+            raise DarwinExecutionError("spawn requires a supported canary")
+        if policy.profile_id != self.PROFILE_ID or policy.resource_enforcement != "observed_memory":
+            raise DarwinExecutionError("experimental profile is required")
+        if self.assessment_ref is None:
+            raise DarwinExecutionError("host assessment is unbound")
+        spec = self.resolver(request)
+        if spec is None:
+            raise DarwinExecutionError("execution spec is unavailable")
+        self._validate_binding(request, spec)
         if hashlib.sha256(spec.executable.read_bytes()).hexdigest() != spec.executable_digest:
-            return self._report(request, "failed", "NATIVE_CONTAINMENT_EXECUTABLE_CHANGED")
+            raise DarwinExecutionError("executable changed")
+        request_ref = request.content_digest
+        spec_ref = spec.content_digest
+        with self._lock:
+            if request_ref in self._spawning:
+                raise DarwinExecutionError("execution spawn is already in progress")
+            prior = self._request_handles.get(request_ref)
+            if prior is not None:
+                if prior[1] != spec_ref:
+                    raise DarwinExecutionError("execution replay uses a different spec")
+                active = self._active.get(prior[0])
+                if active is not None:
+                    return active
+                if prior[0] in self._completed:
+                    raise DarwinExecutionError("execution attempt has already completed")
+            handle_ref = self._handle_ref(request, policy, spec)
+            self._request_handles[request_ref] = (handle_ref, spec_ref)
+            self._spawning.add(request_ref)
         harness = DarwinCanaryHarness(
             python_executable=str(spec.executable),
             backend_executable=self.backend_executable,
@@ -179,7 +244,9 @@ class DarwinExperimentalExecutor:
         stdout_path = spec.output_root / ".workbench-stdout"
         stderr_path = spec.output_root / ".workbench-stderr"
         argv = [self.backend_executable, "-p", profile, str(spec.executable), *spec.arguments]
-        with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
+        stdout_file = stdout_path.open("wb")
+        stderr_file = stderr_path.open("wb")
+        try:
             process = self.process_factory(
                 argv,
                 stdin=subprocess.DEVNULL,
@@ -190,23 +257,89 @@ class DarwinExperimentalExecutor:
                 preexec_fn=harness._preexec(policy),
                 close_fds=True,
             )
-            outcome = self._wait_for_process(process, policy)
-            if outcome is not None:
-                return self._report(request, "failed", outcome)
-
-        if stdout_path.stat().st_size > policy.budget.stdout_bytes or stderr_path.stat().st_size > policy.budget.stderr_bytes:
-            return self._report(request, "failed", "NATIVE_CONTAINMENT_OUTPUT_LIMIT_EXCEEDED")
-        if process.returncode != 0:
-            return self._report(request, "failed", "NATIVE_CONTAINMENT_CHILD_FAILED")
-        output_ref = self._output_bundle_digest(spec.output_root, policy.budget.stdout_bytes + policy.budget.stderr_bytes)
-        return ContainmentReport(
-            attempt_id=request.attempt_id,
-            request_digest=request.content_digest,
-            status="completed",
-            reason_code="NATIVE_CONTAINMENT_COMPLETED",
-            assessment_ref=self.assessment_ref,
-            output_bundle_ref=output_ref,
+        except BaseException:
+            stdout_file.close()
+            stderr_file.close()
+            with self._lock:
+                self._spawning.discard(request_ref)
+            raise
+        spawned = DarwinSpawnedProcess(
+            handle_ref=handle_ref,
+            request=request,
+            policy=policy,
+            spec=spec,
+            process=process,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            stdout_file=stdout_file,
+            stderr_file=stderr_file,
         )
+        with self._lock:
+            self._spawning.discard(request_ref)
+            self._active[handle_ref] = spawned
+        return spawned
+
+    def collect(self, spawned: DarwinSpawnedProcess) -> ContainmentReport:
+        if not isinstance(spawned, DarwinSpawnedProcess):
+            raise DarwinExecutionError("spawned process is invalid")
+        with self._lock:
+            cached = self._completed.get(spawned.handle_ref)
+            if cached is not None:
+                return cached
+            if spawned.handle_ref in self._collecting:
+                raise DarwinExecutionError("execution collection is already in progress")
+            self._collecting.add(spawned.handle_ref)
+        try:
+            try:
+                outcome = self._wait_for_process(spawned.process, spawned.policy)
+                if outcome is not None:
+                    report = self._report(spawned.request, "failed", outcome)
+                elif (
+                    spawned.stdout_path.stat().st_size > spawned.policy.budget.stdout_bytes
+                    or spawned.stderr_path.stat().st_size > spawned.policy.budget.stderr_bytes
+                ):
+                    report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_OUTPUT_LIMIT_EXCEEDED")
+                elif spawned.process.returncode != 0:
+                    report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_CHILD_FAILED")
+                else:
+                    output_ref = self._output_bundle_digest(
+                        spawned.spec.output_root,
+                        spawned.policy.budget.stdout_bytes + spawned.policy.budget.stderr_bytes,
+                    )
+                    report = ContainmentReport(
+                        attempt_id=spawned.request.attempt_id,
+                        request_digest=spawned.request.content_digest,
+                        status="completed",
+                        reason_code="NATIVE_CONTAINMENT_COMPLETED",
+                        assessment_ref=self.assessment_ref,
+                        output_bundle_ref=output_ref,
+                    )
+            except (OSError, subprocess.SubprocessError):
+                report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_EXECUTOR_FAILED")
+        except DarwinExecutionError:
+            report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_OUTPUT_INVALID")
+        finally:
+            spawned.stdout_file.close()
+            spawned.stderr_file.close()
+            with self._lock:
+                self._active.pop(spawned.handle_ref, None)
+                self._completed[spawned.handle_ref] = report
+                self._collecting.discard(spawned.handle_ref)
+        return report
+
+    def _completed_for_request(self, request: ContainmentRequest) -> ContainmentReport | None:
+        with self._lock:
+            prior = self._request_handles.get(request.content_digest)
+            if prior is None:
+                return None
+            return self._completed.get(prior[0])
+
+    @staticmethod
+    def _handle_ref(request: ContainmentRequest, policy: ContainmentPolicy, spec: DarwinExecutionSpec) -> str:
+        value = hashlib.sha256(
+            f"{request.content_digest}\x00{policy.content_digest}\x00{spec.content_digest}".encode("utf-8")
+        ).hexdigest()
+        return f"handle-{value}"
 
     def _wait_for_process(self, process: subprocess.Popen, policy: ContainmentPolicy) -> str | None:
         deadline = self.clock() + max(0.1, min(policy.budget.wall_millis / 1000, 86_400.0))
@@ -323,4 +456,9 @@ class DarwinExperimentalExecutor:
         return digest.hexdigest()
 
 
-__all__ = ["DarwinExecutionError", "DarwinExecutionSpec", "DarwinExperimentalExecutor"]
+__all__ = [
+    "DarwinExecutionError",
+    "DarwinExecutionSpec",
+    "DarwinExperimentalExecutor",
+    "DarwinSpawnedProcess",
+]
