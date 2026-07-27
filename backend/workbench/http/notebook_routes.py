@@ -41,6 +41,7 @@ from ..capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
     CapabilityBindingCatalogError,
 )
+from ..capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
 from ..capability_factory.execution_authorization import (
     ExecutionAuthorizationError,
     OptionExecutionAuthorization,
@@ -166,7 +167,7 @@ def _service(request: Request, project_root: str) -> tuple[Path, NotebookService
             message="The server-owned Notebook capability binding provider is invalid.",
         )
     gateway = getattr(request.app.state, "notebook_execution_gateway", None)
-    if gateway is not None and not callable(getattr(gateway, "dispatch", None)):
+    if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
         raise WorkbenchAPIError(
             status_code=500,
             code="NOTEBOOK_EXECUTION_GATEWAY_PROVIDER_INVALID",

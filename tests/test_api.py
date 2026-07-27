@@ -15,6 +15,23 @@ def _reset_event_manager():
     get_event_manager()._reset_for_testing()
 
 
+def test_app_execution_gateway_bootstrap_accepts_only_authorized_gateway():
+    from workbench.app import configure_notebook_execution_gateway
+    from workbench.capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
+
+    class UntrustedGateway:
+        def dispatch(self, **_kwargs):
+            return None
+
+    with pytest.raises(TypeError, match="AuthorizedCapabilityExecutionGateway"):
+        configure_notebook_execution_gateway(UntrustedGateway())
+
+    gateway = AuthorizedCapabilityExecutionGateway(binding_factory=lambda **_kwargs: None)
+    configure_notebook_execution_gateway(gateway)
+    assert app.state.notebook_execution_gateway is gateway
+    configure_notebook_execution_gateway(None)
+
+
 @pytest.fixture
 def completed_run(tmp_path: Path):
     import time

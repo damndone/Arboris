@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from .api_errors import register_error_handlers
 from .capability_factory.notebook_catalog import CapabilityBindingCatalog
+from .capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
 from .control_plane import control_plane_capability, validate_control_plane
 from .domain_memory.service import DomainMemoryService
 from .domain_memory.review_service import MemoryReviewService
@@ -63,8 +64,8 @@ def configure_notebook_execution_gateway(gateway: object | None) -> None:
     gateway or falls back to in-process execution.
     """
 
-    if gateway is not None and not callable(getattr(gateway, "dispatch", None)):
-        raise TypeError("gateway must expose a callable dispatch method or be None")
+    if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
+        raise TypeError("gateway must be an AuthorizedCapabilityExecutionGateway or None")
     app.state.notebook_execution_gateway = gateway
 
 
