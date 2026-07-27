@@ -209,6 +209,208 @@ def test_registered_capability_generates_a_materialize_only_v12_option(tmp_path:
     )
 
 
+def test_model_custom_proposal_is_canonicalized_to_server_binding_before_persistence(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.adapter",
+        binding,
+        planner_projection={
+            "key": "custom.adapter",
+            "label": "Verified custom adapter",
+            "model_type": "custom.adapter",
+            "notebook_proposal_adapters": ["model.custom"],
+            "params": [],
+            "artifact_types": {"custom.result": "custom_json"},
+        },
+    )
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.create_notebook(
+        title="Custom capability option",
+        created_by="user_1",
+        available_capabilities=["custom.adapter"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_custom",
+        decision_id="rec_custom",
+        batch_id="batch_custom",
+    )
+    proposal = TypedProposal(
+        proposal_id="proposal_custom",
+        operation_id="model.custom",
+        target={"dataset_source_id": "a" * 64},
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={
+            "operation": "fit",
+            "parameters": {"alpha": 0.1},
+            "consumer_slots": ["report_projection"],
+        },
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="the admitted custom adapter is the selected experimental path",
+                proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="custom.result",
+                        artifact_type="custom_json",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                option_id="opt_custom",
+                capability_id="custom.adapter",
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+
+    stored = service.store.read_option(notebook.notebook_id, revision.option_id)
+    persisted = stored.current_stored_revision.proposal
+    assert revision.risk_level == "high"
+    assert revision.execution_modes == (
+        "materialize_only",
+        "experimental_confirm_and_execute",
+    )
+    assert persisted.changes["capability_ref"] == binding.implementation_ref
+    assert persisted.changes["binding_ref"] == binding.content_digest
+    assert persisted.changes["operation"] == "fit"
+    assert persisted.changes["consumer_slots"] == ["report_projection"]
+
+
+def test_model_custom_materializes_a_dataset_bound_provenance_draft(tmp_path: Path) -> None:
+    from workbench.lineage.upload_store import store_upload_bytes
+    from workbench.contracts.agent.notebook_option import EvidenceRef
+
+    project = make_project(tmp_path, name="project.alpha")
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor\n1,2\n2,3\n",
+        filename="custom.csv",
+    )
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.adapter",
+        binding,
+        planner_projection={
+            "key": "custom.adapter",
+            "label": "Verified custom adapter",
+            "model_type": "custom.adapter",
+            "notebook_proposal_adapters": ["model.custom"],
+            "params": [],
+            "artifact_types": {"custom.result": "custom_json"},
+        },
+    )
+    service = NotebookService(project, capability_bindings=catalog)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "custom.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    context = service.compile_context(notebook.notebook_id)
+    service.store.append_evidence_pack(
+        notebook.notebook_id,
+        {
+            "evidence_pack_hash": "sha256:server-evidence",
+            "records": [
+                {
+                    "evidence_id": "evidence:opt_custom",
+                    "result_hash": "sha256:custom-result",
+                    "observations": {"columns": [{"name": "outcome"}, {"name": "predictor"}]},
+                }
+            ],
+        },
+    )
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_custom_materialize",
+        decision_id="rec_custom_materialize",
+        batch_id="batch_custom_materialize",
+    )
+    proposal = TypedProposal(
+        proposal_id="proposal_custom_materialize",
+        operation_id="model.custom",
+        target={"dataset_source_id": upload_sha},
+        preconditions={
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": context.context_id,
+            "owner_resolution": "dataset_projection",
+        },
+        changes={"operation": "fit", "parameters": {"alpha": 0.1}},
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            OptionDraft(
+                rank=1,
+                rationale="the experimental adapter is explicitly selected for this dataset",
+                proposal=proposal,
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="custom.result",
+                        artifact_type="custom_json",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                option_id="opt_custom_materialize",
+                capability_id="custom.adapter",
+                evidence_refs=(
+                    EvidenceRef(
+                        evidence_id="evidence:opt_custom",
+                        result_hash="sha256:custom-result",
+                        source_refs=(f"dataset_profile:{upload_sha}",),
+                    ),
+                ),
+                comparative_claims=("evidence:opt_custom supports the adapter path",),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+    service.record_decision(notebook.notebook_id, revision.option_id, decision="selected", actor="ui")
+
+    result = service.materialize_option(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    model = next(node for node in result.draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert model["model_type"] == "custom"
+    assert model["params"]["capability_ref"] == binding.implementation_ref
+    assert model["params"]["binding_ref"] == binding.content_digest
+    assert result.draft.draft["notebook_provenance"]["capability_resolution_binding_ref"] == binding.content_digest
+
+
 def test_catalog_rejects_mismatched_or_unbounded_planner_projection(tmp_path: Path) -> None:
     del tmp_path
     binding, verifier = _binding_and_verifier()
@@ -300,6 +502,30 @@ def test_catalog_rejects_mismatched_or_unbounded_planner_projection(tmp_path: Pa
     )
     with pytest.raises(ValueError, match="notebook_option_planner consumer"):
         consumer_catalog.planner_projection("custom.consumer_restricted")
+
+
+def test_catalog_publishes_custom_adapter_without_authority_internals(tmp_path: Path) -> None:
+    del tmp_path
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.adapter",
+        binding,
+        planner_projection={
+            "key": "custom.adapter",
+            "label": "Verified custom adapter",
+            "model_type": "custom.adapter",
+            "notebook_proposal_adapters": ["model.custom"],
+            "params": [],
+            "artifact_types": {"custom.result": "custom_json"},
+        },
+    )
+
+    projection = catalog.planner_projection("custom.adapter")
+    assert projection is not None
+    assert projection["notebook_proposal_adapters"] == ["model.custom"]
+    assert "entrypoint_ref" not in projection
+    assert "binding_ref" not in projection
 
 
 def test_custom_projection_artifact_types_reach_service_contract(tmp_path: Path) -> None:

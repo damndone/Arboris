@@ -39,6 +39,7 @@ class DarwinExecutionSpec:
     arguments: tuple[str, ...]
     input_root: Path
     output_root: Path
+    read_roots: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.input_bundle_ref, str) or len(self.input_bundle_ref) != 64:
@@ -89,6 +90,26 @@ class DarwinExecutionSpec:
                 current = current.parent
         if self.input_root == self.output_root:
             raise DarwinExecutionError("input and output roots must be distinct")
+        read_roots = tuple(self.read_roots)
+        if len(read_roots) > 32:
+            raise DarwinExecutionError("read roots exceed the bounded limit")
+        normalized_read_roots: list[Path] = []
+        for root in read_roots:
+            if not isinstance(root, Path) or not root.is_absolute():
+                raise DarwinExecutionError("read roots must be absolute")
+            if root.is_symlink() or not root.is_dir():
+                raise DarwinExecutionError("read roots must be regular directories")
+            current = root
+            while True:
+                if current.is_symlink():
+                    raise DarwinExecutionError("read root contains a symlink ancestor")
+                if current.parent == current:
+                    break
+                current = current.parent
+            normalized_read_roots.append(root.resolve())
+        if len(set(normalized_read_roots)) != len(normalized_read_roots):
+            raise DarwinExecutionError("read roots must be unique")
+        object.__setattr__(self, "read_roots", tuple(normalized_read_roots))
 
     @property
     def content_digest(self) -> str:
@@ -101,6 +122,7 @@ class DarwinExecutionSpec:
                 *self.arguments,
                 str(self.input_root),
                 str(self.output_root),
+                *(str(root) for root in self.read_roots),
             )
         ).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
@@ -240,6 +262,7 @@ class DarwinExperimentalExecutor:
             spec.output_root,
             input_root=spec.input_root,
             executable_parent=spec.executable.parent,
+            read_roots=spec.read_roots,
         )
         stdout_path = spec.output_root / ".workbench-stdout"
         stderr_path = spec.output_root / ".workbench-stderr"
@@ -289,6 +312,11 @@ class DarwinExperimentalExecutor:
             if spawned.handle_ref in self._collecting:
                 raise DarwinExecutionError("execution collection is already in progress")
             self._collecting.add(spawned.handle_ref)
+        report = self._report(
+            spawned.request,
+            "failed",
+            "NATIVE_CONTAINMENT_EXECUTOR_FAILED",
+        )
         try:
             try:
                 outcome = self._wait_for_process(spawned.process, spawned.policy)
@@ -316,6 +344,8 @@ class DarwinExperimentalExecutor:
                     )
             except (OSError, subprocess.SubprocessError):
                 report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_EXECUTOR_FAILED")
+            except Exception:
+                report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_EXECUTOR_FAILED")
         except DarwinExecutionError:
             report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_OUTPUT_INVALID")
         finally:
@@ -325,6 +355,28 @@ class DarwinExperimentalExecutor:
                 self._active.pop(spawned.handle_ref, None)
                 self._completed[spawned.handle_ref] = report
                 self._collecting.discard(spawned.handle_ref)
+        return report
+
+    def terminate(self, spawned: DarwinSpawnedProcess) -> ContainmentReport:
+        """Kill one active process tree and memoize the terminal outcome."""
+
+        if not isinstance(spawned, DarwinSpawnedProcess):
+            raise DarwinExecutionError("spawned process is invalid")
+        with self._lock:
+            cached = self._completed.get(spawned.handle_ref)
+            if cached is not None:
+                return cached
+            active = self._active.get(spawned.handle_ref)
+            if active is None:
+                raise DarwinExecutionError("spawned process is not active")
+        self._kill_process(spawned.process)
+        report = self._report(spawned.request, "failed", "NATIVE_CONTAINMENT_TERMINATED")
+        spawned.stdout_file.close()
+        spawned.stderr_file.close()
+        with self._lock:
+            self._active.pop(spawned.handle_ref, None)
+            self._completed[spawned.handle_ref] = report
+            self._collecting.discard(spawned.handle_ref)
         return report
 
     def _completed_for_request(self, request: ContainmentRequest) -> ContainmentReport | None:

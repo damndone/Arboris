@@ -563,9 +563,11 @@ class NotebookOptionRevisionV12(NotebookOptionRevisionV11):
     """NotebookOptionRevision@1.2 for an admitted capability binding.
 
     ``materialize_only`` remains the default. A server may additionally declare
-    ``confirm_and_execute`` for a low-risk option, but that declaration is only a
-    capability of the option contract: it is not an execution grant. The separate
-    server-owned authorization receipt and existing Run gates remain mandatory.
+    ``confirm_and_execute`` for a low-risk option or the explicitly experimental
+    ``experimental_confirm_and_execute`` for the high-risk ``model.custom``
+    option. Either declaration is only a capability of the option contract: it
+    is not an execution grant. The separate server-owned authorization receipt,
+    containment profile, and existing Run gates remain mandatory.
     """
 
     capability_resolution_binding_ref: str | None = None
@@ -597,11 +599,19 @@ class NotebookOptionRevisionV12(NotebookOptionRevisionV11):
             not modes
             or modes[0] != "materialize_only"
             or len(set(modes)) != len(modes)
-            or any(mode not in {"materialize_only", "confirm_and_execute"} for mode in modes)
+            or any(
+                mode
+                not in {
+                    "materialize_only",
+                    "confirm_and_execute",
+                    "experimental_confirm_and_execute",
+                }
+                for mode in modes
+            )
         ):
             raise NotebookContractError(
                 "execution_modes must start with materialize_only and may optionally "
-                "include confirm_and_execute"
+                "include confirm_and_execute or experimental_confirm_and_execute"
             )
         object.__setattr__(self, "execution_modes", modes)
         object.__setattr__(

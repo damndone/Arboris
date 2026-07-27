@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from workbench.capability_factory.notebook_bridge import NotebookCapabilityBridge
+import pytest
 
-from test_capability_execution_receipt import _authorization
+from workbench.capability_factory.notebook_bridge import (
+    AuthorizedCapabilityExecutionGateway,
+    NotebookCapabilityBridge,
+    NotebookCapabilityDispatchBinding,
+)
+
+from test_capability_execution_receipt import _authorization, _expectations, _fixture
 from test_capability_custom_dispatcher import _intent_and_records
 from datetime import datetime, timezone
 
@@ -28,3 +34,121 @@ def test_notebook_bridge_prepares_one_exact_intent_without_run_side_effect(tmp_p
     assert prepared.intent.run_id == "run.bridge"
     assert prepared.intent.content_digest == prepared.intent.content_digest
     assert list(tmp_path.iterdir()) == []
+
+
+def test_authorized_notebook_gateway_runs_the_single_cf4_lifecycle(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    intent, authorization, plan, coordinator, _control_store, _auth_store, _supervisor, now = _fixture(
+        tmp_path,
+        operation_id="model.custom",
+        execution_mode="experimental_confirm_and_execute",
+        risk_level="high",
+    )
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    canary = CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED")
+    calls: list[str] = []
+
+    class StubExecutor:
+        def spawn(self, *_args):
+            calls.append("spawn")
+            return SimpleNamespace(handle_ref="handle.notebook.gateway")
+
+        def terminate(self, _spawned):
+            calls.append("terminate")
+
+        def __call__(self, request, _policy, _canary):
+            calls.append("collect")
+            return ContainmentReport(
+                attempt_id=request.attempt_id,
+                request_digest=request.content_digest,
+                status="completed",
+                reason_code="NATIVE_CONTAINMENT_COMPLETED",
+                assessment_ref="1" * 64,
+                output_bundle_ref="2" * 64,
+            )
+
+    executor = StubExecutor()
+    binding = NotebookCapabilityDispatchBinding(
+        intent=intent,
+        plan=plan,
+        policy=policy,
+        canary=canary,
+        expectations=_expectations(intent, authorization.authorization_id),
+        request_factory=lambda attempt_id: ContainmentRequest(
+            request_id="request.notebook.gateway",
+            attempt_id=attempt_id,
+            intent_digest=intent.content_digest,
+            input_bundle_ref=intent.bundle_ref,
+            output_namespace_ref="3" * 64,
+            policy_digest=policy.content_digest,
+            harness_digest="4" * 64,
+        ),
+        coordinator=coordinator,
+        broker=ContainmentBroker(host_assessor=lambda _policy: canary, executor=executor),
+        executor=executor,
+        owner_id="supervisor.notebook.gateway",
+        lease_seconds=60,
+        attempt_id="attempt.notebook.gateway",
+        lease_epoch=1,
+        executor_idempotency_key="executor.notebook.gateway",
+        reservation_id="reservation.notebook.gateway",
+        reservation_idempotency_key="reservation-notebook-gateway-idem",
+        now=now,
+    )
+    results = []
+    gateway = AuthorizedCapabilityExecutionGateway(
+        binding_factory=lambda **_kwargs: binding,
+        result_sink=results.append,
+    )
+
+    dispatch = gateway.dispatch(
+        notebook_id="notebook.gateway",
+        option_id="option.gateway",
+        authorization=authorization,
+        materialization={},
+        draft={},
+        context=None,
+    )
+
+    assert dispatch.status == "running"
+    assert dispatch.run_id == intent.run_id
+    assert dispatch.attempt_id == "attempt.notebook.gateway"
+    assert dispatch.receipt_ref
+    assert calls == ["spawn", "collect"]
+    assert results and results[0].status == "completed"
+
+
+def test_authorized_notebook_gateway_rejects_non_experimental_authorization(tmp_path) -> None:
+    _intent, authorization, _plan, _coordinator, _control_store, _auth_store, _supervisor, _now = _fixture(tmp_path)
+    gateway = AuthorizedCapabilityExecutionGateway(
+        binding_factory=lambda **_kwargs: pytest.fail("binding must not be resolved")
+    )
+
+    with pytest.raises(ValueError, match="experimental_confirm_and_execute"):
+        gateway.dispatch(
+            notebook_id="notebook.gateway",
+            option_id="option.gateway",
+            authorization=authorization,
+            materialization={},
+            draft={},
+            context=None,
+        )

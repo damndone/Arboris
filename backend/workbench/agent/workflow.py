@@ -453,14 +453,24 @@ def compile_workflow(
 def execute_workflow(
     project_root: Path | str,
     draft: WorkflowDraft,
+    *,
+    custom_step_executor=None,
 ) -> WorkflowExecutionState:
-    """Execute a compiled workflow plan using native Workbench services."""
+    """Execute a compiled workflow plan using native Workbench services.
+
+    A custom capability gateway is opt-in and must already be bound to the
+    existing authorization and containment lifecycle.
+    """
 
     from .workflow_runtime import build_workflow_step_executor
 
     return WorkflowExecutor(project_root).execute(
         draft,
-        build_workflow_step_executor(project_root, draft),
+        build_workflow_step_executor(
+            project_root,
+            draft,
+            custom_step_executor=custom_step_executor,
+        ),
     )
 
 

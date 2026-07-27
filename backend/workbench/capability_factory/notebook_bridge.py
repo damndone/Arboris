@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Protocol
+from typing import Any, Callable, Literal, Mapping, Protocol
 
 from .dispatch import PreparedRunIntent
 from .execution_authorization import OptionExecutionAuthorization
@@ -116,6 +116,248 @@ class NotebookCapabilityExecutionGateway(Protocol):
         """Reserve/dispatch one already-authorized capability execution."""
 
 
+@dataclass(frozen=True, slots=True)
+class NotebookCapabilityDispatchBinding:
+    """Trusted per-attempt inputs for the explicit CF4 gateway.
+
+    The browser, Agent, and Notebook option payload never construct this
+    object.  A server-owned factory resolves the exact binding, policy,
+    canary, request, and coordinator from the already-confirmed authorization.
+    """
+
+    intent: PreparedRunIntent
+    plan: Any
+    policy: Any
+    canary: Any
+    expectations: tuple[Any, ...]
+    request_factory: Callable[[str], Any]
+    coordinator: Any
+    broker: Any
+    executor: Any
+    owner_id: str
+    lease_seconds: int
+    attempt_id: str
+    lease_epoch: int
+    executor_idempotency_key: str
+    reservation_id: str
+    reservation_idempotency_key: str
+    now: Any = None
+
+    def __post_init__(self) -> None:
+        from ..native_containment.broker import ContainmentBroker
+        from ..native_containment.contracts import ContainmentRequest
+        from ..native_containment.policy import ContainmentPolicy
+        from .custom_dispatcher import CustomDispatchPlan
+        from .execution_receipt import CapabilityDispatchCoordinator
+        from ..native_containment.host import CanaryResult
+
+        if not isinstance(self.intent, PreparedRunIntent):
+            raise _receipt_error("dispatch binding intent is invalid")
+        if not isinstance(self.plan, CustomDispatchPlan):
+            raise _receipt_error("dispatch binding plan is invalid")
+        if self.plan.intent_digest != self.intent.content_digest:
+            raise _receipt_error("dispatch binding plan does not match intent")
+        if not isinstance(self.policy, ContainmentPolicy):
+            raise _receipt_error("dispatch binding policy is invalid")
+        if not isinstance(self.canary, CanaryResult):
+            raise _receipt_error("dispatch binding canary is invalid")
+        if not isinstance(self.expectations, (tuple, list)) or not self.expectations:
+            raise _receipt_error("dispatch binding control expectations are required")
+        if not callable(self.request_factory):
+            raise _receipt_error("dispatch binding request factory is invalid")
+        if not isinstance(self.coordinator, CapabilityDispatchCoordinator):
+            raise _receipt_error("dispatch binding coordinator is invalid")
+        if not isinstance(self.broker, ContainmentBroker):
+            raise _receipt_error("dispatch binding broker is invalid")
+        if self.broker.executor is not self.executor:
+            raise _receipt_error("dispatch binding broker and executor must be identical")
+        if not callable(getattr(self.executor, "spawn", None)) or not callable(
+            getattr(self.executor, "terminate", None)
+        ):
+            raise _receipt_error("dispatch binding executor lacks lifecycle methods")
+        if not isinstance(self.lease_seconds, int) or self.lease_seconds < 1:
+            raise _receipt_error("dispatch binding lease_seconds is invalid")
+        if not isinstance(self.lease_epoch, int) or self.lease_epoch < 1:
+            raise _receipt_error("dispatch binding lease_epoch is invalid")
+        for field in (
+            "owner_id",
+            "attempt_id",
+            "executor_idempotency_key",
+            "reservation_id",
+            "reservation_idempotency_key",
+        ):
+            _identifier(getattr(self, field), field)
+
+
+class AuthorizedCapabilityExecutionGateway:
+    """Explicit Notebook gateway for the existing Proposal/Risk/CF4 path.
+
+    This class is not installed as a default app gateway.  A trusted server
+    configuration must provide ``binding_factory``; without it Notebook keeps
+    the existing unavailable/fail-closed behavior.
+    """
+
+    def __init__(
+        self,
+        *,
+        binding_factory: Callable[..., NotebookCapabilityDispatchBinding],
+        result_sink: Callable[[Any], None] | None = None,
+    ) -> None:
+        if not callable(binding_factory):
+            raise TypeError("binding_factory must be callable")
+        if result_sink is not None and not callable(result_sink):
+            raise TypeError("result_sink must be callable")
+        self.binding_factory = binding_factory
+        self.result_sink = result_sink
+
+    def dispatch(
+        self,
+        *,
+        notebook_id: str,
+        option_id: str,
+        authorization: OptionExecutionAuthorization,
+        materialization: Any,
+        draft: Mapping[str, Any],
+        context: Any,
+    ) -> NotebookExecutionDispatch:
+        from .custom_dispatcher import CustomCapabilityDispatcher
+        from .execution_receipt import CapabilityDispatchReceipt
+
+        if not isinstance(authorization, OptionExecutionAuthorization):
+            raise _receipt_error("execution gateway authorization is invalid")
+        # This gateway is the only local experimental execution seam.  Keep
+        # the high-risk opt-in and operation identity at the last trusted
+        # boundary as well as in NotebookService, so a future server wiring
+        # mistake cannot route a standard/low-risk authorization here.
+        if (
+            authorization.operation_id != "model.custom"
+            or authorization.risk_level != "high"
+            or authorization.execution_mode != "experimental_confirm_and_execute"
+        ):
+            raise _receipt_error(
+                "experimental_confirm_and_execute is required for model.custom execution"
+            )
+        binding = self.binding_factory(
+            notebook_id=notebook_id,
+            option_id=option_id,
+            authorization=authorization,
+            materialization=materialization,
+            draft=draft,
+            context=context,
+        )
+        if not isinstance(binding, NotebookCapabilityDispatchBinding):
+            raise _receipt_error("execution gateway binding factory returned an invalid binding")
+        if binding.intent.intent_id != authorization.run_intent_id:
+            raise _receipt_error("execution binding intent does not match authorization")
+        if binding.intent.draft_hash != authorization.draft_hash:
+            raise _receipt_error("execution binding Draft does not match authorization")
+        if binding.intent.binding_ref != authorization.capability_resolution_binding_ref:
+            raise _receipt_error("execution binding resolution does not match authorization")
+        if binding.policy.profile_id != "darwin-seatbelt-experimental-v1":
+            raise _receipt_error(
+                "model.custom execution requires the darwin experimental containment profile"
+            )
+        if binding.policy.resource_enforcement != "observed_memory":
+            raise _receipt_error(
+                "model.custom execution requires observed-memory experimental enforcement"
+            )
+
+        if binding.canary.status != "supported":
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="unsupported",
+            )
+        request = binding.request_factory(binding.attempt_id)
+        from ..native_containment.contracts import ContainmentRequest
+
+        if not isinstance(request, ContainmentRequest):
+            raise _receipt_error("execution binding request factory returned an invalid request")
+        if request.attempt_id != binding.attempt_id:
+            raise _receipt_error("execution binding request attempt does not match reservation")
+        reserved = binding.coordinator.reserve(
+            authorization=authorization,
+            intent=binding.intent,
+            plan=binding.plan,
+            expectations=binding.expectations,
+            owner_id=binding.owner_id,
+            lease_seconds=binding.lease_seconds,
+            attempt_id=binding.attempt_id,
+            lease_epoch=binding.lease_epoch,
+            executor_idempotency_key=binding.executor_idempotency_key,
+            reservation_id=binding.reservation_id,
+            reservation_idempotency_key=binding.reservation_idempotency_key,
+            now=binding.now,
+        )
+        if not isinstance(reserved, CapabilityDispatchReceipt):
+            raise _receipt_error("execution coordinator returned an invalid reservation")
+        running = binding.coordinator.spawn_and_acknowledge(
+            receipt=reserved,
+            owner_id=binding.owner_id,
+            executor=binding.executor,
+            request=request,
+            policy=binding.policy,
+            canary=binding.canary,
+        )
+        if running.status == "dispatch_unknown":
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="dispatch_unknown",
+            )
+        if running.status != "running":
+            raise _receipt_error("execution coordinator did not acknowledge a running attempt")
+        try:
+            result = CustomCapabilityDispatcher.dispatch(
+                intent=binding.intent,
+                plan=binding.plan,
+                receipt=running,
+                request=request,
+                policy=binding.policy,
+                broker=binding.broker,
+            )
+            if self.result_sink is not None:
+                self.result_sink(result)
+            if result.status != "completed":
+                # A typed child failure is not a successful Notebook result,
+                # and this gateway does not have the server-owned artifact
+                # aggregate needed to close the CF4 journals as ``failed``.
+                # Fence the unique attempt instead of reporting it as still
+                # running or silently inventing an artifact validation.
+                binding.coordinator.isolate_dispatch_unknown(
+                    running,
+                    reason="capability execution ended before artifact reconciliation",
+                )
+                return NotebookExecutionDispatch(
+                    authorization_id=authorization.authorization_id,
+                    run_intent_id=authorization.run_intent_id,
+                    status="dispatch_unknown",
+                )
+        except Exception as error:
+            try:
+                binding.coordinator.isolate_dispatch_unknown(
+                    running,
+                    reason="trusted capability result handoff failed",
+                )
+            except Exception as isolation_error:
+                raise _receipt_error(
+                    "capability result failed and dispatch_unknown isolation failed"
+                ) from isolation_error
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="dispatch_unknown",
+            )
+        return NotebookExecutionDispatch(
+            authorization_id=authorization.authorization_id,
+            run_intent_id=authorization.run_intent_id,
+            status="running",
+            run_id=binding.intent.run_id,
+            attempt_id=running.attempt_id,
+            receipt_ref=running.content_digest,
+        )
+
+
 class NotebookCapabilityBridge:
     """Construct a deterministic intent without creating a Run or directory."""
 
@@ -189,7 +431,9 @@ class NotebookCapabilityBridge:
 
 
 __all__ = [
+    "AuthorizedCapabilityExecutionGateway",
     "NotebookCapabilityBridge",
+    "NotebookCapabilityDispatchBinding",
     "NotebookCapabilityExecutionGateway",
     "NotebookExecutionDispatch",
     "PreparedCapabilityRun",

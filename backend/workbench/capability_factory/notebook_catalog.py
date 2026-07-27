@@ -39,7 +39,9 @@ _PLANNER_PROJECTION_FIELDS = frozenset(
         "artifact_types",
     }
 )
-_PLANNER_PROJECTION_ADAPTERS = frozenset({"model.genesis", "model.rerun"})
+_PLANNER_PROJECTION_ADAPTERS = frozenset(
+    {"model.custom", "model.genesis", "model.rerun"}
+)
 _PLANNER_PARAM_FIELDS = frozenset(
     {"key", "kind", "label", "role", "required", "options", "value"}
 )

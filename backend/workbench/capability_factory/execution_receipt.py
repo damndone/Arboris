@@ -776,6 +776,73 @@ class CapabilityDispatchCoordinator:
             plan_digest=receipt.plan_digest,
         )
 
+    def spawn_and_acknowledge(
+        self,
+        *,
+        receipt: CapabilityDispatchReceipt,
+        owner_id: str,
+        executor: Any,
+        request: Any,
+        policy: Any,
+        canary: Any,
+    ) -> CapabilityDispatchReceipt:
+        """Consume one reserved attempt through a trusted executor handle.
+
+        The executor owns process creation and returns a handle identity.  A
+        receipt is advanced to ``running`` only after that handle is durably
+        recorded.  Any spawn/ack uncertainty is isolated as
+        ``dispatch_unknown``; this method never retries by creating another
+        process.
+        """
+
+        from ..native_containment.contracts import ContainmentRequest
+        from ..native_containment.host import CanaryResult
+        from ..native_containment.policy import ContainmentPolicy
+
+        authorization, attempt = self._assert_receipt_binding(receipt)
+        if receipt.status != "dispatch_reserved":
+            raise ExecutionReceiptError("spawn_and_acknowledge requires a dispatch_reserved receipt")
+        if not isinstance(request, ContainmentRequest):
+            raise ExecutionReceiptError("containment request is invalid")
+        if not isinstance(policy, ContainmentPolicy):
+            raise ExecutionReceiptError("containment policy is invalid")
+        if not isinstance(canary, CanaryResult):
+            raise ExecutionReceiptError("containment canary is invalid")
+        spawn = getattr(executor, "spawn", None)
+        terminate = getattr(executor, "terminate", None)
+        if not callable(spawn) or not callable(terminate):
+            raise ExecutionReceiptError("trusted executor lacks spawn/terminate lifecycle")
+        spawned = None
+        try:
+            spawned = spawn(request, policy, canary)
+            process_handle_ref = _identifier(getattr(spawned, "handle_ref"), "process_handle_ref")
+            return self.acknowledge_executor(
+                receipt,
+                owner_id=owner_id,
+                process_handle_ref=process_handle_ref,
+            )
+        except Exception as error:
+            if spawned is not None:
+                try:
+                    terminate(spawned)
+                except Exception:
+                    pass
+            self._mark_dispatch_unknown(
+                authorization,
+                attempt,
+                reason="trusted executor spawn or acknowledgement was uncertain",
+            )
+            return CapabilityDispatchReceipt(
+                authorization_id=receipt.authorization_id,
+                authorization_payload_digest=receipt.authorization_payload_digest,
+                intent_digest=receipt.intent_digest,
+                reservation_id=receipt.reservation_id,
+                attempt_id=receipt.attempt_id,
+                lease_epoch=receipt.lease_epoch,
+                status="dispatch_unknown",
+                plan_digest=receipt.plan_digest,
+            )
+
     def take_over_lease(
         self,
         receipt: CapabilityDispatchReceipt,
@@ -919,6 +986,42 @@ class CapabilityDispatchCoordinator:
             )
         except Exception as error:
             raise ExecutionReceiptError("dispatch_unknown isolation could not be durably recorded") from error
+
+    def isolate_dispatch_unknown(
+        self,
+        receipt: CapabilityDispatchReceipt,
+        *,
+        reason: str,
+    ) -> CapabilityDispatchReceipt:
+        """Fence one running dispatch after a post-spawn handoff failure.
+
+        This is intentionally not a retry or a terminal success path.  It is
+        the only public escape hatch for a trusted gateway that has lost
+        certainty after the unique reservation crossed the spawn boundary.
+        The journals are fenced together, and the returned receipt cannot be
+        used to start another process.
+        """
+
+        authorization, attempt = self._assert_receipt_binding(receipt)
+        if receipt.status != "running":
+            raise ExecutionReceiptError(
+                "dispatch_unknown isolation requires a running receipt"
+            )
+        self._mark_dispatch_unknown(
+            authorization,
+            attempt,
+            reason=_text(reason, "reason", maximum=256),
+        )
+        return CapabilityDispatchReceipt(
+            authorization_id=receipt.authorization_id,
+            authorization_payload_digest=receipt.authorization_payload_digest,
+            intent_digest=receipt.intent_digest,
+            reservation_id=receipt.reservation_id,
+            attempt_id=receipt.attempt_id,
+            lease_epoch=receipt.lease_epoch,
+            status="dispatch_unknown",
+            plan_digest=receipt.plan_digest,
+        )
 
     def reconcile(
         self,

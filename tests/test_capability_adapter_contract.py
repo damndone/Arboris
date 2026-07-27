@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -306,3 +309,174 @@ def test_adapter_contract_never_grants_execution_capability():
     )
 
     assert adapter.execution_allowed is False
+
+
+def test_python_adapter_binding_prepares_a_digest_bound_offline_invocation(tmp_path):
+    from workbench.capability_factory.adapter_contract import (
+        AdapterContract,
+        AdapterSourceGenerator,
+        PythonAdapterExecutionBinding,
+    )
+    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    implementation = _implementation()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: (
+            "def adapter(request):\n"
+            "    return {'operation': request['operation'], 'ok': True}\n"
+        ),
+        output_root=tmp_path / "source",
+    )
+    adapter = AdapterContract.from_implementation(
+        implementation=implementation,
+        adapter_id="adapter.runtime",
+        revision=1,
+        entrypoint_ref=source.entrypoint_ref,
+        operations=("fit",),
+        consumer_support=_consumer_support(),
+    )
+    binding = PythonAdapterExecutionBinding(
+        bundle_ref="1" * 64,
+        output_namespace_ref="2" * 64,
+        adapter=adapter,
+        source_artifact=source,
+        operation="fit",
+        payload={"value": 3},
+        input_root=tmp_path / "input",
+        output_root=tmp_path / "output",
+        interpreter=Path(sys.executable),
+    )
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    request = ContainmentRequest(
+        request_id="request.adapter.runtime",
+        attempt_id="attempt.adapter.runtime",
+        intent_digest="3" * 64,
+        input_bundle_ref=binding.bundle_ref,
+        output_namespace_ref=binding.output_namespace_ref,
+        policy_digest=policy.content_digest,
+        harness_digest="4" * 64,
+    )
+
+    spec = binding.prepare(request)
+
+    assert spec.input_root == binding.input_root
+    assert spec.output_root == binding.output_root
+    assert spec.executable == Path(sys.executable).resolve()
+    assert spec.arguments[0:2] == ("-I", "-c")
+    assert source.source_ref in spec.arguments[3]
+    assert (binding.input_root / f"{source.source_ref}.py").read_bytes() == source.path.read_bytes()
+    assert '"operation":"fit"' in (binding.input_root / "request.json").read_text()
+    completed = subprocess.run(
+        [str(spec.executable), *spec.arguments],
+        cwd=spec.output_root,
+        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert (binding.result_path).read_text(encoding="utf-8") == '{"ok":true,"operation":"fit"}'
+
+
+def test_python_adapter_gateway_rejects_invalid_adapter_output_without_fallback(tmp_path):
+    from types import SimpleNamespace
+
+    from workbench.capability_factory.adapter_contract import (
+        AdapterContract,
+        AdapterSourceGenerator,
+        PythonAdapterExecutionBinding,
+        PythonAdapterExecutionGateway,
+    )
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    implementation = _implementation()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: "def adapter(request):\n    return {'ok': True}\n",
+        output_root=tmp_path / "source",
+    )
+    adapter = AdapterContract.from_implementation(
+        implementation=implementation,
+        adapter_id="adapter.gateway",
+        revision=1,
+        entrypoint_ref=source.entrypoint_ref,
+        operations=("fit",),
+        consumer_support=_consumer_support(),
+    )
+    binding = PythonAdapterExecutionBinding(
+        bundle_ref="5" * 64,
+        output_namespace_ref="6" * 64,
+        adapter=adapter,
+        source_artifact=source,
+        operation="fit",
+        payload={},
+        input_root=tmp_path / "input",
+        output_root=tmp_path / "output",
+        interpreter=Path(sys.executable),
+    )
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    request = ContainmentRequest(
+        request_id="request.adapter.gateway",
+        attempt_id="attempt.adapter.gateway",
+        intent_digest="7" * 64,
+        input_bundle_ref=binding.bundle_ref,
+        output_namespace_ref=binding.output_namespace_ref,
+        policy_digest=policy.content_digest,
+        harness_digest="8" * 64,
+    )
+    canary = CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED")
+    binding.prepare(request)
+
+    class StubExecutor:
+        def __call__(self, current_request, _policy, _canary):
+            binding.result_path.write_text("[]", encoding="utf-8")
+            return ContainmentReport(
+                attempt_id=current_request.attempt_id,
+                request_digest=current_request.content_digest,
+                status="completed",
+                reason_code="NATIVE_CONTAINMENT_COMPLETED",
+                assessment_ref="9" * 64,
+                output_bundle_ref="a" * 64,
+            )
+
+        def spawn(self, *_args):
+            return SimpleNamespace(handle_ref="handle.gateway")
+
+        def terminate(self, *_args):
+            return None
+
+    report = PythonAdapterExecutionGateway(binding=binding, executor=StubExecutor())(
+        request, policy, canary
+    )
+
+    assert report.status == "failed"
+    assert report.reason_code == "NATIVE_CONTAINMENT_ADAPTER_OUTPUT_INVALID"
+    assert report.output_bundle_ref is None

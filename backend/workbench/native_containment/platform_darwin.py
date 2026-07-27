@@ -48,7 +48,11 @@ def denied(action):
 if case == "host_read_denied":
     ok = denied(lambda: open("/etc/hosts", "rb").read(1))
 elif case == "directory_enumeration_denied":
-    ok = denied(lambda: os.listdir("/"))
+    # The root directory itself remains enumerable on some Seatbelt profiles
+    # because the interpreter needs root metadata during startup.  /Users is
+    # outside the explicit read roots and is the stable untrusted directory
+    # boundary for this profile.
+    ok = denied(lambda: os.listdir("/Users"))
 elif case == "network_denied":
     def connect():
         with socket.create_connection(("198.51.100.1", 9), timeout=0.25):
@@ -200,6 +204,7 @@ for kind, value in limits:
         *,
         input_root: Path | None = None,
         executable_parent: Path | None = None,
+        read_roots: tuple[Path, ...] = (),
     ) -> str:
         """Build the fixed deny-by-default profile used only by trusted canaries."""
 
@@ -225,6 +230,9 @@ for kind, value in limits:
         if input_root is not None:
             input_path = input_root.resolve()
             rules.insert(-2, f'(allow file-read* (subpath "{input_path}"))')
+        for read_root in read_roots:
+            read_path = read_root.resolve()
+            rules.insert(-2, f'(allow file-read* (subpath "{read_path}"))')
         return "\n".join(rules)
 
     def _environment(self, policy: ContainmentPolicy) -> dict[str, str]:

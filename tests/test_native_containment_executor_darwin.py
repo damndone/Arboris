@@ -90,7 +90,7 @@ def test_experimental_executor_returns_output_bound_to_request_and_canary(tmp_pa
 
     executor = DarwinExperimentalExecutor(
         resolver=lambda current: spec if current == request else None,
-        assessment_ref=canary.content_digest,
+        assessment_ref="e" * 64,
         process_factory=process_factory,
         process_snapshot=lambda _pid: None,
     )
@@ -100,7 +100,7 @@ def test_experimental_executor_returns_output_bound_to_request_and_canary(tmp_pa
     assert report.status == "completed"
     assert report.attempt_id == request.attempt_id
     assert report.request_digest == request.content_digest
-    assert report.assessment_ref == canary.content_digest
+    assert report.assessment_ref == "e" * 64
     assert report.output_bundle_ref
     assert calls and calls[0][0][0] == "/usr/bin/sandbox-exec"
 
@@ -190,3 +190,30 @@ def test_experimental_executor_reuses_one_spawned_handle_for_the_same_attempt(tm
     assert first.handle_ref == second.handle_ref
     assert len(processes) == 1
     assert report.status == "completed"
+
+
+def test_experimental_executor_termination_is_idempotent_and_terminal(tmp_path):
+    from workbench.native_containment.executor_darwin import DarwinExperimentalExecutor
+    from workbench.native_containment.host import CanaryResult
+
+    policy = _policy()
+    request = _request(policy)
+    canary = CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED")
+    spec = _spec(request, tmp_path)
+    process = _FakeProcess()
+    process.returncode = None
+    executor = DarwinExperimentalExecutor(
+        resolver=lambda _current: spec,
+        assessment_ref=canary.content_digest,
+        process_factory=lambda *_args, **_kwargs: process,
+        process_snapshot=lambda _pid: (1, 0),
+    )
+
+    spawned = executor.spawn(request, policy, canary)
+    first = executor.terminate(spawned)
+    second = executor.terminate(spawned)
+
+    assert first == second
+    assert first.status == "failed"
+    assert first.reason_code == "NATIVE_CONTAINMENT_TERMINATED"
+    assert process.returncode == -9

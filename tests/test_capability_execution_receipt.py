@@ -29,7 +29,15 @@ from workbench.capability_factory.supervisor import AttemptQuiescenceProof, Dura
 from test_capability_custom_dispatcher import _intent_and_records
 
 
-def _authorization(intent: PreparedRunIntent, binding, implementation, *, now: datetime) -> OptionExecutionAuthorization:
+def _authorization(
+    intent: PreparedRunIntent,
+    binding,
+    implementation,
+    *,
+    now: datetime,
+    execution_mode: str = "confirm_and_execute",
+    risk_level: str = "low",
+) -> OptionExecutionAuthorization:
     return OptionExecutionAuthorization(
         authorization_id="authorization.coordinator",
         notebook_id="notebook.coordinator",
@@ -50,8 +58,8 @@ def _authorization(intent: PreparedRunIntent, binding, implementation, *, now: d
         input_graph_fingerprint=intent.input_graph_fingerprint,
         freshness_dependency_fingerprint=intent.input_graph_fingerprint,
         operation_id=intent.operation_id,
-        execution_mode="confirm_and_execute",
-        risk_level="low",
+        execution_mode=execution_mode,
+        risk_level=risk_level,
         artifact_contract_ref="a" * 64,
         consumer_projection_ref="b" * 64,
         idempotency_key="authorization-coordinator-idem",
@@ -134,10 +142,24 @@ def _terminal_reconciliation(
     )
 
 
-def _fixture(tmp_path, *, trace_sink=None):
-    intent, implementation, adapter, binding = _intent_and_records()
+def _fixture(
+    tmp_path,
+    *,
+    trace_sink=None,
+    operation_id: str = "fit",
+    execution_mode: str = "confirm_and_execute",
+    risk_level: str = "low",
+):
+    intent, implementation, adapter, binding = _intent_and_records(operation_id=operation_id)
     now = datetime(2026, 7, 27, 9, 0, tzinfo=timezone.utc)
-    authorization = _authorization(intent, binding, implementation, now=now)
+    authorization = _authorization(
+        intent,
+        binding,
+        implementation,
+        now=now,
+        execution_mode=execution_mode,
+        risk_level=risk_level,
+    )
     auth_store = OptionExecutionAuthorizationStore(tmp_path, clock=lambda: now)
     auth_store.issue(authorization)
     control_store = ExecutionControlStore(clock=lambda: now)
@@ -148,7 +170,7 @@ def _fixture(tmp_path, *, trace_sink=None):
         binding=binding,
         adapter=adapter,
         implementation=implementation,
-        operation_id="fit",
+        operation_id=intent.operation_id,
         requested_consumers=("notebook_option_planner", "report_projection"),
     )
     coordinator = CapabilityDispatchCoordinator(
@@ -179,26 +201,77 @@ def test_coordinator_claims_reserves_and_replays_one_attempt(tmp_path) -> None:
 
     assert receipt.status == "dispatch_reserved"
     assert len(control_store.records()) == 1
-    assert auth_store.read(authorization.authorization_id).status == "dispatch_reserved"
-    assert supervisor.read(receipt.attempt_id).status == "reserved"
 
-    replay = coordinator.reserve(
+
+def test_coordinator_spawns_then_acknowledges_the_same_trusted_handle(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    intent, authorization, plan, coordinator, control_store, auth_store, supervisor, now = _fixture(tmp_path)
+    receipt = coordinator.reserve(
         authorization=authorization,
         intent=intent,
         plan=plan,
         expectations=_expectations(intent, authorization.authorization_id),
         owner_id="supervisor.coordinator",
         lease_seconds=60,
-        attempt_id="attempt.other",
+        attempt_id="attempt.spawn-ack",
         lease_epoch=1,
-        executor_idempotency_key="executor.other",
-        reservation_id="reservation.other",
-        reservation_idempotency_key="reservation-other-idem",
+        executor_idempotency_key="executor.spawn-ack",
+        reservation_id="reservation.spawn-ack",
+        reservation_idempotency_key="reservation-spawn-ack-idem",
         now=now,
     )
-    assert replay == receipt
-    assert len(control_store.records()) == 1
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    request = ContainmentRequest(
+        request_id="request.spawn-ack",
+        attempt_id=receipt.attempt_id,
+        intent_digest=intent.content_digest,
+        input_bundle_ref=intent.bundle_ref,
+        output_namespace_ref="c" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="d" * 64,
+    )
+    calls = []
 
+    class StubExecutor:
+        def spawn(self, current_request, current_policy, current_canary):
+            calls.append((current_request, current_policy, current_canary))
+            return SimpleNamespace(handle_ref="handle.spawn-ack")
+
+        def terminate(self, spawned):
+            calls.append(("terminate", spawned))
+
+    running = coordinator.spawn_and_acknowledge(
+        receipt=receipt,
+        owner_id="supervisor.coordinator",
+        executor=StubExecutor(),
+        request=request,
+        policy=policy,
+        canary=CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED"),
+    )
+
+    assert running.status == "running"
+    assert len(calls) == 1
+    assert supervisor.read(receipt.attempt_id).status == "running"
+    assert supervisor.read(receipt.attempt_id).process_handle_ref == "handle.spawn-ack"
+    assert auth_store.read(authorization.authorization_id).status == "running"
 
 def test_coordinator_rejects_stale_fence_without_leaving_a_reservation(tmp_path) -> None:
     intent, authorization, plan, coordinator, control_store, auth_store, supervisor, now = _fixture(tmp_path)
@@ -360,6 +433,38 @@ def test_reconciliation_consumes_only_after_the_v11_artifact_gate(tmp_path) -> N
     assert TerminalSideEffectReconciliation.from_dict(
         terminal_reconciliation.to_dict()
     ) == terminal_reconciliation
+
+
+def test_post_spawn_handoff_failure_can_only_fence_as_dispatch_unknown(tmp_path) -> None:
+    intent, authorization, plan, coordinator, _control_store, auth_store, supervisor, now = _fixture(tmp_path)
+    receipt = coordinator.reserve(
+        authorization=authorization,
+        intent=intent,
+        plan=plan,
+        expectations=_expectations(intent, authorization.authorization_id),
+        owner_id="supervisor.unknown",
+        lease_seconds=60,
+        attempt_id="attempt.unknown",
+        lease_epoch=1,
+        executor_idempotency_key="executor.unknown",
+        reservation_id="reservation.unknown",
+        reservation_idempotency_key="reservation-unknown-idem",
+        now=now,
+    )
+    running = coordinator.acknowledge_executor(
+        receipt,
+        owner_id="supervisor.unknown",
+        process_handle_ref="trusted-handle.unknown",
+    )
+
+    unknown = coordinator.isolate_dispatch_unknown(
+        running,
+        reason="trusted result sink failed",
+    )
+
+    assert unknown.status == "dispatch_unknown"
+    assert auth_store.read(authorization.authorization_id).status == "dispatch_unknown"
+    assert supervisor.read(running.attempt_id).status == "dispatch_unknown"
 
 
 def test_reconciliation_requires_termination_proof_before_marking_failure(tmp_path) -> None:

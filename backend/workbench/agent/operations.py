@@ -165,6 +165,47 @@ class OperationRegistry:
         )
         self.register(
             OperationDefinition(
+                operation_id="model.custom",
+                operation_version="v1",
+                effect_level="mutation",
+                scope_requirements=("dataset",),
+                scope="dataset source",
+                risk_level="high",
+                confirmation_policy="required",
+                proposal_schema=_model_custom_proposal_schema(),
+                editable_schema={
+                    "type": "object",
+                    "properties": {
+                        "capability_ref": {"type": "string"},
+                        "binding_ref": {"type": "string"},
+                        "operation": {"type": "string"},
+                        "input_handle": {"type": "string"},
+                        "parameters": {"type": "object"},
+                        "consumer_slots": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "expected_artifacts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                executor_key="capability_factory.custom_dispatcher",
+                reconciler_key="capability_factory.custom_dispatcher",
+                diff_builder_key="capability_factory.custom.diff.v1",
+                verification_builder_key="capability_factory.custom.verification.v1",
+                ui_description=(
+                    "Run one explicitly admitted custom capability through the "
+                    "Proposal/Risk and containment gates."
+                ),
+                natural_language_enabled=False,
+                validator=_validate_model_custom,
+            )
+        )
+        self.register(
+            OperationDefinition(
                 operation_id="graph.fork",
                 operation_version="v1",
                 effect_level="mutation",
@@ -1092,6 +1133,95 @@ def _validate_model_genesis(
     for key, value in changes.items():
         if not isinstance(value, dict):
             raise OperationValidationError(f"model.genesis {key} must be an object")
+
+
+def _model_custom_proposal_schema() -> dict[str, Any]:
+    return _proposal_schema(
+        target_required=[],
+        changes={
+            "type": "object",
+            "required": ["capability_ref", "binding_ref", "operation"],
+            "properties": {
+                "capability_ref": {"type": "string", "minLength": 1},
+                "binding_ref": {"type": "string", "minLength": 1},
+                "operation": {"type": "string", "minLength": 1},
+                "input_handle": {"type": "string", "minLength": 1},
+                "parameters": {"type": "object"},
+                "consumer_slots": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "expected_artifacts": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
+            },
+            "additionalProperties": False,
+        },
+        target_properties={
+            "dataset_source_id": {"type": "string", "minLength": 1},
+            "run_id": {"type": "string", "minLength": 1},
+            "node_ref": {"type": "string", "minLength": 1},
+            "node_hash": {"type": "string", "minLength": 1},
+            "forest_node_key": {"type": "string", "minLength": 1},
+        },
+    )
+
+
+def _validate_model_custom(
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    dataset_target = bool(target.get("dataset_source_id"))
+    run_target = all(target.get(key) for key in ("run_id", "node_ref", "node_hash", "forest_node_key"))
+    if dataset_target == run_target:
+        raise OperationValidationError(
+            "model.custom target must identify exactly one dataset source or run model node"
+        )
+    missing_preconditions = {
+        key
+        for key in ("context_version", "context_fingerprint", "owner_resolution")
+        if not preconditions.get(key)
+    }
+    if missing_preconditions:
+        raise OperationValidationError(
+            "model.custom preconditions missing: " + ", ".join(sorted(missing_preconditions))
+        )
+    if not isinstance(changes, dict) or not changes:
+        raise OperationValidationError("model.custom changes must not be empty")
+    required = {"capability_ref", "binding_ref", "operation"}
+    missing = sorted(field for field in required if not changes.get(field))
+    if missing:
+        raise OperationValidationError(
+            "model.custom changes missing: " + ", ".join(missing)
+        )
+    allowed = required | {"input_handle", "parameters", "consumer_slots", "expected_artifacts"}
+    unknown = set(changes) - allowed
+    if unknown:
+        raise OperationValidationError(
+            "model.custom changes contain unknown field(s): " + ", ".join(sorted(unknown))
+        )
+    for key in required | {"input_handle"}:
+        if key in changes and (not isinstance(changes[key], str) or not changes[key]):
+            raise OperationValidationError(f"model.custom {key} must be a non-empty string")
+    if "parameters" in changes and not isinstance(changes["parameters"], dict):
+        raise OperationValidationError("model.custom parameters must be an object")
+    if "consumer_slots" in changes:
+        slots = changes["consumer_slots"]
+        if (
+            not isinstance(slots, list)
+            or not slots
+            or any(not isinstance(item, str) or not item for item in slots)
+            or len(set(slots)) != len(slots)
+        ):
+            raise OperationValidationError("model.custom consumer_slots must be unique non-empty strings")
+    if "expected_artifacts" in changes:
+        artifacts = changes["expected_artifacts"]
+        if not isinstance(artifacts, list) or any(
+            not isinstance(item, str) or not item for item in artifacts
+        ):
+            raise OperationValidationError("model.custom expected_artifacts must be strings")
 
 
 def _validate_graph_fork(

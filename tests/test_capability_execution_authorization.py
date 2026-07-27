@@ -132,6 +132,31 @@ def test_materialize_only_cannot_issue_execution_authorization() -> None:
         )
 
 
+def test_experimental_custom_authorization_requires_explicit_high_risk_mode() -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    experimental = _authorization(now=now)
+    experimental = replace(
+        experimental,
+        operation_id="model.custom",
+        execution_mode="experimental_confirm_and_execute",
+        risk_level="high",
+    )
+
+    restored = OptionExecutionAuthorization.from_dict(experimental.to_dict())
+
+    assert restored == experimental
+    assert restored.execution_mode == "experimental_confirm_and_execute"
+    assert restored.risk_level == "high"
+
+    with pytest.raises(ValueError, match="model.custom"):
+        OptionExecutionAuthorization.from_dict(
+            replace(
+                experimental,
+                operation_id="fit",
+            ).to_dict()
+        )
+
+
 def test_issue_is_idempotent_and_rejects_same_key_with_changed_payload(tmp_path: Path) -> None:
     now = datetime(2026, 7, 26, tzinfo=timezone.utc)
     store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))

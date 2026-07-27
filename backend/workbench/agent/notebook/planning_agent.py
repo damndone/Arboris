@@ -122,7 +122,10 @@ _TYPED_PROPOSAL_SCHEMA: dict[str, Any] = {
     "properties": {
         "proposal_id": {"type": "string", "minLength": 1},
         "proposal_revision": {"type": "integer", "minimum": 1},
-        "operation_id": {"type": "string", "enum": ["model.genesis", "model.rerun"]},
+        "operation_id": {
+            "type": "string",
+            "enum": ["model.custom", "model.genesis", "model.rerun"],
+        },
         "operation_version": {"type": "string", "const": "v1"},
         "target": {"type": "object"},
         "preconditions": {"type": "object"},
@@ -131,13 +134,22 @@ _TYPED_PROPOSAL_SCHEMA: dict[str, Any] = {
             "description": (
                 "For model.genesis use only table_params, model_params, and/or "
                 "model_options as nested objects. For model.rerun use only the "
-                "model_options nested object. Never put model_type, x, y, "
-                "covariance, capability, or other model fields directly here."
+                "model_options nested object. For model.custom use only operation, "
+                "input_handle, parameters, and consumer_slots. The server injects "
+                "capability_ref and binding_ref. Never put executable source, "
+                "entrypoints, or trust/admission fields here."
             ),
             "properties": {
                 "table_params": {"type": "object"},
                 "model_params": {"type": "object"},
                 "model_options": {"type": "object"},
+                "operation": {"type": "string", "minLength": 1},
+                "input_handle": {"type": "string", "minLength": 1},
+                "parameters": {"type": "object"},
+                "consumer_slots": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                },
             },
             "additionalProperties": False,
         },
@@ -283,9 +295,9 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
     if item["operation_version"] != "v1":
         raise NotebookPlanningContractError("operation_version must be exactly v1")
     operation_id = item["operation_id"]
-    if operation_id not in {"model.genesis", "model.rerun"}:
+    if operation_id not in {"model.custom", "model.genesis", "model.rerun"}:
         raise NotebookPlanningContractError(
-            "operation_id must be exactly model.genesis or model.rerun"
+            "operation_id must be exactly model.custom, model.genesis, or model.rerun"
         )
     target = _strict_mapping(item["target"], "typed proposal target")
     preconditions = _strict_mapping(
@@ -299,11 +311,14 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
     ):
         if any(type(key) is not str for key in mapping):
             raise NotebookPlanningContractError(f"typed proposal {field} keys must be strings")
-    target_fields = (
-        ("dataset_source_id",)
-        if operation_id == "model.genesis"
-        else ("run_id", "node_ref", "node_hash", "forest_node_key")
-    )
+    if operation_id == "model.genesis":
+        target_fields = ("dataset_source_id",)
+    elif operation_id == "model.rerun":
+        target_fields = ("run_id", "node_ref", "node_hash", "forest_node_key")
+    elif "dataset_source_id" in target:
+        target_fields = ("dataset_source_id",)
+    else:
+        target_fields = ("run_id", "node_ref", "node_hash", "forest_node_key")
     for key in target_fields:
         if key in target:
             _strict_string(target[key], f"typed proposal target.{key}")
@@ -326,6 +341,27 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
     for key, nested in changes.items():
         if key in {"table_params", "model_params", "model_options"}:
             _strict_mapping(nested, f"typed proposal changes.{key}")
+    if operation_id == "model.custom":
+        allowed = {"operation", "input_handle", "parameters", "consumer_slots"}
+        unknown_changes = set(changes) - allowed
+        if unknown_changes:
+            if unknown_changes & {"capability_ref", "binding_ref"}:
+                raise NotebookPlanningContractError(
+                    "model.custom server-owned capability fields are server-owned"
+                )
+            raise NotebookPlanningContractError(
+                "model.custom changes contain unknown field(s): "
+                + ", ".join(sorted(unknown_changes))
+            )
+        _strict_string(changes.get("operation"), "model.custom changes.operation")
+        if "input_handle" in changes:
+            _strict_string(changes["input_handle"], "model.custom changes.input_handle")
+        if "parameters" in changes:
+            _strict_mapping(changes["parameters"], "model.custom changes.parameters")
+        if "consumer_slots" in changes:
+            _strict_string_list(
+                changes["consumer_slots"], "model.custom changes.consumer_slots"
+            )
     return TypedProposal.from_dict(item)
 
 
@@ -517,6 +553,12 @@ class NotebookPlanningAgent:
                     "legacy model_params.covariance field is also accepted for human/Draft compatibility, "
                     "but a typed Agent option should use model_options.covariance so the contract binding "
                     "and rerun path remain inspectable. "
+                    "For model.custom, capability_id selects a server-published planner projection; "
+                    "changes may contain only operation, input_handle, parameters, and consumer_slots. "
+                    "The server injects capability_ref and binding_ref. Never invent entrypoints, source "
+                    "paths, dependency refs, trust tiers, admission refs, or executable permissions. "
+                    "A custom option is experimental/high-risk by default and still requires the existing "
+                    "Proposal/Risk authorization and containment gateway; it is never an automatic fallback. "
                     "y and x must be exact column names present in completed profile/sample evidence; "
                     "if the target is not supported by evidence, do not submit the option. "
                     "For every non-empty model_options object, use the exact server-published field names "
@@ -894,6 +936,13 @@ class NotebookPlanningAgent:
                 "an object; do not put capability, params, or raw model fields "
                 "directly under changes."
             )
+        elif "model.custom" in message:
+            remediation = (
+                "Resubmit model.custom with only operation, input_handle, parameters, and consumer_slots "
+                "under changes. Keep capability_ref and binding_ref out of the Agent payload; the server "
+                "resolves them from capability_id. Use only the exact input handle and consumer slots "
+                "published by the server, and do not request execution outside the Proposal/Risk gateway."
+            )
         elif "model_options target contract rejected" in message:
             remediation = (
                 "Resubmit the same typed proposal only after correcting model_options against the "
@@ -1068,6 +1117,23 @@ class NotebookPlanningAgent:
     ) -> dict[str, dict[str, Any]]:
         pins = NotebookPlanningAgent._execution_pins(context)
         return {
+            "model.custom": {
+                "operation_id": "model.custom",
+                "operation_version": "v1",
+                "target_required": ["dataset_source_id"],
+                "preconditions_exact": pins["genesis_preconditions"],
+                "changes_allowed_fields": [
+                    "operation",
+                    "input_handle",
+                    "parameters",
+                    "consumer_slots",
+                ],
+                "changes_field_shape": (
+                    "operation is a string; parameters is an object; "
+                    "consumer_slots is a list of consumer slot ids"
+                ),
+                "server_bound_fields": ["capability_ref", "binding_ref"],
+            },
             "model.genesis": {
                 "operation_id": "model.genesis",
                 "operation_version": "v1",
@@ -1157,10 +1223,8 @@ class NotebookPlanningAgent:
                         "model.genesis model_params must include model_type"
                     )
                 declaration = catalog.get(submission.capability_id) or {}
-                declared_model_type = declaration.get(
-                    "model_type", submission.capability_id
-                )
-                if model_type != declared_model_type:
+                declared_model_type = declaration.get("model_type")
+                if declared_model_type is not None and model_type != declared_model_type:
                     raise NotebookPlanningContractError(
                         "model.genesis model_type does not match the server-declared "
                         "capability model identity"
@@ -1200,6 +1264,47 @@ class NotebookPlanningAgent:
                         raise NotebookPlanningContractError(
                             "model.genesis x is not present in completed evidence columns: "
                             + ", ".join(missing_x)
+                        )
+            elif operation_id == "model.custom":
+                unknown_changes = set(changes) - {
+                    "operation",
+                    "input_handle",
+                    "parameters",
+                    "consumer_slots",
+                }
+                if unknown_changes:
+                    raise NotebookPlanningContractError(
+                        "model.custom changes contain server-owned or unknown field(s): "
+                        + ", ".join(sorted(unknown_changes))
+                    )
+                operation = changes.get("operation")
+                if not isinstance(operation, str) or not operation:
+                    raise NotebookPlanningContractError(
+                        "model.custom changes.operation must be a non-empty string"
+                    )
+                if "input_handle" in changes and (
+                    not isinstance(changes["input_handle"], str)
+                    or not changes["input_handle"]
+                ):
+                    raise NotebookPlanningContractError(
+                        "model.custom input_handle must be a non-empty string"
+                    )
+                if "parameters" in changes and not isinstance(
+                    changes["parameters"], Mapping
+                ):
+                    raise NotebookPlanningContractError(
+                        "model.custom parameters must be an object"
+                    )
+                if "consumer_slots" in changes:
+                    slots = changes["consumer_slots"]
+                    if (
+                        not isinstance(slots, list)
+                        or not slots
+                        or any(not isinstance(item, str) or not item for item in slots)
+                        or len(set(slots)) != len(slots)
+                    ):
+                        raise NotebookPlanningContractError(
+                            "model.custom consumer_slots must be unique non-empty strings"
                         )
             elif operation_id == "model.rerun":
                 unknown_changes = set(changes) - {"model_options"}
@@ -1245,7 +1350,7 @@ class NotebookPlanningAgent:
                 if not any(reference.evidence_id in claim for reference in submission.evidence_refs):
                     raise NotebookPlanningContractError("comparative claim has no evidence ref")
             if context.active_head_run_id:
-                if submission.proposal.operation_id != "model.rerun" or submission.proposal.target.get("run_id") != context.active_head_run_id:
+                if submission.proposal.operation_id not in {"model.rerun", "model.custom"} or submission.proposal.target.get("run_id") != context.active_head_run_id:
                     raise NotebookPlanningContractError("run-source proposal is not a rerun-child of the active head")
                 pins = self._execution_pins(context)
                 matching_pins = [
@@ -1260,7 +1365,7 @@ class NotebookPlanningAgent:
                 if submission.proposal.preconditions != matching_pins[0]["preconditions"]:
                     raise NotebookPlanningContractError("run-source proposal does not copy the server execution pins")
             elif context.projection_source and context.projection_source.get("kind") == "dataset":
-                if submission.proposal.operation_id != "model.genesis":
+                if submission.proposal.operation_id not in {"model.genesis", "model.custom"}:
                     raise NotebookPlanningContractError("dataset-source proposal requires a genesis materialization path")
                 if submission.proposal.target.get("dataset_source_id") != context.projection_source.get("upload_sha256"):
                     raise NotebookPlanningContractError("dataset-source proposal is not pinned to the source upload")

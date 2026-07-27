@@ -17,6 +17,7 @@ The service owns four things the agent is not allowed to own:
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,6 +48,7 @@ from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalogError,
     NOTEBOOK_OPTION_PLANNER_CONSUMER,
 )
+from ...capability_factory.contracts import CONSUMER_SLOTS
 from ...capability_factory.notebook_bridge import (
     NotebookCapabilityExecutionGateway,
     NotebookExecutionDispatch,
@@ -140,11 +142,15 @@ _REGISTRY_RISK_TO_OPTION_RISK = {
 }
 
 
-def _execution_modes_for(risk_level: str) -> tuple[str, ...]:
-    """Expose the fast path only for server-classified low-risk options."""
+def _execution_modes_for(
+    risk_level: str, operation_id: str | None = None
+) -> tuple[str, ...]:
+    """Expose only the execution mode explicitly allowed by the operation."""
 
     if risk_level == "low":
         return ("materialize_only", "confirm_and_execute")
+    if risk_level == "high" and operation_id == "model.custom":
+        return ("materialize_only", "experimental_confirm_and_execute")
     return ("materialize_only",)
 
 
@@ -458,13 +464,16 @@ class NotebookService:
 
         # Validate every candidate before any source decision is written.  The
         # Agent's blocked_reason is deliberately not consulted here.
-        prepared = [self._prepare(notebook, context, draft) for draft in drafts]
-        self._resolve_capability_bindings(
+        bindings = self._resolve_capability_bindings(
             notebook,
             drafts,
             recommendation_decision=None,
             require_recommendation_decision=False,
         )
+        prepared = [
+            self._prepare(notebook, context, draft, binding=binding)
+            for draft, binding in zip(drafts, bindings)
+        ]
 
         evidence_hash = evidence_pack.evidence_pack_hash
         self.store.append_evidence_pack(notebook_id, evidence_pack.to_dict())
@@ -778,7 +787,10 @@ class NotebookService:
             drafts,
             recommendation_decision=recommendation_decision,
         )
-        prepared = [self._prepare(notebook, context, draft) for draft in drafts]
+        prepared = [
+            self._prepare(notebook, context, draft, binding=binding)
+            for draft, binding in zip(drafts, bindings)
+        ]
 
         # An explicit Agent replan is a revalidation episode for any provider
         # option ids that already exist.  Stable option_id means a new
@@ -931,7 +943,9 @@ class NotebookService:
                     revision_kwargs.update(
                         {
                             "capability_resolution_binding_ref": binding.content_digest,
-                            "execution_modes": _execution_modes_for(risk_level),
+                            "execution_modes": _execution_modes_for(
+                                risk_level, proposal.operation_id
+                            ),
                         }
                     )
                 revision = revision_type(**revision_kwargs)
@@ -1166,7 +1180,9 @@ class NotebookService:
                 revision_kwargs.update(
                     {
                         "capability_resolution_binding_ref": binding.content_digest,
-                        "execution_modes": _execution_modes_for(risk_level),
+                        "execution_modes": _execution_modes_for(
+                            risk_level, proposal.operation_id
+                        ),
                     }
                 )
             revision = revision_type(**revision_kwargs)
@@ -1323,7 +1339,9 @@ class NotebookService:
                 )
             draft = effective_draft
 
-        proposal, contract, risk_level = self._prepare(notebook, context, draft)
+        proposal, contract, risk_level = self._prepare(
+            notebook, context, draft, binding=current_binding if current_binding_ref else None
+        )
 
         if trace is not None:
             trace.emit(
@@ -1475,7 +1493,11 @@ class NotebookService:
         context: NotebookPlanningContextV1,
         authorization: OptionExecutionAuthorization,
     ) -> OptionExecutionAuthorization:
-        """Bind a user-confirmed low-risk option to a durable receipt.
+        """Bind a user-confirmed option to a durable receipt.
+
+        Standard low-risk options use ``confirm_and_execute``; the explicitly
+        experimental ``model.custom`` path uses
+        ``experimental_confirm_and_execute`` and remains high-risk.
 
         This is deliberately a control-plane operation.  It validates the
         current recommendation, binding, risk, and freshness, then persists
@@ -1510,16 +1532,22 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="authorization_contract_version",
             )
-        if "confirm_and_execute" not in current.execution_modes:
+        proposal = view.current_stored_revision.proposal
+        offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
+        if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
             raise OptionRevisionStale(
-                "the current option does not offer confirm_and_execute",
+                "the current option does not offer its server-approved execution mode",
                 option_id=option_id,
                 option_revision=current.option_revision,
                 reason="execution_mode_not_offered",
             )
-        if current.risk_level != "low" or authorization.risk_level != "low":
+        expected_mode = offered_modes[1]
+        if (
+            authorization.execution_mode != expected_mode
+            or authorization.risk_level != current.risk_level
+        ):
             raise OptionRevisionStale(
-                "confirm_and_execute is limited to low-risk options",
+                "authorization execution mode or risk does not match the server-approved option",
                 option_id=option_id,
                 option_revision=current.option_revision,
                 reason="authorization_risk",
@@ -1650,16 +1678,19 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="execution_contract_version",
             )
-        if "confirm_and_execute" not in current.execution_modes:
+        proposal = view.current_stored_revision.proposal
+        offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
+        if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
             raise OptionRevisionStale(
-                "the current option does not offer confirm_and_execute",
+                "the current option does not offer its server-approved execution mode",
                 option_id=option_id,
                 option_revision=current.option_revision,
                 reason="execution_mode_not_offered",
             )
-        if current.risk_level != "low":
+        execution_mode = offered_modes[1]
+        if current.risk_level not in {"low", "high"}:
             raise OptionRevisionStale(
-                "confirm_and_execute is limited to low-risk options",
+                "only low-risk standard or high-risk experimental custom options may execute",
                 option_id=option_id,
                 option_revision=current.option_revision,
                 reason="execution_risk",
@@ -1888,7 +1919,9 @@ class NotebookService:
             input_graph_fingerprint=current.generation_context_hash,
             freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
             operation_id=operation_id,
-            execution_mode="confirm_and_execute",
+            execution_mode=_execution_modes_for(
+                current.risk_level, proposal.operation_id
+            )[1],
             risk_level=current.risk_level,
             artifact_contract_ref=_artifact_contract_ref(current.artifact_contract),
             consumer_projection_ref=_consumer_projection_ref(binding),
@@ -2479,6 +2512,10 @@ class NotebookService:
         )
         if projection is None:
             return
+        if proposal.operation_id == "model.custom":
+            if "model.custom" not in projection.get("notebook_proposal_adapters", ()):
+                raise ValueError("CAPABILITY_CUSTOM_ADAPTER_NOT_DECLARED")
+            return
         declared_model_type = projection["model_type"]
         actual_model_type: Any = None
         if proposal.operation_id == "model.genesis":
@@ -2524,10 +2561,47 @@ class NotebookService:
         notebook: Notebook,
         context: NotebookPlanningContextV1,
         draft: OptionDraft,
+        *,
+        binding: CapabilityResolutionBinding | None = None,
     ) -> tuple[TypedProposal, Any, str]:
         """Validate one draft against the real registry. Raises, never stores."""
 
         proposal = draft.proposal
+        if proposal.operation_id == "model.custom":
+            if binding is None:
+                raise OptionValidationFailed(
+                    "model.custom requires a current server-owned capability binding",
+                    option_id=draft.option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {
+                            "code": "CAPABILITY_BINDING_REQUIRED",
+                            "detail": "custom capability execution is never resolved from Agent-supplied refs",
+                        }
+                    ],
+                )
+            try:
+                projection = self.capability_bindings.planner_projection(
+                    draft.capability_id or "",
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                ) if self.capability_bindings is not None else None
+                if projection is None or "model.custom" not in projection.get(
+                    "notebook_proposal_adapters", ()
+                ):
+                    raise ValueError("CAPABILITY_CUSTOM_ADAPTER_NOT_DECLARED")
+                proposal = self._canonicalize_custom_proposal(proposal, binding)
+            except Exception as error:
+                raise OptionValidationFailed(
+                    "model.custom proposal could not be server-bound",
+                    option_id=draft.option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {"code": "CUSTOM_PROPOSAL_BINDING_INVALID", "detail": str(error)}
+                    ],
+                ) from error
         try:
             definition = self.registry.require(
                 proposal.operation_id, proposal.operation_version
@@ -2597,6 +2671,75 @@ class NotebookService:
                 operation_id=proposal.operation_id,
             )
         return proposal, contract, risk_level
+
+    @staticmethod
+    def _canonicalize_custom_proposal(
+        proposal: TypedProposal,
+        binding: CapabilityResolutionBinding,
+    ) -> TypedProposal:
+        """Replace Agent capability names with the exact server-owned binding."""
+
+        changes = dict(proposal.changes)
+        forbidden = {"capability_ref", "binding_ref"} & set(changes)
+        if forbidden:
+            raise ValueError(
+                "model.custom server-owned capability fields are not Agent-writable: "
+                + ", ".join(sorted(forbidden))
+            )
+        operation = changes.get("operation")
+        if not isinstance(operation, str) or not operation:
+            raise ValueError("model.custom operation must be a non-empty string")
+        if operation not in binding.allowed_operations:
+            raise ValueError("model.custom operation is not admitted by the current binding")
+        input_handle = changes.get("input_handle")
+        if input_handle is not None and (
+            not isinstance(input_handle, str)
+            or not input_handle
+            or len(input_handle) > 256
+            or any(ord(char) < 0x20 for char in input_handle)
+        ):
+            raise ValueError("model.custom input_handle is invalid")
+        parameters = changes.get("parameters", {})
+        if not isinstance(parameters, Mapping):
+            raise ValueError("model.custom parameters must be an object")
+        encoded = json.dumps(
+            parameters,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise ValueError("model.custom parameters exceed the bounded input limit")
+        requested_consumers = changes.get(
+            "consumer_slots", [NOTEBOOK_OPTION_PLANNER_CONSUMER]
+        )
+        if (
+            not isinstance(requested_consumers, list)
+            or not requested_consumers
+            or len(requested_consumers) > len(CONSUMER_SLOTS)
+            or any(not isinstance(item, str) or not item for item in requested_consumers)
+            or len(set(requested_consumers)) != len(requested_consumers)
+            or not set(requested_consumers) <= set(CONSUMER_SLOTS)
+            or not set(requested_consumers) <= set(binding.allowed_consumers)
+        ):
+            raise ValueError("model.custom consumer_slots are not admitted by the current binding")
+        canonical_changes = {
+            "capability_ref": binding.implementation_ref,
+            "binding_ref": binding.content_digest,
+            "operation": operation,
+            "input_handle": input_handle or "table_1",
+            "parameters": dict(parameters),
+            "consumer_slots": list(requested_consumers),
+        }
+        if "expected_artifacts" in changes:
+            expected_artifacts = changes["expected_artifacts"]
+            if not isinstance(expected_artifacts, list) or any(
+                not isinstance(item, str) or not item for item in expected_artifacts
+            ):
+                raise ValueError("model.custom expected_artifacts must be strings")
+            canonical_changes["expected_artifacts"] = list(expected_artifacts)
+        return replace(proposal, changes=canonical_changes)
 
     def _validate_target_model_options(self, proposal: TypedProposal) -> None:
         """Validate model-specific options before persisting an Option revision."""

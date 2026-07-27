@@ -312,12 +312,24 @@ class OptionExecutionAuthorization:
         object.__setattr__(self, "input_graph_fingerprint", _text(self.input_graph_fingerprint, "input_graph_fingerprint"))
         object.__setattr__(self, "freshness_dependency_fingerprint", _text(self.freshness_dependency_fingerprint, "freshness_dependency_fingerprint"))
         object.__setattr__(self, "operation_id", _text(self.operation_id, "operation_id"))
-        if self.execution_mode != "confirm_and_execute":
+        if self.execution_mode not in {
+            "confirm_and_execute",
+            "experimental_confirm_and_execute",
+        }:
             raise ExecutionAuthorizationError(
-                "execution_mode must be confirm_and_execute for this authorization"
+                "execution_mode must be confirm_and_execute or "
+                "experimental_confirm_and_execute for this authorization"
             )
-        if self.risk_level != "low":
-            raise ExecutionAuthorizationError("only low-risk options may use confirm_and_execute")
+        if self.execution_mode == "confirm_and_execute" and self.risk_level != "low":
+            raise ExecutionAuthorizationError(
+                "only low-risk options may use confirm_and_execute"
+            )
+        if self.execution_mode == "experimental_confirm_and_execute" and (
+            self.operation_id != "model.custom" or self.risk_level != "high"
+        ):
+            raise ExecutionAuthorizationError(
+                "experimental_confirm_and_execute is reserved for high-risk model.custom"
+            )
         object.__setattr__(self, "idempotency_key", _text(self.idempotency_key, "idempotency_key"))
         issued_at = _utc(self.issued_at, "issued_at")
         expires_at = _utc(self.expires_at, "expires_at")

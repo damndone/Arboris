@@ -177,8 +177,19 @@ def _exploration_step(
     )
 
 
-def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft):
-    """Return one callback that dispatches only the compiled step identities."""
+def build_workflow_step_executor(
+    project_root: Path | str,
+    draft: WorkflowDraft,
+    *,
+    custom_step_executor=None,
+):
+    """Return one callback that dispatches only the compiled step identities.
+
+    ``model.custom`` is intentionally an injected gateway.  The default
+    runtime has no authority to reserve, spawn, or dispatch it; the caller
+    must supply a gateway that has already joined Proposal/Risk authorization,
+    the exact binding, and the B1 broker.
+    """
 
     root = Path(project_root).expanduser().resolve()
     source_context, source_frame = resolve_statistical_source(
@@ -264,7 +275,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 payload={
                     "detail": detail,
                     "threshold_source": {
-                        "step_id": "step-4",
+                        "step_id": detail_step_id,
                         "artifact_role": "result",
                         "result_fingerprint": detail_fingerprint,
                     },
@@ -352,8 +363,24 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
             return _execute_ols_branches(
                 root, draft, source_context, source_frame, step
             )
+        if dispatcher_key == "capability_factory.custom_dispatcher":
+            if not callable(custom_step_executor):
+                raise WorkflowExecutionError(
+                    "model.custom requires an authorized custom capability gateway"
+                )
+            result = custom_step_executor(
+                project_root=root,
+                draft=draft,
+                step=step,
+                previous=previous,
+            )
+            if not isinstance(result, WorkflowStepResult):
+                raise WorkflowExecutionError(
+                    "authorized custom capability gateway returned an invalid result"
+                )
+            return result
         if dispatcher_key == "workbench.agent.workflow_runtime.report":
-            return _execute_workflow_report(root, draft, previous)
+            return _execute_workflow_report(root, draft, previous, step)
         raise WorkflowExecutionError(
             f"unsupported workflow operation: {step.operation_id}"
         )
@@ -538,6 +565,7 @@ def _execute_workflow_report(
     root: Path,
     draft: WorkflowDraft,
     previous: Mapping[str, WorkflowStepResult],
+    step: Any | None = None,
 ) -> WorkflowStepResult:
     run_root = root / "runs" / str(draft.target["run_id"])
     log_path = root / "workbench" / "exploration" / f"{draft.workflow_id}.jsonl"
@@ -557,7 +585,17 @@ def _execute_workflow_report(
     html_id = f"workflow_report_{draft.workflow_id}_html"
     pdf_id = f"workflow_report_{draft.workflow_id}_pdf"
     xlsx_id = f"workflow_report_{draft.workflow_id}_xlsx"
-    steps["step-9"] = {
+    report_step_id = getattr(step, "step_id", None)
+    if not isinstance(report_step_id, str) or not report_step_id:
+        report_step_id = next(
+            (
+                candidate.step_id
+                for candidate in draft.steps
+                if candidate.operation_id == "report.compose"
+            ),
+            "report.compose",
+        )
+    steps[report_step_id] = {
         "status": "completed",
         "artifact_ids": [collection_id, html_id, pdf_id, xlsx_id],
     }
@@ -579,7 +617,7 @@ def _execute_workflow_report(
     view_model = {
         "title": "Statistical workflow report",
         "facts": [
-            "Nine server-defined workflow steps completed.",
+            f"Workflow steps completed: {len(steps)}.",
             f"Workflow id: {draft.workflow_id}",
             f"Source rows: {next(iter(previous.values())).row_counts.get('source', 0) if previous else 0}",
         ],

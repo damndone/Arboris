@@ -7,11 +7,14 @@ referenced implementation.  The entrypoint is a content reference only.
 from __future__ import annotations
 
 import hashlib
+import base64
+import json
 import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from ..custom_capability.canonical import domain_digest
 from .contracts import (
@@ -32,6 +35,60 @@ from .validation_contract import ValidationBundle, ValidationCase
 
 ADAPTER_CONTRACT_SCHEMA_VERSION = "workbench_capability_factory_adapter_v1"
 MAX_GENERATED_SOURCE_BYTES = 256 * 1024
+MAX_ADAPTER_INPUT_BYTES = 256 * 1024
+MAX_ADAPTER_RESULT_BYTES = 4 * 1024 * 1024
+PYTHON_ADAPTER_ABI_VERSION = "workbench.python_adapter/v1"
+
+# This is a fixed, trusted harness.  Generated source is supplied only as a
+# content-addressed file and is loaded inside the explicitly experimental B1
+# executor; the Workbench process never imports it.
+PYTHON_ADAPTER_HARNESS = r'''
+import importlib.util
+import json
+import os
+from pathlib import Path
+import sys
+
+source_path = Path(sys.argv[1]).resolve()
+input_path = Path(sys.argv[2]).resolve()
+result_path = Path(sys.argv[3]).resolve()
+for dependency_root in reversed(sys.argv[4:]):
+    sys.path.insert(0, dependency_root)
+
+def reject_constant(value):
+    raise ValueError("non-finite JSON number: " + value)
+
+document = json.loads(input_path.read_text(encoding="utf-8"), parse_constant=reject_constant)
+module_spec = importlib.util.spec_from_file_location("workbench_generated_adapter", source_path)
+if module_spec is None or module_spec.loader is None:
+    raise RuntimeError("adapter module cannot be loaded")
+module = importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(module)
+entrypoint = getattr(module, "adapter", None)
+if not callable(entrypoint):
+    raise RuntimeError("adapter entrypoint is missing")
+result = entrypoint(document)
+if not isinstance(result, dict):
+    raise TypeError("adapter result must be a JSON object")
+encoded = json.dumps(
+    result,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+).encode("utf-8")
+if len(encoded) > 4 * 1024 * 1024:
+    raise ValueError("adapter result exceeds the bounded limit")
+temporary = result_path.with_name("." + result_path.name + ".tmp")
+temporary.write_bytes(encoded)
+os.chmod(temporary, 0o644)
+os.replace(temporary, result_path)
+'''
+PYTHON_ADAPTER_LAUNCHER = (
+    "exec(__import__('base64').b64decode("
+    + repr(base64.b64encode(PYTHON_ADAPTER_HARNESS.encode("utf-8")).decode("ascii"))
+    + "))"
+)
 
 
 class AdapterContractError(ContractError):
@@ -178,6 +235,303 @@ class AdapterSourceArtifact:
         """A source artifact is not an execution authorization."""
 
         return False
+
+
+class PythonAdapterExecutionError(AdapterContractError):
+    """Raised when a Python adapter invocation cannot be safely prepared."""
+
+
+@dataclass(frozen=True, slots=True)
+class PythonAdapterExecutionBinding:
+    """Trusted preparation of one offline Python adapter invocation.
+
+    The binding creates a fresh input document and a read-only copy of the
+    generated source inside the trusted input root.  It produces only a
+    ``DarwinExecutionSpec``; process creation remains owned by B1.
+    """
+
+    bundle_ref: str
+    output_namespace_ref: str
+    adapter: AdapterContract
+    source_artifact: AdapterSourceArtifact
+    operation: str
+    payload: Mapping[str, object]
+    input_root: Path
+    output_root: Path
+    interpreter: Path = Path(sys.executable)
+    dependency_roots: tuple[Path, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bundle_ref", _digest(self.bundle_ref, "bundle_ref"))
+        object.__setattr__(self, "output_namespace_ref", _digest(self.output_namespace_ref, "output_namespace_ref"))
+        if not isinstance(self.adapter, AdapterContract):
+            raise PythonAdapterExecutionError("adapter is invalid")
+        if not isinstance(self.source_artifact, AdapterSourceArtifact):
+            raise PythonAdapterExecutionError("source_artifact is invalid")
+        if self.adapter.entrypoint_ref != self.source_artifact.entrypoint_ref:
+            raise PythonAdapterExecutionError("adapter entrypoint is not bound to source artifact")
+        operation = _text(self.operation, "operation")
+        if operation not in self.adapter.operations:
+            raise PythonAdapterExecutionError("operation is not declared by adapter")
+        object.__setattr__(self, "operation", operation)
+        if not isinstance(self.payload, Mapping):
+            raise PythonAdapterExecutionError("payload must be a JSON object")
+        payload = dict(self.payload)
+        try:
+            encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise PythonAdapterExecutionError("payload is not finite JSON") from error
+        if len(encoded) > MAX_ADAPTER_INPUT_BYTES:
+            raise PythonAdapterExecutionError("payload exceeds the bounded input limit")
+        object.__setattr__(self, "payload", payload)
+        interpreter_value = self.interpreter.resolve() if isinstance(self.interpreter, Path) else self.interpreter
+        interpreter = self._regular_absolute_path(interpreter_value, "interpreter", must_exist=True)
+        object.__setattr__(self, "interpreter", interpreter)
+        roots = tuple(self.dependency_roots)
+        if len(roots) > 32:
+            raise PythonAdapterExecutionError("dependency roots exceed the bounded limit")
+        normalized_roots = tuple(
+            self._regular_absolute_path(root, "dependency_root", must_exist=True, directory=True)
+            for root in roots
+        )
+        if len(set(normalized_roots)) != len(normalized_roots):
+            raise PythonAdapterExecutionError("dependency roots must be unique")
+        object.__setattr__(self, "dependency_roots", normalized_roots)
+        input_root = self._regular_absolute_path(self.input_root, "input_root", must_exist=False)
+        output_root = self._regular_absolute_path(self.output_root, "output_root", must_exist=False)
+        if input_root == output_root:
+            raise PythonAdapterExecutionError("input and output roots must be distinct")
+        object.__setattr__(self, "input_root", input_root)
+        object.__setattr__(self, "output_root", output_root)
+
+    @property
+    def result_path(self) -> Path:
+        return self.output_root / "result.json"
+
+    @property
+    def content_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.python_adapter_execution_binding/v1",
+            {
+                "bundle_ref": self.bundle_ref,
+                "output_namespace_ref": self.output_namespace_ref,
+                "adapter_ref": self.adapter.content_digest,
+                "source_ref": self.source_artifact.source_ref,
+                "operation": self.operation,
+                "payload": dict(self.payload),
+                "input_root": str(self.input_root),
+                "output_root": str(self.output_root),
+                "interpreter": str(self.interpreter),
+                "dependency_roots": [str(root) for root in self.dependency_roots],
+            },
+        )
+
+    def prepare(self, request: Any):
+        from ..native_containment.contracts import ContainmentRequest
+        from ..native_containment.executor_darwin import DarwinExecutionSpec
+
+        if not isinstance(request, ContainmentRequest):
+            raise PythonAdapterExecutionError("request is invalid")
+        if request.input_bundle_ref != self.bundle_ref:
+            raise PythonAdapterExecutionError("request input is not bound to the adapter bundle")
+        if request.output_namespace_ref != self.output_namespace_ref:
+            raise PythonAdapterExecutionError("request output is not bound to the adapter namespace")
+        self._prepare_root(self.input_root)
+        self._prepare_root(self.output_root)
+        source_destination = self.input_root / f"{self.source_artifact.source_ref}.py"
+        request_path = self.input_root / "request.json"
+        allowed_input_paths = {source_destination, request_path}
+        unexpected = [path for path in self.input_root.iterdir() if path not in allowed_input_paths]
+        if unexpected:
+            raise PythonAdapterExecutionError("input root contains undeclared files")
+        self._write_immutable(source_destination, self.source_artifact.path.read_bytes())
+        document = {
+            "abi": PYTHON_ADAPTER_ABI_VERSION,
+            "adapter_ref": self.adapter.content_digest,
+            "bundle_ref": self.bundle_ref,
+            "request_id": request.request_id,
+            "attempt_id": request.attempt_id,
+            "operation": self.operation,
+            "payload": dict(self.payload),
+        }
+        try:
+            encoded = json.dumps(
+                document,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as error:
+            raise PythonAdapterExecutionError("adapter invocation is not finite JSON") from error
+        if len(encoded) > MAX_ADAPTER_INPUT_BYTES:
+            raise PythonAdapterExecutionError("adapter invocation exceeds the bounded input limit")
+        self._write_immutable(request_path, encoded)
+        executable_digest = hashlib.sha256(self.interpreter.read_bytes()).hexdigest()
+        return DarwinExecutionSpec(
+            input_bundle_ref=self.bundle_ref,
+            output_namespace_ref=self.output_namespace_ref,
+            executable=self.interpreter,
+            executable_digest=executable_digest,
+            arguments=(
+                "-I",
+                "-c",
+                PYTHON_ADAPTER_LAUNCHER,
+                str(source_destination),
+                str(request_path),
+                str(self.result_path),
+                *(str(root) for root in self.dependency_roots),
+            ),
+            input_root=self.input_root,
+            output_root=self.output_root,
+            read_roots=self.dependency_roots,
+        )
+
+    def validate_result(self, request: Any, report: Any) -> None:
+        from ..native_containment.contracts import ContainmentReport, ContainmentRequest
+
+        if not isinstance(request, ContainmentRequest) or not isinstance(report, ContainmentReport):
+            raise PythonAdapterExecutionError("adapter result binding is invalid")
+        if report.status != "completed":
+            return
+        if report.attempt_id != request.attempt_id or report.request_digest != request.content_digest:
+            raise PythonAdapterExecutionError("adapter result report is not bound to request")
+        path = self.result_path
+        if path.is_symlink() or not path.is_file():
+            raise PythonAdapterExecutionError("adapter result file is missing")
+        raw = path.read_bytes()
+        if len(raw) > MAX_ADAPTER_RESULT_BYTES:
+            raise PythonAdapterExecutionError("adapter result exceeds the bounded limit")
+        try:
+            result = json.loads(raw.decode("utf-8"), parse_constant=self._reject_json_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            raise PythonAdapterExecutionError("adapter result is not finite JSON") from error
+        if not isinstance(result, dict):
+            raise PythonAdapterExecutionError("adapter result must be a JSON object")
+
+    @staticmethod
+    def _reject_json_constant(value: str) -> None:
+        raise ValueError("non-finite JSON number: " + value)
+
+    @staticmethod
+    def _prepare_root(path: Path) -> None:
+        PythonAdapterExecutionBinding._assert_no_symlink_ancestors(path)
+        if path.exists() and path.is_symlink():
+            raise PythonAdapterExecutionError("execution root must not be a symlink")
+        path.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink() or not path.is_dir():
+            raise PythonAdapterExecutionError("execution root is not a directory")
+
+    @staticmethod
+    def _write_immutable(path: Path, raw: bytes) -> None:
+        if path.exists() and path.is_symlink():
+            raise PythonAdapterExecutionError("execution input must not be a symlink")
+        if path.exists():
+            if not path.is_file() or path.read_bytes() != raw:
+                raise PythonAdapterExecutionError("execution input is already bound to other bytes")
+            return
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".adapter-input-", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, 0o444)
+            os.replace(temporary, path)
+            os.chmod(path, 0o444)
+        except OSError as error:
+            raise PythonAdapterExecutionError("execution input write failed") from error
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+    @staticmethod
+    def _regular_absolute_path(
+        value: Any,
+        field: str,
+        *,
+        must_exist: bool,
+        directory: bool = False,
+    ) -> Path:
+        if not isinstance(value, Path) or not value.is_absolute():
+            raise PythonAdapterExecutionError(f"{field} must be absolute")
+        PythonAdapterExecutionBinding._assert_no_symlink_ancestors(value)
+        if value.is_symlink():
+            raise PythonAdapterExecutionError(f"{field} must not be a symlink")
+        if must_exist and (not value.exists() or not value.is_file() and not (directory and value.is_dir())):
+            raise PythonAdapterExecutionError(f"{field} is unavailable")
+        if directory and must_exist and not value.is_dir():
+            raise PythonAdapterExecutionError(f"{field} must be a directory")
+        return value.resolve()
+
+    @staticmethod
+    def _assert_no_symlink_ancestors(path: Path) -> None:
+        current = path
+        while True:
+            if current.is_symlink():
+                raise PythonAdapterExecutionError("execution path contains a symlink ancestor")
+            if current.parent == current:
+                return
+            current = current.parent
+
+
+class PythonAdapterExecutionGateway:
+    """Validate adapter output around a trusted B1 executor, never fallback."""
+
+    execution_allowed = False
+
+    def __init__(self, *, binding: PythonAdapterExecutionBinding, executor: Any) -> None:
+        if not isinstance(binding, PythonAdapterExecutionBinding):
+            raise PythonAdapterExecutionError("binding is invalid")
+        if not callable(executor) or not callable(getattr(executor, "spawn", None)) or not callable(
+            getattr(executor, "terminate", None)
+        ):
+            raise PythonAdapterExecutionError("executor lacks trusted lifecycle")
+        self.binding = binding
+        self.executor = executor
+
+    def __call__(self, request: Any, policy: Any, canary: Any):
+        from ..native_containment.contracts import ContainmentReport, ContainmentRequest
+
+        if not isinstance(request, ContainmentRequest):
+            raise PythonAdapterExecutionError("request is invalid")
+        try:
+            report = self.executor(request, policy, canary)
+        except Exception:
+            return ContainmentReport(
+                attempt_id=request.attempt_id,
+                request_digest=request.content_digest,
+                status="failed",
+                reason_code="NATIVE_CONTAINMENT_EXECUTOR_FAILED",
+            )
+        if not isinstance(report, ContainmentReport):
+            return ContainmentReport(
+                attempt_id=request.attempt_id,
+                request_digest=request.content_digest,
+                status="failed",
+                reason_code="NATIVE_CONTAINMENT_EXECUTOR_FAILED",
+            )
+        if report.status == "completed":
+            try:
+                self.binding.validate_result(request, report)
+            except PythonAdapterExecutionError:
+                return ContainmentReport(
+                    attempt_id=request.attempt_id,
+                    request_digest=request.content_digest,
+                    status="failed",
+                    reason_code="NATIVE_CONTAINMENT_ADAPTER_OUTPUT_INVALID",
+                )
+        return report
+
+    def spawn(self, request: Any, policy: Any, canary: Any):
+        self.binding.prepare(request)
+        return self.executor.spawn(request, policy, canary)
+
+    def terminate(self, spawned: Any):
+        return self.executor.terminate(spawned)
 
 
 class AdapterSourceGenerator:
@@ -373,4 +727,10 @@ __all__ = [
     "AdapterSourceGenerationError",
     "AdapterSourceGenerator",
     "GeneratedAdapterCandidate",
+    "MAX_ADAPTER_INPUT_BYTES",
+    "MAX_ADAPTER_RESULT_BYTES",
+    "PYTHON_ADAPTER_ABI_VERSION",
+    "PythonAdapterExecutionBinding",
+    "PythonAdapterExecutionError",
+    "PythonAdapterExecutionGateway",
 ]

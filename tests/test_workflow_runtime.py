@@ -9,8 +9,10 @@ plan answers, so the fixture is deliberately generic.
 from __future__ import annotations
 
 import dataclasses
+import json
 
 import pandas as pd
+import pytest
 
 from tests.test_data_column_cast import _source_project
 from tests.workflow_fixtures import composed_plan
@@ -77,6 +79,7 @@ def test_native_exploration_steps_materialize_without_code_execution(tmp_path) -
     assert previous["split"].payload["threshold_source"]["result_fingerprint"] == (
         previous["detail"].result_fingerprint
     )
+    assert previous["split"].payload["threshold_source"]["step_id"] == "detail"
     assert all(value > 0 for value in previous["compare"].row_counts.values())
     assert len(previous["scatter"].artifact_ids) >= 2
     # No step may reach execution through the arbitrary-code path.
@@ -137,6 +140,35 @@ def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
     assert (project / "runs" / run_id / "exports" / "wf-report-runtime.xlsx").is_file()
 
 
+def test_report_collection_uses_the_declared_report_step_id(tmp_path) -> None:
+    frame = _frame(6)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-report-renamed")
+    report = next(step for step in draft.steps if step.operation_id == "report.compose")
+    renamed_report = dataclasses.replace(report, step_id="final_report")
+    renamed = dataclasses.replace(
+        draft,
+        steps=tuple(renamed_report if step.step_id == report.step_id else step for step in draft.steps),
+    )
+    previous = {
+        step.step_id: WorkflowStepResult(
+            artifact_ids=[f"artifact-{step.step_id}"],
+            row_counts={"source": len(frame)},
+        )
+        for step in renamed.steps
+        if step.operation_id != "report.compose"
+    }
+
+    result = _execute_workflow_report(project, renamed, previous, renamed_report)
+
+    assert result.payload["collection_id"]
+    collection = json.loads(
+        (project / "runs" / run_id / "artifacts" / "statistical_exploration" / "wf-report-renamed.json").read_text()
+    )
+    assert "final_report" in collection["steps"]
+    assert "step-9" not in collection["steps"]
+
+
 def test_runtime_dispatches_on_operation_identity_not_step_naming(tmp_path):
     """A plan with unfamiliar step ids and ordering must run unchanged.
 
@@ -174,3 +206,53 @@ def test_runtime_dispatches_on_operation_identity_not_step_naming(tmp_path):
     assert state.status == "completed"
     assert {step.status for step in state.steps.values()} == {"completed"}
     assert all(step_id.startswith("phase_") for step_id in state.steps)
+
+
+def test_model_custom_requires_an_authorized_gateway_and_can_be_injected(tmp_path) -> None:
+    frame = _frame(6)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-custom-gateway",
+        steps=[
+            {
+                "step_id": "custom_capability",
+                "operation_id": "model.custom",
+                "spec": {
+                    "capability_ref": "capability:example",
+                    "binding_ref": "binding:example",
+                    "operation": "fit",
+                    "parameters": {"family": "count"},
+                    "expected_artifacts": ["model_summary"],
+                },
+            }
+        ],
+    )
+    execute_without_gateway = build_workflow_step_executor(project, draft)
+    with pytest.raises(Exception, match="authorized custom capability gateway"):
+        execute_without_gateway(draft.steps[0], {})
+
+    calls = []
+
+    def authorized_gateway(*, project_root, draft, step, previous):
+        calls.append((project_root, draft.workflow_id, step.step_id, previous))
+        return WorkflowStepResult(
+            artifact_ids=["custom-result"],
+            row_counts={"source": len(frame)},
+            result_fingerprint="sha256:custom-result",
+            payload={"status": "completed"},
+        )
+
+    state = WorkflowExecutor(project).execute(
+        draft,
+        build_workflow_step_executor(
+            project,
+            draft,
+            custom_step_executor=authorized_gateway,
+        ),
+    )
+
+    assert state.status == "completed"
+    assert state.steps["custom_capability"].artifact_ids == ("custom-result",)
+    assert calls and calls[0][1:3] == ("wf-custom-gateway", "custom_capability")

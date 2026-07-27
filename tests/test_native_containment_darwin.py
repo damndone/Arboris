@@ -100,6 +100,12 @@ def test_darwin_profile_imports_system_rules_before_custom_allows():
     assert '(import "system.sb")' in profile
 
 
+def test_darwin_directory_canary_targets_untrusted_users_root():
+    from workbench.native_containment.platform_darwin import DarwinCanaryHarness
+
+    assert 'os.listdir("/Users")' in DarwinCanaryHarness._CANARY_SCRIPT
+
+
 def test_darwin_canary_fails_closed_before_running_cases_when_limits_are_unavailable():
     from workbench.native_containment.platform_darwin import DarwinCanaryHarness
     from workbench.native_containment.policy import ContainmentPolicy
