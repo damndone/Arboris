@@ -6,11 +6,11 @@ Implement MEM2 as a scoped, append-only cross-project domain-memory control plan
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 2/8 (25.0%; 25.0 per 100 events)
+- Failure frequency: 2/9 (22.2%; 22.2 per 100 events)
 - Repeat rate: 0/2 (0.0%)
 - Recurrence rate: 0/2 (0.0%)
 - MTTR: median=0 ms (sample=1; unresolved=1)
@@ -68,3 +68,4 @@ CONTEXT_RESCOPED
 - #6: `55555555-6666-4777-8888-999999999999` | 2026-07-27T11:00:00.000Z | GATE/mem2_targeted_gate | incident=`66666666-7777-4888-8999-000000000000` | lesson_key=`mem2-targeted-gate-not-integration` | event_sha256=`e1e26f83b785ae5b2a40895133b6d190bd8b6f9f6c9abe28362aff8721ea2a12`
 - #7: `77777777-8888-4999-9000-111111111111` | 2026-07-27T11:00:00.000Z | FAILURE/frontend_typecheck_async_response_red | incident=`88888888-9999-4000-8111-222222222222` | lesson_key=`frontend-api-awaits-response` | event_sha256=`57c50ca25eb8db9cefcb517fba22ff327b010ecda029696332038d91f7d7ba75`
 - #8: `99999999-0000-4111-8222-333333333333` | 2026-07-27T11:00:00.000Z | GATE/mem2_targeted_gate | incident=`00000000-1111-4222-8333-444444444444` | lesson_key=`mem2-targeted-gate-not-integration` | event_sha256=`e3bca75dc1101f925ca4b5d354f296576fcf56fbcd1af7e003426cd52818dfa3`
+- #9: `11111111-aaaa-4bbb-8ccc-222222222222` | 2026-07-27T11:05:00.000Z | STATE_CHANGE/mem2_domain_memory_completed | incident=`22222222-bbbb-4ccc-8ddd-333333333333` | lesson_key=`close-mem2-before-shared-integration` | event_sha256=`6ab8be99ba7199221494834b74b082d238dadd4a31ed9332d3b5494a83187b59`
