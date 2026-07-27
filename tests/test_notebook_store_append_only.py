@@ -16,8 +16,10 @@ from pathlib import Path
 import pytest
 
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
+from workbench.agent.notebook.errors import OptionBatchInvalid
 from workbench.agent.notebook.recommendation import (
     ComparisonDecisionRecord,
+    RecommendationValidator,
     ServerDecisionRegistry,
     candidate_cohort_hash,
 )
@@ -28,6 +30,11 @@ from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
     FeasibilityCandidateDecision,
     FeasibilityDecision,
+    RecommendationDecisionV11,
+)
+from workbench.agent.context_compiler import (
+    freshness_dependency_fingerprint,
+    generation_context_hash,
 )
 
 from tests.test_notebook_support import make_project, model_rerun_proposal
@@ -195,6 +202,133 @@ def test_server_decision_persistence_rejects_conflicting_reuse_of_a_reference(
         )
         == decision
     )
+
+
+def test_persisted_server_registry_drives_v11_recommendation_service_lifecycle(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="V11 lifecycle", created_by="u")
+    context = service.compile_context(notebook.notebook_id)
+    source = replace(
+        _server_feasibility_decision(),
+        batch_id="batch_v11_service",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+    )
+    service.persist_server_decision(notebook.notebook_id, source)
+    decision = RecommendationValidator().decide_v11(
+        batch_id=source.batch_id,
+        candidate_option_ids=source.candidate_option_ids,
+        generation_context_hash=source.generation_context_hash,
+        freshness_dependency_fingerprint=source.freshness_dependency_fingerprint,
+        evidence_pack_hashes=source.evidence_pack_hashes,
+        decision_registry=service.read_server_decision_registry(notebook.notebook_id),
+        feasibility_decision_ref=source.feasibility_decision_id,
+    )
+    assert isinstance(decision, RecommendationDecisionV11)
+    drafts = [
+        replace(_draft("p_ets", "robust", option_id="opt_ets"),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome),
+        replace(_draft("p_arma", "clustered", option_id="opt_arma"),
+                rank=2,
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome),
+    ]
+
+    revisions = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=drafts,
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+
+    assert len(revisions) == 2
+    assert service.store.read_decision(notebook.notebook_id, decision.batch_id) == decision
+    reopened = NotebookService(project)
+    assert reopened.store.read_decision(notebook.notebook_id, decision.batch_id) == decision
+
+
+def test_v11_recommendation_without_persisted_source_fails_before_any_write(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="V11 fail closed", created_by="u")
+    context = service.compile_context(notebook.notebook_id)
+    source = replace(
+        _server_feasibility_decision(),
+        batch_id="batch_v11_unpersisted",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+    )
+    in_memory_registry = ServerDecisionRegistry()
+    in_memory_registry.register_feasibility(source)
+    decision = RecommendationValidator().decide_v11(
+        batch_id=source.batch_id,
+        candidate_option_ids=source.candidate_option_ids,
+        generation_context_hash=source.generation_context_hash,
+        freshness_dependency_fingerprint=source.freshness_dependency_fingerprint,
+        evidence_pack_hashes=source.evidence_pack_hashes,
+        decision_registry=in_memory_registry,
+        feasibility_decision_ref=source.feasibility_decision_id,
+    )
+    drafts = [
+        replace(_draft("p_ets", "robust", option_id="opt_ets"),
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome),
+        replace(_draft("p_arma", "clustered", option_id="opt_arma"),
+                rank=2,
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome),
+    ]
+
+    with pytest.raises(OptionBatchInvalid) as caught:
+        service.propose_batch(
+            notebook.notebook_id,
+            context=context,
+            drafts=drafts,
+            batch_id=decision.batch_id,
+            recommendation_decision=decision,
+        )
+
+    assert caught.value.code == "OPTION_RECOMMENDATION_DECISION_UNAVAILABLE"
+    assert service.store.option_ids(notebook.notebook_id) == []
+    assert service.store.read_decision(notebook.notebook_id, decision.batch_id) is None
+
+
+def test_store_rejects_direct_v11_recommendation_without_persisted_source(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="V11 store boundary", created_by="u")
+    context = service.compile_context(notebook.notebook_id)
+    source = replace(
+        _server_feasibility_decision(),
+        batch_id="batch_v11_store_boundary",
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+    )
+    registry = ServerDecisionRegistry()
+    registry.register_feasibility(source)
+    decision = RecommendationValidator().decide_v11(
+        batch_id=source.batch_id,
+        candidate_option_ids=source.candidate_option_ids,
+        generation_context_hash=source.generation_context_hash,
+        freshness_dependency_fingerprint=source.freshness_dependency_fingerprint,
+        evidence_pack_hashes=source.evidence_pack_hashes,
+        decision_registry=registry,
+        feasibility_decision_ref=source.feasibility_decision_id,
+    )
+
+    with pytest.raises(ValueError, match="not backed"):
+        service.store.append_decision(notebook.notebook_id, decision)
+
+    assert service.store.read_decision(notebook.notebook_id, decision.batch_id) is None
 
 
 def test_the_option_log_only_ever_grows(tmp_path: Path) -> None:

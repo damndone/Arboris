@@ -29,6 +29,8 @@ from ...contracts.agent.notebook_option import (
     NotebookOptionRevision,
     OptionMaterialization,
     RecommendationDecision,
+    RecommendationDecisionV11,
+    RECOMMENDATION_DECISION_V11_CONTRACT_VERSION,
 )
 from ..events import AgentEventStream
 from ..storage import append_jsonl_atomic, read_jsonl
@@ -643,15 +645,22 @@ class NotebookStore:
         with self._lock:
             return sorted(self._evidence_packs(notebook_id))
 
-    def _decisions(self, notebook_id: str) -> dict[str, RecommendationDecision]:
-        decisions: dict[str, RecommendationDecision] = {}
+    def _decisions(
+        self, notebook_id: str
+    ) -> dict[str, RecommendationDecision | RecommendationDecisionV11]:
+        decisions: dict[str, RecommendationDecision | RecommendationDecisionV11] = {}
         for record in self._notebook_records(notebook_id):
             if record.get("record_type") != RECORD_RECOMMENDATION_DECISION:
                 continue
             value = record.get("decision")
             if not isinstance(value, Mapping):
                 raise ValueError("recommendation decision record is malformed")
-            decision = RecommendationDecision.from_dict(value)
+            decision = (
+                RecommendationDecisionV11.from_dict(value)
+                if value.get("contract_version")
+                == RECOMMENDATION_DECISION_V11_CONTRACT_VERSION
+                else RecommendationDecision.from_dict(value)
+            )
             existing = decisions.get(decision.batch_id)
             if existing is not None and existing != decision:
                 raise ValueError(
@@ -660,10 +669,23 @@ class NotebookStore:
             decisions[decision.batch_id] = decision
         return decisions
 
-    def append_decision(self, notebook_id: str, decision: RecommendationDecision) -> None:
-        if not isinstance(decision, RecommendationDecision):
+    def append_decision(
+        self,
+        notebook_id: str,
+        decision: RecommendationDecision | RecommendationDecisionV11,
+    ) -> None:
+        if not isinstance(decision, (RecommendationDecision, RecommendationDecisionV11)):
             raise ValueError("decision must be a RecommendationDecision")
         with self._lock:
+            if isinstance(decision, RecommendationDecisionV11):
+                try:
+                    self._server_decision_registry(notebook_id).validate_recommendation(
+                        decision
+                    )
+                except (ValueError, KeyError, TypeError) as error:
+                    raise ValueError(
+                        "recommendation decision is not backed by a persisted server decision"
+                    ) from error
             existing = self._decisions(notebook_id).get(decision.batch_id)
             if existing is not None:
                 if existing != decision:
@@ -682,7 +704,7 @@ class NotebookStore:
 
     def read_decision(
         self, notebook_id: str, batch_id: str
-    ) -> RecommendationDecision | None:
+    ) -> RecommendationDecision | RecommendationDecisionV11 | None:
         with self._lock:
             return self._decisions(notebook_id).get(batch_id)
 

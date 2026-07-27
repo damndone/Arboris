@@ -26,11 +26,13 @@ from uuid import uuid4
 import pandas as pd
 
 from ...contracts.agent.notebook_option import (
+    FeasibilityDecision,
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
     NotebookOptionRevisionV12,
     OptionExecution,
     RecommendationDecision,
+    RecommendationDecisionV11,
 )
 from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
@@ -77,6 +79,11 @@ from .freshness import (
     freshness_details,
 )
 from .proposal import OptionDraft, TypedProposal
+from .recommendation import (
+    ComparisonDecisionRecord,
+    RecommendationValidationError,
+    ServerDecisionRegistry,
+)
 from .store import (
     RECORD_EXECUTION,
     RECORD_EXECUTION_RESULT,
@@ -325,6 +332,27 @@ class NotebookService:
     def list_notebooks(self) -> list[Notebook]:
         return self.store.list_notebooks()
 
+    def persist_server_decision(
+        self,
+        notebook_id: str,
+        decision: FeasibilityDecision | ComparisonDecisionRecord,
+    ) -> None:
+        """Persist one trusted recommendation source decision for a Notebook.
+
+        This is a control-plane seam for Workbench-owned validators.  Agent
+        payloads still cannot register a decision, and the append-only store is
+        the only source used when a later recommendation is validated.
+        """
+
+        self.get_notebook(notebook_id)
+        self.store.append_server_decision(notebook_id, decision)
+
+    def read_server_decision_registry(self, notebook_id: str) -> ServerDecisionRegistry:
+        """Rebuild the recommendation source registry from persisted records."""
+
+        self.get_notebook(notebook_id)
+        return self.store.read_server_decision_registry(notebook_id)
+
     def rebind_run_family(self, notebook_id: str, *, run_family_id: str) -> None:
         """Always refuses. Present so the refusal is explicit, not an omission."""
 
@@ -545,6 +573,10 @@ class NotebookService:
             )
 
         self._assert_batch_shape(drafts)
+        self._validate_recommendation_decision(
+            notebook_id,
+            recommendation_decision,
+        )
         bindings = self._resolve_capability_bindings(
             notebook,
             drafts,
@@ -808,7 +840,9 @@ class NotebookService:
                         "recommendation_outcome": recommendation_decision.outcome,
                         "recommended_option_id": recommendation_decision.recommended_option_id,
                         "evidence_pack_hashes": list(recommendation_decision.evidence_pack_hashes),
-                        "comparison_protocol_refs": list(recommendation_decision.comparison_protocol_refs),
+                        "comparison_protocol_refs": list(
+                            getattr(recommendation_decision, "comparison_protocol_refs", ())
+                        ),
                     }
                 )
             trace.emit(
@@ -1215,8 +1249,10 @@ class NotebookService:
 
         from .materialization import NotebookOptionMaterializer
 
+        current = self.store.read_option(notebook_id, option_id).current_revision
+        self._assert_current_recommendation_source(notebook_id, current)
         self._assert_current_capability_binding(
-            self.store.read_option(notebook_id, option_id).current_revision
+            current
         )
         return NotebookOptionMaterializer(self).materialize(
             notebook_id,
@@ -1417,6 +1453,7 @@ class NotebookService:
 
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        self._assert_current_recommendation_source(notebook_id, current)
         self._assert_current_capability_binding(current)
         if current.materializable:
             materialization = self.store.read_materialization(
@@ -1679,6 +1716,47 @@ class NotebookService:
                 )
             resolved.append(binding)
         return tuple(resolved)
+
+    def _validate_recommendation_decision(
+        self,
+        notebook_id: str,
+        decision: RecommendationDecision | RecommendationDecisionV11 | None,
+    ) -> None:
+        """Validate V1.1 recommendations against the persisted source registry."""
+
+        if decision is None or not isinstance(decision, RecommendationDecisionV11):
+            return
+        try:
+            self.read_server_decision_registry(notebook_id).validate_recommendation(decision)
+        except (RecommendationValidationError, ValueError, KeyError, TypeError) as error:
+            raise OptionBatchInvalid(
+                "OPTION_RECOMMENDATION_DECISION_UNAVAILABLE",
+                "the V1.1 recommendation is not backed by a current persisted server decision",
+                recommendation_decision_id=decision.recommendation_decision_id,
+                batch_id=decision.batch_id,
+            ) from error
+
+    def _assert_current_recommendation_source(
+        self,
+        notebook_id: str,
+        revision: Any,
+    ) -> None:
+        """Recheck the persisted V1.1 source before a downstream consumer."""
+
+        decision_id = getattr(revision, "recommendation_decision_id", None)
+        batch_id = getattr(revision, "batch_id", None)
+        if not isinstance(decision_id, str) or not decision_id:
+            return
+        decision = self.store.read_decision(notebook_id, batch_id)
+        if isinstance(decision, RecommendationDecisionV11):
+            self._validate_recommendation_decision(notebook_id, decision)
+            if decision.recommendation_decision_id != decision_id:
+                raise OptionBatchInvalid(
+                    "OPTION_RECOMMENDATION_DECISION_UNAVAILABLE",
+                    "the persisted V1.1 recommendation does not match the option",
+                    recommendation_decision_id=decision_id,
+                    batch_id=batch_id,
+                )
 
     def _published_artifact_types(
         self,
