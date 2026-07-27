@@ -98,6 +98,12 @@ class MemoryCandidateStore:
                 latest[item.candidate_id] = item
         return tuple(sorted((item for item in latest.values() if item.status in {"proposed", "needs_review"}), key=lambda item: item.candidate_id))
 
+    def latest(self, candidate_id: str) -> MemoryCandidate:
+        history = [item for item in self._read() if item.candidate_id == candidate_id]
+        if not history:
+            raise KeyError(candidate_id)
+        return max(history, key=lambda item: item.revision)
+
     def _read(self) -> list[MemoryCandidate]:
         with self._locked() as directory_fd:
             return self._read_locked(directory_fd)

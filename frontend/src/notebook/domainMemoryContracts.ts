@@ -40,3 +40,12 @@ export interface DomainMemoryRetrievalProjection {
   bounded: boolean;
   preference_ref?: string;
 }
+
+export interface DomainMemoryCandidate {
+  candidate_id: string;
+  revision: number;
+  status: "proposed" | "needs_review" | "approved" | "rejected" | "expired";
+  memory_kind: string;
+  compact_lesson: string;
+  source_summary_refs: string[];
+}

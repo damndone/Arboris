@@ -6,7 +6,7 @@ are prepared. The adapter has no route that starts analysis or executes code.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,6 +15,7 @@ from ..domain_memory.contracts import MemoryCandidate
 from ..domain_memory.preferences import DomainMemoryPreferences, DomainMemoryRequestOverride
 from ..domain_memory.scope import MemoryScope
 from ..domain_memory.service import DomainMemoryService, DomainMemoryServiceError
+from ..domain_memory.review_service import MemoryReviewService, MemoryReviewServiceError
 
 
 class _StrictModel(BaseModel):
@@ -56,6 +57,29 @@ class ApproveBody(_StrictModel):
     override: OverrideBody = Field(default_factory=OverrideBody)
 
 
+class CandidateReviewBody(_StrictModel):
+    decision: Literal["approved", "rejected"]
+    expected_revision: int = Field(ge=1)
+    actor_id: str = Field(min_length=1, max_length=128)
+    approved_at: str | None = Field(default=None, min_length=1, max_length=64)
+    review_after: str | None = Field(default=None, min_length=1, max_length=64)
+    resolve_conflicts: bool = False
+
+
+class MemoryStateBody(_StrictModel):
+    expected_approval_ref: str = Field(min_length=1, max_length=256)
+    expected_validity_revision: int = Field(ge=1)
+    state: Literal["stale", "archived"]
+    actor_id: str = Field(min_length=1, max_length=128)
+    effective_at: str = Field(min_length=1, max_length=64)
+
+
+class MemoryRestoreBody(_StrictModel):
+    actor_id: str = Field(min_length=1, max_length=128)
+    approved_at: str = Field(min_length=1, max_length=64)
+    evidence_ref: str = Field(min_length=1, max_length=256)
+
+
 router = APIRouter(prefix="/domain-memory", tags=["domain-memory"])
 
 
@@ -63,6 +87,13 @@ def _service(request: Request) -> DomainMemoryService:
     service = getattr(request.app.state, "domain_memory_service", None)
     if not isinstance(service, DomainMemoryService):
         raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_UNAVAILABLE"})
+    return service
+
+
+def _review_service(request: Request) -> MemoryReviewService:
+    service = getattr(request.app.state, "domain_memory_review_service", None)
+    if not isinstance(service, MemoryReviewService):
+        raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_REVIEW_UNAVAILABLE"})
     return service
 
 
@@ -121,6 +152,47 @@ def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) ->
         "content": result.content.to_dict(), "approval": result.approval.to_dict(), "validity": result.validity.to_dict(),
         "automatic_execution": False,
     }
+
+
+@router.post("/review/candidates/{candidate_id}")
+def review_candidate(candidate_id: str, body: CandidateReviewBody, request: Request) -> dict[str, Any]:
+    review = _review_service(request)
+    try:
+        if body.decision == "rejected":
+            result = review.reject_candidate(candidate_id, expected_revision=body.expected_revision, actor_id=body.actor_id)
+            return {"review": {"candidate_id": result.candidate_id, "revision": result.revision, "status": result.status}, "automatic_execution": False}
+        if body.approved_at is None or body.review_after is None:
+            raise MemoryReviewServiceError("approved_at and review_after are required for approval")
+        result = review.approve_candidate(
+            candidate_id, expected_revision=body.expected_revision, actor_id=body.actor_id,
+            approved_at=body.approved_at, review_after=body.review_after, resolve_conflicts=body.resolve_conflicts,
+        )
+    except (MemoryReviewServiceError, ValueError, TypeError, KeyError) as error:
+        raise HTTPException(status_code=409, detail={"code": "DOMAIN_MEMORY_REVIEW_FAILED", "message": str(error)}) from error
+    return {"content": result.content.to_dict(), "approval": result.approval.to_dict(), "validity": result.validity.to_dict(), "automatic_execution": False}
+
+
+@router.post("/review/memories/{memory_id}/state")
+def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request) -> dict[str, Any]:
+    review = _review_service(request)
+    try:
+        result = review.change_memory_state(
+            memory_id, expected_approval_ref=body.expected_approval_ref, expected_validity_revision=body.expected_validity_revision,
+            state=body.state, actor_id=body.actor_id, effective_at=body.effective_at,
+        )
+    except (MemoryReviewServiceError, ValueError, TypeError, KeyError) as error:
+        raise HTTPException(status_code=409, detail={"code": "DOMAIN_MEMORY_REVIEW_FAILED", "message": str(error)}) from error
+    return {"validity": result.to_dict(), "automatic_execution": False}
+
+
+@router.post("/review/memories/{memory_id}/restore")
+def restore_memory(memory_id: str, body: MemoryRestoreBody, request: Request) -> dict[str, Any]:
+    review = _review_service(request)
+    try:
+        result = review.restore_memory(memory_id, actor_id=body.actor_id, approved_at=body.approved_at, evidence_ref=body.evidence_ref)
+    except (MemoryReviewServiceError, ValueError, TypeError, KeyError) as error:
+        raise HTTPException(status_code=409, detail={"code": "DOMAIN_MEMORY_REVIEW_FAILED", "message": str(error)}) from error
+    return {"content": result.content.to_dict(), "approval": result.approval.to_dict(), "validity": result.validity.to_dict(), "automatic_execution": False}
 
 
 __all__ = ["router"]

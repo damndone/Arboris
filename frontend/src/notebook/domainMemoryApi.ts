@@ -1,6 +1,7 @@
 import { apiUrl, readResponse } from "../api";
 import type {
   DomainMemoryPreferences,
+  DomainMemoryCandidate,
   DomainMemoryRequestOverride,
   DomainMemoryRetrievalProjection,
   DomainMemoryScope,
@@ -32,3 +33,15 @@ export async function retrieveDomainMemory(
     }),
   }));
 }
+
+export async function reviewDomainMemoryCandidate(
+  projectRoot: string,
+  candidateId: string,
+  input: { decision: "approved" | "rejected"; expected_revision: number; actor_id: string; approved_at?: string; review_after?: string; resolve_conflicts?: boolean },
+): Promise<Record<string, unknown>> {
+  return readResponse<Record<string, unknown>>(await fetch(memoryPath(`/domain-memory/review/candidates/${encodeURIComponent(candidateId)}`, projectRoot), {
+    method: "POST", headers: jsonHeaders, body: JSON.stringify(input),
+  }));
+}
+
+export type { DomainMemoryCandidate };

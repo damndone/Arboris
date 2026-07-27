@@ -61,9 +61,7 @@ class DomainMemoryService:
         self, candidate_id: str, *, expected_revision: int, approver_id: str, approved_at: str,
         review_after: str, global_preferences: DomainMemoryPreferences, override: DomainMemoryRequestOverride | None = None,
     ) -> CandidateApprovalResult:
-        effective = self.effective_preferences(global_preferences, override)
-        if not effective.iteration:
-            raise DomainMemoryServiceError("DOMAIN_MEMORY_DISABLED: iteration is off")
+        self.effective_preferences(global_preferences, override)
         pending = [item for item in self.candidate_store.pending(self.store.scope) if item.candidate_id == candidate_id]
         if not pending:
             raise DomainMemoryServiceError("DOMAIN_MEMORY_CANDIDATE_NOT_PENDING")

@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .project_index_contract import ProjectIndexError
+from .contracts import EFFECT_KINDS
 
 
 TRACE_CONTRACT_VERSION = "workbench.domain_memory.trace/v1"
@@ -32,6 +33,9 @@ _DOMAIN_EVENT_FIELDS = {
     "domain_memory.approval.recorded": frozenset({"approval_ref", "content_revision_ref", "outcome"}),
     "domain_memory.validity.changed": frozenset({"approval_ref", "validity_ref", "to_status"}),
     "domain_memory.retrieval.completed": frozenset({"retrieval_ref", "scope_ref", "outcome"}),
+    "domain_memory.review.completed": frozenset({"review_ref", "candidate_or_content_ref", "outcome"}),
+    "domain_memory.conflict.recorded": frozenset({"conflict_ref", "content_revision_refs"}),
+    "domain_memory.usage.recorded": frozenset({"content_revision_ref", "context_manifest_ref", "effect_kind"}),
 }
 
 
@@ -109,6 +113,17 @@ def build_domain_memory_trace(*, event_type: str, payload: Mapping[str, Any]) ->
         elif field == "outcome":
             if value not in {"used", "not_used", "empty", "blocked", "approved", "rejected"}:
                 raise DomainMemoryTraceError("outcome is not registered")
+            normalized[field] = value
+        elif field == "content_revision_refs":
+            if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 16:
+                raise DomainMemoryTraceError("content_revision_refs are out of bounds")
+            refs = tuple(item for item in value if isinstance(item, str) and item and "/" not in item and "\\" not in item and len(item) <= 256)
+            if len(refs) != len(value) or len(set(refs)) != len(refs):
+                raise DomainMemoryTraceError("content_revision_refs are invalid")
+            normalized[field] = refs
+        elif field == "effect_kind":
+            if value not in EFFECT_KINDS:
+                raise DomainMemoryTraceError("effect_kind is not registered")
             normalized[field] = value
     return ProjectMemoryTraceEvent(
         schema_version=TRACE_CONTRACT_VERSION,
