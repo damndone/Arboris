@@ -175,3 +175,67 @@ def test_fetch_worker_rejects_digest_and_size_mismatch_without_persisting(tmp_pa
             quarantine_root=root,
         )
     assert not list(root.glob("*.artifact"))
+
+
+def test_fetch_worker_rejects_a_preexisting_hardlink_destination(tmp_path: Path):
+    from workbench.capability_factory.dependency_fetch import FetchPolicy, FetchWorker, FetchWorkerError
+
+    body = b"immutable wheel bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    root = tmp_path / "quarantine"
+    root.mkdir()
+    outside = tmp_path / "outside.artifact"
+    outside.write_bytes(body)
+    destination = root / f"{digest}.artifact"
+    destination.hardlink_to(outside)
+
+    with pytest.raises(FetchWorkerError, match="hardlink"):
+        FetchWorker(
+            transport=_Transport(
+                {
+                    "https://packages.example.test/files/safe.whl": _Response(
+                        200, body=body, headers={"Content-Length": str(len(body))}
+                    )
+                }
+            )
+        ).fetch(
+            url="https://packages.example.test/files/safe.whl",
+            expected_digest=digest,
+            policy=FetchPolicy(
+                allowed_origins=("https://packages.example.test",),
+                max_artifact_bytes=1024,
+                max_redirects=0,
+            ),
+            quarantine_root=root,
+        )
+
+
+def test_fetch_worker_rejects_a_symlinked_quarantine_ancestor(tmp_path: Path):
+    from workbench.capability_factory.dependency_fetch import FetchPolicy, FetchWorker, FetchWorkerError
+
+    body = b"immutable wheel bytes"
+    digest = hashlib.sha256(body).hexdigest()
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_root, target_is_directory=True)
+
+    with pytest.raises(FetchWorkerError, match="symlink"):
+        FetchWorker(
+            transport=_Transport(
+                {
+                    "https://packages.example.test/files/safe.whl": _Response(
+                        200, body=body, headers={"Content-Length": str(len(body))}
+                    )
+                }
+            )
+        ).fetch(
+            url="https://packages.example.test/files/safe.whl",
+            expected_digest=digest,
+            policy=FetchPolicy(
+                allowed_origins=("https://packages.example.test",),
+                max_artifact_bytes=1024,
+                max_redirects=0,
+            ),
+            quarantine_root=linked_parent / "quarantine",
+        )

@@ -281,6 +281,7 @@ class FetchWorker:
         root = Path(quarantine_root)
         if not root.is_absolute():
             raise FetchWorkerError("quarantine root must be absolute")
+        FetchWorker._assert_no_symlink_ancestors(root)
         if root.exists() and root.is_symlink():
             raise FetchWorkerError("quarantine root must not be a symlink")
         root.mkdir(parents=True, exist_ok=True)
@@ -290,7 +291,11 @@ class FetchWorker:
         if destination.is_symlink():
             raise FetchWorkerError("quarantine destination must not be a symlink")
         if destination.exists():
-            if not destination.is_file() or hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+            if not destination.is_file():
+                raise FetchWorkerError("content-addressed quarantine object is not a regular file")
+            if destination.stat().st_nlink != 1:
+                raise FetchWorkerError("content-addressed quarantine object is a hardlink")
+            if hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
                 raise FetchWorkerError("content-addressed quarantine object is already bound")
             return destination
         fd, temporary_name = tempfile.mkstemp(prefix=".fetch-", suffix=".tmp", dir=root)
@@ -309,6 +314,16 @@ class FetchWorker:
                 temporary.unlink()
             except FileNotFoundError:
                 pass
+
+    @staticmethod
+    def _assert_no_symlink_ancestors(path: Path) -> None:
+        current = path
+        while True:
+            if current.is_symlink():
+                raise FetchWorkerError("quarantine path contains a symlink ancestor")
+            if current.parent == current:
+                return
+            current = current.parent
 
 
 def validate_fetch_metadata(
