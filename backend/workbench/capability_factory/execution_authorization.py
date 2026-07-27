@@ -29,7 +29,32 @@ _JOURNAL_NAME = "option-execution-authorizations.jsonl"
 _MAX_TEXT = 512
 _MAX_REASON = 256
 _HEX = frozenset("0123456789abcdef")
-_STATUSES = frozenset({"issued", "rejected", "claimed", "invalidated"})
+_STATUSES = frozenset(
+    {
+        "issued",
+        "rejected",
+        "claimed",
+        "invalidated",
+        "dispatch_reserved",
+        "running",
+        "dispatch_unknown",
+        "failed",
+        "consumed",
+    }
+)
+_TRANSITIONS = {
+    "issued": frozenset({"rejected", "claimed"}),
+    "claimed": frozenset({"invalidated", "dispatch_reserved", "failed", "dispatch_unknown"}),
+    "dispatch_reserved": frozenset({"running", "failed", "dispatch_unknown"}),
+    "running": frozenset({"dispatch_unknown", "failed", "consumed"}),
+    "dispatch_unknown": frozenset(),
+    "rejected": frozenset(),
+    "invalidated": frozenset(),
+    "failed": frozenset(),
+    "consumed": frozenset(),
+}
+_TRANSITION_METADATA_LIMIT = 8
+_TRANSITION_VALUE_LIMIT = 256
 
 
 class ExecutionAuthorizationError(ValueError):
@@ -48,6 +73,12 @@ class ExecutionAuthorizationRejected(ExecutionAuthorizationError):
     """The authorization could not be claimed and was durably rejected."""
 
     code = "CAPABILITY_OPTION_EXECUTION_REJECTED"
+
+
+class ExecutionAuthorizationTransitionError(ExecutionAuthorizationError):
+    """A receipt transition violates the explicit lifecycle contract."""
+
+    code = "CAPABILITY_OPTION_EXECUTION_TRANSITION_INVALID"
 
 
 class ExecutionAuthorizationInvalidated(ExecutionAuthorizationRejected):
@@ -120,6 +151,52 @@ def _parse_time(value: Any, field: str) -> datetime:
     return _utc(parsed, field)
 
 
+def _transition_metadata(
+    value: Mapping[str, Any] | tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, Mapping):
+        items = tuple(value.items())
+    elif isinstance(value, tuple):
+        items = value
+    else:
+        raise ExecutionAuthorizationTransitionError(
+            "transition_metadata must be a mapping"
+        )
+    if len(items) > _TRANSITION_METADATA_LIMIT:
+        raise ExecutionAuthorizationTransitionError(
+            "transition_metadata exceeds the bounded field limit"
+        )
+    normalized: list[tuple[str, str]] = []
+    for key, item in items:
+        normalized_key = _identifier(key, "transition_metadata key")
+        normalized_value = _text(
+            item,
+            f"transition_metadata[{normalized_key}]",
+            maximum=_TRANSITION_VALUE_LIMIT,
+        )
+        normalized.append((normalized_key, normalized_value))
+    if len({key for key, _ in normalized}) != len(normalized):
+        raise ExecutionAuthorizationTransitionError(
+            "transition_metadata keys must be unique"
+        )
+    return tuple(sorted(normalized))
+
+
+def _derived_transition_id(
+    authorization_id: str,
+    target_status: str,
+    prior_receipt_digest: str,
+) -> str:
+    return domain_digest(
+        "workbench.capability_factory.authorization_transition/v1",
+        {
+            "authorization_id": authorization_id,
+            "target_status": target_status,
+            "prior_receipt_digest": prior_receipt_digest,
+        },
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class OptionExecutionAuthorization:
     """Immutable snapshot of an authorization and its current journal state."""
@@ -155,6 +232,9 @@ class OptionExecutionAuthorization:
     lease_epoch: int | None = None
     lease_expires_at: datetime | None = None
     rejection_reason: str | None = None
+    transition_id: str | None = None
+    prior_receipt_digest: str | None = None
+    transition_metadata: tuple[tuple[str, str], ...] = ()
 
     _KEYS = frozenset(
         {
@@ -190,9 +270,19 @@ class OptionExecutionAuthorization:
             "lease_epoch",
             "lease_expires_at",
             "rejection_reason",
+            "transition_id",
+            "prior_receipt_digest",
+            "transition_metadata",
             "payload_digest",
+            "receipt_digest",
         }
     )
+    _LEGACY_KEYS = _KEYS - {
+        "transition_id",
+        "prior_receipt_digest",
+        "transition_metadata",
+        "receipt_digest",
+    }
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "authorization_id", _identifier(self.authorization_id, "authorization_id"))
@@ -245,10 +335,24 @@ class OptionExecutionAuthorization:
             object.__setattr__(self, "lease_expires_at", _utc(self.lease_expires_at, "lease_expires_at"))
         if self.rejection_reason is not None:
             object.__setattr__(self, "rejection_reason", _text(self.rejection_reason, "rejection_reason", maximum=_MAX_REASON))
+        if self.transition_id is not None:
+            object.__setattr__(self, "transition_id", _identifier(self.transition_id, "transition_id"))
+        if self.prior_receipt_digest is not None:
+            object.__setattr__(self, "prior_receipt_digest", _digest(self.prior_receipt_digest, "prior_receipt_digest"))
+        object.__setattr__(self, "transition_metadata", _transition_metadata(self.transition_metadata))
         if self.status == "issued" and any(
             value is not None
-            for value in (self.claim_owner_id, self.lease_epoch, self.lease_expires_at, self.rejection_reason)
+            for value in (
+                self.claim_owner_id,
+                self.lease_epoch,
+                self.lease_expires_at,
+                self.rejection_reason,
+                self.transition_id,
+                self.prior_receipt_digest,
+            )
         ):
+            raise ExecutionAuthorizationError("issued authorization cannot carry transition metadata")
+        if self.status == "issued" and self.transition_metadata:
             raise ExecutionAuthorizationError("issued authorization cannot carry transition metadata")
         if self.status == "claimed":
             if self.claim_owner_id is None or self.lease_epoch is None or self.lease_expires_at is None:
@@ -265,6 +369,15 @@ class OptionExecutionAuthorization:
                 raise ExecutionAuthorizationError("invalidated authorization requires rejection_reason")
             if self.claim_owner_id is None or self.lease_epoch is None or self.lease_expires_at is None:
                 raise ExecutionAuthorizationError("invalidated authorization requires claim metadata")
+        if self.status in {"dispatch_reserved", "running", "dispatch_unknown", "failed", "consumed"}:
+            if self.claim_owner_id is None or self.lease_epoch is None or self.lease_expires_at is None:
+                raise ExecutionAuthorizationError(f"{self.status} authorization requires claim metadata")
+            if self.transition_id is None or self.prior_receipt_digest is None:
+                raise ExecutionAuthorizationError(f"{self.status} authorization requires transition provenance")
+            if self.status in {"dispatch_unknown", "failed"} and self.rejection_reason is None:
+                raise ExecutionAuthorizationError(f"{self.status} authorization requires rejection_reason")
+            if self.status in {"dispatch_reserved", "running", "consumed"} and self.rejection_reason is not None:
+                raise ExecutionAuthorizationError(f"{self.status} authorization cannot carry rejection_reason")
 
     @property
     def contract_version(self) -> str:
@@ -304,6 +417,28 @@ class OptionExecutionAuthorization:
     def payload_digest(self) -> str:
         return domain_digest("workbench.capability_factory.option_execution_authorization/v1", self._payload())
 
+    def _receipt_payload(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "authorization_id": self.authorization_id,
+            "status": self.status,
+            "claim_owner_id": self.claim_owner_id,
+            "lease_epoch": self.lease_epoch,
+            "lease_expires_at": None if self.lease_expires_at is None else _time_text(self.lease_expires_at),
+            "rejection_reason": self.rejection_reason,
+            "transition_id": self.transition_id,
+            "prior_receipt_digest": self.prior_receipt_digest,
+            "transition_metadata": dict(self.transition_metadata),
+            "payload_digest": self.payload_digest,
+        }
+
+    @property
+    def receipt_digest(self) -> str:
+        return domain_digest(
+            "workbench.capability_factory.option_execution_authorization_receipt/v1",
+            self._receipt_payload(),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             **self._payload(),
@@ -313,12 +448,16 @@ class OptionExecutionAuthorization:
             "lease_epoch": self.lease_epoch,
             "lease_expires_at": None if self.lease_expires_at is None else _time_text(self.lease_expires_at),
             "rejection_reason": self.rejection_reason,
+            "transition_id": self.transition_id,
+            "prior_receipt_digest": self.prior_receipt_digest,
+            "transition_metadata": dict(self.transition_metadata),
             "payload_digest": self.payload_digest,
+            "receipt_digest": self.receipt_digest,
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "OptionExecutionAuthorization":
-        if not isinstance(value, Mapping) or set(value) != cls._KEYS:
+        if not isinstance(value, Mapping) or set(value) not in {cls._KEYS, cls._LEGACY_KEYS}:
             raise ExecutionAuthorizationError("option execution authorization has an unknown or missing field")
         if value["contract_version"] != OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION:
             raise ExecutionAuthorizationError("contract_version is unsupported")
@@ -358,9 +497,14 @@ class OptionExecutionAuthorization:
                 else _parse_time(value["lease_expires_at"], "lease_expires_at")
             ),
             rejection_reason=value["rejection_reason"],
+            transition_id=value.get("transition_id"),
+            prior_receipt_digest=value.get("prior_receipt_digest"),
+            transition_metadata=value.get("transition_metadata", {}),
         )
         if value["payload_digest"] != result.payload_digest:
             raise ExecutionAuthorizationError("option execution authorization payload digest mismatch")
+        if "receipt_digest" in value and value["receipt_digest"] != result.receipt_digest:
+            raise ExecutionAuthorizationError("option execution authorization receipt digest mismatch")
         return result
 
 
@@ -459,13 +603,33 @@ class OptionExecutionAuthorizationStore:
                 raise ExecutionAuthorizationReplay("idempotency key does not match authorization")
             if current.status == "claimed":
                 if binding != current.capability_resolution_binding_ref:
-                    invalidated = replace(current, status="invalidated", rejection_reason="binding")
+                    invalidated = replace(
+                        current,
+                        status="invalidated",
+                        rejection_reason="binding",
+                        transition_id=_derived_transition_id(
+                            current.authorization_id,
+                            "invalidated",
+                            current.receipt_digest,
+                        ),
+                        prior_receipt_digest=current.receipt_digest,
+                    )
                     self._append_locked(invalidated)
                     raise ExecutionAuthorizationInvalidated(
                         "authorization claim invalidated: binding"
                     )
                 if freshness != current.freshness_cursor_ref:
-                    invalidated = replace(current, status="invalidated", rejection_reason="freshness")
+                    invalidated = replace(
+                        current,
+                        status="invalidated",
+                        rejection_reason="freshness",
+                        transition_id=_derived_transition_id(
+                            current.authorization_id,
+                            "invalidated",
+                            current.receipt_digest,
+                        ),
+                        prior_receipt_digest=current.receipt_digest,
+                    )
                     self._append_locked(invalidated)
                     raise ExecutionAuthorizationInvalidated(
                         "authorization claim invalidated: freshness"
@@ -488,7 +652,17 @@ class OptionExecutionAuthorizationStore:
             elif freshness != current.freshness_cursor_ref:
                 reason = "freshness"
             if reason is not None:
-                rejected = replace(current, status="rejected", rejection_reason=reason)
+                rejected = replace(
+                    current,
+                    status="rejected",
+                    rejection_reason=reason,
+                    transition_id=_derived_transition_id(
+                        current.authorization_id,
+                        "rejected",
+                        current.receipt_digest,
+                    ),
+                    prior_receipt_digest=current.receipt_digest,
+                )
                 self._append_locked(rejected)
                 raise ExecutionAuthorizationRejected(
                     f"authorization claim rejected: {reason}"
@@ -499,9 +673,123 @@ class OptionExecutionAuthorizationStore:
                 claim_owner_id=owner,
                 lease_epoch=1,
                 lease_expires_at=now + timedelta(seconds=lease),
+                transition_id=_derived_transition_id(
+                    current.authorization_id,
+                    "claimed",
+                    current.receipt_digest,
+                ),
+                prior_receipt_digest=current.receipt_digest,
             )
             self._append_locked(claimed)
             return claimed
+
+    def transition(
+        self,
+        authorization_id: str,
+        *,
+        transition_id: str,
+        idempotency_key: str,
+        expected_status: str,
+        target_status: str,
+        owner_id: str,
+        lease_epoch: int,
+        prior_receipt_digest: str,
+        metadata: Mapping[str, Any],
+    ) -> OptionExecutionAuthorization:
+        """Apply one explicit post-claim lifecycle transition.
+
+        This is intentionally a receipt-only operation.  It does not reserve a
+        process or create any product run; a later supervisor must consume the
+        returned immutable state and perform any cross-journal reconciliation.
+        """
+        identifier = _identifier(authorization_id, "authorization_id")
+        transition = _identifier(transition_id, "transition_id")
+        key = _text(idempotency_key, "idempotency_key")
+        expected = _text(expected_status, "expected_status")
+        target = _text(target_status, "target_status")
+        owner = _identifier(owner_id, "owner_id")
+        epoch = _positive_int(lease_epoch, "lease_epoch")
+        prior = _digest(prior_receipt_digest, "prior_receipt_digest")
+        normalized_metadata = _transition_metadata(metadata)
+
+        if expected not in _STATUSES or target not in _STATUSES:
+            raise ExecutionAuthorizationTransitionError(
+                "transition source or target status is unsupported"
+            )
+        if target not in _TRANSITIONS[expected]:
+            raise ExecutionAuthorizationTransitionError(
+                f"transition {expected} -> {target} is not permitted"
+            )
+        if target in {"dispatch_unknown", "failed"} and not dict(normalized_metadata).get("reason"):
+            raise ExecutionAuthorizationTransitionError(
+                f"{target} transition requires a bounded reason"
+            )
+
+        with self._lock, self._journal_lock():
+            records = self._records()
+            current = self._latest_by_id(records).get(identifier)
+            if current is None:
+                raise ExecutionAuthorizationRejected("authorization was not found")
+
+            existing = next(
+                (
+                    record
+                    for record in reversed(records)
+                    if record.authorization_id == identifier
+                    and record.transition_id == transition
+                ),
+                None,
+            )
+            if existing is not None:
+                if (
+                    existing.idempotency_key != key
+                    or existing.status != target
+                    or existing.prior_receipt_digest != prior
+                    or existing.claim_owner_id != owner
+                    or existing.lease_epoch != epoch
+                    or existing.transition_metadata != normalized_metadata
+                ):
+                    raise ExecutionAuthorizationReplay(
+                        "transition id is already bound to another receipt transition"
+                    )
+                return current
+
+            if current.idempotency_key != key:
+                raise ExecutionAuthorizationReplay(
+                    "idempotency key does not match authorization"
+                )
+            if current.status != expected:
+                raise ExecutionAuthorizationTransitionError(
+                    f"transition expected {expected}, current status is {current.status}"
+                )
+            if current.receipt_digest != prior:
+                raise ExecutionAuthorizationTransitionError(
+                    "prior receipt digest does not match current receipt"
+                )
+            if current.claim_owner_id != owner or current.lease_epoch != epoch:
+                raise ExecutionAuthorizationTransitionError(
+                    "lease owner or lease epoch does not match current receipt"
+                )
+            if current.lease_expires_at is None:
+                raise ExecutionAuthorizationTransitionError(
+                    "current receipt has no lease expiry"
+                )
+            now = _utc(self._clock(), "clock")
+            if now >= current.lease_expires_at and target not in {"dispatch_unknown", "failed"}:
+                raise ExecutionAuthorizationTransitionError(
+                    "lease expired before receipt transition"
+                )
+            reason = dict(normalized_metadata).get("reason")
+            next_record = replace(
+                current,
+                status=target,
+                rejection_reason=reason if target in {"dispatch_unknown", "failed"} else None,
+                transition_id=transition,
+                prior_receipt_digest=prior,
+                transition_metadata=normalized_metadata,
+            )
+            self._append_locked(next_record)
+            return next_record
 
     def _records(self) -> list[OptionExecutionAuthorization]:
         if not self.journal.exists():
@@ -558,6 +846,7 @@ __all__ = [
     "ExecutionAuthorizationInvalidated",
     "ExecutionAuthorizationReplay",
     "ExecutionAuthorizationRejected",
+    "ExecutionAuthorizationTransitionError",
     "OPTION_EXECUTION_AUTHORIZATION_CONTRACT_VERSION",
     "OptionExecutionAuthorization",
     "OptionExecutionAuthorizationStore",

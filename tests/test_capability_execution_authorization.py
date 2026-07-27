@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from workbench.capability_factory.execution_authorization import (
     ExecutionAuthorizationInvalidated,
     ExecutionAuthorizationReplay,
     ExecutionAuthorizationRejected,
+    ExecutionAuthorizationTransitionError,
     OptionExecutionAuthorization,
     OptionExecutionAuthorizationStore,
 )
@@ -88,6 +90,35 @@ def test_authorization_is_immutable_and_binds_the_exact_payload() -> None:
         OptionExecutionAuthorization.from_dict(
             {**original.to_dict(), "contract_version": "OptionExecutionAuthorization@9.0"}
         )
+
+
+def test_receipt_digest_is_state_bound_and_old_persisted_shape_remains_readable() -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    original = _authorization(now=now)
+    wire = original.to_dict()
+
+    changed = replace(
+        original,
+        status="claimed",
+        claim_owner_id="owner_1",
+        lease_epoch=1,
+        lease_expires_at=now + timedelta(seconds=30),
+        transition_id="transition_1",
+        prior_receipt_digest=original.receipt_digest,
+        transition_metadata=(("note", "changed"),),
+    )
+    assert changed.receipt_digest != original.receipt_digest
+    with pytest.raises(ValueError, match="receipt digest"):
+        OptionExecutionAuthorization.from_dict(
+            {**wire, "receipt_digest": "b" * 64}
+        )
+
+    legacy_fields = {
+        key: value
+        for key, value in wire.items()
+        if key not in {"transition_id", "prior_receipt_digest", "transition_metadata", "receipt_digest"}
+    }
+    assert OptionExecutionAuthorization.from_dict(legacy_fields) == original
 
 
 def test_materialize_only_cannot_issue_execution_authorization() -> None:
@@ -218,3 +249,233 @@ def test_expiry_is_rejected_and_never_creates_a_claim(tmp_path: Path) -> None:
         )
 
     assert store.read(authorization.authorization_id).status == "rejected"
+
+
+def test_claim_records_a_receipt_digest_and_post_claim_transitions_are_idempotent(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
+    authorization = _authorization(now=now)
+    store.issue(authorization)
+    claimed = store.claim(
+        authorization.authorization_id,
+        idempotency_key=authorization.idempotency_key,
+        current_binding_ref=authorization.capability_resolution_binding_ref,
+        current_freshness_cursor_ref=authorization.freshness_cursor_ref,
+        owner_id="executor_a",
+        lease_seconds=30,
+    )
+
+    reserved = store.transition(
+        authorization.authorization_id,
+        transition_id="transition_reserve_1",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="claimed",
+        target_status="dispatch_reserved",
+        owner_id="executor_a",
+        lease_epoch=claimed.lease_epoch,
+        prior_receipt_digest=claimed.receipt_digest,
+        metadata={
+            "reservation_id": "reservation_1",
+            "reservation_digest": "a" * 64,
+        },
+    )
+    repeated = store.transition(
+        authorization.authorization_id,
+        transition_id="transition_reserve_1",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="claimed",
+        target_status="dispatch_reserved",
+        owner_id="executor_a",
+        lease_epoch=claimed.lease_epoch,
+        prior_receipt_digest=claimed.receipt_digest,
+        metadata={
+            "reservation_id": "reservation_1",
+            "reservation_digest": "a" * 64,
+        },
+    )
+
+    assert reserved.status == "dispatch_reserved"
+    assert repeated == reserved
+    assert repeated.prior_receipt_digest == claimed.receipt_digest
+    assert repeated.transition_metadata == (
+        ("reservation_digest", "a" * 64),
+        ("reservation_id", "reservation_1"),
+    )
+    assert len(store.history(authorization.authorization_id)) == 3
+
+
+def test_transition_binds_prior_receipt_lease_and_transition_payload(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
+    authorization = _authorization(now=now)
+    store.issue(authorization)
+    claimed = store.claim(
+        authorization.authorization_id,
+        idempotency_key=authorization.idempotency_key,
+        current_binding_ref=authorization.capability_resolution_binding_ref,
+        current_freshness_cursor_ref=authorization.freshness_cursor_ref,
+        owner_id="executor_a",
+        lease_seconds=30,
+    )
+
+    with pytest.raises(ExecutionAuthorizationTransitionError, match="prior receipt"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_bad_prior",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="claimed",
+            target_status="dispatch_reserved",
+            owner_id="executor_a",
+            lease_epoch=claimed.lease_epoch,
+            prior_receipt_digest="b" * 64,
+            metadata={"reservation_id": "reservation_1"},
+        )
+
+    with pytest.raises(ExecutionAuthorizationTransitionError, match="lease epoch"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_bad_lease",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="claimed",
+            target_status="dispatch_reserved",
+            owner_id="executor_a",
+            lease_epoch=2,
+            prior_receipt_digest=claimed.receipt_digest,
+            metadata={"reservation_id": "reservation_1"},
+        )
+
+    with pytest.raises(ExecutionAuthorizationTransitionError, match="transition"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_bad_target",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="claimed",
+            target_status="consumed",
+            owner_id="executor_a",
+            lease_epoch=claimed.lease_epoch,
+            prior_receipt_digest=claimed.receipt_digest,
+            metadata={},
+        )
+
+
+def test_transition_rejects_replay_with_changed_metadata_and_terminal_reuse(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
+    authorization = _authorization(now=now)
+    store.issue(authorization)
+    claimed = store.claim(
+        authorization.authorization_id,
+        idempotency_key=authorization.idempotency_key,
+        current_binding_ref=authorization.capability_resolution_binding_ref,
+        current_freshness_cursor_ref=authorization.freshness_cursor_ref,
+        owner_id="executor_a",
+        lease_seconds=30,
+    )
+    store.transition(
+        authorization.authorization_id,
+        transition_id="transition_reserve_2",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="claimed",
+        target_status="dispatch_reserved",
+        owner_id="executor_a",
+        lease_epoch=claimed.lease_epoch,
+        prior_receipt_digest=claimed.receipt_digest,
+        metadata={"reservation_id": "reservation_2"},
+    )
+
+    with pytest.raises(ExecutionAuthorizationReplay, match="transition"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_reserve_2",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="claimed",
+            target_status="dispatch_reserved",
+            owner_id="executor_a",
+            lease_epoch=claimed.lease_epoch,
+            prior_receipt_digest=claimed.receipt_digest,
+            metadata={"reservation_id": "reservation_other"},
+        )
+
+    current = store.read(authorization.authorization_id)
+    with pytest.raises(ExecutionAuthorizationTransitionError, match="transition"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_illegal_after_reservation",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="dispatch_reserved",
+            target_status="consumed",
+            owner_id="executor_a",
+            lease_epoch=current.lease_epoch,
+            prior_receipt_digest=current.receipt_digest,
+            metadata={},
+        )
+
+
+def test_running_may_be_consumed_once_and_unknown_is_terminal_for_this_slice(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 7, 26, tzinfo=timezone.utc)
+    store = OptionExecutionAuthorizationStore(tmp_path, clock=_clock(now))
+    authorization = _authorization(now=now)
+    store.issue(authorization)
+    claimed = store.claim(
+        authorization.authorization_id,
+        idempotency_key=authorization.idempotency_key,
+        current_binding_ref=authorization.capability_resolution_binding_ref,
+        current_freshness_cursor_ref=authorization.freshness_cursor_ref,
+        owner_id="executor_a",
+        lease_seconds=30,
+    )
+    reserved = store.transition(
+        authorization.authorization_id,
+        transition_id="transition_reserve_3",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="claimed",
+        target_status="dispatch_reserved",
+        owner_id="executor_a",
+        lease_epoch=claimed.lease_epoch,
+        prior_receipt_digest=claimed.receipt_digest,
+        metadata={"reservation_id": "reservation_3"},
+    )
+    running = store.transition(
+        authorization.authorization_id,
+        transition_id="transition_running_3",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="dispatch_reserved",
+        target_status="running",
+        owner_id="executor_a",
+        lease_epoch=reserved.lease_epoch,
+        prior_receipt_digest=reserved.receipt_digest,
+        metadata={"reservation_id": "reservation_3", "attempt_id": "attempt_3"},
+    )
+    consumed = store.transition(
+        authorization.authorization_id,
+        transition_id="transition_consumed_3",
+        idempotency_key=authorization.idempotency_key,
+        expected_status="running",
+        target_status="consumed",
+        owner_id="executor_a",
+        lease_epoch=running.lease_epoch,
+        prior_receipt_digest=running.receipt_digest,
+        metadata={"reservation_id": "reservation_3"},
+    )
+
+    assert consumed.status == "consumed"
+    with pytest.raises(ExecutionAuthorizationTransitionError, match="transition"):
+        store.transition(
+            authorization.authorization_id,
+            transition_id="transition_after_consumed",
+            idempotency_key=authorization.idempotency_key,
+            expected_status="consumed",
+            target_status="running",
+            owner_id="executor_a",
+            lease_epoch=consumed.lease_epoch,
+            prior_receipt_digest=consumed.receipt_digest,
+            metadata={},
+        )
