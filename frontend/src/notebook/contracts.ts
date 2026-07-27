@@ -1116,6 +1116,7 @@ export interface PendingConfirmation {
   option: NotebookOptionRevision;
   execution: OptionExecution;
   plan_diff: PlanDiffLine[];
+  mode?: "materialize" | "confirm_and_execute";
 }
 
 export interface NotebookData {

@@ -242,6 +242,27 @@ export function materializeNotebookOption(
   );
 }
 
+export function confirmAndExecuteNotebookOption(
+  projectRoot: string,
+  notebookId: string,
+  optionId: string,
+  body: {
+    option_revision: number;
+    proposal_id: string;
+    proposal_revision: number;
+  },
+): Promise<{ dispatch: Record<string, unknown>; trace_id: string }> {
+  return readNotebookResponse<{ dispatch: Record<string, unknown>; trace_id: string }>(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/options/${encodeURIComponent(optionId)}/confirm-and-execute`,
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export function authorizeNotebookOptionExecution(
   projectRoot: string,
   notebookId: string,

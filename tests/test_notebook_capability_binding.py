@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from test_capability_notebook_binding import _admitted_records, _resolution, _validity
+from test_capability_notebook_binding import (
+    _admitted_records,
+    _exploration_draft,
+    _resolution,
+    _validity,
+)
 
 from workbench.agent.context_compiler import (
     freshness_dependency_fingerprint,
@@ -16,10 +22,13 @@ from workbench.agent.context_compiler import (
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.agent.notebook.errors import (
     OptionBatchInvalid,
+    OptionExecutionGatewayUnavailable,
+    OptionExecutionReceiptRequired,
     OptionRevisionStale,
     OptionValidationFailed,
 )
 from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+from workbench.capability_factory.notebook_bridge import NotebookExecutionDispatch
 from workbench.agent.notebook.recommendation import RecommendationValidator, candidate_cohort_hash
 from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
@@ -539,6 +548,204 @@ def test_current_binding_is_rechecked_before_execution_callback(tmp_path: Path) 
             execution_status="succeeded",
             produced_artifacts=(),
         )
+
+
+def test_bound_v12_completion_rejects_client_owned_run_and_artifact_facts(
+    tmp_path: Path,
+) -> None:
+    """CF4 completion must consume a trusted receipt, never HTTP callback facts."""
+
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, _binding, _catalog = _service_with_catalog(project)
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_client_facts",
+        decision_id="rec_client_facts",
+        batch_id="batch_client_facts",
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            _draft(
+                capability_id="capability.registered",
+                option_id="opt_client_facts",
+                proposal_id="proposal_client_facts",
+                decision_id=decision.recommendation_decision_id,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="user_1",
+    )
+
+    with pytest.raises(OptionExecutionReceiptRequired) as caught:
+        service.complete_execution(
+            notebook.notebook_id,
+            revision.option_id,
+            execution_status="succeeded",
+            run_id="client-forged-run",
+            produced_artifacts=[
+                {
+                    "artifact_id": "client-forged-artifact",
+                    "artifact_type": "custom_json",
+                    "count": 1,
+                }
+            ],
+        )
+
+    assert caught.value.code == "OPTION_EXECUTION_RECEIPT_REQUIRED"
+    assert caught.value.details["reason"] == "capability_execution_receipt_required"
+    view = service.option_view(notebook.notebook_id, revision.option_id)
+    assert view.lifecycle_status == "selected"
+    assert view.executions == ()
+    assert view.last_execution is None
+
+
+def test_confirm_and_execute_fails_closed_before_materialization_without_gateway(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, _binding, _catalog = _service_with_catalog(project)
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_no_gateway",
+        decision_id="rec_no_gateway",
+        batch_id="batch_no_gateway",
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            _exploration_draft(
+                capability_id="capability.registered",
+                option_id="opt_no_gateway",
+                proposal_id="proposal_no_gateway",
+                decision_id=decision.recommendation_decision_id,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="user_1",
+    )
+
+    with pytest.raises(OptionExecutionGatewayUnavailable) as caught:
+        service.confirm_and_execute(
+            notebook.notebook_id,
+            revision.option_id,
+            context=context,
+        )
+
+    assert caught.value.code == "OPTION_EXECUTION_GATEWAY_UNAVAILABLE"
+    assert caught.value.details["reason"] == "trusted_execution_gateway_unavailable"
+    view = service.option_view(notebook.notebook_id, revision.option_id)
+    assert view.lifecycle_status == "selected"
+    assert service.store.read_materialization(
+        notebook.notebook_id, revision.option_id, revision.option_revision
+    ) is None
+
+
+def test_confirm_and_execute_builds_server_authorization_before_gateway_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, binding, _catalog = _service_with_catalog(project)
+    captured: dict[str, object] = {}
+
+    class FakeGateway:
+        def dispatch(self, **kwargs):
+            captured.update(kwargs)
+            authorization = kwargs["authorization"]
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="dispatch_reserved",
+                run_id="run_server_owned",
+                attempt_id="attempt_server_owned",
+                receipt_ref="a" * 64,
+            )
+
+    service.execution_gateway = FakeGateway()
+    context = service.compile_context(notebook.notebook_id)
+    decision = _server_decision(
+        service,
+        notebook,
+        context,
+        option_id="opt_gateway",
+        decision_id="rec_gateway",
+        batch_id="batch_gateway",
+    )
+    (revision,) = service.propose_batch(
+        notebook.notebook_id,
+        context=context,
+        drafts=[
+            _exploration_draft(
+                capability_id="capability.registered",
+                option_id="opt_gateway",
+                proposal_id="proposal_gateway",
+                decision_id=decision.recommendation_decision_id,
+            )
+        ],
+        batch_id=decision.batch_id,
+        recommendation_decision=decision,
+    )
+    service.record_decision(
+        notebook.notebook_id,
+        revision.option_id,
+        decision="selected",
+        actor="user_1",
+    )
+
+    materialization = SimpleNamespace(
+        materialization_id="mat_server_owned",
+        option_id=revision.option_id,
+        option_revision=revision.option_revision,
+        capability_resolution_binding_ref=binding.content_digest,
+        draft_id="draft_server_owned",
+        draft_hash="sha256:" + "d" * 64,
+    )
+    draft = SimpleNamespace(
+        draft={"draft_id": "draft_server_owned", "graph": {"nodes": []}},
+        draft_hash=materialization.draft_hash,
+    )
+
+    def fake_materialize(*_args, **_kwargs):
+        return SimpleNamespace(materialization=materialization, draft=draft)
+
+    monkeypatch.setattr(service, "materialize_option", fake_materialize)
+    dispatch = service.confirm_and_execute(
+        notebook.notebook_id,
+        revision.option_id,
+        context=context,
+    )
+
+    authorization = captured["authorization"]
+    assert dispatch.status == "dispatch_reserved"
+    assert authorization.materialization_id == "mat_server_owned"
+    assert authorization.draft_id == "draft_server_owned"
+    assert authorization.authorization_id.startswith("auth_")
+    assert authorization.run_intent_id.startswith("intent_")
+    assert authorization.idempotency_key.startswith("confirm-and-execute-")
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == (
+        "selected"
+    )
 
 
 def test_bound_option_revalidation_rechecks_current_binding_before_prepare(

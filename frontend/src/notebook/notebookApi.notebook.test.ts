@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   compileNotebookContext,
+  confirmAndExecuteNotebookOption,
   completeNotebookOptionExecution,
   createNotebook,
   ensureNotebookProjection,
@@ -49,6 +50,11 @@ describe("notebookApi", () => {
       actor: "user",
     });
     await materializeNotebookOption("/tmp/project", "nb/1", "opt_1");
+    await confirmAndExecuteNotebookOption("/tmp/project", "nb/1", "opt_1", {
+      option_revision: 1,
+      proposal_id: "proposal_1",
+      proposal_revision: 1,
+    });
     await completeNotebookOptionExecution("/tmp/project", "nb/1", "opt_1", {
       execution_status: "succeeded",
       run_id: "run_1",
@@ -60,6 +66,7 @@ describe("notebookApi", () => {
       "/api/notebooks/nb%2F1/options/propose?project_root=%2Ftmp%2Fproject",
       "/api/notebooks/nb%2F1/options/opt_1/decision?project_root=%2Ftmp%2Fproject",
       "/api/notebooks/nb%2F1/options/opt_1/materialize?project_root=%2Ftmp%2Fproject",
+      "/api/notebooks/nb%2F1/options/opt_1/confirm-and-execute?project_root=%2Ftmp%2Fproject",
       "/api/notebooks/nb%2F1/options/opt_1/execute?project_root=%2Ftmp%2Fproject",
     ]);
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ count: 3 });

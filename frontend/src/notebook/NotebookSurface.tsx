@@ -48,6 +48,7 @@ export interface NotebookSurfaceProps {
   onReplan?: () => void;
   onConfirm?: (confirmation: PendingConfirmation) => void;
   onCancelConfirmation?: (confirmation: PendingConfirmation) => void;
+  onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
   onSelectionAsk?: (selection: NotebookSelection) => void;
   onSelectionExplain?: (selection: NotebookSelection) => void;
   onSelectionFollowUp?: (selection: NotebookSelection) => void;
@@ -381,6 +382,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
                   onDefer={props.onDeferOption}
                   onReject={props.onRejectOption}
                   onRevalidate={props.onRevalidateOption}
+                  onConfirmAndExecute={props.onConfirmAndExecute}
                 />
               ))}
             </div>

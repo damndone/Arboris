@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Mapping, Protocol
 
 from .dispatch import PreparedRunIntent
 from .execution_authorization import OptionExecutionAuthorization
@@ -32,6 +32,76 @@ class PreparedCapabilityRun:
     draft_id: str
     draft_hash: str
     run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class NotebookExecutionDispatch:
+    """Server-owned result of one explicit CF4 dispatch request.
+
+    This is deliberately a dispatch receipt, not an artifact/result callback.
+    Only the trusted gateway may construct it; Notebook never accepts these
+    fields from the Agent or browser.
+    """
+
+    authorization_id: str
+    run_intent_id: str
+    status: Literal["dispatch_reserved", "running", "unsupported", "dispatch_unknown"]
+    run_id: str | None = None
+    attempt_id: str | None = None
+    receipt_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        _identifier(self.authorization_id, "authorization_id")
+        _identifier(self.run_intent_id, "run_intent_id")
+        if self.status not in {
+            "dispatch_reserved",
+            "running",
+            "unsupported",
+            "dispatch_unknown",
+        }:
+            raise ExecutionReceiptError("unsupported Notebook execution dispatch status")
+        if self.run_id is not None:
+            _identifier(self.run_id, "run_id")
+        if self.attempt_id is not None:
+            _identifier(self.attempt_id, "attempt_id")
+        if self.receipt_ref is not None:
+            _identifier(self.receipt_ref, "receipt_ref")
+        if self.status in {"dispatch_reserved", "running"} and not all(
+            (self.run_id, self.attempt_id, self.receipt_ref)
+        ):
+            raise ExecutionReceiptError(
+                "successful Notebook dispatch requires run, attempt, and receipt refs"
+            )
+        if self.status in {"unsupported", "dispatch_unknown"} and self.run_id is not None:
+            raise ExecutionReceiptError(
+                "unsupported or unknown Notebook dispatch cannot expose a run id"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "authorization_id": self.authorization_id,
+            "run_intent_id": self.run_intent_id,
+            "status": self.status,
+            "run_id": self.run_id,
+            "attempt_id": self.attempt_id,
+            "receipt_ref": self.receipt_ref,
+        }
+
+
+class NotebookCapabilityExecutionGateway(Protocol):
+    """Trusted application seam for the real supervisor/broker handoff."""
+
+    def dispatch(
+        self,
+        *,
+        notebook_id: str,
+        option_id: str,
+        authorization: OptionExecutionAuthorization,
+        materialization: Any,
+        draft: Mapping[str, Any],
+        context: Any,
+    ) -> NotebookExecutionDispatch:
+        """Reserve/dispatch one already-authorized capability execution."""
 
 
 class NotebookCapabilityBridge:
@@ -106,4 +176,9 @@ class NotebookCapabilityBridge:
         )
 
 
-__all__ = ["NotebookCapabilityBridge", "PreparedCapabilityRun"]
+__all__ = [
+    "NotebookCapabilityBridge",
+    "NotebookCapabilityExecutionGateway",
+    "NotebookExecutionDispatch",
+    "PreparedCapabilityRun",
+]

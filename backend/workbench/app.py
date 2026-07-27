@@ -33,6 +33,7 @@ from .http.statistical_exploration_routes import router as statistical_explorati
 app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
 app.state.notebook_capability_bindings = None
+app.state.notebook_execution_gateway = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
 app.state.domain_memory_context_provider = None
@@ -52,6 +53,19 @@ def configure_notebook_capability_bindings(
     if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
         raise TypeError("catalog must be a CapabilityBindingCatalog or None")
     app.state.notebook_capability_bindings = catalog
+
+
+def configure_notebook_execution_gateway(gateway: object | None) -> None:
+    """Install the trusted CF4 gateway used only by explicit confirmation.
+
+    ``None`` is the normal fail-closed configuration on hosts without a
+    verified containment/supervisor stack.  The HTTP layer never constructs a
+    gateway or falls back to in-process execution.
+    """
+
+    if gateway is not None and not callable(getattr(gateway, "dispatch", None)):
+        raise TypeError("gateway must expose a callable dispatch method or be None")
+    app.state.notebook_execution_gateway = gateway
 
 
 def configure_domain_memory_services(

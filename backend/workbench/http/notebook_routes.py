@@ -165,7 +165,18 @@ def _service(request: Request, project_root: str) -> tuple[Path, NotebookService
             code="NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID",
             message="The server-owned Notebook capability binding provider is invalid.",
         )
-    return root, NotebookService(root, capability_bindings=catalog)
+    gateway = getattr(request.app.state, "notebook_execution_gateway", None)
+    if gateway is not None and not callable(getattr(gateway, "dispatch", None)):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="NOTEBOOK_EXECUTION_GATEWAY_PROVIDER_INVALID",
+            message="The server-owned Notebook execution gateway is invalid.",
+        )
+    return root, NotebookService(
+        root,
+        capability_bindings=catalog,
+        execution_gateway=gateway,
+    )
 
 
 def _trace(
@@ -1014,6 +1025,49 @@ def confirm_option_endpoint(
         raise _request_error(exc) from exc
 
 
+@router.post("/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute")
+def confirm_and_execute_option_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    option_id: str,
+    body: ConfirmOptionRequest,
+) -> dict[str, Any]:
+    """Explicitly dispatch one low-risk bound option through server CF4.
+
+    The request carries only the current option/proposal pins.  Authorization,
+    Run intent, dispatch reservation, and all result facts are server-owned.
+    """
+
+    root, service = _service(request, project_root)
+    try:
+        context, trace = _compile(root, service, notebook_id)
+        current = service.store.read_option(notebook_id, option_id).current_revision
+        if (body.option_revision, body.proposal_id, body.proposal_revision) != (
+            current.option_revision,
+            current.typed_proposal_id,
+            current.typed_proposal_revision,
+        ):
+            raise OptionRevisionStale(
+                "execution request does not match the current option revision",
+                option_id=option_id,
+                requested_revision=body.option_revision,
+                current_revision=current.option_revision,
+                reason="proposal_pin_mismatch",
+            )
+        dispatch = service.confirm_and_execute(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
+        return {"dispatch": dispatch.to_dict(), "trace_id": trace.trace_id}
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
 @router.post("/notebooks/{notebook_id}/options/{option_id}/materialize")
 def materialize_option_endpoint(
     request: Request,
@@ -1045,16 +1099,23 @@ def authorize_option_execution_endpoint(
     option_id: str,
     body: AuthorizeOptionExecutionRequest,
 ) -> dict[str, Any]:
-    """Persist a verified one-time authorization, without dispatching it.
+    """Legacy control-plane seam for unbound compatibility records.
 
-    This is intentionally separate from ``confirm`` and from any executor
-    route. The request may carry a client-produced envelope, but
-    ``NotebookService`` compares its option, binding, freshness, risk and
-    proposal pins against the server-owned current records before issuing it.
+    A capability-bound V1.2 option cannot use this client-envelope route. Its
+    authorization is constructed by the server only inside
+    ``confirm-and-execute``.
     """
 
     root, service = _service(request, project_root)
     try:
+        current = service.store.read_option(notebook_id, option_id).current_revision
+        if getattr(current, "capability_resolution_binding_ref", None) is not None:
+            raise OptionRevisionStale(
+                "capability execution authorization is server-owned; use explicit confirm-and-execute",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_server_owned",
+            )
         context, trace = _compile(root, service, notebook_id)
         authorization = OptionExecutionAuthorization.from_dict(body.authorization)
         persisted = service.authorize_option_execution(

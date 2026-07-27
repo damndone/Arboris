@@ -23,6 +23,7 @@ export function PlanDiffConfirmation({
   onCancel,
 }: PlanDiffConfirmationProps) {
   const { option, execution, plan_diff } = confirmation;
+  const confirmAndExecute = confirmation.mode === "confirm_and_execute";
   const required = option.artifact_contract.expected.filter((item) => item.required);
   const optional = option.artifact_contract.expected.filter((item) => !item.required);
 
@@ -30,7 +31,11 @@ export function PlanDiffConfirmation({
     <section className="nb-confirmation" data-testid="notebook-confirmation">
       <header className="nb-confirmation-header">
         <span className="nb-label">
-          {option.materializable ? "Confirm before preparing Draft" : "Confirm before running"}
+          {confirmAndExecute
+            ? "Confirm before dispatching capability"
+            : option.materializable
+              ? "Confirm before preparing Draft"
+              : "Confirm before running"}
         </span>
         <span data-testid="confirmation-pins">
           {`${execution.option_id} rev ${execution.option_revision} · ${execution.proposal_id} rev ${execution.proposal_revision}`}
@@ -90,7 +95,9 @@ export function PlanDiffConfirmation({
         >
           {busy
             ? "Submitting…"
-            : option.materializable
+            : confirmAndExecute
+              ? "Confirm and execute"
+              : option.materializable
               ? "Confirm and prepare Draft"
               : "Confirm and run"}
         </button>

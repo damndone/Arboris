@@ -5,6 +5,7 @@ import { uploadDataset } from "../api";
 
 import {
   compileNotebookContext,
+  confirmAndExecuteNotebookOption,
   ensureNotebookProjection,
   getNotebook,
   getNotebookTrace,
@@ -494,7 +495,10 @@ export function NotebookRouteView({
     }
   }
 
-  function showConfirmation(option: NotebookOptionRevision) {
+  function showConfirmation(
+    option: NotebookOptionRevision,
+    mode: "materialize" | "confirm_and_execute" = "materialize",
+  ) {
     const execution = optionExecution(option);
     const planDiff: PlanDiffLine[] = [
       {
@@ -509,7 +513,7 @@ export function NotebookRouteView({
         ...current,
         notebook: {
           ...current.notebook,
-          confirmation: { option, execution, plan_diff: planDiff },
+          confirmation: { option, execution, plan_diff: planDiff, mode },
         },
       };
     });
@@ -541,6 +545,25 @@ export function NotebookRouteView({
   async function confirm(selection: PendingConfirmation) {
     setBusy(true);
     try {
+      if (selection.mode === "confirm_and_execute") {
+        await confirmAndExecuteNotebookOption(
+          projectRoot,
+          selection.option.notebook_id,
+          selection.option.option_id,
+          {
+            option_revision: selection.option.option_revision,
+            proposal_id: selection.option.typed_proposal_id,
+            proposal_revision: selection.option.typed_proposal_revision,
+          },
+        );
+        setView((current) =>
+          current.status === "ready"
+            ? { ...current, notebook: { ...current.notebook, confirmation: null } }
+            : current,
+        );
+        setRefreshToken((token) => token + 1);
+        return;
+      }
       const response = await materializeNotebookOption(
         projectRoot,
         selection.option.notebook_id,
@@ -560,6 +583,10 @@ export function NotebookRouteView({
     } finally {
       setBusy(false);
     }
+  }
+
+  function confirmAndExecute(option: NotebookOptionRevision) {
+    showConfirmation(option, "confirm_and_execute");
   }
 
   async function cancel(selection: PendingConfirmation) {
@@ -695,6 +722,7 @@ export function NotebookRouteView({
         onRejectOption={(option) => void decide(option, "rejected")}
         onConfirm={(selection) => void confirm(selection)}
         onCancelConfirmation={(selection) => void cancel(selection)}
+        onConfirmAndExecute={confirmAndExecute}
         onSelectionAsk={(selection) => onSelectionAction(selection, "ask")}
         onSelectionExplain={(selection) => onSelectionAction(selection, "explain")}
         onSelectionFollowUp={askInSideChat}

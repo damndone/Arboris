@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from uuid import uuid4
@@ -46,6 +46,10 @@ from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
     CapabilityBindingCatalogError,
     NOTEBOOK_OPTION_PLANNER_CONSUMER,
+)
+from ...capability_factory.notebook_bridge import (
+    NotebookCapabilityExecutionGateway,
+    NotebookExecutionDispatch,
 )
 from ...capability_factory.notebook_binding import CapabilityResolutionBinding
 from ...capability_factory.trace_contracts import (
@@ -76,6 +80,8 @@ from .artifact_contract import (
 from .errors import (
     NotebookRunFamilyImmutable,
     OptionBatchInvalid,
+    OptionExecutionReceiptRequired,
+    OptionExecutionGatewayUnavailable,
     OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
     OptionMaterializationRequired,
@@ -229,6 +235,7 @@ class NotebookService:
         *,
         registry: OperationRegistry | None = None,
         capability_bindings: CapabilityBindingCatalog | None = None,
+        execution_gateway: NotebookCapabilityExecutionGateway | None = None,
     ) -> None:
         self.project_root = Path(project_root)
         self.store = NotebookStore(self.project_root)
@@ -238,6 +245,11 @@ class NotebookService:
         ):
             raise TypeError("capability_bindings must be a CapabilityBindingCatalog")
         self.capability_bindings = capability_bindings
+        if execution_gateway is not None and not callable(
+            getattr(execution_gateway, "dispatch", None)
+        ):
+            raise TypeError("execution_gateway must expose a callable dispatch method")
+        self.execution_gateway = execution_gateway
 
     # ------------------------------------------------------------------
     # Notebooks
@@ -1512,10 +1524,10 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="authorization_risk",
             )
-        if view.lifecycle_status != "selected":
+        if view.lifecycle_status not in {"selected", "materialized"}:
             raise OptionLifecycleTransitionInvalid(
                 f"option {option_id} is {view.lifecycle_status}; user confirmation "
-                "requires the selected lifecycle state",
+                "requires the selected or materialized lifecycle state",
                 option_id=option_id,
                 lifecycle_status=view.lifecycle_status,
             )
@@ -1606,6 +1618,281 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="authorization_receipt_invalid",
             ) from error
+
+    def confirm_and_execute(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        trace: TraceWriter | None = None,
+    ) -> NotebookExecutionDispatch:
+        """Run one explicit user confirmation through the trusted CF4 seam.
+
+        The gateway is deliberately optional.  A missing gateway is a normal
+        deployment state on hosts that cannot prove native containment; it is
+        not permission to use the legacy ``/execute`` callback path.
+        """
+
+        if self.execution_gateway is None:
+            raise OptionExecutionGatewayUnavailable(
+                "explicit capability execution is unavailable on this host",
+                option_id=option_id,
+                reason="trusted_execution_gateway_unavailable",
+            )
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "confirm_and_execute requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_contract_version",
+            )
+        if "confirm_and_execute" not in current.execution_modes:
+            raise OptionRevisionStale(
+                "the current option does not offer confirm_and_execute",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_mode_not_offered",
+            )
+        if current.risk_level != "low":
+            raise OptionRevisionStale(
+                "confirm_and_execute is limited to low-risk options",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_risk",
+            )
+        if view.lifecycle_status != "selected":
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; explicit execution "
+                "requires a selected option",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        assert_executable(current, context)
+
+        # Materialization is the first product-side write, and is performed
+        # only after the trusted gateway has been confirmed to exist.
+        materialized = self.materialize_option(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
+        authorization = self._build_server_execution_authorization(
+            notebook_id,
+            option_id,
+            context=context,
+            materialized=materialized,
+        )
+        try:
+            dispatch = self.execution_gateway.dispatch(
+                notebook_id=notebook_id,
+                option_id=option_id,
+                authorization=authorization,
+                materialization=materialized.materialization,
+                draft=materialized.draft.draft,
+                context=context,
+            )
+        except Exception as error:
+            raise OptionExecutionGatewayUnavailable(
+                "the trusted capability execution gateway failed before returning a typed dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="trusted_execution_gateway_error",
+            ) from error
+        if not isinstance(dispatch, NotebookExecutionDispatch):
+            raise OptionExecutionGatewayUnavailable(
+                "the trusted capability execution gateway returned an invalid dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="trusted_execution_gateway_result_invalid",
+            )
+        if (
+            dispatch.authorization_id != authorization.authorization_id
+            or dispatch.run_intent_id != authorization.run_intent_id
+        ):
+            raise OptionRevisionStale(
+                "the capability dispatch receipt is not bound to the server authorization",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="dispatch_receipt_binding",
+            )
+
+        if dispatch.status == "running":
+            latest = self.store.read_option(notebook_id, option_id)
+            self._transition(
+                notebook_id,
+                latest,
+                to_status="executing",
+                actor="system",
+                reason="capability_dispatch_running",
+                trace=trace,
+            )
+            execution = OptionExecution(
+                option_id=option_id,
+                option_revision=current.option_revision,
+                proposal_id=current.typed_proposal_id,
+                proposal_revision=current.typed_proposal_revision,
+                freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
+                generation_context_id=current.generation_context_id,
+                run_id=dispatch.run_id,
+            )
+            self.store.append_option_record(
+                notebook_id,
+                option_id,
+                {
+                    "record_type": RECORD_EXECUTION,
+                    "option_id": option_id,
+                    "option_revision": current.option_revision,
+                    "execution": execution.to_dict(),
+                    "authorization_id": authorization.authorization_id,
+                    "dispatch_receipt_ref": dispatch.receipt_ref,
+                },
+            )
+        return dispatch
+
+    def _build_server_execution_authorization(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        materialized: Any,
+    ) -> OptionExecutionAuthorization:
+        """Create the authorization envelope only from persisted server facts."""
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "server execution authorization requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_contract_version",
+            )
+        reference = current.capability_resolution_binding_ref
+        if self.capability_bindings is None or reference is None:
+            raise OptionRevisionStale(
+                "server execution authorization requires a current capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_unavailable",
+            )
+        try:
+            notebook = self.get_notebook(notebook_id)
+            capability_id = self.capability_bindings.capability_id_for_reference(
+                reference,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise CapabilityBindingCatalogError(
+                    "authorization binding reference is not registered"
+                )
+            binding = self.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "server execution authorization binding is not currently usable",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_not_current",
+            ) from error
+
+        persisted_materialization = materialized.materialization
+        persisted_draft = materialized.draft
+        if (
+            persisted_materialization.option_id != option_id
+            or persisted_materialization.option_revision != current.option_revision
+            or persisted_materialization.capability_resolution_binding_ref != reference
+            or persisted_materialization.draft_id != persisted_draft.draft["draft_id"]
+            or persisted_materialization.draft_hash != persisted_draft.draft_hash
+        ):
+            raise OptionRevisionStale(
+                "materialization provenance does not match the current capability option",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_materialization_binding",
+            )
+
+        proposal = view.current_stored_revision.proposal
+        requested_operation = (proposal.changes.get("operation") or "")
+        operation_id = (
+            requested_operation
+            if requested_operation in binding.allowed_operations
+            else binding.allowed_operations[0]
+        )
+        seed = domain_digest(
+            "workbench.notebook.confirm_and_execute/v1",
+            {
+                "notebook_id": notebook_id,
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "materialization_id": persisted_materialization.materialization_id,
+                "draft_hash": persisted_materialization.draft_hash,
+                "binding_ref": reference,
+            },
+        ).split(":", 1)[-1]
+        draft_hash = persisted_materialization.draft_hash
+        if isinstance(draft_hash, str) and not draft_hash.startswith("sha256:"):
+            if len(draft_hash) != 64 or any(
+                char not in "0123456789abcdef" for char in draft_hash
+            ):
+                raise OptionRevisionStale(
+                    "the persisted Draft hash is not a lowercase SHA-256 digest",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_draft_hash_invalid",
+                )
+            draft_hash = f"sha256:{draft_hash}"
+        now = datetime.now(timezone.utc)
+        authorization = OptionExecutionAuthorization(
+            authorization_id=f"auth_{seed}",
+            notebook_id=notebook_id,
+            option_id=option_id,
+            option_revision=current.option_revision,
+            binding_revision=1,
+            capability_resolution_binding_ref=reference,
+            materialization_id=persisted_materialization.materialization_id,
+            draft_id=persisted_materialization.draft_id,
+            draft_hash=draft_hash,
+            run_intent_id=f"intent_{seed}",
+            capability_ref=binding.implementation_ref,
+            bundle_ref=binding.validation_bundle_ref,
+            evidence_ref=binding.assessment_ref,
+            admission_ref=binding.admission_ref,
+            runtime_policy_ref=binding.runtime_policy_ref,
+            freshness_cursor_ref=binding.validity_cursor_ref,
+            input_graph_fingerprint=current.generation_context_hash,
+            freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
+            operation_id=operation_id,
+            execution_mode="confirm_and_execute",
+            risk_level=current.risk_level,
+            artifact_contract_ref=_artifact_contract_ref(current.artifact_contract),
+            consumer_projection_ref=_consumer_projection_ref(binding),
+            idempotency_key=f"confirm-and-execute-{seed}",
+            issued_at=now,
+            expires_at=now + timedelta(minutes=5),
+        )
+        return self.authorize_option_execution(
+            notebook_id,
+            option_id,
+            context=context,
+            authorization=authorization,
+        )
 
     # ------------------------------------------------------------------
     # Decisions
@@ -1801,6 +2088,16 @@ class NotebookService:
         current = view.current_revision
         self._assert_current_recommendation_source(notebook_id, current)
         self._assert_current_capability_binding(current)
+        if (
+            isinstance(current, NotebookOptionRevisionV12)
+            and current.capability_resolution_binding_ref is not None
+        ):
+            raise OptionExecutionReceiptRequired(
+                "a bound capability execution must be completed from a server-owned CF4 receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_execution_receipt_required",
+            )
         if current.materializable:
             materialization = self.store.read_materialization(
                 notebook_id, option_id, current.option_revision
