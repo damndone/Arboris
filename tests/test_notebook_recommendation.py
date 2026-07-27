@@ -326,6 +326,11 @@ def test_comparison_decision_has_a_strict_persisted_wire_contract() -> None:
     with pytest.raises(ValueError, match="unknown"):
         ComparisonDecisionRecord.from_dict(payload)
 
+    payload = record.to_dict()
+    payload["evidence_pack_hashes"] = "sha256:evidence"
+    with pytest.raises(ValueError):
+        ComparisonDecisionRecord.from_dict(payload)
+
 
 def test_registry_rejects_a_wire_recommendation_with_a_forged_comparison_ref() -> None:
     registry = ServerDecisionRegistry()

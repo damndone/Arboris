@@ -7,8 +7,10 @@ so the assertions look at the file.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 from dataclasses import replace
+import multiprocessing
 from pathlib import Path
 
 import pytest
@@ -102,6 +104,46 @@ def _server_comparison_decision() -> ComparisonDecisionRecord:
         recommended_option_id="opt_ets",
         protocol_ref="comparison.v1",
     )
+
+
+def _append_jsonl_child(path: str, started: object, finished: object) -> None:
+    from workbench.agent.storage import append_jsonl_atomic
+
+    started.set()  # type: ignore[attr-defined]
+    append_jsonl_atomic(Path(path), {"worker": "child"})
+    finished.set()  # type: ignore[attr-defined]
+
+
+def test_append_jsonl_atomic_serializes_writers_across_processes(tmp_path: Path) -> None:
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("process-lock test requires fork")
+    path = tmp_path / "records.jsonl"
+    path.write_text('{"worker":"seed"}\n', encoding="utf-8")
+    lock_path = path.with_name(f".{path.name}.lock")
+    context = multiprocessing.get_context("fork")
+    started = context.Event()
+    finished = context.Event()
+    child = context.Process(
+        target=_append_jsonl_child,
+        args=(str(path), started, finished),
+    )
+
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        child.start()
+        assert started.wait(timeout=5)
+        assert not finished.wait(timeout=0.25)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    child.join(timeout=5)
+    assert child.exitcode == 0
+    assert finished.is_set()
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [record["worker"] for record in records] == ["seed", "child"]
 
 
 def test_server_decisions_survive_store_restart_without_duplicate_records(tmp_path: Path) -> None:

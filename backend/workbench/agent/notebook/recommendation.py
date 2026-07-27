@@ -45,6 +45,15 @@ def _server_text(value: Any, field: str) -> str:
     return value
 
 
+def _server_string_tuple(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise RecommendationValidationError(f"{field} must be a list or tuple of strings")
+    items = tuple(value)
+    if any(type(item) is not str or not item for item in items):
+        raise RecommendationValidationError(f"{field} must contain non-empty strings")
+    return items
+
+
 @dataclass(frozen=True)
 class ComparisonDecisionRecord:
     """A server-registered comparison result bound to one candidate cohort."""
@@ -90,9 +99,13 @@ class ComparisonDecisionRecord:
             "protocol_ref",
         ):
             _server_text(getattr(self, field), field)
-        evidence_pack_hashes = tuple(self.evidence_pack_hashes)
-        candidate_option_ids = tuple(self.candidate_option_ids)
-        if not evidence_pack_hashes or any(not isinstance(item, str) or not item for item in evidence_pack_hashes):
+        evidence_pack_hashes = _server_string_tuple(
+            self.evidence_pack_hashes, "comparison evidence hashes"
+        )
+        candidate_option_ids = _server_string_tuple(
+            self.candidate_option_ids, "comparison candidate option ids"
+        )
+        if not evidence_pack_hashes:
             raise RecommendationValidationError("comparison evidence hashes are required")
         candidate_cohort_hash(candidate_option_ids)
         if self.candidate_cohort_hash != candidate_cohort_hash(candidate_option_ids):
