@@ -7,7 +7,9 @@ import pytest
 
 from workbench.capability_factory.control import (
     ControlAppendRequest,
+    ControlCursorConflict,
     ControlCursorExpectation,
+    ControlSubjectRejected,
     ControlSubjectCursor,
     ExecutionControlRecord,
     ExecutionControlStore,
@@ -100,6 +102,82 @@ def _control_record(intent: PreparedRunIntent) -> ExecutionControlRecord:
     )
 
 
+def _fenced_store(
+    intent: PreparedRunIntent,
+    *,
+    authorization_id: str = "authorization.alpha",
+    authorization_status: str = "claimed",
+) -> tuple[ExecutionControlStore, datetime]:
+    now = datetime(2026, 7, 27, 8, 0, tzinfo=timezone.utc)
+    store = ExecutionControlStore(clock=lambda: now)
+    subjects = (
+        ("authorization", authorization_id, 1, authorization_status),
+        ("binding", intent.binding_ref, intent.binding_revision, "valid"),
+        ("host_containment", intent.host_containment_ref, intent.host_validity_revision, "valid"),
+        ("bundle", intent.bundle_ref, intent.bundle_validity_revision, "valid"),
+        ("evidence", intent.evidence_ref, intent.evidence_validity_revision, "valid"),
+        ("admission", intent.admission_ref, intent.admission_validity_revision, "valid"),
+    )
+    for kind, reference, revision, status in subjects:
+        store.publish_subject(
+            ControlSubjectCursor(
+                subject_kind=kind,
+                subject_ref=reference,
+                validity_revision=revision,
+                status=status,
+                effective_at=now - timedelta(seconds=1),
+                expires_at=now + timedelta(minutes=1),
+                authority="server.control",
+                reason="current",
+                source_record_ref=f"source_{kind}",
+            )
+        )
+    return store, now
+
+
+def _fenced_expectations(
+    intent: PreparedRunIntent,
+    *,
+    authorization_id: str = "authorization.alpha",
+) -> tuple[ControlCursorExpectation, ...]:
+    return (
+        ControlCursorExpectation(
+            subject_kind="authorization",
+            subject_ref=authorization_id,
+            validity_revision=1,
+            expected_status="claimed",
+        ),
+        ControlCursorExpectation(
+            subject_kind="binding",
+            subject_ref=intent.binding_ref,
+            validity_revision=intent.binding_revision,
+            expected_status="valid",
+        ),
+        ControlCursorExpectation(
+            subject_kind="host_containment",
+            subject_ref=intent.host_containment_ref,
+            validity_revision=intent.host_validity_revision,
+            expected_status="valid",
+        ),
+        ControlCursorExpectation(
+            subject_kind="bundle",
+            subject_ref=intent.bundle_ref,
+            validity_revision=intent.bundle_validity_revision,
+            expected_status="valid",
+        ),
+        ControlCursorExpectation(
+            subject_kind="evidence",
+            subject_ref=intent.evidence_ref,
+            validity_revision=intent.evidence_validity_revision,
+            expected_status="valid",
+        ),
+        ControlCursorExpectation(
+            subject_kind="admission",
+            subject_ref=intent.admission_ref,
+            validity_revision=intent.admission_validity_revision,
+            expected_status="valid",
+        ),
+    )
 def test_prepared_run_intent_is_content_addressed_and_round_trips():
     intent = _intent()
     payload = intent.to_dict()
@@ -220,3 +298,155 @@ def test_dispatch_reservation_rejects_tampered_serialized_digest():
 
     with pytest.raises(DispatchReservationError):
         DispatchReservation.from_dict(payload)
+
+
+def test_dispatch_reservation_fence_requires_all_pinned_subjects_and_is_idempotent():
+    intent = _intent()
+    store, now = _fenced_store(intent)
+    expectations = _fenced_expectations(intent)
+
+    reservation = DispatchReservation.reserve(
+        control_store=store,
+        intent=intent,
+        authorization_id="authorization.alpha",
+        authorization_payload_digest="4" * 64,
+        authorization_validity_revision=1,
+        attempt_id="attempt.fenced",
+        lease_epoch=1,
+        executor_idempotency_key="executor.fenced",
+        record_id="reservation.fenced",
+        idempotency_key="reservation-fenced-idem",
+        expectations=expectations,
+        now=now,
+    )
+    assert reservation.control_sequence == store.control_sequence
+    assert len(store.records()) == 1
+
+    store.publish_subject(
+        ControlSubjectCursor(
+            subject_kind="binding",
+            subject_ref=intent.binding_ref,
+            validity_revision=3,
+            status="revoked",
+            effective_at=now,
+            expires_at=None,
+            authority="server.control",
+            reason="revoked",
+            source_record_ref="source_binding_revoke",
+        ),
+        expected_validity_revision=intent.binding_revision,
+    )
+    repeated = DispatchReservation.reserve(
+        control_store=store,
+        intent=intent,
+        authorization_id="authorization.alpha",
+        authorization_payload_digest="4" * 64,
+        authorization_validity_revision=1,
+        attempt_id="attempt.fenced",
+        lease_epoch=1,
+        executor_idempotency_key="executor.fenced",
+        record_id="reservation.fenced",
+        idempotency_key="reservation-fenced-idem",
+        expectations=expectations,
+        now=now,
+    )
+    assert repeated == reservation
+    assert len(store.records()) == 1
+
+
+def test_dispatch_reservation_fence_rejects_missing_subject_or_wrong_revision():
+    intent = _intent()
+    store, now = _fenced_store(intent)
+    expectations = _fenced_expectations(intent)
+
+    with pytest.raises(DispatchReservationError, match="required"):
+        DispatchReservation.reserve(
+            control_store=store,
+            intent=intent,
+            authorization_id="authorization.alpha",
+            authorization_payload_digest="4" * 64,
+            authorization_validity_revision=1,
+            attempt_id="attempt.missing",
+            lease_epoch=1,
+            executor_idempotency_key="executor.missing",
+            record_id="reservation.missing",
+            idempotency_key="reservation-missing-idem",
+            expectations=expectations[:-1],
+            now=now,
+        )
+
+    wrong_revision = expectations[:-1] + (
+        replace(expectations[-1], validity_revision=2),
+    )
+    with pytest.raises(DispatchReservationError, match="revision"):
+        DispatchReservation.reserve(
+            control_store=store,
+            intent=intent,
+            authorization_id="authorization.alpha",
+            authorization_payload_digest="4" * 64,
+            authorization_validity_revision=1,
+            attempt_id="attempt.wrong_revision",
+            lease_epoch=1,
+            executor_idempotency_key="executor.wrong_revision",
+            record_id="reservation.wrong_revision",
+            idempotency_key="reservation-wrong-revision-idem",
+            expectations=wrong_revision,
+            now=now,
+        )
+
+
+def test_dispatch_reservation_fence_serializes_revocation_before_first_reservation():
+    intent = _intent()
+    store, now = _fenced_store(intent)
+    store.publish_subject(
+        ControlSubjectCursor(
+            subject_kind="binding",
+            subject_ref=intent.binding_ref,
+            validity_revision=3,
+            status="revoked",
+            effective_at=now,
+            expires_at=None,
+            authority="server.control",
+            reason="revoked",
+            source_record_ref="source_binding_revoke_first",
+        ),
+        expected_validity_revision=intent.binding_revision,
+    )
+
+    with pytest.raises(ControlCursorConflict):
+        DispatchReservation.reserve(
+            control_store=store,
+            intent=intent,
+            authorization_id="authorization.alpha",
+            authorization_payload_digest="4" * 64,
+            authorization_validity_revision=1,
+            attempt_id="attempt.revoked",
+            lease_epoch=1,
+            executor_idempotency_key="executor.revoked",
+            record_id="reservation.revoked",
+            idempotency_key="reservation-revoked-idem",
+            expectations=_fenced_expectations(intent),
+            now=now,
+        )
+    assert not store.records()
+
+
+def test_dispatch_reservation_fence_requires_claimed_authorization_subject():
+    intent = _intent()
+    store, now = _fenced_store(intent, authorization_status="revoked")
+
+    with pytest.raises(ControlSubjectRejected):
+        DispatchReservation.reserve(
+            control_store=store,
+            intent=intent,
+            authorization_id="authorization.alpha",
+            authorization_payload_digest="4" * 64,
+            authorization_validity_revision=1,
+            attempt_id="attempt.not_claimed",
+            lease_epoch=1,
+            executor_idempotency_key="executor.not_claimed",
+            record_id="reservation.not_claimed",
+            idempotency_key="reservation-not-claimed-idem",
+            expectations=_fenced_expectations(intent),
+            now=now,
+        )

@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, ClassVar, Mapping
 
 from ..custom_capability.canonical import domain_digest
-from .control import ControlSubjectCursor, ExecutionControlRecord
+from .control import (
+    ControlAppendRequest,
+    ControlCursorExpectation,
+    ControlSubjectCursor,
+    ExecutionControlRecord,
+    ExecutionControlStore,
+)
 
 
 PREPARED_RUN_INTENT_CONTRACT_VERSION = "PreparedRunIntent@1.0"
@@ -266,6 +272,108 @@ class DispatchReservation:
             raise DispatchReservationError("subject_snapshot must be a non-empty tuple")
         if any(not isinstance(item, ControlSubjectCursor) for item in self.subject_snapshot):
             raise DispatchReservationError("subject_snapshot contains an invalid cursor")
+
+    @classmethod
+    def reserve(
+        cls,
+        *,
+        control_store: ExecutionControlStore,
+        intent: PreparedRunIntent,
+        authorization_id: str,
+        authorization_payload_digest: str,
+        authorization_validity_revision: int,
+        attempt_id: str,
+        lease_epoch: int,
+        executor_idempotency_key: str,
+        record_id: str,
+        idempotency_key: str,
+        expectations: tuple[ControlCursorExpectation, ...] | list[ControlCursorExpectation],
+        now: datetime | None = None,
+    ) -> "DispatchReservation":
+        """Linearize one reservation against all pinned control subjects.
+
+        The control store owns the compare-and-append linearization point.  A
+        successful call returns a pure reservation projection and does not
+        mutate the separate receipt journal or start any external work.
+        """
+        if not isinstance(control_store, ExecutionControlStore):
+            raise DispatchReservationError("control_store must be an ExecutionControlStore")
+        if not isinstance(intent, PreparedRunIntent):
+            raise DispatchReservationError("intent must be a PreparedRunIntent")
+        try:
+            authorization_id = _identifier(authorization_id, "authorization_id")
+            attempt_id = _identifier(attempt_id, "attempt_id")
+            executor_idempotency_key = _identifier(
+                executor_idempotency_key,
+                "executor_idempotency_key",
+            )
+            authorization_payload_digest = _digest(
+                authorization_payload_digest,
+                "authorization_payload_digest",
+            )
+        except PreparedRunIntentError as error:
+            raise DispatchReservationError("reservation identity fields are invalid") from error
+        if (
+            not isinstance(authorization_validity_revision, int)
+            or isinstance(authorization_validity_revision, bool)
+            or authorization_validity_revision < 1
+        ):
+            raise DispatchReservationError(
+                "authorization_validity_revision must be a positive integer"
+            )
+        if not isinstance(lease_epoch, int) or isinstance(lease_epoch, bool) or lease_epoch < 1:
+            raise DispatchReservationError("lease_epoch must be a positive integer")
+
+        expected = tuple(expectations)
+        if not expected or any(not isinstance(item, ControlCursorExpectation) for item in expected):
+            raise DispatchReservationError("reservation expectations are invalid")
+        expected_by_subject = {(item.subject_kind, item.subject_ref): item for item in expected}
+        if len(expected_by_subject) != len(expected):
+            raise DispatchReservationError("reservation expectations must be unique")
+        required = {
+            ("authorization", authorization_id): authorization_validity_revision,
+            ("binding", intent.binding_ref): intent.binding_revision,
+            ("host_containment", intent.host_containment_ref): intent.host_validity_revision,
+            ("bundle", intent.bundle_ref): intent.bundle_validity_revision,
+            ("evidence", intent.evidence_ref): intent.evidence_validity_revision,
+            ("admission", intent.admission_ref): intent.admission_validity_revision,
+        }
+        for subject, revision in required.items():
+            item = expected_by_subject.get(subject)
+            if item is None:
+                raise DispatchReservationError(
+                    f"required reservation subject is missing: {subject[0]}"
+                )
+            if item.validity_revision != revision:
+                raise DispatchReservationError(
+                    f"required reservation subject has the wrong revision: {subject[0]}"
+                )
+        if expected_by_subject[("authorization", authorization_id)].expected_status != "claimed":
+            raise DispatchReservationError(
+                "authorization reservation subject must require claimed status"
+            )
+
+        request = ControlAppendRequest(
+            record_id=record_id,
+            record_type="dispatch_reservation",
+            value={
+                "authorization_id": authorization_id,
+                "authorization_payload_digest": authorization_payload_digest,
+                "intent_id": intent.intent_id,
+                "intent_digest": intent.content_digest,
+                "run_id": intent.run_id,
+                "attempt_id": attempt_id,
+                "lease_epoch": lease_epoch,
+                "executor_idempotency_key": executor_idempotency_key,
+            },
+            idempotency_key=idempotency_key,
+        )
+        record = control_store.compare_cursors_and_append(
+            expectations=expected,
+            record=request,
+            now=now,
+        )
+        return cls.from_control_record(intent=intent, control_record=record)
 
     @classmethod
     def from_control_record(
