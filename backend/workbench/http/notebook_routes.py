@@ -664,6 +664,7 @@ def propose_options_endpoint(
     root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
+        recommendation_decision = None
         drafts = (
             [_draft(item) for item in body.drafts]
             if body.drafts
@@ -686,31 +687,31 @@ def propose_options_endpoint(
             final_evidence = getattr(result, "evidence_pack", None)
             if isinstance(final_evidence, DataEvidencePackV1):
                 service.store.append_evidence_pack(notebook_id, final_evidence.to_dict())
+            recommendation_evidence = (
+                final_evidence
+                if isinstance(final_evidence, DataEvidencePackV1)
+                else initial_evidence
+            )
             # Inspection calls persist Evidence Packs. Recompile the context
             # before pinning the v1.1 revision so evidence_pack_refs belong to
             # the same freshness fingerprint that the Draft gate will observe.
             context = replace(
                 service.compile_context(notebook_id), trace_id=trace.trace_id
             )
-            decision = replace(
-                result.decision,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+            drafts, recommendation_decision = service.derive_server_recommendation(
+                notebook_id,
+                context=context,
+                drafts=tuple(result.option_drafts),
+                batch_id=result.decision.batch_id,
+                evidence_pack=recommendation_evidence,
             )
-            # Keep the route test seam usable for a deliberately tiny fake
-            # planner result, while the production adapter remains a dataclass.
-            if hasattr(result, "__dataclass_fields__"):
-                result = replace(result, decision=decision)
-            else:
-                result.decision = decision
-            drafts = list(result.option_drafts)
         revisions = service.propose_batch(
             notebook_id,
             context=context,
             drafts=drafts,
             trace=trace,
-            batch_id=(result.decision.batch_id if not body.drafts else None),
-            recommendation_decision=(result.decision if not body.drafts else None),
+            batch_id=(recommendation_decision.batch_id if not body.drafts else None),
+            recommendation_decision=(recommendation_decision if not body.drafts else None),
             # Provider-generated planning is the only path that may
             # deliberately revalidate existing stable option ids.  Manual
             # draft submission keeps the strict reuse-conflict behavior.

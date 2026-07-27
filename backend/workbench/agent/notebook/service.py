@@ -26,6 +26,7 @@ from uuid import uuid4
 import pandas as pd
 
 from ...contracts.agent.notebook_option import (
+    FeasibilityCandidateDecision,
     FeasibilityDecision,
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
@@ -39,6 +40,7 @@ from ...capability_factory.execution_authorization import (
     OptionExecutionAuthorization,
     OptionExecutionAuthorizationStore,
 )
+from ...canonical import sha256_canonical
 from ...custom_capability.canonical import domain_digest
 from ...capability_factory.notebook_catalog import (
     CapabilityBindingCatalog,
@@ -87,8 +89,10 @@ from .freshness import (
 from .proposal import OptionDraft, TypedProposal
 from .recommendation import (
     ComparisonDecisionRecord,
+    RecommendationValidator,
     RecommendationValidationError,
     ServerDecisionRegistry,
+    candidate_cohort_hash,
 )
 from .store import (
     RECORD_EXECUTION,
@@ -372,6 +376,144 @@ class NotebookService:
 
         self.get_notebook(notebook_id)
         self.store.append_server_decision(notebook_id, decision)
+
+    def derive_server_recommendation(
+        self,
+        notebook_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        drafts: Sequence[OptionDraft],
+        batch_id: str,
+        evidence_pack: DataEvidencePackV1,
+    ) -> tuple[tuple[OptionDraft, ...], RecommendationDecisionV11]:
+        """Revalidate an Agent cohort and derive one server-owned decision.
+
+        The Agent can propose typed drafts and bounded evidence, but it cannot
+        decide feasibility.  This stage validates every draft against the
+        operation and capability registries, persists the complete cohort, and
+        only then asks the V1.1 validator to create a recommendation.  This
+        first server protocol is intentionally structural: when more than one
+        candidate is valid it reports ``insufficient_evidence`` until an
+        independent comparison protocol is registered.
+        """
+
+        notebook = self.get_notebook(notebook_id)
+        self._assert_batch_shape(drafts)
+        if type(batch_id) is not str or not batch_id:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_BATCH_ID_INVALID",
+                "the server recommendation batch id must be a non-empty string",
+            )
+        option_ids = tuple(draft.option_id or "" for draft in drafts)
+        if any(not option_id for option_id in option_ids):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_OPTION_ID_REQUIRED",
+                "server recommendation requires a stable option id for every candidate",
+            )
+        if len(set(option_ids)) != len(option_ids):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_OPTION_ID_DUPLICATE",
+                "server recommendation candidate option ids must be unique",
+            )
+        if not isinstance(evidence_pack, DataEvidencePackV1) or not evidence_pack.records:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
+                "server recommendation requires a non-empty evidence pack",
+            )
+        if any(record.status != "completed" for record in evidence_pack.records):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
+                "server recommendation requires completed evidence for every record",
+            )
+        evidence_records = {
+            record.evidence_id: record.to_dict() for record in evidence_pack.records
+        }
+        for draft in drafts:
+            for evidence_ref in draft.evidence_refs:
+                record = evidence_records.get(evidence_ref.evidence_id)
+                if record is None or record["result_hash"] != evidence_ref.result_hash:
+                    raise OptionBatchInvalid(
+                        "OPTION_SERVER_EVIDENCE_BINDING_INVALID",
+                        "a candidate evidence reference is not covered by the server evidence pack",
+                        option_id=draft.option_id,
+                        evidence_id=evidence_ref.evidence_id,
+                    )
+
+        # Validate every candidate before any source decision is written.  The
+        # Agent's blocked_reason is deliberately not consulted here.
+        prepared = [self._prepare(notebook, context, draft) for draft in drafts]
+        self._resolve_capability_bindings(
+            notebook,
+            drafts,
+            recommendation_decision=None,
+            require_recommendation_decision=False,
+        )
+
+        evidence_hash = evidence_pack.evidence_pack_hash
+        self.store.append_evidence_pack(notebook_id, evidence_pack.to_dict())
+        context_hash = generation_context_hash(context)
+        freshness_hash = freshness_dependency_fingerprint(context)
+        cohort_hash = candidate_cohort_hash(option_ids)
+        feasibility_seed = {
+            "protocol": "notebook.server.preflight/v1",
+            "batch_id": batch_id,
+            "candidate_option_ids": option_ids,
+            "candidate_cohort_hash": cohort_hash,
+            "generation_context_hash": context_hash,
+            "freshness_dependency_fingerprint": freshness_hash,
+            "evidence_pack_hashes": (evidence_hash,),
+        }
+        feasibility_id = f"feasibility_{sha256_canonical(feasibility_seed)[:24]}"
+        candidates = tuple(
+            FeasibilityCandidateDecision(
+                option_id=option_id,
+                protocol_id="notebook.server.preflight",
+                protocol_version="v1",
+                inspection_refs=(
+                    "server_validation:"
+                    + sha256_canonical(
+                        {
+                            "option_id": option_id,
+                            "proposal_hash": proposal.canonical_hash(),
+                        }
+                    )[:24],
+                ),
+                evidence_refs=(evidence_hash,),
+                outcome="feasible",
+                reason_code="SERVER_VALIDATED",
+            )
+            for option_id, (proposal, _contract, _risk) in zip(option_ids, prepared)
+        )
+        feasibility = FeasibilityDecision(
+            feasibility_decision_id=feasibility_id,
+            batch_id=batch_id,
+            generation_context_hash=context_hash,
+            freshness_dependency_fingerprint=freshness_hash,
+            evidence_pack_hashes=(evidence_hash,),
+            candidate_option_ids=option_ids,
+            candidate_cohort_hash=cohort_hash,
+            candidates=candidates,
+            validator_revision="notebook.server.preflight/v1",
+        )
+        self.persist_server_decision(notebook_id, feasibility)
+        decision = RecommendationValidator().decide_v11(
+            batch_id=batch_id,
+            candidate_option_ids=option_ids,
+            generation_context_hash=context_hash,
+            freshness_dependency_fingerprint=freshness_hash,
+            evidence_pack_hashes=(evidence_hash,),
+            decision_registry=self.read_server_decision_registry(notebook_id),
+            feasibility_decision_ref=feasibility.feasibility_decision_id,
+        )
+        normalized = tuple(
+            replace(
+                draft,
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+            for draft in drafts
+        )
+        return normalized, decision
 
     def read_server_decision_registry(self, notebook_id: str) -> ServerDecisionRegistry:
         """Rebuild the recommendation source registry from persisted records."""
@@ -1846,6 +1988,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         *,
         recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None,
+        require_recommendation_decision: bool = True,
     ) -> tuple[CapabilityResolutionBinding | None, ...]:
         """Resolve Agent names through the server-owned catalog before writes."""
 
@@ -1886,7 +2029,7 @@ class NotebookService:
                     "the server-owned capability binding is not authorized for the Notebook option planner",
                     capability_id=draft.capability_id,
                 )
-            if binding is not None:
+            if binding is not None and require_recommendation_decision:
                 if recommendation_decision is None:
                     raise OptionBatchInvalid(
                         "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",

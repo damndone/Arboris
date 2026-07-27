@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 from workbench.api import app
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
+from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
@@ -19,6 +20,7 @@ from workbench.contracts.agent.notebook_option import (
     NotebookOptionRevision,
     NotebookOptionRevisionV12,
     RecommendationDecision,
+    RecommendationDecisionV11,
 )
 from workbench.lineage.upload_store import store_upload_bytes
 from workbench.http.notebook_routes import (
@@ -358,6 +360,19 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
         recommended_option_id=None,
         reason_refs=("evidence:time",),
     )
+    evidence_pack = DataEvidencePackV1(
+        source_id="agent:bounded",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:time",
+                inspection_id="time_index.v1",
+                source_refs=("time_index:run_001",),
+                protocol_version="time/v1",
+                status="completed",
+                result_hash="sha256:time-result",
+            ),
+        ),
+    )
 
     class FakePlanningAgent:
         def plan(self, *, context, initial_evidence):
@@ -369,6 +384,7 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
                     recommendation_status=decision.outcome,
                 ),),
                 decision=decision,
+                evidence_pack=evidence_pack,
             )
 
     monkeypatch.setattr(
@@ -383,16 +399,20 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
 
     assert response.status_code == 200, response.text
     persisted = response.json()["options"][0]
-    assert persisted["contract_version"] == NOTEBOOK_OPTION_CONTRACT_VERSION
+    assert persisted["contract_version"] == "1.1"
     assert persisted["batch_id"] == decision.batch_id
-    assert persisted["recommendation_decision_id"] == decision.recommendation_decision_id
-    assert persisted["recommendation_status"] == "insufficient_evidence"
+    assert persisted["recommendation_decision_id"].startswith("rec11_")
+    assert persisted["recommendation_status"] == "recommended"
+    stored_decision = NotebookService(project).store.read_decision(
+        notebook["notebook_id"], persisted["batch_id"]
+    )
+    RecommendationDecisionV11.from_dict(stored_decision.to_dict())
     listed = client.get(
         f"/notebooks/{notebook['notebook_id']}/options",
         params={"project_root": str(project)},
     )
     assert listed.status_code == 200, listed.text
-    assert listed.json()["options"][0]["recommendation_decision_id"] == decision.recommendation_decision_id
+    assert listed.json()["options"][0]["recommendation_decision_id"] == persisted["recommendation_decision_id"]
     trace = client.get(
         f"/notebooks/{notebook['notebook_id']}/traces/{response.json()['trace_id']}",
         params={"project_root": str(project)},
@@ -402,8 +422,10 @@ def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
         event for event in trace.json()["events"]
         if event["event_type"] == "agent.plan.completed/v1"
     ]
-    assert completed[0]["payload"]["recommendation_decision_id"] == decision.recommendation_decision_id
-    assert completed[0]["payload"]["evidence_pack_hashes"] == list(decision.evidence_pack_hashes)
+    assert completed[0]["payload"]["recommendation_decision_id"] == persisted["recommendation_decision_id"]
+    assert completed[0]["payload"]["evidence_pack_hashes"] == list(
+        stored_decision.evidence_pack_hashes
+    )
 
 
 def test_projection_route_binds_real_run_context_and_hashes_graph(tmp_path: Path) -> None:
@@ -580,6 +602,20 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
         recommended_option_id="opt_genesis_route",
         reason_refs=("evidence:profile",),
     )
+    evidence_pack = DataEvidencePackV1(
+        source_id=f"dataset:{upload_sha}",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=(f"dataset_profile:{upload_sha}",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": ["outcome", "predictor"]},
+                result_hash="sha256:profile-result",
+            ),
+        ),
+    )
 
     class FakePlanningAgent:
         def plan(self, *, context, initial_evidence):
@@ -593,6 +629,7 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
                     ),
                 ),
                 decision=decision,
+                evidence_pack=evidence_pack,
             )
 
     monkeypatch.setattr(
@@ -853,11 +890,26 @@ def test_replan_route_returns_replanned_option_and_deferred_sibling(
         recommended_option_id=None,
         reason_refs=("evidence:time",),
     )
+    evidence_pack = DataEvidencePackV1(
+        source_id="agent:bounded",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:time",
+                inspection_id="time_index.v1",
+                source_refs=("time_index:run_001",),
+                protocol_version="time/v1",
+                status="completed",
+                result_hash="sha256:time-result",
+            ),
+        ),
+    )
 
     class FakePlanningAgent:
         def plan(self, *, context, initial_evidence):
             del context, initial_evidence
-            return SimpleNamespace(option_drafts=(replanned,), decision=decision)
+            return SimpleNamespace(
+                option_drafts=(replanned,), decision=decision, evidence_pack=evidence_pack
+            )
 
     monkeypatch.setattr(
         "workbench.http.notebook_routes._planning_agent",
