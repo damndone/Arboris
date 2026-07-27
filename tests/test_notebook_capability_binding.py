@@ -20,11 +20,15 @@ from workbench.agent.notebook.errors import (
     OptionValidationFailed,
 )
 from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+from workbench.agent.notebook.recommendation import RecommendationValidator, candidate_cohort_hash
 from workbench.contracts.agent.notebook_option import (
     ExpectedArtifact,
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
     NotebookOptionRevisionV11,
     NotebookOptionRevisionV12,
     RecommendationDecision,
+    RecommendationDecisionV11,
 )
 
 from tests.test_notebook_support import make_project, model_rerun_proposal
@@ -82,6 +86,51 @@ def _decision(
     )
 
 
+def _server_decision(
+    service: NotebookService,
+    notebook,
+    context,
+    *,
+    option_id: str = "opt_registered",
+    decision_id: str | None = None,
+    batch_id: str = "batch_registered",
+) -> RecommendationDecisionV11:
+    source = FeasibilityDecision(
+        feasibility_decision_id=f"feasibility_{batch_id}",
+        batch_id=batch_id,
+        generation_context_hash=generation_context_hash(context),
+        freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+        evidence_pack_hashes=("sha256:server-evidence",),
+        candidate_option_ids=(option_id,),
+        candidate_cohort_hash=candidate_cohort_hash((option_id,)),
+        candidates=(
+            FeasibilityCandidateDecision(
+                option_id=option_id,
+                protocol_id="feasibility.v1",
+                protocol_version="feasibility/v1",
+                inspection_refs=(f"inspection:{option_id}",),
+                evidence_refs=(f"evidence:{option_id}",),
+                outcome="feasible",
+                reason_code="PASS",
+            ),
+        ),
+        validator_revision="feasibility-validator/v1",
+    )
+    service.persist_server_decision(notebook.notebook_id, source)
+    decision = RecommendationValidator().decide_v11(
+        batch_id=batch_id,
+        candidate_option_ids=(option_id,),
+        generation_context_hash=source.generation_context_hash,
+        freshness_dependency_fingerprint=source.freshness_dependency_fingerprint,
+        evidence_pack_hashes=source.evidence_pack_hashes,
+        decision_registry=service.read_server_decision_registry(notebook.notebook_id),
+        feasibility_decision_ref=source.feasibility_decision_id,
+    )
+    if decision_id is not None:
+        decision = replace(decision, recommendation_decision_id=decision_id)
+    return decision
+
+
 def _draft(
     *,
     capability_id: str,
@@ -126,12 +175,17 @@ def test_registered_capability_generates_a_materialize_only_v12_option(tmp_path:
     project = make_project(tmp_path, name="project.alpha")
     service, notebook, binding, _catalog = _service_with_catalog(project)
     context = service.compile_context(notebook.notebook_id)
-    decision = _decision(context)
+    decision = _server_decision(service, notebook, context)
 
     (revision,) = service.propose_batch(
         notebook.notebook_id,
         context=context,
-        drafts=[_draft(capability_id="capability.registered")],
+        drafts=[
+            _draft(
+                capability_id="capability.registered",
+                decision_id=decision.recommendation_decision_id,
+            )
+        ],
         batch_id=decision.batch_id,
         recommendation_decision=decision,
     )
@@ -398,16 +452,23 @@ def test_bound_option_revalidation_cannot_silently_downgrade_to_v11(
     project = make_project(tmp_path, name="project.alpha")
     service, notebook, binding, _catalog = _service_with_catalog(project)
     context = service.compile_context(notebook.notebook_id)
-    first_decision = _decision(context)
+    first_decision = _server_decision(service, notebook, context)
     (first,) = service.propose_batch(
         notebook.notebook_id,
         context=context,
-        drafts=[_draft(capability_id="capability.registered")],
+        drafts=[
+            _draft(
+                capability_id="capability.registered",
+                decision_id=first_decision.recommendation_decision_id,
+            )
+        ],
         batch_id=first_decision.batch_id,
         recommendation_decision=first_decision,
     )
 
-    second_decision = _decision(
+    second_decision = _server_decision(
+        service,
+        notebook,
         context,
         option_id=first.option_id,
         decision_id="rec_replan",
@@ -456,11 +517,16 @@ def test_current_binding_is_rechecked_before_execution_callback(tmp_path: Path) 
         available_capabilities=["capability.registered"],
     )
     context = service.compile_context(notebook.notebook_id)
-    decision = _decision(context)
+    decision = _server_decision(service, notebook, context)
     (revision,) = service.propose_batch(
         notebook.notebook_id,
         context=context,
-        drafts=[_draft(capability_id="capability.registered")],
+            drafts=[
+                _draft(
+                    capability_id="capability.registered",
+                    decision_id=decision.recommendation_decision_id,
+                )
+            ],
         batch_id=decision.batch_id,
         recommendation_decision=decision,
     )
@@ -496,11 +562,16 @@ def test_bound_option_revalidation_rechecks_current_binding_before_prepare(
         available_capabilities=["capability.registered"],
     )
     context = service.compile_context(notebook.notebook_id)
-    decision = _decision(context)
+    decision = _server_decision(service, notebook, context)
     (first,) = service.propose_batch(
         notebook.notebook_id,
         context=context,
-        drafts=[_draft(capability_id="capability.registered")],
+            drafts=[
+                _draft(
+                    capability_id="capability.registered",
+                    decision_id=decision.recommendation_decision_id,
+                )
+            ],
         batch_id=decision.batch_id,
         recommendation_decision=decision,
     )

@@ -577,7 +577,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         trace: TraceWriter | None = None,
         batch_id: str | None = None,
-        recommendation_decision: RecommendationDecision | None = None,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None = None,
         revalidate_existing: bool = False,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Validate a whole batch, then write it. Never the other way round.
@@ -887,7 +887,7 @@ class NotebookService:
         existing: Sequence[OptionView | None],
         bindings: Sequence[CapabilityResolutionBinding | None],
         batch_id: str | None,
-        recommendation_decision: RecommendationDecision | None,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None,
         trace: TraceWriter | None,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Persist one explicit replan as revisions of existing option ids.
@@ -1845,7 +1845,7 @@ class NotebookService:
         notebook: Notebook,
         drafts: Sequence[OptionDraft],
         *,
-        recommendation_decision: RecommendationDecision | None,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None,
     ) -> tuple[CapabilityResolutionBinding | None, ...]:
         """Resolve Agent names through the server-owned catalog before writes."""
 
@@ -1886,12 +1886,19 @@ class NotebookService:
                     "the server-owned capability binding is not authorized for the Notebook option planner",
                     capability_id=draft.capability_id,
                 )
-            if binding is not None and recommendation_decision is None:
-                raise OptionBatchInvalid(
-                    "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",
-                    "an admitted capability option requires a recommendation decision",
-                    capability_id=draft.capability_id,
-                )
+            if binding is not None:
+                if recommendation_decision is None:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",
+                        "an admitted capability option requires a recommendation decision",
+                        capability_id=draft.capability_id,
+                    )
+                if not isinstance(recommendation_decision, RecommendationDecisionV11):
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_DECISION_VERSION",
+                        "an admitted capability option requires the server-owned V1.1 recommendation contract",
+                        capability_id=draft.capability_id,
+                    )
             resolved.append(binding)
         return tuple(resolved)
 
