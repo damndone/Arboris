@@ -530,7 +530,12 @@ class CapabilityDispatchCoordinator:
         if self.trace_sink is not None:
             self.trace_sink(build_trace_event(event_type=event_type, payload=payload))
 
-    def _assert_receipt_binding(self, receipt: CapabilityDispatchReceipt) -> tuple[Any, Any]:
+    def _assert_receipt_binding(
+        self,
+        receipt: CapabilityDispatchReceipt,
+        *,
+        allow_prior_lease_epoch: bool = False,
+    ) -> tuple[Any, Any]:
         """Join the receipt to the current authorization and attempt journals.
 
         A receipt is an untrusted transport value even when it originated from
@@ -561,7 +566,8 @@ class CapabilityDispatchCoordinator:
         if attempt.intent_digest != receipt.intent_digest:
             raise ExecutionReceiptError("dispatch receipt intent does not match attempt")
         if attempt.lease_epoch != receipt.lease_epoch:
-            raise ExecutionReceiptError("dispatch receipt lease epoch does not match attempt")
+            if not allow_prior_lease_epoch or attempt.lease_epoch != receipt.lease_epoch + 1:
+                raise ExecutionReceiptError("dispatch receipt lease epoch does not match attempt")
         allowed_attempt_statuses = {
             "dispatch_reserved": frozenset({"reserved", "spawn_requested", "spawn_acknowledged"}),
             "running": frozenset({"spawn_acknowledged", "running", "terminated", "failed", "dispatch_unknown", "consumed"}),
@@ -788,9 +794,10 @@ class CapabilityDispatchCoordinator:
         same takeover transition instead of creating a second attempt.
         """
 
-        from .execution_authorization import ExecutionAuthorizationError
-
-        _authorization, attempt = self._assert_receipt_binding(receipt)
+        _authorization, attempt = self._assert_receipt_binding(
+            receipt,
+            allow_prior_lease_epoch=True,
+        )
         transition = _identifier(transition_id, "transition_id")
         authorization = self.authorization_store.read(receipt.authorization_id)
         if authorization.status not in {"dispatch_reserved", "running"}:
@@ -799,19 +806,59 @@ class CapabilityDispatchCoordinator:
             )
         if attempt.authorization_id != authorization.authorization_id:
             raise ExecutionReceiptError("supervisor attempt is bound to another authorization")
-        if attempt.lease_epoch != authorization.lease_epoch:
-            raise ExecutionReceiptError("authorization and supervisor lease epochs are already divergent")
-        try:
-            recovered_authorization = self.authorization_store.take_over_lease(
-                authorization.authorization_id,
-                owner_id=owner_id,
-                transition_id=transition,
-                lease_seconds=lease_seconds,
-                reason=reason,
+        owner = _identifier(owner_id, "owner_id")
+        if authorization.lease_epoch is None:
+            raise ExecutionReceiptError("authorization lease epoch is missing")
+
+        receipt_epoch = receipt.lease_epoch
+        authorization_epoch = authorization.lease_epoch
+        attempt_epoch = attempt.lease_epoch
+        if authorization_epoch == attempt_epoch == receipt_epoch:
+            recovery_mode = "advance_both"
+        elif authorization_epoch == receipt_epoch + 1 and attempt_epoch == receipt_epoch:
+            if authorization.claim_owner_id != owner:
+                raise ExecutionReceiptError(
+                    "authorization takeover is owned by another recovery supervisor"
+                )
+            recovery_mode = "repair_supervisor"
+        elif authorization_epoch == attempt_epoch == receipt_epoch + 1:
+            if authorization.claim_owner_id != owner or attempt.lease_owner_id != owner:
+                raise ExecutionReceiptError(
+                    "completed lease takeover is owned by another recovery supervisor"
+                )
+            return CapabilityDispatchReceipt(
+                authorization_id=authorization.authorization_id,
+                authorization_payload_digest=authorization.payload_digest,
+                intent_digest=receipt.intent_digest,
+                reservation_id=receipt.reservation_id,
+                attempt_id=attempt.attempt_id,
+                lease_epoch=attempt.lease_epoch,
+                status=authorization.status,
+                plan_digest=receipt.plan_digest,
             )
+        else:
+            self._mark_dispatch_unknown(
+                authorization,
+                attempt,
+                reason="authorization and supervisor lease epochs cannot be reconciled",
+            )
+            raise ExecutionReceiptError(
+                "authorization and supervisor lease epochs are irreconcilable; dispatch_unknown recorded"
+            )
+        try:
+            if recovery_mode == "advance_both":
+                recovered_authorization = self.authorization_store.take_over_lease(
+                    authorization.authorization_id,
+                    owner_id=owner,
+                    transition_id=transition,
+                    lease_seconds=lease_seconds,
+                    reason=reason,
+                )
+            else:
+                recovered_authorization = authorization
             recovered_attempt = self.supervisor_store.take_over_lease(
                 attempt.attempt_id,
-                owner_id=owner_id,
+                owner_id=owner,
                 transition_id=_identifier(f"{transition}.supervisor", "transition_id"),
                 reason=reason,
             )
@@ -829,6 +876,49 @@ class CapabilityDispatchCoordinator:
             status=recovered_authorization.status,
             plan_digest=receipt.plan_digest,
         )
+
+    def _mark_dispatch_unknown(self, authorization: Any, attempt: Any, *, reason: str) -> None:
+        """Fence both journals when their epochs cannot be reconciled safely."""
+
+        supervisor_statuses = {"reserved", "spawn_requested", "spawn_acknowledged", "running"}
+        authorization_statuses = {"claimed", "dispatch_reserved", "running"}
+        if attempt.status not in supervisor_statuses:
+            raise ExecutionReceiptError(
+                "irreconcilable supervisor state cannot be isolated as dispatch_unknown"
+            )
+        if authorization.status not in authorization_statuses:
+            raise ExecutionReceiptError(
+                "irreconcilable authorization state cannot be isolated as dispatch_unknown"
+            )
+        supervisor_owner = attempt.lease_owner_id or authorization.claim_owner_id
+        authorization_owner = authorization.claim_owner_id or attempt.lease_owner_id
+        if supervisor_owner is None or authorization_owner is None:
+            raise ExecutionReceiptError("dispatch_unknown isolation requires durable lease owners")
+        try:
+            self.supervisor_store.transition(
+                attempt.attempt_id,
+                target_status="dispatch_unknown",
+                transition_id=_identifier(f"dispatch-unknown-{attempt.attempt_id}", "transition_id"),
+                owner_id=supervisor_owner,
+                lease_epoch=attempt.lease_epoch,
+                reason=reason,
+                process_handle_ref=attempt.process_handle_ref,
+            )
+            self.authorization_store.transition(
+                authorization.authorization_id,
+                transition_id=_identifier(
+                    f"dispatch-unknown-{authorization.authorization_id}", "transition_id"
+                ),
+                idempotency_key=authorization.idempotency_key,
+                expected_status=authorization.status,
+                target_status="dispatch_unknown",
+                owner_id=authorization_owner,
+                lease_epoch=authorization.lease_epoch,
+                prior_receipt_digest=authorization.receipt_digest,
+                metadata={"reason": reason, "attempt_id": attempt.attempt_id},
+            )
+        except Exception as error:
+            raise ExecutionReceiptError("dispatch_unknown isolation could not be durably recorded") from error
 
     def reconcile(
         self,

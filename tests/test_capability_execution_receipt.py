@@ -550,3 +550,132 @@ def test_coordinator_recovers_authorization_and_supervisor_as_one_fenced_epoch(t
     assert recovered_auth.read(authorization.authorization_id).claim_owner_id == "supervisor.recovered"
     assert recovered_supervisor.read(running.attempt_id).lease_epoch == taken.lease_epoch
     assert recovered_supervisor.read(running.attempt_id).lease_owner_id == "supervisor.recovered"
+
+
+def test_recovery_repairs_a_crash_after_authorization_takeover_without_spawning_again(tmp_path) -> None:
+    intent, authorization, plan, coordinator, control_store, _auth_store, supervisor, now = _fixture(
+        tmp_path
+    )
+    receipt = coordinator.reserve(
+        authorization=authorization,
+        intent=intent,
+        plan=plan,
+        expectations=_expectations(intent, authorization.authorization_id),
+        owner_id="supervisor.first",
+        lease_seconds=1,
+        attempt_id="attempt.partial-takeover",
+        lease_epoch=1,
+        executor_idempotency_key="executor.partial-takeover",
+        reservation_id="reservation.partial-takeover",
+        reservation_idempotency_key="reservation-partial-takeover-idem",
+        now=now,
+    )
+    running = coordinator.acknowledge_executor(
+        receipt,
+        owner_id="supervisor.first",
+        process_handle_ref="trusted-handle.partial-takeover",
+    )
+    recovered_auth = OptionExecutionAuthorizationStore(
+        tmp_path,
+        clock=lambda: now + timedelta(seconds=2),
+    )
+    already_taken = recovered_auth.take_over_lease(
+        authorization.authorization_id,
+        owner_id="supervisor.recovered",
+        transition_id="takeover.authorization-only",
+        lease_seconds=30,
+        reason="authorization journal committed before supervisor journal",
+    )
+    assert already_taken.lease_epoch == 2
+
+    recovered = CapabilityDispatchCoordinator(
+        authorization_store=recovered_auth,
+        control_store=control_store,
+        supervisor_store=supervisor,
+    )
+    repaired = recovered.take_over_lease(
+        running,
+        owner_id="supervisor.recovered",
+        transition_id="takeover.repair",
+        lease_seconds=30,
+        reason="repair supervisor journal after crash",
+    )
+
+    assert repaired.status == "running"
+    assert repaired.lease_epoch == 2
+    assert supervisor.read(running.attempt_id).lease_epoch == 2
+    assert supervisor.read(running.attempt_id).lease_owner_id == "supervisor.recovered"
+
+    replayed = recovered.take_over_lease(
+        running,
+        owner_id="supervisor.recovered",
+        transition_id="takeover.repair",
+        lease_seconds=30,
+        reason="repair supervisor journal after crash",
+    )
+    assert replayed == repaired
+
+
+def test_irreconcilable_journal_epochs_are_fenced_as_dispatch_unknown(tmp_path) -> None:
+    intent, authorization, plan, coordinator, control_store, _auth_store, supervisor, now = _fixture(
+        tmp_path
+    )
+    receipt = coordinator.reserve(
+        authorization=authorization,
+        intent=intent,
+        plan=plan,
+        expectations=_expectations(intent, authorization.authorization_id),
+        owner_id="supervisor.first",
+        lease_seconds=1,
+        attempt_id="attempt.irreconcilable",
+        lease_epoch=1,
+        executor_idempotency_key="executor.irreconcilable",
+        reservation_id="reservation.irreconcilable",
+        reservation_idempotency_key="reservation-irreconcilable-idem",
+        now=now,
+    )
+    running = coordinator.acknowledge_executor(
+        receipt,
+        owner_id="supervisor.first",
+        process_handle_ref="trusted-handle.irreconcilable",
+    )
+    first_recovery = OptionExecutionAuthorizationStore(
+        tmp_path,
+        clock=lambda: now + timedelta(seconds=2),
+    )
+    first_recovery.take_over_lease(
+        authorization.authorization_id,
+        owner_id="supervisor.recovered.one",
+        transition_id="takeover.authorization-only.one",
+        lease_seconds=30,
+        reason="authorization journal committed before supervisor journal",
+    )
+    second_recovery = OptionExecutionAuthorizationStore(
+        tmp_path,
+        clock=lambda: now + timedelta(seconds=40),
+    )
+    advanced = second_recovery.take_over_lease(
+        authorization.authorization_id,
+        owner_id="supervisor.recovered.two",
+        transition_id="takeover.authorization-only.two",
+        lease_seconds=30,
+        reason="authorization journal advanced again before supervisor repair",
+    )
+    assert advanced.lease_epoch == 3
+
+    recovered = CapabilityDispatchCoordinator(
+        authorization_store=second_recovery,
+        control_store=control_store,
+        supervisor_store=supervisor,
+    )
+    with pytest.raises(ExecutionReceiptError, match="dispatch_unknown recorded"):
+        recovered.take_over_lease(
+            running,
+            owner_id="supervisor.recovered.two",
+            transition_id="takeover.irreconcilable",
+            lease_seconds=30,
+            reason="fence irreconcilable journals",
+        )
+
+    assert second_recovery.read(authorization.authorization_id).status == "dispatch_unknown"
+    assert supervisor.read(running.attempt_id).status == "dispatch_unknown"
