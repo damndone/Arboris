@@ -43,6 +43,7 @@ def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
         "object_graph_ref": "d" * 64,
         "assessment_ref": "e" * 64,
         "output_bundle_ref": "f" * 64,
+        "attestation_ref": "0" * 64,
         "ignored_payload": {"coefficient": 99},
     }
     service = SimpleNamespace(
@@ -83,6 +84,7 @@ def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
                 "object_graph_ref": "d" * 64,
                 "assessment_ref": "e" * 64,
                 "output_bundle_ref": "f" * 64,
+                "attestation_ref": "0" * 64,
             },
         }
     }

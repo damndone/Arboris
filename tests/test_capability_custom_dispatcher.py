@@ -400,10 +400,16 @@ def test_spawn_ack_then_dispatch_reuses_one_trusted_executor_handle(tmp_path) ->
                 reason_code="NATIVE_CONTAINMENT_EXECUTION_COMPLETED",
                 assessment_ref="f" * 64,
                 output_bundle_ref="0" * 64,
+                attestation_ref="1" * 64,
             )
 
     executor = StubExecutor()
-    broker = ContainmentBroker(host_assessor=lambda _policy: canary, executor=executor)
+    broker = ContainmentBroker(
+        host_assessor=lambda _policy: canary,
+        executor=executor,
+        report_verifier=lambda **_kwargs: "1" * 64,
+        require_authenticated_reports=True,
+    )
     running = coordinator.spawn_and_acknowledge(
         receipt=receipt,
         owner_id="supervisor.custom.sequence",

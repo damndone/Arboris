@@ -379,6 +379,7 @@ def _execution_results_packet(
                             "object_graph_ref",
                             "assessment_ref",
                             "output_bundle_ref",
+                            "attestation_ref",
                         )
                     },
                 }

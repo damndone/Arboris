@@ -1892,6 +1892,7 @@ class NotebookService:
                     "object_graph_ref": dispatch.object_graph_ref,
                     "assessment_ref": dispatch.assessment_ref,
                     "output_bundle_ref": dispatch.output_bundle_ref,
+                    "attestation_ref": dispatch.attestation_ref,
                 },
             },
         )

@@ -36,6 +36,7 @@ class CustomDispatchResult:
     reason_code: str
     assessment_ref: str | None = None
     output_bundle_ref: str | None = None
+    attestation_ref: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "plan_digest", _digest(self.plan_digest, "plan_digest"))
@@ -45,7 +46,7 @@ class CustomDispatchResult:
         if self.status not in {"completed", "failed", "unsupported", "dispatch_unknown"}:
             raise CustomDispatchPreflightError("broker report status is unsupported")
         object.__setattr__(self, "reason_code", _text(self.reason_code, "reason_code"))
-        for field in ("assessment_ref", "output_bundle_ref"):
+        for field in ("assessment_ref", "output_bundle_ref", "attestation_ref"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _digest(value, field))
@@ -54,6 +55,10 @@ class CustomDispatchResult:
         ):
             raise CustomDispatchPreflightError(
                 "completed custom dispatch requires assessment and output refs"
+            )
+        if self.status in {"completed", "failed"} and self.attestation_ref is None:
+            raise CustomDispatchPreflightError(
+                "terminal custom dispatch requires trusted authority verification"
             )
         if self.status != "completed" and self.output_bundle_ref is not None:
             raise CustomDispatchPreflightError(
@@ -73,6 +78,7 @@ class CustomDispatchResult:
                 "reason_code": self.reason_code,
                 "assessment_ref": self.assessment_ref,
                 "output_bundle_ref": self.output_bundle_ref,
+                "attestation_ref": self.attestation_ref,
             },
         )
 
@@ -326,6 +332,15 @@ class CustomCapabilityDispatcher:
             raise CustomDispatchPreflightError("trusted containment broker returned an invalid report")
         if report.attempt_id != receipt.attempt_id or report.request_digest != request.content_digest:
             raise CustomDispatchPreflightError("containment report is not bound to the attempt")
+        if report.status in {"completed", "failed"}:
+            if not broker.require_authenticated_reports or broker.report_verifier is None:
+                raise CustomDispatchPreflightError(
+                    "containment broker is not configured for trusted authority verification"
+                )
+            if report.attestation_ref is None:
+                raise CustomDispatchPreflightError(
+                    "containment report has not passed trusted authority verification"
+                )
         return CustomDispatchResult(
             plan_digest=plan.content_digest,
             attempt_id=receipt.attempt_id,
@@ -335,6 +350,7 @@ class CustomCapabilityDispatcher:
             reason_code=report.reason_code,
             assessment_ref=report.assessment_ref,
             output_bundle_ref=report.output_bundle_ref,
+            attestation_ref=report.attestation_ref,
         )
 
 

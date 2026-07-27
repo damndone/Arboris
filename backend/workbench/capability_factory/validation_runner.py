@@ -72,6 +72,7 @@ class ValidationExecutionResult:
     reason_code: str
     assessment_ref: str | None = None
     output_bundle_ref: str | None = None
+    attestation_ref: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "sealed_bundle_ref", _digest(self.sealed_bundle_ref, "sealed_bundle_ref"))
@@ -83,11 +84,15 @@ class ValidationExecutionResult:
         if self.status not in {"completed", "failed", "unsupported", "dispatch_unknown"}:
             raise ValidationRunnerError("validation execution status is unsupported")
         object.__setattr__(self, "reason_code", _text(self.reason_code, "reason_code"))
-        for field in ("assessment_ref", "output_bundle_ref"):
+        for field in ("assessment_ref", "output_bundle_ref", "attestation_ref"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _digest(value, field))
-        if self.status == "completed" and (self.report_ref is None or self.output_bundle_ref is None):
+        if self.status == "completed" and (
+            self.report_ref is None
+            or self.output_bundle_ref is None
+            or self.attestation_ref is None
+        ):
             raise ValidationRunnerError("completed validation execution requires a report and output bundle")
         if self.status != "completed" and self.output_bundle_ref is not None:
             raise ValidationRunnerError("non-completed validation execution cannot expose output")
@@ -213,6 +218,16 @@ class ValidationRunner:
                 status="failed",
                 reason_code="NATIVE_CONTAINMENT_REPORT_MISMATCH",
             )
+        if report.status == "completed" and report.attestation_ref is None:
+            return ValidationExecutionResult(
+                sealed_bundle_ref=sealed_bundle.bundle_ref,
+                protocol_ref=protocol.content_digest,
+                attempt_id=request.attempt_id,
+                request_ref=request.content_digest,
+                report_ref=None,
+                status="failed",
+                reason_code="NATIVE_CONTAINMENT_ATTESTATION_MISSING",
+            )
         status = report.status
         if status == "completed":
             return ValidationExecutionResult(
@@ -225,6 +240,7 @@ class ValidationRunner:
                 reason_code=report.reason_code,
                 assessment_ref=report.assessment_ref,
                 output_bundle_ref=report.output_bundle_ref,
+                attestation_ref=report.attestation_ref,
             )
         return ValidationExecutionResult(
             sealed_bundle_ref=sealed_bundle.bundle_ref,

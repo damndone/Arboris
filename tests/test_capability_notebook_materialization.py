@@ -92,6 +92,7 @@ def test_authorized_notebook_gateway_runs_the_single_cf4_lifecycle(tmp_path) -> 
                 reason_code="NATIVE_CONTAINMENT_COMPLETED",
                 assessment_ref="1" * 64,
                 output_bundle_ref="2" * 64,
+                attestation_ref="8" * 64,
             )
 
     executor = StubExecutor()
@@ -150,7 +151,12 @@ def test_authorized_notebook_gateway_runs_the_single_cf4_lifecycle(tmp_path) -> 
             harness_digest="4" * 64,
         ),
         coordinator=coordinator,
-        broker=ContainmentBroker(host_assessor=lambda _policy: canary, executor=executor),
+        broker=ContainmentBroker(
+            host_assessor=lambda _policy: canary,
+            executor=executor,
+            report_verifier=lambda **_kwargs: "8" * 64,
+            require_authenticated_reports=True,
+        ),
         executor=executor,
         owner_id="supervisor.notebook.gateway",
         lease_seconds=60,
@@ -252,7 +258,12 @@ def test_authorized_notebook_gateway_fences_completed_child_without_completion_b
             harness_digest="4" * 64,
         ),
         coordinator=coordinator,
-        broker=ContainmentBroker(host_assessor=lambda _policy: canary, executor=executor),
+        broker=ContainmentBroker(
+            host_assessor=lambda _policy: canary,
+            executor=executor,
+            report_verifier=lambda **_kwargs: "9" * 64,
+            require_authenticated_reports=True,
+        ),
         executor=executor,
         owner_id="supervisor.notebook.no-completion",
         lease_seconds=60,

@@ -579,6 +579,8 @@ def test_validation_harness_marks_e2_independent_oracle_verified_without_holdout
     broker = ContainmentBroker(
         host_assessor=lambda _policy: CanaryResult("supported", "canary_passed"),
         executor=lambda *_args: report,
+        report_verifier=lambda **_kwargs: "8" * 64,
+        require_authenticated_reports=True,
     )
 
     class Oracle:

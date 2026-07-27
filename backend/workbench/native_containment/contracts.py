@@ -111,6 +111,7 @@ class ContainmentReport:
     reason_code: str
     assessment_ref: str | None = None
     output_bundle_ref: str | None = None
+    attestation_ref: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attempt_id", _text(self.attempt_id, "attempt_id"))
@@ -119,7 +120,7 @@ class ContainmentReport:
             raise ContainmentReportError("unsupported containment report status")
         object.__setattr__(self, "status", self.status)
         object.__setattr__(self, "reason_code", _text(self.reason_code, "reason_code"))
-        for field in ("assessment_ref", "output_bundle_ref"):
+        for field in ("assessment_ref", "output_bundle_ref", "attestation_ref"):
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, _digest(value, field))

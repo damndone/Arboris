@@ -126,6 +126,7 @@ class NotebookExecutionDispatch:
     object_graph_ref: str | None = None
     assessment_ref: str | None = None
     output_bundle_ref: str | None = None
+    attestation_ref: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.authorization_id, "authorization_id")
@@ -166,10 +167,15 @@ class NotebookExecutionDispatch:
                 "unsupported or unknown Notebook dispatch cannot expose a run id"
             )
         if self.status in {"completed", "failed"} and not all(
-            (self.completion_ref, self.artifact_validation_ref, self.object_graph_ref)
+            (
+                self.completion_ref,
+                self.artifact_validation_ref,
+                self.object_graph_ref,
+                self.attestation_ref,
+            )
         ):
             raise _receipt_error(
-                "terminal Notebook dispatch requires CF4 completion refs"
+                "terminal Notebook dispatch requires CF4 completion and attestation refs"
             )
         if self.status == "completed" and not all(
             (self.assessment_ref, self.output_bundle_ref)
@@ -195,6 +201,7 @@ class NotebookExecutionDispatch:
             "object_graph_ref": self.object_graph_ref,
             "assessment_ref": self.assessment_ref,
             "output_bundle_ref": self.output_bundle_ref,
+            "attestation_ref": self.attestation_ref,
         }
 
 
@@ -268,6 +275,13 @@ class NotebookCapabilityDispatchBinding:
             raise _receipt_error("dispatch binding coordinator is invalid")
         if not isinstance(self.broker, ContainmentBroker):
             raise _receipt_error("dispatch binding broker is invalid")
+        if (
+            self.broker.require_authenticated_reports is not True
+            or self.broker.report_verifier is None
+        ):
+            raise _receipt_error(
+                "dispatch binding requires trusted containment report verification"
+            )
         if self.broker.executor is not self.executor:
             raise _receipt_error("dispatch binding broker and executor must be identical")
         if not callable(getattr(self.executor, "spawn", None)) or not callable(
@@ -474,6 +488,7 @@ class AuthorizedCapabilityExecutionGateway:
                 object_graph_ref=completion.object_graph_ref,
                 assessment_ref=result.assessment_ref if terminal_status == "completed" else None,
                 output_bundle_ref=result.output_bundle_ref if terminal_status == "completed" else None,
+                attestation_ref=result.attestation_ref,
             )
         except Exception as error:
             try:
