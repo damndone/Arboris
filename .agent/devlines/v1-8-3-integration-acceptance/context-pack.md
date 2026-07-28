@@ -26,7 +26,7 @@ real authority and containment evidence. No host Workbench environment may be
 modified by dynamic package installation.
 
 ## Boundary
-- Affected paths: `backend/workbench/app.py`, `backend/workbench/agent/trace.py`, `backend/workbench/capability_factory`, `backend/workbench/http/notebook_routes.py`, `frontend/src/notebook`, `frontend/src/lineage/drafts`, `tests`
+- Affected paths: `backend/workbench/app.py`, `backend/workbench/agent/trace.py`, `backend/workbench/agent/tools.py`, `backend/workbench/capability_factory`, `backend/workbench/http/notebook_routes.py`, `frontend/src/notebook`, `frontend/src/lineage/drafts`, `tests`
 - Allowed paths: `backend/workbench/app.py`, `backend/workbench/capability_factory`, `backend/workbench/http/notebook_routes.py`, `frontend/src/notebook`, `frontend/src/lineage/drafts`, `tests`
 - Protected paths: `.agent/devlines`, `docs/superpowers/specs`, `docs/superpowers/plans`, `scripts/devline_control.py`, `backend/workbench/native_containment`, `backend/workbench/engine/registry.py`
 - Dependencies: `v1-8-3-b1-native-containment`, `v1-8-3-cf3b-adapter-validation`, `v1-8-3-cf4-model-custom-integration`
