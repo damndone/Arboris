@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import fcntl
 import os
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -34,12 +36,26 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def append_jsonl_atomic(path: Path, value: dict[str, Any]) -> None:
+@contextmanager
+def _exclusive_jsonl_lock(path: Path) -> Iterator[None]:
+    """Serialize read-then-replace appends across worker processes."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_bytes() if path.exists() else b""
-    line = (json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
-        temp_path = Path(handle.name)
-        handle.write(existing)
-        handle.write(line)
-    os.replace(temp_path, path)
+    lock_path = path.with_name(f".{path.name}.lock")
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def append_jsonl_atomic(path: Path, value: dict[str, Any]) -> None:
+    with _exclusive_jsonl_lock(path):
+        existing = path.read_bytes() if path.exists() else b""
+        line = (json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(existing)
+            handle.write(line)
+        os.replace(temp_path, path)

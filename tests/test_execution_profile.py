@@ -118,4 +118,10 @@ def test_health_reports_the_process_selected_local_profile(
         "lmm_admitted": True,
         "high_risk_code_admitted": True,
         "canary_status": "passed",
+        "capability_factory": {
+            "configured": False,
+            "catalog_configured": False,
+            "execution_gateway_configured": False,
+            "dependency_gate_configured": False,
+        },
     }

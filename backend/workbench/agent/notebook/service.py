@@ -17,19 +17,46 @@ The service owns four things the agent is not allowed to own:
 from __future__ import annotations
 
 import time
+import json
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 from uuid import uuid4
 
 import pandas as pd
 
 from ...contracts.agent.notebook_option import (
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
     NotebookOptionRevision,
     NotebookOptionRevisionV11,
+    NotebookOptionRevisionV12,
     OptionExecution,
     RecommendationDecision,
+    RecommendationDecisionV11,
+)
+from ...capability_factory.execution_authorization import (
+    ExecutionAuthorizationError,
+    OptionExecutionAuthorization,
+    OptionExecutionAuthorizationStore,
+)
+from ...canonical import sha256_canonical
+from ...custom_capability.canonical import domain_digest
+from ...capability_factory.notebook_catalog import (
+    CapabilityBindingCatalog,
+    CapabilityBindingCatalogError,
+    NOTEBOOK_OPTION_PLANNER_CONSUMER,
+)
+from ...capability_factory.contracts import CONSUMER_SLOTS
+from ...capability_factory.notebook_bridge import (
+    NotebookCapabilityExecutionGateway,
+    NotebookExecutionDispatch,
+)
+from ...capability_factory.notebook_binding import CapabilityResolutionBinding
+from ...capability_factory.trace_contracts import (
+    CapabilityTraceEvent,
+    build_trace_event,
 )
 from ...lineage.run_family import (
     RunFamilyStore,
@@ -55,6 +82,8 @@ from .artifact_contract import (
 from .errors import (
     NotebookRunFamilyImmutable,
     OptionBatchInvalid,
+    OptionExecutionReceiptRequired,
+    OptionExecutionGatewayUnavailable,
     OptionLegacyUnverified,
     OptionLifecycleTransitionInvalid,
     OptionMaterializationRequired,
@@ -70,6 +99,13 @@ from .freshness import (
     freshness_details,
 )
 from .proposal import OptionDraft, TypedProposal
+from .recommendation import (
+    ComparisonDecisionRecord,
+    RecommendationValidator,
+    RecommendationValidationError,
+    ServerDecisionRegistry,
+    candidate_cohort_hash,
+)
 from .store import (
     RECORD_EXECUTION,
     RECORD_EXECUTION_RESULT,
@@ -98,11 +134,35 @@ MAX_OPTIONS_PER_BATCH = 3
 # passed through, so a new registry level fails loudly instead of quietly
 # becoming "low".
 _REGISTRY_RISK_TO_OPTION_RISK = {
+    "none": "low",
     "read": "low",
     "readonly": "low",
     "mutating": "medium",
     "high": "high",
 }
+
+
+def _execution_modes_for(
+    risk_level: str, operation_id: str | None = None
+) -> tuple[str, ...]:
+    """Expose only the execution mode explicitly allowed by the operation."""
+
+    if risk_level == "low":
+        return ("materialize_only", "confirm_and_execute")
+    if risk_level == "high" and operation_id == "model.custom":
+        return ("materialize_only", "experimental_confirm_and_execute")
+    return ("materialize_only",)
+
+
+def _artifact_contract_ref(contract: Any) -> str:
+    return domain_digest("workbench.notebook.artifact_contract/v1", contract.to_dict())
+
+
+def _consumer_projection_ref(binding: CapabilityResolutionBinding) -> str:
+    return domain_digest(
+        "workbench.capability_factory.consumer_projection/v1",
+        {"allowed_consumers": list(binding.allowed_consumers)},
+    )
 
 # spec §3.5. `executed`, `rejected` and `archived` have no outgoing edges.
 _LIFECYCLE_TRANSITIONS: dict[str, frozenset[str]] = {
@@ -180,10 +240,22 @@ class NotebookService:
         project_root: Path | str,
         *,
         registry: OperationRegistry | None = None,
+        capability_bindings: CapabilityBindingCatalog | None = None,
+        execution_gateway: NotebookCapabilityExecutionGateway | None = None,
     ) -> None:
         self.project_root = Path(project_root)
         self.store = NotebookStore(self.project_root)
         self.registry = registry or OperationRegistry()
+        if capability_bindings is not None and not isinstance(
+            capability_bindings, CapabilityBindingCatalog
+        ):
+            raise TypeError("capability_bindings must be a CapabilityBindingCatalog")
+        self.capability_bindings = capability_bindings
+        if execution_gateway is not None and not callable(
+            getattr(execution_gateway, "dispatch", None)
+        ):
+            raise TypeError("execution_gateway must expose a callable dispatch method")
+        self.execution_gateway = execution_gateway
 
     # ------------------------------------------------------------------
     # Notebooks
@@ -311,6 +383,180 @@ class NotebookService:
 
     def list_notebooks(self) -> list[Notebook]:
         return self.store.list_notebooks()
+
+    def persist_server_decision(
+        self,
+        notebook_id: str,
+        decision: FeasibilityDecision | ComparisonDecisionRecord,
+    ) -> None:
+        """Persist one trusted recommendation source decision for a Notebook.
+
+        This is a control-plane seam for Workbench-owned validators.  Agent
+        payloads still cannot register a decision, and the append-only store is
+        the only source used when a later recommendation is validated.
+        """
+
+        self.get_notebook(notebook_id)
+        self.store.append_server_decision(notebook_id, decision)
+
+    def derive_server_recommendation(
+        self,
+        notebook_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        drafts: Sequence[OptionDraft],
+        batch_id: str,
+        evidence_pack: DataEvidencePackV1,
+        capability_trace_sink: Callable[[CapabilityTraceEvent], None] | None = None,
+    ) -> tuple[tuple[OptionDraft, ...], RecommendationDecisionV11]:
+        """Revalidate an Agent cohort and derive one server-owned decision.
+
+        The Agent can propose typed drafts and bounded evidence, but it cannot
+        decide feasibility.  This stage validates every draft against the
+        operation and capability registries, persists the complete cohort, and
+        only then asks the V1.1 validator to create a recommendation.  This
+        first server protocol is intentionally structural: when more than one
+        candidate is valid it reports ``insufficient_evidence`` until an
+        independent comparison protocol is registered.
+        """
+
+        notebook = self.get_notebook(notebook_id)
+        self._assert_batch_shape(drafts)
+        if type(batch_id) is not str or not batch_id:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_BATCH_ID_INVALID",
+                "the server recommendation batch id must be a non-empty string",
+            )
+        option_ids = tuple(draft.option_id or "" for draft in drafts)
+        if any(not option_id for option_id in option_ids):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_OPTION_ID_REQUIRED",
+                "server recommendation requires a stable option id for every candidate",
+            )
+        if len(set(option_ids)) != len(option_ids):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_OPTION_ID_DUPLICATE",
+                "server recommendation candidate option ids must be unique",
+            )
+        if not isinstance(evidence_pack, DataEvidencePackV1) or not evidence_pack.records:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
+                "server recommendation requires a non-empty evidence pack",
+            )
+        if any(record.status != "completed" for record in evidence_pack.records):
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
+                "server recommendation requires completed evidence for every record",
+            )
+        evidence_records = {
+            record.evidence_id: record.to_dict() for record in evidence_pack.records
+        }
+        for draft in drafts:
+            for evidence_ref in draft.evidence_refs:
+                record = evidence_records.get(evidence_ref.evidence_id)
+                if record is None or record["result_hash"] != evidence_ref.result_hash:
+                    raise OptionBatchInvalid(
+                        "OPTION_SERVER_EVIDENCE_BINDING_INVALID",
+                        "a candidate evidence reference is not covered by the server evidence pack",
+                        option_id=draft.option_id,
+                        evidence_id=evidence_ref.evidence_id,
+                    )
+
+        # Validate every candidate before any source decision is written.  The
+        # Agent's blocked_reason is deliberately not consulted here.
+        bindings = self._resolve_capability_bindings(
+            notebook,
+            drafts,
+            recommendation_decision=None,
+            require_recommendation_decision=False,
+        )
+        prepared = [
+            self._prepare(notebook, context, draft, binding=binding)
+            for draft, binding in zip(drafts, bindings)
+        ]
+
+        evidence_hash = evidence_pack.evidence_pack_hash
+        self.store.append_evidence_pack(notebook_id, evidence_pack.to_dict())
+        context_hash = generation_context_hash(context)
+        freshness_hash = freshness_dependency_fingerprint(context)
+        cohort_hash = candidate_cohort_hash(option_ids)
+        feasibility_seed = {
+            "protocol": "notebook.server.preflight/v1",
+            "batch_id": batch_id,
+            "candidate_option_ids": option_ids,
+            "candidate_cohort_hash": cohort_hash,
+            "generation_context_hash": context_hash,
+            "freshness_dependency_fingerprint": freshness_hash,
+            "evidence_pack_hashes": (evidence_hash,),
+        }
+        feasibility_id = f"feasibility_{sha256_canonical(feasibility_seed)[:24]}"
+        candidates = tuple(
+            FeasibilityCandidateDecision(
+                option_id=option_id,
+                protocol_id="notebook.server.preflight",
+                protocol_version="v1",
+                inspection_refs=(
+                    "server_validation:"
+                    + sha256_canonical(
+                        {
+                            "option_id": option_id,
+                            "proposal_hash": proposal.canonical_hash(),
+                        }
+                    )[:24],
+                ),
+                evidence_refs=(evidence_hash,),
+                outcome="feasible",
+                reason_code="SERVER_VALIDATED",
+            )
+            for option_id, (proposal, _contract, _risk) in zip(option_ids, prepared)
+        )
+        feasibility = FeasibilityDecision(
+            feasibility_decision_id=feasibility_id,
+            batch_id=batch_id,
+            generation_context_hash=context_hash,
+            freshness_dependency_fingerprint=freshness_hash,
+            evidence_pack_hashes=(evidence_hash,),
+            candidate_option_ids=option_ids,
+            candidate_cohort_hash=cohort_hash,
+            candidates=candidates,
+            validator_revision="notebook.server.preflight/v1",
+        )
+        self.persist_server_decision(notebook_id, feasibility)
+        decision = RecommendationValidator().decide_v11(
+            batch_id=batch_id,
+            candidate_option_ids=option_ids,
+            generation_context_hash=context_hash,
+            freshness_dependency_fingerprint=freshness_hash,
+            evidence_pack_hashes=(evidence_hash,),
+            decision_registry=self.read_server_decision_registry(notebook_id),
+            feasibility_decision_ref=feasibility.feasibility_decision_id,
+        )
+        if capability_trace_sink is not None:
+            capability_trace_sink(
+                build_trace_event(
+                    event_type="option.feasibility.decided",
+                    payload={
+                        "decision_ref": sha256_canonical(decision.to_dict()),
+                        "candidate_cohort_ref": feasibility.candidate_cohort_hash,
+                        "outcome": decision.outcome,
+                    },
+                )
+            )
+        normalized = tuple(
+            replace(
+                draft,
+                recommendation_decision_id=decision.recommendation_decision_id,
+                recommendation_status=decision.outcome,
+            )
+            for draft in drafts
+        )
+        return normalized, decision
+
+    def read_server_decision_registry(self, notebook_id: str) -> ServerDecisionRegistry:
+        """Rebuild the recommendation source registry from persisted records."""
+
+        self.get_notebook(notebook_id)
+        return self.store.read_server_decision_registry(notebook_id)
 
     def rebind_run_family(self, notebook_id: str, *, run_family_id: str) -> None:
         """Always refuses. Present so the refusal is explicit, not an omission."""
@@ -510,7 +756,7 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         trace: TraceWriter | None = None,
         batch_id: str | None = None,
-        recommendation_decision: RecommendationDecision | None = None,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None = None,
         revalidate_existing: bool = False,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Validate a whole batch, then write it. Never the other way round.
@@ -532,7 +778,19 @@ class NotebookService:
             )
 
         self._assert_batch_shape(drafts)
-        prepared = [self._prepare(notebook, context, draft) for draft in drafts]
+        self._validate_recommendation_decision(
+            notebook_id,
+            recommendation_decision,
+        )
+        bindings = self._resolve_capability_bindings(
+            notebook,
+            drafts,
+            recommendation_decision=recommendation_decision,
+        )
+        prepared = [
+            self._prepare(notebook, context, draft, binding=binding)
+            for draft, binding in zip(drafts, bindings)
+        ]
 
         # An explicit Agent replan is a revalidation episode for any provider
         # option ids that already exist.  Stable option_id means a new
@@ -557,6 +815,7 @@ class NotebookService:
                     drafts=drafts,
                     prepared=prepared,
                     existing=existing,
+                    bindings=bindings,
                     batch_id=batch_id,
                     recommendation_decision=recommendation_decision,
                     trace=trace,
@@ -567,7 +826,9 @@ class NotebookService:
         # append another option@rev1; replay the exact same semantic revision
         # and reject a conflicting reuse so the append-only log stays foldable.
         replayed: list[NotebookOptionRevision] = []
-        for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
+        for draft, (proposal, contract, risk_level), binding in zip(
+            drafts, prepared, bindings
+        ):
             if not draft.option_id:
                 replayed = []
                 break
@@ -594,6 +855,8 @@ class NotebookService:
                     if recommendation_decision is not None
                     else draft.recommendation_status
                 )
+                and getattr(current, "capability_resolution_binding_ref", None)
+                == (binding.content_digest if binding is not None else None)
             )
             if not same_semantics:
                 raise OptionBatchInvalid(
@@ -642,35 +905,50 @@ class NotebookService:
         )
         created_at = _now()
         revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
-        for draft, (proposal, contract, risk_level) in zip(drafts, prepared):
+        for draft, (proposal, contract, risk_level), binding in zip(
+            drafts, prepared, bindings
+        ):
             option_id = draft.option_id or f"opt_{uuid4().hex}"
             revision: NotebookOptionRevision | NotebookOptionRevisionV11
             if recommendation_decision is not None:
-                revision = NotebookOptionRevisionV11(
-                    option_id=option_id,
-                    option_revision=1,
-                    notebook_id=notebook.notebook_id,
-                    run_family_id=notebook.run_family_id,
-                    generation_context_id=context.context_id,
-                    generation_context_hash=generation_context_hash(context),
-                    freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-                    typed_proposal_id=proposal.proposal_id,
-                    typed_proposal_revision=proposal.proposal_revision,
-                    artifact_contract=contract,
-                    rationale=draft.rationale,
-                    assumptions=tuple(draft.assumptions),
-                    risk_level=risk_level,
-                    lifecycle_status="proposed",
-                    freshness_status=FRESH,
-                    validation_status="valid",
-                    rank=draft.rank,
-                    batch_id=batch,
-                    created_at=created_at,
-                    evidence_refs=tuple(draft.evidence_refs),
-                    comparative_claims=tuple(draft.comparative_claims),
-                    recommendation_decision_id=recommendation_decision.recommendation_decision_id,
-                    recommendation_status=recommendation_decision.outcome,
+                revision_type = (
+                    NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
                 )
+                revision_kwargs = {
+                    "option_id": option_id,
+                    "option_revision": 1,
+                    "notebook_id": notebook.notebook_id,
+                    "run_family_id": notebook.run_family_id,
+                    "generation_context_id": context.context_id,
+                    "generation_context_hash": generation_context_hash(context),
+                    "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+                    "typed_proposal_id": proposal.proposal_id,
+                    "typed_proposal_revision": proposal.proposal_revision,
+                    "artifact_contract": contract,
+                    "rationale": draft.rationale,
+                    "assumptions": tuple(draft.assumptions),
+                    "risk_level": risk_level,
+                    "lifecycle_status": "proposed",
+                    "freshness_status": FRESH,
+                    "validation_status": "valid",
+                    "rank": draft.rank,
+                    "batch_id": batch,
+                    "created_at": created_at,
+                    "evidence_refs": tuple(draft.evidence_refs),
+                    "comparative_claims": tuple(draft.comparative_claims),
+                    "recommendation_decision_id": recommendation_decision.recommendation_decision_id,
+                    "recommendation_status": recommendation_decision.outcome,
+                }
+                if binding is not None:
+                    revision_kwargs.update(
+                        {
+                            "capability_resolution_binding_ref": binding.content_digest,
+                            "execution_modes": _execution_modes_for(
+                                risk_level, proposal.operation_id
+                            ),
+                        }
+                    )
+                revision = revision_type(**revision_kwargs)
             else:
                 revision = NotebookOptionRevision(
                     option_id=option_id,
@@ -735,18 +1013,23 @@ class NotebookService:
                 reason="generated",
             )
             if trace is not None:
+                revision_trace_payload = {
+                    "option_id": option_id,
+                    "option_revision": 1,
+                    "generation_context_hash": revision.generation_context_hash,
+                    "freshness_dependency_fingerprint": (
+                        revision.freshness_dependency_fingerprint
+                    ),
+                    "rank": draft.rank,
+                    "risk_level": risk_level,
+                }
+                if binding is not None:
+                    revision_trace_payload["capability_resolution_binding_ref"] = (
+                        binding.content_digest
+                    )
                 trace.emit(
                     "option.revision.created",
-                    payload={
-                        "option_id": option_id,
-                        "option_revision": 1,
-                        "generation_context_hash": revision.generation_context_hash,
-                        "freshness_dependency_fingerprint": (
-                            revision.freshness_dependency_fingerprint
-                        ),
-                        "rank": draft.rank,
-                        "risk_level": risk_level,
-                    },
+                    payload=revision_trace_payload,
                 )
                 trace.emit(
                     "proposal.validation.completed",
@@ -772,7 +1055,9 @@ class NotebookService:
                         "recommendation_outcome": recommendation_decision.outcome,
                         "recommended_option_id": recommendation_decision.recommended_option_id,
                         "evidence_pack_hashes": list(recommendation_decision.evidence_pack_hashes),
-                        "comparison_protocol_refs": list(recommendation_decision.comparison_protocol_refs),
+                        "comparison_protocol_refs": list(
+                            getattr(recommendation_decision, "comparison_protocol_refs", ())
+                        ),
                     }
                 )
             trace.emit(
@@ -789,8 +1074,9 @@ class NotebookService:
         drafts: Sequence[OptionDraft],
         prepared: Sequence[tuple[TypedProposal, Any, str]],
         existing: Sequence[OptionView | None],
+        bindings: Sequence[CapabilityResolutionBinding | None],
         batch_id: str | None,
-        recommendation_decision: RecommendationDecision | None,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None,
         trace: TraceWriter | None,
     ) -> tuple[NotebookOptionRevision, ...]:
         """Persist one explicit replan as revisions of existing option ids.
@@ -825,8 +1111,8 @@ class NotebookService:
         created_at = _now()
         revisions: list[NotebookOptionRevision | NotebookOptionRevisionV11] = []
         stored: list[StoredRevision | None] = []
-        for draft, (proposal, contract, risk_level), prior in zip(
-            drafts, prepared, existing
+        for draft, (proposal, contract, risk_level), prior, binding in zip(
+            drafts, prepared, existing, bindings
         ):
             if prior is None:
                 option_id = draft.option_id or f"opt_{uuid4().hex}"
@@ -845,36 +1131,61 @@ class NotebookService:
                     stored.append(None)
                     continue
                 current = prior.current_revision
+                previous_binding_ref = getattr(
+                    current, "capability_resolution_binding_ref", None
+                )
+                if previous_binding_ref is not None and (
+                    binding is None or binding.content_digest != previous_binding_ref
+                ):
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_REVALIDATION_MISMATCH",
+                        "a bound capability option cannot be revalidated without the same current binding",
+                        option_id=prior.option_id,
+                        option_revision=current.option_revision,
+                    )
                 option_id = prior.option_id
                 revision_number = current.option_revision + 1
                 lifecycle_status = prior.lifecycle_status
                 supersedes = current.option_revision
-            revision = NotebookOptionRevisionV11(
-                option_id=option_id,
-                option_revision=revision_number,
-                notebook_id=notebook.notebook_id,
-                run_family_id=notebook.run_family_id,
-                generation_context_id=context.context_id,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-                typed_proposal_id=proposal.proposal_id,
-                typed_proposal_revision=proposal.proposal_revision,
-                artifact_contract=contract,
-                rationale=draft.rationale,
-                assumptions=tuple(draft.assumptions),
-                risk_level=risk_level,
-                lifecycle_status=lifecycle_status,
-                freshness_status=FRESH,
-                validation_status="valid",
-                rank=draft.rank,
-                batch_id=batch,
-                created_at=created_at,
-                evidence_refs=tuple(draft.evidence_refs),
-                comparative_claims=tuple(draft.comparative_claims),
-                recommendation_decision_id=recommendation_decision.recommendation_decision_id,
-                recommendation_status=recommendation_decision.outcome,
-                supersedes_option_revision=supersedes,
+            revision_type = (
+                NotebookOptionRevisionV12 if binding is not None else NotebookOptionRevisionV11
             )
+            revision_kwargs = {
+                "option_id": option_id,
+                "option_revision": revision_number,
+                "notebook_id": notebook.notebook_id,
+                "run_family_id": notebook.run_family_id,
+                "generation_context_id": context.context_id,
+                "generation_context_hash": generation_context_hash(context),
+                "freshness_dependency_fingerprint": freshness_dependency_fingerprint(context),
+                "typed_proposal_id": proposal.proposal_id,
+                "typed_proposal_revision": proposal.proposal_revision,
+                "artifact_contract": contract,
+                "rationale": draft.rationale,
+                "assumptions": tuple(draft.assumptions),
+                "risk_level": risk_level,
+                "lifecycle_status": lifecycle_status,
+                "freshness_status": FRESH,
+                "validation_status": "valid",
+                "rank": draft.rank,
+                "batch_id": batch,
+                "created_at": created_at,
+                "evidence_refs": tuple(draft.evidence_refs),
+                "comparative_claims": tuple(draft.comparative_claims),
+                "recommendation_decision_id": recommendation_decision.recommendation_decision_id,
+                "recommendation_status": recommendation_decision.outcome,
+                "supersedes_option_revision": supersedes,
+            }
+            if binding is not None:
+                revision_kwargs.update(
+                    {
+                        "capability_resolution_binding_ref": binding.content_digest,
+                        "execution_modes": _execution_modes_for(
+                            risk_level, proposal.operation_id
+                        ),
+                    }
+                )
+            revision = revision_type(**revision_kwargs)
             revisions.append(revision)
             stored.append(
                 StoredRevision(
@@ -924,17 +1235,22 @@ class NotebookService:
                 )
             self._append_revision(notebook.notebook_id, stored_revision)
             if trace is not None:
+                revision_trace_payload = {
+                    "option_id": revision.option_id,
+                    "option_revision": revision.option_revision,
+                    "generation_context_hash": revision.generation_context_hash,
+                    "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
+                    "rank": revision.rank,
+                    "risk_level": revision.risk_level,
+                    "supersedes_option_revision": revision.supersedes_option_revision,
+                }
+                if binding is not None:
+                    revision_trace_payload["capability_resolution_binding_ref"] = (
+                        binding.content_digest
+                    )
                 trace.emit(
                     "option.revision.created",
-                    payload={
-                        "option_id": revision.option_id,
-                        "option_revision": revision.option_revision,
-                        "generation_context_hash": revision.generation_context_hash,
-                        "freshness_dependency_fingerprint": revision.freshness_dependency_fingerprint,
-                        "rank": revision.rank,
-                        "risk_level": revision.risk_level,
-                        "supersedes_option_revision": revision.supersedes_option_revision,
-                    },
+                    payload=revision_trace_payload,
                 )
                 trace.emit(
                     "proposal.validation.completed",
@@ -966,7 +1282,66 @@ class NotebookService:
         notebook = self.get_notebook(notebook_id)
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
-        proposal, contract, risk_level = self._prepare(notebook, context, draft)
+        current_binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        if current_binding_ref is not None:
+            if self.capability_bindings is None:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "a bound capability option requires a current server-owned binding",
+                    capability_id=draft.capability_id,
+                )
+            effective_draft = draft
+            if effective_draft.capability_id is None:
+                try:
+                    capability_id = self.capability_bindings.capability_id_for_reference(
+                        current_binding_ref,
+                        scope_candidates=(
+                            ("project", notebook.project_id),
+                            ("run_family", notebook.run_family_id),
+                        ),
+                    )
+                except CapabilityBindingCatalogError as error:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                        "the persisted capability binding cannot be resolved",
+                    ) from error
+                if capability_id is None:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                        "the persisted capability binding cannot be resolved",
+                    )
+                effective_draft = replace(draft, capability_id=capability_id)
+            else:
+                capability_id = effective_draft.capability_id
+            try:
+                current_binding = self.capability_bindings.resolve(
+                    capability_id,
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                )
+            except CapabilityBindingCatalogError as error:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not currently usable",
+                    capability_id=capability_id,
+                ) from error
+            if (
+                current_binding is None
+                or current_binding.content_digest != current_binding_ref
+            ):
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_REVALIDATION_MISMATCH",
+                    "a bound capability option must retain the same current binding",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                )
+            draft = effective_draft
+
+        proposal, contract, risk_level = self._prepare(
+            notebook, context, draft, binding=current_binding if current_binding_ref else None
+        )
 
         if trace is not None:
             trace.emit(
@@ -1098,11 +1473,624 @@ class NotebookService:
 
         from .materialization import NotebookOptionMaterializer
 
+        current = self.store.read_option(notebook_id, option_id).current_revision
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(
+            current
+        )
         return NotebookOptionMaterializer(self).materialize(
             notebook_id,
             option_id,
             context=context,
             trace=trace,
+        )
+
+    def authorize_option_execution(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        authorization: OptionExecutionAuthorization,
+    ) -> OptionExecutionAuthorization:
+        """Bind a user-confirmed option to a durable receipt.
+
+        Standard low-risk options use ``confirm_and_execute``; the explicitly
+        experimental ``model.custom`` path uses
+        ``experimental_confirm_and_execute`` and remains high-risk.
+
+        This is deliberately a control-plane operation.  It validates the
+        current recommendation, binding, risk, and freshness, then persists
+        the already-prepared server authorization.  It does not transition
+        the Option, materialize a Draft, create a Run intent, or dispatch
+        anything.
+        """
+
+        if not isinstance(authorization, OptionExecutionAuthorization):
+            raise TypeError("authorization must be OptionExecutionAuthorization")
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if authorization.notebook_id != notebook_id or authorization.option_id != option_id:
+            raise OptionRevisionStale(
+                "authorization does not identify the current notebook option",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_option_identity",
+            )
+        if authorization.option_revision != current.option_revision:
+            raise OptionRevisionStale(
+                "authorization option revision is stale",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_option_revision",
+            )
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "confirm_and_execute requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_contract_version",
+            )
+        proposal = view.current_stored_revision.proposal
+        offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
+        if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
+            raise OptionRevisionStale(
+                "the current option does not offer its server-approved execution mode",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_mode_not_offered",
+            )
+        expected_mode = offered_modes[1]
+        if (
+            authorization.execution_mode != expected_mode
+            or authorization.risk_level != current.risk_level
+        ):
+            raise OptionRevisionStale(
+                "authorization execution mode or risk does not match the server-approved option",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_risk",
+            )
+        if view.lifecycle_status not in {"selected", "materialized"}:
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; user confirmation "
+                "requires the selected or materialized lifecycle state",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        assert_executable(current, context)
+
+        reference = current.capability_resolution_binding_ref
+        if self.capability_bindings is None or reference is None:
+            raise OptionRevisionStale(
+                "authorization requires a current server-owned capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_unavailable",
+            )
+        try:
+            capability_id = self.capability_bindings.capability_id_for_reference(
+                reference,
+                scope_candidates=(
+                    ("project", self.get_notebook(notebook_id).project_id),
+                    ("run_family", self.get_notebook(notebook_id).run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise CapabilityBindingCatalogError(
+                    "authorization binding reference is not registered"
+                )
+            binding = self.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", self.get_notebook(notebook_id).project_id),
+                    ("run_family", self.get_notebook(notebook_id).run_family_id),
+                ),
+            )
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "authorization binding is not currently usable",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_not_current",
+            ) from error
+
+        expected = {
+            "capability_resolution_binding_ref": binding.content_digest,
+            "capability_ref": binding.implementation_ref,
+            "bundle_ref": binding.dependency_bundle_ref,
+            "evidence_ref": binding.assessment_ref,
+            "admission_ref": binding.admission_ref,
+            "runtime_policy_ref": binding.runtime_policy_ref,
+            "freshness_cursor_ref": binding.validity_cursor_ref,
+            "input_graph_fingerprint": current.generation_context_hash,
+            "freshness_dependency_fingerprint": current.freshness_dependency_fingerprint,
+            "artifact_contract_ref": _artifact_contract_ref(current.artifact_contract),
+            "consumer_projection_ref": _consumer_projection_ref(binding),
+        }
+        mismatches = [
+            field
+            for field, value in expected.items()
+            if getattr(authorization, field) != value
+        ]
+        if authorization.binding_revision != 1:
+            mismatches.append("binding_revision")
+        if mismatches:
+            raise OptionRevisionStale(
+                "authorization binding does not match the current option: "
+                + ", ".join(sorted(mismatches)),
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding",
+            )
+        binding_operation = (
+            proposal.changes.get("operation")
+            if proposal.operation_id == "model.custom"
+            else authorization.operation_id
+        )
+        if binding_operation not in binding.allowed_operations:
+            raise OptionRevisionStale(
+                "capability operation is not allowed by the current binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_operation",
+            )
+
+        try:
+            return OptionExecutionAuthorizationStore(self.project_root).issue(
+                authorization
+            )
+        except ExecutionAuthorizationError as error:
+            raise OptionRevisionStale(
+                "authorization receipt could not be persisted",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_receipt_invalid",
+            ) from error
+
+    def confirm_and_execute(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        trace: TraceWriter | None = None,
+    ) -> NotebookExecutionDispatch:
+        """Run one explicit user confirmation through the trusted CF4 seam.
+
+        The gateway is deliberately optional.  A missing gateway is a normal
+        deployment state on hosts that cannot prove native containment; it is
+        not permission to use the legacy ``/execute`` callback path.
+        """
+
+        if self.execution_gateway is None:
+            raise OptionExecutionGatewayUnavailable(
+                "explicit capability execution is unavailable on this host",
+                option_id=option_id,
+                reason="trusted_execution_gateway_unavailable",
+            )
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "confirm_and_execute requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_contract_version",
+            )
+        proposal = view.current_stored_revision.proposal
+        offered_modes = _execution_modes_for(current.risk_level, proposal.operation_id)
+        if len(offered_modes) < 2 or offered_modes[1] not in current.execution_modes:
+            raise OptionRevisionStale(
+                "the current option does not offer its server-approved execution mode",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_mode_not_offered",
+            )
+        execution_mode = offered_modes[1]
+        if current.risk_level not in {"low", "high"}:
+            raise OptionRevisionStale(
+                "only low-risk standard or high-risk experimental custom options may execute",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="execution_risk",
+            )
+        if view.lifecycle_status not in {"selected", "materialized"}:
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; explicit execution "
+                "requires a selected or materialized option",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        assert_executable(current, context)
+
+        # Materialization is the first product-side write, and is performed
+        # only after the trusted gateway has been confirmed to exist.
+        materialized = self.materialize_option(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
+        authorization = self._build_server_execution_authorization(
+            notebook_id,
+            option_id,
+            context=context,
+            materialized=materialized,
+        )
+        try:
+            dispatch = self.execution_gateway.dispatch(
+                notebook_id=notebook_id,
+                option_id=option_id,
+                authorization=authorization,
+                materialization=materialized.materialization,
+                draft=materialized.draft.draft,
+                context=context,
+            )
+        except Exception as error:
+            raise OptionExecutionGatewayUnavailable(
+                "the trusted capability execution gateway failed before returning a typed dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="trusted_execution_gateway_error",
+            ) from error
+        if not isinstance(dispatch, NotebookExecutionDispatch):
+            raise OptionExecutionGatewayUnavailable(
+                "the trusted capability execution gateway returned an invalid dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="trusted_execution_gateway_result_invalid",
+            )
+        if (
+            dispatch.authorization_id != authorization.authorization_id
+            or dispatch.run_intent_id != authorization.run_intent_id
+        ):
+            raise OptionRevisionStale(
+                "the capability dispatch receipt is not bound to the server authorization",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="dispatch_receipt_binding",
+            )
+
+        if dispatch.status == "running":
+            latest = self.store.read_option(notebook_id, option_id)
+            self._transition(
+                notebook_id,
+                latest,
+                to_status="executing",
+                actor="system",
+                reason="capability_dispatch_running",
+                trace=trace,
+            )
+            execution = OptionExecution(
+                option_id=option_id,
+                option_revision=current.option_revision,
+                proposal_id=current.typed_proposal_id,
+                proposal_revision=current.typed_proposal_revision,
+                freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
+                generation_context_id=current.generation_context_id,
+                run_id=dispatch.run_id,
+            )
+            self.store.append_option_record(
+                notebook_id,
+                option_id,
+                {
+                    "record_type": RECORD_EXECUTION,
+                    "option_id": option_id,
+                    "option_revision": current.option_revision,
+                    "execution": execution.to_dict(),
+                    "authorization_id": authorization.authorization_id,
+                    "dispatch_receipt_ref": dispatch.receipt_ref,
+                },
+            )
+        elif dispatch.status in {"completed", "failed"}:
+            self._record_capability_dispatch_completion(
+                notebook_id,
+                option_id,
+                current=current,
+                dispatch=dispatch,
+                trace=trace,
+            )
+        return dispatch
+
+    def _record_capability_dispatch_completion(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        current: NotebookOptionRevisionV12,
+        dispatch: NotebookExecutionDispatch,
+        trace: TraceWriter | None,
+    ) -> None:
+        """Project a trusted CF4 terminal receipt into the Notebook log.
+
+        This method accepts only refs already produced by the trusted gateway;
+        it has no parameter for client artifacts, raw adapter output, or an
+        execution status supplied by Agent.  CF4 has already consumed/failed
+        the exact attempt before this projection is written.
+        """
+
+        if dispatch.status not in {"completed", "failed"}:
+            raise OptionRevisionStale(
+                "capability completion requires a terminal dispatch receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_dispatch_not_terminal",
+            )
+        required = (
+            dispatch.run_id,
+            dispatch.attempt_id,
+            dispatch.receipt_ref,
+            dispatch.completion_ref,
+            dispatch.artifact_validation_ref,
+            dispatch.object_graph_ref,
+        )
+        if any(value is None for value in required):
+            raise OptionRevisionStale(
+                "capability completion receipt is missing server-owned refs",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_dispatch_completion_refs",
+            )
+
+        view = self.store.read_option(notebook_id, option_id)
+        if view.lifecycle_status == "materialized":
+            self._transition(
+                notebook_id,
+                view,
+                to_status="executing",
+                actor="system",
+                reason="capability_dispatch_terminal",
+                trace=trace,
+            )
+            view = self.store.read_option(notebook_id, option_id)
+        if view.lifecycle_status != "executing":
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; terminal capability "
+                "projection requires an executing option",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+
+        succeeded = dispatch.status == "completed"
+        self._transition(
+            notebook_id,
+            view,
+            to_status="executed" if succeeded else "materialized",
+            actor="system",
+            reason="capability_cf4_reconciled",
+            trace=trace,
+        )
+        if not succeeded:
+            self._transition(
+                notebook_id,
+                self.store.read_option(notebook_id, option_id),
+                to_status="selected",
+                actor="system",
+                reason="capability_cf4_retry",
+                trace=trace,
+            )
+        self.store.append_option_record(
+            notebook_id,
+            option_id,
+            {
+                "record_type": RECORD_EXECUTION_RESULT,
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "run_id": dispatch.run_id,
+                "execution_status": "succeeded" if succeeded else "failed",
+                "committed": succeeded,
+                "capability_execution": {
+                    "dispatch_status": dispatch.status,
+                    "attempt_id": dispatch.attempt_id,
+                    "receipt_ref": dispatch.receipt_ref,
+                    "completion_ref": dispatch.completion_ref,
+                    "artifact_validation_ref": dispatch.artifact_validation_ref,
+                    "object_graph_ref": dispatch.object_graph_ref,
+                    "assessment_ref": dispatch.assessment_ref,
+                    "output_bundle_ref": dispatch.output_bundle_ref,
+                    "attestation_ref": dispatch.attestation_ref,
+                },
+            },
+        )
+        if succeeded:
+            self.set_active_head(
+                notebook_id,
+                dispatch.run_id,
+                reason="capability_cf4_reconciled",
+                trace=trace,
+            )
+
+    def _build_server_execution_authorization(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        context: NotebookPlanningContextV1,
+        materialized: Any,
+    ) -> OptionExecutionAuthorization:
+        """Create the authorization envelope only from persisted server facts."""
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        if not isinstance(current, NotebookOptionRevisionV12):
+            raise OptionRevisionStale(
+                "server execution authorization requires NotebookOptionRevision@1.2",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_contract_version",
+            )
+        reference = current.capability_resolution_binding_ref
+        if self.capability_bindings is None or reference is None:
+            raise OptionRevisionStale(
+                "server execution authorization requires a current capability binding",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_unavailable",
+            )
+        try:
+            notebook = self.get_notebook(notebook_id)
+            capability_id = self.capability_bindings.capability_id_for_reference(
+                reference,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise CapabilityBindingCatalogError(
+                    "authorization binding reference is not registered"
+                )
+            binding = self.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "server execution authorization binding is not currently usable",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_binding_not_current",
+            ) from error
+
+        persisted_materialization = materialized.materialization
+        persisted_draft = materialized.draft
+        if (
+            persisted_materialization.option_id != option_id
+            or persisted_materialization.option_revision != current.option_revision
+            or persisted_materialization.capability_resolution_binding_ref != reference
+            or persisted_materialization.draft_id != persisted_draft.draft["draft_id"]
+            or persisted_materialization.draft_hash != persisted_draft.draft_hash
+        ):
+            raise OptionRevisionStale(
+                "materialization provenance does not match the current capability option",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_materialization_binding",
+            )
+
+        proposal = view.current_stored_revision.proposal
+        requested_operation = (proposal.changes.get("operation") or "")
+        if proposal.operation_id == "model.custom":
+            if requested_operation not in binding.allowed_operations:
+                raise OptionRevisionStale(
+                    "the custom capability operation is no longer admitted",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_operation_not_admitted",
+                )
+            # ``model.custom`` is the outer, high-risk Workbench operation.
+            # The inner capability operation (for example ``fit``) remains
+            # in the canonical Draft and is consumed by the Adapter plan.
+            operation_id = proposal.operation_id
+        else:
+            operation_id = (
+                requested_operation
+                if requested_operation in binding.allowed_operations
+                else binding.allowed_operations[0]
+            )
+        seed = domain_digest(
+            "workbench.notebook.confirm_and_execute/v1",
+            {
+                "notebook_id": notebook_id,
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "materialization_id": persisted_materialization.materialization_id,
+                "draft_hash": persisted_materialization.draft_hash,
+                "binding_ref": reference,
+            },
+        ).split(":", 1)[-1]
+        authorization_id = f"auth_{seed}"
+        idempotency_key = f"confirm-and-execute-{seed}"
+        try:
+            existing = OptionExecutionAuthorizationStore(self.project_root).read(
+                authorization_id
+            )
+        except KeyError:
+            existing = None
+        draft_hash = persisted_materialization.draft_hash
+        if isinstance(draft_hash, str) and not draft_hash.startswith("sha256:"):
+            if len(draft_hash) != 64 or any(
+                char not in "0123456789abcdef" for char in draft_hash
+            ):
+                raise OptionRevisionStale(
+                    "the persisted Draft hash is not a lowercase SHA-256 digest",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_draft_hash_invalid",
+                )
+            draft_hash = f"sha256:{draft_hash}"
+        issued_at = existing.issued_at if existing is not None else datetime.now(timezone.utc)
+        expires_at = existing.expires_at if existing is not None else issued_at + timedelta(minutes=5)
+        authorization = OptionExecutionAuthorization(
+            authorization_id=authorization_id,
+            notebook_id=notebook_id,
+            option_id=option_id,
+            option_revision=current.option_revision,
+            binding_revision=1,
+            capability_resolution_binding_ref=reference,
+            materialization_id=persisted_materialization.materialization_id,
+            draft_id=persisted_materialization.draft_id,
+            draft_hash=draft_hash,
+            run_intent_id=f"intent_{seed}",
+            capability_ref=binding.implementation_ref,
+            bundle_ref=binding.dependency_bundle_ref,
+            evidence_ref=binding.assessment_ref,
+            admission_ref=binding.admission_ref,
+            runtime_policy_ref=binding.runtime_policy_ref,
+            freshness_cursor_ref=binding.validity_cursor_ref,
+            input_graph_fingerprint=current.generation_context_hash,
+            freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
+            operation_id=operation_id,
+            execution_mode=_execution_modes_for(
+                current.risk_level, proposal.operation_id
+            )[1],
+            risk_level=current.risk_level,
+            artifact_contract_ref=_artifact_contract_ref(current.artifact_contract),
+            consumer_projection_ref=_consumer_projection_ref(binding),
+            idempotency_key=idempotency_key,
+            issued_at=issued_at,
+            expires_at=expires_at,
+        )
+        if existing is not None:
+            if existing.payload_digest != authorization.payload_digest:
+                raise OptionRevisionStale(
+                    "the deterministic capability authorization is bound to different server facts",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_payload_mismatch",
+                )
+            if existing.status == "issued":
+                return self.authorize_option_execution(
+                    notebook_id,
+                    option_id,
+                    context=context,
+                    authorization=existing,
+                )
+            if existing.status in {"dispatch_reserved", "running"}:
+                return existing
+            raise OptionRevisionStale(
+                "the deterministic capability authorization has reached a terminal state",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_already_progressed",
+            )
+        return self.authorize_option_execution(
+            notebook_id,
+            option_id,
+            context=context,
+            authorization=authorization,
         )
 
     # ------------------------------------------------------------------
@@ -1297,6 +2285,18 @@ class NotebookService:
 
         view = self.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        if (
+            isinstance(current, NotebookOptionRevisionV12)
+            and current.capability_resolution_binding_ref is not None
+        ):
+            raise OptionExecutionReceiptRequired(
+                "a bound capability execution must be completed from a server-owned CF4 receipt",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="capability_execution_receipt_required",
+            )
         if current.materializable:
             materialization = self.store.read_materialization(
                 notebook_id, option_id, current.option_revision
@@ -1504,15 +2504,238 @@ class NotebookService:
                 canonical_proposal_hashes=duplicated,
             )
 
+    def _resolve_capability_bindings(
+        self,
+        notebook: Notebook,
+        drafts: Sequence[OptionDraft],
+        *,
+        recommendation_decision: RecommendationDecision | RecommendationDecisionV11 | None,
+        require_recommendation_decision: bool = True,
+    ) -> tuple[CapabilityResolutionBinding | None, ...]:
+        """Resolve Agent names through the server-owned catalog before writes."""
+
+        if self.capability_bindings is None:
+            return tuple(None for _ in drafts)
+
+        resolved: list[CapabilityResolutionBinding | None] = []
+        for draft in drafts:
+            if draft.capability_id is None:
+                resolved.append(None)
+                continue
+            try:
+                binding = self.capability_bindings.resolve(
+                    draft.capability_id,
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                )
+            except CapabilityBindingCatalogError as error:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not currently usable",
+                    capability_id=draft.capability_id,
+                ) from error
+            if binding is not None and "fit" not in binding.allowed_operations:
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not authorized for fit",
+                    capability_id=draft.capability_id,
+                )
+            if (
+                binding is not None
+                and NOTEBOOK_OPTION_PLANNER_CONSUMER not in binding.allowed_consumers
+            ):
+                raise OptionBatchInvalid(
+                    "OPTION_CAPABILITY_BINDING_UNAVAILABLE",
+                    "the server-owned capability binding is not authorized for the Notebook option planner",
+                    capability_id=draft.capability_id,
+                )
+            if binding is not None and require_recommendation_decision:
+                if recommendation_decision is None:
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_DECISION_REQUIRED",
+                        "an admitted capability option requires a recommendation decision",
+                        capability_id=draft.capability_id,
+                    )
+                if not isinstance(recommendation_decision, RecommendationDecisionV11):
+                    raise OptionBatchInvalid(
+                        "OPTION_CAPABILITY_BINDING_DECISION_VERSION",
+                        "an admitted capability option requires the server-owned V1.1 recommendation contract",
+                        capability_id=draft.capability_id,
+                    )
+            resolved.append(binding)
+        return tuple(resolved)
+
+    def _validate_recommendation_decision(
+        self,
+        notebook_id: str,
+        decision: RecommendationDecision | RecommendationDecisionV11 | None,
+    ) -> None:
+        """Validate V1.1 recommendations against the persisted source registry."""
+
+        if decision is None or not isinstance(decision, RecommendationDecisionV11):
+            return
+        try:
+            self.read_server_decision_registry(notebook_id).validate_recommendation(decision)
+        except (RecommendationValidationError, ValueError, KeyError, TypeError) as error:
+            raise OptionBatchInvalid(
+                "OPTION_RECOMMENDATION_DECISION_UNAVAILABLE",
+                "the V1.1 recommendation is not backed by a current persisted server decision",
+                recommendation_decision_id=decision.recommendation_decision_id,
+                batch_id=decision.batch_id,
+            ) from error
+
+    def _assert_current_recommendation_source(
+        self,
+        notebook_id: str,
+        revision: Any,
+    ) -> None:
+        """Recheck the persisted V1.1 source before a downstream consumer."""
+
+        decision_id = getattr(revision, "recommendation_decision_id", None)
+        batch_id = getattr(revision, "batch_id", None)
+        if not isinstance(decision_id, str) or not decision_id:
+            return
+        decision = self.store.read_decision(notebook_id, batch_id)
+        if isinstance(decision, RecommendationDecisionV11):
+            self._validate_recommendation_decision(notebook_id, decision)
+            if decision.recommendation_decision_id != decision_id:
+                raise OptionBatchInvalid(
+                    "OPTION_RECOMMENDATION_DECISION_UNAVAILABLE",
+                    "the persisted V1.1 recommendation does not match the option",
+                    recommendation_decision_id=decision_id,
+                    batch_id=batch_id,
+                )
+
+    def _published_artifact_types(
+        self,
+        capability_id: str,
+        *,
+        scope_candidates: Sequence[tuple[str, str]] | None = None,
+    ) -> Mapping[str, str]:
+        """Merge native and current server-owned capability vocabulary."""
+
+        published = dict(capability_artifact_types(capability_id))
+        if self.capability_bindings is None:
+            return published
+        dynamic = self.capability_bindings.planner_artifact_types(
+            capability_id,
+            scope_candidates=scope_candidates,
+        )
+        if dynamic is not None:
+            published.update(dynamic)
+        return published
+
+    def _assert_capability_model_identity(
+        self,
+        notebook: Notebook,
+        draft: OptionDraft,
+        proposal: TypedProposal,
+    ) -> None:
+        """Keep a server-declared capability mapping explicit at the write seam."""
+
+        if self.capability_bindings is None or draft.capability_id is None:
+            return
+        projection = self.capability_bindings.planner_projection(
+            draft.capability_id,
+            scope_candidates=(
+                ("project", notebook.project_id),
+                ("run_family", notebook.run_family_id),
+            ),
+        )
+        if projection is None:
+            return
+        if proposal.operation_id == "model.custom":
+            if "model.custom" not in projection.get("notebook_proposal_adapters", ()):
+                raise ValueError("CAPABILITY_CUSTOM_ADAPTER_NOT_DECLARED")
+            return
+        declared_model_type = projection["model_type"]
+        actual_model_type: Any = None
+        if proposal.operation_id == "model.genesis":
+            actual_model_type = (proposal.changes.get("model_params") or {}).get(
+                "model_type"
+            )
+        elif proposal.operation_id == "model.rerun":
+            from ...lineage.run_inputs import read_run_inputs
+            from ...repository.run_repository import _resolve_run_root
+
+            inputs = read_run_inputs(
+                _resolve_run_root(str(self.project_root), str(proposal.target["run_id"]))
+            )
+            actual_model_type = (inputs.get("form") or {}).get("model_type")
+        if actual_model_type != declared_model_type:
+            raise ValueError("CAPABILITY_MODEL_IDENTITY_MISMATCH")
+
+    def _assert_current_capability_binding(self, revision: Any) -> None:
+        """Re-check v1.2 authority before materialization or execution callbacks."""
+
+        reference = getattr(revision, "capability_resolution_binding_ref", None)
+        if reference is None:
+            return
+        if self.capability_bindings is None:
+            raise OptionRevisionStale(
+                "the persisted capability binding cannot be revalidated by this service",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_authority_unavailable",
+            )
+        try:
+            self.capability_bindings.assert_current_reference(reference)
+        except CapabilityBindingCatalogError as error:
+            raise OptionRevisionStale(
+                "the persisted capability binding is no longer currently usable",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_not_current",
+            ) from error
+
     def _prepare(
         self,
         notebook: Notebook,
         context: NotebookPlanningContextV1,
         draft: OptionDraft,
+        *,
+        binding: CapabilityResolutionBinding | None = None,
     ) -> tuple[TypedProposal, Any, str]:
         """Validate one draft against the real registry. Raises, never stores."""
 
         proposal = draft.proposal
+        if proposal.operation_id == "model.custom":
+            if binding is None:
+                raise OptionValidationFailed(
+                    "model.custom requires a current server-owned capability binding",
+                    option_id=draft.option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {
+                            "code": "CAPABILITY_BINDING_REQUIRED",
+                            "detail": "custom capability execution is never resolved from Agent-supplied refs",
+                        }
+                    ],
+                )
+            try:
+                projection = self.capability_bindings.planner_projection(
+                    draft.capability_id or "",
+                    scope_candidates=(
+                        ("project", notebook.project_id),
+                        ("run_family", notebook.run_family_id),
+                    ),
+                ) if self.capability_bindings is not None else None
+                if projection is None or "model.custom" not in projection.get(
+                    "notebook_proposal_adapters", ()
+                ):
+                    raise ValueError("CAPABILITY_CUSTOM_ADAPTER_NOT_DECLARED")
+                proposal = self._canonicalize_custom_proposal(proposal, binding)
+            except Exception as error:
+                raise OptionValidationFailed(
+                    "model.custom proposal could not be server-bound",
+                    option_id=draft.option_id,
+                    operation_id=proposal.operation_id,
+                    validation_issues=[
+                        {"code": "CUSTOM_PROPOSAL_BINDING_INVALID", "detail": str(error)}
+                    ],
+                ) from error
         try:
             definition = self.registry.require(
                 proposal.operation_id, proposal.operation_version
@@ -1549,11 +2772,29 @@ class NotebookService:
                 operation_id=proposal.operation_id,
                 validation_issues=[{"code": code, "detail": str(error)}],
             ) from error
+        try:
+            self._assert_capability_model_identity(notebook, draft, proposal)
+        except Exception as error:
+            raise OptionValidationFailed(
+                "option capability model identity does not match the server declaration",
+                option_id=draft.option_id,
+                operation_id=proposal.operation_id,
+                validation_issues=[
+                    {
+                        "code": "CAPABILITY_MODEL_IDENTITY_MISMATCH",
+                        "detail": str(error),
+                    }
+                ],
+            ) from error
 
         contract = build_artifact_contract(
             draft.expected_artifacts,
-            additional_artifact_types=capability_artifact_types(
-                draft.capability_id or ""
+            additional_artifact_types=self._published_artifact_types(
+                draft.capability_id or "",
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
             ),
         )
         risk_level = _REGISTRY_RISK_TO_OPTION_RISK.get(definition.risk_level)
@@ -1564,6 +2805,75 @@ class NotebookService:
                 operation_id=proposal.operation_id,
             )
         return proposal, contract, risk_level
+
+    @staticmethod
+    def _canonicalize_custom_proposal(
+        proposal: TypedProposal,
+        binding: CapabilityResolutionBinding,
+    ) -> TypedProposal:
+        """Replace Agent capability names with the exact server-owned binding."""
+
+        changes = dict(proposal.changes)
+        forbidden = {"capability_ref", "binding_ref"} & set(changes)
+        if forbidden:
+            raise ValueError(
+                "model.custom server-owned capability fields are not Agent-writable: "
+                + ", ".join(sorted(forbidden))
+            )
+        operation = changes.get("operation")
+        if not isinstance(operation, str) or not operation:
+            raise ValueError("model.custom operation must be a non-empty string")
+        if operation not in binding.allowed_operations:
+            raise ValueError("model.custom operation is not admitted by the current binding")
+        input_handle = changes.get("input_handle")
+        if input_handle is not None and (
+            not isinstance(input_handle, str)
+            or not input_handle
+            or len(input_handle) > 256
+            or any(ord(char) < 0x20 for char in input_handle)
+        ):
+            raise ValueError("model.custom input_handle is invalid")
+        parameters = changes.get("parameters", {})
+        if not isinstance(parameters, Mapping):
+            raise ValueError("model.custom parameters must be an object")
+        encoded = json.dumps(
+            parameters,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise ValueError("model.custom parameters exceed the bounded input limit")
+        requested_consumers = changes.get(
+            "consumer_slots", [NOTEBOOK_OPTION_PLANNER_CONSUMER]
+        )
+        if (
+            not isinstance(requested_consumers, list)
+            or not requested_consumers
+            or len(requested_consumers) > len(CONSUMER_SLOTS)
+            or any(not isinstance(item, str) or not item for item in requested_consumers)
+            or len(set(requested_consumers)) != len(requested_consumers)
+            or not set(requested_consumers) <= set(CONSUMER_SLOTS)
+            or not set(requested_consumers) <= set(binding.allowed_consumers)
+        ):
+            raise ValueError("model.custom consumer_slots are not admitted by the current binding")
+        canonical_changes = {
+            "capability_ref": binding.implementation_ref,
+            "binding_ref": binding.content_digest,
+            "operation": operation,
+            "input_handle": input_handle or "table_1",
+            "parameters": dict(parameters),
+            "consumer_slots": list(requested_consumers),
+        }
+        if "expected_artifacts" in changes:
+            expected_artifacts = changes["expected_artifacts"]
+            if not isinstance(expected_artifacts, list) or any(
+                not isinstance(item, str) or not item for item in expected_artifacts
+            ):
+                raise ValueError("model.custom expected_artifacts must be strings")
+            canonical_changes["expected_artifacts"] = list(expected_artifacts)
+        return replace(proposal, changes=canonical_changes)
 
     def _validate_target_model_options(self, proposal: TypedProposal) -> None:
         """Validate model-specific options before persisting an Option revision."""
@@ -1705,16 +3015,22 @@ class NotebookService:
             reason=reason,
         )
         if trace is not None:
+            lifecycle_trace_payload = {
+                "option_id": view.option_id,
+                "option_revision": view.current_revision.option_revision,
+                "from_status": current,
+                "to_status": to_status,
+                "axis": "lifecycle",
+                "reason": reason,
+            }
+            binding_ref = getattr(
+                view.current_revision, "capability_resolution_binding_ref", None
+            )
+            if binding_ref is not None:
+                lifecycle_trace_payload["capability_resolution_binding_ref"] = binding_ref
             trace.emit(
                 "option.lifecycle.changed",
-                payload={
-                    "option_id": view.option_id,
-                    "option_revision": view.current_revision.option_revision,
-                    "from_status": current,
-                    "to_status": to_status,
-                    "axis": "lifecycle",
-                    "reason": reason,
-                },
+                payload=lifecycle_trace_payload,
             )
 
     def _read_run_artifacts(self, run_id: str | None) -> list[dict[str, Any]]:

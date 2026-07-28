@@ -193,8 +193,16 @@ def _is_agent_input_fault(exc: BaseException) -> bool:
 
     from .context_tools import OperationContractUnavailableError
     from .operations import OperationValidationError
+    from ..analysis_loop.resolver import AnalysisLoopSourceResolutionError
 
-    return isinstance(exc, (OperationValidationError, OperationContractUnavailableError))
+    return isinstance(
+        exc,
+        (
+            OperationValidationError,
+            OperationContractUnavailableError,
+            AnalysisLoopSourceResolutionError,
+        ),
+    )
 
 
 class ToolVisibleError(ValueError):

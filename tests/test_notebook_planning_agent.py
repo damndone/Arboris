@@ -18,6 +18,7 @@ from workbench.agent.notebook.planning_agent import (
     NotebookPlanningTimeout,
     NotebookPlanningUnavailable,
     _parse_submissions,
+    _strict_typed_proposal,
 )
 from workbench.agent.notebook.producer import generate_option_batch
 from workbench.agent.operations import OperationRegistry, OperationValidationError
@@ -191,6 +192,59 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert "dataset_source_id" in adapter.requests[0].messages[0]["content"]
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
     assert len(adapter.requests) == 2
+
+
+def test_model_custom_planning_contract_exposes_intent_but_rejects_authority_fields(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    context = _context(
+        project,
+        projection_source={
+            "kind": "dataset",
+            "upload_sha256": "a" * 64,
+        },
+    )
+    contracts = NotebookPlanningAgent._typed_operation_contracts(context)
+    assert contracts["model.custom"]["changes_allowed_fields"] == [
+        "operation",
+        "input_handle",
+        "parameters",
+        "consumer_slots",
+    ]
+
+    proposal = {
+        "proposal_id": "prop_custom",
+        "proposal_revision": 1,
+        "operation_id": "model.custom",
+        "operation_version": "v1",
+        "target": {"dataset_source_id": "a" * 64},
+        "preconditions": {
+            "context_version": "node-operation-context/v1",
+            "context_fingerprint": "fresh1:test",
+            "owner_resolution": "dataset_projection",
+        },
+        "changes": {
+            "operation": "fit",
+            "input_handle": "table_1",
+            "parameters": {"alpha": 0.1},
+            "consumer_slots": ["report_projection"],
+        },
+    }
+    parsed = _strict_typed_proposal(proposal)
+    assert parsed.operation_id == "model.custom"
+    assert parsed.changes["operation"] == "fit"
+
+    with pytest.raises(NotebookPlanningContractError, match="server-owned"):
+        _strict_typed_proposal(
+            {
+                **proposal,
+                "changes": {
+                    **proposal["changes"],
+                    "binding_ref": "b" * 64,
+                },
+            }
+        )
 
 
 def test_provider_plan_runs_target_model_options_validator_before_accepting_batch(

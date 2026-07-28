@@ -34,6 +34,7 @@ from ..statistical_exploration import (
 from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
+from .workflow_contracts import workflow_dispatcher_key
 
 
 def _exploration_spec(spec: Mapping[str, Any]) -> ExplorationSpec:
@@ -176,8 +177,19 @@ def _exploration_step(
     )
 
 
-def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft):
-    """Return one callback that dispatches only the compiled step identities."""
+def build_workflow_step_executor(
+    project_root: Path | str,
+    draft: WorkflowDraft,
+    *,
+    custom_step_executor=None,
+):
+    """Return one callback that dispatches only the compiled step identities.
+
+    ``model.custom`` is intentionally an injected gateway.  The default
+    runtime has no authority to reserve, spawn, or dispatch it; the caller
+    must supply a gateway that has already joined Proposal/Risk authorization,
+    the exact binding, and the B1 broker.
+    """
 
     root = Path(project_root).expanduser().resolve()
     source_context, source_frame = resolve_statistical_source(
@@ -193,7 +205,8 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
         # Dispatch on the declared operation identity, never on a step number:
         # a plan with a different shape or length must run on the same runtime.
         operation_id = step.operation_id
-        if operation_id == "statistical.explore" and "plots" not in step.spec:
+        dispatcher_key = workflow_dispatcher_key(operation_id)
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
                 draft=draft,
@@ -201,7 +214,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 source_frame=source_frame,
                 spec=_exploration_spec(step.spec),
             )
-        if operation_id == "statistical.derive_boolean":
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_boolean":
             detail, detail_step_id, detail_fingerprint = _detail_result(
                 previous, source_run_root, step.depends_on, dependency_graph
             )
@@ -262,13 +275,13 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 payload={
                     "detail": detail,
                     "threshold_source": {
-                        "step_id": "step-4",
+                        "step_id": detail_step_id,
                         "artifact_role": "result",
                         "result_fingerprint": detail_fingerprint,
                     },
                 },
             )
-        if operation_id == "statistical.derived_group_summarize":
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derived_group_summarize":
             detail, detail_step_id, _detail_fp = _detail_result(
                 previous, source_run_root, step.depends_on, dependency_graph
             )
@@ -316,7 +329,7 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 row_counts=row_counts,
                 payload={"groups": row_counts},
             )
-        if operation_id == "statistical.explore" and "plots" in step.spec:
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" in step.spec:
             artifact_ids: list[str] = []
             row_counts: dict[str, int] = {}
             for plot in step.spec["plots"]:
@@ -346,12 +359,28 @@ def build_workflow_step_executor(project_root: Path | str, draft: WorkflowDraft)
                 artifact_ids=list(dict.fromkeys(artifact_ids)),
                 row_counts=row_counts,
             )
-        if operation_id == "model.genesis":
+        if dispatcher_key == "workbench.services.genesis":
             return _execute_ols_branches(
                 root, draft, source_context, source_frame, step
             )
-        if operation_id.startswith("report."):
-            return _execute_workflow_report(root, draft, previous)
+        if dispatcher_key == "capability_factory.custom_dispatcher":
+            if not callable(custom_step_executor):
+                raise WorkflowExecutionError(
+                    "model.custom requires an authorized custom capability gateway"
+                )
+            result = custom_step_executor(
+                project_root=root,
+                draft=draft,
+                step=step,
+                previous=previous,
+            )
+            if not isinstance(result, WorkflowStepResult):
+                raise WorkflowExecutionError(
+                    "authorized custom capability gateway returned an invalid result"
+                )
+            return result
+        if dispatcher_key == "workbench.agent.workflow_runtime.report":
+            return _execute_workflow_report(root, draft, previous, step)
         raise WorkflowExecutionError(
             f"unsupported workflow operation: {step.operation_id}"
         )
@@ -536,6 +565,7 @@ def _execute_workflow_report(
     root: Path,
     draft: WorkflowDraft,
     previous: Mapping[str, WorkflowStepResult],
+    step: Any | None = None,
 ) -> WorkflowStepResult:
     run_root = root / "runs" / str(draft.target["run_id"])
     log_path = root / "workbench" / "exploration" / f"{draft.workflow_id}.jsonl"
@@ -555,7 +585,17 @@ def _execute_workflow_report(
     html_id = f"workflow_report_{draft.workflow_id}_html"
     pdf_id = f"workflow_report_{draft.workflow_id}_pdf"
     xlsx_id = f"workflow_report_{draft.workflow_id}_xlsx"
-    steps["step-9"] = {
+    report_step_id = getattr(step, "step_id", None)
+    if not isinstance(report_step_id, str) or not report_step_id:
+        report_step_id = next(
+            (
+                candidate.step_id
+                for candidate in draft.steps
+                if candidate.operation_id == "report.compose"
+            ),
+            "report.compose",
+        )
+    steps[report_step_id] = {
         "status": "completed",
         "artifact_ids": [collection_id, html_id, pdf_id, xlsx_id],
     }
@@ -577,7 +617,7 @@ def _execute_workflow_report(
     view_model = {
         "title": "Statistical workflow report",
         "facts": [
-            "Nine server-defined workflow steps completed.",
+            f"Workflow steps completed: {len(steps)}.",
             f"Workflow id: {draft.workflow_id}",
             f"Source rows: {next(iter(previous.values())).row_counts.get('source', 0) if previous else 0}",
         ],

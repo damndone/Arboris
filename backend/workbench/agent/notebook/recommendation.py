@@ -6,13 +6,280 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, Sequence
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import RecommendationDecision
+from ...contracts.agent.notebook_option import (
+    FeasibilityCandidateDecision,
+    FeasibilityDecision,
+    MAX_RECOMMENDATION_CANDIDATES,
+    RecommendationDecision,
+    RecommendationDecisionV11,
+    _candidate_cohort_hash,
+)
+from ...contracts.common.envelope import require_exact_keys
 from .evidence import DataEvidencePackV1, EvidenceRecord
 from .proposal import OptionDraft
 
 
 class RecommendationValidationError(ValueError):
     """A recommendation protocol or candidate batch is not comparable."""
+
+
+COMPARISON_DECISION_CONTRACT_VERSION = "1.0"
+
+
+def candidate_cohort_hash(option_ids: Sequence[str]) -> str:
+    """Return the order-independent identity of a complete candidate cohort."""
+
+    ids = tuple(option_ids)
+    if not ids or any(not isinstance(option_id, str) or not option_id for option_id in ids):
+        raise RecommendationValidationError("candidate cohort must contain option ids")
+    if len(set(ids)) != len(ids):
+        raise RecommendationValidationError("candidate cohort option ids must be unique")
+    if len(ids) > MAX_RECOMMENDATION_CANDIDATES:
+        raise RecommendationValidationError("candidate cohort allows at most 3 options")
+    return _candidate_cohort_hash(ids)
+
+
+def _server_text(value: Any, field: str) -> str:
+    if type(value) is not str or not value:
+        raise RecommendationValidationError(f"{field} must be a non-empty string")
+    return value
+
+
+def _server_string_tuple(value: Any, field: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise RecommendationValidationError(f"{field} must be a list or tuple of strings")
+    items = tuple(value)
+    if any(type(item) is not str or not item for item in items):
+        raise RecommendationValidationError(f"{field} must contain non-empty strings")
+    return items
+
+
+@dataclass(frozen=True)
+class ComparisonDecisionRecord:
+    """A server-registered comparison result bound to one candidate cohort."""
+
+    comparison_decision_id: str
+    batch_id: str
+    generation_context_hash: str
+    freshness_dependency_fingerprint: str
+    evidence_pack_hashes: tuple[str, ...]
+    candidate_option_ids: tuple[str, ...]
+    candidate_cohort_hash: str
+    outcome: str
+    recommended_option_id: str | None
+    protocol_ref: str
+    contract_version: str = COMPARISON_DECISION_CONTRACT_VERSION
+
+    _KEYS = frozenset(
+        {
+            "contract_version",
+            "comparison_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "evidence_pack_hashes",
+            "candidate_option_ids",
+            "candidate_cohort_hash",
+            "outcome",
+            "recommended_option_id",
+            "protocol_ref",
+        }
+    )
+
+    def __post_init__(self) -> None:
+        if self.contract_version != COMPARISON_DECISION_CONTRACT_VERSION:
+            raise RecommendationValidationError(
+                f"contract_version must be {COMPARISON_DECISION_CONTRACT_VERSION}"
+            )
+        for field in (
+            "comparison_decision_id",
+            "batch_id",
+            "generation_context_hash",
+            "freshness_dependency_fingerprint",
+            "protocol_ref",
+        ):
+            _server_text(getattr(self, field), field)
+        evidence_pack_hashes = _server_string_tuple(
+            self.evidence_pack_hashes, "comparison evidence hashes"
+        )
+        candidate_option_ids = _server_string_tuple(
+            self.candidate_option_ids, "comparison candidate option ids"
+        )
+        if not evidence_pack_hashes:
+            raise RecommendationValidationError("comparison evidence hashes are required")
+        candidate_cohort_hash(candidate_option_ids)
+        if self.candidate_cohort_hash != candidate_cohort_hash(candidate_option_ids):
+            raise RecommendationValidationError("comparison decision cohort hash does not match candidates")
+        if self.outcome not in {"recommended", "tied", "insufficient_evidence"}:
+            raise RecommendationValidationError("comparison decision outcome is invalid")
+        if self.outcome == "recommended":
+            selected = _server_text(self.recommended_option_id, "recommended_option_id")
+            if selected not in candidate_option_ids:
+                raise RecommendationValidationError("comparison winner is outside the candidate cohort")
+        elif self.recommended_option_id is not None:
+            raise RecommendationValidationError("non-winning comparison decisions cannot name a winner")
+        object.__setattr__(self, "evidence_pack_hashes", evidence_pack_hashes)
+        object.__setattr__(self, "candidate_option_ids", candidate_option_ids)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "contract_version": self.contract_version,
+            "comparison_decision_id": self.comparison_decision_id,
+            "batch_id": self.batch_id,
+            "generation_context_hash": self.generation_context_hash,
+            "freshness_dependency_fingerprint": self.freshness_dependency_fingerprint,
+            "evidence_pack_hashes": list(self.evidence_pack_hashes),
+            "candidate_option_ids": list(self.candidate_option_ids),
+            "candidate_cohort_hash": self.candidate_cohort_hash,
+            "outcome": self.outcome,
+            "recommended_option_id": self.recommended_option_id,
+            "protocol_ref": self.protocol_ref,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ComparisonDecisionRecord":
+        require_exact_keys(value, cls._KEYS, "comparison_decision")
+        return cls(
+            comparison_decision_id=value["comparison_decision_id"],
+            batch_id=value["batch_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            evidence_pack_hashes=value["evidence_pack_hashes"],
+            candidate_option_ids=value["candidate_option_ids"],
+            candidate_cohort_hash=value["candidate_cohort_hash"],
+            outcome=value["outcome"],
+            recommended_option_id=value["recommended_option_id"],
+            protocol_ref=value["protocol_ref"],
+            contract_version=value["contract_version"],
+        )
+
+
+class ServerDecisionRegistry:
+    """Trusted bridge for server-owned decision records.
+
+    Registration is a control-plane operation.  Agent payload parsers must not
+    expose it; the registry is intentionally not a Notebook route or tool. A
+    NotebookStore may reconstruct this registry from its append-only records.
+    """
+
+    def __init__(self) -> None:
+        self._feasibility: dict[str, FeasibilityDecision] = {}
+        self._comparison: dict[str, ComparisonDecisionRecord] = {}
+
+    def register_feasibility(self, decision: FeasibilityDecision) -> None:
+        if not isinstance(decision, FeasibilityDecision):
+            raise RecommendationValidationError("feasibility decision must be a contract")
+        ref = decision.feasibility_decision_id
+        if ref in self._feasibility or ref in self._comparison:
+            raise RecommendationValidationError("server decision reference is already registered")
+        self._feasibility[ref] = decision
+
+    def register_comparison(self, decision: ComparisonDecisionRecord) -> None:
+        if not isinstance(decision, ComparisonDecisionRecord):
+            raise RecommendationValidationError("comparison decision must be a server record")
+        ref = decision.comparison_decision_id
+        if ref in self._feasibility or ref in self._comparison:
+            raise RecommendationValidationError("server decision reference is already registered")
+        self._comparison[ref] = decision
+
+    def feasibility(self, ref: str) -> FeasibilityDecision:
+        try:
+            return self._feasibility[ref]
+        except (KeyError, TypeError) as error:
+            raise RecommendationValidationError("feasibility decision is unavailable") from error
+
+    def comparison(self, ref: str) -> ComparisonDecisionRecord:
+        try:
+            return self._comparison[ref]
+        except (KeyError, TypeError) as error:
+            raise RecommendationValidationError("comparison decision is unavailable") from error
+
+    def get(
+        self, ref: str
+    ) -> FeasibilityDecision | ComparisonDecisionRecord | None:
+        """Return one registered source by opaque reference, if present."""
+
+        if type(ref) is not str or not ref:
+            raise RecommendationValidationError("server decision reference is invalid")
+        return self._feasibility.get(ref) or self._comparison.get(ref)
+
+    def validate_recommendation(self, decision: RecommendationDecisionV11) -> None:
+        if not isinstance(decision, RecommendationDecisionV11):
+            raise RecommendationValidationError("recommendation must be the v1.1 contract")
+        self._assert_common_binding(
+            decision.batch_id,
+            decision.generation_context_hash,
+            decision.freshness_dependency_fingerprint,
+            decision.evidence_pack_hashes,
+            decision.candidate_option_ids,
+            decision.candidate_cohort_hash,
+        )
+        if decision.feasibility_decision_ref is not None:
+            source = self.feasibility(decision.feasibility_decision_ref)
+            self._assert_recommendation_binding(decision, source)
+            self._assert_common_binding(
+                source.batch_id,
+                source.generation_context_hash,
+                source.freshness_dependency_fingerprint,
+                source.evidence_pack_hashes,
+                source.candidate_option_ids,
+                source.candidate_cohort_hash,
+            )
+            feasible = tuple(item.option_id for item in source.candidates if item.outcome == "feasible")
+            expected_outcome = "recommended" if len(feasible) == 1 else "insufficient_evidence"
+            expected_winner = feasible[0] if len(feasible) == 1 else None
+            if (decision.outcome, decision.recommended_option_id) != (expected_outcome, expected_winner):
+                raise RecommendationValidationError("recommendation does not match feasibility decision")
+        else:
+            source = self.comparison(decision.comparison_decision_ref or "")
+            self._assert_recommendation_binding(decision, source)
+            self._assert_common_binding(
+                source.batch_id,
+                source.generation_context_hash,
+                source.freshness_dependency_fingerprint,
+                source.evidence_pack_hashes,
+                source.candidate_option_ids,
+                source.candidate_cohort_hash,
+            )
+            if (decision.outcome, decision.recommended_option_id) != (
+                source.outcome,
+                source.recommended_option_id,
+            ):
+                raise RecommendationValidationError("recommendation does not match comparison decision")
+
+    @staticmethod
+    def _assert_recommendation_binding(
+        decision: RecommendationDecisionV11,
+        source: FeasibilityDecision | ComparisonDecisionRecord,
+    ) -> None:
+        if (
+            decision.batch_id != source.batch_id
+            or decision.generation_context_hash != source.generation_context_hash
+            or decision.freshness_dependency_fingerprint
+            != source.freshness_dependency_fingerprint
+            or decision.evidence_pack_hashes != source.evidence_pack_hashes
+            or set(decision.candidate_option_ids) != set(source.candidate_option_ids)
+            or decision.candidate_cohort_hash != source.candidate_cohort_hash
+        ):
+            raise RecommendationValidationError(
+                "recommendation binding does not match server decision"
+            )
+
+    @staticmethod
+    def _assert_common_binding(
+        batch_id: str,
+        generation_context_hash: str,
+        freshness_dependency_fingerprint: str,
+        evidence_pack_hashes: tuple[str, ...],
+        candidate_option_ids: tuple[str, ...],
+        candidate_cohort_hash_value: str,
+    ) -> None:
+        if not candidate_option_ids or candidate_cohort_hash(candidate_option_ids) != candidate_cohort_hash_value:
+            raise RecommendationValidationError("server decision does not bind a complete candidate cohort")
+        if not all(isinstance(value, str) and value for value in (batch_id, generation_context_hash, freshness_dependency_fingerprint)):
+            raise RecommendationValidationError("server decision binding is incomplete")
+        if not evidence_pack_hashes:
+            raise RecommendationValidationError("server decision has no evidence pack")
 
 
 @dataclass(frozen=True)
@@ -210,6 +477,114 @@ class RecommendationValidator:
             reason_refs=reason_refs,
         )
 
+    def decide_v11(
+        self,
+        *,
+        batch_id: str,
+        candidate_option_ids: tuple[str, ...],
+        generation_context_hash: str,
+        freshness_dependency_fingerprint: str,
+        evidence_pack_hashes: tuple[str, ...],
+        decision_registry: ServerDecisionRegistry,
+        feasibility_decision_ref: str | None = None,
+        comparison_decision_ref: str | None = None,
+    ) -> RecommendationDecisionV11:
+        """Build the server-owned recommendation successor.
+
+        The method accepts only candidate identities and a reference resolved
+        by the trusted registry.  It deliberately has no ``OptionDraft`` input,
+        so an Agent's ``blocked_reason`` or preference cannot become a trusted
+        feasibility fact.
+        """
+
+        ids = tuple(candidate_option_ids)
+        cohort_hash = candidate_cohort_hash(ids)
+        if not evidence_pack_hashes:
+            raise RecommendationValidationError("v1.1 requires evidence pack hashes")
+        if not isinstance(decision_registry, ServerDecisionRegistry):
+            raise RecommendationValidationError("decision_registry is required")
+        if (feasibility_decision_ref is None) == (comparison_decision_ref is None):
+            raise RecommendationValidationError(
+                "exactly one server feasibility or comparison decision is required"
+            )
+
+        recommended: str | None = None
+        outcome = "insufficient_evidence"
+        reason_refs: tuple[str, ...] = ()
+        if feasibility_decision_ref is not None:
+            feasibility_decision = decision_registry.feasibility(feasibility_decision_ref)
+            if (
+                feasibility_decision.batch_id != batch_id
+                or feasibility_decision.generation_context_hash != generation_context_hash
+                or feasibility_decision.freshness_dependency_fingerprint
+                != freshness_dependency_fingerprint
+                or feasibility_decision.evidence_pack_hashes != tuple(evidence_pack_hashes)
+                or set(feasibility_decision.candidate_option_ids) != set(ids)
+                or feasibility_decision.candidate_cohort_hash != cohort_hash
+            ):
+                raise RecommendationValidationError(
+                    "feasibility decision does not cover the requested candidate cohort"
+                )
+            feasible = tuple(
+                item.option_id
+                for item in feasibility_decision.candidates
+                if item.outcome == "feasible"
+            )
+            if len(feasible) == 1:
+                outcome = "recommended"
+                recommended = feasible[0]
+            reason_refs = tuple(
+                sorted(
+                    {
+                        ref
+                        for item in feasibility_decision.candidates
+                        for ref in (*item.inspection_refs, *item.evidence_refs)
+                    }
+                )
+            )
+        else:
+            comparison = decision_registry.comparison(comparison_decision_ref or "")
+            if (
+                comparison.batch_id != batch_id
+                or comparison.generation_context_hash != generation_context_hash
+                or comparison.freshness_dependency_fingerprint
+                != freshness_dependency_fingerprint
+                or comparison.evidence_pack_hashes != tuple(evidence_pack_hashes)
+                or set(comparison.candidate_option_ids) != set(ids)
+                or comparison.candidate_cohort_hash != cohort_hash
+            ):
+                raise RecommendationValidationError(
+                    "comparison decision does not cover the requested candidate cohort"
+                )
+            outcome = comparison.outcome
+            recommended = comparison.recommended_option_id
+            reason_refs = (comparison.protocol_ref,)
+        seed = {
+            "batch_id": batch_id,
+            "candidate_cohort_hash": cohort_hash,
+            "outcome": outcome,
+            "recommended_option_id": recommended,
+            "feasibility_decision_ref": feasibility_decision_ref,
+            "comparison_decision_ref": comparison_decision_ref,
+            "evidence_pack_hashes": tuple(evidence_pack_hashes),
+        }
+        result = RecommendationDecisionV11(
+            recommendation_decision_id=f"rec11_{sha256_canonical(seed)[:24]}",
+            batch_id=batch_id,
+            generation_context_hash=generation_context_hash,
+            freshness_dependency_fingerprint=freshness_dependency_fingerprint,
+            evidence_pack_hashes=tuple(evidence_pack_hashes),
+            candidate_option_ids=ids,
+            candidate_cohort_hash=cohort_hash,
+            outcome=outcome,
+            recommended_option_id=recommended,
+            feasibility_decision_ref=feasibility_decision_ref,
+            comparison_decision_ref=comparison_decision_ref,
+            reason_refs=reason_refs,
+        )
+        decision_registry.validate_recommendation(result)
+        return result
+
     @staticmethod
     def _decision(
         *,
@@ -264,9 +639,15 @@ class RecommendationValidator:
 
 
 __all__ = [
+    "candidate_cohort_hash",
+    "ComparisonDecisionRecord",
+    "FeasibilityCandidateDecision",
+    "FeasibilityDecision",
     "ForecastRollingOriginProtocol",
     "ProtocolResult",
     "RecommendationProtocol",
+    "RecommendationDecisionV11",
     "RecommendationValidationError",
     "RecommendationValidator",
+    "ServerDecisionRegistry",
 ]

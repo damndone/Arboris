@@ -46,6 +46,7 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "data.column.cast",
         "data.columns.cast",
         "graph.fork",
+        "model.custom",
         "model.genesis",
         "model.rerun",
         "operation.multi_step",
@@ -57,6 +58,20 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
     assert all(isinstance(item["executor"], str) for item in capabilities)
     assert all("api_key" not in json.dumps(item) for item in capabilities)
     assert all("<function" not in json.dumps(item) for item in capabilities)
+
+
+def test_model_custom_is_registered_high_risk_but_not_a_generic_nl_execution_tool() -> None:
+    definition = OperationRegistry().require("model.custom")
+
+    assert definition.risk_level == "high"
+    assert definition.confirmation_policy == "required"
+    assert definition.natural_language_enabled is False
+    assert definition.executor_key == "capability_factory.custom_dispatcher"
+    assert definition.proposal_schema["properties"]["changes"]["required"] == [
+        "capability_ref",
+        "binding_ref",
+        "operation",
+    ]
 
 
 def test_data_column_cast_is_registered_but_not_natural_language_enabled() -> None:

@@ -1,5 +1,8 @@
 import "./notebook.css";
 import { ContextSlicePanel } from "./ContextSlicePanel";
+import { DomainMemoryControls } from "./DomainMemoryControls";
+import { DomainMemoryEntryList } from "./DomainMemoryEntryList";
+import { DomainMemoryReviewQueue } from "./DomainMemoryReviewQueue";
 import { OptionCard } from "./OptionCard";
 import { PlanDiffConfirmation } from "./PlanDiffConfirmation";
 import { SelectionActions } from "./SelectionActions";
@@ -12,6 +15,7 @@ import {
   type NotebookView,
   type PendingConfirmation,
 } from "./contracts";
+import type { DomainMemoryCandidate, DomainMemoryPreferences } from "./domainMemoryContracts";
 
 /**
  * The Notebook surface: a narrative stream, persisted option batches, the
@@ -44,11 +48,20 @@ export interface NotebookSurfaceProps {
   onReplan?: () => void;
   onConfirm?: (confirmation: PendingConfirmation) => void;
   onCancelConfirmation?: (confirmation: PendingConfirmation) => void;
+  onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
   onSelectionAsk?: (selection: NotebookSelection) => void;
   onSelectionExplain?: (selection: NotebookSelection) => void;
   onSelectionFollowUp?: (selection: NotebookSelection) => void;
   onSelectionSaveNote?: (selection: NotebookSelection) => void;
   onSelectionDefer?: (selection: NotebookSelection) => void;
+  domainMemoryPreferences?: DomainMemoryPreferences;
+  onDomainMemoryPreferencesChange?: (preferences: DomainMemoryPreferences) => void;
+  domainMemoryCandidates?: DomainMemoryCandidate[];
+  onDomainMemoryCandidateReview?: (
+    candidateId: string,
+    decision: "approved" | "rejected",
+    revision: number,
+  ) => void;
 }
 
 function exclusionSummary(reasons: Record<string, number>): string {
@@ -369,6 +382,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
                   onDefer={props.onDeferOption}
                   onReject={props.onRejectOption}
                   onRevalidate={props.onRevalidateOption}
+                  onConfirmAndExecute={props.onConfirmAndExecute}
                 />
               ))}
             </div>
@@ -388,6 +402,22 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       ) : null}
 
       {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} /> : null}
+
+      {props.domainMemoryPreferences && props.onDomainMemoryPreferencesChange ? (
+        <DomainMemoryControls
+          preferences={props.domainMemoryPreferences}
+          onChange={props.onDomainMemoryPreferencesChange}
+        />
+      ) : null}
+      {notebook.contextSlice?.domain_memory_projection ? (
+        <DomainMemoryEntryList projection={notebook.contextSlice.domain_memory_projection} />
+      ) : null}
+      {props.domainMemoryCandidates && props.onDomainMemoryCandidateReview ? (
+        <DomainMemoryReviewQueue
+          candidates={props.domainMemoryCandidates}
+          onReview={props.onDomainMemoryCandidateReview}
+        />
+      ) : null}
     </div>
   );
 }

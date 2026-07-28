@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .operations import OperationValidationError
@@ -186,6 +186,24 @@ class StepSpecContract:
     summary: str
     fields: Mapping[str, str]
     required: tuple[str, ...] = ()
+    field_types: Mapping[str, str] = field(default_factory=dict)
+    semantic_validator_key: str | None = None
+    reference_resolver_key: str | None = None
+    column_extractor_key: str | None = None
+    risk_class: str = "low"
+    confirmation_policy: str = "proposal_confirmation"
+    output_schema_ref: str | None = None
+    dispatcher_key: str | None = None
+    effect_level: str = "mutation"
+    scope_requirements: tuple[str, ...] = ("chain", "active_head")
+    scope: str = "workflow step"
+    risk_level: str = "mutating"
+    reconciler_key: str | None = None
+    diff_builder_key: str | None = None
+    verification_builder_key: str | None = None
+    ui_description: str = ""
+    example_prompts: tuple[str, ...] = ()
+    natural_language_enabled: bool = False
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -196,6 +214,47 @@ class StepSpecContract:
             "summary": self.summary,
             "required": list(self.required),
             "fields": dict(self.fields),
+            "optional": sorted(set(self.fields) - set(self.required)),
+            "field_types": dict(self.field_types),
+            "semantic_validator_key": self.semantic_validator_key,
+            "reference_resolver_key": self.reference_resolver_key,
+            "column_extractor_key": self.column_extractor_key,
+            "risk_class": self.risk_class,
+            "confirmation_policy": self.confirmation_policy,
+            "output_schema_ref": self.output_schema_ref,
+            "dispatcher_key": self.dispatcher_key,
+            "effect_level": self.effect_level,
+            "scope_requirements": list(self.scope_requirements),
+            "scope": self.scope,
+            "risk_level": self.risk_level,
+            "reconciler_key": self.reconciler_key,
+            "diff_builder_key": self.diff_builder_key,
+            "verification_builder_key": self.verification_builder_key,
+            "ui_description": self.ui_description,
+            "example_prompts": list(self.example_prompts),
+            "natural_language_enabled": self.natural_language_enabled,
+        }
+
+    def to_schema(self) -> dict[str, Any]:
+        """Build the editable spec schema from the same field declarations."""
+
+        type_map = {
+            "string": "string",
+            "list": "array",
+            "object": "object",
+        }
+        properties: dict[str, dict[str, Any]] = {}
+        for name, description in self.fields.items():
+            field_schema: dict[str, Any] = {"description": description}
+            declared_type = self.field_types.get(name)
+            if declared_type is not None:
+                field_schema["type"] = type_map.get(declared_type, declared_type)
+            properties[name] = field_schema
+        return {
+            "type": "object",
+            "required": list(self.required),
+            "properties": properties,
+            "additionalProperties": False,
         }
 
 
@@ -218,6 +277,26 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "missing_policy": "listwise | variablewise.",
         },
         required=("operation",),
+        field_types={
+            "operation": "string",
+            "selected_columns": "list",
+            "filters": "list",
+            "options": "object",
+            "plots": "list",
+            "missing_policy": "string",
+        },
+        semantic_validator_key="statistical.exploration",
+        reference_resolver_key="workflow.source_columns",
+        column_extractor_key="statistical.explore",
+        output_schema_ref="workbench.statistical.exploration/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.statistical_explore",
+        effect_level="read_only",
+        scope="Raw data statistical exploration",
+        risk_level="none",
+        reconciler_key="statistical.explore",
+        diff_builder_key="exploration.diff.v1",
+        verification_builder_key="exploration.verification.v1",
+        ui_description="Run one server-defined statistical exploration step.",
     ),
     "statistical.derive_boolean": StepSpecContract(
         summary="Derive boolean group-membership columns from percentile thresholds.",
@@ -232,6 +311,22 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "threshold_source": "step_id of the summarize_detail step the thresholds come from.",
         },
         required=("recipes",),
+        field_types={
+            "operation": "string",
+            "recipes": "list",
+            "quantile_method": "string",
+            "threshold_source": "string",
+        },
+        semantic_validator_key="statistical.derive_boolean",
+        reference_resolver_key="workflow.source_columns",
+        column_extractor_key="statistical.derive_boolean",
+        output_schema_ref="workbench.statistical.exploration/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.statistical_derive_boolean",
+        scope="Raw data derived grouping",
+        reconciler_key="statistical.derive_boolean",
+        diff_builder_key="exploration.derived_diff.v1",
+        verification_builder_key="exploration.derived_verification.v1",
+        ui_description="Create one server-defined boolean grouping node.",
     ),
     "statistical.derived_group_summarize": StepSpecContract(
         summary="Summarize columns within each derived group.",
@@ -244,6 +339,21 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "missing_policy": "listwise | variablewise.",
         },
         required=("groups", "summarize_columns"),
+        field_types={
+            "groups": "list",
+            "summarize_columns": "list",
+            "missing_policy": "string",
+        },
+        semantic_validator_key="statistical.derived_group_summarize",
+        reference_resolver_key="workflow.source_columns",
+        column_extractor_key="statistical.derived_group_summarize",
+        output_schema_ref="workbench.statistical.exploration/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.statistical_derived_group_summarize",
+        scope="derived group comparison",
+        reconciler_key="statistical.derived_group_summarize",
+        diff_builder_key="exploration.derived_diff.v1",
+        verification_builder_key="exploration.derived_verification.v1",
+        ui_description="Summarize columns within each derived group.",
     ),
     "model.genesis": StepSpecContract(
         summary="Estimate one or more models from the source table.",
@@ -277,6 +387,27 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "context_columns": "Extra columns to carry into the model context.",
         },
         required=("branches",),
+        field_types={
+            "model_family": "string",
+            "covariance": "string",
+            "branches": "list",
+            "categorical": "list",
+            "polynomials": "list",
+            "context_columns": "list",
+        },
+        semantic_validator_key="model.genesis",
+        reference_resolver_key="workflow.source_columns",
+        column_extractor_key="model.genesis",
+        risk_class="high",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.genesis/v1",
+        dispatcher_key="workbench.services.genesis",
+        scope="dataset model genesis",
+        risk_level="high",
+        reconciler_key="model.genesis",
+        diff_builder_key="genesis.diff.v1",
+        verification_builder_key="genesis.verification.v1",
+        ui_description="Estimate one or more models from the source table.",
     ),
     "report.compose": StepSpecContract(
         summary="Assemble the completed steps into a report.",
@@ -287,6 +418,54 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "sections": "Ordered report sections.",
             "complete_on": "Completion condition.",
         },
+        semantic_validator_key="report.compose",
+        reference_resolver_key="workflow.step_artifacts",
+        output_schema_ref="workbench.report.collection/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.report",
+        scope="workflow report",
+        reconciler_key="report.compose",
+        diff_builder_key="report.compose.diff.v1",
+        verification_builder_key="report.compose.verification.v1",
+        ui_description="Assemble the completed steps into a report.",
+    ),
+    "model.custom": StepSpecContract(
+        summary=(
+            "Declare a server-bound custom capability operation. The binding, "
+            "risk decision, and execution authorization are server-owned; this "
+            "workflow contract never grants code execution by itself."
+        ),
+        fields={
+            "capability_ref": "Registered capability implementation reference.",
+            "binding_ref": "Current server-owned resolution binding reference.",
+            "operation": "Declared adapter operation, such as fit or predict.",
+            "input_handle": "Graph/data handle resolved by the Workbench.",
+            "parameters": "JSON object of adapter parameters.",
+            "consumer_slots": "Explicit consumer slots requested by the capability.",
+            "expected_artifacts": "Artifact roles expected from the adapter.",
+        },
+        required=("capability_ref", "binding_ref", "operation"),
+        field_types={
+            "capability_ref": "string",
+            "binding_ref": "string",
+            "operation": "string",
+            "input_handle": "string",
+            "parameters": "object",
+            "consumer_slots": "list",
+            "expected_artifacts": "list",
+        },
+        semantic_validator_key="capability_factory.custom_operation",
+        reference_resolver_key="capability_factory.binding",
+        column_extractor_key="none",
+        risk_class="high",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="capability_factory.artifact_contract/v1.1",
+        dispatcher_key="capability_factory.custom_dispatcher",
+        scope="dataset custom capability",
+        risk_level="high",
+        reconciler_key="capability_factory.custom_dispatcher",
+        diff_builder_key="capability_factory.custom.diff.v1",
+        verification_builder_key="capability_factory.custom.verification.v1",
+        ui_description="Run one explicitly admitted custom capability through the Proposal/Risk and containment gates.",
     ),
 }
 
@@ -318,6 +497,17 @@ def workflow_step_vocabulary() -> dict[str, Any]:
         ),
     }
 
+
+def workflow_dispatcher_key(operation_id: str) -> str:
+    """Return the trusted runtime key published by one step contract."""
+
+    contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
+    if contract is None or not contract.dispatcher_key:
+        raise OperationValidationError(
+            f"workflow step operation has no trusted dispatcher: {operation_id!r}"
+        )
+    return contract.dispatcher_key
+
 _STEP_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
@@ -325,7 +515,12 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
     """Every source column a step spec references, for schema checking."""
 
     columns: set[str] = set()
-    if operation_id == "statistical.explore":
+    extractor_key = (
+        WORKFLOW_STEP_SPEC_CONTRACTS[operation_id].column_extractor_key
+        if operation_id in WORKFLOW_STEP_SPEC_CONTRACTS
+        else None
+    )
+    if extractor_key == "statistical.explore":
         columns.update(str(item) for item in spec.get("selected_columns", []) or [])
         for item in spec.get("filters", []) or []:
             if isinstance(item, Mapping) and item.get("column"):
@@ -336,16 +531,16 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         for plot in spec.get("plots", []) or []:
             if isinstance(plot, Mapping):
                 columns.update(str(plot[key]) for key in ("x_column", "y_column") if plot.get(key))
-    elif operation_id == "statistical.derive_boolean":
+    elif extractor_key == "statistical.derive_boolean":
         for recipe in spec.get("recipes", []) or []:
             if isinstance(recipe, Mapping) and recipe.get("source_column"):
                 columns.add(str(recipe["source_column"]))
-    elif operation_id == "statistical.derived_group_summarize":
+    elif extractor_key == "statistical.derived_group_summarize":
         columns.update(str(item) for item in spec.get("summarize_columns", []) or [])
         for group in spec.get("groups", []) or []:
             if isinstance(group, Mapping) and group.get("source_column"):
                 columns.add(str(group["source_column"]))
-    elif operation_id == "model.genesis":
+    elif extractor_key == "model.genesis":
         for branch in spec.get("branches", []) or []:
             if isinstance(branch, Mapping):
                 if branch.get("outcome"):
@@ -373,7 +568,8 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
     # `selected_columns` silently became "all columns"; the plan validated and
     # then meant something the author never wrote. Naming the unknown field is
     # what lets the agent correct itself on the next attempt.
-    allowed = _ALLOWED_SPEC_FIELDS.get(operation_id, frozenset())
+    contract = WORKFLOW_STEP_SPEC_CONTRACTS.get(operation_id)
+    allowed = contract.allowed if contract is not None else frozenset()
     unknown = sorted(set(spec) - allowed - {"source_artifact_fingerprint"})
     if unknown:
         raise OperationValidationError(
@@ -382,7 +578,22 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             + ". Supported fields: "
             + ", ".join(sorted(allowed))
         )
-    if operation_id == "statistical.explore":
+    if contract is not None:
+        missing = sorted(
+            field_name
+            for field_name in contract.required
+            if field_name not in spec or spec[field_name] is None
+        )
+        if missing:
+            raise OperationValidationError(
+                f"{operation_id} spec is missing required field(s): "
+                + ", ".join(missing)
+            )
+        _validate_declared_field_types(operation_id, spec, contract)
+    validator_key = contract.semantic_validator_key if contract is not None else None
+    if validator_key == "capability_factory.custom_operation":
+        return
+    if validator_key == "statistical.exploration":
         if "plots" in spec:
             plots = spec.get("plots")
             if not isinstance(plots, list) or not plots:
@@ -407,7 +618,7 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             )
         except (StatisticalExplorationValidationError, KeyError, TypeError, ValueError) as exc:
             raise OperationValidationError(f"invalid statistical.explore spec: {exc}") from exc
-    elif operation_id == "statistical.derive_boolean":
+    elif validator_key == "statistical.derive_boolean":
         recipes = spec.get("recipes")
         if not isinstance(recipes, list) or not recipes:
             raise OperationValidationError("derive_boolean step requires a non-empty recipes list")
@@ -431,7 +642,7 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             name = recipe.get("output_name")
             if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
                 raise OperationValidationError("derive_boolean output_name must be a valid column name")
-    elif operation_id == "statistical.derived_group_summarize":
+    elif validator_key == "statistical.derived_group_summarize":
         groups = spec.get("groups")
         if not isinstance(groups, list) or not groups:
             raise OperationValidationError("derived_group_summarize requires a non-empty groups list")
@@ -462,7 +673,7 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 )
         if not isinstance(spec.get("summarize_columns"), list) or not spec["summarize_columns"]:
             raise OperationValidationError("derived_group_summarize requires summarize_columns")
-    elif operation_id == "model.genesis":
+    elif validator_key == "model.genesis":
         from ..contracts.model.ols import OLS_COVARIANCE_VALUES
         from ..model_terms import ModelTermError, validate_branch_terms
 
@@ -502,6 +713,32 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 raise OperationValidationError(
                     f"model branch {branch_id}: {exc}"
                 ) from exc
+
+
+def _validate_declared_field_types(
+    operation_id: str,
+    spec: Mapping[str, Any],
+    contract: StepSpecContract,
+) -> None:
+    """Apply only the small JSON type vocabulary declared by a contract."""
+
+    for field_name, type_name in contract.field_types.items():
+        if field_name not in spec or spec[field_name] is None:
+            continue
+        value = spec[field_name]
+        valid = {
+            "string": isinstance(value, str) and not isinstance(value, bool),
+            "list": isinstance(value, list),
+            "object": isinstance(value, Mapping),
+        }.get(type_name)
+        if valid is None:
+            raise OperationValidationError(
+                f"{operation_id} contract declares unsupported field type: {type_name}"
+            )
+        if not valid:
+            raise OperationValidationError(
+                f"{operation_id} field {field_name} must be a {type_name}"
+            )
 
 
 def validate_workflow_steps(
@@ -627,4 +864,5 @@ __all__ = [
     "workflow_authorization",
     "workflow_proposal_schema",
     "workflow_step_vocabulary",
+    "workflow_dispatcher_key",
 ]

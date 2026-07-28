@@ -144,6 +144,7 @@ def test_all_registered_trace_event_types_are_registered() -> None:
         "evidence.inspection.requested",
         "evidence.inspection.completed",
         "evidence.inspection.failed",
+        "domain_memory.retrieval.completed",
     }
 
 

@@ -159,6 +159,15 @@ def executable_payload(draft: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _creation_identity(draft: dict[str, Any]) -> dict[str, Any]:
+    """Include provenance in get-or-create identity without changing draft_hash."""
+
+    return {
+        "executable": executable_payload(draft),
+        "notebook_provenance": draft.get("notebook_provenance"),
+    }
+
+
 def compute_executable_draft_hash(draft: dict[str, Any]) -> str:
     payload = canonical_json(executable_payload(draft)).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -208,10 +217,19 @@ class PipelineDraftStore:
     def create(self, draft: dict[str, Any]) -> StoredDraft:
         PipelineDraftV1(**draft)
         path = self._path(str(draft["draft_id"]))
-        if path.exists():
-            raise DraftHashConflict("draft already exists")
-        self._write_atomic(path, draft)
-        return StoredDraft(draft=draft, draft_hash=compute_executable_draft_hash(draft))
+        lock = self._lock_for(str(draft["draft_id"]))
+        with lock:
+            draft_hash = compute_executable_draft_hash(draft)
+            if path.exists():
+                existing = self.get(str(draft["draft_id"]))
+                if (
+                    existing.draft_hash == draft_hash
+                    and _creation_identity(existing.draft) == _creation_identity(draft)
+                ):
+                    return existing
+                raise DraftHashConflict("draft already exists with different identity")
+            self._write_atomic(path, draft)
+            return StoredDraft(draft=draft, draft_hash=draft_hash)
 
     def get(self, draft_id: str) -> StoredDraft:
         path = self._path(draft_id)

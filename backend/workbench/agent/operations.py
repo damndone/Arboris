@@ -95,6 +95,7 @@ class OperationRegistry:
         # Keep this import local so importing this module does not create a
         # module-initialization cycle.
         from .workflow_contracts import (
+            WORKFLOW_STEP_SPEC_CONTRACTS,
             workflow_proposal_schema,
             validate_workflow_operation,
             workflow_step_vocabulary,
@@ -161,6 +162,31 @@ class OperationRegistry:
                 ui_description="Create a first-run model Draft from a verified dataset source.",
                 natural_language_enabled=False,
                 validator=_validate_model_genesis,
+            )
+        )
+        self.register(
+            OperationDefinition(
+                operation_id="model.custom",
+                operation_version="v1",
+                effect_level="mutation",
+                scope_requirements=("dataset",),
+                scope="dataset source",
+                risk_level="high",
+                confirmation_policy="required",
+                proposal_schema=_model_custom_proposal_schema(
+                    WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"]
+                ),
+                editable_schema=WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"].to_schema(),
+                executor_key=WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"].dispatcher_key or "",
+                reconciler_key=WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"].reconciler_key or "",
+                diff_builder_key=WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"].diff_builder_key or "",
+                verification_builder_key=WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"].verification_builder_key or "",
+                ui_description=(
+                    "Run one explicitly admitted custom capability through the "
+                    "Proposal/Risk and containment gates."
+                ),
+                natural_language_enabled=False,
+                validator=_validate_model_custom,
             )
         )
         self.register(
@@ -541,105 +567,47 @@ class OperationRegistry:
 
 
 def _workflow_step_operation_definitions() -> tuple[OperationDefinition, ...]:
-    """Return the closed set of typed operations a compiled workflow may use."""
+    """Project the single workflow-step contract table into the registry."""
 
-    return (
-        OperationDefinition(
-            operation_id="statistical.explore",
-            operation_version="v1",
-            effect_level="read_only",
-            scope_requirements=("chain", "active_head"),
-            scope="Raw data statistical exploration",
-            risk_level="none",
-            confirmation_policy="workflow_parent",
-            proposal_schema=_workflow_step_schema(
-                "statistical.explore",
-                changes={
-                    "operation": {"type": "string"},
-                    "variables": {"type": "array", "items": {"type": "string"}},
-                    "filters": {"type": "array", "items": {"type": "object"}},
-                },
-                required_changes=["operation"],
-            ),
-            executor_key="statistical.explore",
-            reconciler_key="statistical.explore",
-            diff_builder_key="exploration.diff.v1",
-            verification_builder_key="exploration.verification.v1",
-            ui_description="Run one server-defined statistical exploration step.",
-            natural_language_enabled=False,
-            validator=_validate_workflow_step,
-        ),
-        OperationDefinition(
-            operation_id="statistical.derive_boolean",
-            operation_version="v1",
-            effect_level="mutation",
-            scope_requirements=("chain", "active_head"),
-            scope="Raw data derived grouping",
-            risk_level="mutating",
-            confirmation_policy="workflow_parent",
-            proposal_schema=_workflow_step_schema(
-                "statistical.derive_boolean",
-                changes={"recipe": {"type": "object"}},
-                required_changes=["recipe"],
-            ),
-            executor_key="statistical.derive_boolean",
-            reconciler_key="statistical.derive_boolean",
-            diff_builder_key="exploration.derived_diff.v1",
-            verification_builder_key="exploration.derived_verification.v1",
-            ui_description="Create one server-defined boolean grouping node.",
-            natural_language_enabled=False,
-            validator=_validate_workflow_step,
-        ),
-        OperationDefinition(
-            # A composed plan could name this step, but nothing declared it, so
-            # the registry silently stopped being the closed set it claims to
-            # be and audit records carried an unregistered identity.
-            operation_id="statistical.derived_group_summarize",
-            operation_version="v1",
-            effect_level="mutation",
-            scope_requirements=("chain", "active_head"),
-            scope="derived group comparison",
-            risk_level="mutating",
-            confirmation_policy="workflow_parent",
-            proposal_schema=_workflow_step_schema(
-                "statistical.derived_group_summarize",
-                changes={
-                    "groups": {"type": "array", "items": {"type": "object"}},
-                    "summarize_columns": {"type": "array", "items": {"type": "string"}},
-                },
-                required_changes=["groups"],
-            ),
-            executor_key="statistical.derived_group_summarize",
-            reconciler_key="statistical.derived_group_summarize",
-            diff_builder_key="exploration.derived_diff.v1",
-            verification_builder_key="exploration.derived_verification.v1",
-            ui_description="Summarize columns within each derived group.",
-            natural_language_enabled=False,
-            validator=_validate_workflow_step,
-        ),
-        OperationDefinition(
-            operation_id="report.compose",
-            operation_version="v1",
-            effect_level="mutation",
-            scope_requirements=("chain", "active_head"),
-            scope="workflow report",
-            risk_level="mutating",
-            confirmation_policy="workflow_parent",
-            proposal_schema=_workflow_step_schema(
-                "report.compose",
-                changes={"report_contract": {"type": "object"}},
-                required_changes=["report_contract"],
-            ),
-            executor_key="report.compose",
-            reconciler_key="report.compose",
-            diff_builder_key="report.compose.diff.v1",
-            verification_builder_key="report.compose.verification.v1",
-            ui_description="Assemble the compiled workflow's report.",
-            natural_language_enabled=False,
-            validator=_validate_workflow_step,
-        ),
-    )
+    from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
 
+    definitions: list[OperationDefinition] = []
+    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items():
+        # These two identities also have top-level operation definitions with
+        # the same operation/version. Their shared editable fields and runtime
+        # metadata are projected into those definitions during registry setup.
+        if operation_id in {"model.genesis", "model.custom"}:
+            continue
+        if not contract.dispatcher_key:
+            raise ValueError(f"workflow step {operation_id} has no dispatcher key")
+        spec_schema = contract.to_schema()
+        definitions.append(
+            OperationDefinition(
+                operation_id=operation_id,
+                operation_version="v1",
+                effect_level=contract.effect_level,
+                scope_requirements=contract.scope_requirements,
+                scope=contract.scope,
+                risk_level=contract.risk_level,
+                confirmation_policy=contract.confirmation_policy,
+                proposal_schema=_workflow_step_schema(
+                    operation_id,
+                    changes=spec_schema["properties"],
+                    required_changes=list(contract.required),
+                ),
+                editable_schema=spec_schema,
+                contract_owner="operation_registry",
+                executor_key=contract.dispatcher_key,
+                reconciler_key=contract.reconciler_key or contract.dispatcher_key,
+                diff_builder_key=contract.diff_builder_key or "",
+                verification_builder_key=contract.verification_builder_key or "",
+                ui_description=contract.ui_description,
+                example_prompts=contract.example_prompts,
+                natural_language_enabled=contract.natural_language_enabled,
+                validator=_validate_workflow_step,
+            )
+        )
+    return tuple(definitions)
 
 def _workflow_step_schema(
     operation_id: str,
@@ -1092,6 +1060,93 @@ def _validate_model_genesis(
     for key, value in changes.items():
         if not isinstance(value, dict):
             raise OperationValidationError(f"model.genesis {key} must be an object")
+
+
+def _model_custom_proposal_schema(contract: Any | None = None) -> dict[str, Any]:
+    if contract is None:
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+        contract = WORKFLOW_STEP_SPEC_CONTRACTS["model.custom"]
+    if not hasattr(contract, "to_schema"):
+        raise TypeError("model.custom contract must expose to_schema")
+    contract_schema = contract.to_schema()
+    changes = dict(contract_schema)
+    properties: dict[str, Any] = {}
+    for name, schema in contract_schema["properties"].items():
+        normalized = dict(schema)
+        if normalized.get("type") == "string":
+            normalized["minLength"] = 1
+        elif normalized.get("type") == "array":
+            normalized["items"] = {"type": "string", "minLength": 1}
+        properties[name] = normalized
+    changes["properties"] = properties
+    return _proposal_schema(
+        target_required=[],
+        changes=changes,
+        target_properties={
+            "dataset_source_id": {"type": "string", "minLength": 1},
+            "run_id": {"type": "string", "minLength": 1},
+            "node_ref": {"type": "string", "minLength": 1},
+            "node_hash": {"type": "string", "minLength": 1},
+            "forest_node_key": {"type": "string", "minLength": 1},
+        },
+    )
+
+
+def _validate_model_custom(
+    target: dict[str, Any],
+    preconditions: dict[str, Any],
+    changes: dict[str, Any],
+) -> None:
+    dataset_target = bool(target.get("dataset_source_id"))
+    run_target = all(target.get(key) for key in ("run_id", "node_ref", "node_hash", "forest_node_key"))
+    if dataset_target == run_target:
+        raise OperationValidationError(
+            "model.custom target must identify exactly one dataset source or run model node"
+        )
+    missing_preconditions = {
+        key
+        for key in ("context_version", "context_fingerprint", "owner_resolution")
+        if not preconditions.get(key)
+    }
+    if missing_preconditions:
+        raise OperationValidationError(
+            "model.custom preconditions missing: " + ", ".join(sorted(missing_preconditions))
+        )
+    if not isinstance(changes, dict) or not changes:
+        raise OperationValidationError("model.custom changes must not be empty")
+    required = {"capability_ref", "binding_ref", "operation"}
+    missing = sorted(field for field in required if not changes.get(field))
+    if missing:
+        raise OperationValidationError(
+            "model.custom changes missing: " + ", ".join(missing)
+        )
+    allowed = required | {"input_handle", "parameters", "consumer_slots", "expected_artifacts"}
+    unknown = set(changes) - allowed
+    if unknown:
+        raise OperationValidationError(
+            "model.custom changes contain unknown field(s): " + ", ".join(sorted(unknown))
+        )
+    for key in required | {"input_handle"}:
+        if key in changes and (not isinstance(changes[key], str) or not changes[key]):
+            raise OperationValidationError(f"model.custom {key} must be a non-empty string")
+    if "parameters" in changes and not isinstance(changes["parameters"], dict):
+        raise OperationValidationError("model.custom parameters must be an object")
+    if "consumer_slots" in changes:
+        slots = changes["consumer_slots"]
+        if (
+            not isinstance(slots, list)
+            or not slots
+            or any(not isinstance(item, str) or not item for item in slots)
+            or len(set(slots)) != len(slots)
+        ):
+            raise OperationValidationError("model.custom consumer_slots must be unique non-empty strings")
+    if "expected_artifacts" in changes:
+        artifacts = changes["expected_artifacts"]
+        if not isinstance(artifacts, list) or any(
+            not isinstance(item, str) or not item for item in artifacts
+        ):
+            raise OperationValidationError("model.custom expected_artifacts must be strings")
 
 
 def _validate_graph_fork(

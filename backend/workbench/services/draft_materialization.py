@@ -23,6 +23,7 @@ from ..lineage.pipeline_drafts import (
     new_draft_id,
     schema_hash,
     utc_now,
+    validate_draft_id,
 )
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import verify_upload
@@ -154,6 +155,12 @@ def _provenance_payload(provenance: Mapping[str, str] | None) -> dict[str, str] 
     return {str(key): str(value) for key, value in provenance.items()}
 
 
+def _resolved_draft_id(draft_id: str | None) -> str:
+    resolved = new_draft_id() if draft_id is None else draft_id
+    validate_draft_id(resolved)
+    return resolved
+
+
 def create_rerun_draft_from_node(
     project_root: Path,
     *,
@@ -165,10 +172,12 @@ def create_rerun_draft_from_node(
     source_context_fingerprint: str,
     notebook_provenance: Mapping[str, str] | None = None,
     persist: bool = True,
+    draft_id: str | None = None,
 ) -> StoredDraft:
     """Create one source-pinned rerun-child Draft without executing it."""
 
     root = Path(project_root)
+    resolved_draft_id = _resolved_draft_id(draft_id)
     runs_root = _resolve_project_runs_dir(str(root))
     run_root = _resolve_run_root(str(root), source_run_id)
     manifest = _read_manifest(run_root)
@@ -223,7 +232,7 @@ def create_rerun_draft_from_node(
     source_params = _source_params_from_schema(editable_schema)
     now = utc_now()
     draft: dict[str, Any] = {
-        "draft_id": new_draft_id(),
+        "draft_id": resolved_draft_id,
         "schema_version": "pipeline_draft.v1",
         "created_at": now,
         "updated_at": now,
@@ -297,10 +306,12 @@ def create_genesis_draft(
     model_params: Mapping[str, Any] | None = None,
     exploration_context: Mapping[str, Any] | None = None,
     notebook_provenance: Mapping[str, str] | None = None,
+    draft_id: str | None = None,
 ) -> StoredDraft:
     """Create one parentless, upload-bound genesis Draft without executing it."""
 
     root = Path(project_root)
+    resolved_draft_id = _resolved_draft_id(draft_id)
     _resolve_project_runs_dir(str(root))
     if not re.fullmatch(r"[0-9a-f]{64}", upload_sha256):
         raise ValueError("UPLOAD_NOT_FOUND")
@@ -321,7 +332,7 @@ def create_genesis_draft(
         "status": "pending",
     }
     draft: dict[str, Any] = {
-        "draft_id": new_draft_id(),
+        "draft_id": resolved_draft_id,
         "schema_version": "pipeline_draft.v1",
         "created_at": utc_now(),
         "updated_at": utc_now(),

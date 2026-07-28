@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..agent.context_compiler import (
     NotebookPlanningContextV1,
+    attach_domain_memory_projection,
     freshness_dependency_fingerprint,
     generation_context_hash,
 )
@@ -25,12 +27,27 @@ from ..agent.notebook.planning_agent import (
     NotebookPlanningUnavailable,
 )
 from ..llm.config import load_llm_config
-from ..agent.trace import TraceWriter, record_compiled_context
+from ..agent.trace import (
+    TraceWriter,
+    record_compiled_context,
+    record_domain_memory_retrieval,
+)
+from ..domain_memory.preferences import DomainMemoryPreferences
+from ..domain_memory.service import DomainMemoryService
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
 from ..agent.notebook.vocabulary import capability_artifact_types
 from ..agent.recipes.registry import build_option_vocabulary
+from ..capability_factory.notebook_catalog import (
+    CapabilityBindingCatalog,
+    CapabilityBindingCatalogError,
+)
+from ..capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
+from ..capability_factory.execution_authorization import (
+    ExecutionAuthorizationError,
+    OptionExecutionAuthorization,
+)
 
 router = APIRouter()
 
@@ -103,6 +120,12 @@ class ConfirmOptionRequest(_StrictModel):
     proposal_revision: int = Field(ge=1)
 
 
+class AuthorizeOptionExecutionRequest(_StrictModel):
+    """Untrusted receipt envelope; the service rechecks every server-owned pin."""
+
+    authorization: dict[str, Any]
+
+
 class DecisionRequest(_StrictModel):
     decision: Literal[
         "selected",
@@ -136,9 +159,36 @@ def _project_root(raw: str) -> Path:
     return root
 
 
-def _service(project_root: str) -> tuple[Path, NotebookService]:
+def _service(request: Request, project_root: str) -> tuple[Path, NotebookService]:
     root = _project_root(project_root)
-    return root, NotebookService(root)
+    runtime = getattr(request.app.state, "capability_factory_runtime", None)
+    catalog = (
+        runtime.catalog
+        if runtime is not None
+        else getattr(request.app.state, "notebook_capability_bindings", None)
+    )
+    if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID",
+            message="The server-owned Notebook capability binding provider is invalid.",
+        )
+    gateway = (
+        runtime.execution_gateway
+        if runtime is not None
+        else getattr(request.app.state, "notebook_execution_gateway", None)
+    )
+    if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
+        raise WorkbenchAPIError(
+            status_code=500,
+            code="NOTEBOOK_EXECUTION_GATEWAY_PROVIDER_INVALID",
+            message="The server-owned Notebook execution gateway is invalid.",
+        )
+    return root, NotebookService(
+        root,
+        capability_bindings=catalog,
+        execution_gateway=gateway,
+    )
 
 
 def _trace(
@@ -174,15 +224,136 @@ def _notebook_trace(root: Path, service: NotebookService, notebook_id: str) -> T
 
 
 def _compile(
-    root: Path, service: NotebookService, notebook_id: str, *, focused_run_id: str | None = None
+    root: Path,
+    service: NotebookService,
+    notebook_id: str,
+    *,
+    focused_run_id: str | None = None,
+    request: Request | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> tuple[NotebookPlanningContextV1, TraceWriter]:
     notebook = service.get_notebook(notebook_id)
     trace = _notebook_trace(root, service, notebook.notebook_id)
     context = replace(
         service.compile_context(notebook_id, focused_run_id=focused_run_id), trace_id=trace.trace_id
     )
+    projection = _domain_memory_projection(
+        request,
+        root,
+        service,
+        notebook_id,
+        context=context,
+        use=domain_memory_use,
+        iteration=domain_memory_iteration,
+    )
+    if projection is not None:
+        context = attach_domain_memory_projection(context, projection)
+        record_domain_memory_retrieval(trace, projection)
     record_compiled_context(trace, context)
     return context, trace
+
+
+def _domain_memory_projection(
+    request: Request | None,
+    root: Path,
+    service: NotebookService,
+    notebook_id: str,
+    *,
+    context: NotebookPlanningContextV1 | None = None,
+    use: bool,
+    iteration: bool,
+) -> dict[str, Any] | None:
+    """Ask only the server-owned provider for an already-bounded projection.
+
+    Compilation is deliberately complete before this call.  A deployment
+    provider may therefore build/read a Project/RunFamily index from the
+    canonical Notebook context before it retrieves approved cross-project
+    hints; the memory result cannot retroactively change capability inputs or
+    freshness dependencies.
+    """
+
+    if not use:
+        return None
+    provider = getattr(request.app.state, "domain_memory_context_provider", None) if request else None
+    if provider is None:
+        service_provider = getattr(request.app.state, "domain_memory_service", None) if request else None
+        if isinstance(service_provider, DomainMemoryService):
+            return _default_domain_memory_projection(
+                service_provider,
+                context=context,
+                preferences=DomainMemoryPreferences(
+                    cross_project_domain_memory_use=use,
+                    cross_project_domain_memory_iteration=iteration,
+                ),
+            )
+        return {
+            "contract_version": "domain-memory-context-input/v1",
+            "retrieval_ref": "retrieval:unavailable",
+            "scope_ref": "scope:unavailable",
+            "outcome": "blocked",
+            "reason": "DOMAIN_MEMORY_UNAVAILABLE",
+            "entries": [],
+            "omissions": [],
+            "bounded": True,
+            "preference_ref": "preference:unavailable",
+            "memory_authority": "non_authoritative",
+        }
+    projection = provider(
+        request=request,
+        project_root=root,
+        notebook_service=service,
+        notebook_id=notebook_id,
+        context=context,
+        preferences=DomainMemoryPreferences(
+            cross_project_domain_memory_use=use,
+            cross_project_domain_memory_iteration=iteration,
+        ),
+    )
+    if projection is not None and not isinstance(projection, dict):
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="DOMAIN_MEMORY_PROVIDER_INVALID",
+            message="The server-owned domain-memory provider returned an invalid projection.",
+        )
+    return projection
+
+
+def _default_domain_memory_projection(
+    service: DomainMemoryService,
+    *,
+    context: NotebookPlanningContextV1 | None,
+    preferences: DomainMemoryPreferences,
+) -> dict[str, Any]:
+    """Use the configured server-owned store without inventing request scope.
+
+    The compiled Notebook context is the direct canonical fallback when a
+    deployment has not installed a persisted ProjectContextIndex provider.
+    Facts are a small scalar projection used only for applicability matching;
+    they never grant source access or capability authority.
+    """
+
+    if context is None:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
+            message="A compiled Notebook context is required before memory retrieval.",
+        )
+    facts: dict[str, Any] = {}
+    for source in (context.analysis_contract, context.user_focus):
+        for key in ("analysis_family", "model_family", "goal", "domain", "data_kind"):
+            value = source.get(key)
+            if isinstance(value, str) and value and len(value) <= 128:
+                facts.setdefault(key, value)
+    result = service.retrieve(
+        requester=service.store.scope,
+        global_preferences=preferences,
+        facts=facts,
+        now=datetime.now(timezone.utc).isoformat(),
+        max_entries=8,
+        max_bytes=8192,
+    )
+    return result.to_context_projection()
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:
@@ -254,6 +425,33 @@ def _execution_results_packet(
             continue
         validation = raw.get("artifact_validation")
         if not isinstance(validation, dict):
+            capability_execution = raw.get("capability_execution")
+            if isinstance(capability_execution, dict):
+                # CF4 has already committed the full ArtifactContract@1.1
+                # aggregate in its own durable store.  The Notebook route
+                # exposes only its server-owned refs; it never accepts or
+                # reconstructs adapter payloads here.
+                results[revision.option_id] = {
+                    "option_id": revision.option_id,
+                    "option_revision": revision.option_revision,
+                    "run_id": raw.get("run_id"),
+                    "execution_status": raw.get("execution_status"),
+                    "committed": raw.get("committed"),
+                    "capability_execution": {
+                        key: capability_execution.get(key)
+                        for key in (
+                            "dispatch_status",
+                            "attempt_id",
+                            "receipt_ref",
+                            "completion_ref",
+                            "artifact_validation_ref",
+                            "object_graph_ref",
+                            "assessment_ref",
+                            "output_bundle_ref",
+                            "attestation_ref",
+                        )
+                    },
+                }
             continue
         raw_issues = [dict(issue) for issue in validation.get("issues", [])]
         bounded_issues = raw_issues[:64]
@@ -314,22 +512,71 @@ def _planning_agent(
         else "model.rerun"
     )
     source_model_type = _source_model_type(root, context)
+    server_projections: tuple[dict[str, Any], ...] = ()
+    if service.capability_bindings is not None:
+        notebook = service.get_notebook(notebook_id)
+        try:
+            server_projections = service.capability_bindings.planner_projections(
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                )
+            )
+        except CapabilityBindingCatalogError as error:
+            raise NotebookPlanningUnavailable(
+                "a server-owned capability planner projection is unavailable"
+            ) from error
+    server_manifest = {
+        str(item["key"]): dict(item)
+        for item in server_projections
+        if isinstance(item, Mapping) and isinstance(item.get("key"), str)
+    }
+    server_model_types = {
+        capability: str(item["model_type"])
+        for capability, item in server_manifest.items()
+    }
+    dynamic_artifact_types = {
+        capability: dict(item["artifact_types"])
+        for capability, item in server_manifest.items()
+        if isinstance(item.get("artifact_types"), Mapping)
+    }
+    candidate_capabilities = tuple(
+        dict.fromkeys((*context.available_capabilities, *server_manifest))
+    )
     catalog = {
         capability: {
-            **manifest[capability],
+            **(
+                manifest[capability]
+                if capability in manifest
+                else server_manifest[capability]
+            ),
+            "model_type": server_model_types.get(capability, capability),
             "notebook_proposal_adapters": [proposal_adapter],
             **_model_options_catalog_metadata(root, context, capability),
         }
-        for capability in context.available_capabilities
-        if capability in manifest
-        and capability_artifact_types(capability)
+        for capability in candidate_capabilities
+        if (
+            capability in manifest
+            or capability in server_manifest
+        )
         and (
-            proposal_adapter == "model.genesis"
-            or source_model_type is None
-            or capability == source_model_type
+            capability_artifact_types(capability)
+            or capability in dynamic_artifact_types
+        )
+        and (
+            capability not in server_manifest
+            or proposal_adapter in server_manifest[capability].get(
+                "notebook_proposal_adapters", [proposal_adapter]
+            )
         )
         and (
             proposal_adapter == "model.genesis"
+            or source_model_type is None
+            or server_model_types.get(capability, capability) == source_model_type
+        )
+        and (
+            proposal_adapter == "model.genesis"
+            or capability not in manifest
             or _supports_rerun_model_options(manifest[capability])
         )
     }
@@ -390,6 +637,7 @@ def _planning_agent(
     return NotebookPlanningAgent(
         adapter=OpenAICompatibleModelAdapter(config),
         capability_catalog=catalog,
+        capability_artifact_types=dynamic_artifact_types,
         inspection_executor=execute_inspections,
         proposal_validator=validate_proposal,
         available_inspections=tuple(INSPECTIONS),
@@ -498,9 +746,9 @@ def _request_error(exc: Exception) -> WorkbenchAPIError:
 
 @router.post("/notebooks", status_code=201)
 def create_notebook_endpoint(
-    project_root: str, body: NotebookCreateRequest
+    request: Request, project_root: str, body: NotebookCreateRequest
 ) -> dict[str, Any]:
-    _root, service = _service(project_root)
+    _root, service = _service(request, project_root)
     try:
         return service.create_notebook(
             title=body.title,
@@ -518,11 +766,11 @@ def create_notebook_endpoint(
 
 @router.post("/notebooks/projection")
 def ensure_notebook_projection_endpoint(
-    project_root: str, body: NotebookProjectionRequest
+    request: Request, project_root: str, body: NotebookProjectionRequest
 ) -> dict[str, Any]:
     """Ensure a source-bound default projection; this is the new UI boundary."""
 
-    _root, service = _service(project_root)
+    _root, service = _service(request, project_root)
     if (body.from_run_id is None) == (body.dataset is None):
         raise WorkbenchAPIError(
             status_code=422,
@@ -560,14 +808,16 @@ def ensure_notebook_projection_endpoint(
 
 
 @router.get("/notebooks")
-def list_notebooks_endpoint(project_root: str) -> list[dict[str, Any]]:
-    _root, service = _service(project_root)
+def list_notebooks_endpoint(request: Request, project_root: str) -> list[dict[str, Any]]:
+    _root, service = _service(request, project_root)
     return [notebook.to_dict() for notebook in service.list_notebooks()]
 
 
 @router.get("/notebooks/{notebook_id}")
-def get_notebook_endpoint(project_root: str, notebook_id: str) -> dict[str, Any]:
-    _root, service = _service(project_root)
+def get_notebook_endpoint(
+    request: Request, project_root: str, notebook_id: str
+) -> dict[str, Any]:
+    _root, service = _service(request, project_root)
     try:
         return service.get_notebook(notebook_id).to_dict()
     except NotebookOptionError as exc:
@@ -576,11 +826,24 @@ def get_notebook_endpoint(project_root: str, notebook_id: str) -> dict[str, Any]
 
 @router.post("/notebooks/{notebook_id}/context/compile")
 def compile_notebook_context_endpoint(
-    project_root: str, notebook_id: str, focused_run_id: str | None = None
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    focused_run_id: str | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            focused_run_id=focused_run_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
         return _context_packet(context)
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
@@ -590,11 +853,24 @@ def compile_notebook_context_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/propose")
 def propose_options_endpoint(
-    project_root: str, notebook_id: str, body: ProposeOptionsRequest
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    body: ProposeOptionsRequest,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
+        recommendation_decision = None
         drafts = (
             [_draft(item) for item in body.drafts]
             if body.drafts
@@ -617,31 +893,36 @@ def propose_options_endpoint(
             final_evidence = getattr(result, "evidence_pack", None)
             if isinstance(final_evidence, DataEvidencePackV1):
                 service.store.append_evidence_pack(notebook_id, final_evidence.to_dict())
+            recommendation_evidence = (
+                final_evidence
+                if isinstance(final_evidence, DataEvidencePackV1)
+                else initial_evidence
+            )
             # Inspection calls persist Evidence Packs. Recompile the context
             # before pinning the v1.1 revision so evidence_pack_refs belong to
             # the same freshness fingerprint that the Draft gate will observe.
-            context = replace(
-                service.compile_context(notebook_id), trace_id=trace.trace_id
+            context, trace = _compile(
+                root,
+                service,
+                notebook_id,
+                request=request,
+                domain_memory_use=domain_memory_use,
+                domain_memory_iteration=domain_memory_iteration,
             )
-            decision = replace(
-                result.decision,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+            drafts, recommendation_decision = service.derive_server_recommendation(
+                notebook_id,
+                context=context,
+                drafts=tuple(result.option_drafts),
+                batch_id=result.decision.batch_id,
+                evidence_pack=recommendation_evidence,
             )
-            # Keep the route test seam usable for a deliberately tiny fake
-            # planner result, while the production adapter remains a dataclass.
-            if hasattr(result, "__dataclass_fields__"):
-                result = replace(result, decision=decision)
-            else:
-                result.decision = decision
-            drafts = list(result.option_drafts)
         revisions = service.propose_batch(
             notebook_id,
             context=context,
             drafts=drafts,
             trace=trace,
-            batch_id=(result.decision.batch_id if not body.drafts else None),
-            recommendation_decision=(result.decision if not body.drafts else None),
+            batch_id=(recommendation_decision.batch_id if not body.drafts else None),
+            recommendation_decision=(recommendation_decision if not body.drafts else None),
             # Provider-generated planning is the only path that may
             # deliberately revalidate existing stable option ids.  Manual
             # draft submission keeps the strict reuse-conflict behavior.
@@ -687,7 +968,12 @@ def propose_options_endpoint(
 
 @router.get("/notebooks/{notebook_id}/options")
 def list_options_endpoint(
-    project_root: str, notebook_id: str, focused_run_id: str | None = None
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    focused_run_id: str | None = None,
+    domain_memory_use: bool = False,
+    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     """Return the current options against one freshly compiled context.
 
@@ -697,9 +983,17 @@ def list_options_endpoint(
     into a new agent-generation event.
     """
 
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
-        context, trace = _compile(root, service, notebook_id, focused_run_id=focused_run_id)
+        context, trace = _compile(
+            root,
+            service,
+            notebook_id,
+            focused_run_id=focused_run_id,
+            request=request,
+            domain_memory_use=domain_memory_use,
+            domain_memory_iteration=domain_memory_iteration,
+        )
         options = service.list_options(notebook_id, context=context)
         revisions = [
             replace(
@@ -725,11 +1019,11 @@ def list_options_endpoint(
 
 @router.get("/notebooks/{notebook_id}/traces/{trace_id}")
 def get_notebook_trace_endpoint(
-    project_root: str, notebook_id: str, trace_id: str
+    request: Request, project_root: str, notebook_id: str, trace_id: str
 ) -> dict[str, Any]:
     """Replay the typed trace for a notebook without exposing other scopes."""
 
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         events = TraceWriter.replay(root, trace_id)
@@ -752,12 +1046,13 @@ def get_notebook_trace_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/revalidate")
 def revalidate_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: RevalidateOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         revision = service.revalidate_option(
@@ -780,12 +1075,13 @@ def revalidate_option_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/confirm")
 def confirm_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: ConfirmOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         current = service.store.read_option(notebook_id, option_id).current_revision
@@ -825,13 +1121,57 @@ def confirm_option_endpoint(
         raise _request_error(exc) from exc
 
 
+@router.post("/notebooks/{notebook_id}/options/{option_id}/confirm-and-execute")
+def confirm_and_execute_option_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    option_id: str,
+    body: ConfirmOptionRequest,
+) -> dict[str, Any]:
+    """Explicitly dispatch one low-risk bound option through server CF4.
+
+    The request carries only the current option/proposal pins.  Authorization,
+    Run intent, dispatch reservation, and all result facts are server-owned.
+    """
+
+    root, service = _service(request, project_root)
+    try:
+        context, trace = _compile(root, service, notebook_id)
+        current = service.store.read_option(notebook_id, option_id).current_revision
+        if (body.option_revision, body.proposal_id, body.proposal_revision) != (
+            current.option_revision,
+            current.typed_proposal_id,
+            current.typed_proposal_revision,
+        ):
+            raise OptionRevisionStale(
+                "execution request does not match the current option revision",
+                option_id=option_id,
+                requested_revision=body.option_revision,
+                current_revision=current.option_revision,
+                reason="proposal_pin_mismatch",
+            )
+        dispatch = service.confirm_and_execute(
+            notebook_id,
+            option_id,
+            context=context,
+            trace=trace,
+        )
+        return {"dispatch": dispatch.to_dict(), "trace_id": trace.trace_id}
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
 @router.post("/notebooks/{notebook_id}/options/{option_id}/materialize")
 def materialize_option_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         context, trace = _compile(root, service, notebook_id)
         result = service.materialize_option(
@@ -847,14 +1187,57 @@ def materialize_option_endpoint(
         raise _request_error(exc) from exc
 
 
+@router.post("/notebooks/{notebook_id}/options/{option_id}/authorize-execution")
+def authorize_option_execution_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    option_id: str,
+    body: AuthorizeOptionExecutionRequest,
+) -> dict[str, Any]:
+    """Legacy control-plane seam for unbound compatibility records.
+
+    A capability-bound V1.2 option cannot use this client-envelope route. Its
+    authorization is constructed by the server only inside
+    ``confirm-and-execute``.
+    """
+
+    root, service = _service(request, project_root)
+    try:
+        current = service.store.read_option(notebook_id, option_id).current_revision
+        if getattr(current, "capability_resolution_binding_ref", None) is not None:
+            raise OptionRevisionStale(
+                "capability execution authorization is server-owned; use explicit confirm-and-execute",
+                option_id=option_id,
+                option_revision=current.option_revision,
+                reason="authorization_server_owned",
+            )
+        context, trace = _compile(root, service, notebook_id)
+        authorization = OptionExecutionAuthorization.from_dict(body.authorization)
+        persisted = service.authorize_option_execution(
+            notebook_id,
+            option_id,
+            context=context,
+            authorization=authorization,
+        )
+        return {"authorization": persisted.to_dict(), "trace_id": trace.trace_id}
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except ExecutionAuthorizationError as exc:
+        raise _request_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
 @router.post("/notebooks/{notebook_id}/options/{option_id}/decision")
 def record_decision_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: DecisionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         trace = _notebook_trace(root, service, notebook.notebook_id)
@@ -880,12 +1263,13 @@ def record_decision_endpoint(
 
 @router.post("/notebooks/{notebook_id}/options/{option_id}/execute")
 def complete_option_execution_endpoint(
+    request: Request,
     project_root: str,
     notebook_id: str,
     option_id: str,
     body: ExecuteOptionRequest,
 ) -> dict[str, Any]:
-    root, service = _service(project_root)
+    root, service = _service(request, project_root)
     try:
         notebook = service.get_notebook(notebook_id)
         trace = _notebook_trace(root, service, notebook.notebook_id)

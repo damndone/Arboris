@@ -1411,7 +1411,11 @@ def test_ols_genesis_covariance_model_options_are_materialized_as_covariance(
         notebook.notebook_id,
         revision.option_id,
         context=service.compile_context(notebook.notebook_id),
+        materialization_id="mat_ols_nested_covariance",
+        draft_id="draft_ols_nested_covariance",
     )
+    assert result.materialization.materialization_id == "mat_ols_nested_covariance"
+    assert result.draft.draft["draft_id"] == "draft_ols_nested_covariance"
     model = next(node for node in result.draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
     assert model["params"]["covariance"] == "robust"
     assert model["params"]["model_options"] == {"covariance": "robust"}

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 
+from workbench.analysis_loop.resolver import AnalysisLoopSourceResolutionError
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import (
@@ -17,6 +18,44 @@ from workbench.agent.tools import ToolDefinition, ToolRegistry
 from workbench.llm.config import LLMConfig
 from workbench.llm import client as llm_client
 from workbench.agent.session import JsonlSessionRepository
+
+
+def test_tool_registry_surfaces_analysis_loop_source_errors_to_agent() -> None:
+    def handler(arguments, context):
+        raise AnalysisLoopSourceResolutionError(
+            "the selected OLS source covariance is not eligible for this action",
+            code="RECOVERY_ACTION_SOURCE_MISMATCH",
+        )
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolDefinition(
+            tool_id="propose_analysis_loop",
+            version="v1",
+            input_schema={"type": "object"},
+            side_effect="proposal",
+            handler=handler,
+        )
+    )
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-analysis-loop",
+                "tool_id": "propose_analysis_loop",
+                "arguments": {},
+            },
+            session_id="session-a",
+        )
+    )
+
+    assert result.ok is False
+    assert result.error == "AnalysisLoopSourceResolutionError"
+    assert result.error_details == [
+        {
+            "message": "the selected OLS source covariance is not eligible for this action"
+        }
+    ]
 
 
 class ToolRoundTripAdapter:

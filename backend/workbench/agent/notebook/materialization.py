@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping, TYPE_CHECKING
 from uuid import uuid4
 
 from ...canonical import sha256_canonical
-from ...contracts.agent.notebook_option import NotebookOptionRevisionV11, OptionMaterialization
+from ...contracts.agent.notebook_option import (
+    NotebookOptionRevisionV11,
+    OptionMaterialization,
+    OptionMaterializationV11,
+)
 from ...engine.capabilities import COVARIANCE_UI, build_capabilities
-from ...lineage.pipeline_drafts import PipelineDraftStore, StoredDraft
+from ...lineage.pipeline_drafts import PipelineDraftStore, StoredDraft, schema_hash
 from ...model_options import (
     ModelOptionsError,
     bind_new_model_options,
@@ -62,10 +67,15 @@ class NotebookOptionMaterializer:
         *,
         context: NotebookPlanningContextV1,
         trace: TraceWriter | None = None,
+        materialization_id: str | None = None,
+        draft_id: str | None = None,
     ) -> MaterializationResult:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        if binding_ref is not None:
+            self.service._assert_current_capability_binding(current)
         if not isinstance(current, NotebookOptionRevisionV11):
             self.service.assert_materializable(notebook_id, option_id)
         if view.lifecycle_status not in {"selected", "materialized", "executed"}:
@@ -79,7 +89,23 @@ class NotebookOptionMaterializer:
             notebook_id, option_id, current.option_revision
         )
         if existing is not None:
+            if (
+                materialization_id is not None
+                and materialization_id != existing.materialization_id
+            ):
+                raise _fail(
+                    "the requested materialization id conflicts with the persisted materialization",
+                    option_id=option_id,
+                    reason="MATERIALIZATION_ID_CONFLICT",
+                )
+            if draft_id is not None and draft_id != existing.draft_id:
+                raise _fail(
+                    "the requested draft id conflicts with the persisted materialization",
+                    option_id=option_id,
+                    reason="DRAFT_ID_CONFLICT",
+                )
             draft = PipelineDraftStore(self.service.project_root).get(existing.draft_id)
+            self._validate_binding_provenance(current, existing, draft)
             return MaterializationResult(existing, draft)
         if view.lifecycle_status == "executed":
             raise _fail("an executed option cannot be materialized again", option_id=option_id)
@@ -114,6 +140,8 @@ class NotebookOptionMaterializer:
             # handoff so a Genesis run is born in the Notebook's family.
             "run_family_id": notebook.run_family_id,
         }
+        if binding_ref is not None:
+            provenance["capability_resolution_binding_ref"] = binding_ref
         source = notebook.projection_source
         try:
             if source is not None and source.kind == "run":
@@ -121,6 +149,7 @@ class NotebookOptionMaterializer:
                     notebook,
                     proposal.to_dict(),
                     provenance,
+                    draft_id=draft_id,
                 )
                 mode = "rerun_child"
                 pins = {
@@ -137,6 +166,7 @@ class NotebookOptionMaterializer:
                     notebook,
                     proposal.to_dict(),
                     provenance,
+                    draft_id=draft_id,
                 )
                 mode = "genesis"
                 pins = {
@@ -159,20 +189,30 @@ class NotebookOptionMaterializer:
                 reason=str(exc),
             ) from exc
 
-        materialization = OptionMaterialization(
-            materialization_id=f"mat_{uuid4().hex}",
-            option_id=option_id,
-            option_revision=current.option_revision,
-            proposal_id=current.typed_proposal_id,
-            proposal_revision=current.typed_proposal_revision,
-            freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
-            generation_context_id=current.generation_context_id,
-            draft_id=draft.draft["draft_id"],
-            draft_hash=draft.draft_hash,
-            draft_execution_mode=mode,
-            run_family_id=notebook.run_family_id,
+        materialization_kwargs: dict[str, Any] = {
+            "materialization_id": (
+                f"mat_{uuid4().hex}"
+                if materialization_id is None
+                else materialization_id
+            ),
+            "option_id": option_id,
+            "option_revision": current.option_revision,
+            "proposal_id": current.typed_proposal_id,
+            "proposal_revision": current.typed_proposal_revision,
+            "freshness_dependency_fingerprint": current.freshness_dependency_fingerprint,
+            "generation_context_id": current.generation_context_id,
+            "draft_id": draft.draft["draft_id"],
+            "draft_hash": draft.draft_hash,
+            "draft_execution_mode": mode,
+            "run_family_id": notebook.run_family_id,
             **pins,
-        )
+        }
+        if binding_ref is not None:
+            materialization_kwargs["capability_resolution_binding_ref"] = binding_ref
+            materialization = OptionMaterializationV11(**materialization_kwargs)
+        else:
+            materialization = OptionMaterialization(**materialization_kwargs)
+        self._validate_binding_provenance(current, materialization, draft)
         self.service.store.append_materialization(notebook_id, materialization)
         if view.lifecycle_status == "selected":
             self.service._transition(
@@ -184,18 +224,51 @@ class NotebookOptionMaterializer:
                 trace=trace,
             )
         if trace is not None:
+            lifecycle_payload = {
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "from_status": "selected",
+                "to_status": "materialized",
+                "axis": "lifecycle",
+                "reason": "draft_materialized",
+            }
+            if binding_ref is not None:
+                lifecycle_payload["capability_resolution_binding_ref"] = binding_ref
             trace.emit(
                 "option.lifecycle.changed",
-                payload={
-                    "option_id": option_id,
-                    "option_revision": current.option_revision,
-                    "from_status": "selected",
-                    "to_status": "materialized",
-                    "axis": "lifecycle",
-                    "reason": "draft_materialized",
-                },
+                payload=lifecycle_payload,
             )
         return MaterializationResult(materialization, draft)
+
+    def _validate_binding_provenance(
+        self,
+        revision: Any,
+        materialization: OptionMaterialization,
+        draft: StoredDraft,
+    ) -> None:
+        """Require one binding identity across Option, Materialization, Draft."""
+
+        expected = getattr(revision, "capability_resolution_binding_ref", None)
+        materialization_ref = getattr(
+            materialization, "capability_resolution_binding_ref", None
+        )
+        draft_provenance = draft.draft.get("notebook_provenance") or {}
+        draft_ref = draft_provenance.get("capability_resolution_binding_ref")
+        if expected is None:
+            if materialization_ref is not None or draft_ref is not None:
+                raise _fail(
+                    "an unbound option cannot carry capability binding provenance",
+                    option_id=revision.option_id,
+                    reason="CAPABILITY_BINDING_PROVENANCE_UNEXPECTED",
+                )
+            return
+        if materialization_ref != expected or draft_ref != expected:
+            raise OptionRevisionStale(
+                "capability binding provenance does not match the current option",
+                option_id=revision.option_id,
+                option_revision=revision.option_revision,
+                reason="capability_binding_provenance_mismatch",
+            )
 
     def _validate_evidence_pins(
         self,
@@ -247,16 +320,24 @@ class NotebookOptionMaterializer:
             raise _fail("the persisted typed proposal is no longer valid", reason=str(exc)) from exc
         if source is None:
             raise _fail("projection source is missing")
-        if source.kind == "run" and proposal.operation_id != "model.rerun":
-            raise _fail("run projections require a model.rerun proposal")
-        if source.kind == "dataset" and proposal.operation_id != "model.genesis":
-            raise _fail("dataset projections require a model.genesis proposal")
+        if source.kind == "run" and proposal.operation_id not in {
+            "model.rerun",
+            "model.custom",
+        }:
+            raise _fail("run projections require a model.rerun or model.custom proposal")
+        if source.kind == "dataset" and proposal.operation_id not in {
+            "model.genesis",
+            "model.custom",
+        }:
+            raise _fail("dataset projections require a model.genesis or model.custom proposal")
 
     def _materialize_run(
         self,
         notebook: Any,
         proposal: Mapping[str, Any],
         provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
     ) -> StoredDraft:
         if proposal["target"]["run_id"] != notebook.active_head_run_id:
             raise OptionRevisionStale(
@@ -267,6 +348,13 @@ class NotebookOptionMaterializer:
                 reason="rerun_target_not_active_head",
             )
         changes = proposal.get("changes") or {}
+        if proposal.get("operation_id") == "model.custom":
+            return self._materialize_custom_run(
+                notebook,
+                proposal,
+                provenance,
+                draft_id=draft_id,
+            )
         if set(changes) - {"model_options"}:
             raise _fail("run materialization only accepts model_options changes")
         model = None
@@ -288,6 +376,7 @@ class NotebookOptionMaterializer:
                 source_context_fingerprint=proposal["preconditions"]["context_fingerprint"],
                 notebook_provenance=provenance,
                 persist=False,
+                draft_id=draft_id,
             )
             model = next(
                 node
@@ -335,6 +424,7 @@ class NotebookOptionMaterializer:
                 source_forest_node_key=proposal["target"]["forest_node_key"],
                 source_context_fingerprint=proposal["preconditions"]["context_fingerprint"],
                 notebook_provenance=provenance,
+                draft_id=draft_id,
             )
         # An empty typed model-options patch is the explicit “retain the
         # verified active model path” option. It must still produce a pinned
@@ -357,11 +447,113 @@ class NotebookOptionMaterializer:
             store.delete(draft.draft["draft_id"])
             raise
 
+    def _materialize_custom_run(
+        self,
+        notebook: Any,
+        proposal: Mapping[str, Any],
+        provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
+    ) -> StoredDraft:
+        """Create a source-pinned child Draft whose execution stays CF4-owned."""
+
+        source = notebook.projection_source
+        current = self.service.store.read_option(
+            notebook.notebook_id, provenance["option_id"]
+        ).current_revision
+        expected_binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        changes = dict(proposal.get("changes") or {})
+        if not expected_binding_ref or changes.get("binding_ref") != expected_binding_ref:
+            raise OptionRevisionStale(
+                "custom capability rerun is not bound to the current resolution",
+                option_id=provenance["option_id"],
+                option_revision=int(provenance["option_revision"]),
+                current_revision=int(provenance["option_revision"]),
+                reason="custom_binding_mismatch",
+            )
+        if self.service.capability_bindings is None:
+            raise _fail("custom capability binding catalog is unavailable")
+        try:
+            capability_id = self.service.capability_bindings.capability_id_for_reference(
+                expected_binding_ref,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise ValueError("custom capability binding is not registered")
+            binding = self.service.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+        except Exception as exc:
+            raise _fail("custom capability binding is not currently usable") from exc
+        if changes.get("capability_ref") != binding.implementation_ref:
+            raise _fail("custom capability implementation is not server-bound")
+        operation = changes.get("operation")
+        if operation not in binding.allowed_operations:
+            raise _fail("custom capability operation is not admitted")
+        target_node = proposal["target"]["node_ref"]
+        input_handle = changes.get("input_handle", target_node)
+        if input_handle != target_node:
+            raise _fail("custom capability input_handle is not the pinned source node")
+        parameters = changes.get("parameters", {})
+        encoded = json.dumps(
+            parameters,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise _fail("custom capability parameters exceed the bounded input limit")
+        consumers = changes.get("consumer_slots") or ["notebook_option_planner"]
+        if not set(consumers) <= set(binding.allowed_consumers):
+            raise _fail("custom capability consumer slot is not admitted")
+        source_draft = create_rerun_draft_from_node(
+            self.service.project_root,
+            source_run_id=proposal["target"]["run_id"],
+            source_model_node_id=target_node,
+            source_op_node_id=target_node,
+            source_node_hash=proposal["target"]["node_hash"],
+            source_forest_node_key=proposal["target"]["forest_node_key"],
+            source_context_fingerprint=proposal["preconditions"]["context_fingerprint"],
+            notebook_provenance=provenance,
+            persist=False,
+            draft_id=draft_id,
+        )
+        draft = source_draft.draft
+        model = next(node for node in draft["graph"]["nodes"] if node["node_type"] == "model")
+        model["model_family"] = "custom"
+        model["model_type"] = "custom"
+        model["editable_schema"] = []
+        model["editable_schema_hash"] = schema_hash([])
+        model["source_params"] = {}
+        model["params"] = {
+            "model_type": "custom",
+            "capability_ref": binding.implementation_ref,
+            "binding_ref": binding.content_digest,
+            "operation": operation,
+            "input_handle": input_handle,
+            "parameters": dict(parameters),
+            "consumer_slots": list(consumers),
+        }
+        if "expected_artifacts" in changes:
+            model["params"]["expected_artifacts"] = list(changes["expected_artifacts"])
+        draft["default_execution_mode"] = "rerun_child"
+        return PipelineDraftStore(self.service.project_root).create(draft)
+
     def _materialize_dataset(
         self,
         notebook: Any,
         proposal: Mapping[str, Any],
         provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
     ) -> StoredDraft:
         source = notebook.projection_source
         if proposal["target"]["dataset_source_id"] != source.upload_sha256:
@@ -371,6 +563,13 @@ class NotebookOptionMaterializer:
                 requested_revision=int(provenance["option_revision"]),
                 current_revision=int(provenance["option_revision"]),
                 reason="dataset_source_changed",
+            )
+        if proposal.get("operation_id") == "model.custom":
+            return self._materialize_custom_dataset(
+                notebook,
+                proposal,
+                provenance,
+                draft_id=draft_id,
             )
         profile = self.service._dataset_header_profile(source)
         columns = tuple(item["name"] for item in profile.get("columns", []) if item.get("name"))
@@ -453,6 +652,7 @@ class NotebookOptionMaterializer:
             sheet_names=tuple(source.sheet_names),
             columns=columns,
             notebook_provenance=provenance,
+            draft_id=draft_id,
         )
         store = PipelineDraftStore(self.service.project_root)
         try:
@@ -468,6 +668,104 @@ class NotebookOptionMaterializer:
         except Exception:
             store.delete(draft.draft["draft_id"])
             raise
+
+    def _materialize_custom_dataset(
+        self,
+        notebook: Any,
+        proposal: Mapping[str, Any],
+        provenance: Mapping[str, str],
+        *,
+        draft_id: str | None = None,
+    ) -> StoredDraft:
+        """Create a provenance-only Draft for the authorized custom gateway."""
+
+        source = notebook.projection_source
+        if source is None or source.kind != "dataset":
+            raise _fail("custom capability materialization requires a dataset source")
+        current = self.service.store.read_option(
+            notebook.notebook_id, provenance["option_id"]
+        ).current_revision
+        expected_binding_ref = getattr(current, "capability_resolution_binding_ref", None)
+        changes = dict(proposal.get("changes") or {})
+        if not expected_binding_ref or changes.get("binding_ref") != expected_binding_ref:
+            raise OptionRevisionStale(
+                "custom capability materialization is not bound to the current resolution",
+                option_id=provenance["option_id"],
+                option_revision=int(provenance["option_revision"]),
+                current_revision=int(provenance["option_revision"]),
+                reason="custom_binding_mismatch",
+            )
+        if self.service.capability_bindings is None:
+            raise _fail("custom capability binding catalog is unavailable")
+        try:
+            capability_id = self.service.capability_bindings.capability_id_for_reference(
+                expected_binding_ref,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+            if capability_id is None:
+                raise ValueError("custom capability binding is not registered")
+            binding = self.service.capability_bindings.require(
+                capability_id,
+                scope_candidates=(
+                    ("project", notebook.project_id),
+                    ("run_family", notebook.run_family_id),
+                ),
+            )
+        except Exception as exc:
+            raise _fail("custom capability binding is not currently usable") from exc
+        if changes.get("capability_ref") != binding.implementation_ref:
+            raise _fail("custom capability implementation is not server-bound")
+        operation = changes.get("operation")
+        if operation not in binding.allowed_operations:
+            raise _fail("custom capability operation is not admitted")
+        input_handle = changes.get("input_handle", "table_1")
+        if input_handle != "table_1":
+            raise _fail("custom capability input_handle is not a verified dataset handle")
+        parameters = changes.get("parameters", {})
+        encoded = json.dumps(
+            parameters,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise _fail("custom capability parameters exceed the bounded input limit")
+        consumers = changes.get("consumer_slots") or ["notebook_option_planner"]
+        if not set(consumers) <= set(binding.allowed_consumers):
+            raise _fail("custom capability consumer slot is not admitted")
+        profile = self.service._dataset_header_profile(source)
+        columns = tuple(item["name"] for item in profile.get("columns", []) if item.get("name"))
+        model_params: dict[str, Any] = {
+            "model_type": "custom",
+            "capability_ref": binding.implementation_ref,
+            "binding_ref": binding.content_digest,
+            "operation": operation,
+            "input_handle": input_handle,
+            "parameters": dict(parameters),
+            "consumer_slots": list(consumers),
+        }
+        if "expected_artifacts" in changes:
+            model_params["expected_artifacts"] = list(changes["expected_artifacts"])
+        try:
+            return create_genesis_draft(
+                self.service.project_root,
+                upload_sha256=source.upload_sha256 or "",
+                filename=source.filename or "dataset.csv",
+                sheet_names=tuple(source.sheet_names),
+                columns=columns,
+                model_params=model_params,
+                notebook_provenance=provenance,
+                draft_id=draft_id,
+            )
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise _fail(
+                "the custom capability could not produce a valid provenance Draft",
+                reason=str(exc),
+            ) from exc
 
 
 __all__ = ["MaterializationResult", "NotebookOptionMaterializer"]

@@ -86,6 +86,20 @@ class OptionMaterializationRequired(NotebookOptionError):
     status_code = 409
 
 
+class OptionExecutionReceiptRequired(NotebookOptionError):
+    """A bound capability may complete only from server-owned CF4 facts."""
+
+    code = "OPTION_EXECUTION_RECEIPT_REQUIRED"
+    status_code = 409
+
+
+class OptionExecutionGatewayUnavailable(NotebookOptionError):
+    """Explicit execution confirmation has no trusted gateway on this host."""
+
+    code = "OPTION_EXECUTION_GATEWAY_UNAVAILABLE"
+    status_code = 409
+
+
 class OptionMaterializationFailed(NotebookOptionError):
     """A selected evidence-backed option cannot produce a valid Draft."""
 
@@ -127,6 +141,8 @@ __all__ = [
     "NotebookOptionError",
     "NotebookRunFamilyImmutable",
     "OptionBatchInvalid",
+    "OptionExecutionReceiptRequired",
+    "OptionExecutionGatewayUnavailable",
     "OptionLifecycleTransitionInvalid",
     "OptionLegacyUnverified",
     "OptionMaterializationRequired",

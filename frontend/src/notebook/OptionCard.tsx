@@ -9,6 +9,7 @@ export interface OptionCardProps {
   onDefer?: (option: NotebookOptionRevision) => void;
   onReject?: (option: NotebookOptionRevision) => void;
   onRevalidate?: (option: NotebookOptionRevision) => void;
+  onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
 }
 
 function Axis({
@@ -40,10 +41,12 @@ export function OptionCard({
   onDefer,
   onReject,
   onRevalidate,
+  onConfirmAndExecute,
 }: OptionCardProps) {
   const gate = executability(option);
   const notes = axisNote(option);
   const contract = option.artifact_contract;
+  const experimental = option.experimentalExecution === true;
   const expectedById = new Map(contract.expected.map((item) => [item.artifact_id, item]));
 
   return (
@@ -108,6 +111,16 @@ export function OptionCard({
         </p>
       </section>
 
+      {option.capability_resolution_binding_ref ? (
+        <p data-testid="option-capability-binding" className="nb-option-capability-binding">
+          {experimental
+            ? "server-bound experimental capability · high risk · explicit confirmation required"
+            : option.confirmAndExecute
+            ? "server-bound capability · explicit confirmation required"
+            : "server-bound capability · materialization only until execution gates are satisfied"}
+        </p>
+      ) : null}
+
       {outcome ? (
         <section className="nb-option-outcome" data-testid="option-contract-outcome">
           <span className="nb-outcome-headline">
@@ -158,6 +171,17 @@ export function OptionCard({
               ? "Review and prepare Draft"
               : "Review and confirm"}
         </button>
+        {option.confirmAndExecute ? (
+          <button
+            type="button"
+            data-testid="option-confirm-and-execute"
+            className="nb-button nb-button-primary"
+          disabled={!gate.executable}
+          onClick={() => onConfirmAndExecute?.(option)}
+        >
+          {experimental ? "Confirm experimental execution" : "Confirm and execute"}
+        </button>
+        ) : null}
         <button
           type="button"
           data-testid="option-revalidate"
