@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..custom_capability.canonical import canonical_json_bytes, domain_digest
@@ -28,7 +29,7 @@ from .dependency_service import (
 )
 
 
-_SCANNER_SCHEMA_VERSION = "workbench.local_supply_chain_scanner/v1"
+_SCANNER_SCHEMA_VERSION = "workbench.local_supply_chain_scanner/v2"
 _MAX_COMMAND_ITEMS = 32
 _MAX_COMMAND_ITEM_CHARS = 16_384
 _MAX_SCANNER_OUTPUT_BYTES = 1_048_576
@@ -108,6 +109,8 @@ class LocalSupplyChainScannerConfiguration:
     executable_sha256: str
     policy_ref: str
     timeout_seconds: int = 60
+    max_verification_age_seconds: int = 86_400
+    license_allowlist: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         scanner_id = _text(self.scanner_id, "scanner_id")
@@ -124,10 +127,26 @@ class LocalSupplyChainScannerConfiguration:
             raise LocalSupplyChainScannerError("scanner executable is not executable")
         if not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 600:
             raise LocalSupplyChainScannerError("scanner timeout_seconds is invalid")
+        if (
+            not isinstance(self.max_verification_age_seconds, int)
+            or not 60 <= self.max_verification_age_seconds <= 604_800
+        ):
+            raise LocalSupplyChainScannerError("scanner max_verification_age_seconds is invalid")
+        if not isinstance(self.license_allowlist, tuple) or len(self.license_allowlist) > 128:
+            raise LocalSupplyChainScannerError("scanner license_allowlist is invalid")
+        license_allowlist = tuple(
+            sorted(
+                {
+                    _text(value, "scanner license allowlist entry", maximum=128)
+                    for value in self.license_allowlist
+                }
+            )
+        )
         object.__setattr__(self, "scanner_id", scanner_id)
         object.__setattr__(self, "command", command)
         object.__setattr__(self, "executable_sha256", _digest(self.executable_sha256, "executable_sha256"))
         object.__setattr__(self, "policy_ref", _digest(self.policy_ref, "policy_ref"))
+        object.__setattr__(self, "license_allowlist", license_allowlist)
 
     @property
     def authority_ref(self) -> str:
@@ -138,6 +157,8 @@ class LocalSupplyChainScannerConfiguration:
                 "command": list(self.command),
                 "executable_sha256": self.executable_sha256,
                 "policy_ref": self.policy_ref,
+                "max_verification_age_seconds": self.max_verification_age_seconds,
+                "license_allowlist": list(self.license_allowlist),
                 "schema_version": _SCANNER_SCHEMA_VERSION,
             },
         )
@@ -174,7 +195,7 @@ class LocalSupplyChainScanner:
         if not isinstance(preparation, DependencyPreparation) or preparation.quarantine_build is None:
             raise LocalSupplyChainScannerError("scanner requires a sealed quarantine build")
         build = preparation.quarantine_build
-        response = self._run(build)
+        response = self._run(build, preparation.lock)
         reports = self._reports_from_response(response=response, build=build)
         for report in reports.values():
             service.store.put_supply_chain_report(report)
@@ -199,12 +220,24 @@ class LocalSupplyChainScanner:
                     "authority_ref": self.configuration.authority_ref,
                     "license_report_ref": reports["license"].content_digest,
                     "vulnerability_report_ref": reports["vulnerability"].content_digest,
+                    "issued_at": response["issued_at"],
+                    "valid_until": response["valid_until"],
+                    "advisory_snapshot_ref": response["advisory_snapshot_ref"],
                 },
             ),
             status="passed",
             attestation_ref=attestation.content_digest,
             build_ref=build.content_digest,
+            issued_at=response["issued_at"],
+            valid_until=response["valid_until"],
+            advisory_snapshot_ref=response["advisory_snapshot_ref"],
         )
+        if verification.validity_seconds > self.configuration.max_verification_age_seconds:
+            raise LocalSupplyChainScannerError("scanner verification freshness window exceeds policy")
+        try:
+            verification.assert_current(now=datetime.now(timezone.utc))
+        except DependencyPreparationError as error:
+            raise LocalSupplyChainScannerError(str(error)) from error
         self._issued_verifications[attestation.content_digest] = verification
         try:
             return service.mark_validated(preparation, attestation=attestation)
@@ -229,7 +262,7 @@ class LocalSupplyChainScanner:
             )
         return verification
 
-    def _run(self, build: QuarantineBuild) -> Mapping[str, Any]:
+    def _run(self, build: QuarantineBuild, lock: Any) -> Mapping[str, Any]:
         executable = Path(self.configuration.command[0])
         if _file_sha256(executable) != self.configuration.executable_sha256:
             raise LocalSupplyChainScannerError("configured scanner executable digest changed")
@@ -237,6 +270,7 @@ class LocalSupplyChainScanner:
             {
                 "schema_version": _SCANNER_SCHEMA_VERSION,
                 "policy_ref": self.configuration.policy_ref,
+                "license_allowlist": list(self.configuration.license_allowlist),
                 "build": {
                     "content_digest": build.content_digest,
                     "bundle_ref": build.bundle_ref,
@@ -244,6 +278,17 @@ class LocalSupplyChainScanner:
                     "sbom_ref": build.sbom_ref,
                     "root": str(build.root),
                 },
+                "requirements": [
+                    {
+                        "distribution": requirement.distribution,
+                        "version": requirement.version,
+                        "artifact_digest": requirement.artifact_digest,
+                    }
+                    for requirement in sorted(
+                        lock.requirements,
+                        key=lambda requirement: (requirement.distribution, requirement.version),
+                    )
+                ],
             }
         )
         try:
@@ -271,7 +316,16 @@ class LocalSupplyChainScanner:
         response: Mapping[str, Any],
         build: QuarantineBuild,
     ) -> dict[str, SupplyChainReport]:
-        if set(response) != {"schema_version", "build_ref", "sbom_ref", "policy_ref", "reports"}:
+        if set(response) != {
+            "schema_version",
+            "build_ref",
+            "sbom_ref",
+            "policy_ref",
+            "issued_at",
+            "valid_until",
+            "advisory_snapshot_ref",
+            "reports",
+        }:
             raise LocalSupplyChainScannerError("scanner response fields are invalid")
         if (
             response["schema_version"] != _SCANNER_SCHEMA_VERSION

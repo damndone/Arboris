@@ -733,6 +733,9 @@ class DependencyStore:
                 "status": verification.status,
                 "attestation_ref": verification.attestation_ref,
                 "build_ref": verification.build_ref,
+                "issued_at": verification.issued_at,
+                "valid_until": verification.valid_until,
+                "advisory_snapshot_ref": verification.advisory_snapshot_ref,
             },
         }
 

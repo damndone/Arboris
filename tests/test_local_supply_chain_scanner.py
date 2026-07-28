@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,14 +12,19 @@ _FIXTURE_SCANNER = r'''
 import hashlib
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 
 request = json.loads(sys.stdin.read())
 build = request["build"]
+issued_at = datetime.now(timezone.utc).replace(microsecond=0)
 response = {
-    "schema_version": "workbench.local_supply_chain_scanner/v1",
+    "schema_version": "workbench.local_supply_chain_scanner/v2",
     "build_ref": build["content_digest"],
     "sbom_ref": build["sbom_ref"],
     "policy_ref": request["policy_ref"],
+    "issued_at": issued_at.isoformat().replace("+00:00", "Z"),
+    "valid_until": (issued_at + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+    "advisory_snapshot_ref": hashlib.sha256(b"fixture-advisory-snapshot").hexdigest(),
     "reports": {
         "license": {
             "status": "passed",
@@ -65,7 +71,12 @@ def _prepared_dependency(tmp_path: Path, scanner):
     return service, prepared
 
 
-def _scanner(tmp_path: Path, *, executable_sha256: str | None = None):
+def _scanner(
+    tmp_path: Path,
+    *,
+    executable_sha256: str | None = None,
+    worker_source: str = _FIXTURE_SCANNER,
+):
     from workbench.capability_factory.local_supply_chain import (
         LocalSupplyChainScanner,
         LocalSupplyChainScannerConfiguration,
@@ -74,7 +85,7 @@ def _scanner(tmp_path: Path, *, executable_sha256: str | None = None):
 
     executable = Path(sys.executable).resolve()
     worker = tmp_path / "fixture-scanner.py"
-    worker.write_text(f"#!{executable}\n{_FIXTURE_SCANNER}", encoding="utf-8")
+    worker.write_text(f"#!{executable}\n{worker_source}", encoding="utf-8")
     worker.chmod(0o700)
     return LocalSupplyChainScanner(
         LocalSupplyChainScannerConfiguration(
@@ -90,6 +101,8 @@ def _scanner(tmp_path: Path, *, executable_sha256: str | None = None):
 
 
 def test_local_scanner_runs_a_pinned_external_worker_and_validates_exact_build(tmp_path):
+    from workbench.capability_factory.dependency_service import DependencyPreparationError
+
     scanner = _scanner(tmp_path)
     service, prepared = _prepared_dependency(tmp_path, scanner)
 
@@ -104,6 +117,30 @@ def test_local_scanner_runs_a_pinned_external_worker_and_validates_exact_build(t
     admitted = service.admit_execution_bundle(validated.bundle.bundle_ref, scope="project")
     assert admitted.status == "admitted"
     service.assert_execution_bundle(validated.bundle.bundle_ref)
+    with pytest.raises(DependencyPreparationError, match="freshness"):
+        service.assert_execution_bundle(
+            validated.bundle.bundle_ref,
+            now=datetime(2100, 1, 1, tzinfo=timezone.utc),
+        )
+
+
+def test_local_scanner_rejects_an_expired_advisory_snapshot(tmp_path):
+    from workbench.capability_factory.local_supply_chain import LocalSupplyChainScannerError
+
+    scanner = _scanner(
+        tmp_path,
+        worker_source=_FIXTURE_SCANNER.replace(
+            'issued_at = datetime.now(timezone.utc).replace(microsecond=0)',
+            'issued_at = datetime(2000, 1, 1, tzinfo=timezone.utc)',
+        ).replace(
+            'timedelta(hours=1)',
+            'timedelta(hours=1)',
+        ),
+    )
+    service, prepared = _prepared_dependency(tmp_path, scanner)
+
+    with pytest.raises(LocalSupplyChainScannerError, match="freshness"):
+        scanner.scan_and_validate(service=service, preparation=prepared)
 
 
 def test_local_scanner_fails_closed_when_the_configured_worker_changed(tmp_path):

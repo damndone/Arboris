@@ -10,6 +10,7 @@ import csv
 import stat
 import zipfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -36,6 +37,20 @@ class DependencyPreparationError(ValueError):
 
 class SupplyChainAttestationError(DependencyPreparationError):
     """Raised when a bundle lacks server-bound license or vulnerability facts."""
+
+
+def _utc_timestamp(value: object, field: str) -> datetime:
+    """Accept one canonical UTC timestamp for scanner freshness decisions."""
+
+    if not isinstance(value, str) or not value.endswith("Z") or len(value) > 64:
+        raise SupplyChainAttestationError(f"{field} must be a canonical UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(f"{value[:-1]}+00:00")
+    except ValueError as error:
+        raise SupplyChainAttestationError(f"{field} must be a canonical UTC timestamp") from error
+    if parsed.tzinfo != timezone.utc or parsed.isoformat().replace("+00:00", "Z") != value:
+        raise SupplyChainAttestationError(f"{field} must be a canonical UTC timestamp")
+    return parsed
 
 
 def _require_non_placeholder_digest(value: str, field: str) -> str:
@@ -181,16 +196,51 @@ class SupplyChainVerification:
     status: str
     attestation_ref: str
     build_ref: str
+    issued_at: str
+    valid_until: str
+    advisory_snapshot_ref: str
 
     def __post_init__(self) -> None:
         from .contracts import _digest
 
-        for field in ("authority_ref", "decision_ref", "attestation_ref", "build_ref"):
+        for field in (
+            "authority_ref",
+            "decision_ref",
+            "attestation_ref",
+            "build_ref",
+            "advisory_snapshot_ref",
+        ):
             object.__setattr__(self, field, _digest(getattr(self, field), field))
         _require_non_placeholder_digest(self.authority_ref, "authority_ref")
         _require_non_placeholder_digest(self.decision_ref, "decision_ref")
+        _require_non_placeholder_digest(self.advisory_snapshot_ref, "advisory_snapshot_ref")
         if self.status not in {"passed", "blocked"}:
             raise SupplyChainAttestationError("supply-chain verification status is unsupported")
+        issued_at = _utc_timestamp(self.issued_at, "issued_at")
+        valid_until = _utc_timestamp(self.valid_until, "valid_until")
+        if valid_until <= issued_at:
+            raise SupplyChainAttestationError("supply-chain verification validity window is invalid")
+
+    @property
+    def validity_seconds(self) -> int:
+        return int(
+            (_utc_timestamp(self.valid_until, "valid_until") - _utc_timestamp(self.issued_at, "issued_at"))
+            .total_seconds()
+        )
+
+    def assert_current(self, *, now: datetime | None = None) -> None:
+        """Fail closed when the scanner result is future-dated or expired."""
+
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise SupplyChainAttestationError("supply-chain verification clock must be timezone-aware")
+        current = current.astimezone(timezone.utc)
+        issued_at = _utc_timestamp(self.issued_at, "issued_at")
+        valid_until = _utc_timestamp(self.valid_until, "valid_until")
+        if current < issued_at:
+            raise SupplyChainAttestationError("supply-chain verification is not current yet")
+        if current >= valid_until:
+            raise SupplyChainAttestationError("supply-chain verification freshness has expired")
 
     @property
     def content_digest(self) -> str:
@@ -202,6 +252,9 @@ class SupplyChainVerification:
                 "status": self.status,
                 "attestation_ref": self.attestation_ref,
                 "build_ref": self.build_ref,
+                "issued_at": self.issued_at,
+                "valid_until": self.valid_until,
+                "advisory_snapshot_ref": self.advisory_snapshot_ref,
             },
         )
 
@@ -777,6 +830,7 @@ class DependencyService:
             raise SupplyChainAttestationError("trusted supply-chain verifier returned an invalid decision")
         if verification.status != "passed":
             raise SupplyChainAttestationError("trusted supply-chain verifier blocked the bundle")
+        verification.assert_current()
         if (
             verification.authority_ref != attestation.authority_ref
             or verification.attestation_ref != attestation.content_digest
@@ -800,7 +854,12 @@ class DependencyService:
             quarantine_build=build,
         )
 
-    def assert_execution_bundle(self, bundle_ref: str) -> None:
+    def assert_execution_bundle(
+        self,
+        bundle_ref: str,
+        *,
+        now: datetime | None = None,
+    ) -> None:
         """Require a fully scanned and admitted bundle before execution.
 
         This is intentionally a read-only final gate.  It does not assemble,
@@ -837,6 +896,10 @@ class DependencyService:
             raise DependencyPreparationError(
                 "dependency bundle supply-chain verification did not pass"
             )
+        try:
+            verification.assert_current(now=now)
+        except SupplyChainAttestationError as error:
+            raise DependencyPreparationError(str(error)) from error
         if history[-1].validity_ref != verification.content_digest:
             raise DependencyPreparationError(
                 "dependency bundle admission is not bound to current verification"
@@ -879,6 +942,10 @@ class DependencyService:
             raise DependencyPreparationError(
                 "dependency bundle supply-chain verification did not pass"
             )
+        try:
+            verification.assert_current()
+        except SupplyChainAttestationError as error:
+            raise DependencyPreparationError(str(error)) from error
         try:
             self.admission.restore(history)
             admission = self.admission.admit(

@@ -998,6 +998,7 @@ function WorkbenchShell({
   const [navigationParams, setNavigationParams] = useSearchParams();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
+  const settingsLocationInitialized = useRef(false);
 
   const openAgentNavigation = useMemo(
     () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
@@ -1009,6 +1010,10 @@ function WorkbenchShell({
   );
 
   useEffect(() => {
+    if (!settingsLocationInitialized.current) {
+      settingsLocationInitialized.current = true;
+      return;
+    }
     setSettingsOpen(false);
   }, [location.pathname, location.search]);
 

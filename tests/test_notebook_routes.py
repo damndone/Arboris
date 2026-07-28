@@ -1042,6 +1042,11 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
                 status="passed",
                 attestation_ref=attestation.content_digest,
                 build_ref=build.content_digest,
+                issued_at="2020-01-01T00:00:00Z",
+                valid_until="2099-01-01T00:00:00Z",
+                advisory_snapshot_ref=domain_digest(
+                    "tests.notebook_route.supply_chain_snapshot/v1", {"name": "fixture"}
+                ),
             )
 
     dependency_service = DependencyService(

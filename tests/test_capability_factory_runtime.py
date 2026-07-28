@@ -291,6 +291,9 @@ def test_deployment_runtime_binds_external_authority_scanner_and_signed_report_s
                 status="passed",
                 attestation_ref=attestation.content_digest,
                 build_ref=build.content_digest,
+                issued_at="2020-01-01T00:00:00Z",
+                valid_until="2099-01-01T00:00:00Z",
+                advisory_snapshot_ref="3" * 64,
             )
 
     received = {}
