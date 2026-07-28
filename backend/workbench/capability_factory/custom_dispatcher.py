@@ -246,7 +246,15 @@ class CustomCapabilityDispatcher:
             adapter.validate_against(implementation)
         except AdapterContractError as error:
             raise CustomDispatchPreflightError(f"implementation or adapter mismatch: {error}") from error
-        if binding.resolution_binding_ref != intent.binding_ref:
+        # Notebook persists the full, content-addressed resolution join while
+        # older direct CF4 callers pin the underlying resolver record. Both
+        # references are server-owned fields of this exact immutable binding;
+        # accepting either preserves the old ABI without treating an
+        # Agent-supplied arbitrary digest as a binding.
+        if intent.binding_ref not in {
+            binding.resolution_binding_ref,
+            binding.content_digest,
+        }:
             raise CustomDispatchPreflightError("binding does not match intent")
         if binding.implementation_ref != implementation.content_digest:
             raise CustomDispatchPreflightError("binding implementation does not match")

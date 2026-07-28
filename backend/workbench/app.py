@@ -10,13 +10,17 @@ Extracted from ``api.py`` in v1.6.10 (D1 decomposition, Phase 4).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from fastapi import FastAPI
 
 from .agent.trace import TraceSchemaDescriptor, register_trace_catalog
 from .api_errors import register_error_handlers
 from .capability_factory.notebook_catalog import CapabilityBindingCatalog
 from .capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
-from .capability_factory.runtime import CapabilityFactoryRuntime
+from .capability_factory.dependency_service import DependencyService
+from .capability_factory.runtime import CapabilityFactoryRuntime, DependencyAdmissionGate
 from .capability_factory.trace_contracts import trace_catalog as capability_trace_catalog
 from .control_plane import control_plane_capability, validate_control_plane
 from .domain_memory.service import DomainMemoryService
@@ -141,6 +145,50 @@ def configure_capability_factory_runtime(
     app.state.capability_factory_runtime = runtime
     app.state.notebook_capability_bindings = runtime.catalog if runtime else None
     app.state.notebook_execution_gateway = runtime.execution_gateway if runtime else None
+
+
+def configure_local_experimental_capability_runtime(
+    *,
+    authority_id: str,
+    catalog: CapabilityBindingCatalog,
+    dependency_service: DependencyService,
+    binding_factory: Callable[..., Any],
+    result_sink: Callable[[Any], None] | None = None,
+    enable: bool,
+) -> CapabilityFactoryRuntime:
+    """Explicitly install the local Darwin experimental execution profile.
+
+    This is a deployment/bootstrap operation, never an HTTP operation. The
+    caller must deliberately pass ``enable=True`` and provide server-owned
+    catalog, dependency service, and per-attempt binding factory objects. The
+    gateway still enforces the fixed experimental profile, the high-risk
+    ``model.custom`` mode, dependency admission, and the native canary before
+    any reservation or process spawn. There is no default or weaker fallback.
+    """
+
+    if enable is not True:
+        raise ValueError(
+            "local experimental capability execution requires enable=True"
+        )
+    if not isinstance(catalog, CapabilityBindingCatalog):
+        raise TypeError("catalog must be a CapabilityBindingCatalog")
+    if not isinstance(dependency_service, DependencyService):
+        raise TypeError("dependency_service must be a DependencyService")
+    if not callable(binding_factory):
+        raise TypeError("binding_factory must be callable")
+    gateway = AuthorizedCapabilityExecutionGateway(
+        binding_factory=binding_factory,
+        result_sink=result_sink,
+        dependency_binding_validator=DependencyAdmissionGate(dependency_service),
+    )
+    runtime = CapabilityFactoryRuntime(
+        authority_id=authority_id,
+        catalog=catalog,
+        execution_gateway=gateway,
+        dependency_service=dependency_service,
+    )
+    configure_capability_factory_runtime(runtime)
+    return runtime
 
 
 def configure_domain_memory_services(

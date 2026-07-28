@@ -59,6 +59,47 @@ def test_runtime_bootstrap_rejects_untrusted_runtime_type() -> None:
         configure_capability_factory_runtime(object())
 
 
+def test_local_experimental_bootstrap_requires_explicit_enable() -> None:
+    from workbench.app import configure_local_experimental_capability_runtime
+
+    catalog = CapabilityBindingCatalog(verifier=lambda _binding: None)
+    dependency_service = DependencyService()
+
+    with pytest.raises(ValueError, match="enable=True"):
+        configure_local_experimental_capability_runtime(
+            authority_id="authority.local.experimental",
+            catalog=catalog,
+            dependency_service=dependency_service,
+            binding_factory=lambda **_kwargs: None,
+            enable=False,
+        )
+
+
+def test_local_experimental_bootstrap_installs_dependency_gated_gateway() -> None:
+    from workbench.app import configure_local_experimental_capability_runtime
+
+    catalog = CapabilityBindingCatalog(verifier=lambda _binding: None)
+    dependency_service = DependencyService()
+    runtime = configure_local_experimental_capability_runtime(
+        authority_id="authority.local.experimental",
+        catalog=catalog,
+        dependency_service=dependency_service,
+        binding_factory=lambda **_kwargs: None,
+        enable=True,
+    )
+
+    try:
+        assert app.state.capability_factory_runtime is runtime
+        assert runtime.execution_enabled is True
+        assert runtime.dependency_service is dependency_service
+        assert isinstance(
+            runtime.execution_gateway.dependency_binding_validator,
+            DependencyAdmissionGate,
+        )
+    finally:
+        configure_capability_factory_runtime(None)
+
+
 def test_dependency_admission_gate_forwards_exact_dispatch_bundle() -> None:
     from workbench.capability_factory.dependency_service import DependencyService
 

@@ -129,7 +129,6 @@ def test_preflight_rejects_mismatched_identity_or_undeclared_consumer() -> None:
             operation_id="fit",
             requested_consumers=("notebook_option_planner",),
         )
-
     with pytest.raises(CustomDispatchPreflightError, match="consumer"):
         CustomCapabilityDispatcher.prepare(
             intent=intent,
@@ -140,6 +139,21 @@ def test_preflight_rejects_mismatched_identity_or_undeclared_consumer() -> None:
             requested_consumers=("diagnostic_adapter",),
         )
 
+
+def test_preflight_accepts_notebook_content_addressed_binding_reference() -> None:
+    intent, implementation, adapter, binding = _intent_and_records()
+    notebook_intent = replace(intent, binding_ref=binding.content_digest)
+
+    plan = CustomCapabilityDispatcher.prepare(
+        intent=notebook_intent,
+        binding=binding,
+        adapter=adapter,
+        implementation=implementation,
+        operation_id="fit",
+        requested_consumers=("notebook_option_planner", "report_projection"),
+    )
+
+    assert plan.binding_digest == binding.content_digest
 
 def test_preflight_rejects_operation_and_adapter_implementation_mismatch() -> None:
     intent, implementation, adapter, binding = _intent_and_records()

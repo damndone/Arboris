@@ -947,6 +947,447 @@ def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authoriza
         configure_capability_factory_runtime(None)
 
 
+def test_model_custom_route_runs_generated_adapter_through_local_experimental_gateway(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Exercise the complete user-confirmed local custom capability path."""
+
+    import sys
+    from datetime import datetime, timezone
+
+    import pytest
+
+    if sys.platform != "darwin":
+        pytest.skip("real local Darwin containment is only available on macOS")
+
+    from workbench.agent.context_compiler import (
+        freshness_dependency_fingerprint,
+        generation_context_hash,
+    )
+    from workbench.app import (
+        configure_capability_factory_runtime,
+        configure_local_experimental_capability_runtime,
+    )
+    from workbench.capability_factory.adapter_contract import (
+        AdapterContract,
+        AdapterSourceGenerator,
+        PythonAdapterExecutionBinding,
+        PythonAdapterExecutionGateway,
+    )
+    from workbench.capability_factory.control import ExecutionControlStore
+    from workbench.capability_factory.custom_dispatcher import CustomCapabilityDispatcher
+    from workbench.capability_factory.dependency_service import DependencyService
+    from workbench.capability_factory.execution_authorization import (
+        OptionExecutionAuthorizationStore,
+    )
+    from workbench.capability_factory.execution_receipt import CapabilityDispatchCoordinator
+    from workbench.capability_factory.notebook_bridge import (
+        CapabilityExecutionCompletion,
+        NotebookCapabilityBridge,
+        NotebookCapabilityDispatchBinding,
+    )
+    from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+    from workbench.capability_factory.supervisor import DurableSupervisorStore
+    from workbench.lineage.run_family import ensure_run_family_binding
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.executor_darwin import DarwinExperimentalExecutor
+    from workbench.native_containment.platform_darwin import DarwinCanaryHarness
+    from workbench.native_containment.policy import ContainmentPolicy
+    from workbench.agent.notebook import OptionDraft, TypedProposal
+
+    from test_capability_custom_dispatcher import _records
+    from test_capability_execution_receipt import (
+        _expectations,
+        _store_subjects,
+        _terminal_reconciliation,
+        _termination_proof,
+    )
+
+    project = make_project(tmp_path, name="project.alpha")
+    upload_sha = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
+    )
+    implementation, adapter_template, binding_template = _records()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: (
+            "def adapter(document):\n"
+            "    value = document['payload']['value']\n"
+            "    return {'status': 'ok', 'value': value}\n"
+        ),
+        output_root=(tmp_path / "generated-adapter").resolve(),
+    )
+    adapter = AdapterContract.from_implementation(
+        implementation=implementation,
+        adapter_id="adapter.route.local",
+        revision=1,
+        entrypoint_ref=source.entrypoint_ref,
+        operations=("fit", "predict", "model.custom"),
+        consumer_support=dict(adapter_template.consumer_support),
+    )
+    binding = replace(
+        binding_template,
+        adapter_ref=adapter.content_digest,
+        scope_ref="project.alpha",
+    )
+    catalog = CapabilityBindingCatalog(verifier=lambda _binding: None)
+    catalog.register(
+        "custom.route.adapter",
+        binding,
+        planner_projection={
+            "key": "custom.route.adapter",
+            "label": "Local experimental generated adapter",
+            "model_type": "custom.route.adapter",
+            "notebook_proposal_adapters": ["model.custom"],
+            "params": [],
+            "artifact_types": {"custom.route.result": "custom_json"},
+        },
+    )
+    now = datetime.now(timezone.utc)
+    requests: dict[str, ContainmentRequest] = {}
+    reports: dict[str, object] = {}
+    result_paths: list[Path] = []
+    dependency_checks: list[str] = []
+    run_ids: list[str] = []
+    dependency_service = DependencyService()
+    dependency_service.assert_execution_bundle = (  # type: ignore[method-assign]
+        lambda bundle_ref: dependency_checks.append(bundle_ref)
+    )
+
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    canary = DarwinCanaryHarness(
+        python_executable="/usr/bin/python3",
+        backend_executable="/usr/bin/sandbox-exec",
+    ).run(policy)
+    if canary.status != "supported":
+        pytest.skip(f"Darwin experimental canary unavailable: {canary.reason_code}")
+
+    def binding_factory(**kwargs):
+        authorization = kwargs["authorization"]
+        draft = kwargs["draft"]
+        notebook = NotebookService(project).get_notebook(kwargs["notebook_id"])
+        from workbench.projects import create_run
+
+        run = create_run(project, mode="custom")
+        ensure_run_family_binding(
+            project,
+            run.root,
+            rerun_of=None,
+            created_by="local_experimental_capability_factory",
+            run_family_id=notebook.run_family_id,
+        )
+        run_ids.append(run.run_id)
+        model = next(
+            node for node in draft["graph"]["nodes"] if node["node_type"] == "model"
+        )
+        parameters = dict(model["params"]["parameters"])
+        intent = NotebookCapabilityBridge.prepare_intent(
+            authorization=authorization,
+            run_id=run.run_id,
+            input_contract_ref=authorization.artifact_contract_ref,
+            output_contract_ref="a" * 64,
+            host_containment_ref="b" * 64,
+            host_validity_revision=1,
+            bundle_validity_revision=1,
+            evidence_validity_revision=1,
+            admission_validity_revision=1,
+        ).intent
+        plan = CustomCapabilityDispatcher.prepare(
+            intent=intent,
+            binding=binding,
+            adapter=adapter,
+            implementation=implementation,
+            operation_id="model.custom",
+            requested_consumers=("notebook_option_planner", "report_projection"),
+        )
+        auth_store = OptionExecutionAuthorizationStore(project, clock=lambda: now)
+        control_store = ExecutionControlStore(clock=lambda: now)
+        _store_subjects(control_store, intent, authorization.authorization_id, now)
+        supervisor = DurableSupervisorStore(project)
+        coordinator = CapabilityDispatchCoordinator(
+            authorization_store=auth_store,
+            control_store=control_store,
+            supervisor_store=supervisor,
+        )
+        input_root = (tmp_path / "adapter-input").resolve()
+        output_root = (tmp_path / "adapter-output").resolve()
+        adapter_binding = PythonAdapterExecutionBinding(
+            bundle_ref=intent.bundle_ref,
+            output_namespace_ref="c" * 64,
+            adapter=adapter,
+            source_artifact=source,
+            operation="fit",
+            payload=parameters,
+            input_root=input_root,
+            output_root=output_root,
+            interpreter=Path("/usr/bin/python3"),
+        )
+        result_paths.append(adapter_binding.result_path)
+        darwin_executor = DarwinExperimentalExecutor(
+            resolver=adapter_binding.prepare,
+            assessment_ref=binding.assessment_ref,
+            backend_executable="/usr/bin/sandbox-exec",
+        )
+        adapter_executor = PythonAdapterExecutionGateway(
+            binding=adapter_binding,
+            executor=darwin_executor,
+        )
+
+        class CapturingExecutor:
+            def spawn(self, request, current_policy, current_canary):
+                return adapter_executor.spawn(request, current_policy, current_canary)
+
+            def terminate(self, spawned):
+                return adapter_executor.terminate(spawned)
+
+            def __call__(self, request, current_policy, current_canary):
+                report = adapter_executor(request, current_policy, current_canary)
+                reports[request.attempt_id] = report
+                return report
+
+        executor = CapturingExecutor()
+
+        def request_factory(attempt_id: str) -> ContainmentRequest:
+            request = ContainmentRequest(
+                request_id="request.route.custom",
+                attempt_id=attempt_id,
+                intent_digest=intent.content_digest,
+                input_bundle_ref=intent.bundle_ref,
+                output_namespace_ref="c" * 64,
+                policy_digest=policy.content_digest,
+                harness_digest="d" * 64,
+            )
+            requests[attempt_id] = request
+            return request
+
+        def completion_factory(*, result, receipt, binding):
+            from workbench.capability_factory.execution_receipt import (
+                validate_artifact_contract_v11,
+            )
+            from workbench.contracts.agent.notebook_option import (
+                ArtifactContract,
+                ExpectedArtifact,
+            )
+
+            payload = adapter_binding.read_result(
+                requests[receipt.attempt_id], reports[receipt.attempt_id]
+            )
+            assert payload == {"status": "ok", "value": 42}
+            attempt = binding.coordinator.supervisor_store.read(receipt.attempt_id)
+            artifact = {
+                "artifact_id": "custom.route.result",
+                "artifact_type": "custom_json",
+                "step": "fit",
+                "lineage_ref": "e" * 64,
+                "consumer_projection_ref": authorization.consumer_projection_ref,
+                "run_attempt_ref": attempt.content_digest,
+                "option_revision_ref": authorization.artifact_contract_ref,
+                "artifact_ref": "f" * 64,
+                "facet": "parameters",
+            }
+            validation = validate_artifact_contract_v11(
+                ArtifactContract(
+                    expected=(
+                        ExpectedArtifact(
+                            "custom.route.result", "custom_json", step="fit"
+                        ),
+                    )
+                ),
+                [artifact],
+                option_revision_ref=authorization.artifact_contract_ref,
+                run_attempt_ref=attempt.content_digest,
+                consumer_projection_ref=authorization.consumer_projection_ref,
+                lineage_ref="e" * 64,
+                allowed_facets=("parameters",),
+            )
+            return CapabilityExecutionCompletion(
+                artifact_validation=validation,
+                object_graph_ref="1" * 64,
+                termination_proof=_termination_proof(
+                    attempt, authorization.authorization_id
+                ),
+                terminal_reconciliation=_terminal_reconciliation(
+                    attempt,
+                    authorization.authorization_id,
+                    validation,
+                    "1" * 64,
+                ),
+            )
+
+        return NotebookCapabilityDispatchBinding(
+            intent=intent,
+            plan=plan,
+            policy=policy,
+            canary=canary,
+            expectations=_expectations(intent, authorization.authorization_id),
+            request_factory=request_factory,
+            coordinator=coordinator,
+            broker=ContainmentBroker(
+                host_assessor=lambda _policy: canary,
+                executor=executor,
+                report_verifier=lambda **_kwargs: "2" * 64,
+                require_authenticated_reports=True,
+            ),
+            executor=executor,
+            owner_id="supervisor.route.custom",
+            lease_seconds=60,
+            attempt_id="attempt.route.custom",
+            lease_epoch=1,
+            executor_idempotency_key="executor-route-custom",
+            reservation_id="reservation.route.custom",
+            reservation_idempotency_key="reservation-route-custom",
+            now=now,
+            completion_factory=completion_factory,
+        )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del initial_evidence
+            option = OptionDraft(
+                rank=1,
+                rationale="The server-admitted generated adapter is the selected local experimental path.",
+                assumptions=("the controlled local fixture is representative",),
+                proposal=TypedProposal(
+                    proposal_id="proposal_route_custom",
+                    operation_id="model.custom",
+                    target={"dataset_source_id": upload_sha},
+                    preconditions={
+                        "context_version": "node-operation-context/v1",
+                        "context_fingerprint": context.context_id,
+                        "owner_resolution": "dataset_projection",
+                    },
+                    changes={
+                        "operation": "fit",
+                        "parameters": {"value": 42},
+                        "consumer_slots": [
+                            "notebook_option_planner",
+                            "report_projection",
+                        ],
+                    },
+                ),
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="custom.route.result",
+                        artifact_type="custom_json",
+                        required=True,
+                        count=1,
+                        step="fit",
+                    ),
+                ),
+                capability_id="custom.route.adapter",
+                option_id="opt_route_custom",
+            )
+            decision = RecommendationDecision(
+                recommendation_decision_id="rec_route_custom",
+                batch_id="batch_route_custom",
+                generation_context_hash=generation_context_hash(context),
+                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                evidence_pack_hashes=(),
+                comparison_protocol_refs=(),
+                candidate_option_ids=(option.option_id,),
+                outcome="recommended",
+                recommended_option_id=option.option_id,
+                reason_refs=(),
+            )
+            return SimpleNamespace(
+                option_drafts=(
+                    replace(
+                        option,
+                        recommendation_decision_id=decision.recommendation_decision_id,
+                        recommendation_status=decision.outcome,
+                    ),
+                ),
+                decision=decision,
+            )
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    runtime = configure_local_experimental_capability_runtime(
+        authority_id="authority.local.experimental",
+        catalog=catalog,
+        dependency_service=dependency_service,
+        binding_factory=binding_factory,
+        enable=True,
+    )
+    try:
+        client = TestClient(app)
+        params = {"project_root": str(project)}
+        notebook = client.post(
+            "/notebooks/projection",
+            params=params,
+            json={
+                "dataset": {
+                    "upload_sha256": upload_sha,
+                    "filename": "data.csv",
+                    "sheet_names": [],
+                },
+                "created_by": "ui",
+            },
+        ).json()
+        notebook_id = notebook["notebook_id"]
+        proposed = client.post(
+            f"/notebooks/{notebook_id}/options/propose",
+            params=params,
+            json={"count": 1},
+        )
+        assert proposed.status_code == 200, proposed.text
+        option = proposed.json()["options"][0]
+        assert option["risk_level"] == "high"
+        assert option["execution_modes"] == [
+            "materialize_only",
+            "experimental_confirm_and_execute",
+        ]
+        selected = client.post(
+            f"/notebooks/{notebook_id}/options/{option['option_id']}/decision",
+            params=params,
+            json={"decision": "selected", "actor": "ui"},
+        )
+        assert selected.status_code == 200, selected.text
+        executed = client.post(
+            f"/notebooks/{notebook_id}/options/{option['option_id']}/confirm-and-execute",
+            params=params,
+            json={
+                "option_revision": option["option_revision"],
+                "proposal_id": option["typed_proposal_id"],
+                "proposal_revision": option["typed_proposal_revision"],
+            },
+        )
+        assert executed.status_code == 200, executed.text
+        assert executed.json()["dispatch"]["status"] == "completed"
+        assert dependency_checks == [binding.dependency_bundle_ref]
+        assert result_paths and result_paths[0].read_text(encoding="utf-8") == (
+            '{"status":"ok","value":42}'
+        )
+        listed = client.get(
+            f"/notebooks/{notebook_id}/options", params=params
+        )
+        assert listed.status_code == 200, listed.text
+        result = listed.json()["execution_results"][option["option_id"]]
+        assert result["committed"] is True
+        assert result["capability_execution"]["dispatch_status"] == "completed"
+        assert run_ids == [executed.json()["dispatch"]["run_id"]]
+        assert result["capability_execution"]["object_graph_ref"] == "1" * 64
+        assert runtime.public_status()["execution_gateway_configured"] is True
+    finally:
+        configure_capability_factory_runtime(None)
+
+
 def test_notebook_route_uses_server_owned_catalog_for_v12_options(
     tmp_path: Path, monkeypatch
 ) -> None:
