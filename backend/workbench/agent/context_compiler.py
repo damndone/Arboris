@@ -336,6 +336,52 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def resolve_registered_artifact(
+    run_root: Path,
+    artifact_id: str,
+) -> tuple[str, str | None, dict[str, Any]] | None:
+    """Resolve one registered JSON artifact without accepting a caller path.
+
+    The compiler owns artifact-index reads.  Agent tools may request only a
+    durable artifact id, then apply their own public result projection to this
+    server-resolved payload.  A missing, malformed, escaping, or non-JSON
+    artifact remains unavailable rather than becoming an alternate file-read
+    capability.
+    """
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return None
+    entry = next(
+        (
+            item
+            for item in entries
+            if isinstance(item, dict) and item.get("artifact_id") == artifact_id
+        ),
+        None,
+    )
+    if entry is None:
+        return None
+    artifact_type = entry.get("artifact_type")
+    artifact_path = entry.get("path")
+    if not isinstance(artifact_type, str) or not isinstance(artifact_path, str):
+        return None
+    try:
+        resolved_root = run_root.resolve()
+        resolved_path = (run_root / artifact_path).resolve()
+        resolved_path.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    if not resolved_path.is_file():
+        return None
+    payload = _read_json(resolved_path)
+    if not isinstance(payload, dict):
+        return None
+    sha256 = entry.get("sha256")
+    return artifact_type, (sha256 if isinstance(sha256, str) else None), payload
+
+
 def _digest(value: Any) -> str:
     return "sha256:" + sha256_canonical(value)
 

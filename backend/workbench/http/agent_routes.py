@@ -105,6 +105,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - When inspect_operation_contract returns an option_vocabulary, that vocabulary is the model pack's own field list: build model_options only from its declared paths, closed value sets, and limits, and satisfy its cross_field_rules. A patch may name only the keys it changes; nested sections are merged key-wise. A patch outside the vocabulary is rejected when the proposal is created, and its rejection code tells you what to fix.
 - Never copy a displayed editable-schema value or model narrative as the source fact when a typed Analysis Loop tool returns canonical source facts, PlanDiff, and expected invariants; explain only those backend-owned facts.
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.
+- After a confirmed operation completes, its status is not numerical evidence. First use inspect_completed_operations for the current node, then inspect_operation_artifact only with an emitted artifact_id; cite that artifact id in the answer. If no public result view is available, say that the result cannot yet be verified. Never request raw rows, a filesystem path, or infer a figure from its title alone.
 """
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):

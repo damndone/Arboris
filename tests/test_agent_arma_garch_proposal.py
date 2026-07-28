@@ -175,14 +175,11 @@ def test_an_illegal_patch_is_rejected_before_the_user_can_confirm_it(
     assert code in str(excinfo.value)
 
 
-def test_a_pack_without_a_validator_is_left_alone(tmp_path: Path) -> None:
-    """OLS declares no patch validator; the precheck must not invent one."""
+def test_current_form_model_options_are_rejected_before_confirmation(tmp_path: Path) -> None:
+    """A non-time-series rerun also uses its current form as a real contract."""
 
-    project_root = _project(tmp_path, time_series=False)
-
-    canonical = _canonicalize(project_root, {"random_slope": False})
-
-    assert canonical["changes"]["model_options"] == {"random_slope": False}
+    with pytest.raises(ValueError, match="OLS_MODEL_OPTIONS_UNKNOWN_FIELD"):
+        _canonicalize(_project(tmp_path, time_series=False), {"random_slope": False})
 
 
 def test_an_empty_patch_is_left_to_the_generic_validator(tmp_path: Path) -> None:

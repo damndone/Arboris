@@ -10,8 +10,12 @@ import pytest
 from workbench.agent.core import AgentCore
 from workbench.agent.chains import ChainStore
 from workbench.agent.events import AgentEventStream
+from workbench.agent.model import ModelStreamEvent
+from workbench.agent.operations import OperationRecordStore
 from workbench.agent.orchestrator import WorkbenchOrchestrator
+from workbench.agent.proposals import ProposalConfirmation
 from workbench.agent.session import JsonlSessionRepository
+from workbench.agent.tools import ToolVisibleError
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 
@@ -20,6 +24,69 @@ class IdleAdapter:
     async def stream(self, request):
         if False:
             yield request
+
+
+class CompletedResultAnswerAdapter:
+    """Make the Agent consume its own completed-operation evidence before answering."""
+
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def stream(self, request):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "call-discover-completed",
+                    "tool_id": "inspect_completed_operations",
+                    "arguments": {
+                        "owner_run_id": "run-a",
+                        "op_node_id": "model:ols_1",
+                        "active_head_run_id": "run-a",
+                    },
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        if len(self.requests) == 2:
+            tool_message = next(
+                message
+                for message in request.messages
+                if message.get("role") == "tool"
+                and message.get("name") == "inspect_completed_operations"
+            )
+            discovered = json.loads(tool_message["content"])["output"]["completed_operations"][0]
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "call-read-completed-artifact",
+                    "tool_id": "inspect_operation_artifact",
+                    "arguments": {
+                        "owner_run_id": "run-a",
+                        "op_node_id": "model:ols_1",
+                        "active_head_run_id": "run-a",
+                        "operation_record_id": discovered["operation_record_id"],
+                        "artifact_id": discovered["artifact_ids"][0],
+                    },
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        tool_message = next(
+            message
+            for message in request.messages
+            if message.get("role") == "tool"
+            and message.get("name") == "inspect_operation_artifact"
+        )
+        evidence = json.loads(tool_message["content"])["output"]["artifact_evidence"]
+        mean = evidence["result"]["variables"]["outcome"]["mean"]
+        artifact_id = evidence["evidence_ref"]["artifact_id"]
+        yield ModelStreamEvent.text_delta(
+            request.request_id,
+            f"The completed summary reports an outcome mean of {mean} (artifact: {artifact_id}).",
+        )
+        yield ModelStreamEvent.done(request.request_id)
 
 
 def _write_project_run(project_root: Path) -> None:
@@ -125,6 +192,7 @@ def _make_orchestrator(
     tmp_path: Path,
     *,
     context_provider=None,
+    adapter=None,
 ) -> WorkbenchOrchestrator:
     repository = JsonlSessionRepository(tmp_path / "workbench")
     repository.create_session("main-session", chain_id="project", role="main")
@@ -133,7 +201,7 @@ def _make_orchestrator(
     agent = AgentCore(
         repository,
         events,
-        IdleAdapter(),
+        adapter or IdleAdapter(),
         session_id="chain-session",
     )
     orchestrator = WorkbenchOrchestrator(
@@ -144,6 +212,107 @@ def _make_orchestrator(
     )
     orchestrator.register_chain("chain-a", "chain-session", agent)
     return orchestrator
+
+
+def _write_completed_workflow_result(
+    project_root: Path,
+    *,
+    proposal_id: str = "proposal-workflow-result",
+    session_id: str = "chain-session",
+    chain_id: str = "chain-a",
+    artifact_id: str = "statistical_exploration_summary",
+    artifact_type: str = "statistical_exploration",
+    artifact_payload: dict | None = None,
+) -> tuple[str, str]:
+    """Persist one completed workflow record with a public result artifact."""
+
+    run_root = project_root / "runs" / "run-a"
+    artifact_path = run_root / "artifacts" / artifact_type / f"{artifact_id}.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            artifact_payload
+            or {
+                "schema_version": "statistical-exploration.v1",
+                "source_artifact_id": "cleaned_dataset",
+                "source_sha256": "source-sha",
+                "spec": {
+                    "operation": "summarize",
+                    "selected_columns": ["outcome"],
+                    "filters": [],
+                },
+                "result": {
+                    "schema_version": "statistical-exploration.v1",
+                    "operation": "summarize",
+                    "source_row_count": 4,
+                    "filtered_row_count": 4,
+                    "missing_policy": "variablewise",
+                    "variables": {
+                        "outcome": {
+                            "obs": 4,
+                            "mean": 2.5,
+                            "std_dev": 1.29,
+                            "min": 1.0,
+                            "max": 4.0,
+                            "raw_rows": [{"outcome": 1.0}],
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": artifact_id,
+                        "artifact_type": artifact_type,
+                        "path": str(artifact_path.relative_to(run_root)),
+                        "sha256": "artifact-sha",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    confirmation = ProposalConfirmation(
+        proposal_id=proposal_id,
+        operation_id="operation.multi_step",
+        operation_version="v1",
+        revision=1,
+        fingerprint="sha256:proposal-workflow-result",
+        session_id=session_id,
+        chain_id=chain_id,
+        command_id="command-workflow-result",
+        target={"run_id": "run-a", "node_ref": "model:ols_1"},
+        preconditions={"active_head_run_id": "run-a"},
+        actor_type="user",
+        confirmed_at="2026-07-28T00:00:00+00:00",
+        status="confirmed",
+        changes={"steps": []},
+    )
+    store = OperationRecordStore(project_root / "workbench")
+    pending = store.create_pending(confirmation)
+    completed = store.append_status(
+        pending.record_id,
+        "completed",
+        outputs={
+            "workflow_state": {
+                "workflow_id": "workflow-result",
+                "status": "completed",
+                "steps": {
+                    "summary": {
+                        "status": "completed",
+                        "artifact_ids": [artifact_id],
+                        "row_counts": {"source": 4, "filtered": 4},
+                    }
+                },
+            }
+        },
+    )
+    return completed.record_id, artifact_id
 
 
 def _load_provider_type():
@@ -412,6 +581,299 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         for path in project_root.rglob("*")
         if path.is_file()
     }
+
+
+def test_completed_workflow_result_is_discoverable_as_bounded_evidence(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    operation_record_id, artifact_id = _write_completed_workflow_result(project_root)
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    registry = orchestrator.tool_registry("chain-a")
+
+    tool_ids = {item["tool_id"] for item in registry.descriptors()}
+    assert "inspect_completed_operations" in tool_ids
+    assert "inspect_operation_artifact" in tool_ids
+
+    discovery = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-completed-operations",
+                "tool_id": "inspect_completed_operations",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert discovery.ok is True
+    assert discovery.output["completed_operations"][0] == {
+        "operation_record_id": operation_record_id,
+        "operation_id": "operation.multi_step",
+        "operation_version": "v1",
+        "status": "completed",
+        "artifact_ids": [artifact_id],
+        "workflow": {
+            "workflow_id": "workflow-result",
+            "status": "completed",
+            "steps": [
+                {
+                    "step_id": "summary",
+                    "status": "completed",
+                    "artifact_ids": [artifact_id],
+                    "row_counts": {"source": 4, "filtered": 4},
+                }
+            ],
+        },
+    }
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-operation-artifact",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": operation_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    evidence = result.output["artifact_evidence"]
+    assert evidence["evidence_ref"] == {
+        "operation_record_id": operation_record_id,
+        "artifact_id": artifact_id,
+        "artifact_type": "statistical_exploration",
+        "sha256": "artifact-sha",
+    }
+    assert evidence["result"]["variables"]["outcome"] == {
+        "obs": 4,
+        "mean": 2.5,
+        "std_dev": 1.29,
+        "min": 1.0,
+        "max": 4.0,
+    }
+    assert "raw_rows" not in json.dumps(evidence["result"])
+    assert "raw_rows" in result.output["omitted_sections"]
+
+
+def test_rerun_precheck_rejects_non_option_fields_before_confirmation(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    with pytest.raises(ToolVisibleError, match="OLS_MODEL_OPTIONS_UNKNOWN_FIELD"):
+        orchestrator._precheck_model_options(
+            owner_run_id="run-a",
+            changes={"model_options": {"x": ["x1", "x2"]}},
+        )
+
+
+def test_operation_artifact_rejects_a_record_from_another_chain(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    _write_completed_workflow_result(project_root)
+    foreign_record_id, artifact_id = _write_completed_workflow_result(
+        project_root,
+        proposal_id="proposal-workflow-result-foreign",
+        session_id="other-session",
+        chain_id="chain-b",
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-foreign-operation-artifact",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": foreign_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is False
+    assert result.error == "ToolVisibleError"
+    assert "OPERATION_RESULT_NOT_IN_SCOPE" in result.error_details[0]["message"]
+
+
+def test_operation_artifact_refuses_an_unregistered_figure_payload(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    operation_record_id, artifact_id = _write_completed_workflow_result(
+        project_root,
+        artifact_id="plot-packet",
+        artifact_type="figure_packet",
+        artifact_payload={
+            "series": [{"x": 1, "y": 2}],
+            "rendered_path": "artifacts/figures/plot.png",
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-unregistered-figure",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": operation_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    evidence = result.output["artifact_evidence"]
+    assert evidence["available"] is False
+    assert evidence["status"] == "public_result_not_available"
+    assert evidence["result"] is None
+    assert "registered public Agent result view" in evidence["reason"]
+    assert "series" not in json.dumps(result.output)
+    assert "raw_artifact_payloads" in result.output["omitted_sections"]
+
+
+def test_operation_artifact_enforces_a_total_public_result_budget(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    operation_record_id, artifact_id = _write_completed_workflow_result(
+        project_root,
+        artifact_payload={
+            "result": {
+                "variables": {
+                    f"variable_{index}_{'x' * 120}": {"note": "y" * 400}
+                    for index in range(24)
+                }
+            }
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-large-public-result",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": operation_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    public_result = result.output["artifact_evidence"]["result"]
+    assert len(json.dumps(public_result)) <= 7_000
+    assert public_result["variables"]["_omitted_item_count"] > 0
+
+
+def test_operation_artifact_reserves_its_omission_marker(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    operation_record_id, artifact_id = _write_completed_workflow_result(
+        project_root,
+        artifact_payload={
+            "result": {
+                "_omitted_item_count": 999,
+                "variables": {"outcome": {"mean": 2.5}},
+            }
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-reserved-omission-marker",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": operation_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    public_result = result.output["artifact_evidence"]["result"]
+    assert "_omitted_item_count" not in public_result
+    assert public_result["variables"]["outcome"]["mean"] == 2.5
+
+
+def test_agent_uses_completed_operation_evidence_before_answering(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    _write_completed_workflow_result(project_root)
+    provider = _load_provider_type()(project_root)
+    adapter = CompletedResultAnswerAdapter()
+    orchestrator = _make_orchestrator(
+        tmp_path,
+        context_provider=provider,
+        adapter=adapter,
+    )
+
+    command = orchestrator.dispatch_to_chain(
+        "chain-a",
+        objective="Read the completed summary and answer with its mean.",
+        allowed_operations=["inspect"],
+        budget={"max_steps": 4, "timeout_s": 30},
+        context_fingerprint="nocv1:test",
+    )
+    answer = asyncio.run(orchestrator.execute(command.command_id))
+
+    assert answer == (
+        "The completed summary reports an outcome mean of 2.5 "
+        "(artifact: statistical_exploration_summary)."
+    )
+    assert len(adapter.requests) == 3
 
 
 def test_managed_chain_context_tool_rejects_a_forged_active_head(

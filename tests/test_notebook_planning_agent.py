@@ -194,6 +194,71 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert len(adapter.requests) == 2
 
 
+def test_provider_can_request_three_distinct_bounded_inspections_before_submitting(
+    tmp_path: Path,
+) -> None:
+    """Valid sequential inspections must not exhaust a two-turn implementation limit."""
+
+    inspection_ids = ("profile.v1", "quality.v1", "time_index.v1")
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": f"inspect-{inspection_id}",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": inspection_id,
+                            "target_ref": "run:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            }
+            for inspection_id in inspection_ids
+        ]
+        + [
+            {
+                "tool_call_id": "submit-after-inspections",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            }
+        ]
+    )
+
+    def inspect(requests: tuple[InspectionRequest, ...], current: DataEvidencePackV1) -> DataEvidencePackV1:
+        del current
+        inspection_id = requests[0].inspection_id
+        if inspection_id == "time_index.v1":
+            return _evidence()
+        return DataEvidencePackV1(
+            source_id="run:run_001",
+            records=(
+                EvidenceRecord(
+                    evidence_id=f"evidence:{inspection_id}",
+                    inspection_id=inspection_id,
+                    source_refs=(f"{inspection_id}:run_001",),
+                    protocol_version=f"{inspection_id}/v1",
+                    status="completed",
+                    result_hash=f"sha256:{inspection_id}",
+                ),
+            ),
+        )
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=inspect,
+    ).plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=DataEvidencePackV1("run:run_001", ()),
+    )
+
+    assert [request.inspection_id for request in result.inspection_requests] == list(inspection_ids)
+    assert len(result.option_drafts) == 1
+    assert len(adapter.requests) == 4
+
+
 def test_model_custom_planning_contract_exposes_intent_but_rejects_authority_fields(
     tmp_path: Path,
 ) -> None:

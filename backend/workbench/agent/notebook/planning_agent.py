@@ -461,7 +461,7 @@ class NotebookPlanningAgent:
         operation_registry: OperationRegistry | None = None,
         proposal_validator: ProposalValidator | None = None,
         available_inspections: Sequence[str] | None = None,
-        max_inspection_rounds: int = 2,
+        max_inspection_rounds: int = 5,
         max_contract_corrections: int = 2,
         model_timeout_s: float = 120.0,
     ) -> None:
@@ -481,8 +481,8 @@ class NotebookPlanningAgent:
         self.available_inspections = frozenset(
             available_inspections if available_inspections is not None else INSPECTIONS
         )
-        if max_inspection_rounds < 1 or max_inspection_rounds > 2:
-            raise ValueError("max_inspection_rounds must be 1 or 2")
+        if max_inspection_rounds < 1 or max_inspection_rounds > 5:
+            raise ValueError("max_inspection_rounds must be between 1 and 5")
         if max_contract_corrections < 0 or max_contract_corrections > 2:
             raise ValueError("max_contract_corrections must be between 0 and 2")
         self.max_inspection_rounds = max_inspection_rounds
@@ -538,8 +538,10 @@ class NotebookPlanningAgent:
                     "Use only the two typed Notebook tools. Never invent metrics or executable capability ids. "
                     "Inspection ids are exactly profile.v1, quality.v1, time_index.v1, sample.v1, "
                     "or forecast_rolling_origin.v1; use dataset:active for a dataset projection and "
-                    "run:active for a run projection. Request evidence first, then submit only typed options "
-                    "whose claims cite completed evidence refs. Every comparative_claim must literally contain "
+                    "run:active for a run projection. Request evidence before submitting options. "
+                    f"You may make at most {self.max_inspection_rounds} inspection turns, each requesting "
+                    "one to five distinct ids; after enough evidence is available, submit the option batch. "
+                    "Submitted typed options must cite completed evidence refs. Every comparative_claim must literally contain "
                     "the evidence_id of one of that option's evidence_refs; do not use unsupported prose. "
                     "Copy execution_pins exactly: for a dataset proposal use model.genesis and set "
                     "target.dataset_source_id exactly to context.projection_source.upload_sha256; for a run "
@@ -593,6 +595,7 @@ class NotebookPlanningAgent:
             for record in evidence.records
             if record.status == "completed"
         }
+        inspection_rounds = 0
         contract_corrections = 0
         for round_number in range(
             1, self.max_inspection_rounds + 2 + self.max_contract_corrections
@@ -605,20 +608,6 @@ class NotebookPlanningAgent:
             tool_id = call.get("tool_id")
             arguments = call.get("arguments")
             if tool_id == "request_notebook_inspections":
-                if round_number > self.max_inspection_rounds:
-                    error = NotebookPlanningContractError("inspection round limit exceeded")
-                    if contract_corrections < self.max_contract_corrections:
-                        contract_corrections += 1
-                        self._append_contract_correction(
-                            messages,
-                            call=call,
-                            error=error,
-                            context=context,
-                            evidence=evidence,
-                            correction_number=contract_corrections,
-                        )
-                        continue
-                    raise error
                 try:
                     requests = _inspection_requests(arguments)
                     unavailable = sorted(
@@ -654,6 +643,20 @@ class NotebookPlanningAgent:
                         correction_number=contract_corrections,
                     )
                     continue
+                if inspection_rounds >= self.max_inspection_rounds:
+                    error = NotebookPlanningContractError("inspection round limit exceeded")
+                    if contract_corrections >= self.max_contract_corrections:
+                        raise error
+                    contract_corrections += 1
+                    self._append_contract_correction(
+                        messages,
+                        call=call,
+                        error=error,
+                        context=context,
+                        evidence=evidence,
+                        correction_number=contract_corrections,
+                    )
+                    continue
                 requests_seen.extend(requests)
                 if self.inspection_executor is None:
                     raise NotebookPlanningUnavailable("inspection executor is not configured")
@@ -661,6 +664,7 @@ class NotebookPlanningAgent:
                 inspection_pack = await result if hasattr(result, "__await__") else result
                 if not isinstance(inspection_pack, DataEvidencePackV1):
                     raise NotebookPlanningContractError("inspection executor returned no Evidence Pack")
+                inspection_rounds += 1
                 evidence = self._append_evidence_pack(evidence, inspection_pack)
                 completed_inspection_ids.update(
                     record.inspection_id

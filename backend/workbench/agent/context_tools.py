@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json
+from ..contracts.common.envelope import ContractError
 from .chains import ChainHeadConflict, ChainStore
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..diagnostic_preview.artifact_manifest import build_artifact_manifest
@@ -20,7 +21,8 @@ from ..analysis_loop.time_series_compare import read_time_series_artifacts as _r
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
-from .operations import OperationRegistry
+from .context_compiler import resolve_registered_artifact
+from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
 from .tools import ToolContext, ToolDefinition, ToolVisibleError
 
@@ -89,6 +91,24 @@ class InspectDataSchemaRequest:
     owner_run_id: str
     op_node_id: str
     active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectCompletedOperationsRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectOperationArtifactRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+    operation_record_id: str
+    artifact_id: str
 
 
 class OperationContractUnavailableError(ValueError):
@@ -288,6 +308,50 @@ class NodeOperationContextProvider:
                 )
             )
 
+        def inspect_completed_operations(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_completed_operations(
+                InspectCompletedOperationsRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-completed-operations"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                ),
+                chain_id=chain_id,
+                session_id=session_id,
+            )
+
+        def inspect_operation_artifact(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_operation_artifact(
+                InspectOperationArtifactRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-operation-artifact"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                    operation_record_id=str(arguments["operation_record_id"]),
+                    artifact_id=str(arguments["artifact_id"]),
+                ),
+                chain_id=chain_id,
+                session_id=session_id,
+            )
+
         def inspect_analysis_loop_context_tool(
             arguments: dict[str, Any],
             context: ToolContext,
@@ -362,6 +426,56 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_data_schema,
+            ),
+            ToolDefinition(
+                tool_id="inspect_completed_operations",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_completed_operations,
+            ),
+            ToolDefinition(
+                tool_id="inspect_operation_artifact",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                        "operation_record_id",
+                        "artifact_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                        "operation_record_id": {"type": "string"},
+                        "artifact_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_operation_artifact,
             ),
             ToolDefinition(
                 tool_id="inspect_analysis_loop_context",
@@ -711,27 +825,50 @@ class NodeOperationContextProvider:
 
         run_root = self.project_root / "runs" / owner_run_id
         try:
+            run_inputs = read_run_inputs(run_root)
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            run_inputs = {}
+        try:
             manifest = read_json(run_root / "run_manifest.json")
         except (FileNotFoundError, OSError, TypeError, ValueError):
-            return
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
         contract = resolve_operation_contract(stage="model", manifest=manifest)
-        if contract is None:
+        if contract is not None:
+            artifacts, _metadata = _read_time_series_artifacts(run_root)
+            current = artifacts.get("ts.analysis_contract")
+            if not isinstance(current, dict):
+                current = _analysis_contract_from_run_inputs(run_inputs)
+            if isinstance(current, dict):
+                # A server-persisted analysis contract is more authoritative
+                # than a legacy form's model_type.  This matters for reruns
+                # whose historical form predates the selected model pack.
+                validate_model_options_patch(
+                    contract.op_type,
+                    current_contract=current,
+                    patch=patch,
+                )
+                return
+
+        source_form = run_inputs.get("form") if isinstance(run_inputs, dict) else None
+        if not isinstance(source_form, dict):
             return
-        artifacts, _metadata = _read_time_series_artifacts(run_root)
-        current = artifacts.get("ts.analysis_contract")
-        if not isinstance(current, dict):
-            try:
-                run_inputs = read_run_inputs(run_root)
-            except (FileNotFoundError, OSError, TypeError, ValueError):
-                run_inputs = {}
-            current = _analysis_contract_from_run_inputs(run_inputs)
-        if not isinstance(current, dict):
-            return
-        validate_model_options_patch(
-            contract.op_type,
-            current_contract=current,
-            patch=patch,
-        )
+        from ..model_options import ModelOptionsError
+        from ..services.run_service import merge_form_overrides
+
+        try:
+            # This is the same pure merge/bind path the rerun service uses
+            # before allocating a child run.  It validates any model pack
+            # whose current form is the authoritative contract source.
+            merge_form_overrides(
+                source_form,
+                {"model_options": dict(patch)},
+            )
+        except ModelOptionsError as exc:
+            error = ContractError(str(exc))
+            error.code = exc.code  # type: ignore[attr-defined]
+            raise error from exc
 
     def inspect_diagnostics(
         self,
@@ -939,6 +1076,148 @@ class NodeOperationContextProvider:
             },
             "omitted_sections": ["raw_artifact_payloads"],
         }
+
+    def inspect_completed_operations(
+        self,
+        request: InspectCompletedOperationsRequest,
+        *,
+        chain_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Discover completed operations only within the current Agent scope."""
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        records = self._completed_operation_records(
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            chain_id=chain_id,
+            session_id=session_id,
+        )
+        omitted = max(len(records) - 8, 0)
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "completed_operations": [
+                _bounded_completed_operation(record) for record in records[:8]
+            ],
+            "omitted_counts": (
+                {"completed_operations": omitted} if omitted else {}
+            ),
+            "omitted_sections": ["raw_artifact_payloads"],
+        }
+
+    def inspect_operation_artifact(
+        self,
+        request: InspectOperationArtifactRequest,
+        *,
+        chain_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Return one declared operation artifact through a public result view.
+
+        The caller supplies durable ids, never a path.  The ids are accepted
+        only after checking the current node/Chain scope and the operation's
+        own emitted artifact list.
+        """
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        records = self._completed_operation_records(
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            chain_id=chain_id,
+            session_id=session_id,
+        )
+        record = next(
+            (
+                candidate
+                for candidate in records
+                if candidate.record_id == request.operation_record_id
+            ),
+            None,
+        )
+        if record is None:
+            raise ToolVisibleError(
+                "OPERATION_RESULT_NOT_IN_SCOPE: the completed operation is not "
+                "available in this Chain and node scope."
+            )
+        allowed_artifacts = set(_operation_artifact_ids(record))
+        if request.artifact_id not in allowed_artifacts:
+            raise ToolVisibleError(
+                "OPERATION_ARTIFACT_NOT_DECLARED: the artifact was not emitted "
+                "by this completed operation."
+            )
+        artifact = resolve_registered_artifact(
+            self.project_root / "runs" / request.owner_run_id,
+            request.artifact_id,
+        )
+        if artifact is None:
+            raise ToolVisibleError(
+                "OPERATION_ARTIFACT_UNAVAILABLE: the declared artifact is not "
+                "available from the active run."
+            )
+        artifact_type, artifact_sha256, payload = artifact
+        public_result, omitted_sections = _public_operation_artifact_result(
+            artifact_type,
+            payload,
+        )
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "artifact_evidence": {
+                "available": public_result is not None,
+                "status": (
+                    "complete"
+                    if public_result is not None
+                    else "public_result_not_available"
+                ),
+                "evidence_ref": {
+                    "operation_record_id": record.record_id,
+                    "artifact_id": request.artifact_id,
+                    "artifact_type": artifact_type,
+                    "sha256": artifact_sha256,
+                },
+                "result": public_result,
+                "reason": (
+                    None
+                    if public_result is not None
+                    else "This artifact type has no registered public Agent result view."
+                ),
+            },
+            "omitted_sections": omitted_sections,
+        }
+
+    def _completed_operation_records(
+        self,
+        *,
+        owner_run_id: str,
+        op_node_id: str,
+        chain_id: str,
+        session_id: str,
+    ) -> list[OperationRecord]:
+        """Select only terminal, caller-owned parent operation records."""
+
+        store = OperationRecordStore(self.project_root / "workbench", create=False)
+        records = [
+            record
+            for record in store.list_records()
+            if record.status == "completed"
+            and record.chain_id == chain_id
+            and record.agent_session_id == session_id
+            and record.target.get("run_id") == owner_run_id
+            and record.target.get("node_ref") == op_node_id
+            and record.workflow_step_id is None
+        ]
+        return sorted(records, key=lambda record: (record.updated_at, record.record_id), reverse=True)
 
     def inspect_data_schema(
         self,
@@ -1195,6 +1474,191 @@ def _bounded_artifact_manifest(
         if not isinstance(section, str) or not isinstance(value, dict):
             continue
         bounded[section] = {key: value[key] for key in allowed if key in value}
+    return bounded
+
+
+def _operation_artifact_ids(record: OperationRecord) -> list[str]:
+    """Collect only artifact ids already recorded as this operation's output."""
+
+    artifact_ids: list[str] = []
+    direct = record.outputs.get("artifact_ids")
+    if isinstance(direct, list):
+        artifact_ids.extend(item for item in direct if isinstance(item, str) and item)
+    workflow_state = record.outputs.get("workflow_state")
+    steps = workflow_state.get("steps") if isinstance(workflow_state, dict) else None
+    if isinstance(steps, dict):
+        for step in steps.values():
+            step_artifacts = step.get("artifact_ids") if isinstance(step, dict) else None
+            if isinstance(step_artifacts, list):
+                artifact_ids.extend(
+                    item for item in step_artifacts if isinstance(item, str) and item
+                )
+    return list(dict.fromkeys(artifact_ids))
+
+
+def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
+    workflow_state = record.outputs.get("workflow_state")
+    steps = workflow_state.get("steps") if isinstance(workflow_state, dict) else None
+    workflow_steps: list[dict[str, Any]] = []
+    if isinstance(steps, dict):
+        for step_id, step in sorted(steps.items()):
+            if not isinstance(step_id, str) or not isinstance(step, dict):
+                continue
+            artifact_ids = step.get("artifact_ids")
+            row_counts = step.get("row_counts")
+            workflow_steps.append(
+                {
+                    "step_id": step_id,
+                    "status": str(step.get("status") or "unknown"),
+                    "artifact_ids": [
+                        item
+                        for item in (artifact_ids if isinstance(artifact_ids, list) else [])
+                        if isinstance(item, str) and item
+                    ][:16],
+                    "row_counts": {
+                        str(key): value
+                        for key, value in (row_counts.items() if isinstance(row_counts, dict) else ())
+                        if isinstance(value, int) and not isinstance(value, bool)
+                    },
+                }
+            )
+    return {
+        "operation_record_id": record.record_id,
+        "operation_id": record.operation_id,
+        "operation_version": record.operation_version,
+        "status": record.status,
+        "artifact_ids": _operation_artifact_ids(record)[:16],
+        "workflow": {
+            "workflow_id": (
+                workflow_state.get("workflow_id")
+                if isinstance(workflow_state, dict)
+                and isinstance(workflow_state.get("workflow_id"), str)
+                else None
+            ),
+            "status": (
+                workflow_state.get("status")
+                if isinstance(workflow_state, dict)
+                and isinstance(workflow_state.get("status"), str)
+                else None
+            ),
+            "steps": workflow_steps[:16],
+        },
+    }
+
+
+_PUBLIC_RESULT_DENIED_KEYS = frozenset(
+    {
+        "_omitted_item_count",
+        "data",
+        "dataset",
+        "file",
+        "filename",
+        "path",
+        "raw_rows",
+        "rows",
+        "records",
+        "rendered_path",
+        "source_rows",
+        "row_ids",
+        "values",
+    }
+)
+
+
+@dataclass
+class _PublicResultBudget:
+    """One aggregate budget for a public artifact projection."""
+
+    remaining_items: int = 96
+    remaining_string_characters: int = 2048
+    remaining_key_characters: int = 1600
+    omitted_items: int = 0
+
+
+def _public_operation_artifact_result(
+    artifact_type: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Project a declared result type; unknown types remain deliberately opaque."""
+
+    if artifact_type != "statistical_exploration":
+        return None, ["raw_artifact_payloads"]
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None, ["raw_artifact_payloads"]
+    return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+def _bounded_public_result_value(
+    value: Any,
+    *,
+    depth: int = 0,
+    budget: _PublicResultBudget | None = None,
+) -> Any:
+    """Keep a numerical result compact and reject row-shaped/raw payload fields."""
+
+    budget = budget or _PublicResultBudget()
+    if budget.remaining_items <= 0:
+        budget.omitted_items += 1
+        return "[omitted: result item budget]"
+    budget.remaining_items -= 1
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        limit = min(300, budget.remaining_string_characters)
+        if limit <= 0:
+            budget.omitted_items += 1
+            return "[omitted: result string budget]"
+        budget.remaining_string_characters -= limit
+        if len(value) > limit:
+            budget.omitted_items += 1
+        return value[:limit]
+    if depth >= 4:
+        budget.omitted_items += 1
+        return "[omitted: nesting limit]"
+    if isinstance(value, list):
+        bounded_list: list[Any] = []
+        for item in value:
+            if len(bounded_list) >= 16 or budget.remaining_items <= 0:
+                budget.omitted_items += 1
+                break
+            if isinstance(item, (dict, list, str, int, float, bool)) or item is None:
+                bounded_list.append(
+                    _bounded_public_result_value(item, depth=depth + 1, budget=budget)
+                )
+        return bounded_list
+    if not isinstance(value, dict):
+        budget.omitted_items += 1
+        return "[omitted: unsupported value]"
+    bounded: dict[str, Any] = {}
+    omissions_at_entry = budget.omitted_items
+    for key in sorted(value):
+        if not isinstance(key, str):
+            continue
+        normalized = key.lower()
+        if normalized in _PUBLIC_RESULT_DENIED_KEYS or normalized.startswith("raw_"):
+            continue
+        if (
+            len(bounded) >= 24
+            or budget.remaining_items <= 0
+            or budget.remaining_key_characters <= 0
+        ):
+            budget.omitted_items += 1
+            break
+        key_limit = min(64, budget.remaining_key_characters)
+        bounded_key = key[:key_limit]
+        budget.remaining_key_characters -= len(bounded_key)
+        if len(key) > key_limit:
+            budget.omitted_items += 1
+        if bounded_key in bounded:
+            budget.omitted_items += 1
+            continue
+        bounded[bounded_key] = _bounded_public_result_value(
+            value[key], depth=depth + 1, budget=budget
+        )
+    omitted_here = budget.omitted_items - omissions_at_entry
+    if omitted_here:
+        bounded["_omitted_item_count"] = omitted_here
     return bounded
 
 
