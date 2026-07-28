@@ -613,6 +613,164 @@ def test_validation_harness_marks_e2_independent_oracle_verified_without_holdout
     assert result.execution_allowed is False
 
 
+def test_validation_harness_promotes_real_local_adapter_through_independent_oracle(tmp_path):
+    """Run a bounded generated adapter before deriving E2 verification."""
+
+    import sys
+    from pathlib import Path
+
+    import pytest
+
+    from workbench.capability_factory.adapter_contract import (
+        AdapterContract,
+        AdapterSourceGenerator,
+        PythonAdapterExecutionBinding,
+        PythonAdapterExecutionGateway,
+    )
+    from workbench.capability_factory.validation_contract import ValidationBundle
+    from workbench.capability_factory.validation_runner import OracleObservation, ValidationRunner
+    from workbench.native_containment.broker import ContainmentBroker
+    from workbench.native_containment.contracts import ContainmentRequest, ResourceBudget
+    from workbench.native_containment.executor_darwin import DarwinExperimentalExecutor
+    from workbench.native_containment.platform_darwin import DarwinCanaryHarness
+    from workbench.native_containment.policy import ContainmentPolicy
+    from test_capability_custom_dispatcher import _records
+
+    if sys.platform != "darwin":
+        pytest.skip("real local Darwin validation is only available on macOS")
+
+    implementation, _adapter_template, _binding_template = _records()
+    source = AdapterSourceGenerator().generate(
+        implementation=implementation,
+        provider=lambda _context: (
+            "def adapter(document):\n"
+            "    value = document['payload']['value']\n"
+            "    return {'estimate': value * 2}\n"
+        ),
+        output_root=(tmp_path / "validation-source").resolve(),
+    )
+    adapter = AdapterContract.from_implementation(
+        implementation=implementation,
+        adapter_id="adapter.validation.local",
+        revision=1,
+        entrypoint_ref=source.entrypoint_ref,
+        operations=("fit",),
+        consumer_support=dict(implementation.consumer_support),
+    )
+    sealed = _sealed(adapter_ref=adapter.content_digest)
+    case = _case()
+    validation_bundle = ValidationBundle(
+        bundle_id="validation.real-local",
+        revision=1,
+        adapter_ref=sealed.adapter_ref,
+        cases=(case,),
+    )
+    protocol = _protocol(evidence_floor="E2")
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    python_executable = Path("/usr/bin/python3")
+    if not python_executable.is_file():
+        pytest.skip("canonical Darwin Python interpreter is unavailable")
+    canary = DarwinCanaryHarness(
+        python_executable=str(python_executable),
+        backend_executable="/usr/bin/sandbox-exec",
+    ).run(policy)
+    if canary.status != "supported":
+        pytest.skip(f"Darwin experimental canary unavailable: {canary.reason_code}")
+
+    request = ContainmentRequest(
+        request_id="request.validation.real-local",
+        attempt_id="attempt.validation.real-local",
+        intent_digest=sealed.bundle_ref,
+        input_bundle_ref=sealed.bundle_ref,
+        output_namespace_ref="9" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="8" * 64,
+    )
+    adapter_binding = PythonAdapterExecutionBinding(
+        bundle_ref=sealed.bundle_ref,
+        output_namespace_ref=request.output_namespace_ref,
+        adapter=adapter,
+        source_artifact=source,
+        operation="fit",
+        payload={"value": 21},
+        input_root=(tmp_path / "validation-input").resolve(),
+        output_root=(tmp_path / "validation-output").resolve(),
+        interpreter=python_executable,
+    )
+    darwin_executor = DarwinExperimentalExecutor(
+        resolver=adapter_binding.prepare,
+        assessment_ref="a" * 64,
+        backend_executable="/usr/bin/sandbox-exec",
+    )
+    adapter_executor = PythonAdapterExecutionGateway(
+        binding=adapter_binding,
+        executor=darwin_executor,
+    )
+    captured: dict[str, object] = {}
+
+    class CapturingExecutor:
+        def __call__(self, current_request, current_policy, current_canary):
+            report = adapter_executor(current_request, current_policy, current_canary)
+            captured[current_request.attempt_id] = report
+            return report
+
+        def spawn(self, current_request, current_policy, current_canary):
+            return adapter_executor.spawn(current_request, current_policy, current_canary)
+
+        def terminate(self, spawned):
+            return adapter_executor.terminate(spawned)
+
+    executor = CapturingExecutor()
+    broker = ContainmentBroker(
+        host_assessor=lambda _policy: canary,
+        executor=executor,
+        report_verifier=lambda **_kwargs: "b" * 64,
+        require_authenticated_reports=True,
+    )
+
+    class IndependentOracle:
+        def evaluate(self, **kwargs):
+            assert kwargs["case_ref"] == case.content_digest
+            report = captured[request.attempt_id]
+            result = adapter_binding.read_result(request, report)
+            expected = 21 * 2
+            assert result == {"estimate": expected}
+            return OracleObservation(
+                observed_ref="c" * 64,
+                oracle_ref="d" * 64,
+                oracle_kind="independent_implementation",
+                status="passed",
+            )
+
+    result = ValidationRunner().run_with_oracle(
+        sealed_bundle=sealed,
+        validation_bundle=validation_bundle,
+        protocol=protocol,
+        request=request,
+        policy=policy,
+        broker=broker,
+        oracle=IndependentOracle(),
+    )
+
+    assert result.execution.status == "completed"
+    assert result.validation_bundle.evidence[0].tier == "E2"
+    assert result.verified is True
+    assert result.promotion_state == "verified"
+
+
 def test_validation_e2_with_independent_oracle_is_verified_without_holdout():
     from workbench.capability_factory.provenance import EvidenceProvenance, ProvenanceNode
     from workbench.capability_factory.validation_contract import ValidationBundle, ValidationEvidence
