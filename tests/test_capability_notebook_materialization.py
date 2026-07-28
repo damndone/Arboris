@@ -169,9 +169,13 @@ def test_authorized_notebook_gateway_runs_the_single_cf4_lifecycle(tmp_path) -> 
         completion_factory=completion_factory,
     )
     results = []
+    dependency_checks = []
     gateway = AuthorizedCapabilityExecutionGateway(
         binding_factory=lambda **_kwargs: binding,
         result_sink=results.append,
+        dependency_binding_validator=lambda dispatch_binding: dependency_checks.append(
+            dispatch_binding.intent.bundle_ref
+        ),
     )
 
     dispatch = gateway.dispatch(
@@ -189,6 +193,7 @@ def test_authorized_notebook_gateway_runs_the_single_cf4_lifecycle(tmp_path) -> 
     assert dispatch.receipt_ref
     assert dispatch.completion_ref
     assert calls == ["spawn", "collect"]
+    assert dependency_checks == [intent.bundle_ref]
     assert results and results[0].status == "completed"
     assert auth_store.read(authorization.authorization_id).status == "consumed"
     assert supervisor.read("attempt.notebook.gateway").status == "consumed"

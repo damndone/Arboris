@@ -1602,7 +1602,7 @@ class NotebookService:
         expected = {
             "capability_resolution_binding_ref": binding.content_digest,
             "capability_ref": binding.implementation_ref,
-            "bundle_ref": binding.validation_bundle_ref,
+            "bundle_ref": binding.dependency_bundle_ref,
             "evidence_ref": binding.assessment_ref,
             "admission_ref": binding.admission_ref,
             "runtime_policy_ref": binding.runtime_policy_ref,
@@ -1627,9 +1627,14 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="authorization_binding",
             )
-        if authorization.operation_id not in binding.allowed_operations:
+        binding_operation = (
+            proposal.changes.get("operation")
+            if proposal.operation_id == "model.custom"
+            else authorization.operation_id
+        )
+        if binding_operation not in binding.allowed_operations:
             raise OptionRevisionStale(
-                "authorization operation is not allowed by the current binding",
+                "capability operation is not allowed by the current binding",
                 option_id=option_id,
                 option_revision=current.option_revision,
                 reason="authorization_operation",
@@ -1977,11 +1982,24 @@ class NotebookService:
 
         proposal = view.current_stored_revision.proposal
         requested_operation = (proposal.changes.get("operation") or "")
-        operation_id = (
-            requested_operation
-            if requested_operation in binding.allowed_operations
-            else binding.allowed_operations[0]
-        )
+        if proposal.operation_id == "model.custom":
+            if requested_operation not in binding.allowed_operations:
+                raise OptionRevisionStale(
+                    "the custom capability operation is no longer admitted",
+                    option_id=option_id,
+                    option_revision=current.option_revision,
+                    reason="authorization_operation_not_admitted",
+                )
+            # ``model.custom`` is the outer, high-risk Workbench operation.
+            # The inner capability operation (for example ``fit``) remains
+            # in the canonical Draft and is consumed by the Adapter plan.
+            operation_id = proposal.operation_id
+        else:
+            operation_id = (
+                requested_operation
+                if requested_operation in binding.allowed_operations
+                else binding.allowed_operations[0]
+            )
         seed = domain_digest(
             "workbench.notebook.confirm_and_execute/v1",
             {
@@ -2027,7 +2045,7 @@ class NotebookService:
             draft_hash=draft_hash,
             run_intent_id=f"intent_{seed}",
             capability_ref=binding.implementation_ref,
-            bundle_ref=binding.validation_bundle_ref,
+            bundle_ref=binding.dependency_bundle_ref,
             evidence_ref=binding.assessment_ref,
             admission_ref=binding.admission_ref,
             runtime_policy_ref=binding.runtime_policy_ref,

@@ -58,6 +58,11 @@ class CapabilityResolutionBinding:
     minimum_evidence_tier: str
     allowed_operations: tuple[str, ...]
     allowed_consumers: tuple[str, ...]
+    # This is the exact CF2 bundle consumed by the runtime gate.  It is
+    # optional only for backwards-compatible in-process/native fixtures; a
+    # production registration must provide the sealed bundle's dependency
+    # reference explicitly.
+    dependency_bundle_ref: str | None = None
     schema_version: str = CAPABILITY_RESOLUTION_BINDING_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -75,6 +80,14 @@ class CapabilityResolutionBinding:
                 "validity_cursor_ref",
             ):
                 object.__setattr__(self, field, _digest(getattr(self, field), field))
+            dependency_bundle_ref = self.dependency_bundle_ref
+            if dependency_bundle_ref is None:
+                dependency_bundle_ref = self.validation_bundle_ref
+            object.__setattr__(
+                self,
+                "dependency_bundle_ref",
+                _digest(dependency_bundle_ref, "dependency_bundle_ref"),
+            )
             object.__setattr__(self, "admission_id", _text(self.admission_id, "admission_id"))
             if self.scope_kind not in SCOPE_KINDS:
                 raise CapabilityResolutionBindingError("unsupported binding scope")
@@ -107,6 +120,7 @@ class CapabilityResolutionBinding:
         assessment: EvidenceAssessment,
         admission: ScopedAdmissionRecord,
         current_validity: ValidityCursorSnapshot,
+        dependency_bundle_ref: str | None = None,
     ) -> "CapabilityResolutionBinding":
         """Join exact immutable records without consulting mutable registries."""
 
@@ -199,6 +213,7 @@ class CapabilityResolutionBinding:
             minimum_evidence_tier=admission.minimum_evidence_tier,
             allowed_operations=admission.allowed_operations,
             allowed_consumers=admission.allowed_consumers,
+            dependency_bundle_ref=dependency_bundle_ref,
         )
 
     @property

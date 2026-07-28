@@ -27,8 +27,9 @@ def test_app_execution_gateway_bootstrap_accepts_only_authorized_gateway():
         configure_notebook_execution_gateway(UntrustedGateway())
 
     gateway = AuthorizedCapabilityExecutionGateway(binding_factory=lambda **_kwargs: None)
-    configure_notebook_execution_gateway(gateway)
-    assert app.state.notebook_execution_gateway is gateway
+    with pytest.raises(ValueError, match="configure_capability_factory_runtime"):
+        configure_notebook_execution_gateway(gateway)
+    assert app.state.notebook_execution_gateway is None
     configure_notebook_execution_gateway(None)
 
 

@@ -73,6 +73,42 @@ class BundleAdmissionController:
     def history(self, bundle_ref: str) -> tuple[BundleAdmission, ...]:
         return tuple(self._history.get(_digest(bundle_ref, "bundle_ref"), ()))
 
+    def restore(self, history: tuple[BundleAdmission, ...] | list[BundleAdmission]) -> None:
+        """Rehydrate one persisted history without bypassing transition rules.
+
+        The controller is intentionally in-memory, while the dependency store
+        is durable.  A new process must therefore restore the already-written
+        prefix before it can append the next transition.  This method accepts
+        only a complete, ordered history and never permits a caller to replace
+        a different history for the same bundle.
+        """
+
+        records = tuple(history)
+        if not records or any(not isinstance(item, BundleAdmission) for item in records):
+            raise AdmissionError("admission history must contain BundleAdmission records")
+        bundle_ref = records[0].bundle_ref
+        if any(item.bundle_ref != bundle_ref for item in records):
+            raise AdmissionError("admission history contains another bundle")
+        if len({item.content_digest for item in records}) != len(records):
+            raise AdmissionError("admission history contains a duplicate transition")
+        if records[0].status != "quarantined":
+            raise AdmissionError("admission history must begin with quarantine")
+        transitions = {
+            "quarantined": frozenset({"validated", "rejected", "revoked"}),
+            "validated": frozenset({"admitted", "rejected", "revoked"}),
+            "admitted": frozenset({"revoked"}),
+        }
+        for previous, current in zip(records, records[1:]):
+            allowed = transitions.get(previous.status, frozenset())
+            if current.status not in allowed:
+                raise AdmissionError(
+                    f"invalid persisted transition {previous.status} -> {current.status}"
+                )
+        existing = self._history.get(bundle_ref)
+        if existing is not None and tuple(existing) != records:
+            raise AdmissionError("bundle admission history is already bound differently")
+        self._history[bundle_ref] = list(records)
+
     def _latest(self, bundle_ref: str) -> BundleAdmission:
         reference = _digest(bundle_ref, "bundle_ref")
         try:

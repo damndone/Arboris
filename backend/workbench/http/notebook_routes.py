@@ -159,14 +159,23 @@ def _project_root(raw: str) -> Path:
 
 def _service(request: Request, project_root: str) -> tuple[Path, NotebookService]:
     root = _project_root(project_root)
-    catalog = getattr(request.app.state, "notebook_capability_bindings", None)
+    runtime = getattr(request.app.state, "capability_factory_runtime", None)
+    catalog = (
+        runtime.catalog
+        if runtime is not None
+        else getattr(request.app.state, "notebook_capability_bindings", None)
+    )
     if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
         raise WorkbenchAPIError(
             status_code=500,
             code="NOTEBOOK_CAPABILITY_BINDING_PROVIDER_INVALID",
             message="The server-owned Notebook capability binding provider is invalid.",
         )
-    gateway = getattr(request.app.state, "notebook_execution_gateway", None)
+    gateway = (
+        runtime.execution_gateway
+        if runtime is not None
+        else getattr(request.app.state, "notebook_execution_gateway", None)
+    )
     if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
         raise WorkbenchAPIError(
             status_code=500,

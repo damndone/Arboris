@@ -317,13 +317,20 @@ class AuthorizedCapabilityExecutionGateway:
         *,
         binding_factory: Callable[..., NotebookCapabilityDispatchBinding],
         result_sink: Callable[[Any], None] | None = None,
+        dependency_binding_validator: Callable[[NotebookCapabilityDispatchBinding], None]
+        | None = None,
     ) -> None:
         if not callable(binding_factory):
             raise TypeError("binding_factory must be callable")
         if result_sink is not None and not callable(result_sink):
             raise TypeError("result_sink must be callable")
+        if dependency_binding_validator is not None and not callable(
+            dependency_binding_validator
+        ):
+            raise TypeError("dependency_binding_validator must be callable")
         self.binding_factory = binding_factory
         self.result_sink = result_sink
+        self.dependency_binding_validator = dependency_binding_validator
 
     def dispatch(
         self,
@@ -368,6 +375,11 @@ class AuthorizedCapabilityExecutionGateway:
             raise _receipt_error("execution binding Draft does not match authorization")
         if binding.intent.binding_ref != authorization.capability_resolution_binding_ref:
             raise _receipt_error("execution binding resolution does not match authorization")
+        if self.dependency_binding_validator is not None:
+            # This is deliberately before the host canary and before any
+            # reservation/spawn. The deployment-owned validator must prove
+            # that the exact offline dependency build is still admitted.
+            self.dependency_binding_validator(binding)
         if binding.policy.profile_id != "darwin-seatbelt-experimental-v1":
             raise _receipt_error(
                 "model.custom execution requires the darwin experimental containment profile"
@@ -376,12 +388,28 @@ class AuthorizedCapabilityExecutionGateway:
             raise _receipt_error(
                 "model.custom execution requires observed-memory experimental enforcement"
             )
+        if (
+            binding.policy.filesystem_mode != "sealed_readonly"
+            or binding.policy.network_mode != "disabled"
+            or binding.policy.process_mode != "isolated"
+            or binding.policy.inherited_descriptors is not False
+            or binding.policy.dependency_tree_writable is not False
+            or binding.policy.allow_weaker_fallback is not False
+            or binding.policy.thread_count != 1
+        ):
+            raise _receipt_error(
+                "model.custom execution requires the sealed experimental policy"
+            )
 
         if binding.canary.status != "supported":
             return NotebookExecutionDispatch(
                 authorization_id=authorization.authorization_id,
                 run_intent_id=authorization.run_intent_id,
                 status="unsupported",
+            )
+        if any(not assertion.passed for assertion in binding.canary.assertions):
+            raise _receipt_error(
+                "supported containment canary contains a failed assertion"
             )
         request = binding.request_factory(binding.attempt_id)
         from ..native_containment.contracts import ContainmentRequest

@@ -742,6 +742,211 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     assert listed.json()["materializations"][option.option_id]["draft_id"] == packet["draft"]["draft_id"]
 
 
+def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authorization(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Exercise the production HTTP seam without opening a host execution path."""
+
+    from test_notebook_capability_binding import _binding_and_verifier
+    from workbench.agent.context_compiler import (
+        freshness_dependency_fingerprint,
+        generation_context_hash,
+    )
+    from workbench.app import (
+        configure_capability_factory_runtime,
+    )
+    from workbench.capability_factory.notebook_catalog import CapabilityBindingCatalog
+    from workbench.capability_factory.runtime import CapabilityFactoryRuntime
+
+    project = make_project(tmp_path, name="project.alpha")
+    upload_sha = store_upload_bytes(
+        project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    notebook = client.post(
+        "/notebooks/projection",
+        params=params,
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "data.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    notebook_id = notebook["notebook_id"]
+
+    service = NotebookService(project)
+    service.store.append_evidence_pack(
+        notebook_id,
+        {
+            "schema_version": "data-evidence-pack/v1",
+            "source_id": f"dataset:{upload_sha}",
+            "records": [
+                {
+                    "evidence_id": "evidence:custom-profile",
+                    "inspection_id": "profile.v1",
+                    "source_refs": [f"dataset_profile:{upload_sha}"],
+                    "protocol_version": "profile/v1",
+                    "status": "completed",
+                    "observations": {"columns": ["outcome", "predictor"]},
+                    "metrics": {},
+                    "warnings": [],
+                    "omissions": [],
+                    "failure_code": None,
+                    "result_hash": "sha256:custom-profile-result",
+                }
+            ],
+            "pack_omissions": [],
+            "content_hash": "sha256:custom-profile-pack",
+            "evidence_pack_hash": "sha256:custom-profile-pack",
+        },
+    )
+
+    binding, verifier = _binding_and_verifier()
+    catalog = CapabilityBindingCatalog(verifier=verifier)
+    catalog.register(
+        "custom.adapter",
+        binding,
+        planner_projection={
+            "key": "custom.adapter",
+            "label": "Controlled custom adapter",
+            "model_type": "custom.adapter",
+            "notebook_proposal_adapters": ["model.custom"],
+            "params": [],
+            "artifact_types": {"custom.result": "custom_json"},
+        },
+    )
+    runtime = CapabilityFactoryRuntime(
+        authority_id="authority.test.runtime",
+        catalog=catalog,
+    )
+
+    class FakePlanningAgent:
+        def plan(self, *, context, initial_evidence):
+            del initial_evidence
+            option = OptionDraft(
+                rank=1,
+                rationale="The server-registered custom adapter is the selected experimental path.",
+                proposal=TypedProposal(
+                    proposal_id="proposal_custom_route",
+                    operation_id="model.custom",
+                    target={"dataset_source_id": upload_sha},
+                    preconditions={
+                        "context_version": "node-operation-context/v1",
+                        "context_fingerprint": context.context_id,
+                        "owner_resolution": "dataset_projection",
+                    },
+                    changes={
+                        "operation": "fit",
+                        "parameters": {"alpha": 0.1},
+                        "consumer_slots": ["report_projection"],
+                    },
+                ),
+                expected_artifacts=(
+                    ExpectedArtifact(
+                        artifact_id="custom.result",
+                        artifact_type="custom_json",
+                        required=True,
+                        count=1,
+                    ),
+                ),
+                capability_id="custom.adapter",
+                option_id="opt_custom_route",
+                evidence_refs=(),
+                comparative_claims=(),
+            )
+            decision = RecommendationDecision(
+                recommendation_decision_id="rec_custom_route",
+                batch_id="batch_custom_route",
+                generation_context_hash=generation_context_hash(context),
+                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                evidence_pack_hashes=(),
+                comparison_protocol_refs=(),
+                candidate_option_ids=(option.option_id,),
+                outcome="recommended",
+                recommended_option_id=option.option_id,
+                reason_refs=(),
+            )
+            return SimpleNamespace(
+                option_drafts=(
+                    replace(
+                        option,
+                        recommendation_decision_id=decision.recommendation_decision_id,
+                        recommendation_status=decision.outcome,
+                    ),
+                ),
+                decision=decision,
+            )
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: FakePlanningAgent(),
+    )
+    configure_capability_factory_runtime(runtime)
+    try:
+        proposed = client.post(
+            f"/notebooks/{notebook_id}/options/propose",
+            params=params,
+            json={"count": 1},
+        )
+        assert proposed.status_code == 200, proposed.text
+        option = proposed.json()["options"][0]
+        assert option["risk_level"] == "high"
+        assert option["execution_modes"] == [
+            "materialize_only",
+            "experimental_confirm_and_execute",
+        ]
+        assert option["capability_resolution_binding_ref"] == binding.content_digest
+
+        selected = client.post(
+            f"/notebooks/{notebook_id}/options/{option['option_id']}/decision",
+            params=params,
+            json={"decision": "selected", "actor": "ui"},
+        )
+        assert selected.status_code == 200, selected.text
+
+        confirmed = client.post(
+            f"/notebooks/{notebook_id}/options/{option['option_id']}/confirm",
+            params=params,
+            json={
+                "option_revision": option["option_revision"],
+                "proposal_id": option["typed_proposal_id"],
+                "proposal_revision": option["typed_proposal_revision"],
+            },
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        # Dataset-backed Drafts retain the genesis source mode; the model node
+        # carries the canonical custom capability identity below.
+        assert confirmed.json()["materialization"]["draft_execution_mode"] == "genesis"
+        model_node = next(
+            node
+            for node in confirmed.json()["draft"]["graph"]["nodes"]
+            if node["node_type"] == "model"
+        )
+        assert model_node["model_type"] == "custom"
+        assert confirmed.json()["draft"]["notebook_provenance"][
+            "capability_resolution_binding_ref"
+        ] == binding.content_digest
+
+        blocked = client.post(
+            f"/notebooks/{notebook_id}/options/{option['option_id']}/confirm-and-execute",
+            params=params,
+            json={
+                "option_revision": option["option_revision"],
+                "proposal_id": option["typed_proposal_id"],
+                "proposal_revision": option["typed_proposal_revision"],
+            },
+        )
+        assert blocked.status_code == 409, blocked.text
+        assert blocked.json()["error"]["code"] == "OPTION_EXECUTION_GATEWAY_UNAVAILABLE"
+        assert list((project / "runs").iterdir()) == []
+    finally:
+        configure_capability_factory_runtime(None)
+
+
 def test_notebook_route_uses_server_owned_catalog_for_v12_options(
     tmp_path: Path, monkeypatch
 ) -> None:

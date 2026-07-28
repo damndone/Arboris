@@ -307,6 +307,7 @@ def test_model_custom_materializes_a_dataset_bound_provenance_draft(tmp_path: Pa
         filename="custom.csv",
     )
     binding, verifier = _binding_and_verifier()
+    binding = replace(binding, dependency_bundle_ref="a" * 64)
     catalog = CapabilityBindingCatalog(verifier=verifier)
     catalog.register(
         "custom.adapter",
@@ -409,6 +410,28 @@ def test_model_custom_materializes_a_dataset_bound_provenance_draft(tmp_path: Pa
     assert model["params"]["capability_ref"] == binding.implementation_ref
     assert model["params"]["binding_ref"] == binding.content_digest
     assert result.draft.draft["notebook_provenance"]["capability_resolution_binding_ref"] == binding.content_digest
+
+    captured: dict[str, object] = {}
+    from workbench.capability_factory.notebook_bridge import NotebookExecutionDispatch
+
+    class FakeGateway:
+        def dispatch(self, **kwargs):
+            captured.update(kwargs)
+            authorization = kwargs["authorization"]
+            return NotebookExecutionDispatch(
+                authorization_id=authorization.authorization_id,
+                run_intent_id=authorization.run_intent_id,
+                status="unsupported",
+            )
+
+    service.execution_gateway = FakeGateway()
+    dispatch = service.confirm_and_execute(
+        notebook.notebook_id,
+        revision.option_id,
+        context=service.compile_context(notebook.notebook_id),
+    )
+    assert dispatch.status == "unsupported"
+    assert captured["authorization"].bundle_ref == binding.dependency_bundle_ref
 
 
 def test_catalog_rejects_mismatched_or_unbounded_planner_projection(tmp_path: Path) -> None:

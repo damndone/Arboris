@@ -312,6 +312,20 @@ def test_dependency_service_requires_external_supply_chain_attestation_before_va
     assert DependencyStore(tmp_path / "store", create=False).get_supply_chain_verification(
         passed.content_digest
     ).attestation_ref == passed.content_digest
+    reloaded = DependencyService(
+        store=DependencyStore(tmp_path / "store", create=False),
+    )
+    reloaded.admit_execution_bundle(prepared.bundle.bundle_ref, scope="project")
+    reloaded.assert_execution_bundle(prepared.bundle.bundle_ref)
+    reloaded.admission.revoke(
+        bundle_ref=prepared.bundle.bundle_ref,
+        validity_ref=domain_digest(
+            "tests.supply_chain.revoke/v1", {"bundle_ref": prepared.bundle.bundle_ref}
+        ),
+    )
+    reloaded.store.append_admission(reloaded.admission.history(prepared.bundle.bundle_ref)[-1])
+    with pytest.raises(DependencyPreparationError, match="scoped admission"):
+        reloaded.assert_execution_bundle(prepared.bundle.bundle_ref)
 
 
 def test_offline_builder_rejects_a_dangling_symlink_root(tmp_path):

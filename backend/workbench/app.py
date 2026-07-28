@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from .api_errors import register_error_handlers
 from .capability_factory.notebook_catalog import CapabilityBindingCatalog
 from .capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
+from .capability_factory.runtime import CapabilityFactoryRuntime
 from .control_plane import control_plane_capability, validate_control_plane
 from .domain_memory.service import DomainMemoryService
 from .domain_memory.review_service import MemoryReviewService
@@ -35,6 +36,7 @@ app = FastAPI(title="Local Econometrics Workbench")
 register_error_handlers(app)
 app.state.notebook_capability_bindings = None
 app.state.notebook_execution_gateway = None
+app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
 app.state.domain_memory_context_provider = None
@@ -53,20 +55,48 @@ def configure_notebook_capability_bindings(
 
     if catalog is not None and not isinstance(catalog, CapabilityBindingCatalog):
         raise TypeError("catalog must be a CapabilityBindingCatalog or None")
+    app.state.capability_factory_runtime = None
     app.state.notebook_capability_bindings = catalog
 
 
 def configure_notebook_execution_gateway(gateway: object | None) -> None:
-    """Install the trusted CF4 gateway used only by explicit confirmation.
+    """Clear the legacy gateway slot; production installation is runtime-only.
 
     ``None`` is the normal fail-closed configuration on hosts without a
     verified containment/supervisor stack.  The HTTP layer never constructs a
-    gateway or falls back to in-process execution.
+    gateway or falls back to in-process execution.  A non-``None`` gateway
+    must be installed through ``configure_capability_factory_runtime`` so the
+    server-owned dependency admission gate and authority identity cannot be
+    omitted.
     """
 
     if gateway is not None and not isinstance(gateway, AuthorizedCapabilityExecutionGateway):
         raise TypeError("gateway must be an AuthorizedCapabilityExecutionGateway or None")
+    if gateway is not None:
+        raise ValueError(
+            "gateway must be installed through configure_capability_factory_runtime"
+        )
+    app.state.capability_factory_runtime = None
     app.state.notebook_execution_gateway = gateway
+
+
+def configure_capability_factory_runtime(
+    runtime: CapabilityFactoryRuntime | None,
+) -> None:
+    """Install the complete server-owned factory seam atomically.
+
+    Deployment code calls this once after constructing the catalog and the
+    already-authorized gateway. The HTTP layer never receives a binding loader,
+    signer, dependency receipt, or executor constructor.
+    """
+
+    if runtime is not None and not isinstance(runtime, CapabilityFactoryRuntime):
+        raise TypeError("runtime must be a CapabilityFactoryRuntime or None")
+    if runtime is not None:
+        runtime.validate_for_bootstrap()
+    app.state.capability_factory_runtime = runtime
+    app.state.notebook_capability_bindings = runtime.catalog if runtime else None
+    app.state.notebook_execution_gateway = runtime.execution_gateway if runtime else None
 
 
 def configure_domain_memory_services(
@@ -104,10 +134,14 @@ def configure_domain_memory_context_provider(provider: object | None) -> None:
 def _validate_supported_deployment() -> None:
     validate_control_plane()
     current_execution_profile()
+    runtime = getattr(app.state, "capability_factory_runtime", None)
+    if runtime is not None:
+        runtime.validate_for_bootstrap()
 
 
 @app.get("/health")
 def health() -> dict[str, object]:
+    runtime = getattr(app.state, "capability_factory_runtime", None)
     return {
         "status": "ok",
         **control_plane_capability(),
@@ -117,6 +151,16 @@ def health() -> dict[str, object]:
             for key, value in current_execution_profile().public_status().items()
             if key != "profile"
         },
+        "capability_factory": (
+            runtime.public_status()
+            if isinstance(runtime, CapabilityFactoryRuntime)
+            else {
+                "configured": False,
+                "catalog_configured": False,
+                "execution_gateway_configured": False,
+                "dependency_gate_configured": False,
+            }
+        ),
     }
 
 app.include_router(projects_router)

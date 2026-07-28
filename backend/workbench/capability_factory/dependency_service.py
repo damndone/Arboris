@@ -800,6 +800,97 @@ class DependencyService:
             quarantine_build=build,
         )
 
+    def assert_execution_bundle(self, bundle_ref: str) -> None:
+        """Require a fully scanned and admitted bundle before execution.
+
+        This is intentionally a read-only final gate.  It does not assemble,
+        fetch, install, or import anything.  The trusted execution gateway
+        calls it after resolving the exact dispatch binding and before canary,
+        reservation, or process creation.
+        """
+
+        from .contracts import _digest
+
+        bundle_ref = _digest(bundle_ref, "bundle_ref")
+        try:
+            self.store.get_bundle(bundle_ref)
+            history = self.store.admission_history(bundle_ref)
+            attestation = self.store.get_supply_chain_attestation(bundle_ref)
+            verification = self.store.get_supply_chain_verification(
+                attestation.content_digest
+            )
+        except DependencyStoreError as error:
+            raise DependencyPreparationError(
+                "dependency bundle is not ready for execution"
+            ) from error
+        try:
+            self.admission.restore(history)
+        except AdmissionError as error:
+            raise DependencyPreparationError(
+                "dependency bundle admission history is invalid"
+            ) from error
+        if not history or history[-1].status != "admitted":
+            raise DependencyPreparationError(
+                "dependency bundle has not reached scoped admission"
+            )
+        if verification.status != "passed":
+            raise DependencyPreparationError(
+                "dependency bundle supply-chain verification did not pass"
+            )
+        if history[-1].validity_ref != verification.content_digest:
+            raise DependencyPreparationError(
+                "dependency bundle admission is not bound to current verification"
+            )
+
+    def admit_execution_bundle(
+        self,
+        bundle_ref: str,
+        *,
+        scope: str,
+    ) -> BundleAdmission:
+        """Record the explicit final CF2 admission consumed by the gateway.
+
+        Validation and supply-chain scanning deliberately stop at ``validated``.
+        This separate server-side operation is the only transition to
+        ``admitted`` and binds that transition to the persisted verification
+        digest.  It does not install, import, or spawn anything.
+        """
+
+        from .contracts import _digest, _text
+
+        bundle_ref = _digest(bundle_ref, "bundle_ref")
+        scope = _text(scope, "scope")
+        try:
+            self.store.get_bundle(bundle_ref)
+            history = self.store.admission_history(bundle_ref)
+            attestation = self.store.get_supply_chain_attestation(bundle_ref)
+            verification = self.store.get_supply_chain_verification(
+                attestation.content_digest
+            )
+        except DependencyStoreError as error:
+            raise DependencyPreparationError(
+                "dependency bundle is not ready for scoped admission"
+            ) from error
+        if not history or history[-1].status != "validated":
+            raise DependencyPreparationError(
+                "only a validated dependency bundle can be admitted"
+            )
+        if verification.status != "passed":
+            raise DependencyPreparationError(
+                "dependency bundle supply-chain verification did not pass"
+            )
+        try:
+            self.admission.restore(history)
+            admission = self.admission.admit(
+                bundle_ref=bundle_ref,
+                scope=scope,
+                validity_ref=verification.content_digest,
+            )
+            self.store.append_admission(admission)
+        except (AdmissionError, DependencyStoreError) as error:
+            raise DependencyPreparationError(str(error)) from error
+        return admission
+
     def _require_trusted_report(
         self,
         *,
