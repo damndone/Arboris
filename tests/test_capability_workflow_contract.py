@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from workbench.agent.operations import OperationValidationError
+from workbench.agent.operations import OperationRegistry, OperationValidationError
 from workbench.agent.workflow_contracts import (
     WORKFLOW_STEP_SPEC_CONTRACTS,
     _validate_step_spec,
@@ -68,3 +68,22 @@ def test_each_registered_step_publishes_one_dispatcher_key() -> None:
     for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items():
         assert contract.dispatcher_key
         assert workflow_dispatcher_key(operation_id) == contract.dispatcher_key
+
+
+def test_workflow_step_registry_projection_is_derived_from_contracts() -> None:
+    registry = OperationRegistry()
+
+    for operation_id, contract in WORKFLOW_STEP_SPEC_CONTRACTS.items():
+        if operation_id in {"model.genesis", "model.custom"}:
+            # These identities have deliberately distinct direct-operation and
+            # composable-workflow policy envelopes. The workflow validator and
+            # vocabulary remain the source for the child-step envelope; the
+            # direct registry identities preserve their existing API contract.
+            continue
+        definition = registry.require(operation_id)
+        schema = definition.editable_schema
+
+        assert set(schema["properties"]) == set(contract.fields)
+        assert schema["required"] == list(contract.required)
+        assert definition.executor_key == contract.dispatcher_key
+        assert definition.confirmation_policy == contract.confirmation_policy

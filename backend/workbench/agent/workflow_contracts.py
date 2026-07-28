@@ -194,6 +194,16 @@ class StepSpecContract:
     confirmation_policy: str = "proposal_confirmation"
     output_schema_ref: str | None = None
     dispatcher_key: str | None = None
+    effect_level: str = "mutation"
+    scope_requirements: tuple[str, ...] = ("chain", "active_head")
+    scope: str = "workflow step"
+    risk_level: str = "mutating"
+    reconciler_key: str | None = None
+    diff_builder_key: str | None = None
+    verification_builder_key: str | None = None
+    ui_description: str = ""
+    example_prompts: tuple[str, ...] = ()
+    natural_language_enabled: bool = False
 
     @property
     def allowed(self) -> frozenset[str]:
@@ -213,6 +223,38 @@ class StepSpecContract:
             "confirmation_policy": self.confirmation_policy,
             "output_schema_ref": self.output_schema_ref,
             "dispatcher_key": self.dispatcher_key,
+            "effect_level": self.effect_level,
+            "scope_requirements": list(self.scope_requirements),
+            "scope": self.scope,
+            "risk_level": self.risk_level,
+            "reconciler_key": self.reconciler_key,
+            "diff_builder_key": self.diff_builder_key,
+            "verification_builder_key": self.verification_builder_key,
+            "ui_description": self.ui_description,
+            "example_prompts": list(self.example_prompts),
+            "natural_language_enabled": self.natural_language_enabled,
+        }
+
+    def to_schema(self) -> dict[str, Any]:
+        """Build the editable spec schema from the same field declarations."""
+
+        type_map = {
+            "string": "string",
+            "list": "array",
+            "object": "object",
+        }
+        properties: dict[str, dict[str, Any]] = {}
+        for name, description in self.fields.items():
+            field_schema: dict[str, Any] = {"description": description}
+            declared_type = self.field_types.get(name)
+            if declared_type is not None:
+                field_schema["type"] = type_map.get(declared_type, declared_type)
+            properties[name] = field_schema
+        return {
+            "type": "object",
+            "required": list(self.required),
+            "properties": properties,
+            "additionalProperties": False,
         }
 
 
@@ -248,6 +290,13 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         column_extractor_key="statistical.explore",
         output_schema_ref="workbench.statistical.exploration/v1",
         dispatcher_key="workbench.agent.workflow_runtime.statistical_explore",
+        effect_level="read_only",
+        scope="Raw data statistical exploration",
+        risk_level="none",
+        reconciler_key="statistical.explore",
+        diff_builder_key="exploration.diff.v1",
+        verification_builder_key="exploration.verification.v1",
+        ui_description="Run one server-defined statistical exploration step.",
     ),
     "statistical.derive_boolean": StepSpecContract(
         summary="Derive boolean group-membership columns from percentile thresholds.",
@@ -273,6 +322,11 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         column_extractor_key="statistical.derive_boolean",
         output_schema_ref="workbench.statistical.exploration/v1",
         dispatcher_key="workbench.agent.workflow_runtime.statistical_derive_boolean",
+        scope="Raw data derived grouping",
+        reconciler_key="statistical.derive_boolean",
+        diff_builder_key="exploration.derived_diff.v1",
+        verification_builder_key="exploration.derived_verification.v1",
+        ui_description="Create one server-defined boolean grouping node.",
     ),
     "statistical.derived_group_summarize": StepSpecContract(
         summary="Summarize columns within each derived group.",
@@ -295,6 +349,11 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         column_extractor_key="statistical.derived_group_summarize",
         output_schema_ref="workbench.statistical.exploration/v1",
         dispatcher_key="workbench.agent.workflow_runtime.statistical_derived_group_summarize",
+        scope="derived group comparison",
+        reconciler_key="statistical.derived_group_summarize",
+        diff_builder_key="exploration.derived_diff.v1",
+        verification_builder_key="exploration.derived_verification.v1",
+        ui_description="Summarize columns within each derived group.",
     ),
     "model.genesis": StepSpecContract(
         summary="Estimate one or more models from the source table.",
@@ -343,6 +402,12 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         confirmation_policy="proposal_authorization",
         output_schema_ref="workbench.model.genesis/v1",
         dispatcher_key="workbench.services.genesis",
+        scope="dataset model genesis",
+        risk_level="high",
+        reconciler_key="model.genesis",
+        diff_builder_key="genesis.diff.v1",
+        verification_builder_key="genesis.verification.v1",
+        ui_description="Estimate one or more models from the source table.",
     ),
     "report.compose": StepSpecContract(
         summary="Assemble the completed steps into a report.",
@@ -357,6 +422,11 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         reference_resolver_key="workflow.step_artifacts",
         output_schema_ref="workbench.report.collection/v1",
         dispatcher_key="workbench.agent.workflow_runtime.report",
+        scope="workflow report",
+        reconciler_key="report.compose",
+        diff_builder_key="report.compose.diff.v1",
+        verification_builder_key="report.compose.verification.v1",
+        ui_description="Assemble the completed steps into a report.",
     ),
     "model.custom": StepSpecContract(
         summary=(
@@ -390,6 +460,12 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         confirmation_policy="proposal_authorization",
         output_schema_ref="capability_factory.artifact_contract/v1.1",
         dispatcher_key="capability_factory.custom_dispatcher",
+        scope="dataset custom capability",
+        risk_level="high",
+        reconciler_key="capability_factory.custom_dispatcher",
+        diff_builder_key="capability_factory.custom.diff.v1",
+        verification_builder_key="capability_factory.custom.verification.v1",
+        ui_description="Run one explicitly admitted custom capability through the Proposal/Risk and containment gates.",
     ),
 }
 
