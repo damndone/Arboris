@@ -19,9 +19,10 @@ debug log.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from ..artifacts import read_json, write_json
@@ -55,6 +56,51 @@ class UnknownTraceEventType(ValueError):
 
 class TracePayloadError(ValueError):
     """A payload that does not match its registered schema."""
+
+
+class TraceCatalogCollision(ValueError):
+    """Two package owners attempted to claim one Core Trace event."""
+
+
+@dataclass(frozen=True, slots=True)
+class TraceSchemaDescriptor:
+    """The package-neutral part of one versioned Core Trace schema."""
+
+    payload_schema: str
+    required: tuple[str, ...]
+    optional: tuple[str, ...] = ()
+    forbidden: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field, value in (
+            ("payload_schema", self.payload_schema),
+            ("required", self.required),
+            ("optional", self.optional),
+            ("forbidden", self.forbidden),
+        ):
+            if field == "payload_schema":
+                if not isinstance(value, str) or not value or len(value) > 256:
+                    raise TracePayloadError("payload_schema must be bounded non-empty text")
+                continue
+            if not isinstance(value, tuple) or any(
+                not isinstance(item, str) or not item or len(item) > 128
+                for item in value
+            ):
+                raise TracePayloadError(f"{field} must contain bounded field names")
+            if len(set(value)) != len(value):
+                raise TracePayloadError(f"{field} must not contain duplicate field names")
+        if set(self.required) & set(self.optional):
+            raise TracePayloadError("required and optional trace fields must be disjoint")
+        if set(self.forbidden) & (set(self.required) | set(self.optional)):
+            raise TracePayloadError("forbidden trace fields must be outside the schema")
+
+    def to_schema(self) -> "_Schema":
+        return _Schema(
+            self.payload_schema,
+            required=self.required,
+            optional=self.optional,
+            forbidden=self.forbidden,
+        )
 
 
 class _Schema:
@@ -219,6 +265,99 @@ TRACE_EVENT_SCHEMAS: dict[str, _Schema] = {
     ),
 }
 
+# Preserve the historical public constant as the Core-owned vocabulary. Lane
+# packages are admitted through the separate bootstrap registry below; their
+# schemas must be available to TraceWriter without changing callers that use
+# this constant to inspect the Core v1 set.
+_REGISTERED_TRACE_EVENT_SCHEMAS: dict[str, _Schema] = dict(TRACE_EVENT_SCHEMAS)
+
+
+_TRACE_CATALOG_LOCK = RLock()
+_TRACE_CATALOGS: dict[str, dict[str, TraceSchemaDescriptor]] = {
+    "core": {
+        event_type: TraceSchemaDescriptor(
+            payload_schema=schema.payload_schema,
+            required=schema.required,
+            optional=schema.optional,
+            forbidden=schema.forbidden,
+        )
+        for event_type, schema in TRACE_EVENT_SCHEMAS.items()
+    }
+}
+
+
+def register_trace_catalog(
+    owner: str,
+    schemas: Mapping[str, TraceSchemaDescriptor],
+) -> None:
+    """Register one package-owned catalog into the Core Trace registry.
+
+    Registration is a bootstrap operation.  Same-owner, same-schema replay is
+    idempotent so application startup and test imports can safely converge;
+    another owner or a changed schema cannot silently replace the meaning of a
+    persisted event.
+    """
+
+    if not isinstance(owner, str) or not owner or len(owner) > 128 or any(
+        ord(char) < 0x20 for char in owner
+    ):
+        raise TracePayloadError("trace catalog owner is invalid")
+    if not isinstance(schemas, Mapping) or not schemas:
+        raise TracePayloadError("trace catalog must contain at least one schema")
+    normalized: dict[str, TraceSchemaDescriptor] = {}
+    for event_type, descriptor in schemas.items():
+        if (
+            not isinstance(event_type, str)
+            or not event_type
+            or len(event_type) > 256
+            or "/" in event_type
+            or any(ord(char) < 0x20 for char in event_type)
+        ):
+            raise TracePayloadError("trace event type is invalid")
+        if not isinstance(descriptor, TraceSchemaDescriptor):
+            raise TracePayloadError(
+                f"trace catalog {owner!r} contains a non-descriptor schema"
+            )
+        normalized[event_type] = descriptor
+
+    with _TRACE_CATALOG_LOCK:
+        for event_type, descriptor in normalized.items():
+            existing_owner = next(
+                (
+                    candidate_owner
+                    for candidate_owner, catalog in _TRACE_CATALOGS.items()
+                    if event_type in catalog
+                ),
+                None,
+            )
+            if existing_owner is not None and existing_owner != owner:
+                raise TraceCatalogCollision(
+                    f"trace event {event_type!r} is already registered by "
+                    f"{existing_owner!r}"
+                )
+            current = _TRACE_CATALOGS.get(owner, {})
+            existing = current.get(event_type)
+            if existing is not None and existing != descriptor:
+                raise TraceCatalogCollision(
+                    f"trace event {event_type!r} is already registered by "
+                    f"{owner!r} with another schema"
+                )
+
+        current = _TRACE_CATALOGS.setdefault(owner, {})
+        for event_type, descriptor in normalized.items():
+            current[event_type] = descriptor
+            _REGISTERED_TRACE_EVENT_SCHEMAS[event_type] = descriptor.to_schema()
+
+
+def trace_catalog_snapshot() -> dict[str, tuple[str, ...]]:
+    """Return a bounded, immutable-name view for diagnostics and tests."""
+
+    with _TRACE_CATALOG_LOCK:
+        return {
+            owner: tuple(sorted(catalog))
+            for owner, catalog in sorted(_TRACE_CATALOGS.items())
+        }
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -265,11 +404,11 @@ class TraceWriter:
         command_id: str | None = None,
     ) -> dict[str, Any]:
         with _TRACE_WRITE_LOCK:
-            schema = TRACE_EVENT_SCHEMAS.get(event_type)
+            schema = _REGISTERED_TRACE_EVENT_SCHEMAS.get(event_type)
             if schema is None:
                 raise UnknownTraceEventType(
                     f"no payload schema registered for trace event {event_type!r}; "
-                    f"known types: {', '.join(sorted(TRACE_EVENT_SCHEMAS))}"
+                    f"known types: {', '.join(sorted(_REGISTERED_TRACE_EVENT_SCHEMAS))}"
                 )
             schema.validate(payload, event_type=event_type)
             # Refresh after waiting: another TraceWriter instance may have

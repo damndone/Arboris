@@ -97,4 +97,24 @@ def build_trace_event(*, event_type: str, payload: Mapping[str, Any]) -> Capabil
     )
 
 
-__all__ = ["CapabilityTraceEvent", "TRACE_CONTRACT_VERSION", "TraceContractError", "build_trace_event"]
+def trace_catalog() -> dict[str, "TraceSchemaDescriptor"]:
+    """Expose this package's exact fields to the shared Core Trace bootstrap."""
+
+    from ..agent.trace import TraceSchemaDescriptor
+
+    return {
+        event_type: TraceSchemaDescriptor(
+            payload_schema=event_type.replace(".", "-").replace("_", "-") + "/v1",
+            required=tuple(sorted(fields)),
+        )
+        for event_type, fields in _EVENT_FIELDS.items()
+    }
+
+
+__all__ = [
+    "CapabilityTraceEvent",
+    "TRACE_CONTRACT_VERSION",
+    "TraceContractError",
+    "build_trace_event",
+    "trace_catalog",
+]

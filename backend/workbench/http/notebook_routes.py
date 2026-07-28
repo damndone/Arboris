@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -32,6 +33,7 @@ from ..agent.trace import (
     record_domain_memory_retrieval,
 )
 from ..domain_memory.preferences import DomainMemoryPreferences
+from ..domain_memory.service import DomainMemoryService
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
@@ -241,6 +243,7 @@ def _compile(
         root,
         service,
         notebook_id,
+        context=context,
         use=domain_memory_use,
         iteration=domain_memory_iteration,
     )
@@ -257,15 +260,33 @@ def _domain_memory_projection(
     service: NotebookService,
     notebook_id: str,
     *,
+    context: NotebookPlanningContextV1 | None = None,
     use: bool,
     iteration: bool,
 ) -> dict[str, Any] | None:
-    """Ask only the server-owned provider for an already-bounded projection."""
+    """Ask only the server-owned provider for an already-bounded projection.
+
+    Compilation is deliberately complete before this call.  A deployment
+    provider may therefore build/read a Project/RunFamily index from the
+    canonical Notebook context before it retrieves approved cross-project
+    hints; the memory result cannot retroactively change capability inputs or
+    freshness dependencies.
+    """
 
     if not use:
         return None
     provider = getattr(request.app.state, "domain_memory_context_provider", None) if request else None
     if provider is None:
+        service_provider = getattr(request.app.state, "domain_memory_service", None) if request else None
+        if isinstance(service_provider, DomainMemoryService):
+            return _default_domain_memory_projection(
+                service_provider,
+                context=context,
+                preferences=DomainMemoryPreferences(
+                    cross_project_domain_memory_use=use,
+                    cross_project_domain_memory_iteration=iteration,
+                ),
+            )
         return {
             "contract_version": "domain-memory-context-input/v1",
             "retrieval_ref": "retrieval:unavailable",
@@ -283,6 +304,7 @@ def _domain_memory_projection(
         project_root=root,
         notebook_service=service,
         notebook_id=notebook_id,
+        context=context,
         preferences=DomainMemoryPreferences(
             cross_project_domain_memory_use=use,
             cross_project_domain_memory_iteration=iteration,
@@ -295,6 +317,43 @@ def _domain_memory_projection(
             message="The server-owned domain-memory provider returned an invalid projection.",
         )
     return projection
+
+
+def _default_domain_memory_projection(
+    service: DomainMemoryService,
+    *,
+    context: NotebookPlanningContextV1 | None,
+    preferences: DomainMemoryPreferences,
+) -> dict[str, Any]:
+    """Use the configured server-owned store without inventing request scope.
+
+    The compiled Notebook context is the direct canonical fallback when a
+    deployment has not installed a persisted ProjectContextIndex provider.
+    Facts are a small scalar projection used only for applicability matching;
+    they never grant source access or capability authority.
+    """
+
+    if context is None:
+        raise WorkbenchAPIError(
+            status_code=503,
+            code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
+            message="A compiled Notebook context is required before memory retrieval.",
+        )
+    facts: dict[str, Any] = {}
+    for source in (context.analysis_contract, context.user_focus):
+        for key in ("analysis_family", "model_family", "goal", "domain", "data_kind"):
+            value = source.get(key)
+            if isinstance(value, str) and value and len(value) <= 128:
+                facts.setdefault(key, value)
+    result = service.retrieve(
+        requester=service.store.scope,
+        global_preferences=preferences,
+        facts=facts,
+        now=datetime.now(timezone.utc).isoformat(),
+        max_entries=8,
+        max_bytes=8192,
+    )
+    return result.to_context_projection()
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:

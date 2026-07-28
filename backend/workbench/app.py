@@ -12,13 +12,20 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from .agent.trace import TraceSchemaDescriptor, register_trace_catalog
 from .api_errors import register_error_handlers
 from .capability_factory.notebook_catalog import CapabilityBindingCatalog
 from .capability_factory.notebook_bridge import AuthorizedCapabilityExecutionGateway
 from .capability_factory.runtime import CapabilityFactoryRuntime
+from .capability_factory.trace_contracts import trace_catalog as capability_trace_catalog
 from .control_plane import control_plane_capability, validate_control_plane
 from .domain_memory.service import DomainMemoryService
 from .domain_memory.review_service import MemoryReviewService
+from .domain_memory.trace_contracts import (
+    _DOMAIN_EVENT_FIELDS as _DOMAIN_MEMORY_EVENT_FIELDS,
+    _EVENT_FIELDS as _PROJECT_MEMORY_EVENT_FIELDS,
+)
+from .native_containment.trace_contracts import _EVENT_FIELDS as _CONTAINMENT_EVENT_FIELDS
 from .services.execution_profile import current_execution_profile
 from .http.agent_routes import router as agent_router
 from .http.drafts_routes import router as drafts_router
@@ -40,6 +47,43 @@ app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
 app.state.domain_memory_context_provider = None
+
+
+def register_v183_trace_catalogs() -> None:
+    """Register package-owned event fields before the app serves requests."""
+
+    register_trace_catalog("capability_factory", capability_trace_catalog())
+    register_trace_catalog(
+        "native_containment",
+        _trace_descriptors(_CONTAINMENT_EVENT_FIELDS),
+    )
+    memory_fields = {
+        **_PROJECT_MEMORY_EVENT_FIELDS,
+        **_DOMAIN_MEMORY_EVENT_FIELDS,
+    }
+    # Core Agent Trace owns this Notebook retrieval envelope and adds the
+    # bounded preference/count fields. The package-local builder remains a
+    # compatibility contract, but it must not claim a second persisted schema.
+    memory_fields.pop("domain_memory.retrieval.completed", None)
+    register_trace_catalog("domain_memory", _trace_descriptors(memory_fields))
+
+
+def _trace_descriptors(
+    fields: dict[str, frozenset[str]],
+) -> dict[str, TraceSchemaDescriptor]:
+    return {
+        event_type: TraceSchemaDescriptor(
+            payload_schema=event_type.replace(".", "-").replace("_", "-") + "/v1",
+            required=tuple(sorted(event_fields)),
+        )
+        for event_type, event_fields in fields.items()
+    }
+
+
+# Trace event ownership is application bootstrap, not a request-time extension
+# point.  Persisted traces therefore have one collision-checked vocabulary in
+# every process that imports the Workbench app.
+register_v183_trace_catalogs()
 
 
 def configure_notebook_capability_bindings(

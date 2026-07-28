@@ -12,6 +12,10 @@ from workbench.agent.context_compiler import (
     generation_context_hash,
     notebook_planning_workbench_context,
 )
+from workbench.domain_memory.candidate_store import MemoryCandidateStore
+from workbench.domain_memory.service import DomainMemoryService
+from workbench.domain_memory.scope import MemoryScope
+from workbench.domain_memory.store import DomainMemoryStore
 from workbench.http.notebook_routes import _domain_memory_projection
 
 
@@ -114,3 +118,66 @@ def test_notebook_provider_is_opt_in_and_receives_independent_preferences(tmp_pa
     assert _domain_memory_projection(request, tmp_path, object(), "notebook-1", use=True, iteration=False) == projection
     assert calls[0].cross_project_domain_memory_use is True
     assert calls[0].cross_project_domain_memory_iteration is False
+
+
+def test_notebook_provider_receives_compiled_project_context_before_memory_lookup(
+    tmp_path: Path,
+) -> None:
+    seen: list[NotebookPlanningContextV1] = []
+    base = _context(tmp_path)
+
+    def provider(**kwargs):
+        seen.append(kwargs["context"])
+        return None
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(domain_memory_context_provider=provider))
+    )
+    assert (
+        _domain_memory_projection(
+            request,
+            tmp_path,
+            object(),
+            "notebook-1",
+            context=base,
+            use=True,
+            iteration=False,
+        )
+        is None
+    )
+    assert seen == [base]
+    assert base.analysis_contract == {"question": "bounded"}
+    assert base.domain_memory_projection is None
+
+
+def test_configured_memory_service_is_the_default_read_only_notebook_provider(
+    tmp_path: Path,
+) -> None:
+    scope = MemoryScope("ns-a", "profile-a", "user-a", None, "private", "user")
+    service = DomainMemoryService(
+        DomainMemoryStore(tmp_path / "memory", scope),
+        MemoryCandidateStore(tmp_path / "memory", scope),
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                domain_memory_context_provider=None,
+                domain_memory_service=service,
+            )
+        )
+    )
+
+    projection = _domain_memory_projection(
+        request,
+        tmp_path,
+        object(),
+        "notebook-1",
+        context=_context(tmp_path),
+        use=True,
+        iteration=False,
+    )
+
+    assert projection is not None
+    assert projection["outcome"] == "empty"
+    assert projection["memory_authority"] == "non_authoritative"
+    assert projection["entries"] == []
