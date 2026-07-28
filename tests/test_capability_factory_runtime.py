@@ -78,8 +78,12 @@ def test_local_experimental_bootstrap_requires_explicit_enable() -> None:
 def test_local_experimental_bootstrap_installs_dependency_gated_gateway() -> None:
     from workbench.app import configure_local_experimental_capability_runtime
 
+    class Scanner:
+        def verify(self, *, attestation, build):
+            raise AssertionError("the bootstrap test must not invoke the scanner")
+
     catalog = CapabilityBindingCatalog(verifier=lambda _binding: None)
-    dependency_service = DependencyService()
+    dependency_service = DependencyService(supply_chain_verifier=Scanner())
     runtime = configure_local_experimental_capability_runtime(
         authority_id="authority.local.experimental",
         catalog=catalog,
@@ -98,6 +102,21 @@ def test_local_experimental_bootstrap_installs_dependency_gated_gateway() -> Non
         )
     finally:
         configure_capability_factory_runtime(None)
+
+
+def test_local_experimental_bootstrap_rejects_unconfigured_supply_chain_verifier() -> None:
+    """An experimental profile may not merely appear configured without a scanner."""
+
+    from workbench.app import configure_local_experimental_capability_runtime
+
+    with pytest.raises(ValueError, match="supply-chain verifier"):
+        configure_local_experimental_capability_runtime(
+            authority_id="authority.local.experimental",
+            catalog=CapabilityBindingCatalog(verifier=lambda _binding: None),
+            dependency_service=DependencyService(),
+            binding_factory=lambda **_kwargs: None,
+            enable=True,
+        )
 
 
 def test_dependency_admission_gate_forwards_exact_dispatch_bundle() -> None:

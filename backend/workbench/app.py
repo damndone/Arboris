@@ -174,6 +174,10 @@ def configure_local_experimental_capability_runtime(
         raise TypeError("catalog must be a CapabilityBindingCatalog")
     if not isinstance(dependency_service, DependencyService):
         raise TypeError("dependency_service must be a DependencyService")
+    if not callable(getattr(dependency_service.supply_chain_verifier, "verify", None)):
+        raise ValueError(
+            "local experimental capability execution requires a configured supply-chain verifier"
+        )
     if not callable(binding_factory):
         raise TypeError("binding_factory must be callable")
     gateway = AuthorizedCapabilityExecutionGateway(
