@@ -57,4 +57,19 @@ describe("v1.8.3 NotebookOptionRevision@1.2", () => {
       "capability_resolution_binding_ref",
     );
   });
+
+  it("preserves the explicit experimental execution mode for high-risk custom capabilities", () => {
+    const packet = v12Packet();
+    packet.risk_level = "high";
+    packet.execution_modes = ["materialize_only", "experimental_confirm_and_execute"];
+
+    const option = parseNotebookOptionRevision(packet);
+
+    expect(option.execution_modes).toEqual([
+      "materialize_only",
+      "experimental_confirm_and_execute",
+    ]);
+    expect(option.confirmAndExecute).toBe(true);
+    expect(option.experimentalExecution).toBe(true);
+  });
 });

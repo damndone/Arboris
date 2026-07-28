@@ -191,6 +191,39 @@ def configure_local_experimental_capability_runtime(
     return runtime
 
 
+def configure_deployment_capability_factory_runtime(
+    *,
+    authority: Any,
+    dependency_service: DependencyService,
+    binding_factory: Callable[..., Any],
+    report_attestation_source: Any,
+    attestation_binding: Any,
+    result_sink: Callable[[Any], None] | None = None,
+) -> CapabilityFactoryRuntime:
+    """Atomically install a deployment-provided authority and scanner runtime.
+
+    This accepts only deployment ports.  It never manufactures signing keys,
+    allows unsigned containment reports, or replaces an absent scanner with a
+    local fallback.  The per-attempt binding factory receives an authenticated
+    report verifier and must mount it in its B1 broker.
+    """
+
+    from .capability_factory.deployment_authority import (
+        build_deployment_capability_factory_runtime,
+    )
+
+    runtime = build_deployment_capability_factory_runtime(
+        authority=authority,
+        dependency_service=dependency_service,
+        binding_factory=binding_factory,
+        report_attestation_source=report_attestation_source,
+        attestation_binding=attestation_binding,
+        result_sink=result_sink,
+    )
+    configure_capability_factory_runtime(runtime)
+    return runtime
+
+
 def configure_domain_memory_services(
     service: DomainMemoryService | None,
     review_service: MemoryReviewService | None,

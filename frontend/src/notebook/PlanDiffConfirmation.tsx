@@ -24,6 +24,7 @@ export function PlanDiffConfirmation({
 }: PlanDiffConfirmationProps) {
   const { option, execution, plan_diff } = confirmation;
   const confirmAndExecute = confirmation.mode === "confirm_and_execute";
+  const experimental = option.experimentalExecution === true;
   const required = option.artifact_contract.expected.filter((item) => item.required);
   const optional = option.artifact_contract.expected.filter((item) => !item.required);
 
@@ -32,7 +33,9 @@ export function PlanDiffConfirmation({
       <header className="nb-confirmation-header">
         <span className="nb-label">
           {confirmAndExecute
-            ? "Confirm before dispatching capability"
+            ? experimental
+              ? "Confirm before dispatching experimental capability"
+              : "Confirm before dispatching capability"
             : option.materializable
               ? "Confirm before preparing Draft"
               : "Confirm before running"}
@@ -52,6 +55,13 @@ export function PlanDiffConfirmation({
           ))}
         </ul>
       </div>
+
+      {experimental ? (
+        <p className="nb-confirmation-scope" data-testid="confirmation-experimental-warning">
+          Experimental local capability execution is high risk and remains subject to the
+          server-owned containment, dependency, and authorization gates.
+        </p>
+      ) : null}
 
       <div className="nb-confirmation-expected" data-testid="confirmation-expected-artifacts">
         <span className="nb-label">This run must produce</span>
@@ -96,7 +106,9 @@ export function PlanDiffConfirmation({
           {busy
             ? "Submitting…"
             : confirmAndExecute
-              ? "Confirm and execute"
+              ? experimental
+                ? "Confirm experimental execution"
+                : "Confirm and execute"
               : option.materializable
               ? "Confirm and prepare Draft"
               : "Confirm and run"}

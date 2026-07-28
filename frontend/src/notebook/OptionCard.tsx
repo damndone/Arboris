@@ -46,6 +46,7 @@ export function OptionCard({
   const gate = executability(option);
   const notes = axisNote(option);
   const contract = option.artifact_contract;
+  const experimental = option.experimentalExecution === true;
   const expectedById = new Map(contract.expected.map((item) => [item.artifact_id, item]));
 
   return (
@@ -112,7 +113,9 @@ export function OptionCard({
 
       {option.capability_resolution_binding_ref ? (
         <p data-testid="option-capability-binding" className="nb-option-capability-binding">
-          {option.confirmAndExecute
+          {experimental
+            ? "server-bound experimental capability · high risk · explicit confirmation required"
+            : option.confirmAndExecute
             ? "server-bound capability · explicit confirmation required"
             : "server-bound capability · materialization only until execution gates are satisfied"}
         </p>
@@ -173,11 +176,11 @@ export function OptionCard({
             type="button"
             data-testid="option-confirm-and-execute"
             className="nb-button nb-button-primary"
-            disabled={!gate.executable}
-            onClick={() => onConfirmAndExecute?.(option)}
-          >
-            Confirm and execute
-          </button>
+          disabled={!gate.executable}
+          onClick={() => onConfirmAndExecute?.(option)}
+        >
+          {experimental ? "Confirm experimental execution" : "Confirm and execute"}
+        </button>
         ) : null}
         <button
           type="button"

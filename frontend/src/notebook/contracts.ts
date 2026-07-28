@@ -299,6 +299,11 @@ export interface EvidenceRef {
   source_refs: string[];
 }
 
+export type CapabilityExecutionMode =
+  | "materialize_only"
+  | "confirm_and_execute"
+  | "experimental_confirm_and_execute";
+
 /** Common consumer shape. New parser outputs are the narrower union below. */
 export interface NotebookOptionRevision extends NotebookOptionRevisionBase {
   contract_version: "1.0" | "1.1" | "1.2";
@@ -309,8 +314,10 @@ export interface NotebookOptionRevision extends NotebookOptionRevisionBase {
   recommendation_decision_id?: string;
   recommendation_status?: RecommendationOutcome;
   capability_resolution_binding_ref?: string;
-  execution_modes?: ReadonlyArray<"materialize_only" | "confirm_and_execute">;
+  execution_modes?: ReadonlyArray<CapabilityExecutionMode>;
   confirmAndExecute?: boolean;
+  /** Server-declared high-risk local execution; never inferred from UI state. */
+  experimentalExecution?: boolean;
 }
 
 export interface LegacyNotebookOptionRevision extends NotebookOptionRevision {
@@ -337,8 +344,9 @@ export interface NotebookOptionRevisionV11 extends NotebookOptionRevision {
 export interface NotebookOptionRevisionV12 extends Omit<NotebookOptionRevisionV11, "contract_version"> {
   contract_version: "1.2";
   capability_resolution_binding_ref: string;
-  execution_modes: ReadonlyArray<"materialize_only" | "confirm_and_execute">;
+  execution_modes: ReadonlyArray<CapabilityExecutionMode>;
   confirmAndExecute: boolean;
+  experimentalExecution: boolean;
 }
 
 export type ParsedNotebookOptionRevision =
@@ -501,22 +509,36 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
     "notebook_option_revision",
   );
   const executionModes = requireStringArray(raw, "execution_modes", "notebook_option_revision");
+  const isExperimental = executionModes.includes("experimental_confirm_and_execute");
   if (
     executionModes.length === 0 ||
     executionModes[0] !== "materialize_only" ||
     new Set(executionModes).size !== executionModes.length ||
-    executionModes.some((mode) => mode !== "materialize_only" && mode !== "confirm_and_execute")
+    executionModes.some(
+      (mode) =>
+        mode !== "materialize_only" &&
+        mode !== "confirm_and_execute" &&
+        mode !== "experimental_confirm_and_execute",
+    ) ||
+    executionModes.filter((mode) => mode !== "materialize_only").length > 1
   ) {
     throw new NotebookContractError(
       "notebook_option_revision.execution_modes must start with materialize_only and use known modes",
+    );
+  }
+  if (isExperimental && base.risk_level !== "high") {
+    throw new NotebookContractError(
+      "experimental_confirm_and_execute is reserved for high-risk capabilities",
     );
   }
   return {
     ...baseOption,
     contract_version: "1.2",
     capability_resolution_binding_ref: bindingRef,
-    execution_modes: executionModes as Array<"materialize_only" | "confirm_and_execute">,
-    confirmAndExecute: executionModes.includes("confirm_and_execute"),
+    execution_modes: executionModes as CapabilityExecutionMode[],
+    confirmAndExecute:
+      executionModes.includes("confirm_and_execute") || isExperimental,
+    experimentalExecution: isExperimental,
   };
 }
 

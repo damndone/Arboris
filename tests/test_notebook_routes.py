@@ -976,7 +976,14 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
     )
     from workbench.capability_factory.control import ExecutionControlStore
     from workbench.capability_factory.custom_dispatcher import CustomCapabilityDispatcher
-    from workbench.capability_factory.dependency_service import DependencyService
+    from workbench.capability_factory.dependency_fetch import FetchPolicy, FetchWorker
+    from workbench.capability_factory.dependency_service import (
+        DependencyService,
+        SupplyChainAttestation,
+        SupplyChainReport,
+        SupplyChainVerification,
+    )
+    from workbench.capability_factory.dependency_store import DependencyStore
     from workbench.capability_factory.execution_authorization import (
         OptionExecutionAuthorizationStore,
     )
@@ -995,8 +1002,14 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
     from workbench.native_containment.platform_darwin import DarwinCanaryHarness
     from workbench.native_containment.policy import ContainmentPolicy
     from workbench.agent.notebook import OptionDraft, TypedProposal
+    from workbench.custom_capability.canonical import domain_digest
 
     from test_capability_custom_dispatcher import _records
+    from test_capability_dependency_service import (
+        _FetchTransport,
+        _authorized_fetch,
+        _inputs,
+    )
     from test_capability_execution_receipt import (
         _expectations,
         _store_subjects,
@@ -1009,12 +1022,101 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
         project, b"outcome,predictor\n1,2\n2,3\n", filename="data.csv"
     )
     implementation, adapter_template, binding_template = _records()
+    requirements, snapshot, resolution_policy, artifacts = _inputs()
+    transport = _FetchTransport(snapshot.artifacts[0].url, next(iter(artifacts.values())))
+    fetch_receipt = _authorized_fetch(
+        tmp_path / "dependency-authorization",
+        requirements,
+        snapshot,
+        resolution_policy,
+    )
+
+    class PassingSupplyChainVerifier:
+        def verify(self, *, attestation, build):
+            return SupplyChainVerification(
+                authority_ref=attestation.authority_ref,
+                decision_ref=domain_digest(
+                    "tests.notebook_route.supply_chain_decision/v1",
+                    {"build_ref": build.content_digest},
+                ),
+                status="passed",
+                attestation_ref=attestation.content_digest,
+                build_ref=build.content_digest,
+            )
+
+    dependency_service = DependencyService(
+        fetcher=FetchWorker(transport=transport),
+        store=DependencyStore(tmp_path / "dependency-store"),
+        supply_chain_verifier=PassingSupplyChainVerifier(),
+    )
+    prepared_dependency = dependency_service.fetch_and_prepare(
+        requirements=requirements,
+        snapshot=snapshot,
+        policy=resolution_policy,
+        fetch_policy=FetchPolicy(
+            allowed_origins=("https://packages.example.test",),
+            max_artifact_bytes=1024 * 1024,
+            max_redirects=0,
+        ),
+        quarantine_root=tmp_path / "dependency-quarantine",
+        authorization_receipt=fetch_receipt,
+        authorization_root=tmp_path / "dependency-authorization",
+    )
+    assert prepared_dependency.quarantine_build is not None
+    quarantine_build = prepared_dependency.quarantine_build
+    scanner_authority_ref = domain_digest(
+        "tests.notebook_route.supply_chain_authority/v1",
+        {"name": "controlled-local-scanner"},
+    )
+    license_report = SupplyChainReport(
+        report_kind="license",
+        build_ref=quarantine_build.content_digest,
+        sbom_ref=quarantine_build.sbom_ref,
+        authority_ref=scanner_authority_ref,
+        status="passed",
+        evidence_ref=domain_digest(
+            "tests.notebook_route.license_evidence/v1",
+            {"sbom_ref": quarantine_build.sbom_ref},
+        ),
+    )
+    vulnerability_report = SupplyChainReport(
+        report_kind="vulnerability",
+        build_ref=quarantine_build.content_digest,
+        sbom_ref=quarantine_build.sbom_ref,
+        authority_ref=scanner_authority_ref,
+        status="passed",
+        evidence_ref=domain_digest(
+            "tests.notebook_route.vulnerability_evidence/v1",
+            {"sbom_ref": quarantine_build.sbom_ref},
+        ),
+    )
+    dependency_service.store.put_supply_chain_report(license_report)
+    dependency_service.store.put_supply_chain_report(vulnerability_report)
+    validated_dependency = dependency_service.mark_validated(
+        prepared_dependency,
+        attestation=SupplyChainAttestation(
+            bundle_ref=prepared_dependency.bundle.bundle_ref,
+            tree_manifest_ref=quarantine_build.tree_manifest_ref,
+            sbom_ref=quarantine_build.sbom_ref,
+            license_status="passed",
+            vulnerability_status="passed",
+            license_report_ref=license_report.content_digest,
+            vulnerability_report_ref=vulnerability_report.content_digest,
+            authority_ref=scanner_authority_ref,
+        ),
+    )
+    dependency_service.admit_execution_bundle(
+        validated_dependency.bundle.bundle_ref,
+        scope="project",
+    )
+    dependency_service.assert_execution_bundle(validated_dependency.bundle.bundle_ref)
     source = AdapterSourceGenerator().generate(
         implementation=implementation,
         provider=lambda _context: (
+            "from safe_library import VALUE\n"
             "def adapter(document):\n"
             "    value = document['payload']['value']\n"
-            "    return {'status': 'ok', 'value': value}\n"
+            "    return {'status': 'ok', 'value': value + VALUE}\n"
         ),
         output_root=(tmp_path / "generated-adapter").resolve(),
     )
@@ -1030,6 +1132,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
         binding_template,
         adapter_ref=adapter.content_digest,
         scope_ref="project.alpha",
+        dependency_bundle_ref=validated_dependency.bundle.bundle_ref,
     )
     catalog = CapabilityBindingCatalog(verifier=lambda _binding: None)
     catalog.register(
@@ -1048,12 +1151,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
     requests: dict[str, ContainmentRequest] = {}
     reports: dict[str, object] = {}
     result_paths: list[Path] = []
-    dependency_checks: list[str] = []
     run_ids: list[str] = []
-    dependency_service = DependencyService()
-    dependency_service.assert_execution_bundle = (  # type: ignore[method-assign]
-        lambda bundle_ref: dependency_checks.append(bundle_ref)
-    )
 
     policy = ContainmentPolicy(
         profile_id="darwin-seatbelt-experimental-v1",
@@ -1135,6 +1233,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
             input_root=input_root,
             output_root=output_root,
             interpreter=Path("/usr/bin/python3"),
+            dependency_roots=(quarantine_build.root,),
         )
         result_paths.append(adapter_binding.result_path)
         darwin_executor = DarwinExperimentalExecutor(
@@ -1186,7 +1285,7 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
             payload = adapter_binding.read_result(
                 requests[receipt.attempt_id], reports[receipt.attempt_id]
             )
-            assert payload == {"status": "ok", "value": 42}
+            assert payload == {"status": "ok", "value": 43}
             attempt = binding.coordinator.supervisor_store.read(receipt.attempt_id)
             artifact = {
                 "artifact_id": "custom.route.result",
@@ -1370,9 +1469,14 @@ def test_model_custom_route_runs_generated_adapter_through_local_experimental_ga
         )
         assert executed.status_code == 200, executed.text
         assert executed.json()["dispatch"]["status"] == "completed"
-        assert dependency_checks == [binding.dependency_bundle_ref]
+        assert transport.calls == [snapshot.artifacts[0].url]
+        assert dependency_service.store.get_quarantine_build(
+            binding.dependency_bundle_ref,
+            root=quarantine_build.root,
+        ) == quarantine_build
+        assert dependency_service.admission.history(binding.dependency_bundle_ref)[-1].status == "admitted"
         assert result_paths and result_paths[0].read_text(encoding="utf-8") == (
-            '{"status":"ok","value":42}'
+            '{"status":"ok","value":43}'
         )
         listed = client.get(
             f"/notebooks/{notebook_id}/options", params=params

@@ -56,4 +56,34 @@ describe("OptionCard — capability-bound execution declaration", () => {
     );
     expect(screen.queryByTestId("option-confirm-and-execute")).toBeNull();
   });
+
+  it("labels experimental custom execution as high-risk instead of a normal dispatch", () => {
+    const option = {
+      ...canonicalOptionRevision(),
+      contract_version: "1.2" as const,
+      lifecycle_projection: "proposed" as const,
+      materializable: true,
+      evidence_refs: [],
+      comparative_claims: [],
+      recommendation_decision_id: "decision_capability",
+      recommendation_status: "recommended" as const,
+      risk_level: "high" as const,
+      capability_resolution_binding_ref: "c".repeat(64),
+      execution_modes: [
+        "materialize_only",
+        "experimental_confirm_and_execute",
+      ] as never,
+      confirmAndExecute: true,
+      experimentalExecution: true,
+    };
+
+    render(<OptionCard option={option} onConfirmAndExecute={vi.fn()} />);
+
+    expect(screen.getByTestId("option-capability-binding")).toHaveTextContent(
+      "experimental",
+    );
+    expect(screen.getByTestId("option-confirm-and-execute")).toHaveTextContent(
+      "Confirm experimental execution",
+    );
+  });
 });

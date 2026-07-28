@@ -117,6 +117,206 @@ def test_dependency_admission_gate_forwards_exact_dispatch_bundle() -> None:
     assert calls == ["a" * 64]
 
 
+def test_deployment_runtime_binds_external_authority_scanner_and_signed_report_source() -> None:
+    """The product composes trusted deployment ports without shipping a key."""
+
+    from datetime import datetime, timedelta, timezone
+
+    from workbench.app import (
+        app,
+        configure_capability_factory_runtime,
+        configure_deployment_capability_factory_runtime,
+    )
+    from workbench.capability_factory.dependency_service import (
+        DependencyService,
+        SupplyChainVerification,
+    )
+    from workbench.capability_factory.deployment_authority import (
+        AttestationVerificationState,
+        AuthenticatedContainmentReportVerifier,
+        ExecutionResultAttestationBinding,
+    )
+    from workbench.custom_capability.contracts import (
+        AttestationEnvelope,
+        AuthorityTrustSnapshot,
+        SCHEMA_VERSION,
+    )
+    from workbench.native_containment.contracts import ContainmentReport, ContainmentRequest, ResourceBudget
+    from workbench.native_containment.host import CanaryResult
+    from workbench.native_containment.policy import ContainmentPolicy
+
+    now = datetime(2026, 7, 28, 9, 0, tzinfo=timezone.utc)
+
+    class KeyProvider:
+        def verify(self, payload, authentication, *, scheme, key_id, authority_id):
+            assert payload
+            return (
+                authentication == "signed-by-external-provider"
+                and scheme == "external-v1"
+                and key_id == "external-key"
+                and authority_id == "deployment-authority"
+            )
+
+    class Authority:
+        authority_id = "deployment-authority"
+
+        def authentication_verifier(self):
+            return KeyProvider()
+
+        def trust_snapshot(self):
+            return AuthorityTrustSnapshot(
+                snapshot_id="deployment-snapshot",
+                authority_id=self.authority_id,
+                allowed_kinds=frozenset({"execution_result"}),
+                allowed_key_ids=frozenset({"external-key"}),
+                allowed_auth_schemes=frozenset({"external-v1"}),
+                valid_from=now - timedelta(minutes=1),
+                valid_until=now + timedelta(minutes=5),
+            )
+
+        def verification_state(self):
+            return AttestationVerificationState(
+                now=now,
+                minimum_control_sequence=7,
+            )
+
+        def verify_capability_binding(self, binding):
+            assert binding is not None
+
+    policy = ContainmentPolicy(
+        profile_id="darwin-seatbelt-experimental-v1",
+        filesystem_mode="sealed_readonly",
+        network_mode="disabled",
+        process_mode="isolated",
+        inherited_descriptors=False,
+        dependency_tree_writable=False,
+        environment_allowlist={"LANG": "C.UTF-8"},
+        locale="C.UTF-8",
+        thread_count=1,
+        budget=ResourceBudget(10_000, 8_000, 64 * 1024 * 1024, 8, 1_000_000, 100_000),
+        allow_weaker_fallback=False,
+        resource_enforcement="observed_memory",
+    )
+    request = ContainmentRequest(
+        request_id="request.deployment",
+        attempt_id="attempt.deployment",
+        intent_digest="a" * 64,
+        input_bundle_ref="b" * 64,
+        output_namespace_ref="c" * 64,
+        policy_digest=policy.content_digest,
+        harness_digest="d" * 64,
+    )
+    report = ContainmentReport(
+        attempt_id=request.attempt_id,
+        request_digest=request.content_digest,
+        status="completed",
+        reason_code="NATIVE_CONTAINMENT_COMPLETED",
+        assessment_ref="e" * 64,
+        output_bundle_ref="f" * 64,
+    )
+    attestation_binding = ExecutionResultAttestationBinding(
+        operation_id="model.custom",
+        backend_subject_id="darwin-seatbelt",
+        protocol_digest="1" * 64,
+    )
+
+    class SignedReportSource:
+        def execution_result_attestation(self, *, report, request, policy, canary, binding):
+            assert canary.status == "supported"
+            return AttestationEnvelope(
+                schema_version=SCHEMA_VERSION,
+                attestation_kind="execution_result",
+                authority_id="deployment-authority",
+                key_id="external-key",
+                auth_scheme="external-v1",
+                issued_at=now,
+                expires_at=now + timedelta(minutes=1),
+                nonce="deployment-nonce",
+                control_sequence=7,
+                claims={
+                    "binding": {
+                        "intent_digest": request.intent_digest,
+                        "attempt_id": request.attempt_id,
+                        "input_bundle_digest": request.input_bundle_ref,
+                        "operation_id": binding.operation_id,
+                        "output_bundle_digest": report.output_bundle_ref,
+                        "policy_digest": policy.content_digest,
+                        "backend_subject_id": binding.backend_subject_id,
+                        "protocol_digest": binding.protocol_digest,
+                    },
+                    "payload": {"status": report.status},
+                },
+                authentication="signed-by-external-provider",
+            )
+
+    authority = Authority()
+    verifier = AuthenticatedContainmentReportVerifier(
+        authority=authority,
+        source=SignedReportSource(),
+        binding=attestation_binding,
+    )
+    assert len(
+        verifier(
+            report=report,
+            request=request,
+            policy=policy,
+            canary=CanaryResult(status="supported", reason_code="NATIVE_CONTAINMENT_CANARY_PASSED"),
+        )
+    ) == 64
+
+    class Scanner:
+        def verify(self, *, attestation, build):
+            return SupplyChainVerification(
+                authority_ref=attestation.authority_ref,
+                decision_ref="2" * 64,
+                status="passed",
+                attestation_ref=attestation.content_digest,
+                build_ref=build.content_digest,
+            )
+
+    received = {}
+
+    def binding_factory(*, authority_report_verifier, **kwargs):
+        received.update(kwargs)
+        received["authority_report_verifier"] = authority_report_verifier
+        return object()
+
+    runtime = configure_deployment_capability_factory_runtime(
+        authority=authority,
+        dependency_service=DependencyService(supply_chain_verifier=Scanner()),
+        binding_factory=binding_factory,
+        report_attestation_source=SignedReportSource(),
+        attestation_binding=attestation_binding,
+    )
+    try:
+        assert runtime.authority_id == "deployment-authority"
+        assert runtime.execution_enabled is True
+        assert runtime.catalog.__class__.__name__ == "CapabilityBindingCatalog"
+        assert runtime.execution_gateway.binding_factory(
+            notebook_id="notebook-deployment",
+            option_id="option-deployment",
+            authorization=object(),
+            materialization=object(),
+            draft={},
+            context=object(),
+        ) is not None
+        assert isinstance(
+            received["authority_report_verifier"],
+            AuthenticatedContainmentReportVerifier,
+        )
+    finally:
+        configure_capability_factory_runtime(None)
+
+    with pytest.raises(ValueError, match="supply-chain verifier"):
+        configure_deployment_capability_factory_runtime(
+            authority=authority,
+            dependency_service=DependencyService(),
+            binding_factory=binding_factory,
+            report_attestation_source=SignedReportSource(),
+            attestation_binding=attestation_binding,
+        )
+
+
 def test_controlled_fixture_promotes_generated_adapter_through_verified_to_approved(
     tmp_path,
 ) -> None:
