@@ -11,6 +11,17 @@ function option(overrides: Partial<NotebookOptionRevision> = {}): NotebookOption
 }
 
 describe("OptionCard — the canonical option, rendered as the packet states it", () => {
+  it.each([
+    ["low", "Low risk"],
+    ["medium", "Medium risk"],
+    ["high", "High risk"],
+  ] as const)("exposes %s risk as text and a semantic styling hook", (risk, label) => {
+    render(<OptionCard option={option({ risk_level: risk })} />);
+
+    expect(screen.getByTestId("option-risk")).toHaveTextContent(label);
+    expect(screen.getByTestId("option-risk")).toHaveAttribute("data-risk", risk);
+  });
+
   it("renders the packet's own rationale, assumptions and pinned revisions", () => {
     render(<OptionCard option={option()} />);
 
@@ -141,6 +152,7 @@ describe("OptionCard — a stale option is never directly executable", () => {
   it("allows execution only for a fresh, valid, proposed/selected option", () => {
     render(<OptionCard option={option()} />);
     expect(screen.getByTestId("option-execute")).toBeEnabled();
+    expect(screen.getByTestId("option-execute")).toHaveTextContent("Review plan");
     expect(screen.queryByTestId("option-blocked-reason")).toBeNull();
   });
 

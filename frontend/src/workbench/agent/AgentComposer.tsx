@@ -127,9 +127,11 @@ function AgentComposerContent({
               ))}
             </select>
           </label>
-          <span className="wb-agent-session-status" role="status" aria-live="polite">
-            {isSubmitting ? "Thinking" : sessionStatus}
-          </span>
+          {(isSubmitting || sessionStatus.toLowerCase() !== "idle") && (
+            <span className="wb-agent-session-status" role="status" aria-live="polite">
+              {isSubmitting ? "Thinking" : sessionStatus}
+            </span>
+          )}
           <button
             type="button"
             className="wb-agent-voice"

@@ -161,6 +161,10 @@ def test_chain_turn_receives_structured_proposal_protocol(
     protocol = protocol_messages[0]["content"]
     assert "must call propose_operation" in protocol
     assert "does not execute" in protocol
+    assert "description does not execute a result" in protocol
+    assert "model.joint_f_test" in protocol
+    assert "model.quadratic_stationary_point" in protocol
+    assert "stationary_point_within_observed_range" in protocol
 
 
 def test_agent_session_rejects_oversized_context_and_unknown_session(tmp_path: Path) -> None:
@@ -1113,7 +1117,7 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     assert _snapshot(project_root) == before
 
 
-def test_main_role_turn_exposes_no_workbench_tools(
+def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1138,7 +1142,13 @@ def test_main_role_turn_exposes_no_workbench_tools(
             json={"question": "总结项目状态。"},
         )
     assert turn.status_code == 200
-    assert FakeAgentAdapter.instances[-1].requests[0].tools == []
+    tool_ids = {
+        tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+    }
+    assert tool_ids == {"inspect_project_model_coefficients"}
+    descriptor = FakeAgentAdapter.instances[-1].requests[0].tools[0]
+    assert descriptor["side_effect"] == "none"
+    assert descriptor["scope_requirements"] == ["project"]
     protocol_messages = [
         message
         for message in FakeAgentAdapter.instances[-1].requests[0].messages
@@ -1147,6 +1157,50 @@ def test_main_role_turn_exposes_no_workbench_tools(
     assert len(protocol_messages) == 1
     assert "project-level advisory Agent" in protocol_messages[0]["content"]
     assert "never invent" in protocol_messages[0]["content"].lower()
+    assert "inspect_project_model_coefficients" in protocol_messages[0]["content"]
+    assert "one recorded unit" in protocol_messages[0]["content"]
+    assert "overlap" in protocol_messages[0]["content"]
+    assert "exact sign" in protocol_messages[0]["content"]
+
+
+def test_main_turn_refreshes_protocol_for_existing_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from workbench.http import agent_routes
+
+    FakeAgentAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={"role": "main", "context_packet": _context_packet()},
+        )
+        session_id = created.json()["session_id"]
+        marker = "PROTOCOL_UPGRADE_MARKER"
+        monkeypatch.setattr(
+            agent_routes,
+            "MAIN_AGENT_PROTOCOL",
+            f"{agent_routes.MAIN_AGENT_PROTOCOL}\n- {marker}",
+        )
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "读取现有证据。"},
+        )
+
+    assert turn.status_code == 200
+    protocol_messages = [
+        message
+        for message in FakeAgentAdapter.instances[-1].requests[0].messages
+        if message.get("name") == "workbench_global_agent_protocol"
+    ]
+    assert any(marker in message["content"] for message in protocol_messages)
 
 
 class ProposingAdapter:

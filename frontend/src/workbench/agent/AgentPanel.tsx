@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useAgentSurface } from "./AgentSurfaceContext";
 import { agentAuditExportUrl } from "./agentApi";
-import { AgentHierarchyTree } from "./AgentHierarchyTree";
 import { AgentComposer } from "./AgentComposer";
 import { renderMarkdown } from "../../report/markdown";
 import "./agent.css";
@@ -112,7 +111,6 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
   const [revisionDraft, setRevisionDraft] = useState("");
   const [revisionError, setRevisionError] = useState<string | null>(null);
-  const hasNavigationContext = Boolean(agent.hierarchy || agent.navigationLinks.length > 0);
   const auditSessionId = agent.navigationLinks.find(
     (link) => link.kind === "operation" && typeof link.href.session_id === "string",
   )?.href.session_id;
@@ -134,9 +132,11 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
       >
         <strong style={{ color: "var(--label)" }}>agent</strong>
         <span style={{ color: "var(--label-secondary)" }}>{agent.scopeLabel}</span>
-        <span style={{ color: "var(--label-tertiary)" }} aria-label={`Session status: ${agent.sessionStatus}`}>
-          [{agent.isSubmitting ? "thinking" : agent.sessionStatus}]
-        </span>
+        {(agent.isSubmitting || agent.sessionStatus.toLowerCase() !== "idle") && (
+          <span style={{ color: "var(--label-tertiary)" }} aria-label={`Session status: ${agent.sessionStatus}`}>
+            [{agent.isSubmitting ? "thinking" : agent.sessionStatus}]
+          </span>
+        )}
         <span
           data-testid="agent-event-cursor"
           title={agent.lastEventType ? `last event: ${agent.lastEventType}` : "No Agent events yet"}
@@ -155,51 +155,6 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
           </a>
         )}
       </header>
-      {hasNavigationContext && (
-        <details
-          data-testid="agent-context-details"
-          className="wb-agent-context-details"
-        >
-          <summary>
-            <span>Agent context</span>
-            <span className="wb-agent-context-summary-meta">
-              {agent.hierarchy ? "Main / Chain" : `${agent.navigationLinks.length} links`}
-            </span>
-          </summary>
-          <div className="wb-agent-context-body">
-            {agent.hierarchy && (
-              <AgentHierarchyTree
-                root={agent.hierarchy}
-                openNavigation={agent.openNavigation}
-              />
-            )}
-            {agent.navigationLinks.length > 0 && (
-              <nav
-                data-testid="agent-navigation-links"
-                aria-label="Agent lineage links"
-                className="wb-agent-navigation-links"
-              >
-                {agent.navigationLinks.map((link) => (
-                  <button
-                    key={`${link.kind}:${link.id}:${link.relation}`}
-                    type="button"
-                    className="wb-agent-navigation-link"
-                    aria-label={navigationButtonLabel(link)}
-                    disabled={!link.available || !agent.openNavigation}
-                    title={link.available ? link.label : link.reason ?? "Unavailable"}
-                    onClick={() => {
-                      if (link.available) agent.openNavigation?.(link);
-                    }}
-                  >
-                    <span className="wb-agent-navigation-link-relation">{link.relation}</span>
-                    <span>{link.label}</span>
-                  </button>
-                ))}
-              </nav>
-            )}
-          </div>
-        </details>
-      )}
       <div
         role="log"
         aria-label={`Agent transcript for ${runId}`}

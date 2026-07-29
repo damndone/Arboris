@@ -233,7 +233,7 @@ export function WorkbenchHomeView({
         <header style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
             <p style={{ margin: "0 0 8px", color: "var(--label-secondary, #98989d)", fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Econometrics Workbench
+              Workbench
             </p>
             <h1 id="workbench-home-title" style={{ margin: 0, fontSize: 30, letterSpacing: "-0.02em" }}>
               Project home

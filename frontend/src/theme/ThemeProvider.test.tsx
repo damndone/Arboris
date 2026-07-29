@@ -11,7 +11,7 @@
  * the cleanup test can assert correctness.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, renderHook } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
 import {
   STORAGE_KEY,
   ThemeProvider,
@@ -68,6 +68,10 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise<Response>(() => undefined)),
+  );
 });
 
 afterEach(() => {
@@ -100,6 +104,22 @@ describe("ThemeProvider", () => {
     act(() => mql.__setMatches(true));
     expect(result.current.effective).toBe("dark");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("uses the local Workbench native appearance when the embedded browser signal differs", async () => {
+    installMatchMedia(true); // Embedded browser reports dark.
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ theme: "light", source: "darwin-native" }),
+    } as Response);
+
+    const { result } = renderHook(() => useTheme(), { wrapper });
+    expect(result.current.effective).toBe("dark");
+    await waitFor(() => expect(result.current.effective).toBe("light"));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/system/appearance",
+      expect.objectContaining({ cache: "no-store" }),
+    );
   });
 
   it("locked mode (dark/light) ignores matchMedia changes", () => {

@@ -125,6 +125,7 @@ export function DetailDrawer({
       role="dialog"
       aria-labelledby={DETAIL_HEADER_TITLE_ID}
       data-testid="detail-drawer"
+      className="detail-drawer"
       style={{
         width: drawerWidth,
         flex: `0 0 ${drawerWidth}px`,

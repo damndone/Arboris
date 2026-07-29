@@ -48,6 +48,8 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "graph.fork",
         "model.custom",
         "model.genesis",
+        "model.joint_f_test",
+        "model.quadratic_stationary_point",
         "model.rerun",
         "operation.multi_step",
         "report.compose",

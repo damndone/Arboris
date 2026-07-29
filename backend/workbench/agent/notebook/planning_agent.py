@@ -464,6 +464,7 @@ class NotebookPlanningAgent:
         max_inspection_rounds: int = 5,
         max_contract_corrections: int = 2,
         model_timeout_s: float = 120.0,
+        planning_timeout_s: float | None = None,
     ) -> None:
         self.adapter = adapter
         self.capability_catalog = dict(capability_catalog or {})
@@ -490,6 +491,14 @@ class NotebookPlanningAgent:
         if model_timeout_s <= 0:
             raise ValueError("model_timeout_s must be positive")
         self.model_timeout_s = float(model_timeout_s)
+        if planning_timeout_s is None:
+            planning_timeout_s = max(
+                self.model_timeout_s,
+                min(self.model_timeout_s * 2, 180.0),
+            )
+        if planning_timeout_s <= 0:
+            raise ValueError("planning_timeout_s must be positive")
+        self.planning_timeout_s = float(planning_timeout_s)
 
     def _published_artifact_types(self, capability_id: str) -> Mapping[str, str]:
         dynamic = self._capability_artifact_types.get(capability_id)
@@ -516,6 +525,9 @@ class NotebookPlanningAgent:
         catalog = self.capability_catalog or {name: {} for name in context.available_capabilities}
         if not catalog:
             raise NotebookNoEligibleCapability("no registered executable Notebook capability is available")
+        planning_deadline = (
+            asyncio.get_running_loop().time() + self.planning_timeout_s
+        )
         context_payload = notebook_planning_workbench_context(context)
         context_payload["execution_pins"] = self._execution_pins(context)
         context_payload["available_inspection_ids"] = sorted(self.available_inspections)
@@ -543,6 +555,9 @@ class NotebookPlanningAgent:
                     "one to five distinct ids; after enough evidence is available, submit the option batch. "
                     "Submitted typed options must cite completed evidence refs. Every comparative_claim must literally contain "
                     "the evidence_id of one of that option's evidence_refs; do not use unsupported prose. "
+                    "Evidence with status partial or failed is non-citable. A partial bounded inspection is "
+                    "terminal for that inspection id: describe its omissions as a limitation, but do not "
+                    "request it again merely to remove a declared cap. "
                     "Copy execution_pins exactly: for a dataset proposal use model.genesis and set "
                     "target.dataset_source_id exactly to context.projection_source.upload_sha256; for a run "
                     "proposal copy the active-head and node pins without rewriting them. For model.genesis, "
@@ -567,6 +582,8 @@ class NotebookPlanningAgent:
                     "and nesting shown in capability_catalog's notebook_model_options_contract or "
                     "model_options_vocabulary. Never translate canonical fields into aliases such as ar, ma, "
                     "dist, or mean; the server validates the merged target contract and rejects invented keys. "
+                    "If a model type has no published notebook_model_options_contract, omit model_options "
+                    "entirely; never borrow options from a related model family. "
                     "Do not claim missingness is random, a model is superior, or a diagnostic is clean unless "
                     "the completed evidence record explicitly supports that claim. If evidence cannot separate "
                     "options, submit the options as tied/insufficient evidence rather than forcing a winner. "
@@ -583,6 +600,9 @@ class NotebookPlanningAgent:
                         "context": context_payload,
                         "capability_catalog": catalog,
                         "evidence": initial_evidence.to_dict(),
+                        "evidence_citation_policy": self._evidence_citation_policy(
+                            initial_evidence
+                        ),
                     },
                     ensure_ascii=False,
                 ),
@@ -590,20 +610,46 @@ class NotebookPlanningAgent:
         ]
         evidence = initial_evidence
         requests_seen: list[InspectionRequest] = []
-        completed_inspection_ids = {
+        terminal_inspection_ids = {
             record.inspection_id
             for record in evidence.records
-            if record.status == "completed"
+            if record.status in {"completed", "partial"}
         }
         inspection_rounds = 0
         contract_corrections = 0
         for round_number in range(
             1, self.max_inspection_rounds + 2 + self.max_contract_corrections
         ):
-            events = await self._call_model(messages)
+            remaining_s = planning_deadline - asyncio.get_running_loop().time()
+            if remaining_s <= 0:
+                raise NotebookPlanningTimeout(
+                    f"Notebook planning exceeded the {self.planning_timeout_s:g}s total budget"
+                )
+            total_budget_limited = remaining_s < self.model_timeout_s
+            events = await self._call_model(
+                messages,
+                timeout_s=min(self.model_timeout_s, remaining_s),
+                total_budget_limited=total_budget_limited,
+            )
             calls = [event.tool_call for event in events if event.type == "tool_call_delta" and event.tool_call]
             if len(calls) != 1:
-                raise NotebookPlanningContractError("planning turn must contain exactly one typed tool call")
+                error = NotebookPlanningContractError(
+                    "text-only planning completion is not accepted"
+                    if not calls
+                    else "planning turn must contain exactly one typed tool call"
+                )
+                if contract_corrections >= self.max_contract_corrections:
+                    raise error
+                contract_corrections += 1
+                self._append_contract_correction(
+                    messages,
+                    call={},
+                    error=error,
+                    context=context,
+                    evidence=evidence,
+                    correction_number=contract_corrections,
+                )
+                continue
             call = calls[0]
             tool_id = call.get("tool_id")
             arguments = call.get("arguments")
@@ -626,7 +672,7 @@ class NotebookPlanningAgent:
                         )
                     if any(
                         request in requests_seen
-                        or request.inspection_id in completed_inspection_ids
+                        or request.inspection_id in terminal_inspection_ids
                         for request in requests
                     ):
                         raise NotebookPlanningContractError("duplicate inspection request")
@@ -666,14 +712,26 @@ class NotebookPlanningAgent:
                     raise NotebookPlanningContractError("inspection executor returned no Evidence Pack")
                 inspection_rounds += 1
                 evidence = self._append_evidence_pack(evidence, inspection_pack)
-                completed_inspection_ids.update(
+                terminal_inspection_ids.update(
                     record.inspection_id
                     for record in inspection_pack.records
-                    if record.status == "completed"
+                    if record.status in {"completed", "partial"}
                 )
                 messages.extend([
                     {"role": "assistant", "tool_calls": [call]},
-                    {"role": "tool", "tool_call_id": call.get("tool_call_id", "inspection"), "content": json.dumps(evidence.to_dict(), ensure_ascii=False)},
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("tool_call_id", "inspection"),
+                        "content": json.dumps(
+                            {
+                                "evidence": evidence.to_dict(),
+                                "evidence_citation_policy": self._evidence_citation_policy(
+                                    evidence
+                                ),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
                 ])
                 failed_codes = sorted(
                     {
@@ -747,6 +805,31 @@ class NotebookPlanningAgent:
             drafts = option_drafts_from_submissions(context, submissions, decision=decision)
             return PlanningResult(tuple(requests_seen), evidence, submissions, drafts, decision, round_number)
         raise NotebookPlanningContractError("planning loop did not submit an option batch")
+
+    @staticmethod
+    def _evidence_citation_policy(
+        evidence: DataEvidencePackV1,
+    ) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "completed_evidence_refs": [
+                {
+                    "evidence_id": record.evidence_id,
+                    "result_hash": record.result_hash,
+                    "source_refs": list(record.source_refs),
+                }
+                for record in evidence.records
+                if record.status == "completed"
+            ],
+            "non_citable_evidence": [
+                {
+                    "evidence_id": record.evidence_id,
+                    "status": record.status,
+                    "omissions": [dict(item) for item in record.omissions],
+                }
+                for record in evidence.records
+                if record.status != "completed"
+            ],
+        }
 
     @staticmethod
     def _append_evidence_pack(
@@ -892,6 +975,53 @@ class NotebookPlanningAgent:
                 "Resubmit the option batch. Every comparative_claim must literally "
                 f"contain one completed evidence_id from this pack: {available}."
             )
+        elif message == "duplicate inspection request":
+            remediation = (
+                "Do not request an inspection id already present with status completed "
+                "or partial. A partial result is the terminal bounded result; preserve "
+                "its omissions as a limitation and proceed using only completed refs "
+                "from evidence_citation_policy for citations."
+            )
+        elif message == "text-only planning completion is not accepted":
+            remediation = (
+                "Do not answer in prose. You must call exactly one declared Notebook "
+                "tool: request_notebook_inspections when more evidence is required, "
+                "or submit_notebook_option_batch when the bounded evidence is enough."
+            )
+        elif message == "option tool arguments must contain only options":
+            remediation = (
+                "Call submit_notebook_option_batch with exactly one top-level field "
+                "named options whose value is the option array. Do not include "
+                "reasoning, explanation, evidence, metadata, or any other sibling "
+                "field; put option-specific rationale inside each option.rationale."
+            )
+        elif message == "option evidence ref is missing, changed, or incomplete":
+            completed = [
+                {
+                    "evidence_id": record.evidence_id,
+                    "result_hash": record.result_hash,
+                    "source_refs": list(record.source_refs),
+                }
+                for record in evidence.records
+                if record.status == "completed"
+            ]
+            partial = [
+                {
+                    "evidence_id": record.evidence_id,
+                    "status": record.status,
+                    "omissions": [dict(item) for item in record.omissions],
+                }
+                for record in evidence.records
+                if record.status == "partial"
+            ]
+            remediation = (
+                "Resubmit the option batch using only an exact evidence_id, "
+                "result_hash, and source_refs tuple from completed_evidence_refs "
+                f"{json.dumps(completed, sort_keys=True)}. Partial evidence "
+                f"{json.dumps(partial, sort_keys=True)} must not be cited as completed; "
+                "its omissions may be described only as a limitation. Do not request "
+                "the same bounded inspection again merely to remove a declared cap."
+            )
         elif message == "dataset-source proposal is not pinned to the source upload":
             source_id = (context.projection_source or {}).get("upload_sha256")
             remediation = (
@@ -946,6 +1076,15 @@ class NotebookPlanningAgent:
                 "under changes. Keep capability_ref and binding_ref out of the Agent payload; the server "
                 "resolves them from capability_id. Use only the exact input handle and consumer slots "
                 "published by the server, and do not request execution outside the Proposal/Risk gateway."
+            )
+        elif (
+            "model_options target contract rejected" in message
+            and "MODEL_OPTIONS_UNSUPPORTED" in message
+        ):
+            remediation = (
+                "This exact model type publishes no model_options contract. Resubmit "
+                "the same proposal but omit model_options entirely. Do not borrow "
+                "covariance or any other option from a related model family."
             )
         elif "model_options target contract rejected" in message:
             remediation = (
@@ -1031,20 +1170,28 @@ class NotebookPlanningAgent:
             f"{correction_number}/2. {message}. {remediation}"
         )
 
-    async def _call_model(self, messages: list[dict[str, Any]]) -> list[ModelStreamEvent]:
+    async def _call_model(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        timeout_s: float,
+        total_budget_limited: bool,
+    ) -> list[ModelStreamEvent]:
         request = ModelRequest(messages=list(messages), tools=[dict(tool) for tool in NOTEBOOK_TOOLS])
         try:
             events = await asyncio.wait_for(
-                self._collect_model_events(request), timeout=self.model_timeout_s
+                self._collect_model_events(request), timeout=timeout_s
             )
         except asyncio.TimeoutError as exc:
+            if total_budget_limited:
+                raise NotebookPlanningTimeout(
+                    f"Notebook planning exceeded the {self.planning_timeout_s:g}s total budget"
+                ) from exc
             raise NotebookPlanningTimeout(
                 f"Notebook planning provider exceeded {self.model_timeout_s:g}s"
             ) from exc
         if not any(event.type == "done" for event in events):
             raise NotebookPlanningUnavailable("model provider returned no completion")
-        if not any(event.type == "tool_call_delta" for event in events):
-            raise NotebookPlanningContractError("text-only planning completion is not accepted")
         return events
 
     async def _collect_model_events(self, request: ModelRequest) -> list[ModelStreamEvent]:

@@ -50,6 +50,13 @@ function mount(context: AgentSurfaceContextValue) {
 }
 
 describe("AgentComposer", () => {
+  it("does not render an idle-only session label", () => {
+    mount(value({ sessionStatus: "idle" }));
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^idle$/i)).not.toBeInTheDocument();
+  });
+
   it("renders the bounded context ring and synchronized model selector", () => {
     mount(value());
 

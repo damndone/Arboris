@@ -182,13 +182,13 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   return (
     <>
       <aside
-        className="run-rail"
+        className={`run-rail${railOpen ? "" : " run-rail--collapsed"}`}
         data-testid="run-rail"
         data-open={railOpen ? "true" : "false"}
         aria-label="Run history"
         style={railOpen
           ? { width: railWidth, flexBasis: railWidth }
-          : { width: 0, flexBasis: 0, overflow: "hidden" }}
+          : { width: 0, flexBasis: 0 }}
       >
       {railOpen && (
         <>
@@ -217,11 +217,11 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
                 background: "transparent",
                 color: "var(--label-secondary)",
                 cursor: "pointer",
-                fontSize: 16,
+                fontSize: 11,
                 lineHeight: 1,
               }}
             >
-              ‹
+              <span aria-hidden="true">◀</span>
             </button>
           </header>
           {loading && sorted.length === 0 && (
@@ -263,6 +263,20 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           )}
         </>
       )}
+      {!railOpen && (
+        <button
+          type="button"
+          className="run-rail__reopen run-rail__reopen--square"
+          aria-label="Open run history"
+          title="Show runs"
+          onClick={() => setRailOpen(true)}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+            <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </button>
+      )}
       </aside>
       {railOpen ? (
         <div
@@ -290,41 +304,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           }}
           className="run-rail__resizer"
         />
-      ) : (
-        // Claude-style collapse: the rail fully disappears (no leftover strip);
-        // a single compact icon button floats at the top-left to reopen it.
-        <div style={{ position: "relative", width: 0, flexBasis: 0 }}>
-          <button
-            type="button"
-            className="run-rail__reopen"
-            aria-label="Open run history"
-            title="Show runs"
-            onClick={() => setRailOpen(true)}
-            style={{
-              position: "absolute",
-              top: 8,
-              left: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 30,
-              height: 30,
-              padding: 0,
-              border: "1px solid var(--separator)",
-              borderRadius: 8,
-              background: "color-mix(in oklch, var(--bg-card) 92%, transparent)",
-              color: "var(--label-secondary)",
-              cursor: "pointer",
-              zIndex: 5,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-              <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-          </button>
-        </div>
-      )}
+      ) : null}
     </>
   );
 }

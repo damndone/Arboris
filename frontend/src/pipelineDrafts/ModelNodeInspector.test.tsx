@@ -106,6 +106,68 @@ test("shows a changed-fields summary vs source params (§6.5)", () => {
   expect(summary).toHaveTextContent(/robust/);
 });
 
+test("keeps changed fields compact while preserving expandable exact details", () => {
+  render(
+    <ModelNodeInspector
+      draftHash="h1"
+      node={{
+        node_id: "model_1",
+        node_type: "model",
+        model_family: "regression",
+        model_type: "ols",
+        schema_id: "ols@v1",
+        editable_schema: [],
+        editable_schema_hash: "schema",
+        source_ref: {},
+        source_params: {},
+        params: {
+          model_options: { covariance: "robust", threads: 1 },
+          x: ["alpha", "beta", "gamma", "delta"],
+          y: "outcome",
+        },
+      }}
+      onSave={vi.fn()}
+    />,
+  );
+
+  const summary = screen.getByTestId("changed-fields-summary");
+  expect(summary).not.toHaveAttribute("open");
+  expect(summary.querySelector("summary")).toHaveTextContent("3 changes");
+  expect(screen.getByTestId("changed-field-value-model_options")).toHaveTextContent(
+    "2 settings",
+  );
+  expect(screen.getByTestId("changed-field-value-x")).toHaveTextContent("4 items");
+  expect(screen.getByTestId("changed-field-value-y")).toHaveTextContent("outcome");
+});
+
+test("separates model edit actions and gives Save the primary emphasis", () => {
+  render(
+    <ModelNodeInspector
+      draftHash="h1"
+      node={{
+        node_id: "model_1",
+        node_type: "model",
+        model_family: "regression",
+        model_type: "ols",
+        schema_id: "ols@v1",
+        editable_schema: [],
+        editable_schema_hash: "schema",
+        source_ref: {},
+        source_params: {},
+        params: {},
+      }}
+      onSave={vi.fn()}
+    />,
+  );
+
+  const actions = screen.getByTestId("model-editor-actions");
+  expect(actions).toContainElement(screen.getByRole("button", { name: "Reset to source" }));
+  expect(actions).toContainElement(screen.getByRole("button", { name: "Save changes" }));
+  expect(screen.getByRole("button", { name: "Save changes" })).toHaveClass(
+    "draft-button--primary",
+  );
+});
+
 test("keeps the OLS Agent envelope out of the human covariance editor", () => {
   render(
     <ModelNodeInspector

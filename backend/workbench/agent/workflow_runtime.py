@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import numpy as np
 import pandas as pd
 
 from ..artifacts import read_json, register_artifact, write_json
+from ..econometrics.runner import run_ols
 from ..exports import export_pdf, export_xlsx
 from ..lineage.pipeline_drafts import (
     PipelineDraftStore,
@@ -18,7 +21,12 @@ from ..lineage.pipeline_drafts import (
 )
 from ..lineage.run_inputs import read_run_inputs
 from ..lineage.upload_store import store_upload_bytes, verify_upload
-from ..model_terms import ModelTermError, expand_branch_terms
+from ..model_terms import (
+    ModelTermError,
+    dummy_column_name,
+    expand_branch_terms,
+    polynomial_column_name,
+)
 from ..reporting import render_html_report
 from ..repository.run_repository import _read_artifacts_index
 from ..statistical_exploration import (
@@ -363,6 +371,16 @@ def build_workflow_step_executor(
             return _execute_ols_branches(
                 root, draft, source_context, source_frame, step
             )
+        if dispatcher_key == "workbench.agent.workflow_runtime.model_joint_f_test":
+            return _execute_model_joint_f_test(
+                root, draft, source_context, source_frame, step, previous
+            )
+        if dispatcher_key == (
+            "workbench.agent.workflow_runtime.model_quadratic_stationary_point"
+        ):
+            return _execute_model_quadratic_stationary_point(
+                root, draft, source_context, source_frame, step, previous
+            )
         if dispatcher_key == "capability_factory.custom_dispatcher":
             if not callable(custom_step_executor):
                 raise WorkflowExecutionError(
@@ -526,11 +544,398 @@ def _execute_ols_branches(
                 + ", ".join(missing_figures)
             )
         artifact_ids.extend(f"{run_id}:{artifact_id}" for artifact_id in ids)
-        branch_outputs.append({"branch_id": branch_id, "run_id": run_id, "artifact_ids": ids})
+        branch_outputs.append(
+            {
+                "branch_id": branch_id,
+                "run_id": run_id,
+                "artifact_ids": ids,
+                "branch_spec": {
+                    "outcome": str(branch["outcome"]),
+                    "predictors": [str(item) for item in branch["predictors"]],
+                    "categorical": [str(item) for item in branch.get("categorical", []) or []],
+                    "polynomials": [dict(item) for item in branch.get("polynomials", []) or []],
+                },
+                "predictor_columns": list(branch_predictors),
+                "term_groups": _declared_branch_term_groups(
+                    branch,
+                    branch_frame,
+                    branch_predictors,
+                    references,
+                ),
+            }
+        )
     return WorkflowStepResult(
         artifact_ids=artifact_ids,
         row_counts={"source": len(source_frame)},
         payload={"branches": branch_outputs},
+    )
+
+
+def _declared_branch_term_groups(
+    branch: Mapping[str, Any],
+    branch_frame: pd.DataFrame,
+    branch_predictors: list[str],
+    references: Mapping[str, Any],
+) -> dict[str, dict[str, list[str]]]:
+    """Map only a branch's declared source terms to its fitted columns."""
+
+    groups: dict[str, dict[str, list[str]]] = {
+        "linear": {},
+        "categorical": {},
+        "polynomial": {},
+    }
+    available = set(branch_predictors)
+    for column in [str(item) for item in branch.get("predictors", []) or []]:
+        if column in available:
+            groups["linear"][column] = [column]
+    for column in [str(item) for item in branch.get("categorical", []) or []]:
+        reference = references.get(column)
+        if reference is None or column not in branch_frame.columns:
+            continue
+        levels = branch_frame[column].dropna().unique().tolist()
+        levels.sort(key=lambda value: (str(type(value)), value))
+        terms = [
+            dummy_column_name(column, level)
+            for level in levels
+            if level != reference and dummy_column_name(column, level) in available
+        ]
+        if terms:
+            groups["categorical"][column] = terms
+    for entry in branch.get("polynomials", []) or []:
+        if not isinstance(entry, Mapping):
+            continue
+        column = entry.get("column")
+        degree = entry.get("degree")
+        if not isinstance(column, str) or isinstance(degree, bool) or not isinstance(degree, int):
+            continue
+        terms = [
+            polynomial_column_name(column, power)
+            for power in range(2, degree + 1)
+            if polynomial_column_name(column, power) in available
+        ]
+        if terms:
+            groups["polynomial"][column] = terms
+    return groups
+
+
+def _dependent_model_branch(
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+) -> dict[str, Any]:
+    """Resolve a branch only from a direct completed model dependency."""
+
+    branch_id = str(step.spec["branch_id"])
+    matches: list[dict[str, Any]] = []
+    for dependency_id in step.depends_on:
+        dependency = previous.get(dependency_id)
+        branches = dependency.payload.get("branches") if dependency is not None else None
+        if not isinstance(branches, list):
+            continue
+        for branch in branches:
+            if isinstance(branch, Mapping) and branch.get("branch_id") == branch_id:
+                matches.append(dict(branch))
+    if not matches:
+        raise WorkflowExecutionError(
+            f"{step.step_id} must directly depend on a completed model branch: {branch_id}"
+        )
+    if len(matches) != 1:
+        raise WorkflowExecutionError(
+            f"{step.step_id} has an ambiguous completed model branch: {branch_id}"
+        )
+    branch = matches[0]
+    if not isinstance(branch.get("branch_spec"), Mapping) or not isinstance(
+        branch.get("term_groups"), Mapping
+    ):
+        raise WorkflowExecutionError(
+            f"completed model branch {branch_id} lacks declared-term provenance"
+        )
+    return branch
+
+
+def _refit_completed_ols_branch(
+    source_frame: pd.DataFrame,
+    branch: Mapping[str, Any],
+) -> tuple[Any, list[str], pd.DataFrame]:
+    """Reconstruct the exact unadjusted OLS design from immutable source data."""
+
+    branch_spec = branch.get("branch_spec")
+    if not isinstance(branch_spec, Mapping):
+        raise WorkflowExecutionError("completed model branch lacks a branch specification")
+    try:
+        branch_frame, predictor_columns, _references = expand_branch_terms(
+            source_frame,
+            branch_spec,
+        )
+    except ModelTermError as exc:
+        raise WorkflowExecutionError(
+            f"completed model branch cannot be reconstructed: {exc}"
+        ) from exc
+    expected = branch.get("predictor_columns")
+    if not isinstance(expected, list) or predictor_columns != [str(item) for item in expected]:
+        raise WorkflowExecutionError(
+            "completed model branch design no longer matches its declared provenance"
+        )
+    try:
+        _normalized, fitted = run_ols(
+            branch_frame,
+            str(branch_spec["outcome"]),
+            predictor_columns,
+            robust=False,
+            model_id="ols_1",
+            covariance="unadjusted",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkflowExecutionError(
+            f"completed model branch cannot be refit for post-estimation: {exc}"
+        ) from exc
+    model_frame = branch_frame.copy()
+    if not model_frame.index.is_unique:
+        model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
+    row_labels = getattr(fitted.model.data, "row_labels", None)
+    if row_labels is None:
+        raise WorkflowExecutionError("completed model does not expose its analysis sample")
+    try:
+        analysis_frame = model_frame.loc[row_labels].copy()
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkflowExecutionError(
+            "completed model analysis sample cannot be recovered from immutable source data"
+        ) from exc
+    if len(analysis_frame) != int(fitted.nobs):
+        raise WorkflowExecutionError(
+            "completed model analysis sample does not match its fitted observation count"
+        )
+    return fitted, predictor_columns, analysis_frame
+
+
+def _fitted_term_positions(fitted: Any, terms: list[str]) -> list[int]:
+    names = [str(item) for item in getattr(fitted.model, "exog_names", [])]
+    positions: list[int] = []
+    for term in terms:
+        fitted_name = f"Q({term!r})"
+        try:
+            positions.append(names.index(fitted_name))
+        except ValueError as exc:
+            raise WorkflowExecutionError(
+                f"completed model is missing the declared coefficient term: {term}"
+            ) from exc
+    return positions
+
+
+def _selected_model_terms(branch: Mapping[str, Any], selectors: list[Any]) -> list[str]:
+    groups = branch.get("term_groups")
+    if not isinstance(groups, Mapping):
+        raise WorkflowExecutionError("completed model branch lacks declared term groups")
+    selected: list[str] = []
+    for selector in selectors:
+        if not isinstance(selector, Mapping):
+            raise WorkflowExecutionError("joint F test selector is invalid")
+        kind = str(selector.get("kind"))
+        column = str(selector.get("column"))
+        by_column = groups.get(kind)
+        terms = by_column.get(column) if isinstance(by_column, Mapping) else None
+        if not isinstance(terms, list) or not terms:
+            raise WorkflowExecutionError(
+                "joint F test selector is not declared by the completed model branch: "
+                f"{kind}:{column}"
+            )
+        selected.extend(str(item) for item in terms)
+    return list(dict.fromkeys(selected))
+
+
+def _persist_model_post_estimation_result(
+    root: Path,
+    draft: WorkflowDraft,
+    step: Any,
+    *,
+    artifact_type: str,
+    result: Mapping[str, Any],
+    model_run_id: str,
+    source_sha256: str,
+) -> WorkflowStepResult:
+    """Persist one durable, idempotent post-estimation artifact on the source run."""
+
+    run_root = root / "runs" / str(draft.target["run_id"])
+    token = str(step.fingerprint).removeprefix("sha256:")[:24]
+    operation_token = str(step.operation_id).replace(".", "_")
+    artifact_id = f"workflow_{operation_token}_{token}"
+    artifact_path = run_root / "artifacts" / artifact_type / f"{artifact_id}.json"
+    payload = {
+        "schema_version": "workbench.workflow.post-estimation/v1",
+        "source": {
+            "run_id": str(draft.target["run_id"]),
+            "node_ref": str(draft.target["node_ref"]),
+            "artifact_id": str(draft.target["artifact_id"]),
+            "sha256": source_sha256,
+            "model_run_id": model_run_id,
+            "model_artifact_id": "ols_1",
+            "workflow_id": draft.workflow_id,
+            "workflow_step_id": step.step_id,
+            "workflow_step_fingerprint": step.fingerprint,
+        },
+        "result": dict(result),
+    }
+    if artifact_path.exists():
+        if read_json(artifact_path) != payload:
+            raise WorkflowExecutionError("post-estimation artifact path is occupied")
+    else:
+        write_json(artifact_path, payload)
+    index = _read_artifacts_index(run_root)
+    existing = [
+        item for item in index.get("artifacts", []) if item.get("artifact_id") == artifact_id
+    ]
+    if len(existing) > 1:
+        raise WorkflowExecutionError("post-estimation artifact identity is duplicated")
+    if not existing:
+        register_artifact(
+            run_root,
+            artifact_id,
+            artifact_path,
+            artifact_type,
+            str(step.operation_id),
+            [str(draft.target["artifact_id"])],
+        )
+    else:
+        record = existing[0]
+        if (
+            record.get("artifact_type") != artifact_type
+            or record.get("path") != artifact_path.relative_to(run_root).as_posix()
+        ):
+            raise WorkflowExecutionError("post-estimation artifact identity is inconsistent")
+    return WorkflowStepResult(
+        artifact_ids=[artifact_id],
+        row_counts={},
+        result_fingerprint=str(step.fingerprint),
+        payload={"result": dict(result), "model_run_id": model_run_id},
+    )
+
+
+def _execute_model_joint_f_test(
+    root: Path,
+    draft: WorkflowDraft,
+    source_context: Mapping[str, Any],
+    source_frame: pd.DataFrame,
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+) -> WorkflowStepResult:
+    branch = _dependent_model_branch(step, previous)
+    selectors = step.spec.get("term_selectors")
+    if not isinstance(selectors, list):
+        raise WorkflowExecutionError("joint F test term selectors are unavailable")
+    terms = _selected_model_terms(branch, selectors)
+    fitted, _predictor_columns, _analysis_frame = _refit_completed_ols_branch(
+        source_frame, branch
+    )
+    positions = _fitted_term_positions(fitted, terms)
+    restriction = np.zeros((len(positions), len(fitted.model.exog_names)))
+    for row, position in enumerate(positions):
+        restriction[row, position] = 1.0
+    test = fitted.f_test(restriction)
+    f_statistic = float(np.asarray(test.fvalue).squeeze())
+    p_value = float(np.asarray(test.pvalue).squeeze())
+    denominator_df = float(np.asarray(test.df_denom).squeeze())
+    numerator_df = float(np.asarray(test.df_num).squeeze())
+    if not all(math.isfinite(value) for value in (f_statistic, p_value, denominator_df, numerator_df)):
+        raise WorkflowExecutionError("joint F test produced a non-finite result")
+    result = {
+        "schema_version": "workbench.model.joint-f-test/v1",
+        "test": "joint_f_test",
+        "branch_id": str(branch["branch_id"]),
+        "term_selectors": [dict(item) for item in selectors if isinstance(item, Mapping)],
+        "coefficient_terms": terms,
+        "f_statistic": f_statistic,
+        "p_value": p_value,
+        "numerator_df": numerator_df,
+        "denominator_df": denominator_df,
+        "nobs": int(fitted.nobs),
+        "covariance": "unadjusted",
+    }
+    return _persist_model_post_estimation_result(
+        root,
+        draft,
+        step,
+        artifact_type="statistical_test",
+        result=result,
+        model_run_id=str(branch["run_id"]),
+        source_sha256=str(source_context["source_sha256"]),
+    )
+
+
+def _execute_model_quadratic_stationary_point(
+    root: Path,
+    draft: WorkflowDraft,
+    source_context: Mapping[str, Any],
+    source_frame: pd.DataFrame,
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+) -> WorkflowStepResult:
+    branch = _dependent_model_branch(step, previous)
+    column = str(step.spec["column"])
+    groups = branch.get("term_groups")
+    branch_spec = branch.get("branch_spec")
+    if not isinstance(groups, Mapping) or not isinstance(branch_spec, Mapping):
+        raise WorkflowExecutionError("completed model branch lacks declared-term provenance")
+    linear_terms = groups.get("linear", {}).get(column) if isinstance(groups.get("linear"), Mapping) else None
+    polynomial_terms = groups.get("polynomial", {}).get(column) if isinstance(groups.get("polynomial"), Mapping) else None
+    degree = next(
+        (
+            item.get("degree")
+            for item in branch_spec.get("polynomials", []) or []
+            if isinstance(item, Mapping) and item.get("column") == column
+        ),
+        None,
+    )
+    if linear_terms != [column] or polynomial_terms != [polynomial_column_name(column, 2)] or degree != 2:
+        raise WorkflowExecutionError(
+            "stationary point requires a declared linear-plus-degree-two polynomial term: "
+            + column
+        )
+    fitted, _predictor_columns, analysis_frame = _refit_completed_ols_branch(
+        source_frame, branch
+    )
+    linear_position, quadratic_position = _fitted_term_positions(
+        fitted,
+        [column, polynomial_column_name(column, 2)],
+    )
+    parameters = np.asarray(fitted.params, dtype=float)
+    linear_coefficient = float(parameters[linear_position])
+    quadratic_coefficient = float(parameters[quadratic_position])
+    if not all(math.isfinite(value) for value in (linear_coefficient, quadratic_coefficient)):
+        raise WorkflowExecutionError("stationary point coefficients are non-finite")
+    if quadratic_coefficient == 0.0:
+        raise WorkflowExecutionError("stationary point is undefined because the quadratic coefficient is zero")
+    stationary_point = -linear_coefficient / (2.0 * quadratic_coefficient)
+    if not math.isfinite(stationary_point):
+        raise WorkflowExecutionError("stationary point is non-finite")
+    observed_values = pd.to_numeric(analysis_frame[column], errors="coerce")
+    observed_values = observed_values[np.isfinite(observed_values.to_numpy(dtype=float))]
+    if observed_values.empty:
+        raise WorkflowExecutionError(
+            "stationary point analysis sample has no finite values for the declared column"
+        )
+    observed_min = float(observed_values.min())
+    observed_max = float(observed_values.max())
+    result = {
+        "schema_version": "workbench.model.quadratic-stationary-point/v1",
+        "branch_id": str(branch["branch_id"]),
+        "column": column,
+        "linear_coefficient": linear_coefficient,
+        "quadratic_coefficient": quadratic_coefficient,
+        "stationary_point": stationary_point,
+        "observed_min": observed_min,
+        "observed_max": observed_max,
+        "stationary_point_within_observed_range": observed_min <= stationary_point <= observed_max,
+        "curvature": "minimum" if quadratic_coefficient > 0 else "maximum",
+        "nobs": int(fitted.nobs),
+        "covariance": "unadjusted",
+    }
+    return _persist_model_post_estimation_result(
+        root,
+        draft,
+        step,
+        artifact_type="post_estimation",
+        result=result,
+        model_run_id=str(branch["run_id"]),
+        source_sha256=str(source_context["source_sha256"]),
     )
 
 

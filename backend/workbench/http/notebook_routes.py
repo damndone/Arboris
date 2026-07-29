@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
+import threading
 from typing import Any, Literal, Mapping
 
 from fastapi import APIRouter, Request
@@ -19,7 +21,7 @@ from ..agent.context_compiler import (
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
-from ..agent.model import OpenAICompatibleModelAdapter
+from ..agent.model import CancellableOpenAICompatibleModelAdapter
 from ..agent.notebook.planning_agent import (
     NotebookNoEligibleCapability,
     NotebookPlanningAgent,
@@ -50,6 +52,12 @@ from ..capability_factory.execution_authorization import (
 )
 
 router = APIRouter()
+
+NOTEBOOK_PROVIDER_TIMEOUT_S = 120.0
+_ACTIVE_PLANNING_ATTEMPTS: dict[
+    tuple[str, str, str], asyncio.Task[Any]
+] = {}
+_ACTIVE_PLANNING_ATTEMPTS_LOCK = threading.Lock()
 
 _TRACE_VERSIONS = {
     "app_commit": "local-workbench",
@@ -108,6 +116,12 @@ class OptionDraftRequest(_StrictModel):
 class ProposeOptionsRequest(_StrictModel):
     drafts: list[OptionDraftRequest] = Field(default_factory=list, max_length=3)
     count: int | None = Field(default=None, ge=1, le=3)
+    attempt_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
 
 
 class RevalidateOptionRequest(OptionDraftRequest):
@@ -634,14 +648,19 @@ def _planning_agent(
                     raise ValueError("MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED")
                 bind_new_model_options(model_type, payload)
 
+    notebook_config = (
+        config
+        if config.timeout_s >= NOTEBOOK_PROVIDER_TIMEOUT_S
+        else replace(config, timeout_s=NOTEBOOK_PROVIDER_TIMEOUT_S)
+    )
     return NotebookPlanningAgent(
-        adapter=OpenAICompatibleModelAdapter(config),
+        adapter=CancellableOpenAICompatibleModelAdapter(notebook_config),
         capability_catalog=catalog,
         capability_artifact_types=dynamic_artifact_types,
         inspection_executor=execute_inspections,
         proposal_validator=validate_proposal,
         available_inspections=tuple(INSPECTIONS),
-        model_timeout_s=config.timeout_s,
+        model_timeout_s=notebook_config.timeout_s,
     )
 
 
@@ -851,8 +870,50 @@ def compile_notebook_context_endpoint(
         raise _request_error(exc) from exc
 
 
+def _planning_attempt_key(
+    root: Path,
+    notebook_id: str,
+    attempt_id: str,
+) -> tuple[str, str, str]:
+    return (str(root.resolve()), notebook_id, attempt_id)
+
+
+async def _run_planning_agent(
+    agent: NotebookPlanningAgent,
+    *,
+    context: NotebookPlanningContextV1,
+    initial_evidence: DataEvidencePackV1,
+):
+    plan_async = getattr(agent, "plan_async", None)
+    if callable(plan_async):
+        return await plan_async(context=context, initial_evidence=initial_evidence)
+    return await asyncio.to_thread(
+        agent.plan,
+        context=context,
+        initial_evidence=initial_evidence,
+    )
+
+
+@router.delete("/notebooks/{notebook_id}/planning/{attempt_id}")
+async def cancel_planning_attempt_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    attempt_id: str,
+) -> dict[str, str]:
+    root, service = _service(request, project_root)
+    service.get_notebook(notebook_id)
+    key = _planning_attempt_key(root, notebook_id, attempt_id)
+    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+        task = _ACTIVE_PLANNING_ATTEMPTS.get(key)
+    if task is None or task.done():
+        return {"attempt_id": attempt_id, "status": "not_active"}
+    task.get_loop().call_soon_threadsafe(task.cancel)
+    return {"attempt_id": attempt_id, "status": "cancelled"}
+
+
 @router.post("/notebooks/{notebook_id}/options/propose")
-def propose_options_endpoint(
+async def propose_options_endpoint(
     request: Request,
     project_root: str,
     notebook_id: str,
@@ -881,10 +942,39 @@ def propose_options_endpoint(
             initial_evidence = _baseline_planning_evidence(
                 service, notebook_id, context, trace
             )
-            result = agent.plan(
-                context=context,
-                initial_evidence=initial_evidence,
+            attempt_key = (
+                _planning_attempt_key(root, notebook_id, body.attempt_id)
+                if body.attempt_id is not None
+                else None
             )
+            current_task = asyncio.current_task()
+            if attempt_key is not None and current_task is not None:
+                with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                    active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
+                    if active is not None and not active.done():
+                        raise WorkbenchAPIError(
+                            status_code=409,
+                            code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
+                            message="Notebook planning attempt is already active",
+                        )
+                    _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
+            try:
+                result = await _run_planning_agent(
+                    agent,
+                    context=context,
+                    initial_evidence=initial_evidence,
+                )
+            except asyncio.CancelledError as exc:
+                raise WorkbenchAPIError(
+                    status_code=409,
+                    code="NOTEBOOK_PLANNING_CANCELLED",
+                    message="Notebook planning was cancelled",
+                ) from exc
+            finally:
+                if attempt_key is not None and current_task is not None:
+                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                        if _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key) is current_task:
+                            _ACTIVE_PLANNING_ATTEMPTS.pop(attempt_key, None)
             # Each bounded inspection is persisted separately by the service.
             # Persist the planner's final append-only view as well, because the
             # recommendation decision may cite evidence from more than one

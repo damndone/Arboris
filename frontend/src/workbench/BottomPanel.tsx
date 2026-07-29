@@ -107,11 +107,11 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
 
   return (
     <div
+      className="bottom-panel"
       data-testid="bottom-panel"
       data-open={open ? "true" : "false"}
       style={{
         borderTop: "1px solid var(--separator, #2e2e30)",
-        background: "var(--surface-elevated, transparent)",
         display: "flex",
         flexDirection: "column",
         flex: "0 0 auto",
@@ -150,6 +150,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
             }}
           />
           <div
+            className="bottom-panel__tabs"
             role="tablist"
             aria-label="Bottom panels"
             data-testid="bottom-panel-tabs"
@@ -158,7 +159,6 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
               alignItems: "stretch",
               gap: 0,
               height: 32,
-              borderBottom: "1px solid var(--separator, #2e2e30)",
               padding: "0 4px",
               flex: "0 0 auto",
             }}
@@ -171,6 +171,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
                 const disabled = panel.disabled?.(ctx);
                 return (
                   <button
+                    className="bottom-panel__tab"
                     key={panel.id}
                     type="button"
                     role="tab"
@@ -205,6 +206,7 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
               })}
             <div style={{ flex: 1 }} />
             <button
+              className="bottom-panel__collapse"
               type="button"
               aria-label="Close bottom panel"
               title="Close bottom panel"
@@ -215,12 +217,12 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
                 background: "transparent",
                 color: "var(--label-secondary)",
                 cursor: "pointer",
-                fontSize: 16,
+                fontSize: 11,
                 lineHeight: 1,
                 padding: "0 8px",
               }}
             >
-              ˅
+              <span aria-hidden="true">▼</span>
             </button>
           </div>
           {Body && (

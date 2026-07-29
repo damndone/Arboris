@@ -116,6 +116,119 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
     assert all("ols_1" in branch["artifact_ids"] for branch in result.payload["branches"])
 
 
+def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
+    tmp_path,
+) -> None:
+    """A model workflow can test declared terms without accepting formulas or code."""
+
+    rows = 48
+    exposure = [float(index - 24) for index in range(rows)]
+    frame = pd.DataFrame(
+        {
+            "response": [
+                20.0
+                + 1.8 * value
+                - 0.12 * value**2
+                + (2.0 if index % 2 else -1.0)
+                + ((index % 5) - 2) * 0.05
+                for index, value in enumerate(exposure)
+            ],
+            "exposure": exposure,
+            "segment": ["lower" if index % 2 else "upper" for index in range(rows)],
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-post-estimation",
+        steps=[
+            {
+                "step_id": "estimate_curved_model",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "curved",
+                            "outcome": "response",
+                            "predictors": ["exposure"],
+                            "categorical": ["segment"],
+                            "polynomials": [{"column": "exposure", "degree": 2}],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "test_curved_terms",
+                "operation_id": "model.joint_f_test",
+                "depends_on": ["estimate_curved_model"],
+                "spec": {
+                    "branch_id": "curved",
+                    "term_selectors": [
+                        {"kind": "polynomial", "column": "exposure"},
+                        {"kind": "categorical", "column": "segment"},
+                    ],
+                },
+            },
+            {
+                "step_id": "locate_stationary_point",
+                "operation_id": "model.quadratic_stationary_point",
+                "depends_on": ["estimate_curved_model"],
+                "spec": {"branch_id": "curved", "column": "exposure"},
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    index = json.loads(
+        (project / "runs" / run_id / "artifacts_index.json").read_text(encoding="utf-8")
+    )
+    records = {record["artifact_id"]: record for record in index["artifacts"]}
+    joint_record = records[state.steps["test_curved_terms"].artifact_ids[0]]
+    stationary_record = records[state.steps["locate_stationary_point"].artifact_ids[0]]
+    assert joint_record["artifact_type"] == "statistical_test"
+    assert stationary_record["artifact_type"] == "post_estimation"
+
+    joint = json.loads(
+        (project / "runs" / run_id / joint_record["path"]).read_text(encoding="utf-8")
+    )["result"]
+    stationary = json.loads(
+        (project / "runs" / run_id / stationary_record["path"]).read_text(encoding="utf-8")
+    )["result"]
+    assert joint["test"] == "joint_f_test"
+    assert joint["term_selectors"] == [
+        {"kind": "polynomial", "column": "exposure"},
+        {"kind": "categorical", "column": "segment"},
+    ]
+    assert joint["f_statistic"] > 0
+    assert joint["p_value"] >= 0
+    assert stationary["column"] == "exposure"
+    assert stationary["curvature"] == "maximum"
+    assert stationary["stationary_point"] == pytest.approx(7.5, abs=0.2)
+    assert stationary["observed_min"] == -24.0
+    assert stationary["observed_max"] == 23.0
+    assert stationary["stationary_point_within_observed_range"] is True
+
+
 def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:
     frame = _frame(6)
     project, run_id, artifact_id = _source_project(tmp_path, frame)

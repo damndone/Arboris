@@ -18,6 +18,9 @@ from .config import LLMConfig
 _client_factory: Callable[[LLMConfig], httpx.Client] = lambda config: httpx.Client(
     timeout=config.timeout_s
 )
+_async_client_factory: Callable[[LLMConfig], httpx.AsyncClient] = (
+    lambda config: httpx.AsyncClient(timeout=config.timeout_s)
+)
 
 
 class LLMNotConfiguredError(Exception):
@@ -91,15 +94,9 @@ def chat_completion(
     """POST Chat Completions and normalize text plus optional tool calls."""
     if not config.is_configured():
         raise LLMNotConfiguredError(config.configuration_error_message())
+    request_payload = _chat_request_payload(messages, config, tools)
     try:
         with _client_factory(config) as client:
-            request_payload: dict[str, Any] = {
-                "model": config.model,
-                "messages": messages,
-                "stream": False,
-            }
-            if tools:
-                request_payload["tools"] = tools
             response = client.post(
                 f"{config.base_url.rstrip('/')}/chat/completions",
                 headers={
@@ -112,6 +109,56 @@ def chat_completion(
     except (httpx.HTTPError, ValueError) as exc:
         raise LLMUpstreamError(f"LLM provider request failed: {type(exc).__name__}") from exc
 
+    return _normalize_chat_completion_response(response, config)
+
+
+async def async_chat_completion(
+    messages: list[dict[str, Any]],
+    config: LLMConfig,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Cancellable async variant used by long-running Agent workflows."""
+
+    if not config.is_configured():
+        raise LLMNotConfiguredError(config.configuration_error_message())
+    request_payload = _chat_request_payload(messages, config, tools)
+    try:
+        async with _async_client_factory(config) as client:
+            response = await client.post(
+                f"{config.base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_payload,
+                timeout=config.timeout_s,
+            )
+    except (httpx.HTTPError, ValueError) as exc:
+        raise LLMUpstreamError(f"LLM provider request failed: {type(exc).__name__}") from exc
+
+    return _normalize_chat_completion_response(response, config)
+
+
+def _chat_request_payload(
+    messages: list[dict[str, Any]],
+    config: LLMConfig,
+    tools: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": config.model,
+        "messages": messages,
+        "stream": False,
+    }
+    if tools:
+        payload["tools"] = tools
+    return payload
+
+
+def _normalize_chat_completion_response(
+    response: httpx.Response,
+    config: LLMConfig,
+) -> dict[str, Any]:
     if response.status_code < 200 or response.status_code >= 300:
         raise LLMUpstreamError(
             "LLM provider returned an error: "

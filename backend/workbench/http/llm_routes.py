@@ -154,7 +154,7 @@ def _public_config_base_url(config) -> str | None:
 # the model receives numeric source context and emits only figure markers; the
 # serving/export layers resolve those markers to the run-owned artifacts.
 _REPORT_PROMPT_HEADER = (
-    "You are the report writer of a local econometrics workbench. The JSON "
+    "You are the report writer of a local Workbench. The JSON "
     "packet below contains a fact_table: the ONLY numbers you may use. Each "
     "fact has an id. It may also contain a figures list. Each figure has an "
     "artifact_id and a numeric source summary.\n"
@@ -187,7 +187,7 @@ _REPORT_CORRECTION_PROMPT = (
 )
 
 _SYSTEM_PROMPT_HEADER = (
-    "You are the node assistant of a local econometrics workbench. The user "
+    "You are the node assistant of a local Workbench. The user "
     "selected one node of a lineage graph (data -> cleaning -> model -> "
     "diagnostics); the JSON context packet below describes that node, its "
     "upstream path, parameters, metrics and artifact previews.\n"
@@ -202,7 +202,7 @@ _SYSTEM_PROMPT_HEADER = (
 )
 
 _FIGURE_PROMPT_HEADER = (
-    "You are the figure assistant of a local econometrics workbench. The user "
+    "You are the figure assistant of a local Workbench. The user "
     "selected one generated chart. You CANNOT see the image. The JSON packet "
     "below gives the chart type and a safe preview of the numeric artifact the "
     "chart was drawn from.\n"
@@ -223,7 +223,7 @@ _FIGURE_PROMPT_HEADER = (
 # structure, but numbers must still come from the numeric source (a model
 # reading values off pixels is exactly the failure mode we avoid).
 _FIGURE_VISION_PROMPT_HEADER = (
-    "You are the figure assistant of a local econometrics workbench. The user "
+    "You are the figure assistant of a local Workbench. The user "
     "selected one generated chart and explicitly chose to send you the rendered "
     "image. You are given BOTH the chart image and the JSON packet with its "
     "chart type and a safe preview of the numeric artifact it was drawn from.\n"

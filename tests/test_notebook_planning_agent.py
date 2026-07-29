@@ -179,6 +179,10 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert [tool["tool_id"] for tool in adapter.requests[0].tools] == [tool["tool_id"] for tool in NOTEBOOK_TOOLS]
     planning_payload = json.loads(adapter.requests[0].messages[1]["content"])
     planning_context = planning_payload["context"]
+    assert planning_payload["evidence_citation_policy"] == {
+        "completed_evidence_refs": [],
+        "non_citable_evidence": [],
+    }
     assert planning_context["generation_context_hash"].startswith("sha256:")
     assert planning_context["freshness_dependency_fingerprint"].startswith("fresh1:")
     assert planning_context["execution_pins"]["rerun_preconditions"]["context_version"] == "node-operation-context/v1"
@@ -389,6 +393,34 @@ def test_provider_plan_surfaces_a_bounded_timeout(tmp_path: Path) -> None:
     )
 
     with pytest.raises(NotebookPlanningTimeout, match="exceeded"):
+        agent.plan(
+            context=_context(make_project(tmp_path)),
+            initial_evidence=DataEvidencePackV1("run:run_001", ()),
+        )
+
+
+def test_provider_plan_enforces_one_total_planning_budget(tmp_path: Path) -> None:
+    class SlowCorrectingAdapter:
+        async def stream(self, request):
+            await asyncio.sleep(0.03)
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "unknown",
+                    "tool_id": "unknown_tool",
+                    "arguments": {},
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id)
+
+    agent = NotebookPlanningAgent(
+        adapter=SlowCorrectingAdapter(),
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        model_timeout_s=0.1,
+        planning_timeout_s=0.05,
+    )
+
+    with pytest.raises(NotebookPlanningTimeout, match="total budget"):
         agent.plan(
             context=_context(make_project(tmp_path)),
             initial_evidence=DataEvidencePackV1("run:run_001", ()),
@@ -741,6 +773,193 @@ def test_provider_gets_bounded_correction_for_invalid_submission(tmp_path: Path)
     assert any(message.get("role") == "tool" and "rejected" in message["content"] for message in correction_messages)
     assert "comparative claim has no evidence ref" in correction_messages[-1]["content"]
     assert "evidence:time" in correction_messages[-1]["content"]
+
+
+def test_provider_correction_names_only_completed_refs_after_partial_sample_rejection() -> None:
+    evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": [{"name": "outcome"}, {"name": "predictor"}]},
+                result_hash="sha256:profile",
+            ),
+            EvidenceRecord(
+                evidence_id="evidence:sample",
+                inspection_id="sample.v1",
+                source_refs=("sample:dataset",),
+                protocol_version="sample/v1",
+                status="partial",
+                observations={"columns": [{"name": "outcome"}]},
+                omissions=(
+                    {
+                        "section": "sample.columns",
+                        "included_count": 8,
+                        "available_count": 18,
+                        "reason": "sample_column_cap",
+                    },
+                ),
+                result_hash="sha256:sample",
+            ),
+        ),
+    )
+
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "option evidence ref is missing, changed, or incomplete"
+        ),
+        context=object(),  # this correction does not consult planning context
+        evidence=evidence,
+        correction_number=1,
+    )
+
+    assert "evidence:profile" in message
+    assert "sha256:profile" in message
+    assert "evidence:sample" in message
+    assert "partial" in message
+    assert "must not be cited as completed" in message
+
+
+def test_provider_correction_closes_option_batch_top_level_shape() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "option tool arguments must contain only options"
+        ),
+        context=object(),  # this correction does not consult planning context
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "exactly one top-level field named options" in message
+    assert "Do not include" in message
+    assert "reasoning" in message
+
+
+def test_provider_correction_omits_unsupported_model_options() -> None:
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "model_options target contract rejected [MODEL_OPTIONS_UNSUPPORTED]: "
+            "Model type panel_ols does not declare model_options."
+        ),
+        context=object(),
+        evidence=DataEvidencePackV1("dataset:active", ()),
+        correction_number=1,
+    )
+
+    assert "omit model_options entirely" in message
+    assert "related model family" in message
+
+
+def test_provider_prompt_separates_completed_and_partial_evidence_refs(
+    tmp_path: Path,
+) -> None:
+    partial = EvidenceRecord(
+        evidence_id="evidence:sample",
+        inspection_id="sample.v1",
+        source_refs=("sample:run_001",),
+        protocol_version="sample/v1",
+        status="partial",
+        observations={"columns": [{"name": "outcome"}]},
+        omissions=({"section": "sample.columns", "reason": "sample_column_cap"},),
+        result_hash="sha256:sample-result",
+    )
+    evidence = DataEvidencePackV1(
+        source_id="run:run_001",
+        records=(*_evidence().records, partial),
+    )
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "submit-1",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            }
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+    )
+
+    agent.plan(context=_context(make_project(tmp_path)), initial_evidence=evidence)
+
+    payload = json.loads(adapter.requests[0].messages[1]["content"])
+    policy = payload["evidence_citation_policy"]
+    assert policy["completed_evidence_refs"] == [
+        {
+            "evidence_id": "evidence:time",
+            "result_hash": "sha256:time-result",
+            "source_refs": ["time_index:run_001"],
+        }
+    ]
+    assert policy["non_citable_evidence"] == [
+        {
+            "evidence_id": "evidence:sample",
+            "status": "partial",
+            "omissions": [{"section": "sample.columns", "reason": "sample_column_cap"}],
+        }
+    ]
+
+
+def test_provider_cannot_repeat_a_terminal_partial_inspection(
+    tmp_path: Path,
+) -> None:
+    partial = EvidenceRecord(
+        evidence_id="evidence:sample",
+        inspection_id="sample.v1",
+        source_refs=("sample:run_001",),
+        protocol_version="sample/v1",
+        status="partial",
+        observations={"columns": [{"name": "outcome"}]},
+        omissions=({"section": "sample.columns", "reason": "sample_column_cap"},),
+        result_hash="sha256:sample-result",
+    )
+    evidence = DataEvidencePackV1(
+        source_id="run:run_001",
+        records=(*_evidence().records, partial),
+    )
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-sample-again",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "sample.v1",
+                            "target_ref": "run:active",
+                            "arguments": {},
+                            "why_needed": "remove the column cap",
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "submit-1",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            },
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=lambda requests, current: pytest.fail(
+            "a terminal partial inspection must not execute again"
+        ),
+    )
+
+    result = agent.plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=evidence,
+    )
+
+    assert len(result.option_drafts) == 1
+    assert "duplicate inspection request" in adapter.requests[1].messages[-1]["content"]
 
 
 def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_path: Path) -> None:
@@ -1512,6 +1731,42 @@ def test_text_only_completion_is_rejected(tmp_path: Path) -> None:
         NotebookPlanningAgent(adapter=TextOnlyAdapter()).plan(
             context=_context(make_project(tmp_path)), initial_evidence=_evidence()
         )
+
+
+def test_text_only_completion_gets_bounded_typed_tool_correction(
+    tmp_path: Path,
+) -> None:
+    class TextThenToolAdapter:
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                yield ModelStreamEvent.text_delta(request.request_id, "I recommend ETS.")
+                yield ModelStreamEvent.done(request.request_id)
+                return
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "submit-1",
+                    "tool_id": "submit_notebook_option_batch",
+                    "arguments": _submit_call(),
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id)
+
+    adapter = TextThenToolAdapter()
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+    ).plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=_evidence(),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert "must call exactly one" in adapter.requests[1].messages[-1]["content"]
 
 
 def test_unregistered_capability_is_rejected(tmp_path: Path) -> None:

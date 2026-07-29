@@ -197,12 +197,22 @@ describe("RunHistoryRail", () => {
     harness(["/runs/r-a?project_root=/tmp/p"]);
 
     await screen.findByTestId("run-rail-row-r-a");
-    fireEvent.click(screen.getByRole("button", { name: "Close run history" }));
+    const close = screen.getByRole("button", { name: "Close run history" });
+    expect(close).toHaveTextContent("◀");
+    fireEvent.click(close);
 
     expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "false");
     expect(screen.queryByTestId("run-rail-row-r-a")).not.toBeInTheDocument();
     const reopen = screen.getByRole("button", { name: "Open run history" });
     expect(reopen).toBeInTheDocument();
+    expect(reopen).toHaveClass("run-rail__reopen--square");
+    expect(reopen).not.toHaveClass("run-rail__reopen--edge");
+    expect(screen.getByTestId("run-rail")).toHaveClass("run-rail--collapsed");
+    expect(screen.getByTestId("run-rail")).toHaveStyle({
+      width: "0px",
+      flexBasis: "0px",
+    });
+    expect(screen.getByTestId("run-rail")).toContainElement(reopen);
 
     fireEvent.click(reopen);
     expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "true");

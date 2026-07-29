@@ -443,24 +443,46 @@ class NotebookService:
                 "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
                 "server recommendation requires a non-empty evidence pack",
             )
-        if any(record.status != "completed" for record in evidence_pack.records):
-            raise OptionBatchInvalid(
-                "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
-                "server recommendation requires completed evidence for every record",
-            )
         evidence_records = {
-            record.evidence_id: record.to_dict() for record in evidence_pack.records
+            record.evidence_id: record for record in evidence_pack.records
         }
+        referenced_evidence_ids: set[str] = set()
         for draft in drafts:
             for evidence_ref in draft.evidence_refs:
                 record = evidence_records.get(evidence_ref.evidence_id)
-                if record is None or record["result_hash"] != evidence_ref.result_hash:
+                if record is None or record.result_hash != evidence_ref.result_hash:
                     raise OptionBatchInvalid(
                         "OPTION_SERVER_EVIDENCE_BINDING_INVALID",
                         "a candidate evidence reference is not covered by the server evidence pack",
                         option_id=draft.option_id,
                         evidence_id=evidence_ref.evidence_id,
                     )
+                if record.status != "completed":
+                    raise OptionBatchInvalid(
+                        "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
+                        "server recommendation requires completed evidence for every referenced record",
+                        option_id=draft.option_id,
+                        evidence_id=evidence_ref.evidence_id,
+                    )
+                referenced_evidence_ids.add(evidence_ref.evidence_id)
+        decision_evidence_ids = referenced_evidence_ids or {
+            record.evidence_id
+            for record in evidence_pack.records
+            if record.status == "completed"
+        }
+        if not decision_evidence_ids:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
+                "server recommendation requires at least one completed evidence record",
+            )
+        decision_evidence_pack = DataEvidencePackV1(
+            source_id=evidence_pack.source_id,
+            records=tuple(
+                record
+                for record in evidence_pack.records
+                if record.evidence_id in decision_evidence_ids
+            ),
+        )
 
         # Validate every candidate before any source decision is written.  The
         # Agent's blocked_reason is deliberately not consulted here.
@@ -475,8 +497,12 @@ class NotebookService:
             for draft, binding in zip(drafts, bindings)
         ]
 
-        evidence_hash = evidence_pack.evidence_pack_hash
+        evidence_hash = decision_evidence_pack.evidence_pack_hash
         self.store.append_evidence_pack(notebook_id, evidence_pack.to_dict())
+        if decision_evidence_pack.evidence_pack_hash != evidence_pack.evidence_pack_hash:
+            self.store.append_evidence_pack(
+                notebook_id, decision_evidence_pack.to_dict()
+            )
         context_hash = generation_context_hash(context)
         freshness_hash = freshness_dependency_fingerprint(context)
         cohort_hash = candidate_cohort_hash(option_ids)

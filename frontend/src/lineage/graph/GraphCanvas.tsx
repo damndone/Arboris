@@ -72,7 +72,7 @@ export function waitingReviewsCount(model: GraphViewModel): number {
 // snap nodes to the result. Switching back to "free" preserves the most
 // recent positions (via useNodesState ownership; see HF5 comment below).
 export type LayoutMode = "free" | "LR" | "TB";
-export const DEFAULT_LAYOUT: LayoutMode = "free";
+export const DEFAULT_LAYOUT: LayoutMode = "LR";
 
 interface CanvasToolbarProps {
   containerRef: React.RefObject<HTMLDivElement>;
@@ -80,7 +80,11 @@ interface CanvasToolbarProps {
   onLayout: (mode: LayoutMode) => void;
 }
 
-function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
+function CanvasToolbar({
+  containerRef,
+  layout,
+  onLayout,
+}: CanvasToolbarProps) {
   const { fitView } = useReactFlow();
   const onFit = () => fitView({ padding: 0.2, duration: 200 });
   const onFullscreen = async () => {
@@ -108,6 +112,7 @@ function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
       data-active={layout === mode ? "true" : undefined}
       aria-pressed={layout === mode}
       title={title}
+      className="ln-canvas-toolbar__button"
     >
       {label}
     </button>
@@ -124,7 +129,7 @@ function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
          * Horizontal/Vertical click forces a fresh dagre re-layout with
          * that rankdir; clicking Free again stops forced re-layouts
          * (positions are preserved by useNodesState below). */}
-        {layoutBtn("free", "Free", "Free layout — drag nodes anywhere")}
+        {layoutBtn("free", "Manual", "Manual layout — drag nodes anywhere")}
         {layoutBtn("LR", "Horizontal", "Horizontal flow (left → right)")}
         {layoutBtn("TB", "Vertical", "Vertical flow (top → bottom)")}
         <button
@@ -132,30 +137,16 @@ function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
           onClick={onFit}
           data-testid="toolbar-fit"
           title="Fit to screen"
+          className="ln-canvas-toolbar__button"
         >
           Fit
-        </button>
-        {/* v1.6.12 (V8) — one-click recovery after nodes get dragged into a
-         * mess: re-trigger the current layout mode (bumps layoutVersion →
-         * fresh dagre snap, discarding drag offsets), then fit the view. */}
-        <button
-          type="button"
-          onClick={() => {
-            onLayout(layout);
-            requestAnimationFrame(() =>
-              fitView({ padding: 0.2, duration: 200 }),
-            );
-          }}
-          data-testid="toolbar-reset"
-          title="Reset layout — snap all nodes back to the automatic arrangement"
-        >
-          Reset
         </button>
         <button
           type="button"
           onClick={onFullscreen}
           data-testid="toolbar-fullscreen"
           title="Toggle fullscreen"
+          className="ln-canvas-toolbar__button"
         >
           Fullscreen
         </button>
@@ -166,20 +157,22 @@ function CanvasToolbar({ containerRef, layout, onLayout }: CanvasToolbarProps) {
 
 function CanvasStatus({ model }: { model: GraphViewModel }) {
   const waiting = waitingReviewsCount(model);
+  const runId = model.runId.trim();
+  if (!runId && waiting === 0) return null;
+
   return (
     <Panel position="top-right">
       <div className="ln-canvas-status" data-testid="canvas-status">
-        run_{model.runId} ·{" "}
-        <span
-          className={
-            waiting > 0
-              ? "ln-canvas-status__count ln-canvas-status__count--warn"
-              : "ln-canvas-status__count"
-          }
-          data-testid="canvas-status-count"
-        >
-          waiting {waiting} {waiting === 1 ? "review" : "reviews"}
-        </span>
+        {runId && <span>Run {runId}</span>}
+        {runId && waiting > 0 && <span aria-hidden="true"> · </span>}
+        {waiting > 0 && (
+          <span
+            className="ln-canvas-status__count ln-canvas-status__count--warn"
+            data-testid="canvas-status-count"
+          >
+            {waiting} {waiting === 1 ? "review" : "reviews"} needed
+          </span>
+        )}
       </div>
     </Panel>
   );
@@ -428,15 +421,27 @@ export function GraphCanvas({
     [],
   );
   const layout = layoutProp ?? layoutLocal;
+  const lastAutomaticLayoutRef = useRef<Exclude<LayoutMode, "free">>(
+    layout === "TB" ? "TB" : "LR",
+  );
   const handleLayout = useCallback(
     (mode: LayoutMode) => {
+      if (mode !== "free") {
+        lastAutomaticLayoutRef.current = mode;
+      }
       if (onLayoutChange) onLayoutChange(mode);
       else setLayoutLocal(mode);
-      setLayoutVersion((v) => v + 1);
+      if (mode !== "free") {
+        setLayoutVersion((v) => v + 1);
+      }
     },
     [onLayoutChange],
   );
-
+  useEffect(() => {
+    if (layout !== "free") {
+      lastAutomaticLayoutRef.current = layout;
+    }
+  }, [layout]);
   // Hoisted out of the main useMemo so a selection-only re-render (which
   // bumps selectedNodeId but not model) doesn't pay an O(n) Map rebuild.
   // [REV-3 #6 — Step 5 adversarial review]
@@ -596,7 +601,9 @@ export function GraphCanvas({
     // useNodesState ownership lets the user drag freely without snap-back.
     // Clicking Horizontal/Vertical bumps layoutVersion, which re-runs this
     // useMemo and produces a fresh dagre snap.
-    const rankdir: "TB" | "LR" = layout === "TB" ? "TB" : "LR";
+    const automaticLayout =
+      layout === "free" ? lastAutomaticLayoutRef.current : layout;
+    const rankdir: "TB" | "LR" = automaticLayout === "TB" ? "TB" : "LR";
     const layouted = layoutDagre(
       [...realNodes, ...groupNodes, ...expandedGroupNodes],
       uniqEdges,
@@ -636,7 +643,10 @@ export function GraphCanvas({
   // V1.5.1 T4': handleAxis flips edge anchor sides so LR layout edges
   // come out the right side (not bottom) — kills the S-curve look the
   // user flagged 2026-05-25.
-  const handleAxis = layout === "TB" ? "vertical" : "horizontal";
+  const handleAxis =
+    (layout === "free" ? lastAutomaticLayoutRef.current : layout) === "TB"
+      ? "vertical"
+      : "horizontal";
   const decoratedNodes = useMemo(() => {
     const visibleSelectedId =
       selectedNodeId === null
@@ -806,7 +816,10 @@ export function GraphCanvas({
     <div
       ref={rootRef}
       className="lineage-root"
+      data-testid="graph-canvas-root"
       data-graph="true"
+      data-layout-mode={layout}
+      data-nodes-draggable={layout === "free" ? "true" : "false"}
       style={{ width: "100%", height: "100%", minHeight: 0 }}
     >
       <ReactFlow
@@ -817,7 +830,7 @@ export function GraphCanvas({
         // (uiux/app.jsx TWEAK_DEFAULTS layout=free; uiux/panels.jsx empty
         // drawer hint "拖拽 = 重排"). Positions are owned by RF state
         // via useNodesState above; dagre is the initial seed only.
-        nodesDraggable={true}
+        nodesDraggable={layout === "free"}
         // V1.5.0.1 HF5: pin edge type to RF's bezier default so a future
         // RF upgrade can't silently switch us to step / smoothstep.
         // Matches uiux/app.jsx TWEAK_DEFAULTS edgeStyle="bezier".

@@ -355,7 +355,7 @@ describe("AgentSurfaceProvider", () => {
     expect(await screen.findByText("可回放的回答。")).toBeInTheDocument();
   });
 
-  it("hydrates typed Main/Chain/fork navigation links with the durable session", async () => {
+  it("hydrates durable navigation links without duplicating them in the Agent transcript", async () => {
     sessionStorage.setItem(
       "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone",
       "agent_chain_saved",
@@ -394,7 +394,7 @@ describe("AgentSurfaceProvider", () => {
       "/proj",
       "agent_chain_saved",
     ));
-    expect(await screen.findByRole("button", { name: /open source model/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open source model/i })).not.toBeInTheDocument();
   });
 
   it("loads a linked child Agent session and operation focus from the URL", async () => {

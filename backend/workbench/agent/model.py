@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import uuid4
 
-from workbench.llm.client import LLMUpstreamError, chat_completion
+from workbench.llm.client import (
+    LLMUpstreamError,
+    async_chat_completion,
+    chat_completion,
+)
 from workbench.llm.config import LLMConfig
 
 
@@ -208,14 +212,62 @@ class OpenAICompatibleModelAdapter:
         if abort_event is not None and abort_event.is_set():
             yield ModelStreamEvent.from_error(request.request_id, "aborted")
             return
-        tool_calls = result.get("tool_calls") or []
-        for tool_call in tool_calls:
-            yield ModelStreamEvent.tool_call_delta(request.request_id, tool_call)
-        if result.get("text"):
-            yield ModelStreamEvent.text_delta(request.request_id, str(result["text"]))
-        yield ModelStreamEvent(
+        for event in _completion_events(request, result):
+            yield event
+
+
+class CancellableOpenAICompatibleModelAdapter:
+    """Async HTTP adapter whose in-flight provider request can be cancelled."""
+
+    def __init__(self, config: LLMConfig) -> None:
+        self.config = config
+
+    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
+        abort_event = request.abort_event
+        if abort_event is not None and abort_event.is_set():
+            yield ModelStreamEvent.from_error(request.request_id, "aborted")
+            return
+        wire_messages = _to_openai_wire_messages(request.messages)
+        wire_tools = _to_openai_tool_descriptors(request.tools)
+        for attempt in range(2):
+            try:
+                result = await async_chat_completion(
+                    wire_messages,
+                    self.config,
+                    tools=wire_tools if request.tools else None,
+                )
+                break
+            except LLMUpstreamError as exc:
+                if attempt == 0 and exc.upstream_status is None:
+                    continue
+                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                return
+            except Exception as exc:
+                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
+                return
+        if abort_event is not None and abort_event.is_set():
+            yield ModelStreamEvent.from_error(request.request_id, "aborted")
+            return
+        for event in _completion_events(request, result):
+            yield event
+
+
+def _completion_events(
+    request: ModelRequest,
+    result: Mapping[str, Any],
+) -> tuple[ModelStreamEvent, ...]:
+    events: list[ModelStreamEvent] = []
+    tool_calls = result.get("tool_calls") or []
+    for tool_call in tool_calls:
+        events.append(ModelStreamEvent.tool_call_delta(request.request_id, tool_call))
+    if result.get("text"):
+        events.append(ModelStreamEvent.text_delta(request.request_id, str(result["text"])))
+    events.append(
+        ModelStreamEvent(
             type="done",
             request_id=request.request_id,
             finish_reason="tool_calls" if tool_calls else "stop",
             provider_request_id=request.request_id,
         )
+    )
+    return tuple(events)

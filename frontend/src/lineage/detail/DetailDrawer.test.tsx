@@ -155,6 +155,7 @@ describe("DetailDrawer", () => {
     const node = makeNode();
     renderDrawer(makeCtx(node));
     const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveClass("detail-drawer");
     expect(dialog.getAttribute("aria-labelledby")).toBe("detail-drawer-title");
     expect(document.getElementById("detail-drawer-title")).not.toBeNull();
   });

@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { uploadDataset } from "../api";
 
 import {
+  cancelNotebookPlanning,
   compileNotebookContext,
   confirmAndExecuteNotebookOption,
   ensureNotebookProjection,
@@ -46,6 +47,60 @@ import type {
 } from "./domainMemoryContracts";
 
 type ApiErrorLike = Error & { code?: string | null };
+
+type NotebookPlanningResponse = Awaited<ReturnType<typeof proposeNotebookOptions>>;
+
+interface ActivePlanningRequest {
+  scopeKey: string;
+  requestKey: string;
+  attemptId: string;
+  controller: AbortController;
+  promise: Promise<NotebookPlanningResponse>;
+}
+
+const planningRequests = new Map<
+  string,
+  ActivePlanningRequest
+>();
+
+function proposeNotebookOptionsOnce(
+  projectRoot: string,
+  notebookId: string,
+  refreshToken: number,
+  preferences: DomainMemoryPreferences | undefined,
+): ActivePlanningRequest {
+  const scopeKey = JSON.stringify({
+    projectRoot,
+    notebookId,
+    preferences: preferences ?? null,
+  });
+  const requestKey = `${scopeKey}:${refreshToken}`;
+  const current = planningRequests.get(scopeKey);
+  if (current?.requestKey === requestKey) return current;
+  const attemptId = `attempt_${
+    globalThis.crypto?.randomUUID?.().replace(/-/g, "") ??
+    `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  }`;
+  const controller = new AbortController();
+  const promise = preferences
+    ? proposeNotebookOptions(projectRoot, notebookId, 3, preferences, {
+        attemptId,
+        signal: controller.signal,
+      })
+    : proposeNotebookOptions(projectRoot, notebookId, 3, undefined, {
+        attemptId,
+        signal: controller.signal,
+      });
+  const request = { scopeKey, requestKey, attemptId, controller, promise };
+  planningRequests.set(scopeKey, request);
+  const release = () => {
+    if (planningRequests.get(scopeKey)?.promise === promise) {
+      planningRequests.delete(scopeKey);
+    }
+  };
+  void promise.then(release, release);
+  return request;
+}
 
 function failurePacket(error: unknown): { code: string; message: string } {
   const candidate = error as ApiErrorLike | null;
@@ -332,6 +387,15 @@ export function NotebookRouteView({
   );
   const [view, setView] = useState<NotebookView>({ status: "loading" });
   const [busy, setBusy] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [planningError, setPlanningError] = useState<{
+    code: string;
+    message: string;
+  } | null>(null);
+  const [actionError, setActionError] = useState<{
+    code: string;
+    message: string;
+  } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [domainMemoryPreferences, setDomainMemoryPreferences] = useState<DomainMemoryPreferences>({
     cross_project_domain_memory_use: false,
@@ -340,9 +404,18 @@ export function NotebookRouteView({
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const initializationClaimedRef = useRef(false);
+  const lastLoadKeyRef = useRef<string | null>(null);
+  const lastReadyViewRef = useRef<NotebookReadyView | null>(null);
+  const activePlanningRef = useRef<ActivePlanningRequest | null>(null);
+  const loadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
-    setView({ status: "loading" });
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
+    const preserved = lastReadyViewRef.current;
+    if (!(refreshToken > 0 && preserved)) {
+      setView({ status: "loading" });
+    }
     try {
       let notebook: NotebookRecord;
       if (notebookId) {
@@ -378,26 +451,36 @@ export function NotebookRouteView({
       const compiled = memoryRequestPreferences
         ? await compileNotebookContext(projectRoot, notebook.notebook_id, memoryRequestPreferences)
         : await compileNotebookContext(projectRoot, notebook.notebook_id);
-      // Agent planning is the slow leg (real providers take tens of seconds);
-      // surface it as its own phase so the loading state does not read as a hang.
-      if (refreshToken > 0) setView({ status: "loading", phase: "planning" });
-      let snapshot = refreshToken > 0
-        ? memoryRequestPreferences
-          ? await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3, memoryRequestPreferences)
-          : await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3)
-        : memoryRequestPreferences
+      let snapshot: NotebookPlanningResponse;
+      if (refreshToken > 0) {
+        const request = proposeNotebookOptionsOnce(
+            projectRoot,
+            notebook.notebook_id,
+            refreshToken,
+            memoryRequestPreferences,
+          );
+        activePlanningRef.current = request;
+        setPlanningError(null);
+        setPlanning(true);
+        if (!preserved) setView({ status: "loading", phase: "planning" });
+        snapshot = await request.promise;
+      } else {
+        snapshot = memoryRequestPreferences
           ? await listNotebookOptions(projectRoot, notebook.notebook_id, memoryRequestPreferences)
           : await listNotebookOptions(projectRoot, notebook.notebook_id);
+      }
       if (snapshot.options.length === 0) {
-        setView({ status: "loading", phase: "planning" });
-        snapshot = memoryRequestPreferences
-          ? await proposeNotebookOptions(
-              projectRoot,
-              notebook.notebook_id,
-              3,
-              memoryRequestPreferences,
-            )
-          : await proposeNotebookOptions(projectRoot, notebook.notebook_id, 3);
+        const request = proposeNotebookOptionsOnce(
+          projectRoot,
+          notebook.notebook_id,
+          refreshToken,
+          memoryRequestPreferences,
+        );
+        activePlanningRef.current = request;
+        setPlanningError(null);
+        setPlanning(true);
+        if (!preserved) setView({ status: "loading", phase: "planning" });
+        snapshot = await request.promise;
       }
       const traceId = snapshot.trace_id ?? compiled.trace_id;
       const trace = traceId
@@ -424,10 +507,28 @@ export function NotebookRouteView({
       const materialization = persistedMaterialization
         ? parseOptionMaterialization(persistedMaterialization)
         : null;
-      setView(readyView(notebook, context, options, { materialization, executionResults }));
+      if (generation !== loadGenerationRef.current) return;
+      const nextView = readyView(notebook, context, options, {
+        materialization,
+        executionResults,
+      });
+      lastReadyViewRef.current = nextView;
+      setView(nextView);
     } catch (error: unknown) {
+      if (generation !== loadGenerationRef.current) return;
       if (!notebookId) initializationClaimedRef.current = false;
-      setView({ status: "error", error: failurePacket(error) });
+      const failure = failurePacket(error);
+      if (lastReadyViewRef.current && activePlanningRef.current) {
+        setPlanningError(failure);
+        setView(lastReadyViewRef.current);
+      } else {
+        setView({ status: "error", error: failure });
+      }
+    } finally {
+      if (generation === loadGenerationRef.current) {
+        activePlanningRef.current = null;
+        setPlanning(false);
+      }
     }
   }, [
     activeRunId,
@@ -440,6 +541,17 @@ export function NotebookRouteView({
   ]);
 
   useEffect(() => {
+    const loadKey = JSON.stringify({
+      projectRoot,
+      notebookId,
+      activeRunId,
+      refreshToken,
+      domainMemoryUse: domainMemoryPreferences.cross_project_domain_memory_use,
+      domainMemoryIteration:
+        domainMemoryPreferences.cross_project_domain_memory_iteration,
+    });
+    if (lastLoadKeyRef.current === loadKey) return;
+    lastLoadKeyRef.current = loadKey;
     // React StrictMode may invoke this effect twice before the first async
     // request yields. Claim a runless initialization before calling load so a
     // second invocation cannot create a second notebook/run-family pair.
@@ -448,7 +560,15 @@ export function NotebookRouteView({
     }
     if (refreshToken === 0 && !notebookId && activeRunId) initializationClaimedRef.current = true;
     void load();
-  }, [activeRunId, load, notebookId, refreshToken]);
+  }, [
+    activeRunId,
+    domainMemoryPreferences.cross_project_domain_memory_iteration,
+    domainMemoryPreferences.cross_project_domain_memory_use,
+    load,
+    notebookId,
+    projectRoot,
+    refreshToken,
+  ]);
 
   async function startWithDataset(file: File) {
     setUploadBusy(true);
@@ -495,10 +615,50 @@ export function NotebookRouteView({
     }
   }
 
+  function cancelPlanning() {
+    const active = activePlanningRef.current;
+    if (!active || !notebookId) return;
+    loadGenerationRef.current += 1;
+    activePlanningRef.current = null;
+    if (planningRequests.get(active.scopeKey)?.requestKey === active.requestKey) {
+      planningRequests.delete(active.scopeKey);
+    }
+    active.controller.abort();
+    setPlanning(false);
+    setPlanningError(null);
+    if (lastReadyViewRef.current) {
+      setView(lastReadyViewRef.current);
+    } else {
+      setView({
+        status: "error",
+        error: {
+          code: "NOTEBOOK_PLANNING_CANCELLED",
+          message: "Notebook planning was cancelled",
+        },
+      });
+    }
+    void cancelNotebookPlanning(projectRoot, notebookId, active.attemptId).catch(
+      (error: unknown) => {
+        const failure = failurePacket(error);
+        setPlanningError({
+          code: "NOTEBOOK_PLANNING_CANCEL_FAILED",
+          message:
+            `Workbench stopped waiting, but backend cancellation was not confirmed: ` +
+            `${failure.code} — ${failure.message}`,
+        });
+      },
+    );
+  }
+
+  function revalidateOption() {
+    setRefreshToken((token) => token + 1);
+  }
+
   function showConfirmation(
     option: NotebookOptionRevision,
     mode: "materialize" | "confirm_and_execute" = "materialize",
   ) {
+    setActionError(null);
     const execution = optionExecution(option);
     const planDiff: PlanDiffLine[] = [
       {
@@ -544,6 +704,7 @@ export function NotebookRouteView({
 
   async function confirm(selection: PendingConfirmation) {
     setBusy(true);
+    setActionError(null);
     try {
       if (selection.mode === "confirm_and_execute") {
         await confirmAndExecuteNotebookOption(
@@ -578,8 +739,20 @@ export function NotebookRouteView({
       forest?.refetch?.();
       const materialized = { ...selection.option, lifecycle_status: "materialized" as const };
       updateWithOption(materialized, { confirmation: null, materialization });
+      const nodeKey =
+        materialization.draft_execution_mode === "genesis"
+          ? `draft:${materialization.draft_id}:model_1`
+          : `draft:${materialization.draft_id}`;
+      const next = new URLSearchParams(searchParams);
+      next.set("view", "graph");
+      next.set("notebook", selection.option.notebook_id);
+      next.set("panel", "agent");
+      next.set("tabs", nodeKey);
+      next.set("active", nodeKey);
+      next.set("focus", nodeKey);
+      setSearchParams(next);
     } catch (error: unknown) {
-      setView({ status: "error", error: failurePacket(error) });
+      setActionError(failurePacket(error));
     } finally {
       setBusy(false);
     }
@@ -591,6 +764,7 @@ export function NotebookRouteView({
 
   async function cancel(selection: PendingConfirmation) {
     void selection;
+    setActionError(null);
     setView((current) =>
       current.status === "ready"
         ? { ...current, notebook: { ...current.notebook, confirmation: null } }
@@ -674,8 +848,9 @@ export function NotebookRouteView({
         <span className="nb-label">Start with a verified dataset</span>
         <h2>Bring the raw data into a bounded Notebook context</h2>
         <p>
-          The Agent will inspect a bounded profile and evidence pack before it
-          proposes any analysis. No Run or runless Notebook is created here.
+          This uses the same project data store as Import data and create analysis.
+          The Agent first inspects a bounded profile and evidence pack, but this path
+          does not create a Run until you review, confirm, and execute an option.
         </p>
         <label htmlFor="notebook-dataset-upload">Dataset</label>
         <input
@@ -714,12 +889,17 @@ export function NotebookRouteView({
         projectRoot={projectRoot}
         busy={busy}
         onReplan={() => setRefreshToken((token) => token + 1)}
+        onCancelPlanning={cancelPlanning}
+        planning={planning}
+        planningError={planningError}
+        actionError={actionError}
         onTextSelection={handleTextSelection}
         onDismissSelection={dismissSelectionSurface}
         selectionAnchor={selectionAnchor}
         onSelectOption={selectOption}
         onDeferOption={(option) => void decide(option, "deferred")}
         onRejectOption={(option) => void decide(option, "rejected")}
+        onRevalidateOption={revalidateOption}
         onConfirm={(selection) => void confirm(selection)}
         onCancelConfirmation={(selection) => void cancel(selection)}
         onConfirmAndExecute={confirmAndExecute}

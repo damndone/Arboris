@@ -26,6 +26,14 @@
   background: var(--bg-canvas);
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -85,6 +93,55 @@ button:disabled {
   min-width: 0;
 }
 
+.workbench-settings-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--label-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 22px;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  transition: color 120ms ease;
+  width: 34px;
+}
+
+.workbench-settings-button:hover {
+  color: var(--label);
+}
+
+.workbench-settings-button:focus-visible {
+  outline: 2px solid var(--tint);
+  outline-offset: 2px;
+}
+
+.bottom-panel {
+  background: color-mix(
+    in oklch,
+    var(--bg-canvas) 96%,
+    var(--label) 4%
+  );
+}
+
+.bottom-panel__tabs {
+  border-bottom: 1px solid var(--separator);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.bottom-panel__tab {
+  align-self: stretch;
+  height: 31px;
+  min-height: 0;
+}
+
+.bottom-panel__collapse {
+  height: 31px;
+  min-height: 0;
+}
+
 .workbench-header {
   align-items: center;
   border-bottom: 1px solid var(--border-strong);
@@ -131,11 +188,180 @@ button:disabled {
 .theme-toggle__btn[data-active="true"] {
   background: var(--panel-bg);
   color: var(--label);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 1px color-mix(in oklch, var(--tint) 42%, transparent);
 }
 .theme-toggle__btn:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+.theme-toggle__auto {
+  min-width: 28px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Draft editing has two different action scopes: model edits and lifecycle
+ * progression. Keep them visually separate so a narrow drawer does not turn
+ * five unrelated actions into one undifferentiated button strip. */
+.model-node-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.model-node-inspector > dl {
+  margin: 0;
+}
+
+.model-node-inspector__changes {
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--bg-card-2);
+  overflow: hidden;
+}
+
+.model-node-inspector__changes > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.model-node-inspector__changes > summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-node-inspector__changes > summary::after {
+  content: "⌄";
+  color: var(--label-tertiary);
+}
+
+.model-node-inspector__changes[open] > summary::after {
+  transform: rotate(180deg);
+}
+
+.model-node-inspector__change-count {
+  margin-left: auto;
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.model-node-inspector__changes > p,
+.model-node-inspector__changes > ul {
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--separator-faint);
+}
+
+.model-node-inspector__changes > ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-node-inspector__changes li {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.6fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.model-node-inspector__changes li > code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-secondary);
+}
+
+.model-node-inspector__change-values {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.model-node-inspector__change-values > span:not([aria-hidden="true"]) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-node-inspector__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.draft-editor__workflow {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--separator);
+}
+
+.draft-editor__workflow-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--label-secondary);
+  font-weight: 650;
+}
+
+.draft-editor__workflow-heading small {
+  color: var(--label-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.draft-editor__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+button.draft-button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+button.draft-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button.draft-button--secondary {
+  border-color: var(--separator);
+  background: var(--bg-card-2);
+  color: var(--label-secondary);
+}
+
+button.draft-button--primary {
+  border-color: var(--tint);
+  background: var(--tint);
+  color: #fff;
+}
+
+button.draft-button--danger {
+  grid-column: 1 / -1;
+  justify-self: end;
+  border-color: color-mix(in oklch, var(--danger) 45%, var(--separator));
+  background: transparent;
+  color: var(--danger);
 }
 
 h1,

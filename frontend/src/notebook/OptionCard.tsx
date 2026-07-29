@@ -34,6 +34,12 @@ function Axis({
   );
 }
 
+const RISK_LABELS = {
+  low: "Low risk",
+  medium: "Medium risk",
+  high: "High risk",
+} as const;
+
 export function OptionCard({
   option,
   outcome = null,
@@ -62,7 +68,13 @@ export function OptionCard({
         <span className="nb-option-rank" data-testid="option-rank">
           {recommendationLabel(option)}
         </span>
-        <span className="nb-option-risk">{`risk ${option.risk_level}`}</span>
+        <span
+          className="nb-option-risk"
+          data-testid="option-risk"
+          data-risk={option.risk_level}
+        >
+          {RISK_LABELS[option.risk_level]}
+        </span>
       </header>
 
       <div className="nb-option-axes">
@@ -167,9 +179,7 @@ export function OptionCard({
         >
           {option.lifecycle_status === "executed"
             ? "Already executed"
-            : option.materializable
-              ? "Review and prepare Draft"
-              : "Review and confirm"}
+            : "Review plan"}
         </button>
         {option.confirmAndExecute ? (
           <button

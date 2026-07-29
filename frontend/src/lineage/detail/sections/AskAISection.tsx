@@ -585,7 +585,7 @@ function LlmProviderBadge({
     return (
       <span
         data-testid="llm-provider-badge"
-        title="Set WORKBENCH_LLM_BASE_URL / _API_KEY / _MODEL in ~/.config/econometrics-workbench/llm.env (see .env.example), then restart the backend."
+        title="Configure the language-model provider in Workbench Settings, then restart the backend."
         style={{ fontSize: 10.5, color: "var(--diff-removed, #b35900)", fontWeight: 500 }}
       >
         LLM not configured

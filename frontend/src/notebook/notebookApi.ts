@@ -49,6 +49,11 @@ export interface NotebookOptionsResponse {
   trace_id: string;
 }
 
+export interface NotebookPlanningRequest {
+  attemptId: string;
+  signal?: AbortSignal;
+}
+
 export interface NotebookTraceResponse {
   trace_id: string;
   events: Array<Record<string, unknown>>;
@@ -145,6 +150,7 @@ export function proposeNotebookOptions(
   notebookId: string,
   count = 3,
   preferences?: DomainMemoryPreferences,
+  planning?: NotebookPlanningRequest,
 ): Promise<NotebookOptionsResponse> {
   return readNotebookResponse<NotebookOptionsResponse>(
     projectRoot,
@@ -152,8 +158,24 @@ export function proposeNotebookOptions(
     {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ count }),
+      body: JSON.stringify({
+        count,
+        ...(planning ? { attempt_id: planning.attemptId } : {}),
+      }),
+      signal: planning?.signal,
     },
+  );
+}
+
+export function cancelNotebookPlanning(
+  projectRoot: string,
+  notebookId: string,
+  attemptId: string,
+): Promise<{ attempt_id: string; status: "cancelled" | "not_active" }> {
+  return readNotebookResponse(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/planning/${encodeURIComponent(attemptId)}`,
+    { method: "DELETE" },
   );
 }
 

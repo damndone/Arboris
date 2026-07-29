@@ -63,6 +63,7 @@ from ..agent.execution import OperationClaimConflict
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
 from ..agent.session import EntryRef, JsonlSessionRepository
+from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
 from ..llm.config import load_llm_config
@@ -83,7 +84,7 @@ DEFAULT_MAX_STEPS = 10
 DEFAULT_TIMEOUT_S = 120.0
 
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
-- You are the Econometrics Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- You are the Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
@@ -91,6 +92,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 {step_vocabulary}
 - A composed workflow runs over the dataset, not over one graph node. Once you have the data schema and the operation contract you have everything a plan needs: inspecting further nodes adds nothing and spends the budget that writing the plan requires. Do not walk the graph node by node.
 - Use the columns and grouping values the DATA actually has, taken from inspection — never invented and never copied from an example. depends_on must name the step that produced the evidence a later step relies on; a percentile threshold must depend on the summarize_detail step that produced it.
+- A requested post-estimation quantity requires its own actual typed step: use model.joint_f_test for a joint test and model.quadratic_stationary_point for a quadratic stationary point. Each must depend on the model.genesis step that declared its branch, and a report that includes either result must list that producing step in required_steps. A report section description does not execute a result and must never substitute for the producing step.
 - The server owns statistical semantics: percentile method, missing-value policy, covariance validation, diagnostics and artifacts. Choose which steps to run over which columns; do not restate those fixed semantics in changes.
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
@@ -106,15 +108,20 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - Never copy a displayed editable-schema value or model narrative as the source fact when a typed Analysis Loop tool returns canonical source facts, PlanDiff, and expected invariants; explain only those backend-owned facts.
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.
 - After a confirmed operation completes, its status is not numerical evidence. First use inspect_completed_operations for the current node, then inspect_operation_artifact only with an emitted artifact_id; cite that artifact id in the answer. If no public result view is available, say that the result cannot yet be verified. Never request raw rows, a filesystem path, or infer a figure from its title alone.
+- When interpreting a quadratic stationary point, use only the server-reported observed_min, observed_max, and stationary_point_within_observed_range fields. Never infer whether it is in range from a column name, label, or a typical domain.
 """
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
-- You are the Econometrics Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- You are the Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - You are the project-level advisory Agent. Use the bounded project overview and durable summaries supplied in the context packet.
 - You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
 - Never invent raw-data facts, model metrics, run results, chain state, or unsupported causal claims.
-- You have no execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
-- If the bounded overview is insufficient, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
+- You have no mutation or execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
+- inspect_project_model_coefficients is a bounded, read-only evidence tool. When the user asks for an exact coefficient, standard error, p value, or confidence interval from one or more visible runs, call it with the run ids and exact persisted term names from the overview. Report only its returned values and cite its run_id/model_id evidence_ref; do not calculate a new interval, read a report file, or infer a missing coefficient.
+- A coefficient is a change per one recorded unit of its term unless the visible model evidence documents another scale. Never convert it to a percentage-point, currency, or other unit from a variable name alone.
+- Do not use overlap or non-overlap of two separately estimated confidence intervals as a test that their coefficients differ. Do not label a comparison Simpson's paradox, claim an omitted-variable direction, state a correlation not in evidence, or rank one specification as more credible without a separately reported diagnostic or contrast. You may explain that conditioning on additional declared variables changes the reported conditional association, and state the limit.
+- Preserve the exact sign, digits, and interval endpoints returned by the evidence tool. Never "correct" a number from prose or a prior transcript; if earlier text conflicts with evidence, call the tool again and treat the new result as authoritative.
+- If the bounded overview is insufficient to identify the relevant run or exact term, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
 """
 
 
@@ -344,6 +351,34 @@ def _context_serialized(packet: dict[str, Any]) -> tuple[str, str]:
     if not fingerprint:
         fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     return serialized, fingerprint
+
+
+def _ensure_current_global_protocol(
+    repository: JsonlSessionRepository,
+    session_id: str,
+) -> None:
+    """Append a protocol revision once when a durable Main session is older."""
+
+    for entry in repository.get_branch(session_id):
+        if entry.entry_type != "custom_message":
+            continue
+        payload = entry.payload
+        if (
+            payload.get("name") == "workbench_global_agent_protocol"
+            and payload.get("content") == MAIN_AGENT_PROTOCOL
+        ):
+            return
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_protocol",
+            "audience": "model",
+            "name": "workbench_global_agent_protocol",
+            "content": MAIN_AGENT_PROTOCOL,
+            "metadata": {"protocol_version": "agent/v1"},
+        },
+    )
 
 
 def _ensure_main_session(repository: JsonlSessionRepository, root: Path) -> str:
@@ -663,7 +698,7 @@ def create_agent_session(
             "audience": "model",
             "name": "workbench_agent_identity",
             "content": (
-                "Agent identity (authoritative): you are the Econometrics Workbench "
+                "Agent identity (authoritative): you are the Workbench "
                 + ("Chain" if body.role == "chain" else "Global")
                 + " Agent. You run on the configured provider "
                 + f"'{identity_config.provider_id or 'unknown'}' using model "
@@ -689,17 +724,7 @@ def create_agent_session(
             },
         )
     else:
-        repository.append(
-            session_id,
-            "custom_message",
-            {
-                "message_type": "agent_protocol",
-                "audience": "model",
-                "name": "workbench_global_agent_protocol",
-                "content": MAIN_AGENT_PROTOCOL,
-                "metadata": {"protocol_version": "agent/v1"},
-            },
-        )
+        _ensure_current_global_protocol(repository, session_id)
     events.emit(
         session_id,
         "session_created",
@@ -1768,6 +1793,8 @@ async def run_agent_turn(
         session_id=session_id,
     )
     tool_context: dict[str, Any] | None = None
+    if metadata.get("role") == "main":
+        _ensure_current_global_protocol(repository, session_id)
     if metadata.get("role") == "chain":
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never
@@ -1788,6 +1815,12 @@ async def run_agent_turn(
                 scope_requirements=("chain", "active_head")
             )
         }
+    else:
+        provider = NodeOperationContextProvider(root)
+        registry = ToolRegistry()
+        for definition in provider.global_tool_definitions(session_id=session_id):
+            registry.register(definition)
+        agent.attach_tools(registry.descriptors(), registry)
     await agent.prompt(
         body.question.strip(),
         budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},

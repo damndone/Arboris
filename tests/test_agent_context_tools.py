@@ -15,7 +15,7 @@ from workbench.agent.operations import OperationRecordStore
 from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.proposals import ProposalConfirmation
 from workbench.agent.session import JsonlSessionRepository
-from workbench.agent.tools import ToolVisibleError
+from workbench.agent.tools import ToolRegistry, ToolVisibleError
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
 
@@ -765,6 +765,58 @@ def test_operation_artifact_refuses_an_unregistered_figure_payload(
     assert "raw_artifact_payloads" in result.output["omitted_sections"]
 
 
+@pytest.mark.parametrize("artifact_type", ["statistical_test", "post_estimation"])
+def test_operation_artifact_projects_declared_model_post_estimation_results(
+    tmp_path: Path,
+    artifact_type: str,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    operation_record_id, artifact_id = _write_completed_workflow_result(
+        project_root,
+        artifact_id=f"declared_{artifact_type}",
+        artifact_type=artifact_type,
+        artifact_payload={
+            "result": {
+                "branch_id": "curved",
+                "f_statistic": 12.4,
+                "p_value": 0.003,
+                "raw_rows": [{"response": 1.0}],
+            }
+        },
+    )
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+
+    result = asyncio.run(
+        orchestrator.tool_registry("chain-a").execute(
+            {
+                "tool_call_id": "call-declared-post-estimation",
+                "tool_id": "inspect_operation_artifact",
+                "arguments": {
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_record_id": operation_record_id,
+                    "artifact_id": artifact_id,
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    evidence = result.output["artifact_evidence"]
+    assert evidence["available"] is True
+    assert evidence["evidence_ref"]["artifact_type"] == artifact_type
+    assert evidence["result"] == {
+        "branch_id": "curved",
+        "f_statistic": 12.4,
+        "p_value": 0.003,
+    }
+    assert "raw_rows" not in json.dumps(evidence["result"])
+
+
 def test_operation_artifact_enforces_a_total_public_result_budget(
     tmp_path: Path,
 ) -> None:
@@ -956,6 +1008,8 @@ def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
                 "estimate": index,
                 "std_error": 0.1,
                 "p_value": 0.05,
+                "ci_lower": index - 0.2,
+                "ci_upper": index + 0.2,
                 "significance_label": "not reported",
                 "raw_payload": {"should_not": "leak"},
             }
@@ -985,11 +1039,103 @@ def test_result_summary_bounds_coefficient_rows_and_preserves_artifact_ref(
     assert summary_output["coefficient_row_count"] == 10
     assert summary_output["coefficient_rows_omitted"] == 2
     assert len(summary_output["coefficient_rows"]) == 8
+    assert summary_output["coefficient_rows"][0]["ci_lower"] == -0.2
+    assert summary_output["coefficient_rows"][0]["ci_upper"] == 0.2
     assert all("raw_payload" not in row for row in summary_output["coefficient_rows"])
     assert summary_output["full_table_ref"] == "model_results/ols_1.json"
     assert summary_output["interpretation_mode"] == "associational"
     assert "raw_model_results" in result.output["omitted_sections"]
     assert "coefficient_rows" in result.output["omitted_sections"]
+
+
+def test_global_coefficient_inspector_returns_requested_persisted_intervals(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    result_path = project_root / "runs" / "run-a" / "model_results" / "ols_1.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "model_id": "ols_1",
+                "model_type": "ols_robust",
+                "nobs": 100,
+                "y_column": "outcome",
+                "x_columns": ["share", "control"],
+                "covariance": "robust",
+                "covariance_estimator": "HC1",
+                "covariance_evidence": {
+                    "confidence_level": 0.95,
+                    "confidence_interval_method": "normal_z",
+                },
+                "coefficients": {
+                    "share": {
+                        "estimate": 1.2,
+                        "std_error": 0.3,
+                        "p_value": 0.001,
+                        "ci_lower": 0.61,
+                        "ci_upper": 1.79,
+                        "source_id": "model_results.ols_1.coefficients.share",
+                    },
+                    "control": {"estimate": 0.4},
+                },
+                "raw_rows": [{"outcome": 99}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    for definition in provider.global_tool_definitions(session_id="main-session"):
+        registry.register(definition)
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-coefficients",
+                "tool_id": "inspect_project_model_coefficients",
+                "arguments": {"run_ids": ["run-a"], "terms": ["share"]},
+            },
+            session_id="main-session",
+        )
+    )
+
+    assert result.ok is True
+    assert result.output == {
+        "models": [
+            {
+                "run_id": "run-a",
+                "model_id": "ols_1",
+                "model_type": "ols_robust",
+                "nobs": 100,
+                "outcome": "outcome",
+                "predictors": ["share", "control"],
+                "predictors_omitted": 0,
+                "covariance": "robust",
+                "covariance_estimator": "HC1",
+                "confidence_interval": {"level": 0.95, "method": "normal_z"},
+                "coefficients": [
+                    {
+                        "term": "share",
+                        "estimate": 1.2,
+                        "std_error": 0.3,
+                        "p_value": 0.001,
+                        "ci_lower": 0.61,
+                        "ci_upper": 1.79,
+                        "source_id": "model_results.ols_1.coefficients.share",
+                    }
+                ],
+                "missing_terms": [],
+                "evidence_ref": {
+                    "run_id": "run-a",
+                    "model_id": "ols_1",
+                    "result_ref": "model_results:ols_1",
+                },
+            }
+        ],
+        "omitted_sections": ["raw_model_results", "raw_rows"],
+    }
+    assert "99" not in json.dumps(result.output)
 
 
 def test_time_series_summary_reads_only_bounded_public_artifacts(

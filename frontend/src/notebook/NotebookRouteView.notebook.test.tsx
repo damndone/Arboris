@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { StrictMode } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NotebookRouteView } from "./NotebookRouteView";
@@ -16,6 +16,7 @@ import {
   WorkbenchStateProvider,
 } from "../workbench/WorkbenchStateProvider";
 import {
+  cancelNotebookPlanning,
   compileNotebookContext,
   ensureNotebookProjection,
   getNotebook,
@@ -28,6 +29,7 @@ import {
 } from "./notebookApi";
 
 vi.mock("./notebookApi", () => ({
+  cancelNotebookPlanning: vi.fn(),
   compileNotebookContext: vi.fn(),
   ensureNotebookProjection: vi.fn(),
   getNotebook: vi.fn(),
@@ -48,6 +50,47 @@ function PanelProbe() {
   return <span data-testid="selected-bottom-panel">{workbench?.state.bottomPanel ?? "none"}</span>;
 }
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <span data-testid="location-search">
+      {JSON.stringify(Object.fromEntries(new URLSearchParams(location.search)))}
+    </span>
+  );
+}
+
+function genesisMaterializationResponse() {
+  const draftHash = `sha256:${"d".repeat(64)}`;
+  return {
+    draft: {
+      draft_id: "draft_genesis_01",
+    } as unknown as Awaited<ReturnType<typeof materializeNotebookOption>>["draft"],
+    draft_hash: draftHash,
+    materialization: {
+      contract_version: "1.0",
+      materialization_id: "mat_genesis_01",
+      option_id: "opt_7f3a1c",
+      option_revision: 2,
+      proposal_id: "prop_51de90",
+      proposal_revision: 1,
+      freshness_dependency_fingerprint: "fresh1:premises",
+      generation_context_id: "ctx_1",
+      draft_id: "draft_genesis_01",
+      draft_hash: draftHash,
+      draft_execution_mode: "genesis",
+      source_run_id: null,
+      source_model_node_id: null,
+      source_op_node_id: null,
+      source_node_hash: null,
+      source_forest_node_key: null,
+      source_context_fingerprint: null,
+      dataset_upload_sha256: `sha256:${"1".repeat(64)}`,
+      run_family_id: "family_1",
+    },
+    trace_id: "trace_materialize",
+  };
+}
+
 const context = {
   context_id: "ctx_1",
   context_profile: "notebook-plan/v1",
@@ -66,6 +109,7 @@ const context = {
 
 describe("NotebookRouteView", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     vi.mocked(uploadDataset).mockResolvedValue({ sha256: "a".repeat(64), filename: "data.csv" });
     vi.mocked(ensureNotebookProjection).mockResolvedValue({
       notebook_id: "nb_1",
@@ -91,6 +135,10 @@ describe("NotebookRouteView", () => {
     vi.mocked(getNotebookTrace).mockResolvedValue({ trace_id: "trace_1", events: [] });
     vi.mocked(listNotebooks).mockResolvedValue([]);
     vi.mocked(recordNotebookDecision).mockResolvedValue({});
+    vi.mocked(cancelNotebookPlanning).mockResolvedValue({
+      attempt_id: "attempt-test",
+      status: "cancelled",
+    });
   });
 
   it("creates a notebook, compiles context, proposes options, and renders the real surface", async () => {
@@ -117,7 +165,16 @@ describe("NotebookRouteView", () => {
       title: "Analysis Notebook",
     });
     expect(compileNotebookContext).toHaveBeenCalledWith("/tmp/project", "nb_1");
-    expect(proposeNotebookOptions).toHaveBeenCalledWith("/tmp/project", "nb_1", 3);
+    expect(proposeNotebookOptions).toHaveBeenCalledWith(
+      "/tmp/project",
+      "nb_1",
+      3,
+      undefined,
+      {
+        attemptId: expect.stringMatching(/^attempt_/),
+        signal: expect.any(AbortSignal),
+      },
+    );
   });
 
   it("renders a typed API failure without pretending the notebook is empty", async () => {
@@ -144,6 +201,12 @@ describe("NotebookRouteView", () => {
     );
 
     expect(screen.getByTestId("notebook-dataset-start")).toBeInTheDocument();
+    expect(screen.getByTestId("notebook-dataset-start")).toHaveTextContent(
+      "same project data store",
+    );
+    expect(screen.getByTestId("notebook-dataset-start")).toHaveTextContent(
+      "does not create a Run",
+    );
     fireEvent.change(screen.getByLabelText("Dataset"), {
       target: { files: [new File(["outcome,predictor\n1,2"], "data.csv", { type: "text/csv" })] },
     });
@@ -157,6 +220,52 @@ describe("NotebookRouteView", () => {
       created_by: "user",
       title: "Analysis Notebook",
     }));
+  });
+
+  it("deduplicates planning after a StrictMode runless upload binds the notebook URL", async () => {
+    vi.mocked(proposeNotebookOptions).mockClear();
+    let resolvePlanning: (value: {
+      context: typeof context;
+      options: unknown[];
+      trace_id: string;
+    }) => void = () => {};
+    const planning = new Promise<{
+      context: typeof context;
+      options: unknown[];
+      trace_id: string;
+    }>((resolve) => {
+      resolvePlanning = resolve;
+    });
+    vi.mocked(proposeNotebookOptions).mockImplementation(() => planning);
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+          <NotebookRouteView projectRoot="/tmp/project-dedupe" />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    fireEvent.change(screen.getByLabelText("Dataset"), {
+      target: { files: [new File(["outcome,predictor\n1,2"], "data.csv", { type: "text/csv" })] },
+    });
+
+    await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
+    const proposed = readCanonicalFixture("notebook_option_revision");
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [proposed],
+      trace_id: "trace_1",
+    });
+    resolvePlanning({
+      context,
+      options: [proposed],
+      trace_id: "trace_1",
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-option-list")).toBeInTheDocument(),
+    );
+    expect(proposeNotebookOptions).toHaveBeenCalledTimes(1);
   });
 
   it("reuses the sole persisted Notebook when Graph reload has no active Run", async () => {
@@ -301,6 +410,107 @@ describe("NotebookRouteView", () => {
     );
   });
 
+  it("opens the prepared genesis Draft in Graph after materialization succeeds", async () => {
+    const selected = readCanonicalFixture("notebook_option_revision_v11");
+    selected.lifecycle_status = "selected";
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [selected],
+      trace_id: "trace_1",
+    });
+    vi.mocked(materializeNotebookOption).mockResolvedValue(
+      genesisMaterializationResponse(),
+    );
+    const onMaterializedDraft = vi.fn();
+
+    render(
+      <MemoryRouter
+        initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}
+      >
+        <LocationProbe />
+        <NotebookRouteView
+          projectRoot="/tmp/project"
+          onMaterializedDraft={onMaterializedDraft}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("option-execute")).toHaveTextContent("Review plan"),
+    );
+    fireEvent.click(screen.getByTestId("option-execute"));
+    fireEvent.click(await screen.findByTestId("confirmation-confirm"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search")).toHaveTextContent(
+        '"view":"graph"',
+      ),
+    );
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      `"notebook":"${selected.notebook_id}"`,
+    );
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      '"panel":"agent"',
+    );
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      '"tabs":"draft:draft_genesis_01:model_1"',
+    );
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      '"active":"draft:draft_genesis_01:model_1"',
+    );
+    expect(screen.getByTestId("location-search")).toHaveTextContent(
+      '"focus":"draft:draft_genesis_01:model_1"',
+    );
+    expect(materializeNotebookOption).toHaveBeenCalledWith(
+      "/tmp/project",
+      selected.notebook_id,
+      selected.option_id,
+    );
+    expect(onMaterializedDraft).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the selected option and confirmation visible when Draft preparation fails", async () => {
+    const selected = readCanonicalFixture("notebook_option_revision_v11");
+    selected.lifecycle_status = "selected";
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [selected],
+      trace_id: "trace_1",
+    });
+    vi.mocked(materializeNotebookOption).mockRejectedValue(
+      Object.assign(new Error("Draft validation rejected the proposal"), {
+        code: "OPTION_MATERIALIZATION_FAILED",
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("option-execute")).toHaveTextContent("Review plan"),
+    );
+    fireEvent.click(screen.getByTestId("option-execute"));
+    fireEvent.click(await screen.findByTestId("confirmation-confirm"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-action-error")).toHaveTextContent(
+        "OPTION_MATERIALIZATION_FAILED",
+      ),
+    );
+    expect(screen.getByTestId("notebook-action-error")).toHaveTextContent(
+      "Draft validation rejected the proposal",
+    );
+    expect(screen.getByTestId("notebook-surface")).toHaveAttribute(
+      "data-state",
+      "confirmation",
+    );
+    expect(screen.getByTestId(`option-card-${selected.option_id}`)).toBeInTheDocument();
+    expect(screen.getByTestId("notebook-confirmation")).toBeInTheDocument();
+  });
+
   it("replans persisted options only after an explicit user action", async () => {
     const proposed = readCanonicalFixture("notebook_option_revision_v11");
     vi.mocked(proposeNotebookOptions).mockClear();
@@ -322,6 +532,175 @@ describe("NotebookRouteView", () => {
     fireEvent.click(screen.getByTestId("notebook-replan-options"));
 
     await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(2));
+  });
+
+  it("cancels replanning, preserves current options, and ignores a late response", async () => {
+    const current = readCanonicalFixture("notebook_option_revision_v11");
+    const late = {
+      ...readCanonicalFixture("notebook_option_revision_v11"),
+      option_id: "option_late",
+    };
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [current],
+      trace_id: "trace_1",
+    });
+    let resolvePlanning: (value: {
+      context: typeof context;
+      options: unknown[];
+      trace_id: string;
+    }) => void = () => {};
+    vi.mocked(proposeNotebookOptions).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePlanning = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-planning-progress")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("notebook-cancel-planning"));
+
+    await waitFor(() => expect(cancelNotebookPlanning).toHaveBeenCalledOnce());
+    const attemptId = vi.mocked(cancelNotebookPlanning).mock.calls[0][2];
+    expect(attemptId).toMatch(/^attempt_/);
+    expect(screen.queryByTestId("notebook-planning-progress")).toBeNull();
+    expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+
+    resolvePlanning({ context, options: [late], trace_id: "trace_1" });
+    await Promise.resolve();
+    expect(screen.queryByTestId("option-card-option_late")).toBeNull();
+    expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+  });
+
+  it("reports when backend cancellation cannot be confirmed", async () => {
+    const current = readCanonicalFixture("notebook_option_revision_v11");
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [current],
+      trace_id: "trace_1",
+    });
+    vi.mocked(proposeNotebookOptions).mockImplementation(
+      () => new Promise(() => {}),
+    );
+    vi.mocked(cancelNotebookPlanning).mockRejectedValue(
+      Object.assign(new Error("cancel endpoint unavailable"), {
+        code: "NETWORK_ERROR",
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-planning-progress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("notebook-cancel-planning"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-planning-error")).toHaveTextContent(
+        "NOTEBOOK_PLANNING_CANCEL_FAILED",
+      ),
+    );
+    expect(screen.getByTestId("notebook-planning-error")).toHaveTextContent(
+      "backend cancellation was not confirmed",
+    );
+    expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+  });
+
+  it("keeps current options usable when a replan times out", async () => {
+    const current = readCanonicalFixture("notebook_option_revision_v11");
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [current],
+      trace_id: "trace_1",
+    });
+    vi.mocked(proposeNotebookOptions).mockRejectedValue(
+      Object.assign(new Error("Notebook planning provider exceeded 120s"), {
+        code: "NOTEBOOK_PLANNING_TIMEOUT",
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-planning-error")).toHaveTextContent(
+        "NOTEBOOK_PLANNING_TIMEOUT",
+      ),
+    );
+    expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+    expect(screen.getByTestId("notebook-retry-planning")).toHaveTextContent("Retry");
+  });
+
+  it("runs agent revalidation when a stale option requests it", async () => {
+    const stale = readCanonicalFixture("notebook_option_revision_v11");
+    stale.freshness_status = "stale";
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context,
+      options: [stale],
+      trace_id: "trace_1",
+    });
+    vi.mocked(proposeNotebookOptions).mockClear();
+    let resolveRevalidation: (value: {
+      context: typeof context;
+      options: unknown[];
+      trace_id: string;
+    }) => void = () => {};
+    vi.mocked(proposeNotebookOptions).mockImplementation(() => new Promise((resolve) => {
+      resolveRevalidation = resolve;
+    }));
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook&notebook=nb_1"]}>
+        <NotebookRouteView projectRoot="/tmp/project" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("option-revalidate")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("option-revalidate"));
+
+    await waitFor(() => expect(proposeNotebookOptions).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("notebook-planning-progress")).toBeInTheDocument();
+    resolveRevalidation({
+      context,
+      options: [{ ...stale, freshness_status: "fresh", option_revision: 3 }],
+      trace_id: "trace_1",
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId(`option-card-${stale.option_id}`)).toHaveAttribute(
+        "data-freshness",
+        "fresh",
+      ),
+    );
   });
 
   it("hydrates the persisted Draft handoff after the route reloads", async () => {

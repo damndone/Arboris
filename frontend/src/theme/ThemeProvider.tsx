@@ -46,6 +46,7 @@ export interface ThemeContextValue {
 }
 
 const Ctx = createContext<ThemeContextValue | null>(null);
+const NATIVE_REFRESH_MS = 30_000;
 
 function readStored(): ThemeChoice {
   if (typeof window === "undefined") return "system";
@@ -70,6 +71,28 @@ function resolve(choice: ThemeChoice): ThemeEffective {
   return prefersDark() ? "dark" : "light";
 }
 
+function isLoopbackHost(): boolean {
+  if (typeof window === "undefined") return false;
+  return ["127.0.0.1", "localhost", "::1"].includes(window.location.hostname);
+}
+
+async function readLocalSystemTheme(): Promise<ThemeEffective | null> {
+  if (!isLoopbackHost() || typeof fetch !== "function") return null;
+  try {
+    const response = await fetch("/api/system/appearance", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { theme?: unknown };
+    return payload.theme === "dark" || payload.theme === "light"
+      ? payload.theme
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function stamp(eff: ThemeEffective): void {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute(ATTR, eff);
@@ -92,14 +115,44 @@ export function ThemeProvider({ children, initial }: ThemeProviderProps): JSX.El
     stamp(effective);
   }, [effective]);
 
-  // matchMedia listener — only meaningful when theme === "system".
+  // System mode normally follows matchMedia. On a loopback Workbench, a
+  // bounded native projection corrects embedded browsers that report the
+  // host application's theme instead of the actual operating-system theme.
   useEffect(() => {
     if (theme !== "system") return;
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = (): void => setEffective(mql.matches ? "dark" : "light");
-    mql.addEventListener?.("change", onChange);
-    return () => mql.removeEventListener?.("change", onChange);
+    let active = true;
+
+    const refresh = async (): Promise<void> => {
+      const native = await readLocalSystemTheme();
+      if (active) setEffective(native ?? (mql.matches ? "dark" : "light"));
+    };
+    const onChange = (): void => {
+      setEffective(mql.matches ? "dark" : "light");
+      void refresh();
+    };
+    const onVisibility = (): void => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+
+    onChange();
+    if (mql.addEventListener) mql.addEventListener("change", onChange);
+    else mql.addListener?.(onChange);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    const interval = isLoopbackHost()
+      ? window.setInterval(() => void refresh(), NATIVE_REFRESH_MS)
+      : null;
+
+    return () => {
+      active = false;
+      if (mql.removeEventListener) mql.removeEventListener("change", onChange);
+      else mql.removeListener?.(onChange);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (interval !== null) window.clearInterval(interval);
+    };
   }, [theme]);
 
   const setTheme = useCallback((next: ThemeChoice) => {

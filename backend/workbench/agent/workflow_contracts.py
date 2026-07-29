@@ -409,6 +409,73 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         verification_builder_key="genesis.verification.v1",
         ui_description="Estimate one or more models from the source table.",
     ),
+    "model.joint_f_test": StepSpecContract(
+        summary=(
+            "Test whether one or more declared OLS term groups are jointly zero. "
+            "Selectors can reference only linear predictors, categorical dummy "
+            "sets, or generated polynomial powers that the dependent model "
+            "branch already declared."
+        ),
+        fields={
+            "branch_id": "Declared model branch to read from a direct dependency.",
+            "term_selectors": (
+                "Non-empty list of {kind, column}; kind is linear, categorical, "
+                "or polynomial. `column` is a source column, not a generated "
+                "coefficient name or formula fragment."
+            ),
+        },
+        required=("branch_id", "term_selectors"),
+        field_types={"branch_id": "string", "term_selectors": "list"},
+        semantic_validator_key="model.joint_f_test",
+        reference_resolver_key="workflow.model_branch",
+        column_extractor_key="model.post_estimation",
+        risk_class="low",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.joint-f-test/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_joint_f_test",
+        effect_level="read_only",
+        scope="declared OLS post-estimation",
+        risk_level="none",
+        reconciler_key="model.joint_f_test",
+        diff_builder_key="model.post_estimation.diff.v1",
+        verification_builder_key="model.post_estimation.verification.v1",
+        ui_description=(
+            "Run a joint F test over terms already present in a completed, "
+            "unadjusted OLS branch."
+        ),
+    ),
+    "model.quadratic_stationary_point": StepSpecContract(
+        summary=(
+            "Compute the stationary point of one declared linear-plus-square "
+            "term in a completed unadjusted OLS branch."
+        ),
+        fields={
+            "branch_id": "Declared model branch to read from a direct dependency.",
+            "column": (
+                "Source column declared both as a linear predictor and as a "
+                "degree-two polynomial term."
+            ),
+        },
+        required=("branch_id", "column"),
+        field_types={"branch_id": "string", "column": "string"},
+        semantic_validator_key="model.quadratic_stationary_point",
+        reference_resolver_key="workflow.model_branch",
+        column_extractor_key="model.post_estimation",
+        risk_class="low",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.quadratic-stationary-point/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_quadratic_stationary_point",
+        effect_level="read_only",
+        scope="declared OLS post-estimation",
+        risk_level="none",
+        reconciler_key="model.quadratic_stationary_point",
+        diff_builder_key="model.post_estimation.diff.v1",
+        verification_builder_key="model.post_estimation.verification.v1",
+        ui_description=(
+            "Compute -beta_linear / (2 * beta_square) only when both declared "
+            "terms are present in a completed quadratic OLS branch."
+        ),
+    ),
     "report.compose": StepSpecContract(
         summary="Assemble the completed steps into a report.",
         fields={
@@ -552,6 +619,12 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
                 for entry in branch.get("polynomials", []) or []:
                     if isinstance(entry, Mapping) and entry.get("column"):
                         columns.add(str(entry["column"]))
+    elif extractor_key == "model.post_estimation":
+        if spec.get("column"):
+            columns.add(str(spec["column"]))
+        for selector in spec.get("term_selectors", []) or []:
+            if isinstance(selector, Mapping) and selector.get("column"):
+                columns.add(str(selector["column"]))
     return columns
 
 
@@ -713,6 +786,47 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 raise OperationValidationError(
                     f"model branch {branch_id}: {exc}"
                 ) from exc
+    elif validator_key == "model.joint_f_test":
+        selectors = spec.get("term_selectors")
+        if not isinstance(selectors, list) or not selectors:
+            raise OperationValidationError(
+                "model.joint_f_test requires a non-empty term_selectors list"
+            )
+        seen: set[tuple[str, str]] = set()
+        for selector in selectors:
+            if not isinstance(selector, Mapping):
+                raise OperationValidationError(
+                    "each model.joint_f_test term selector must be an object"
+                )
+            unknown = sorted(set(selector) - {"kind", "column"})
+            if unknown:
+                raise OperationValidationError(
+                    "model.joint_f_test term selector contains unsupported field(s): "
+                    + ", ".join(unknown)
+                )
+            kind = selector.get("kind")
+            column = selector.get("column")
+            if kind not in {"linear", "categorical", "polynomial"}:
+                raise OperationValidationError(
+                    "model.joint_f_test selector kind must be linear, categorical, or polynomial"
+                )
+            if not isinstance(column, str) or not column:
+                raise OperationValidationError(
+                    "model.joint_f_test selector column must be a non-empty string"
+                )
+            identity = (kind, column)
+            if identity in seen:
+                raise OperationValidationError(
+                    "model.joint_f_test contains a duplicate term selector: "
+                    f"{kind}:{column}"
+                )
+            seen.add(identity)
+    elif validator_key == "model.quadratic_stationary_point":
+        column = spec.get("column")
+        if not isinstance(column, str) or not column:
+            raise OperationValidationError(
+                "model.quadratic_stationary_point column must be a non-empty string"
+            )
 
 
 def _validate_declared_field_types(

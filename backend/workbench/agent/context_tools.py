@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
+import re
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json
@@ -109,6 +111,14 @@ class InspectOperationArtifactRequest:
     active_head_run_id: str
     operation_record_id: str
     artifact_id: str
+
+
+@dataclass(frozen=True)
+class InspectProjectModelCoefficientsRequest:
+    """A bounded, project-wide lookup of persisted model estimates."""
+
+    run_ids: tuple[str, ...]
+    terms: tuple[str, ...]
 
 
 class OperationContractUnavailableError(ValueError):
@@ -707,6 +717,60 @@ class NodeOperationContextProvider:
             ),
         ]
 
+    def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
+        """Expose the one project-wide numeric evidence reader to Main Agent.
+
+        The Main Agent remains unable to mutate a graph or run.  It may only
+        look up exact, requested coefficient terms from already-persisted
+        result contracts, which is enough to answer a cross-run comparison
+        without transferring model payloads or data rows into its context.
+        """
+
+        def inspect_project_model_coefficients(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_model_coefficients(
+                InspectProjectModelCoefficientsRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"]),
+                    terms=tuple(str(term) for term in arguments["terms"]),
+                )
+            )
+
+        return [
+            ToolDefinition(
+                tool_id="inspect_project_model_coefficients",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids", "terms"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                        "terms": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_model_coefficients,
+            )
+        ]
+
     def inspect_node_context(
         self,
         request: InspectNodeContextRequest,
@@ -925,6 +989,34 @@ class NodeOperationContextProvider:
             "node": _bounded_node(node),
             "result_summary": result_summary,
             "omitted_sections": omitted_sections,
+        }
+
+    def inspect_project_model_coefficients(
+        self,
+        request: InspectProjectModelCoefficientsRequest,
+    ) -> dict[str, Any]:
+        """Return exact public coefficient evidence for explicitly named terms.
+
+        This deliberately resolves neither a formula nor a raw-data artifact.
+        The caller chooses a small set of known project runs and terms; the
+        server projects only the persisted public statistics that answer that
+        question.  Missing terms remain visible rather than being inferred.
+        """
+
+        models: list[dict[str, Any]] = []
+        for run_id in request.run_ids:
+            run_root = self._project_run_root(run_id)
+            for result in read_model_results(run_root):
+                public_model = _public_requested_model_coefficients(
+                    run_id=run_id,
+                    result=result,
+                    requested_terms=request.terms,
+                )
+                if public_model is not None:
+                    models.append(public_model)
+        return {
+            "models": models,
+            "omitted_sections": ["raw_model_results", "raw_rows"],
         }
 
     def inspect_time_series_summary(
@@ -1314,6 +1406,128 @@ class NodeOperationContextProvider:
         manifest = _read_manifest(runs_root / owner_run_id)
         return canonical.model_dump(), node, manifest
 
+    def _project_run_root(self, run_id: str) -> Path:
+        """Resolve a project run identifier without accepting a filesystem path."""
+
+        if not _PROJECT_RUN_ID_RE.fullmatch(run_id):
+            raise ToolVisibleError(
+                "PROJECT_RUN_ID_INVALID: run_ids must be project run identifiers, not paths."
+            )
+        runs_root = (self.project_root / "runs").resolve()
+        run_root = (runs_root / run_id).resolve()
+        if run_root.parent != runs_root or not run_root.is_dir():
+            raise ToolVisibleError(
+                f"PROJECT_RUN_NOT_FOUND: no completed project run is available for {run_id!r}."
+            )
+        return run_root
+
+
+_PROJECT_RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}")
+_MAX_PUBLIC_MODEL_PREDICTORS = 32
+
+
+def _public_requested_model_coefficients(
+    *,
+    run_id: str,
+    result: dict[str, Any],
+    requested_terms: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Project one stored result into term-specific, non-row evidence."""
+
+    model_id = result.get("model_id")
+    coefficients = result.get("coefficients")
+    if not isinstance(model_id, str) or not model_id or not isinstance(coefficients, dict):
+        return None
+
+    public_coefficients: list[dict[str, Any]] = []
+    missing_terms: list[str] = []
+    for term in requested_terms:
+        coefficient = coefficients.get(term)
+        if not isinstance(coefficient, dict):
+            missing_terms.append(term)
+            continue
+        public_coefficients.append(
+            {
+                "term": term,
+                "estimate": _public_stat_number(coefficient.get("estimate")),
+                "std_error": _public_stat_number(coefficient.get("std_error")),
+                "p_value": _public_stat_number(coefficient.get("p_value")),
+                "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
+                "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                "source_id": (
+                    coefficient.get("source_id")
+                    if isinstance(coefficient.get("source_id"), str)
+                    else None
+                ),
+            }
+        )
+
+    predictors = result.get("x_columns")
+    public_predictors = (
+        [item for item in predictors if isinstance(item, str)][:_MAX_PUBLIC_MODEL_PREDICTORS]
+        if isinstance(predictors, list)
+        else []
+    )
+    predictor_count = (
+        len([item for item in predictors if isinstance(item, str)])
+        if isinstance(predictors, list)
+        else 0
+    )
+    covariance_evidence = result.get("covariance_evidence")
+    covariance_evidence = (
+        covariance_evidence if isinstance(covariance_evidence, dict) else {}
+    )
+    confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
+    return {
+        "run_id": run_id,
+        "model_id": model_id,
+        "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
+        "nobs": _public_positive_int(result.get("nobs")),
+        "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
+        "predictors": public_predictors,
+        "predictors_omitted": max(predictor_count - len(public_predictors), 0),
+        "covariance": result.get("covariance") if isinstance(result.get("covariance"), str) else None,
+        "covariance_estimator": (
+            result.get("covariance_estimator")
+            if isinstance(result.get("covariance_estimator"), str)
+            else None
+        ),
+        "confidence_interval": {
+            "level": confidence_level,
+            "method": (
+                covariance_evidence.get("confidence_interval_method")
+                if isinstance(covariance_evidence.get("confidence_interval_method"), str)
+                else None
+            ),
+        },
+        "coefficients": public_coefficients,
+        "missing_terms": missing_terms,
+        "evidence_ref": {
+            "run_id": run_id,
+            "model_id": model_id,
+            "result_ref": f"model_results:{model_id}",
+        },
+    }
+
+
+def _public_stat_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(float(value)) else None
+
+
+def _public_probability(value: Any) -> float | None:
+    number = _public_stat_number(value)
+    if number is None or not 0 < float(number) < 1:
+        return None
+    return float(number)
+
+
+def _public_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
 
 def _read_manifest(run_root: Path) -> dict[str, Any]:
     try:
@@ -1450,6 +1664,8 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "estimate",
         "std_error",
         "p_value",
+        "ci_lower",
+        "ci_upper",
         "significance_label",
     )
     return {key: row[key] for key in allowed if key in row}
@@ -1581,7 +1797,11 @@ def _public_operation_artifact_result(
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Project a declared result type; unknown types remain deliberately opaque."""
 
-    if artifact_type != "statistical_exploration":
+    if artifact_type not in {
+        "statistical_exploration",
+        "statistical_test",
+        "post_estimation",
+    }:
         return None, ["raw_artifact_payloads"]
     result = payload.get("result")
     if not isinstance(result, dict):

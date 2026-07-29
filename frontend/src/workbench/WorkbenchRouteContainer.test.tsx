@@ -329,19 +329,15 @@ function confirmOperationRerun() {
 }
 
 describe("WorkbenchRouteContainer", () => {
-  it("leaving settings through any view tab restores the selected workbench view", async () => {
+  it("keeps project settings out of the inner workbench action bar", async () => {
     mountAt("/?tab=lineage");
     await screen.findByTestId("graph-workbench");
 
-    fireEvent.click(screen.getByTestId("workbench-topbar-settings"));
-    expect(screen.getByTestId("llm-provider-manager")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("view-tab-graph"));
-    expect(screen.queryByTestId("llm-provider-manager")).toBeNull();
-    expect(screen.getByTestId("workbench-main")).toHaveAttribute(
-      "data-view",
-      "graph",
-    );
+    expect(screen.queryByTestId("workbench-topbar-settings")).toBeNull();
+    expect(screen.queryByTestId("topbar-action-generateReport")).toBeNull();
+    expect(screen.getByTestId("topbar-action-rerun")).toHaveStyle({
+      border: "0px",
+    });
   });
 
   it("renders the topbar with two view tabs once data loads (Pipeline retired v1.6.7)", async () => {
@@ -493,7 +489,19 @@ describe("WorkbenchRouteContainer", () => {
       mountAt("/?tab=lineage&panel=logs");
       await screen.findByTestId("graph-workbench");
 
-      fireEvent.click(screen.getByRole("button", { name: "Close bottom panel" }));
+      const closePanel = screen.getByRole("button", {
+        name: "Close bottom panel",
+      });
+      expect(closePanel).toHaveTextContent("▼");
+      expect(screen.getByTestId("bottom-panel")).toHaveClass("bottom-panel");
+      expect(screen.getByTestId("bottom-panel-tabs")).toHaveClass(
+        "bottom-panel__tabs",
+      );
+      expect(screen.getByTestId("panel-tab-logs")).toHaveClass(
+        "bottom-panel__tab",
+      );
+
+      fireEvent.click(closePanel);
       expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "false");
       expect(screen.queryByTestId("bottom-panel-body")).not.toBeInTheDocument();
 
@@ -925,7 +933,10 @@ describe("WorkbenchRouteContainer", () => {
       mountHome();
 
       expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
-      expect(screen.getByText("This project has no data yet.")).toBeInTheDocument();
+      expect(screen.getByText("This project has no imported data or analysis yet.")).toBeInTheDocument();
+      expect(screen.getByTestId("genesis-cta")).toHaveTextContent(
+        "Import data and create analysis",
+      );
       // The empty canvas replaces the shell entirely.
       expect(screen.queryByTestId("workbench-route")).toBeNull();
     });
@@ -1043,7 +1054,9 @@ describe("WorkbenchRouteContainer", () => {
       mountHome();
 
       expect(await screen.findByTestId("graph-workbench")).toBeInTheDocument();
-      fireEvent.click(await screen.findByTestId("genesis-resume-cta"));
+      const resume = await screen.findByTestId("genesis-resume-cta");
+      expect(resume).toHaveStyle({ border: "0px" });
+      fireEvent.click(resume);
 
       expect(screen.getByTestId("genesis-wizard-drawer")).toBeInTheDocument();
       expect(await screen.findByTestId("genesis-resume")).toBeInTheDocument();

@@ -52,16 +52,37 @@ export function DraftEditorSection({
           ))}
         </ul>
       )}
-      <div className="draft-editor__actions">
-        <button type="button" disabled={busy} onClick={() => onValidate(entry.draftId)}>
+      <div className="draft-editor__workflow">
+        <div className="draft-editor__workflow-heading">
+          <span>Draft workflow</span>
+          <small>Validate before execution</small>
+        </div>
+        <div className="draft-editor__actions">
+        <button
+          type="button"
+          className="draft-button draft-button--secondary"
+          disabled={busy}
+          onClick={() => onValidate(entry.draftId)}
+        >
           Validate
         </button>
-        <button type="button" disabled={!canExecute} onClick={() => onExecute(entry.draftId)}>
+        <button
+          type="button"
+          className="draft-button draft-button--primary"
+          disabled={!canExecute}
+          onClick={() => onExecute(entry.draftId)}
+        >
           Execute
         </button>
-        <button type="button" disabled={busy} onClick={() => onDiscard(entry.draftId)}>
+        <button
+          type="button"
+          className="draft-button draft-button--danger"
+          disabled={busy}
+          onClick={() => onDiscard(entry.draftId)}
+        >
           Discard
         </button>
+        </div>
       </div>
     </section>
   );

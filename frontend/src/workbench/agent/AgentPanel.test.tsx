@@ -94,6 +94,7 @@ describe("AgentPanel", () => {
     expect(screen.getByText("检查 active head")).toBeInTheDocument();
     expect(screen.getByText("发现一个待确认的风险。")).toBeInTheDocument();
     expect(screen.getByText(/Current chain · run-a/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session status: idle")).not.toBeInTheDocument();
     // Context usage is a hollow ring; the token figures live in its aria-label
     // (and hover tooltip), not as inline summary text.
     expect(screen.getByTestId("agent-context-ring")).toHaveAccessibleName(
@@ -119,7 +120,7 @@ describe("AgentPanel", () => {
     expect(agentLine.className).toContain("wb-agent-terminal-line");
   });
 
-  it("keeps navigation context collapsed so the terminal owns the panel space", () => {
+  it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {
     const rootRef: AgentNavigationRef = {
       kind: "agent_session",
       id: "agent-main",
@@ -142,10 +143,9 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    const context = screen.getByTestId("agent-context-details");
-    expect(context).not.toHaveAttribute("open");
+    expect(screen.queryByTestId("agent-context-details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent context")).not.toBeInTheDocument();
     expect(screen.getByRole("log", { name: /Agent transcript/ })).toBeInTheDocument();
-    expect(screen.getByText("Agent context")).toBeInTheDocument();
   });
 
   it("offers a typed fork action on a message with a verified source node", () => {
@@ -361,68 +361,25 @@ describe("AgentPanel", () => {
     expect(card.textContent).not.toContain("[{");
   });
 
-  it("renders Main/Chain and operation lineage links", async () => {
-    const openNavigation = vi.fn();
-    const navigationLinks: AgentNavigationRef[] = [
-      {
-        kind: "graph_node",
-        id: "run-source::model:ols_1",
-        label: "Source model:ols_1",
-        relation: "source",
-        available: true,
-        href: {
-          view: "graph",
-          run_id: "run-source",
-          node_ref: "model:ols_1",
-          forest_node_key: "run-source::model:ols_1",
-        },
-      },
-      {
-        kind: "operation",
-        id: "oprec-1",
-        label: "model.rerun · completed",
-        relation: "audit",
-        available: true,
-        href: {
-          view: "agent",
-          session_id: "agent_chain",
-          operation_record_id: "oprec-1",
-        },
-      },
-      {
-        kind: "run",
-        id: "run-child",
-        label: "Child run run-child",
-        relation: "child",
-        available: true,
-        href: { view: "graph", run_id: "run-child" },
-      },
-      {
-        kind: "agent_session",
-        id: "agent_chain_child",
-        label: "Agent agent_chain_child",
-        relation: "child",
-        available: true,
-        href: { view: "agent", session_id: "agent_chain_child" },
-      },
-    ];
+  it("does not duplicate project navigation links already available in AI activity", () => {
+    const navigationLinks: AgentNavigationRef[] = [{
+      kind: "run",
+      id: "run-child",
+      label: "Child run run-child",
+      relation: "child",
+      available: true,
+      href: { view: "graph", run_id: "run-child" },
+    }];
     render(
       <AgentSurfaceContext.Provider
-        value={value({ navigationLinks, openNavigation })}
+        value={value({ navigationLinks, openNavigation: vi.fn() })}
       >
         <AgentPanel runId="run-a" projectRoot="/proj" />
       </AgentSurfaceContext.Provider>,
     );
 
-    expect(screen.getByRole("button", { name: /open source model/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open child run/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open operation/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open child agent/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /open child run/i }));
-    expect(openNavigation).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "run", id: "run-child" }),
-    );
+    expect(screen.queryByTestId("agent-navigation-links")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open child run/i })).not.toBeInTheDocument();
   });
 
   it("offers a human-readable audit export for the operation's owning session", () => {
@@ -449,40 +406,6 @@ describe("AgentPanel", () => {
       "href",
       expect.stringContaining("/agent/sessions/agent_chain/audit?project_root=%2Fproj&format=html"),
     );
-  });
-
-  it("keeps typed navigation keys unique when one chain has two relations", () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const duplicateChainId = "chain-child";
-    const navigationLinks: AgentNavigationRef[] = [
-      {
-        kind: "chain",
-        id: duplicateChainId,
-        label: `Chain ${duplicateChainId}`,
-        relation: "parent",
-        available: true,
-        href: { view: "agent", chain_id: duplicateChainId },
-      },
-      {
-        kind: "chain",
-        id: duplicateChainId,
-        label: `Chain ${duplicateChainId}`,
-        relation: "child",
-        available: true,
-        href: { view: "agent", chain_id: duplicateChainId },
-      },
-    ];
-
-    render(
-      <AgentSurfaceContext.Provider value={value({ navigationLinks })}>
-        <AgentPanel runId="run-a" projectRoot="/proj" />
-      </AgentSurfaceContext.Provider>,
-    );
-
-    expect(screen.getByRole("button", { name: "Open parent Chain chain-child" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open child Chain chain-child" })).toBeInTheDocument();
-    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
-    consoleError.mockRestore();
   });
 
   it("keeps message navigation keys unique when one chain has two relations", () => {

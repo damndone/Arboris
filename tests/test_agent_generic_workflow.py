@@ -293,6 +293,63 @@ def test_published_step_vocabulary_covers_every_composable_operation() -> None:
     assert "selected_columns" in explore and "NOT `columns`" in explore["selected_columns"]
     assert "group_by" in explore["options"]
     assert vocabulary["reported_percentiles"] == [1, 5, 10, 25, 50, 75, 90, 95, 99]
+    assert published["model.joint_f_test"]["required"] == [
+        "branch_id",
+        "term_selectors",
+    ]
+    assert published["model.quadratic_stationary_point"]["required"] == [
+        "branch_id",
+        "column",
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation_id, spec, message",
+    [
+        (
+            "model.joint_f_test",
+            {
+                "branch_id": "candidate",
+                "term_selectors": [{"kind": "formula", "column": "revenue"}],
+            },
+            "selector kind",
+        ),
+        (
+            "model.joint_f_test",
+            {
+                "branch_id": "candidate",
+                "term_selectors": [
+                    {"kind": "linear", "column": "revenue", "formula": "x + z"}
+                ],
+            },
+            "unsupported field",
+        ),
+        (
+            "model.quadratic_stationary_point",
+            {"branch_id": "candidate", "column": "unknown"},
+            "missing column",
+        ),
+    ],
+)
+def test_post_estimation_specs_fail_closed(
+    operation_id: str,
+    spec: dict,
+    message: str,
+) -> None:
+    with pytest.raises(OperationValidationError, match=message):
+        compile_workflow(
+            workflow_id="wf-post-estimation-invalid",
+            target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
+            preconditions={"context_fingerprint": "fp"},
+            steps=[
+                {
+                    "step_id": "post_estimation",
+                    "operation_id": operation_id,
+                    "spec": spec,
+                }
+            ],
+            available_columns=list(_frame().columns),
+        )
 
 
 def test_step_vocabulary_and_validator_share_one_source_of_truth() -> None:

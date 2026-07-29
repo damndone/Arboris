@@ -5,8 +5,10 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from workbench.analysis_loop.resolver import AnalysisLoopSourceResolutionError
+from workbench.agent import model as agent_model
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import (
@@ -246,6 +248,52 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
         assert events[1].finish_reason == "tool_calls"
 
     asyncio.run(scenario())
+
+
+def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) -> None:
+    config = LLMConfig(
+        base_url="https://api.example.test",
+        api_key="secret",
+        model="deepseek-chat",
+        timeout_s=120,
+    )
+    started = asyncio.Event()
+    cancelled = False
+
+    async def slow_completion(messages, actual_config, *, tools):
+        nonlocal cancelled
+        assert actual_config == config
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+
+    monkeypatch.setattr(
+        "workbench.agent.model.async_chat_completion",
+        slow_completion,
+    )
+
+    async def scenario() -> None:
+        adapter = agent_model.CancellableOpenAICompatibleModelAdapter(config)
+        request = ModelRequest(
+            request_id="request-cancellable",
+            messages=[{"role": "user", "content": "plan"}],
+            tools=[{"tool_id": "submit", "input_schema": {"type": "object"}}],
+        )
+
+        async def collect():
+            return [event async for event in adapter.stream(request)]
+
+        task = asyncio.create_task(collect())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    assert cancelled is True
 
 
 def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> None:

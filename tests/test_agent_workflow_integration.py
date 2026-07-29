@@ -4,7 +4,10 @@ import asyncio
 import json
 from pathlib import Path
 
+import pandas as pd
+
 from workbench.agent.chains import RerunExecutionResult
+from workbench.agent.chains import ChainStore
 from workbench.agent.context_tools import NodeOperationContextProvider
 from workbench.agent.core import AgentCore
 from workbench.agent.events import AgentEventStream
@@ -13,6 +16,15 @@ from workbench.agent.orchestrator import WorkbenchOrchestrator
 from workbench.agent.session import JsonlSessionRepository
 from workbench.graph_model import Graph, Node, NodeKind, Stage
 from workbench.graph_store import GraphStore
+from workbench.lineage.run_inputs import write_run_inputs
+from workbench.lineage.upload_store import store_upload_bytes
+from tests.test_data_column_cast import _source_project
+
+
+class IdleAdapter:
+    async def stream(self, request):
+        if False:
+            yield request
 
 
 class MultiToolWorkflowAdapter:
@@ -294,5 +306,160 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
         event_types = [event.event_type for event in events.replay("chain-session")]
         assert event_types.index("proposal_ready") < event_types.index("proposal_confirmed")
         assert "operation_completed" in event_types
+
+    asyncio.run(scenario())
+
+
+def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
+    tmp_path: Path,
+) -> None:
+    """The normal Agent confirmation path, not a test-only executor, owns the run."""
+
+    async def scenario() -> None:
+        rows = 44
+        exposure = [float(index - 22) for index in range(rows)]
+        frame = pd.DataFrame(
+            {
+                "response": [
+                    15.0
+                    + 1.4 * value
+                    - 0.1 * value**2
+                    + (1.0 if index % 2 else -1.0)
+                    for index, value in enumerate(exposure)
+                ],
+                "exposure": exposure,
+                "segment": ["lower" if index % 2 else "upper" for index in range(rows)],
+            }
+        )
+        project_root, run_id, artifact_id = _source_project(tmp_path, frame)
+        upload_sha = store_upload_bytes(
+            project_root,
+            frame.to_csv(index=False).encode("utf-8"),
+            filename="fixture.csv",
+        )
+        write_run_inputs(
+            project_root / "runs" / run_id,
+            form={"model_type": "auto", "y": "", "x": ""},
+            upload={"sha256": upload_sha, "filename": "fixture.csv"},
+            rerun_of=None,
+            from_node=None,
+            rerun_reason="initial",
+            override_hash=None,
+            dag_hash="fixture-dag",
+        )
+        workbench_root = tmp_path / "workbench"
+        repository = JsonlSessionRepository(workbench_root)
+        repository.create_session("main-session", chain_id="project", role="main")
+        repository.create_session("chain-session", chain_id="chain-a", role="chain")
+        events = AgentEventStream(workbench_root)
+        agent = AgentCore(repository, events, IdleAdapter(), session_id="chain-session")
+        orchestrator = WorkbenchOrchestrator(
+            repository,
+            events,
+            main_session_id="main-session",
+            context_provider=NodeOperationContextProvider(project_root),
+        )
+        orchestrator.register_chain("chain-a", "chain-session", agent)
+        ChainStore(workbench_root).create_root(
+            chain_id="chain-a",
+            run_family_id="family-source",
+            active_head_run_id=run_id,
+            agent_session_id="chain-session",
+        )
+        context_fingerprint = "nocv1:declared-model-terms"
+        proposal = orchestrator.create_proposal(
+            chain_id="chain-a",
+            operation_id="operation.multi_step",
+            target={
+                "run_id": run_id,
+                "node_ref": "stage:source",
+                "artifact_id": artifact_id,
+            },
+            preconditions={
+                "context_version": "node-operation-context/v1",
+                "context_fingerprint": context_fingerprint,
+                "active_head_run_id": run_id,
+                "owner_resolution": "single_candidate",
+            },
+            changes={
+                "steps": [
+                    {
+                        "step_id": "estimate",
+                        "operation_id": "model.genesis",
+                        "spec": {
+                            "model_family": "ols",
+                            "covariance": "unadjusted",
+                            "branches": [
+                                {
+                                    "branch_id": "curved",
+                                    "outcome": "response",
+                                    "predictors": ["exposure"],
+                                    "categorical": ["segment"],
+                                    "polynomials": [
+                                        {"column": "exposure", "degree": 2}
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                    {
+                        "step_id": "test_terms",
+                        "operation_id": "model.joint_f_test",
+                        "depends_on": ["estimate"],
+                        "spec": {
+                            "branch_id": "curved",
+                            "term_selectors": [
+                                {"kind": "polynomial", "column": "exposure"},
+                                {"kind": "categorical", "column": "segment"},
+                            ],
+                        },
+                    },
+                    {
+                        "step_id": "stationary_point",
+                        "operation_id": "model.quadratic_stationary_point",
+                        "depends_on": ["estimate"],
+                        "spec": {"branch_id": "curved", "column": "exposure"},
+                    },
+                ]
+            },
+            evidence_refs=["profile:fixture"],
+            expected_effect=["estimate declared OLS branch and post-estimation evidence"],
+            risks=["model semantics require user confirmation"],
+        )
+        before_confirmation = list(orchestrator.operation_store.list_records())
+        assert before_confirmation == []
+
+        record = orchestrator.confirm_proposal(
+            proposal.proposal_id,
+            revision=proposal.revision,
+            fingerprint=proposal.fingerprint,
+            actor_type="user",
+            current_context_fingerprint=context_fingerprint,
+            current_active_head_run_id=run_id,
+        )
+        completed = await orchestrator.execute_confirmed_operation(
+            record.record_id,
+            project_root=project_root,
+            current_context_fingerprint=context_fingerprint,
+            current_active_head_run_id=run_id,
+            allow_recovery=True,
+        )
+
+        assert completed.status == "completed"
+        state = completed.outputs["workflow_state"]
+        assert state["status"] == "completed"
+        assert state["steps"]["test_terms"]["artifact_ids"]
+        assert state["steps"]["stationary_point"]["artifact_ids"]
+        child_operations = [
+            item
+            for item in orchestrator.operation_store.list_records()
+            if item.record_id != record.record_id
+        ]
+        assert {item.operation_id for item in child_operations} == {
+            "model.genesis",
+            "model.joint_f_test",
+            "model.quadratic_stationary_point",
+        }
+        assert {item.status for item in child_operations} == {"completed"}
 
     asyncio.run(scenario())

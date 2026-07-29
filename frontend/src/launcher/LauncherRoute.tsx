@@ -38,7 +38,7 @@ export function LauncherRoute() {
   return (
     <section className="panel" aria-labelledby="launcher-heading">
       <div className="panel-heading">
-        <h2 id="launcher-heading">Econometrics Workbench</h2>
+        <h2 id="launcher-heading">Workbench</h2>
         <span>选择或新建一个项目开始。</span>
       </div>
       <button type="button" onClick={() => setModalOpen(true)}>

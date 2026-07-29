@@ -25,6 +25,7 @@ def _evidence() -> DataEvidencePackV1:
                 source_refs=("source.alpha",),
                 protocol_version="inspection/v1",
                 status="completed",
+                result_hash="sha256:evidence-alpha",
             ),
         ),
     )
@@ -93,6 +94,95 @@ def test_single_server_validated_candidate_gets_v11_recommendation(tmp_path: Pat
     assert decision.recommended_option_id == "opt.alpha"
     assert normalized[0].recommendation_decision_id == decision.recommendation_decision_id
     assert normalized[0].recommendation_status == "recommended"
+
+
+def test_server_recommendation_uses_only_referenced_completed_evidence(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, _binding, _catalog = _service_with_catalog(project)
+    context = service.compile_context(notebook.notebook_id)
+    partial = EvidenceRecord(
+        evidence_id="evidence.sample",
+        inspection_id="sample.v1",
+        source_refs=("source.alpha",),
+        protocol_version="sample/v1",
+        status="partial",
+        omissions=({"section": "sample.columns", "reason": "sample_column_cap"},),
+    )
+    full_pack = DataEvidencePackV1(
+        source_id="source.alpha",
+        records=(*_evidence().records, partial),
+    )
+
+    draft = replace(
+        _draft(capability_id="capability.registered", option_id="opt.alpha"),
+        evidence_refs=(
+            EvidenceRef(
+                evidence_id="evidence.alpha",
+                result_hash=_evidence().records[0].result_hash,
+                source_refs=("source.alpha",),
+            ),
+        ),
+    )
+
+    _normalized, decision = service.derive_server_recommendation(
+        notebook.notebook_id,
+        context=context,
+        drafts=(draft,),
+        batch_id="batch.partial-limitation",
+        evidence_pack=full_pack,
+    )
+
+    assert decision.outcome == "recommended"
+    assert decision.evidence_pack_hashes == (_evidence().evidence_pack_hash,)
+    assert (
+        service.store.read_evidence_pack(
+            notebook.notebook_id, full_pack.evidence_pack_hash
+        )
+        is not None
+    )
+
+
+def test_server_recommendation_rejects_a_referenced_partial_record(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path, name="project.alpha")
+    service, notebook, _binding, _catalog = _service_with_catalog(project)
+    context = service.compile_context(notebook.notebook_id)
+    partial = EvidenceRecord(
+        evidence_id="evidence.sample",
+        inspection_id="sample.v1",
+        source_refs=("source.alpha",),
+        protocol_version="sample/v1",
+        status="partial",
+        result_hash="sha256:partial",
+        omissions=({"section": "sample.columns", "reason": "sample_column_cap"},),
+    )
+    draft = replace(
+        _draft(capability_id="capability.registered", option_id="opt.alpha"),
+        evidence_refs=(
+            EvidenceRef(
+                evidence_id=partial.evidence_id,
+                result_hash=partial.result_hash,
+                source_refs=partial.source_refs,
+            ),
+        ),
+    )
+
+    with pytest.raises(OptionBatchInvalid) as error:
+        service.derive_server_recommendation(
+            notebook.notebook_id,
+            context=context,
+            drafts=(draft,),
+            batch_id="batch.partial-reference",
+            evidence_pack=DataEvidencePackV1(
+                source_id="source.alpha",
+                records=(*_evidence().records, partial),
+            ),
+        )
+
+    assert error.value.code == "OPTION_SERVER_FEASIBILITY_INCOMPLETE"
 
 
 def test_server_feasibility_emits_a_bounded_capability_trace_event(tmp_path: Path) -> None:

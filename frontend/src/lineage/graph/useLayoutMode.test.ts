@@ -1,6 +1,6 @@
 /* useLayoutMode.test.ts — V1.5.1 T4' phase 2.
  *
- * Verifies the per-runId sessionStorage contract: default = "free",
+ * Verifies the per-runId sessionStorage contract: default = "LR",
  * setLayout persists, runId change re-reads, invalid values rejected.
  */
 import { act, renderHook } from "@testing-library/react";
@@ -15,9 +15,9 @@ beforeEach(() => {
 });
 
 describe("useLayoutMode", () => {
-  it("defaults to 'free' when no stored value exists", () => {
+  it("defaults to horizontal automatic layout when no stored value exists", () => {
     const { result } = renderHook(() => useLayoutMode("run-abc"));
-    expect(result.current.layout).toBe("free");
+    expect(result.current.layout).toBe("LR");
   });
 
   it("setLayout persists per-runId to sessionStorage", () => {
@@ -44,22 +44,22 @@ describe("useLayoutMode", () => {
     expect(result.current.layout).toBe("TB");
   });
 
-  it("ignores invalid stored values and falls back to 'free'", () => {
+  it("ignores invalid stored values and falls back to horizontal", () => {
     window.sessionStorage.setItem(KEY("run-corrupt"), "diagonal");
     const { result } = renderHook(() => useLayoutMode("run-corrupt"));
-    expect(result.current.layout).toBe("free");
+    expect(result.current.layout).toBe("LR");
   });
 
   it("ignores invalid setLayout calls without mutating state", () => {
     const { result } = renderHook(() => useLayoutMode("run-x"));
     act(() => result.current.setLayout("diagonal" as LayoutMode));
-    expect(result.current.layout).toBe("free");
+    expect(result.current.layout).toBe("LR");
     expect(window.sessionStorage.getItem(KEY("run-x"))).toBeNull();
   });
 
   it("works with null runId (no persistence, just defaults)", () => {
     const { result } = renderHook(() => useLayoutMode(null));
-    expect(result.current.layout).toBe("free");
+    expect(result.current.layout).toBe("LR");
     act(() => result.current.setLayout("LR"));
     // No persistence when no runId — state still updates in-memory.
     expect(result.current.layout).toBe("LR");

@@ -189,7 +189,7 @@ class ReportStage:
             "after controlling for other predictors."
         )
         report = {
-            "title": "Econometrics Report",
+            "title": "Workbench Report",
             "facts": facts,
             "claims": claims,
             "warnings": issue_dicts,

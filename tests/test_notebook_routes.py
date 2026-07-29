@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
+import threading
 
 from fastapi.testclient import TestClient
 from dataclasses import replace
@@ -189,6 +192,8 @@ def test_real_planner_reads_current_server_owned_custom_projection(
     assert planner.capability_catalog["custom.ols"]["artifact_types"] == {
         "custom.ols.result": "custom_json"
     }
+    assert planner.model_timeout_s == 120
+    assert planner.adapter.config.timeout_s == 120
     assert "binding" not in planner.capability_catalog["custom.ols"]
     assert "entrypoint_ref" not in planner.capability_catalog["custom.ols"]
 
@@ -376,6 +381,62 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
 
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_UNAVAILABLE"
+
+
+def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    notebook_id = notebook["notebook_id"]
+    params = {"project_root": str(project)}
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    class SlowPlanningAgent:
+        async def plan_async(self, *, context, initial_evidence):
+            del context, initial_evidence
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: SlowPlanningAgent(),
+    )
+
+    def propose():
+        with TestClient(app) as request_client:
+            return request_client.post(
+                f"/notebooks/{notebook_id}/options/propose",
+                params=params,
+                json={"count": 3, "attempt_id": "attempt_cancel_1"},
+            )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(propose)
+        assert started.wait(timeout=2)
+        stopped = client.delete(
+            f"/notebooks/{notebook_id}/planning/attempt_cancel_1",
+            params=params,
+        )
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["status"] == "cancelled"
+        response = pending.result(timeout=2)
+
+    assert cancelled.wait(timeout=1)
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_CANCELLED"
+    snapshot = client.get(
+        f"/notebooks/{notebook_id}/options",
+        params=params,
+    )
+    assert snapshot.status_code == 200, snapshot.text
+    assert snapshot.json()["options"] == []
 
 
 def test_notebook_route_persists_agent_decision_as_evidence_option_revision(

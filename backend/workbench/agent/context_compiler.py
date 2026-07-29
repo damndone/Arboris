@@ -144,7 +144,6 @@ FRESHNESS_DEPENDENCY_FIELDS = (
     "available_capabilities",
     "user_focus",
     "source_manifest",
-    "evidence_pack_refs",
 )
 
 
@@ -152,9 +151,11 @@ def freshness_dependency_fingerprint(context: NotebookPlanningContextV1) -> str:
     """Which upstream facts, if changed, force this option to be revalidated.
 
     Deliberately NOT the whole context. `existing_option_summaries`,
-    `budget_report`, `omissions` and `trace_id` describe the generation event,
-    not the analysis premises: folding them in would make an option stale itself
-    the moment its siblings were written (spec §4.0).
+    `evidence_pack_refs`, `budget_report`, `omissions` and `trace_id` describe
+    the generation event, not the analysis premises: folding them in would make
+    an option stale itself when its siblings or the recommendation's persisted
+    evidence subset were written (spec §4.0). Options and recommendation
+    decisions pin the exact immutable evidence hashes they consume.
     """
 
     payload = context.hashable_payload()
@@ -457,15 +458,16 @@ _ARTIFACT_TYPE_RANK = {
     "model_result": 0,
     "model_diagnostic": 1,
     "statistical_test": 2,
-    "profile": 3,
-    "table_export": 4,
-    "report": 5,
-    "figure": 6,
-    "time_series_manifest": 7,
-    "processed_data": 8,
-    "metadata": 9,
-    "time_series_json": 10,
-    "raw_data": 11,
+    "post_estimation": 3,
+    "profile": 4,
+    "table_export": 5,
+    "report": 6,
+    "figure": 7,
+    "time_series_manifest": 8,
+    "processed_data": 9,
+    "metadata": 10,
+    "time_series_json": 11,
+    "raw_data": 12,
 }
 
 

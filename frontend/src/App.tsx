@@ -55,6 +55,8 @@ type AppContextValue = {
   setError: (msg: string | null) => void;
   setActivity: (text: string) => void;
   activity: string;
+  settingsRequestVersion: number;
+  requestOpenSettings: () => void;
 };
 
 function useAppContext(): AppContextValue {
@@ -252,6 +254,7 @@ function ProjectGraphRoute() {
 
 function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
   const [searchParams] = useSearchParams();
+  const { settingsRequestVersion } = useAppContext();
   // ?run= is the run deep-link param. ?focus= belongs to the workbench URL
   // schema (NODE focus key, rewritten on every canvas interaction) — never
   // read it here.
@@ -266,6 +269,7 @@ function ProjectGraphBridge({ projectRoot }: { projectRoot: string }) {
       <WorkbenchHome
         projectRoot={projectRoot}
         focusRunId={runParam || undefined}
+        settingsRequestVersion={settingsRequestVersion}
       />
     </div>
   );
@@ -290,6 +294,7 @@ function AppShell() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activity, setActivity] = useState<string>("Idle");
+  const [settingsRequestVersion, setSettingsRequestVersion] = useState(0);
 
   useEffect(() => {
     const fromUrl = searchParams.get("project_root");
@@ -332,9 +337,28 @@ function AppShell() {
     setErrorMessage(msg);
   }, []);
 
+  const requestOpenSettings = useCallback(() => {
+    setSettingsRequestVersion((version) => version + 1);
+  }, []);
+
   const context = useMemo<AppContextValue>(
-    () => ({ projectRoot, setProjectRoot, setError, setActivity, activity }),
-    [projectRoot, setProjectRoot, setError, activity]
+    () => ({
+      projectRoot,
+      setProjectRoot,
+      setError,
+      setActivity,
+      activity,
+      settingsRequestVersion,
+      requestOpenSettings,
+    }),
+    [
+      projectRoot,
+      setProjectRoot,
+      setError,
+      activity,
+      settingsRequestVersion,
+      requestOpenSettings,
+    ]
   );
 
   const isProjectGraphRoute = /^\/p\/[^/]+\/graph\/?$/.test(location.pathname);
@@ -388,9 +412,23 @@ function AppShell() {
           </button>
         </nav>
         <div className="workbench-navigation-actions">
-          <span className="activity" aria-live="polite">
-            {activity}
-          </span>
+          {activity !== "Idle" && (
+            <span className="activity" aria-live="polite">
+              {activity}
+            </span>
+          )}
+          {isProjectGraphRoute && (
+            <button
+              type="button"
+              className="workbench-settings-button"
+              aria-label="Settings"
+              title="Settings"
+              data-testid="workbench-shell-settings"
+              onClick={requestOpenSettings}
+            >
+              <span aria-hidden="true">⚙</span>
+            </button>
+          )}
           <ThemeToggle />
         </div>
       </div>

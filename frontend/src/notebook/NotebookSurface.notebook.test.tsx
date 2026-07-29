@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotebookSurface } from "./NotebookSurface";
 import { rootToSlug } from "../workbench/projectSlug";
@@ -44,6 +44,10 @@ function ready(overrides: Partial<NotebookReadyView["notebook"]> = {}): Notebook
 }
 
 describe("NotebookSurface — six states, none of them lying", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("loading: says the context is being compiled and shows no options", () => {
     render(<NotebookSurface view={{ status: "loading" }} />);
     expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
@@ -53,10 +57,29 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 
   it("loading (planning phase): names the slow agent step so it does not read as a hang", () => {
-    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+    vi.useFakeTimers();
+    const onCancelPlanning = vi.fn();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        onCancelPlanning={onCancelPlanning}
+      />,
+    );
     expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
       "Planning analysis options with the agent…",
     );
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveTextContent(
+      "Validating evidence-bound options",
+    );
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveTextContent(
+      "How the plan is being formed",
+    );
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 5s",
+    );
+    fireEvent.click(screen.getByTestId("notebook-cancel-planning"));
+    expect(onCancelPlanning).toHaveBeenCalledOnce();
   });
 
   it("error: shows the error code and message, and no success wording", () => {
@@ -102,6 +125,25 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-success")).toBeNull();
   });
 
+  it("planning timeout remains explicitly retryable", () => {
+    const onReplan = vi.fn();
+    render(
+      <NotebookSurface
+        view={{
+          status: "error",
+          error: {
+            code: "NOTEBOOK_PLANNING_TIMEOUT",
+            message: "Notebook planning provider exceeded 60s",
+          },
+        }}
+        onReplan={onReplan}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+    expect(onReplan).toHaveBeenCalledOnce();
+  });
+
   it("empty: says no options were proposed rather than rendering an empty list", () => {
     render(<NotebookSurface view={ready({ options: [] })} />);
     expect(screen.getByTestId("notebook-empty")).toHaveTextContent(
@@ -125,11 +167,17 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 
   it("confirmation: shows the plan diff and required artifacts before anything runs", () => {
+    const selected = {
+      ...canonicalOptionRevision(),
+      lifecycle_status: "selected" as const,
+      materializable: true,
+    };
     render(
       <NotebookSurface
         view={ready({
+          options: [selected],
           confirmation: {
-            option: canonicalOptionRevision(),
+            option: selected,
             execution: canonicalOptionExecution(),
             plan_diff: [
               { field: "model_type", from: "time_series.arma_garch", to: "time_series.ets" },
@@ -149,13 +197,11 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByTestId("confirmation-pins")).toHaveTextContent(
       "opt_7f3a1c rev 2 · prop_51de90 rev 1",
     );
+    expect(screen.getByTestId("confirmation-confirm")).toHaveTextContent("Prepare Draft");
     expect(screen.queryByTestId("notebook-success")).toBeNull();
-    expect(
-      Boolean(
-        screen.getByTestId("notebook-option-list").compareDocumentPosition(confirmation) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
+    const card = screen.getByTestId(`option-card-${selected.option_id}`);
+    expect(card.nextElementSibling).toBe(screen.getByTestId("notebook-confirmation-slot"));
+    expect(screen.getByTestId("notebook-confirmation-slot")).toHaveFocus();
   });
 
   it("success: renders the executed result exactly as the ETS packet states it", () => {
@@ -272,6 +318,89 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
     expect(screen.getAllByTestId(/^option-card-/)).toHaveLength(4);
     expect(screen.getAllByTestId(/^notebook-option-batch-/)).toHaveLength(2);
     expect(screen.queryByTestId("notebook-option-overflow")).toBeNull();
+  });
+
+  it("collapses an older stale-only batch while keeping the latest actionable batch open", () => {
+    const base = canonicalOptionRevision();
+    render(
+      <NotebookSurface
+        view={ready({
+          options: [
+            {
+              ...base,
+              option_id: "opt_old",
+              batch_id: "batch_old",
+              freshness_status: "stale",
+            },
+            {
+              ...base,
+              option_id: "opt_current",
+              batch_id: "batch_current",
+              freshness_status: "fresh",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_current")).toHaveAttribute("open");
+    expect(screen.getByTestId("notebook-option-batch-batch_current")).toHaveTextContent(
+      "Current option batch",
+    );
+  });
+
+  it("orders batches by generation time and labels only the newest batch as current", () => {
+    const base = canonicalOptionRevision();
+    render(
+      <NotebookSurface
+        view={ready({
+          options: [
+            {
+              ...base,
+              option_id: "opt_old",
+              batch_id: "batch_old",
+              created_at: "2026-07-22T10:00:00+00:00",
+              freshness_status: "stale",
+            },
+            {
+              ...base,
+              option_id: "opt_new",
+              batch_id: "batch_new",
+              created_at: "2026-07-22T12:00:00+00:00",
+              freshness_status: "fresh",
+            },
+            {
+              ...base,
+              option_id: "opt_middle",
+              batch_id: "batch_middle",
+              created_at: "2026-07-22T11:00:00+00:00",
+              freshness_status: "stale",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const batches = screen.getAllByTestId(/^notebook-option-batch-/);
+    expect(batches.map((batch) => batch.dataset.testid)).toEqual([
+      "notebook-option-batch-batch_old",
+      "notebook-option-batch-batch_middle",
+      "notebook-option-batch-batch_new",
+    ]);
+    expect(screen.getAllByText("Current option batch")).toHaveLength(1);
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_middle")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_new")).toHaveTextContent(
+      "Current option batch",
+    );
   });
 
   it("offers an explicit replan action when persisted options need recovery", () => {

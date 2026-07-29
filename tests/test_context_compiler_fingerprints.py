@@ -89,6 +89,10 @@ def test_whitelisted_changes_move_the_fingerprint(project: Path, overrides: dict
             {"existing_option_summaries": [{"option_id": "opt_9", "batch": "b2", "rank": 1}]},
             id="sibling_option",
         ),
+        pytest.param(
+            {"evidence_pack_refs": ["sha256:newly-persisted-planning-evidence"]},
+            id="planning_evidence",
+        ),
     ],
 )
 def test_blacklisted_changes_do_not_move_the_fingerprint(project: Path, overrides: dict) -> None:
@@ -125,9 +129,14 @@ def test_freshness_whitelist_is_declared_not_inferred() -> None:
         "available_capabilities",
         "user_focus",
         "source_manifest",
-        "evidence_pack_refs",
     )
-    for forbidden in ("existing_option_summaries", "budget_report", "omissions", "trace_id"):
+    for forbidden in (
+        "existing_option_summaries",
+        "evidence_pack_refs",
+        "budget_report",
+        "omissions",
+        "trace_id",
+    ):
         assert forbidden not in FRESHNESS_DEPENDENCY_FIELDS
 
 
