@@ -157,6 +157,8 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
   const [answer, setAnswer] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [requestStartedAt, setRequestStartedAt] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
   const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
   const [showAllArtifacts, setShowAllArtifacts] = useState(false);
   // v1.6.12 (V6): per-node Q&A history — regenerating no longer erases the
@@ -169,11 +171,23 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     setAnswer(null);
     setError(null);
     setIsSubmitting(false);
+    setRequestStartedAt(null);
     setShowAllArtifacts(false);
     setHistory(
       projectRoot && nodeKey ? askAiHistoryForNode(projectRoot, nodeKey) : [],
     );
   }, [contextIdentity, projectRoot, nodeKey]);
+
+  useEffect(() => {
+    if (!isSubmitting || requestStartedAt === null) return undefined;
+    setClock(Date.now());
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [isSubmitting, requestStartedAt]);
+
+  const elapsedSeconds = requestStartedAt === null
+    ? 0
+    : Math.max(0, Math.floor((clock - requestStartedAt) / 1_000));
 
   const artifacts = node.artifacts ?? [];
   const artifactCategoryCounts = useMemo(
@@ -215,6 +229,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
     requestVersionRef.current = requestVersion;
 
     setIsSubmitting(true);
+    setRequestStartedAt(Date.now());
     setError(null);
     setAnswer(null);
     try {
@@ -254,6 +269,7 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
         requestVersionRef.current === requestVersion
       ) {
         setIsSubmitting(false);
+        setRequestStartedAt(null);
       }
     }
   }
@@ -274,9 +290,10 @@ export function AskAISection({ node }: { node: GraphViewNode }) {
         }}
       >
         <span>Ask AI</span>
-        <LlmProviderBadge
-          onConfig={packet ? setLlmConfig : undefined}
-        />
+        <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}>
+          {isSubmitting ? <span data-testid="ask-ai-elapsed" aria-live="polite">{`Working · ${elapsedSeconds}s`}</span> : null}
+          <LlmProviderBadge onConfig={packet ? setLlmConfig : undefined} />
+        </span>
       </div>
       <div
         style={{

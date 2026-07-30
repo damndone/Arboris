@@ -1,6 +1,8 @@
 """A plan of a shape no template describes must compile and execute."""
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import pytest
 
@@ -143,6 +145,142 @@ def test_a_derived_column_is_available_to_later_steps(tmp_path):
         ],
         available_columns=list(_frame().columns),
     )
+
+
+def test_numeric_derived_columns_are_typed_and_available_to_later_steps(tmp_path):
+    """A workflow may name safe transforms, never an executable expression."""
+
+    project, run_id, artifact_id = _source_project(tmp_path, _frame())
+    steps = [
+        {
+            "step_id": "transform",
+            "operation_id": "statistical.derive_numeric",
+            "spec": {
+                "recipes": [
+                    {
+                        "operator": "natural_log",
+                        "input_columns": ["headcount"],
+                        "output_name": "log_headcount",
+                    },
+                    {
+                        "operator": "multiply",
+                        "input_columns": ["rnd_share", "export_share"],
+                        "output_name": "rnd_export_product",
+                    },
+                ]
+            },
+        },
+        {
+            "step_id": "describe_transform",
+            "operation_id": "statistical.explore",
+            "depends_on": ["transform"],
+            "spec": {"operation": "summarize", "selected_columns": ["log_headcount", "rnd_export_product"]},
+        },
+    ]
+    draft = compile_workflow(
+        workflow_id="wf-numeric-derived",
+        target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
+        preconditions={"context_fingerprint": "fp"},
+        steps=steps,
+        available_columns=list(_frame().columns),
+    )
+
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+
+    assert state.status == "completed"
+    assert state.steps["transform"].artifact_ids
+    assert state.steps["describe_transform"].status == "completed"
+    records = {
+        item["artifact_id"]: item
+        for item in json.loads(
+            (project / "runs" / run_id / "artifacts_index.json").read_text(
+                encoding="utf-8"
+            )
+        )["artifacts"]
+    }
+    data_record = records[state.steps["transform"].artifact_ids[0]]
+    derived = pd.read_csv(project / "runs" / run_id / data_record["path"])
+    assert derived["log_headcount"].iloc[0] == pytest.approx(2.302585093)
+    assert derived["rnd_export_product"].iloc[23] == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    "recipe, message",
+    [
+        (
+            {
+                "operator": "formula",
+                "input_columns": ["headcount"],
+                "output_name": "derived_value",
+            },
+            "operator must be natural_log or multiply",
+        ),
+        (
+            {
+                "operator": "natural_log",
+                "input_columns": ["headcount"],
+                "output_name": "headcount",
+            },
+            "output column already exists",
+        ),
+        (
+            {
+                "operator": "multiply",
+                "input_columns": ["headcount", "headcount"],
+                "output_name": "squared_headcount",
+            },
+            "requires 2 distinct input column",
+        ),
+    ],
+)
+def test_numeric_derivation_contract_refuses_code_and_unsafe_shapes(recipe, message):
+    with pytest.raises(OperationValidationError, match=message):
+        compile_workflow(
+            workflow_id="wf-numeric-contract-rejection",
+            target={"run_id": "r", "node_ref": "n", "artifact_id": "a"},
+            preconditions={"context_fingerprint": "fp"},
+            steps=[
+                {
+                    "step_id": "transform",
+                    "operation_id": "statistical.derive_numeric",
+                    "spec": {"recipes": [recipe]},
+                }
+            ],
+            available_columns=list(_frame().columns),
+        )
+
+
+def test_numeric_derivation_fails_closed_for_invalid_observed_values(tmp_path):
+    frame = _frame()
+    frame.loc[0, "headcount"] = 0
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    draft = compile_workflow(
+        workflow_id="wf-numeric-domain-rejection",
+        target={"run_id": run_id, "node_ref": "stage:source", "artifact_id": artifact_id},
+        preconditions={"context_fingerprint": "fp"},
+        steps=[
+            {
+                "step_id": "transform",
+                "operation_id": "statistical.derive_numeric",
+                "spec": {
+                    "recipes": [
+                        {
+                            "operator": "natural_log",
+                            "input_columns": ["headcount"],
+                            "output_name": "log_headcount",
+                        }
+                    ]
+                },
+            }
+        ],
+        available_columns=list(frame.columns),
+    )
+
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+
+    assert state.status == "failed"
+    assert state.steps["transform"].status == "failed"
+    assert "strictly positive" in str(state.steps["transform"].error)
 
 
 @pytest.mark.parametrize(
@@ -445,6 +583,7 @@ def test_a_dummy_column_typo_is_caught_by_the_schema_check():
                     "step_id": "models",
                     "operation_id": "model.genesis",
                     "spec": {
+                        "model_family": "ols",
                         "branches": [
                             {
                                 "branch_id": "b",
@@ -472,6 +611,7 @@ def test_the_validator_refuses_a_branch_the_executor_could_not_build():
                     "step_id": "models",
                     "operation_id": "model.genesis",
                     "spec": {
+                        "model_family": "ols",
                         "branches": [
                             {
                                 "branch_id": "b",

@@ -23,10 +23,16 @@ import { foldNodeClusters, type GroupNode } from "../folding";
 import { rolesByVariable, primaryRole } from "./variableRoles";
 import { roleEdgeStyle, suppressAggregateEdges, isRoleOp } from "./roleEdges";
 import { roleAbbrev, roleColorVar, roleLabel, type Role } from "../roles";
+import {
+  readHiddenGraphNodeIds,
+  useWorkbenchOptional,
+} from "../../workbench/WorkbenchStateProvider";
 
 // T8.4: 240ms hover delay before the tooltip mounts. Matches V1.4.1
 // NodeTooltip and the prototype (uiux/graph.jsx L228).
 export const TOOLTIP_HOVER_DELAY_MS = 240;
+/** Dense cross-run lineage needs a wider overview than React Flow's 0.5 default. */
+export const GRAPH_MIN_ZOOM = 0.1;
 
 // T8.6a: stage labels from uiux/panels.jsx::stageLabel (L301-304). All
 // 8 V1.5.0 stages have an entry. Synthetic "unknown" doesn't appear in
@@ -150,29 +156,6 @@ function CanvasToolbar({
         >
           Fullscreen
         </button>
-      </div>
-    </Panel>
-  );
-}
-
-function CanvasStatus({ model }: { model: GraphViewModel }) {
-  const waiting = waitingReviewsCount(model);
-  const runId = model.runId.trim();
-  if (!runId && waiting === 0) return null;
-
-  return (
-    <Panel position="top-right">
-      <div className="ln-canvas-status" data-testid="canvas-status">
-        {runId && <span>Run {runId}</span>}
-        {runId && waiting > 0 && <span aria-hidden="true"> · </span>}
-        {waiting > 0 && (
-          <span
-            className="ln-canvas-status__count ln-canvas-status__count--warn"
-            data-testid="canvas-status-count"
-          >
-            {waiting} {waiting === 1 ? "review" : "reviews"} needed
-          </span>
-        )}
       </div>
     </Panel>
   );
@@ -322,6 +305,8 @@ interface GraphCanvasProps {
    *  viewport-coordinate event so a portal context menu can position
    *  itself. Omit to disable right-click in tests / legacy consumers. */
   onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
+  /** Blank canvas uses the same menu for view-only restoration. */
+  onPaneContextMenu?: (x: number, y: number) => void;
   /** V1.5.2 P6 — focus anchor (plan §8 priority #2). When set AND
    *  different from `selectedNodeId`, the node renders with a distinct
    *  focus ring. */
@@ -392,11 +377,14 @@ export function GraphCanvas({
   layout: layoutProp,
   onLayoutChange,
   onNodeContextMenu,
+  onPaneContextMenu,
   focusNodeKey = null,
   focusUpstreamKeys,
   searchHitKeys,
   searchCursorKey = null,
 }: GraphCanvasProps) {
+  const workbench = useWorkbenchOptional();
+  const graphCleanupVersion = workbench?.state.graphCleanupVersion ?? 0;
   // V1.5.1 T4' — layout state. Controlled when `layout` prop is supplied
   // (T4'.1 will hoist to LineageContext), uncontrolled fallback otherwise.
   // `layoutVersion` increments on every user click so the seedNodes
@@ -404,6 +392,12 @@ export function GraphCanvas({
   // "Horizontal" or "Vertical" click forces a fresh dagre snap.
   const [layoutLocal, setLayoutLocal] = useState<LayoutMode>(DEFAULT_LAYOUT);
   const [layoutVersion, setLayoutVersion] = useState(0);
+  const [hiddenNodeIds, setHiddenNodeIds] = useState<Set<string>>(
+    () => readHiddenGraphNodeIds(model.runId),
+  );
+  useEffect(() => {
+    setHiddenNodeIds(readHiddenGraphNodeIds(model.runId));
+  }, [model.runId, graphCleanupVersion]);
   // The seedNodes useMemo bakes callbacks into node data but deliberately
   // omits them from its deps (they must not force a re-layout). Route them
   // through refs so the baked callbacks can never go stale if a caller
@@ -442,12 +436,24 @@ export function GraphCanvas({
       lastAutomaticLayoutRef.current = layout;
     }
   }, [layout]);
+  const visibleNodes = useMemo(
+    () => model.nodes.filter((node) => !hiddenNodeIds.has(node.id)),
+    [hiddenNodeIds, model.nodes],
+  );
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((node) => node.id)),
+    [visibleNodes],
+  );
+  const visibleEdges = useMemo(
+    () => model.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
+    [model.edges, visibleNodeIds],
+  );
   // Hoisted out of the main useMemo so a selection-only re-render (which
   // bumps selectedNodeId but not model) doesn't pay an O(n) Map rebuild.
   // [REV-3 #6 — Step 5 adversarial review]
   const nodeById = useMemo(
-    () => new Map(model.nodes.map((n) => [n.id, n])),
-    [model.nodes],
+    () => new Map(visibleNodes.map((n) => [n.id, n])),
+    [visibleNodes],
   );
 
   // V1.5.0.1 HF5: the seed layout (positions + edges) depends only on
@@ -456,18 +462,18 @@ export function GraphCanvas({
   // without rebuilding positions, so dragged cards don't snap back to
   // dagre on every selection change.
   const { seedNodes, rfEdges, memberToGroup } = useMemo(() => {
-    const { kept, groups } = foldNodeClusters(model.nodes, expandedGroups);
+    const { kept, groups } = foldNodeClusters(visibleNodes, expandedGroups);
 
     // v1.6.5: which role(s) each variable node holds for the primary model,
     // derived from the role-bearing var→model edges.
     const primaryModelId =
-      model.nodes.find((n) => n.kind === "model")?.id ?? "";
-    const varRoles = rolesByVariable(model.edges, primaryModelId);
+      visibleNodes.find((n) => n.kind === "model")?.id ?? "";
+    const varRoles = rolesByVariable(visibleEdges, primaryModelId);
 
     // v1.6.5: model-node roles tag (spec §5 back-compat). `legacy_unspecified`
     // = run predates the role layer (no role edges at all); `unspecified` =
     // RHS has only the explanatory fallback (no declared focal/covariate split).
-    const anyRoleEdges = model.edges.some((e) => isRoleOp(e.op));
+    const anyRoleEdges = visibleEdges.some((e) => isRoleOp(e.op));
     const rhsRoles = new Set(
       [...varRoles.values()].flat().filter((r) =>
         [
@@ -566,7 +572,7 @@ export function GraphCanvas({
       string,
       { source: string; target: string; ops: Set<string | null> }
     >();
-    for (const e of suppressAggregateEdges(model.edges)) {
+    for (const e of suppressAggregateEdges(visibleEdges)) {
       const src = memberToGroup.get(e.source) ?? e.source;
       const tgt = memberToGroup.get(e.target) ?? e.target;
       if (src === tgt) continue;
@@ -616,7 +622,7 @@ export function GraphCanvas({
       memberToGroup,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, expandedGroups, layout, layoutVersion]);
+  }, [visibleNodes, visibleEdges, expandedGroups, layout, layoutVersion]);
 
   // V1.5.0.1 HF5: useNodesState lets React Flow own the live position
   // state, so node drag mutations stick. We re-seed from layoutDagre
@@ -657,7 +663,7 @@ export function GraphCanvas({
     const related = new Set<string>();
     if (visibleSelectedId !== null) {
       related.add(visibleSelectedId);
-      for (const e of model.edges) {
+      for (const e of visibleEdges) {
         const src = memberToGroup.get(e.source) ?? e.source;
         const tgt = memberToGroup.get(e.target) ?? e.target;
         if (tgt === visibleSelectedId) related.add(src);
@@ -710,7 +716,7 @@ export function GraphCanvas({
     focusUpstreamKeys,
     searchHitKeys,
     searchCursorKey,
-    model.edges,
+    visibleEdges,
     memberToGroup,
     handleAxis,
     nodeById,
@@ -845,6 +851,11 @@ export function GraphCanvas({
           else onSelect(n.id);
         }}
         onPaneClick={onPaneClick}
+        onPaneContextMenu={(event) => {
+          if (!onPaneContextMenu) return;
+          event.preventDefault();
+          onPaneContextMenu(event.clientX, event.clientY);
+        }}
         onNodeContextMenu={(e, n) => {
           // V1.5.2 P4 — open the workbench context menu. Suppress the
           // browser default so the registry menu is the only one shown.
@@ -858,6 +869,7 @@ export function GraphCanvas({
         onNodeMouseMove={onNodeMouseMove}
         onNodeMouseLeave={onNodeMouseLeave}
         fitView
+        minZoom={GRAPH_MIN_ZOOM}
       >
         <Background gap={20} />
         <Controls showInteractive={false} />
@@ -866,7 +878,6 @@ export function GraphCanvas({
           layout={layout}
           onLayout={handleLayout}
         />
-        <CanvasStatus model={model} />
         <CanvasLegend />
       </ReactFlow>
       <GraphTooltip

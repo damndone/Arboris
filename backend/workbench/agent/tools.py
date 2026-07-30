@@ -302,7 +302,29 @@ class ToolRegistry:
         call_id = str(tool_call.get("tool_call_id", ""))
         definition = self._definitions.get(tool_id)
         if definition is None:
-            raise UnknownToolError(f"tool is not registered: {tool_id}")
+            # A misspelled model-emitted tool is a rejected request, not an
+            # internal runtime fault. Preserve the allowlist boundary, but give
+            # the model bounded feedback so it can correct itself next round.
+            # Treating this as an exception causes AgentCore to terminate the
+            # whole turn as `tool_runtime_error`, even though no tool ran.
+            available = sorted(self._definitions)
+            visible = ", ".join(available[:24]) or "(none)"
+            suffix = ", …" if len(available) > 24 else ""
+            requested = tool_id[:200]
+            return ToolResult(
+                tool_call_id=call_id,
+                tool_id=tool_id,
+                ok=False,
+                error="unknown_tool",
+                error_details=[
+                    {
+                        "message": (
+                            f"tool is not registered: {requested}. "
+                            f"Use one of the registered tools: {visible}{suffix}"
+                        )
+                    }
+                ],
+            )
         arguments = tool_call.get("arguments") or {}
         details = validation_details(definition.input_schema, arguments)
         if details:

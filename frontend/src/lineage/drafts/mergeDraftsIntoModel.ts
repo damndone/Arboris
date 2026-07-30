@@ -108,11 +108,16 @@ function mergeGenesisDraft(
 export function mergeDraftsIntoModel(
   model: GraphViewModel,
   registry: DraftRegistry,
+  options: { visibleDraftIds?: ReadonlySet<string> } = {},
 ): GraphViewModel {
   if (registry.size === 0) return model;
   const addNodes: GraphViewNode[] = [];
   const addEdges: GraphViewModel["edges"] = [];
   for (const entry of registry.values()) {
+    const isBusy = entry.lifecycleState === "pending";
+    if (options.visibleDraftIds && !options.visibleDraftIds.has(entry.draftId) && !isBusy) {
+      continue;
+    }
     if (isGenesisDraft(entry)) {
       mergeGenesisDraft(entry, addNodes, addEdges);
       continue;

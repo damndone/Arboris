@@ -42,6 +42,31 @@ def _frame(rows: int = 24) -> pd.DataFrame:
     )
 
 
+def _panel_frame() -> pd.DataFrame:
+    """A generic balanced panel with within-entity and within-time variation."""
+
+    rows: list[dict[str, float | int | str]] = []
+    for entity_index, school in enumerate(("a", "b", "c", "d", "e", "f")):
+        for time_index, year in enumerate((2016, 2017, 2018, 2019, 2020)):
+            exposure = float((entity_index * 3 + time_index * 2) % 11 + 1)
+            rows.append(
+                {
+                    "school": school,
+                    "year": year,
+                    "exposure": exposure,
+                    "outcome": (
+                        40.0
+                        + entity_index * 5.0
+                        + time_index * 2.0
+                        + 1.4 * exposure
+                        - 0.08 * exposure**2
+                        + (0.25 if (entity_index + time_index) % 2 else -0.15)
+                    ),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def _compile(project_run, frame, *, workflow_id, steps=None):
     run_id, artifact_id = project_run
     return compile_workflow(
@@ -114,6 +139,119 @@ def test_ols_step_uses_native_genesis_and_persists_one_run_per_branch(tmp_path) 
     assert len(result.payload["branches"]) == 2
     assert all(branch["run_id"] for branch in result.payload["branches"])
     assert all("ols_1" in branch["artifact_ids"] for branch in result.payload["branches"])
+
+
+def test_ols_step_preserves_each_declared_branch_covariance(tmp_path) -> None:
+    """Sibling OLS branches may differ only in their declared covariance."""
+
+    frame = _frame(60)
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    steps = composed_plan()
+    model_spec = next(step["spec"] for step in steps if step["operation_id"] == "model.genesis")
+    model_spec["branches"][0]["covariance"] = "robust"
+    model_spec["branches"][1]["covariance"] = "unadjusted"
+    draft = _compile((run_id, artifact_id), frame, workflow_id="wf-ols-covariance", steps=steps)
+    model_step = next(step for step in draft.steps if step.operation_id == "model.genesis")
+
+    result = _execute_ols_branches(
+        project, draft, {"source_sha256": upload_sha}, frame, model_step
+    )
+
+    persisted = {
+        branch["branch_id"]: json.loads(
+            (project / "runs" / branch["run_id"] / "model_results" / "ols_1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for branch in result.payload["branches"]
+    }
+    assert persisted["m1"]["covariance"] == "robust"
+    assert persisted["m1"]["covariance_estimator"] == "HC1"
+    assert persisted["m2"]["covariance"] == "unadjusted"
+    assert persisted["m2"]["covariance_estimator"] == "nonrobust"
+
+
+def test_panel_genesis_step_runs_two_way_fixed_effects_with_entity_clusters(tmp_path) -> None:
+    """A registered panel model family is executable through typed workflow composition."""
+
+    pytest.importorskip("linearmodels")
+    frame = _panel_frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="panel_fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "panel_fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="panel-fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-panel-runtime",
+        steps=[
+            {
+                "step_id": "estimate_panel",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "panel_ols",
+                    "covariance": "clustered",
+                    "entity_col": "school",
+                    "time_col": "year",
+                    "branches": [
+                        {
+                            "branch_id": "two_way_fe",
+                            "outcome": "outcome",
+                            "predictors": ["exposure"],
+                            "polynomials": [{"column": "exposure", "degree": 2}],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    model_ref = next(
+        artifact
+        for artifact in state.steps["estimate_panel"].artifact_ids
+        if artifact.endswith(":panel_ols_1")
+    )
+    run_id = model_ref.split(":", 1)[0]
+    result = json.loads(
+        (project / "runs" / run_id / "model_results" / "panel_ols_1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["model_type"] == "panel_ols"
+    assert result["covariance"] == "clustered"
+    assert result["entity_col"] == "school"
+    assert result["time_col"] == "year"
+    assert result["covariance_evidence"]["cluster_variable"] == "school"
+    assert result["coefficients"]["exposure"]["ci_lower"] is not None
+    assert result["coefficients"]["exposure_pow2"]["ci_upper"] is not None
 
 
 def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
@@ -191,6 +329,12 @@ def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
                 "depends_on": ["estimate_curved_model"],
                 "spec": {"branch_id": "curved", "column": "exposure"},
             },
+            {
+                "step_id": "test_white_heteroskedasticity",
+                "operation_id": "model.white_test",
+                "depends_on": ["estimate_curved_model"],
+                "spec": {"branch_id": "curved"},
+            },
         ],
     )
 
@@ -205,14 +349,19 @@ def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
     records = {record["artifact_id"]: record for record in index["artifacts"]}
     joint_record = records[state.steps["test_curved_terms"].artifact_ids[0]]
     stationary_record = records[state.steps["locate_stationary_point"].artifact_ids[0]]
+    white_record = records[state.steps["test_white_heteroskedasticity"].artifact_ids[0]]
     assert joint_record["artifact_type"] == "statistical_test"
     assert stationary_record["artifact_type"] == "post_estimation"
+    assert white_record["artifact_type"] == "statistical_test"
 
     joint = json.loads(
         (project / "runs" / run_id / joint_record["path"]).read_text(encoding="utf-8")
     )["result"]
     stationary = json.loads(
         (project / "runs" / run_id / stationary_record["path"]).read_text(encoding="utf-8")
+    )["result"]
+    white = json.loads(
+        (project / "runs" / run_id / white_record["path"]).read_text(encoding="utf-8")
     )["result"]
     assert joint["test"] == "joint_f_test"
     assert joint["term_selectors"] == [
@@ -227,6 +376,193 @@ def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
     assert stationary["observed_min"] == -24.0
     assert stationary["observed_max"] == 23.0
     assert stationary["stationary_point_within_observed_range"] is True
+    assert white["test"] == "white_test"
+    assert white["branch_id"] == "curved"
+    assert white["nobs"] == 48
+    assert white["lm_statistic"] >= 0
+    assert 0 <= white["lm_p_value"] <= 1
+    assert white["f_statistic"] >= 0
+    assert 0 <= white["f_p_value"] <= 1
+
+
+def test_white_test_handles_a_high_scale_polynomial_categorical_design(tmp_path) -> None:
+    """White's auxiliary regression uses one stable rank policy for valid designs."""
+
+    rows = 420
+    position = pd.Series(range(rows), dtype="float64")
+    scale = 250.0 + 31.0 * position
+    frame = pd.DataFrame(
+        {
+            "outcome": 40.0 + 0.03 * scale + 0.00001 * scale**2 + (position % 7) / 10.0,
+            "scale": scale,
+            **{
+                f"ratio_{index}": ((position * (index + 3)) % (29 + index)) / (29 + index)
+                for index in range(8)
+            },
+            "wave": [f"wave_{index % 6}" for index in range(rows)],
+            "group": [f"group_{index % 2}" for index in range(rows)],
+            "region": [f"region_{index % 5}" for index in range(rows)],
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-white-stable-rank",
+        steps=[
+            {
+                "step_id": "estimate_main",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "main",
+                            "outcome": "outcome",
+                            "predictors": [
+                                "scale",
+                                *[f"ratio_{index}" for index in range(8)],
+                            ],
+                            "categorical": ["wave", "group", "region"],
+                            "polynomials": [{"column": "scale", "degree": 2}],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "test_white",
+                "operation_id": "model.white_test",
+                "depends_on": ["estimate_main"],
+                "spec": {"branch_id": "main"},
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    assert state.steps["test_white"].artifact_ids
+
+
+def test_numeric_transform_reaches_model_and_declared_joint_test(tmp_path) -> None:
+    """A later model may use a declared product without a formula/code escape."""
+
+    rows = 60
+    left = [1.0 + (index % 13) for index in range(rows)]
+    right = [2.0 + ((index * 5) % 17) for index in range(rows)]
+    product = [first * second for first, second in zip(left, right)]
+    frame = pd.DataFrame(
+        {
+            "response": [
+                8.0 + 0.7 * first + 0.25 * second + 0.08 * combined
+                + (0.2 if index % 2 else -0.2)
+                for index, (first, second, combined) in enumerate(
+                    zip(left, right, product)
+                )
+            ],
+            "left_exposure": left,
+            "right_exposure": right,
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id="wf-numeric-model-post-estimation",
+        steps=[
+            {
+                "step_id": "derive_product",
+                "operation_id": "statistical.derive_numeric",
+                "spec": {
+                    "recipes": [
+                        {
+                            "operator": "multiply",
+                            "input_columns": ["left_exposure", "right_exposure"],
+                            "output_name": "exposure_product",
+                        }
+                    ]
+                },
+            },
+            {
+                "step_id": "estimate_interaction",
+                "operation_id": "model.genesis",
+                "depends_on": ["derive_product"],
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "unadjusted",
+                    "branches": [
+                        {
+                            "branch_id": "interaction",
+                            "outcome": "response",
+                            "predictors": [
+                                "left_exposure",
+                                "right_exposure",
+                                "exposure_product",
+                            ],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "test_interaction",
+                "operation_id": "model.joint_f_test",
+                "depends_on": ["estimate_interaction"],
+                "spec": {
+                    "branch_id": "interaction",
+                    "term_selectors": [
+                        {"kind": "linear", "column": "exposure_product"}
+                    ],
+                },
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    index = json.loads(
+        (project / "runs" / run_id / "artifacts_index.json").read_text(encoding="utf-8")
+    )
+    records = {record["artifact_id"]: record for record in index["artifacts"]}
+    joint_record = records[state.steps["test_interaction"].artifact_ids[0]]
+    joint = json.loads(
+        (project / "runs" / run_id / joint_record["path"]).read_text(encoding="utf-8")
+    )["result"]
+    assert joint["term_selectors"] == [
+        {"kind": "linear", "column": "exposure_product"}
+    ]
+    assert joint["f_statistic"] > 0
 
 
 def test_report_collection_exports_one_complete_artifact_pack(tmp_path) -> None:

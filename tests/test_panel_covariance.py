@@ -41,6 +41,14 @@ def test_clustered_covariance_runs(tmp_path):
     assert result["status"] == "completed"
     model = read_json(run_root / "model_results" / "panel_ols_1.json")
     assert model["model_type"] == "panel_ols"
+    assert model["y_column"] == "profit"
+    assert model["entity_col"] == "firm"
+    assert model["time_col"] == "yr"
+    assert model["df_model"] is not None
+    assert model["df_resid"] is not None
+    assert model["covariance"] == "clustered"
+    assert model["covariance_evidence"]["cluster_variable"] == "firm"
+    assert model["covariance_evidence"]["cluster_count"] == 8
 
 
 def test_default_covariance_runs(tmp_path):

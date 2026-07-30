@@ -132,9 +132,21 @@ function coerceStage(s: unknown): Stage {
   return typeof s === "string" && STAGE_VALUES.has(s) ? (s as Stage) : "unknown";
 }
 
+function displayTitle(
+  raw: { display_label: string },
+  stage: Stage,
+  isTerminal = false,
+): string {
+  // A report is one representation of the run output, not the output's
+  // identity. Keep the persisted stage/type unchanged while presenting every
+  // terminal report node as the format-neutral Result to users.
+  return stage === "report" && isTerminal ? "Result" : raw.display_label;
+}
+
 function adaptNode(
   raw: LineageNode & { stage?: string | null },
   stageSource: "v2" | "v3",
+  isTerminal = false,
 ): GraphViewNode {
   const stage: Stage =
     stageSource === "v2" ? "unknown" : coerceStage(raw.stage);
@@ -152,7 +164,7 @@ function adaptNode(
     raw,
     stage,
     kind: raw.kind,
-    title: raw.display_label,
+    title: displayTitle(raw, stage, isTerminal),
     subtitle,
     summary: raw.summary ?? undefined,
     parentStageId: raw.parent_stage_id ?? null,
@@ -191,14 +203,20 @@ function adaptCore(
   backend: GraphResponse,
   stageSource: "v2" | "v3",
 ): GraphViewModel {
+  const rawEdges = Object.values(backend.edges);
+  const nodeIdsWithChildren = new Set(rawEdges.map((edge) => edge.source_id));
   return {
     schemaVersion: backend.schema_version,
     runId: backend.run_id,
     legacy: backend.legacy,
     nodes: Object.values(backend.nodes).map((n) =>
-      adaptNode(n as LineageNode & { stage?: string | null }, stageSource),
+      adaptNode(
+        n as LineageNode & { stage?: string | null },
+        stageSource,
+        !nodeIdsWithChildren.has(n.id),
+      ),
     ),
-    edges: Object.values(backend.edges).map(adaptEdge),
+    edges: rawEdges.map(adaptEdge),
     stats: {
       nodeCount: backend.stats.node_count,
       edgeCount: backend.stats.edge_count,
@@ -239,6 +257,7 @@ function adaptHeadSetNodeWithRunProvenance(
   key: string,
   raw: HeadSetNodeRaw,
   runRerunFrom?: HeadSetNode["runRerunFrom"],
+  isTerminal = false,
 ): HeadSetNode {
   const stage = coerceStage(raw.stage);
   const dps = (raw.decision_points ?? []) as DecisionPoint[];
@@ -251,7 +270,7 @@ function adaptHeadSetNodeWithRunProvenance(
     raw,
     stage,
     kind: raw.kind,
-    title: raw.display_label,
+    title: displayTitle(raw, stage, isTerminal),
     subtitle: stage !== "unknown" ? `${stage} · ${raw.kind}` : undefined,
     summary: raw.summary ?? undefined,
     parentStageId: raw.parent_stage_id ?? null,
@@ -320,6 +339,8 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
       .filter((head) => head.runRerunFrom)
       .map((head) => [head.runId, head] as const),
   );
+  const rawEdges = backend.edges ?? [];
+  const nodeKeysWithChildren = new Set(rawEdges.map((edge) => edge.source));
   const nodes: HeadSetNode[] = Object.entries(backend.nodes ?? {}).map(
     ([key, raw]) => {
       const runRerunFrom = findConservativeRunRerunFromForNode(
@@ -327,10 +348,15 @@ export function adaptHeadSet(backend: HeadSetResponse): ForestViewModel {
         raw,
         runRerunFromByRun,
       );
-      return adaptHeadSetNodeWithRunProvenance(key, raw, runRerunFrom);
+      return adaptHeadSetNodeWithRunProvenance(
+        key,
+        raw,
+        runRerunFrom,
+        !nodeKeysWithChildren.has(key),
+      );
     },
   );
-  const edges: GraphViewEdge[] = (backend.edges ?? []).map((e) => ({
+  const edges: GraphViewEdge[] = rawEdges.map((e) => ({
     id: `${e.source}->${e.target}`,
     source: e.source,
     target: e.target,

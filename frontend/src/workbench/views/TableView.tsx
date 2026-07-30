@@ -12,7 +12,7 @@
 // widening that coverage (violin/pairplot/…) is a backend concern (roadmap
 // §3.5 V).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   appendAiActivity,
   askAiHistoryForNode,
@@ -40,7 +40,6 @@ import {
   useArmaGarchCharts,
 } from "../../runResult/useArmaGarchCharts";
 import { StatisticalExplorationTable } from "./StatisticalExplorationTable";
-import { useWorkbenchOptional } from "../WorkbenchStateProvider";
 import { resolveTableRunScope } from "./tableRunScope";
 
 /** Run ids look like 20260703_065622_030010_92222fe1 — the last hex segment is
@@ -91,7 +90,13 @@ function CoefficientTable({ model }: { model: ModelResult }) {
         {model.r_squared != null ? ` · R²=${fmt(model.r_squared)}` : null}
         {model.r_squared_adj != null ? ` · adj. R²=${fmt(model.r_squared_adj)}` : null}
       </div>
-      <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+      <div
+        className="wb-result-table-scroll"
+        data-testid="table-view-coefficient-scroll"
+        tabIndex={0}
+        aria-label="Coefficient table scroll region"
+      >
+      <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
         <thead>
           <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
             <th style={{ padding: "2px 8px" }}>term</th>
@@ -115,6 +120,7 @@ function CoefficientTable({ model }: { model: ModelResult }) {
           ))}
         </tbody>
       </table>
+      </div>
       {diagnostics.length > 0 && (
         <div
           data-testid="table-view-lmm-diagnostics"
@@ -137,10 +143,49 @@ function FigureCard({
   runId: string;
 }) {
   const label = humanize(item.artifact_id);
+  const imageUrl = artifactDownloadUrl(projectRoot, runId, item.artifact_id);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const closeWhenOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeWhenOutside, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenOutside, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [menuOpen]);
+
+  async function copyChart() {
+    setMenuOpen(false);
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error("chart download failed");
+      const blob = await response.blob();
+      if (!("clipboard" in navigator) || !("ClipboardItem" in window)) {
+        throw new Error("clipboard is unavailable");
+      }
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type || "image/png"]: blob })]);
+      setCopyMessage("Chart copied");
+    } catch {
+      setCopyMessage("Copy is unavailable here — download the chart instead.");
+    }
+  }
+
   return (
-    <figure style={{ margin: 0 }}>
+    <figure style={{ margin: 0, position: "relative" }}>
       <img
-        src={artifactDownloadUrl(projectRoot, runId, item.artifact_id)}
+        src={imageUrl}
         alt={`${item.artifact_id} figure`}
         loading="lazy"
         style={{
@@ -150,7 +195,19 @@ function FigureCard({
           border: "1px solid var(--separator)",
           background: "var(--surface, #fff)",
         }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setCopyMessage(null);
+          setMenuOpen(true);
+        }}
       />
+      {menuOpen && (
+        <div ref={menuRef} className="wb-chart-context-menu" role="menu" aria-label="Chart actions">
+          <button type="button" role="menuitem" onClick={() => void copyChart()}>Copy chart</button>
+          <a role="menuitem" href={imageUrl} download={`${item.artifact_id}.png`} onClick={() => setMenuOpen(false)}>Download chart</a>
+        </div>
+      )}
+      {copyMessage && <div role="status" style={{ fontSize: 11, marginTop: 4 }}>{copyMessage}</div>}
       <figcaption
         style={{ fontSize: 12, color: "var(--label-secondary)", marginTop: 4 }}
       >
@@ -338,10 +395,11 @@ function FigureAskAi({
 const CONTAINER_STYLE: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  padding: 24,
+  padding: "12px 24px 24px",
   gap: 20,
   height: "100%",
   minHeight: 0,
+  minWidth: 0,
   overflow: "auto",
 };
 
@@ -354,36 +412,59 @@ const FIGURE_GRID: React.CSSProperties = {
 export function TableView({ projectRoot: projectRootProp }: { projectRoot?: string }) {
   const { model } = useLineage();
   const forest = useForest();
-  const workbench = useWorkbenchOptional();
   const [searchParams] = useSearchParams();
   const contextProjectRoot = useProjectRootOptional();
   const projectRoot = projectRootProp ?? contextProjectRoot ?? searchParams.get("project_root") ?? "";
 
-  // Selecting a node scopes the Table to that node's lineage chain; selecting
-  // nothing shows every run in the project. Previously this view was pinned to
-  // one run, so results saved against a source run looked deleted as soon as
-  // the active head moved on.
+  // Table is the project-wide result browser: selecting a Graph node must not
+  // hide sibling Run results. The active Run chooses the one visible result
+  // panel, and the same ForestContext setter drives the Graph highlight.
   const runIds = useMemo(
     () =>
       resolveTableRunScope({
         forest: forest?.forest ?? null,
         activeRunId: forest?.activeRunId ?? null,
-        selectedKey: workbench?.state.selectedKey ?? null,
+        selectedKey: null,
         fallbackRunId: forest?.activeRunId ?? model.runId,
       }),
-    [forest, workbench?.state.selectedKey, model.runId],
+    [forest, model.runId],
   );
+  const activeRunId = runIds.includes(forest?.activeRunId ?? "")
+    ? forest?.activeRunId ?? null
+    : runIds[0] ?? null;
 
   return (
     <div data-testid="view-table" data-view="table" style={CONTAINER_STYLE}>
-      {runIds.map((runId) => (
+      {runIds.length > 0 && activeRunId && (
+        <nav
+          data-testid="table-view-run-picker"
+          className="wb-run-version-picker"
+          aria-label="Run results"
+          style={{ margin: "-12px -24px 0" }}
+        >
+          <span className="wb-run-version-picker__label">Versions:</span>
+          {runIds.map((runId) => (
+            <button
+              key={runId}
+              type="button"
+              className="wb-run-version-picker__button"
+              aria-pressed={runId === activeRunId}
+              aria-label={`Show results for run ${runId}`}
+              title={runId}
+              onClick={() => forest?.setActiveRunId(runId)}
+            >
+              {shortRunId(runId)}
+            </button>
+          ))}
+        </nav>
+      )}
+      {activeRunId && (
         <RunResultsPanel
-          key={runId}
-          runId={runId}
+          runId={activeRunId}
           projectRoot={projectRoot}
-          scopeSize={runIds.length}
+          scopeSize={1}
         />
-      ))}
+      )}
     </div>
   );
 }
@@ -545,7 +626,16 @@ function RunResultsPanel({
           <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
             Time-series charts
           </h3>
-          <ArmaGarchChartGallery charts={armaGarchCharts} />
+          <div
+            className="wb-result-artifact-scroll"
+            data-testid="table-view-time-series-scroll"
+            tabIndex={0}
+            aria-label="Time-series chart scroll region"
+          >
+            <div className="wb-result-artifact-scroll__content">
+              <ArmaGarchChartGallery charts={armaGarchCharts} />
+            </div>
+          </div>
         </section>
       )}
 

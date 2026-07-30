@@ -43,9 +43,9 @@ export function DetailDrawerTabs({
   };
 
   return (
-    <div className="detail-tabs" data-testid="detail-drawer-tabs">
+    <div className="detail-tabs detail-tabs--versions" data-testid="detail-drawer-tabs">
       <div
-        className="detail-tabs__strip"
+        className="detail-tabs__strip detail-tabs__strip--compact"
         role="tablist"
         aria-label="Open node details"
         tabIndex={0}

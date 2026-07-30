@@ -425,20 +425,6 @@ class RecommendationValidator:
                         protocols=(),
                         reason_refs=reason_refs,
                     )
-            for claim in getattr(candidate, "comparative_claims", ()):
-                if not any(evidence_id in claim for evidence_id in records):
-                    return self._decision(
-                        batch_id=batch_id,
-                        ids=ids,
-                        outcome="insufficient_evidence",
-                        recommended=None,
-                        generation_context_hash=generation_context_hash,
-                        freshness_dependency_fingerprint=freshness_dependency_fingerprint,
-                        evidence_pack_hashes=evidence_pack_hashes or (pack_hash,),
-                        protocols=(),
-                        reason_refs=reason_refs,
-                    )
-
         if len(viable) == 1 and len(blocked) == len(candidates) - 1 and bool(records) and not incomplete:
             outcome = "recommended"
             recommended = viable[0]

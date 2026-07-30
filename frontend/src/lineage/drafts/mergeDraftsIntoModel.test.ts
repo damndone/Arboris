@@ -96,6 +96,15 @@ const genesisDraft = (): PipelineDraftV1 => ({
 });
 
 describe("mergeDraftsIntoModel", () => {
+  it("keeps dormant drafts durable but leaves them out of the graph until explicitly opened", () => {
+    const reg = draftReducer(emptyRegistry(), { type: "put", draftId: "d1", draft: draft("d1"), draftHash: "h1" });
+
+    expect(mergeDraftsIntoModel(baseModel(), reg, { visibleDraftIds: new Set() }).nodes)
+      .toHaveLength(1);
+    expect(mergeDraftsIntoModel(baseModel(), reg, { visibleDraftIds: new Set(["d1"]) }).nodes)
+      .toHaveLength(2);
+  });
+
   it("injects a draft node + edge anchored by node_hash", () => {
     const reg = draftReducer(emptyRegistry(), { type: "put", draftId: "d1", draft: draft("d1"), draftHash: "h1" });
     const merged = mergeDraftsIntoModel(baseModel(), reg);

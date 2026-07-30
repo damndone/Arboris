@@ -19,6 +19,13 @@ export interface NotebookRecord {
   available_capabilities?: string[];
 }
 
+export type NotebookInteractionMode = "plan" | "action";
+
+export interface NotebookFocusInput {
+  goal?: string;
+  interaction_mode?: NotebookInteractionMode;
+}
+
 export interface NotebookContextResponse {
   context_id: string;
   context_profile: string;
@@ -123,6 +130,25 @@ export function ensureNotebookProjection(
   });
 }
 
+export function ensureNotebookDatasetProjection(
+  projectRoot: string,
+  input: { from_run_id: string; created_by?: string; title?: string },
+): Promise<NotebookRecord> {
+  return readNotebookResponse<NotebookRecord>(
+    projectRoot,
+    "/notebooks/projection/from-run-dataset",
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        created_by: "user",
+        title: "New analysis from source data",
+        ...input,
+      }),
+    },
+  );
+}
+
 export function getNotebook(
   projectRoot: string,
   notebookId: string,
@@ -130,6 +156,22 @@ export function getNotebook(
   return readNotebookResponse<NotebookRecord>(
     projectRoot,
     `/notebooks/${encodeURIComponent(notebookId)}`,
+  );
+}
+
+export function updateNotebookFocus(
+  projectRoot: string,
+  notebookId: string,
+  input: NotebookFocusInput,
+): Promise<NotebookRecord> {
+  return readNotebookResponse<NotebookRecord>(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/focus`,
+    {
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify(input),
+    },
   );
 }
 

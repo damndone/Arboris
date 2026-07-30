@@ -5,6 +5,7 @@ import importlib
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from workbench.agent.core import AgentCore
@@ -89,14 +90,14 @@ class CompletedResultAnswerAdapter:
         yield ModelStreamEvent.done(request.request_id)
 
 
-def _write_project_run(project_root: Path) -> None:
+def _write_project_run(project_root: Path, *, run_id: str = "run-a") -> None:
     runs_root = project_root / "runs"
-    run_root = runs_root / "run-a"
+    run_root = runs_root / run_id
     run_root.mkdir(parents=True)
     GraphStore(runs_root).write(
         Graph(
             schema_version=3,
-            run_id="run-a",
+            run_id=run_id,
             nodes={
                 "model:ols_1": Node(
                     id="model:ols_1",
@@ -184,6 +185,103 @@ def _write_project_run(project_root: Path) -> None:
                 },
             }
         ),
+        encoding="utf-8",
+    )
+
+
+def _write_notebook_workflow_receipt(project_root: Path) -> None:
+    """Persist one committed Notebook receipt with sibling model runs.
+
+    This fixture deliberately uses generic response/exposure-style results.  It
+    proves the Agent can recover a committed composed workflow from the
+    selected branch without teaching it any particular dataset or exercise.
+    """
+
+    for run_id in ("source-run", "branch-east", "branch-west"):
+        _write_project_run(project_root, run_id=run_id)
+
+    source_root = project_root / "runs" / "source-run"
+    artifacts_root = source_root / "artifacts" / "statistical_test"
+    artifacts_root.mkdir(parents=True)
+    joint_result = artifacts_root / "joint_test.json"
+    joint_result.write_text(
+        json.dumps(
+            {
+                "result": {
+                    "test_statistic": 12.4,
+                    "p_value": 0.003,
+                    "raw_rows": [{"response": 1.0}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_root.joinpath("artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": "joint-test-result",
+                        "artifact_type": "statistical_test",
+                        "path": "artifacts/statistical_test/joint_test.json",
+                        "sha256": "test-result-sha",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    options_root = project_root / "notebooks" / "notebook-workflow" / "options"
+    options_root.mkdir(parents=True)
+    (options_root / "committed-workflow.jsonl").write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {
+                    "record_type": "revision",
+                    "option_revision": 2,
+                    "typed_proposal": {"target": {"run_id": "source-run"}},
+                },
+                {
+                    "record_type": "execution_result",
+                    "option_revision": 2,
+                    "execution_status": "succeeded",
+                    "committed": True,
+                    "workflow_execution": {
+                        "workflow_id": "workflow-committed",
+                        "plan_fingerprint": "plan-committed",
+                        "status": "completed",
+                        "branch_runs": [
+                            {"branch_id": "east", "run_id": "branch-east"},
+                            {"branch_id": "west", "run_id": "branch-west"},
+                        ],
+                        "post_estimation_artifact_ids": ["joint-test-result"],
+                    },
+                },
+                {
+                    "record_type": "revision",
+                    "option_revision": 1,
+                    "typed_proposal": {"target": {"run_id": "source-run"}},
+                },
+                {
+                    "record_type": "execution_result",
+                    "option_revision": 1,
+                    "execution_status": "succeeded",
+                    "committed": True,
+                    "workflow_execution": {
+                        "workflow_id": "workflow-foreign",
+                        "plan_fingerprint": "plan-foreign",
+                        "status": "completed",
+                        "branch_runs": [
+                            {"branch_id": "other", "run_id": "branch-unrelated"}
+                        ],
+                        "post_estimation_artifact_ids": ["joint-test-result"],
+                    },
+                },
+            )
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -430,7 +528,6 @@ def test_configured_chain_exposes_read_only_node_context_provider(
     assert result.output["owner_resolution"] == "active_head_contains_node"
     assert result.output["node"]["id"] == "model:ols_1"
     assert result.output["node"]["stage"] == "model"
-
     contract_result = asyncio.run(
         registry.execute(
             {
@@ -575,12 +672,324 @@ def test_configured_chain_exposes_read_only_node_context_provider(
         "readable": True,
         "model_id": "ols_1",
     }
-    assert artifact_result.output["omitted_sections"] == ["raw_artifact_payloads"]
+    assert artifact_result.output["omitted_sections"] == [
+        "raw_artifact_payloads",
+        "raw_rows",
+        "image_pixels",
+    ]
     assert before == {
         path.relative_to(project_root): path.read_bytes()
         for path in project_root.rglob("*")
         if path.is_file()
     }
+
+
+def test_notebook_workflow_results_discover_only_committed_sibling_evidence(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_notebook_workflow_receipt(project_root)
+    provider = _load_provider_type()(project_root)
+    orchestrator = _make_orchestrator(tmp_path, context_provider=provider)
+    registry = orchestrator.tool_registry("chain-a")
+
+    assert "inspect_notebook_workflow_results" in {
+        item["tool_id"] for item in registry.descriptors()
+    }
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-notebook-workflow-results",
+                "tool_id": "inspect_notebook_workflow_results",
+                "arguments": {
+                    "request_id": "inspect-notebook-workflow-results",
+                    "owner_run_id": "branch-east",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "branch-east",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is True
+    workflows = result.output["notebook_workflows"]
+    assert len(workflows) == 1
+    workflow = workflows[0]
+    assert workflow["workflow_id"] == "workflow-committed"
+    assert workflow["branch_runs"] == [
+        {"branch_id": "east", "run_id": "branch-east"},
+        {"branch_id": "west", "run_id": "branch-west"},
+    ]
+    assert workflow["post_estimation_evidence"] == [
+        {
+            "artifact_id": "joint-test-result",
+            "artifact_type": "statistical_test",
+            "evidence_ref": {
+                "run_id": "source-run",
+                "artifact_id": "joint-test-result",
+                "artifact_type": "statistical_test",
+                "sha256": "test-result-sha",
+            },
+            "result": {"p_value": 0.003, "test_statistic": 12.4},
+        }
+    ]
+    public_output = json.dumps(result.output)
+    assert "workflow-foreign" not in public_output
+    assert "raw_rows" not in json.dumps(workflow["post_estimation_evidence"])
+    assert str(project_root) not in public_output
+    assert result.output["omitted_sections"] == ["raw_artifact_payloads", "raw_rows"]
+
+
+def test_global_workflow_reader_discovers_only_committed_visible_branch_evidence(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_notebook_workflow_receipt(project_root)
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    for definition in provider.global_tool_definitions(session_id="main-session"):
+        registry.register(definition)
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-notebook-workflow-results",
+                "tool_id": "inspect_project_notebook_workflow_results",
+                "arguments": {"run_ids": ["branch-east"]},
+            },
+            session_id="main-session",
+        )
+    )
+
+    assert result.ok is True
+    assert result.output["workflows"] == [
+        {
+            "workflow_id": "workflow-committed",
+            "plan_fingerprint": "plan-committed",
+            "status": "completed",
+            "branch_runs": [
+                {"branch_id": "east", "run_id": "branch-east"},
+                {"branch_id": "west", "run_id": "branch-west"},
+            ],
+            "post_estimation_evidence": [
+                {
+                    "artifact_id": "joint-test-result",
+                    "artifact_type": "statistical_test",
+                    "evidence_ref": {
+                        "run_id": "source-run",
+                        "artifact_id": "joint-test-result",
+                        "artifact_type": "statistical_test",
+                        "sha256": "test-result-sha",
+                    },
+                    "result": {"p_value": 0.003, "test_statistic": 12.4},
+                }
+            ],
+            "unavailable_post_estimation_artifact_count": 0,
+        }
+    ]
+    assert "workflow-foreign" not in json.dumps(result.output)
+    assert "raw_rows" not in json.dumps(result.output["workflows"])
+
+
+def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    (run_root / "model_results" / "ols_1.json").write_text(
+        json.dumps(
+            {
+                "model_id": "ols_1",
+                "model_type": "ols",
+                "coefficients": {
+                    "share": {"estimate": 1.2},
+                    "share_x_group": {"estimate": 0.5},
+                    "ln_size": {"estimate": -4052.1594},
+                    "middle": {"estimate": 0.022887},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    profile_path = run_root / "staged" / "data_profile.json"
+    profile_path.parent.mkdir()
+    profile_path.write_text(
+        json.dumps(
+            {
+                "row_count": 100,
+                "column_count": 2,
+                "columns": {
+                    "share": {"dtype": "float64", "mean": 0.3, "std": 0.1},
+                    "group": {"dtype": "float64", "mean": 0.4, "std": 0.2},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    for definition in provider.global_tool_definitions(session_id="main-session"):
+        registry.register(definition)
+
+    summary = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-numeric-summary",
+                "tool_id": "inspect_project_numeric_summary",
+                "arguments": {"run_id": "run-a", "columns": ["share", "group"]},
+            },
+            session_id="main-session",
+        )
+    )
+    effects = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-linear-interaction-effects",
+                "tool_id": "inspect_project_linear_interaction_effects",
+                "arguments": {
+                    "effects": [
+                        {
+                            "run_id": "run-a",
+                            "focal_term": "share",
+                            "interaction_term": "share_x_group",
+                            "moderator_column": "group",
+                        }
+                    ]
+                },
+            },
+            session_id="main-session",
+        )
+    )
+    transformed = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-coefficient-transforms",
+                "tool_id": "inspect_project_coefficient_transforms",
+                "arguments": {
+                    "transforms": [
+                        {
+                            "run_id": "run-a",
+                            "term": "ln_size",
+                            "transform": "scale_0_01",
+                        },
+                        {
+                            "run_id": "run-a",
+                            "term": "middle",
+                            "transform": "expm1_percent",
+                        },
+                    ]
+                },
+            },
+            session_id="main-session",
+        )
+    )
+
+    assert summary.ok is True
+    assert summary.output == {
+        "run_id": "run-a",
+        "numeric_summary": [
+            {"column": "group", "mean": 0.4, "std": 0.2},
+            {"column": "share", "mean": 0.3, "std": 0.1},
+        ],
+        "unavailable_columns": [],
+        "evidence_ref": {"run_id": "run-a", "profile_ref": "staged/data_profile.json"},
+        "omitted_sections": ["raw_rows", "correlations"],
+    }
+    assert effects.ok is True
+    assert effects.output == {
+        "effects": [
+            {
+                "run_id": "run-a",
+                "model_id": "ols_1",
+                "focal_term": "share",
+                "interaction_term": "share_x_group",
+                "moderator_column": "group",
+                "moderator_mean": 0.4,
+                "marginal_effect": 1.4,
+                "evidence_ref": {
+                    "run_id": "run-a",
+                    "model_id": "ols_1",
+                    "result_ref": "model_results:ols_1",
+                    "profile_ref": "staged/data_profile.json",
+                },
+            }
+        ],
+        "omitted_sections": ["raw_model_results", "raw_rows", "correlations"],
+    }
+    assert transformed.ok is True
+    assert transformed.output == {
+        "transforms": [
+            {
+                "run_id": "run-a",
+                "model_id": "ols_1",
+                "term": "ln_size",
+                "transform": "scale_0_01",
+                "value": -40.521594,
+                "evidence_ref": {
+                    "run_id": "run-a",
+                    "model_id": "ols_1",
+                    "result_ref": "model_results:ols_1",
+                },
+            },
+            {
+                "run_id": "run-a",
+                "model_id": "ols_1",
+                "term": "middle",
+                "transform": "expm1_percent",
+                "value": pytest.approx(2.315092),
+                "evidence_ref": {
+                    "run_id": "run-a",
+                    "model_id": "ols_1",
+                    "result_ref": "model_results:ols_1",
+                },
+            },
+        ],
+        "omitted_sections": ["raw_model_results", "raw_rows"],
+    }
+
+
+def test_workflow_step_contract_request_redirects_to_the_parent_workflow(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    from workbench.agent.operations import OperationRegistry
+
+    operation_registry = OperationRegistry()
+    for definition in provider.tool_definitions(
+        chain_id="chain-a",
+        session_id="chain-session",
+        operation_registry=operation_registry,
+    ):
+        registry.register(definition)
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-workflow-step-contract",
+                "tool_id": "inspect_operation_contract",
+                "arguments": {
+                    "request_id": "inspect-workflow-step-contract",
+                    "owner_run_id": "run-a",
+                    "op_node_id": "model:ols_1",
+                    "active_head_run_id": "run-a",
+                    "operation_id": "model.joint_f_test",
+                    "operation_version": "v1",
+                },
+            },
+            session_id="chain-session",
+        )
+    )
+
+    assert result.ok is False
+    assert result.error == "OperationContractUnavailableError"
+    assert result.error_details is not None
+    assert "workflow step" in result.error_details[0]["message"]
+    assert "operation.multi_step@v1" in result.error_details[0]["message"]
 
 
 def test_completed_workflow_result_is_discoverable_as_bounded_evidence(
@@ -1060,8 +1469,14 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                 "model_id": "ols_1",
                 "model_type": "ols_robust",
                 "nobs": 100,
+                "r_squared": 0.42,
+                "r_squared_adj": 0.41,
+                "df_model": 2,
+                "df_resid": 97,
                 "y_column": "outcome",
                 "x_columns": ["share", "control"],
+                "entity_col": "firm_id",
+                "time_col": "year",
                 "covariance": "robust",
                 "covariance_estimator": "HC1",
                 "covariance_evidence": {
@@ -1108,12 +1523,23 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
                 "model_id": "ols_1",
                 "model_type": "ols_robust",
                 "nobs": 100,
+                "r_squared": 0.42,
+                "r_squared_adj": 0.41,
+                "df_model": 2,
+                "df_resid": 97,
                 "outcome": "outcome",
                 "predictors": ["share", "control"],
                 "predictors_omitted": 0,
+                "entity_col": "firm_id",
+                "time_col": "year",
                 "covariance": "robust",
                 "covariance_estimator": "HC1",
                 "confidence_interval": {"level": 0.95, "method": "normal_z"},
+                "covariance_details": {
+                    "cluster_variable": None,
+                    "cluster_count": None,
+                    "cluster_entity": None,
+                },
                 "coefficients": [
                     {
                         "term": "share",
@@ -1136,6 +1562,408 @@ def test_global_coefficient_inspector_returns_requested_persisted_intervals(
         "omitted_sections": ["raw_model_results", "raw_rows"],
     }
     assert "99" not in json.dumps(result.output)
+
+
+def test_global_dataset_schema_inspector_exposes_only_bounded_column_metadata(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    profile_path = project_root / "runs" / "run-a" / "staged" / "data_profile.json"
+    profile_path.parent.mkdir()
+    profile_path.write_text(
+        json.dumps(
+            {
+                "row_count": 100,
+                "column_count": 3,
+                "columns": {
+                    "outcome": {
+                        "dtype": "float64",
+                        "missing_rate": 0.0,
+                        "unique_count": 100,
+                        "mean": 999.0,
+                    },
+                    "year": {
+                        "dtype": "int64",
+                        "missing_rate": 0.0,
+                        "unique_count": 6,
+                        "mean": 2007.0,
+                    },
+                    "group": {
+                        "dtype": "object",
+                        "missing_rate": 0.1,
+                        "unique_count": 4,
+                    },
+                },
+                "correlations": {"outcome": {"year": 0.42}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    for definition in provider.global_tool_definitions(session_id="main-session"):
+        registry.register(definition)
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "call-global-dataset-schema",
+                "tool_id": "inspect_project_dataset_schema",
+                "arguments": {"run_id": "run-a"},
+            },
+            session_id="main-session",
+        )
+    )
+
+    assert result.ok is True
+    assert result.output == {
+        "run_id": "run-a",
+        "row_count": 100,
+        "column_count": 3,
+        "columns": [
+            {
+                "name": "group",
+                "dtype": "object",
+                "missing_rate": 0.1,
+                "unique_count": 4,
+            },
+            {
+                "name": "outcome",
+                "dtype": "float64",
+                "missing_rate": 0.0,
+                "unique_count": 100,
+            },
+            {
+                "name": "year",
+                "dtype": "int64",
+                "missing_rate": 0.0,
+                "unique_count": 6,
+            },
+        ],
+        "columns_omitted": 0,
+        "evidence_ref": {
+            "run_id": "run-a",
+            "profile_ref": "staged/data_profile.json",
+        },
+        "omitted_sections": [
+            "raw_rows",
+            "correlations",
+            "column_descriptives",
+        ],
+    }
+    assert "999" not in json.dumps(result.output)
+    assert '"correlations": {' not in json.dumps(result.output)
+
+
+def test_chain_context_exposes_the_same_bounded_exact_coefficient_reader(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    provider = _load_provider_type()(project_root)
+
+    definitions = provider.tool_definitions(
+        chain_id="chain:run-a",
+        session_id="chain-session",
+    )
+
+    assert {
+        definition.tool_id for definition in definitions
+    } >= {"inspect_project_model_coefficients"}
+
+
+def test_selected_model_result_summary_keeps_public_fit_and_interval_facts(
+    tmp_path: Path,
+) -> None:
+    from workbench.agent.context_tools import InspectResultSummaryRequest
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    result_path = project_root / "runs" / "run-a" / "model_results" / "ols_1.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "model_id": "ols_1",
+                "model_type": "ols",
+                "nobs": 100,
+                "r_squared": 0.42,
+                "r_squared_adj": 0.41,
+                "coefficients": {
+                    "share": {"estimate": 1.2, "ci_lower": 0.61, "ci_upper": 1.79},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = _load_provider_type()(project_root)
+
+    output = provider.inspect_result_summary(
+        InspectResultSummaryRequest(
+            request_id="summary", owner_run_id="run-a", op_node_id="model:ols_1", active_head_run_id="run-a"
+        )
+    )
+
+    assert output["result_summary"]["persisted_models"] == [
+        {
+            "model_id": "ols_1",
+            "r_squared": 0.42,
+            "r_squared_adj": 0.41,
+            "coefficients": [{"term": "share", "estimate": 1.2, "std_error": None, "p_value": None, "ci_lower": 0.61, "ci_upper": 1.79}],
+        }
+    ]
+
+
+def test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors(
+    tmp_path: Path,
+) -> None:
+    """A residual figure needs run-specific evidence without revealing rows."""
+
+    from workbench.agent.context_tools import (
+        InspectArtifactPreviewRequest,
+        InspectProjectModelFigureEvidenceRequest,
+        _bounded_model_figure_numeric_source,
+    )
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    (run_root / "model_results" / "ols_1.json").write_text(
+        json.dumps(
+            {
+                "model_id": "ols_1",
+                "model_type": "ols",
+                "nobs": 20,
+                "coefficients": {},
+                "residuals": [float(index - 10) / 10 for index in range(20)],
+                "fitted_values": [float(index) for index in range(20)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    index = {
+        "artifacts": [
+            {
+                "artifact_id": "residuals_fitted",
+                "artifact_type": "figure",
+                "path": "figures/residuals_fitted.png",
+                "sha256": "figure-sha",
+                "inputs": [],
+            }
+        ]
+    }
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+    assert _bounded_model_figure_numeric_source(
+        run_root,
+        node_id="model:ols_1",
+        artifact_id="residuals_fitted",
+    ) is not None
+
+    output = _load_provider_type()(project_root).inspect_artifact_preview(
+        InspectArtifactPreviewRequest(
+            request_id="residual-figure",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+
+    figure = output["artifact_preview"]["figure_evidence"][0]
+    assert figure["chart_type"] == "residuals-vs-fitted diagnostic scatter"
+    assert figure["numeric_source"]["kind"] == "residuals_vs_fitted_bins"
+    assert figure["numeric_source"]["bins"]
+    serialized = json.dumps(figure["numeric_source"])
+    assert '"residuals":' not in serialized
+    assert '"fitted_values":' not in serialized
+
+
+def test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows(
+    tmp_path: Path,
+) -> None:
+    """A persisted residual-vs-predictor chart is answerable without row access."""
+
+    from workbench.agent.context_tools import (
+        InspectArtifactPreviewRequest,
+        InspectProjectModelFigureEvidenceRequest,
+        _bounded_model_figure_numeric_source,
+    )
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    processed = run_root / "processed"
+    processed.mkdir()
+    frame = pd.DataFrame({"exposure": list(range(12)), "outcome": list(range(12))})
+    frame.to_parquet(processed / "cleaned_dataset.parquet", index=False)
+    (run_root / "model_results" / "ols_1.json").write_text(
+        json.dumps(
+            {
+                "model_id": "ols_1",
+                "model_type": "ols",
+                "nobs": 12,
+                "x_columns": ["exposure"],
+                "coefficients": {},
+                "analysis_sample": {"row_order": [str(index) for index in range(12)]},
+                "residuals": [float(index - 5) / 4 for index in range(12)],
+                "fitted_values": [float(index) for index in range(12)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    index = {
+        "artifacts": [
+            {
+                "artifact_id": "cleaned_dataset",
+                "artifact_type": "processed_data",
+                "path": "processed/cleaned_dataset.parquet",
+                "sha256": "dataset-sha",
+                "inputs": [],
+            },
+            {
+                "artifact_id": "residuals_vs_exposure",
+                "artifact_type": "figure",
+                "path": "figures/residuals_vs_exposure.png",
+                "sha256": "figure-sha",
+                "inputs": [],
+            },
+        ]
+    }
+    (run_root / "artifacts_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+    direct = _bounded_model_figure_numeric_source(
+        run_root,
+        node_id="model:ols_1",
+        artifact_id="residuals_vs_exposure",
+    )
+    assert direct is not None
+    assert direct["kind"] == "residuals_vs_predictor_bins"
+    assert direct["predictor"] == "exposure"
+    assert direct["plotted_observations"] == 12
+    assert direct["bins"]
+
+    output = _load_provider_type()(project_root).inspect_artifact_preview(
+        InspectArtifactPreviewRequest(
+            request_id="predictor-residual-figure",
+            owner_run_id="run-a",
+            op_node_id="model:ols_1",
+            active_head_run_id="run-a",
+        )
+    )
+    figure = next(
+        item
+        for item in output["artifact_preview"]["figure_evidence"]
+        if item["artifact_id"] == "residuals_vs_exposure"
+    )
+    assert figure["chart_type"] == "residuals-vs-predictor diagnostic scatter"
+    assert figure["numeric_source"]["kind"] == "residuals_vs_predictor_bins"
+    serialized = json.dumps(figure["numeric_source"])
+    assert '"residuals": [' not in serialized
+    assert '"exposure": [' not in serialized
+
+    project_figure = _load_provider_type()(project_root).inspect_project_model_figure_evidence(
+        InspectProjectModelFigureEvidenceRequest(
+            figures=({"run_id": "run-a", "artifact_id": "residuals_vs_exposure"},)
+        )
+    )
+    assert project_figure["figures"][0]["chart_type"] == "residuals-vs-predictor diagnostic scatter"
+    assert project_figure["figures"][0]["numeric_source"]["kind"] == "residuals_vs_predictor_bins"
+    assert project_figure["figures"][0]["evidence_ref"] == {
+        "run_id": "run-a",
+        "model_id": "ols_1",
+        "artifact_id": "residuals_vs_exposure",
+    }
+
+
+def test_raw_node_preview_exposes_only_registered_statistical_result_facts(
+    tmp_path: Path,
+) -> None:
+    """Direct UI results become readable evidence only through declared inputs."""
+
+    from workbench.agent.context_tools import InspectArtifactPreviewRequest
+    from workbench.artifacts import sha256_file
+
+    project_root = tmp_path / "project"
+    _write_project_run(project_root)
+    run_root = project_root / "runs" / "run-a"
+    raw_path = run_root / "raw_snapshot" / "source.csv"
+    raw_path.parent.mkdir()
+    raw_path.write_text("outcome\n1\n2\n3\n4\n", encoding="utf-8")
+    summary_path = run_root / "artifacts" / "statistical_exploration" / "summary.json"
+    summary_path.parent.mkdir(parents=True)
+    summary_path.write_text(
+        json.dumps(
+            {
+                "result": {
+                    "operation": "summarize",
+                    "variables": {"outcome": {"mean": 2.5, "raw_rows": [{"outcome": 1}]}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    graph_store = GraphStore(project_root / "runs")
+    graph = graph_store.read("run-a")
+    graph_store.write(
+        Graph(
+            schema_version=graph.schema_version,
+            run_id=graph.run_id,
+            nodes={
+                **graph.nodes,
+                "stage:raw": Node(
+                    id="stage:raw",
+                    kind=NodeKind.DATASET_STAGE,
+                    display_label="Raw data",
+                    created_at="2026-07-14T00:00:00+00:00",
+                    parent_stage_id=None,
+                    branch_id="main",
+                    stage=Stage.SOURCE,
+                    payload_ref="raw_snapshot/source.csv",
+                ),
+            },
+            edges=graph.edges,
+            branches=graph.branches,
+        )
+    )
+    node_index = json.loads((run_root / "node_index.json").read_text(encoding="utf-8"))
+    node_index["stage:raw"] = {"node_hash": sha256_file(raw_path)}
+    (run_root / "node_index.json").write_text(json.dumps(node_index), encoding="utf-8")
+    (run_root / "artifacts_index.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "artifact_id": "source_data",
+                        "artifact_type": "raw_data",
+                        "path": "raw_snapshot/source.csv",
+                        "sha256": sha256_file(raw_path),
+                        "inputs": [],
+                    },
+                    {
+                        "artifact_id": "summary",
+                        "artifact_type": "statistical_exploration",
+                        "path": "artifacts/statistical_exploration/summary.json",
+                        "sha256": sha256_file(summary_path),
+                        "inputs": ["source_data"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    output = _load_provider_type()(project_root).inspect_artifact_preview(
+        InspectArtifactPreviewRequest(
+            request_id="raw-statistical-result",
+            owner_run_id="run-a",
+            op_node_id="stage:raw",
+            active_head_run_id="run-a",
+        )
+    )
+
+    evidence = output["artifact_preview"]["public_result_evidence"]
+    assert evidence[0]["artifact_id"] == "summary"
+    assert evidence[0]["result"]["variables"]["outcome"]["mean"] == 2.5
+    assert "raw_rows" not in json.dumps(evidence)
 
 
 def test_time_series_summary_reads_only_bounded_public_artifacts(
@@ -1433,7 +2261,11 @@ def test_artifact_preview_reports_running_lifecycle_without_writes(
     assert artifact_preview["preview_status"] == "pending"
     assert artifact_preview["run_lifecycle_status"] == "running"
     assert artifact_preview["artifact_manifest"]["primary_model_results"]["available"] is True
-    assert result.output["omitted_sections"] == ["raw_artifact_payloads"]
+    assert result.output["omitted_sections"] == [
+        "raw_artifact_payloads",
+        "raw_rows",
+        "image_pixels",
+    ]
     assert before == {
         path.relative_to(project_root): path.read_bytes()
         for path in project_root.rglob("*")

@@ -75,6 +75,14 @@ function readRailOpen(storageKey: string): boolean {
   return raw === null ? true : raw !== "false";
 }
 
+export function readRunHistoryOpen(projectRoot?: string | null): boolean {
+  return readRailOpen(`${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`);
+}
+
+export function persistRunHistoryOpen(projectRoot: string | null | undefined, open: boolean): void {
+  sessionStorage.setItem(`${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`, String(open));
+}
+
 function readRailWidth(storageKey: string): number {
   const raw = sessionStorage.getItem(storageKey);
   return raw === null ? DEFAULT_RAIL_WIDTH : clampRailWidth(Number(raw));
@@ -83,9 +91,16 @@ function readRailWidth(storageKey: string): number {
 export interface RunHistoryRailProps {
   /** Optional override. When omitted, reads `project_root` from URL. */
   projectRoot?: string | null;
+  /** Controlled shell state; keeps the visible control in the topbar. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailProps = {}): JSX.Element {
+export function RunHistoryRail({
+  projectRoot: projectRootProp,
+  open: controlledOpen,
+  onOpenChange,
+}: RunHistoryRailProps = {}): JSX.Element {
   const { runId: activeRunId } = useParams<{ runId: string }>();
   const [searchParams] = useSearchParams();
   const contextProjectRoot = useProjectRootOptional();
@@ -95,13 +110,15 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const widthStorageKey = `workbench:runRailWidth:${projectRoot ?? "default"}`;
   const openStorageKey = `${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`;
   const [railWidth, setRailWidth] = useState(() => readRailWidth(widthStorageKey));
-  const [railOpen, setRailOpenState] = useState(() => readRailOpen(openStorageKey));
+  const [storedRailOpen, setStoredRailOpen] = useState(() => readRailOpen(openStorageKey));
+  const railOpen = controlledOpen ?? storedRailOpen;
+  const isControlled = controlledOpen !== undefined;
   const dragStart = useRef<{ x: number; width: number; pointerId: number } | null>(null);
 
   useEffect(() => {
     setRailWidth(readRailWidth(widthStorageKey));
-    setRailOpenState(readRailOpen(openStorageKey));
-  }, [openStorageKey, widthStorageKey]);
+    if (!isControlled) setStoredRailOpen(readRailOpen(openStorageKey));
+  }, [isControlled, openStorageKey, widthStorageKey]);
 
   const commitRailWidth = useCallback((nextWidth: number) => {
     const clamped = clampRailWidth(nextWidth);
@@ -110,9 +127,10 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   }, [widthStorageKey]);
 
   const setRailOpen = useCallback((nextOpen: boolean) => {
-    setRailOpenState(nextOpen);
-    sessionStorage.setItem(openStorageKey, String(nextOpen));
-  }, [openStorageKey]);
+    if (!isControlled) setStoredRailOpen(nextOpen);
+    persistRunHistoryOpen(projectRoot, nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [isControlled, onOpenChange, projectRoot]);
 
   const onRailResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
     dragStart.current = {
@@ -192,7 +210,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
       >
       {railOpen && (
         <>
-          <header className="run-rail__header">
+          <header className="run-rail__header run-rail__header--compact">
             <h3 className="run-rail__title">Runs</h3>
             {projectRoot && (
               <Link
@@ -241,7 +259,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
                   <li key={r.run_id}>
                     <button
                       type="button"
-                      className="run-rail__row"
+                      className="run-rail__row run-rail__row--compact"
                       data-testid={`run-rail-row-${r.run_id}`}
                       data-active={isActive ? "true" : undefined}
                       aria-current={isActive ? "true" : undefined}
@@ -263,7 +281,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           )}
         </>
       )}
-      {!railOpen && (
+      {!railOpen && !isControlled && (
         <button
           type="button"
           className="run-rail__reopen run-rail__reopen--square"

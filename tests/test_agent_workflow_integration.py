@@ -245,8 +245,10 @@ def test_main_to_chain_multi_tool_workflow_stops_at_confirmation_then_completes(
             budget={"max_steps": 8, "timeout_s": 30},
             command_id="command-workflow-1",
         )
-        assert await orchestrator.execute(command.command_id) == "proposal prepared"
-        assert len(adapter.requests) == 7
+        assert await orchestrator.execute(command.command_id) == "proposal is ready for confirmation"
+        # The persisted proposal is already reviewable and confirmation-gated;
+        # no extra provider turn is needed merely to restate that boundary.
+        assert len(adapter.requests) == 6
         assert adapter.context_fingerprint is not None
         assert _project_files(project_root) == before_confirmation
 

@@ -126,6 +126,29 @@ describe("AskAISection", () => {
     });
   });
 
+  it("shows elapsed time while an Ask AI request is still pending", async () => {
+    vi.useFakeTimers();
+    const deferred = deferredAskAIResponse();
+    vi.mocked(askAiForNode).mockReturnValueOnce(deferred.promise);
+    const seed = makeOwnerResolutionSeedFixture();
+    renderAskAISection(seed.activeHeadRunId);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI about this node" }));
+    expect(screen.getByTestId("ask-ai-elapsed")).toHaveTextContent("Working · 0s");
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(screen.getByTestId("ask-ai-elapsed")).toHaveTextContent("Working · 3s");
+
+    await act(async () => {
+      deferred.resolve({ text: "completed" });
+      await deferred.promise;
+    });
+    expect(screen.queryByTestId("ask-ai-elapsed")).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("ignores stale responses after context switches to resolver failure", async () => {
     const deferred = deferredAskAIResponse();
     vi.mocked(askAiForNode).mockReturnValueOnce(deferred.promise);

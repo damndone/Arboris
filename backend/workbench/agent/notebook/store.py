@@ -24,6 +24,7 @@ from typing import Any, Callable, Iterator, Mapping
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
+from ...canonical import sha256_canonical
 from ...contracts.agent.notebook_option import (
     FeasibilityDecision,
     NotebookOptionRevision,
@@ -133,6 +134,57 @@ def _reject_raw_evidence_values(value: object) -> None:
 
 
 @dataclass(frozen=True)
+class WorkflowSource:
+    """Server-resolved raw source identity for a dataset-rooted Notebook.
+
+    A dataset projection normally has no active Run head.  When it was started
+    from a persisted Run, this small immutable pin preserves the actual raw
+    dataset node that the server resolved at creation time.  It is an artifact
+    identity, never a filesystem path or a client-supplied execution target.
+    """
+
+    run_id: str
+    node_ref: str
+    artifact_id: str
+    source_sha256: str
+
+    def __post_init__(self) -> None:
+        _require_pathless_string(self.run_id, label="workflow_source.run_id")
+        _require_pathless_string(self.node_ref, label="workflow_source.node_ref")
+        _require_pathless_string(self.artifact_id, label="workflow_source.artifact_id")
+        if (
+            not isinstance(self.source_sha256, str)
+            or len(self.source_sha256) != 64
+            or any(char not in "0123456789abcdef" for char in self.source_sha256)
+        ):
+            raise ValueError("workflow_source.source_sha256 must be a lowercase SHA-256 digest")
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "WorkflowSource":
+        if not isinstance(value, Mapping) or set(value) != {
+            "run_id",
+            "node_ref",
+            "artifact_id",
+            "source_sha256",
+        }:
+            raise ValueError("workflow_source has invalid fields")
+        return cls(
+            run_id=value["run_id"],
+            node_ref=value["node_ref"],
+            artifact_id=value["artifact_id"],
+            source_sha256=value["source_sha256"],
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "run_id": self.run_id,
+            "node_ref": self.node_ref,
+            "artifact_id": self.artifact_id,
+            "source_sha256": self.source_sha256,
+        }
+
+
+@dataclass(frozen=True)
 class ProjectionSource:
     """The immutable, strict source of a default Notebook projection."""
 
@@ -141,6 +193,7 @@ class ProjectionSource:
     upload_sha256: str | None = None
     filename: str | None = None
     sheet_names: tuple[str, ...] = ()
+    workflow_source: WorkflowSource | None = None
 
     def __post_init__(self) -> None:
         if self.kind == "run":
@@ -149,6 +202,7 @@ class ProjectionSource:
                 self.upload_sha256 is not None
                 or self.filename is not None
                 or self.sheet_names
+                or self.workflow_source is not None
             ):
                 raise ValueError("run projection_source cannot carry dataset fields")
             return
@@ -166,6 +220,10 @@ class ProjectionSource:
             raise ValueError(
                 "projection_source.sheet_names must be a tuple of nonempty strings"
             )
+        if self.workflow_source is not None and not isinstance(
+            self.workflow_source, WorkflowSource
+        ):
+            raise ValueError("dataset workflow_source must be a WorkflowSource when supplied")
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "ProjectionSource":
@@ -177,7 +235,13 @@ class ProjectionSource:
                 raise ValueError("run projection_source must contain only kind and run_id")
             return cls(kind="run", run_id=value["run_id"])
         if kind == "dataset":
-            allowed = {"kind", "upload_sha256", "filename", "sheet_names"}
+            allowed = {
+                "kind",
+                "upload_sha256",
+                "filename",
+                "sheet_names",
+                "workflow_source",
+            }
             required = {"kind", "upload_sha256", "filename"}
             if set(value) - allowed or not required.issubset(value):
                 raise ValueError("dataset projection_source has invalid fields")
@@ -189,18 +253,62 @@ class ProjectionSource:
                 upload_sha256=value["upload_sha256"],
                 filename=value["filename"],
                 sheet_names=tuple(raw_sheet_names),
+                workflow_source=(
+                    WorkflowSource.from_dict(value["workflow_source"])
+                    if value.get("workflow_source") is not None
+                    else None
+                ),
             )
         raise ValueError("projection_source.kind must be 'run' or 'dataset'")
 
     def to_dict(self) -> dict[str, Any]:
         if self.kind == "run":
             return {"kind": "run", "run_id": self.run_id}
-        return {
+        payload = {
             "kind": "dataset",
             "upload_sha256": self.upload_sha256,
             "filename": self.filename,
             "sheet_names": list(self.sheet_names),
         }
+        if self.workflow_source is not None:
+            payload["workflow_source"] = self.workflow_source.to_dict()
+        return payload
+
+
+def dataset_workflow_source_pin(source: ProjectionSource) -> dict[str, dict[str, str]] | None:
+    """Return the exact execution pin for one server-resolved dataset source.
+
+    The pin is intentionally derived from immutable provenance fields instead
+    of accepting a Notebook active head.  A dataset-rooted Notebook may have
+    several resulting model branches and therefore no single head to pretend
+    is the source of all work.
+    """
+
+    workflow_source = source.workflow_source if source.kind == "dataset" else None
+    if workflow_source is None:
+        return None
+    target = {
+        "run_id": workflow_source.run_id,
+        "node_ref": workflow_source.node_ref,
+        "artifact_id": workflow_source.artifact_id,
+    }
+    identity = {
+        "schema_version": "notebook-workflow-source/v1",
+        "target": target,
+        "source_sha256": workflow_source.source_sha256,
+    }
+    return {
+        "target": target,
+        "preconditions": {
+            "context_version": "notebook-workflow-source/v1",
+            "context_fingerprint": "nbsrc1:" + sha256_canonical(identity),
+            # The workflow contract calls this field active_head_run_id.  For
+            # a dataset projection it names the immutable *source* Run, not
+            # the Notebook's (deliberately absent) result head.
+            "active_head_run_id": workflow_source.run_id,
+            "owner_resolution": "dataset_projection_source",
+        },
+    }
 
 
 @dataclass(frozen=True)

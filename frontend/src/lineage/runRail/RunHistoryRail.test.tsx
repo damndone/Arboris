@@ -132,6 +132,12 @@ describe("RunHistoryRail", () => {
     // Status pill text
     expect(screen.getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
+    expect(screen.getByLabelText("Run history").querySelector("header")).toHaveClass(
+      "run-rail__header--compact",
+    );
+    expect(
+      screen.getByTestId("run-rail-row-20260525_210044_142101_055d5cbd"),
+    ).toHaveClass("run-rail__row--compact");
   });
 
   it("marks the URL :runId row as aria-current + data-active", async () => {

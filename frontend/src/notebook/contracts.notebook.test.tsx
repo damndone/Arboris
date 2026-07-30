@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   parseArtifactContract,
   parseEtsResult,
+  parseNotebookExecutionResult,
   parseNotebookOptionRevision,
   parseOptionMaterialization,
   parseOptionExecution,
@@ -64,6 +65,45 @@ describe("contracts — the canonical v1.8.1 mocks parse into the locked shape",
     expect(execution.option_revision).toBe(2);
     expect(execution.proposal_revision).toBe(1);
     expect(execution.run_id).toBeNull();
+  });
+
+  it("reads a bounded multi-branch workflow receipt without inventing an active head", () => {
+    const result = parseNotebookExecutionResult({
+      option_id: "opt_workflow",
+      option_revision: 1,
+      run_id: null,
+      execution_status: "succeeded",
+      committed: true,
+      artifact_validation: {
+        contract_profile: "artifact-identity-type-count/v1",
+        validation_status: "passed",
+        checked_dimensions: ["artifact_id"],
+        not_evaluated_dimensions: ["payload_schema"],
+        issues: [],
+      },
+      workflow_execution: {
+        workflow_id: "workflow_1",
+        plan_fingerprint: "plan_1",
+        status: "completed",
+        branch_runs: [
+          {
+            branch_id: "baseline",
+            run_id: "run_baseline",
+            artifact_ids: ["model_result"],
+          },
+        ],
+        post_estimation_artifact_ids: ["joint_f"],
+      },
+    });
+
+    expect(result.run_id).toBeNull();
+    expect(result.workflow_execution?.branch_runs).toEqual([
+      {
+        branch_id: "baseline",
+        run_id: "run_baseline",
+        artifact_ids: ["model_result"],
+      },
+    ]);
   });
 
   it("projects a v1.0 option as legacy-unverified and not materializable", () => {

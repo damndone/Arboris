@@ -946,12 +946,66 @@ export interface NotebookExecutionResult {
     issues: NotebookExecutionIssue[];
     omitted_issue_count?: number;
   };
+  /** Server-produced receipt for a multi-branch workflow, never an inferred head. */
+  workflow_execution?: WorkflowExecutionReceipt;
+}
+
+export interface WorkflowExecutionBranchRun {
+  branch_id: string;
+  run_id: string;
+  artifact_ids: string[];
+}
+
+export interface WorkflowExecutionReceipt {
+  workflow_id: string;
+  plan_fingerprint: string;
+  status: "completed" | "failed";
+  branch_runs: WorkflowExecutionBranchRun[];
+  post_estimation_artifact_ids: string[];
+}
+
+function parseWorkflowExecutionReceipt(value: unknown, path: string): WorkflowExecutionReceipt {
+  const raw = asRecord(value, path);
+  requireExactKeys(
+    raw,
+    [
+      "workflow_id",
+      "plan_fingerprint",
+      "status",
+      "branch_runs",
+      "post_estimation_artifact_ids",
+    ],
+    path,
+  );
+  if (!Array.isArray(raw.branch_runs)) {
+    throw new NotebookContractError(`${path}.branch_runs must be an array`);
+  }
+  return {
+    workflow_id: requireString(raw, "workflow_id", path),
+    plan_fingerprint: requireString(raw, "plan_fingerprint", path),
+    status: requireChoice(raw, "status", ["completed", "failed"], path),
+    branch_runs: raw.branch_runs.map((item, index) => {
+      const branchPath = `${path}.branch_runs[${index}]`;
+      const branch = asRecord(item, branchPath);
+      requireExactKeys(branch, ["branch_id", "run_id", "artifact_ids"], branchPath);
+      return {
+        branch_id: requireString(branch, "branch_id", branchPath),
+        run_id: requireString(branch, "run_id", branchPath),
+        artifact_ids: requireStringArray(branch, "artifact_ids", branchPath),
+      };
+    }),
+    post_estimation_artifact_ids: requireStringArray(
+      raw,
+      "post_estimation_artifact_ids",
+      path,
+    ),
+  };
 }
 
 export function parseNotebookExecutionResult(value: unknown): NotebookExecutionResult {
   const raw = asRecord(value, "notebook_execution_result");
   const path = "notebook_execution_result";
-  requireExactKeys(
+  requireKnownKeys(
     raw,
     [
       "option_id",
@@ -961,6 +1015,7 @@ export function parseNotebookExecutionResult(value: unknown): NotebookExecutionR
       "committed",
       "artifact_validation",
     ],
+    ["workflow_execution"],
     path,
   );
   const validation = asRecord(raw.artifact_validation, `${path}.artifact_validation`);
@@ -1039,6 +1094,10 @@ export function parseNotebookExecutionResult(value: unknown): NotebookExecutionR
       omitted_issue_count:
         optionalInt(validation, "omitted_issue_count", `${path}.artifact_validation`) ?? 0,
     },
+    workflow_execution:
+      "workflow_execution" in raw
+        ? parseWorkflowExecutionReceipt(raw.workflow_execution, `${path}.workflow_execution`)
+        : undefined,
   };
 }
 

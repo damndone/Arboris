@@ -51,6 +51,15 @@ def _context_packet() -> dict[str, object]:
     }
 
 
+def test_chain_protocol_uses_notebook_receipt_evidence_directly() -> None:
+    """Receipt projections are final bounded evidence, not operation records."""
+    from workbench.http.agent_routes import CHAIN_AGENT_PROTOCOL
+
+    assert "inspect_notebook_workflow_results" in CHAIN_AGENT_PROTOCOL
+    assert "cite its returned post_estimation_evidence directly" in CHAIN_AGENT_PROTOCOL
+    assert "never call inspect_operation_artifact for those ids" in CHAIN_AGENT_PROTOCOL
+
+
 def test_agent_session_turn_is_durable_and_replayable(
     tmp_path: Path,
     monkeypatch,
@@ -116,6 +125,88 @@ def test_agent_session_turn_is_durable_and_replayable(
         assert (project_root / "workbench" / "agent-events" / f"{session_id}.jsonl").is_file()
         assert not (project_root / "agent-sessions").exists()
         assert not (project_root / "agent-events").exists()
+
+
+def test_agent_turn_abort_rejects_when_the_session_has_no_active_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Stop is explicit: it must never pretend to cancel an idle session."""
+
+    from workbench.http import agent_routes
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        assert created.status_code == 200
+
+        stopped = client.post(
+            f"/agent/sessions/{created.json()['session_id']}/abort",
+            params={"project_root": str(project_root)},
+        )
+
+    assert stopped.status_code == 409
+    assert stopped.json()["error"]["code"] == "AGENT_TURN_NOT_ACTIVE"
+
+
+def test_agent_turn_abort_targets_only_the_live_session_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The stop route forwards cancellation to the exact live AgentCore."""
+
+    from workbench.http import agent_routes
+
+    class ActiveAgent:
+        aborted = False
+
+        async def abort(self) -> None:
+            self.aborted = True
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    live = ActiveAgent()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        assert created.status_code == 200
+        session_id = created.json()["session_id"]
+        monkeypatch.setitem(
+            agent_routes._ACTIVE_TURNS,
+            agent_routes._active_turn_key(project_root, session_id),
+            live,
+        )
+
+        stopped = client.post(
+            f"/agent/sessions/{session_id}/abort",
+            params={"project_root": str(project_root)},
+        )
+
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "cancelling"
+    assert live.aborted is True
 
 
 def test_chain_turn_receives_structured_proposal_protocol(
@@ -1145,8 +1236,20 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     tool_ids = {
         tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
     }
-    assert tool_ids == {"inspect_project_model_coefficients"}
-    descriptor = FakeAgentAdapter.instances[-1].requests[0].tools[0]
+    assert tool_ids == {
+        "inspect_project_model_coefficients",
+        "inspect_project_coefficient_transforms",
+        "inspect_project_dataset_schema",
+        "inspect_project_model_figure_evidence",
+        "inspect_project_linear_interaction_effects",
+        "inspect_project_notebook_workflow_results",
+        "inspect_project_numeric_summary",
+    }
+    descriptor = next(
+        tool
+        for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+        if tool["tool_id"] == "inspect_project_dataset_schema"
+    )
     assert descriptor["side_effect"] == "none"
     assert descriptor["scope_requirements"] == ["project"]
     protocol_messages = [
@@ -1158,9 +1261,32 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     assert "project-level advisory Agent" in protocol_messages[0]["content"]
     assert "never invent" in protocol_messages[0]["content"].lower()
     assert "inspect_project_model_coefficients" in protocol_messages[0]["content"]
+    assert "at most four exact persisted term names per call" in protocol_messages[0]["content"]
+    assert "inspect_project_coefficient_transforms" in protocol_messages[0]["content"]
+    assert "inspect_project_dataset_schema" in protocol_messages[0]["content"]
+    assert "inspect_project_model_figure_evidence" in protocol_messages[0]["content"]
+    assert "inspect_project_notebook_workflow_results" in protocol_messages[0]["content"]
+    assert "one receipt lookup with up to sixteen visible candidate run ids" in protocol_messages[0]["content"]
+    assert "do not inspect a dataset schema merely to restate a declared model specification" in protocol_messages[0]["content"].lower()
+    assert "inspect_project_numeric_summary" in protocol_messages[0]["content"]
+    assert "inspect_project_linear_interaction_effects" in protocol_messages[0]["content"]
     assert "one recorded unit" in protocol_messages[0]["content"]
     assert "overlap" in protocol_messages[0]["content"]
     assert "exact sign" in protocol_messages[0]["content"]
+    assert "mechanically copy those returned fields" in protocol_messages[0]["content"]
+    assert "contradicts the returned p value" in protocol_messages[0]["content"]
+    assert "nonrobust significance is false" in protocol_messages[0]["content"]
+    assert "standard-error size alone does not establish" in protocol_messages[0]["content"]
+    assert "a signal, an indication, a hint, or a suggestion" in protocol_messages[0]["content"]
+    assert "conditional association, not a causal effect" in protocol_messages[0]["content"]
+    assert "variable's real-world meaning" in protocol_messages[0]["content"]
+    assert "unique counts do not establish whether a covariate changes within entities" in protocol_messages[0]["content"]
+    workflow_descriptor = next(
+        tool
+        for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+        if tool["tool_id"] == "inspect_project_notebook_workflow_results"
+    )
+    assert workflow_descriptor["input_schema"]["properties"]["run_ids"]["maxItems"] == 16
 
 
 def test_main_turn_refreshes_protocol_for_existing_session(

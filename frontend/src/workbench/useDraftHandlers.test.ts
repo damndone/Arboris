@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useDraftHandlers } from "./useDraftHandlers";
 import type { DraftAction, DraftEntry, DraftRegistry } from "../lineage/drafts/draftRegistry";
 import type {
@@ -250,6 +250,24 @@ describe("useDraftHandlers", () => {
   });
 
   describe("hydration effect", () => {
+    it("reports pending until the persisted-draft listing settles", async () => {
+      let resolveSummaries!: (summaries: PipelineDraftSummary[]) => void;
+      asMock(listPipelineDrafts).mockReturnValue(
+        new Promise<PipelineDraftSummary[]>((resolve) => {
+          resolveSummaries = resolve;
+        }),
+      );
+      const { result } = setup();
+
+      expect(result.current.persistedDraftsHydrated).toBe(false);
+
+      await act(async () => {
+        resolveSummaries([]);
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(result.current.persistedDraftsHydrated).toBe(true));
+    });
+
     it("hydrates ONLY unexecuted summaries and backfills unanchored drafts", async () => {
       asMock(listPipelineDrafts).mockResolvedValue([
         summary({ draft_id: "exec", status: "executed" }),

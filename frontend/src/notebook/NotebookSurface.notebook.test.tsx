@@ -56,6 +56,30 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-option-list")).toBeNull();
   });
 
+  it("makes the user-selected Plan or Action mode explicit", () => {
+    const onInteractionModeChange = vi.fn();
+    render(
+      <NotebookSurface
+        view={ready()}
+        onInteractionModeChange={onInteractionModeChange}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-mode-plan")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("notebook-mode-action"));
+    expect(onInteractionModeChange).toHaveBeenCalledWith("action");
+  });
+
+  it("uses one-Draft, non-executing language in Action mode", () => {
+    render(<NotebookSurface view={ready()} interactionMode="action" />);
+
+    expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("What should Workbench do?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check and prepare Draft" })).toBeInTheDocument();
+    expect(screen.getByText(/Nothing runs until you confirm/)).toBeInTheDocument();
+  });
+
   it("loading (planning phase): names the slow agent step so it does not read as a hang", () => {
     vi.useFakeTimers();
     const onCancelPlanning = vi.fn();
@@ -197,7 +221,7 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByTestId("confirmation-pins")).toHaveTextContent(
       "opt_7f3a1c rev 2 · prop_51de90 rev 1",
     );
-    expect(screen.getByTestId("confirmation-confirm")).toHaveTextContent("Prepare Draft");
+    expect(screen.getByTestId("confirmation-confirm")).toHaveTextContent("Confirm");
     expect(screen.queryByTestId("notebook-success")).toBeNull();
     const card = screen.getByTestId(`option-card-${selected.option_id}`);
     expect(card.nextElementSibling).toBe(screen.getByTestId("notebook-confirmation-slot"));
@@ -224,6 +248,51 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(success).toHaveTextContent("BIC 12078.9226330019");
     expect(success).toHaveTextContent("converged");
     expect(success).toHaveTextContent("run-9ab");
+  });
+
+  it("labels a composed workflow as sibling branches instead of an unassigned run", () => {
+    render(
+      <NotebookSurface
+        view={ready({
+          executionResults: {
+            opt_workflow: {
+              option_id: "opt_workflow",
+              option_revision: 1,
+              run_id: null,
+              execution_status: "succeeded",
+              committed: true,
+              artifact_validation: {
+                contract_profile: "artifact-identity-type-count/v1",
+                validation_status: "passed",
+                checked_dimensions: ["artifact_id"],
+                not_evaluated_dimensions: ["payload_schema"],
+                issues: [],
+              },
+              workflow_execution: {
+                workflow_id: "workflow_1",
+                plan_fingerprint: "plan_1",
+                status: "completed",
+                branch_runs: [
+                  { branch_id: "baseline", run_id: "run_1", artifact_ids: ["model_result"] },
+                  { branch_id: "extended", run_id: "run_2", artifact_ids: ["model_result"] },
+                ],
+                post_estimation_artifact_ids: ["joint_f"],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
+      "2 model branches",
+    );
+    expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
+      "no single active head",
+    );
+    expect(screen.getByTestId("notebook-execution-summary")).not.toHaveTextContent(
+      "run unassigned",
+    );
   });
 
   it("renders a bounded model-neutral execution summary for non-ETS results", () => {
@@ -403,13 +472,12 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
     );
   });
 
-  it("offers an explicit replan action when persisted options need recovery", () => {
+  it("keeps replan out of the header because the goal composer owns it", () => {
     const onReplan = vi.fn();
     render(<NotebookSurface view={ready()} onReplan={onReplan} />);
 
-    fireEvent.click(screen.getByTestId("notebook-replan-options"));
-
-    expect(onReplan).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("notebook-replan-options")).toBeNull();
+    expect(onReplan).not.toHaveBeenCalled();
   });
 
   it("always keeps the context slice visible next to the options", () => {

@@ -97,8 +97,13 @@ function ExplorationResultTable({ payload }: { payload: ExplorationPayload }) {
         {groupCount > 0 ? ` · ${groupCount} groups` : null}
       </div>
       {rows.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
+        <div
+          className="wb-result-table-scroll"
+          data-testid="table-view-statistical-exploration-scroll"
+          tabIndex={0}
+          aria-label="Statistical exploration table scroll region"
+        >
+          <table className="wb-result-table" style={{ borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ textAlign: "left", color: "var(--label-secondary)" }}>
                 {columns.map((column) => <th key={column} style={{ padding: "4px 8px", whiteSpace: "nowrap" }}>{column}</th>)}

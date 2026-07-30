@@ -107,12 +107,13 @@ def _v11_option(
     *,
     option_id: str,
     lifecycle_status: str = "selected",
+    proposal: TypedProposal | None = None,
 ) -> NotebookOptionRevision:
     """Persist one genuine v1.1 option packet for materialization-boundary tests."""
 
     notebook = service.get_notebook(notebook_id)
     context = service.compile_context(notebook_id)
-    proposal = TypedProposal.from_dict(model_rerun_proposal(f"proposal_{option_id}"))
+    proposal = proposal or TypedProposal.from_dict(model_rerun_proposal(f"proposal_{option_id}"))
     payload = _contract_fixture("notebook_option_revision_v11")
     payload.update(
         {
@@ -409,6 +410,48 @@ def test_v11_option_cannot_confirm_without_a_bound_materialization_record(tmp_pa
     view = service.option_view(notebook.notebook_id, revision.option_id)
     assert view.lifecycle_status == "selected"
     assert view.last_execution is None
+    assert service.store.read_materialization(
+        notebook.notebook_id, revision.option_id, revision.option_revision
+    ) is None
+
+
+def test_server_composed_workflow_can_enter_prepared_state_without_a_fake_draft(
+    tmp_path: Path,
+) -> None:
+    """A multi-branch workflow needs lifecycle evidence, not a fake Draft."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook = service.create_notebook(title="Composed workflow", created_by="ui")
+    proposal = TypedProposal(
+        proposal_id="proposal_workflow",
+        operation_id="operation.multi_step",
+        target={"run_id": "source-run", "node_ref": "stage:raw", "artifact_id": "raw.csv"},
+        preconditions={
+            "context_version": "notebook-workflow-source/v1",
+            "context_fingerprint": "nbsrc1:test",
+            "active_head_run_id": "source-run",
+            "owner_resolution": "dataset_projection_source",
+        },
+        changes={"steps": []},
+    )
+    revision = _v11_option(
+        service,
+        notebook.notebook_id,
+        option_id="opt_workflow",
+        proposal=proposal,
+    )
+
+    service._transition(
+        notebook.notebook_id,
+        service.option_view(notebook.notebook_id, revision.option_id),
+        to_status="materialized",
+        actor="system",
+        reason="workflow_execution_prepared",
+        server_workflow_prepared=True,
+    )
+
+    assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "materialized"
     assert service.store.read_materialization(
         notebook.notebook_id, revision.option_id, revision.option_revision
     ) is None

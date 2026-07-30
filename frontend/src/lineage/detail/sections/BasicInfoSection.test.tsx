@@ -56,6 +56,29 @@ describe("BasicInfoSection", () => {
     );
   });
 
+  it("describes a terminal report as a Result and identifies its run", () => {
+    render(
+      <BasicInfoSection
+        node={{
+          ...node({ stage: "report", kind: "report", title: "Result" }),
+          runs: ["run_20260730_result"],
+        } as GraphViewNode}
+      />,
+    );
+
+    expect(screen.getByTestId("basic-info-kind")).toHaveTextContent("Result");
+    expect(screen.getByTestId("basic-info-stage")).toHaveTextContent("Result");
+    expect(screen.getByTestId("basic-info-run")).toHaveTextContent("run_20260730_result");
+  });
+
+  it("keeps a non-terminal report as Report", () => {
+    render(<BasicInfoSection node={node({ stage: "report", kind: "report", title: "Report" })} />);
+
+    expect(screen.getByTestId("basic-info-kind")).toHaveTextContent("report");
+    expect(screen.getByTestId("basic-info-stage")).toHaveTextContent("Report");
+    expect(screen.queryByTestId("basic-info-run")).not.toBeInTheDocument();
+  });
+
   it("Stage value: unknown → 'Unknown stage' (spec wording)", () => {
     render(<BasicInfoSection node={node({ stage: "unknown" })} />);
     expect(screen.getByTestId("basic-info-stage").textContent).toBe(

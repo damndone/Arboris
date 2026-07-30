@@ -418,7 +418,8 @@ describe("WorkbenchRouteContainer", () => {
       mountAt("/?tab=lineage&panel=agent");
       await screen.findByTestId("graph-workbench");
 
-      fireEvent.click(screen.getAllByTestId("graph-node")[0]);
+      const [firstNode] = await screen.findAllByTestId("graph-node");
+      fireEvent.click(firstNode);
 
       const drawer = await screen.findByTestId("detail-drawer");
       expect(drawer).toBeInTheDocument();
@@ -445,6 +446,29 @@ describe("WorkbenchRouteContainer", () => {
   });
 
   describe("layout — P8 plan §2 hoisting", () => {
+    it("keeps the run-history toggle in the topbar before the project switcher", async () => {
+      sessionStorage.removeItem("workbench:runRailOpen:/proj");
+      mountAt("/?tab=lineage");
+
+      await screen.findByTestId("graph-workbench");
+      const topbar = screen.getByTestId("workbench-topbar");
+      const toggle = screen.getByTestId("run-history-toggle");
+      const projectSwitcher = screen.getByTestId("project-switcher");
+
+      expect(topbar.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeTruthy();
+      expect(topbar.compareDocumentPosition(projectSwitcher) & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeTruthy();
+      expect(toggle.compareDocumentPosition(projectSwitcher) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(toggle).not.toHaveTextContent("Show runs");
+      expect(toggle).not.toHaveTextContent("Hide runs");
+      expect(toggle).toHaveStyle({ border: "0px" });
+      expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "true");
+
+      fireEvent.click(toggle);
+      expect(screen.getByTestId("run-rail")).toHaveAttribute("data-open", "false");
+      expect(sessionStorage.getItem("workbench:runRailOpen:/proj")).toBe("false");
+      sessionStorage.removeItem("workbench:runRailOpen:/proj");
+    });
+
     it("mounts RunHistoryRail at the container level (not inside GraphView)", async () => {
       mountAt("/?tab=lineage");
       // RunHistoryRail's testid is owned by the rail component; this
@@ -509,6 +533,28 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
       expect(screen.getByTestId("panel-tab-logs")).toHaveAttribute("aria-selected", "true");
       expect(screen.getByTestId("bottom-panel-body")).toBeInTheDocument();
+    });
+
+    it("keeps the Agent composer interactive while the Agent panel is collapsed", async () => {
+      sessionStorage.removeItem("workbench:bottomPanelOpen:r1");
+      mountAt("/?tab=lineage&panel=agent");
+      await screen.findByTestId("graph-workbench");
+
+      fireEvent.click(screen.getByRole("button", { name: "Close bottom panel" }));
+
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "false");
+      const compactComposer = screen.getByTestId("agent-compact-composer");
+      const input = screen.getByRole("textbox", { name: "Ask Agent" });
+      expect(compactComposer).toContainElement(input);
+      fireEvent.click(input);
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "false");
+
+      fireEvent.click(screen.getByRole("button", { name: "Expand Agent panel" }));
+
+      expect(screen.getByTestId("bottom-panel")).toHaveAttribute("data-open", "true");
+      expect(screen.getByTestId("agent-composer")).toBeInTheDocument();
+      expect(screen.getByTestId("panel-tab-agent")).toHaveAttribute("aria-selected", "true");
+      sessionStorage.removeItem("workbench:bottomPanelOpen:r1");
     });
 
     it("keeps the bottom panel freely resizable instead of forcing Focus mode", async () => {
@@ -618,6 +664,12 @@ describe("WorkbenchRouteContainer", () => {
         "aria-pressed",
         "true",
       ),
+    );
+    expect(screen.getByTestId("forest-heads")).toHaveClass(
+      "wb-run-version-picker",
+    );
+    expect(screen.getByTestId("forest-head-run_child")).toHaveClass(
+      "wb-run-version-picker__button",
     );
     await waitFor(() =>
       expect(document.getElementById("detail-drawer-title")?.textContent).toBe(
@@ -939,6 +991,33 @@ describe("WorkbenchRouteContainer", () => {
       );
       // The empty canvas replaces the shell entirely.
       expect(screen.queryByTestId("workbench-route")).toBeNull();
+    });
+
+    it("waits for persisted genesis-draft hydration before exposing the empty canvas", async () => {
+      let resolveSummaries!: (summaries: api.PipelineDraftSummary[]) => void;
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(emptyForestBody());
+      vi.spyOn(api, "listPipelineDrafts").mockReturnValue(
+        new Promise<api.PipelineDraftSummary[]>((resolve) => {
+          resolveSummaries = resolve;
+        }),
+      );
+      vi.spyOn(api, "getPipelineDraft").mockResolvedValue(genesisDraftResponse());
+      mountHome();
+
+      await waitFor(() => expect(api.listPipelineDrafts).toHaveBeenCalledWith("/proj"));
+      expect(screen.queryByTestId("workbench-empty-canvas")).toBeNull();
+
+      await act(async () => {
+        resolveSummaries([
+          {
+            draft_id: "genesis_d1",
+            status: "draft",
+            draft_hash: "h_genesis",
+          },
+        ]);
+        await Promise.resolve();
+      });
+      expect(await screen.findByTestId("graph-workbench")).toBeInTheDocument();
     });
 
     it("clicking the genesis CTA opens the genesis wizard drawer", async () => {

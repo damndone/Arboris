@@ -221,10 +221,12 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
 export function WorkbenchTopbar({
   projectRoot,
   extraActions = null,
+  leadingActions = null,
   onViewChange,
 }: {
   projectRoot: string;
   extraActions?: ReactNode;
+  leadingActions?: ReactNode;
   onViewChange?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
@@ -274,7 +276,13 @@ export function WorkbenchTopbar({
         background: "var(--surface-elevated, transparent)",
       }}
     >
-      <ProjectSwitcher projectRoot={projectRoot} />
+      <div
+        data-testid="workbench-topbar-navigation"
+        style={{ display: "flex", alignItems: "center", gap: 8 }}
+      >
+        {leadingActions}
+        <ProjectSwitcher projectRoot={projectRoot} />
+      </div>
       <div
         role="tablist"
         aria-label="Workbench view mode"

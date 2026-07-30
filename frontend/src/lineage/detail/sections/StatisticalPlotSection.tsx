@@ -20,6 +20,7 @@ export function StatisticalPlotSection({ projectRoot, request, numericColumns }:
   const [plotArtifactId, setPlotArtifactId] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "previewing" | "confirming" | "complete" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   const plotRequest = useMemo<StatisticalExplorationRequest>(() => ({
     ...request,
@@ -65,15 +66,16 @@ export function StatisticalPlotSection({ projectRoot, request, numericColumns }:
     ? artifactDownloadUrl(projectRoot, request.source_run_id, plotArtifactId)
     : null;
 
-  return (
-    <div data-testid="statistical-plot-builder" className="statistical-exploration-derived">
-      <strong>Scatter plot</strong>
-      <label>X variable <select data-testid="statistical-plot-x" value={xColumn} onChange={(event) => { setXColumn(event.target.value); setPreview(null); }}>
-        {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-      </select></label>
-      <label>Y variable <select data-testid="statistical-plot-y" value={yColumn} onChange={(event) => { setYColumn(event.target.value); setPreview(null); }}>
-        {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-      </select></label>
+  const editor = (
+    <>
+      <div className="statistical-plot-editor-dialog__fields">
+        <label>X variable <select data-testid="statistical-plot-x" value={xColumn} onChange={(event) => { setXColumn(event.target.value); setPreview(null); }}>
+          {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+        </select></label>
+        <label>Y variable <select data-testid="statistical-plot-y" value={yColumn} onChange={(event) => { setYColumn(event.target.value); setPreview(null); }}>
+          {numericColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+        </select></label>
+      </div>
       <button type="button" data-testid="statistical-plot-preview" disabled={!xColumn || !yColumn || xColumn === yColumn || status === "previewing" || status === "confirming"} onClick={() => void handlePreview()}>
         {status === "previewing" ? "Previewing…" : "Preview scatter"}
       </button>
@@ -81,6 +83,22 @@ export function StatisticalPlotSection({ projectRoot, request, numericColumns }:
       {preview?.status === "ready" && <button type="button" data-testid="statistical-plot-confirm" disabled={status === "confirming"} onClick={() => void handleConfirm()}>
         {status === "confirming" ? "Saving…" : "Save plot"}
       </button>}
+    </>
+  );
+
+  return (
+    <div data-testid="statistical-plot-builder" className="statistical-exploration-derived">
+      <strong>Scatter plot</strong>
+      <p>Open the full editor to choose variables, preview, and save a chart.</p>
+      <button type="button" data-testid="statistical-plot-open-editor" onClick={() => setEditorOpen(true)}>Open plot editor</button>
+      {editorOpen && (
+        <div className="statistical-plot-editor-dialog" data-testid="statistical-plot-editor-dialog" role="dialog" aria-label="Scatter plot editor" aria-modal="true">
+          <div className="statistical-plot-editor-dialog__surface">
+            <header className="statistical-plot-editor-dialog__header"><strong>Scatter plot editor</strong><button type="button" onClick={() => setEditorOpen(false)}>Close</button></header>
+            {editor}
+          </div>
+        </div>
+      )}
       {imageUrl && <img data-testid="statistical-plot-image" src={imageUrl} alt={`${String(plotSummary?.y_column)} versus ${String(plotSummary?.x_column)}`} />}
       {status === "error" && <div data-testid="statistical-plot-error">{error}</div>}
       {status === "complete" && <div data-testid="statistical-plot-complete">Plot saved as a figure artifact.</div>}

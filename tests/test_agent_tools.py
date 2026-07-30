@@ -9,7 +9,7 @@ import pytest
 
 from workbench.analysis_loop.resolver import AnalysisLoopSourceResolutionError
 from workbench.agent import model as agent_model
-from workbench.agent.core import AgentCore
+from workbench.agent.core import AgentCore, AgentRunBudget
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import (
     ModelRequest,
@@ -79,6 +79,55 @@ class ToolRoundTripAdapter:
             return
         yield ModelStreamEvent.text_delta(request.request_id, "evidence found")
         yield ModelStreamEvent.done(request.request_id)
+
+
+class UnknownToolRecoveryAdapter:
+    """A provider typo must produce actionable feedback, not kill the turn."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "call-typo",
+                    "tool_id": "inspcet_operation_contract",
+                    "arguments": {},
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+
+        tool_messages = [message for message in request.messages if message.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        payload = json.loads(tool_messages[0]["content"])
+        assert payload["error"] == "unknown_tool"
+        assert "inspect_operation_contract" in payload["error_details"][0]["message"]
+        yield ModelStreamEvent.text_delta(request.request_id, "recovered after tool feedback")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+class ProposalReadyAdapter:
+    """A proposal tool result is already a complete, user-reviewable outcome."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        yield ModelStreamEvent.text_delta(request.request_id, "proposal prepared")
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": "call-propose",
+                "tool_id": "propose_operation",
+                "arguments": {},
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
 
 
 def test_tool_registry_validates_and_executes_allowlisted_tool() -> None:
@@ -200,6 +249,94 @@ def test_agent_core_round_trips_tool_call_and_persists_tool_result(tmp_path: Pat
         assert [event.event_type for event in events.replay("session-a")].count(
             "tool_execution_end"
         ) == 1
+
+    asyncio.run(scenario())
+
+
+def test_unknown_tool_is_visible_to_the_agent_and_does_not_abort_the_turn(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+        tools.register(
+            ToolDefinition(
+                tool_id="inspect_operation_contract",
+                version="v1",
+                input_schema={"type": "object"},
+                side_effect="none",
+                handler=lambda _arguments, _context: {"status": "available"},
+            )
+        )
+        adapter = UnknownToolRecoveryAdapter()
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt("inspect the workflow contract") == "recovered after tool feedback"
+        branch = repository.get_branch("session-a")
+        tool_payload = json.loads(branch[2].payload["content"])
+        assert tool_payload["error"] == "unknown_tool"
+        assert len(adapter.requests) == 2
+        assert not any(
+            event.payload.get("error") == "tool_runtime_error"
+            for event in events.replay("session-a")
+        )
+
+    asyncio.run(scenario())
+
+
+def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+        tools.register(
+            ToolDefinition(
+                tool_id="propose_operation",
+                version="v1",
+                input_schema={"type": "object"},
+                side_effect="proposal",
+                handler=lambda _arguments, _context: {
+                    "requires_confirmation": True,
+                    "proposal": {"proposal_id": "proposal-a"},
+                },
+            )
+        )
+        adapter = ProposalReadyAdapter()
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt(
+            "prepare a proposal",
+            budget=AgentRunBudget(max_steps=1),
+        ) == "proposal prepared"
+        assert len(adapter.requests) == 1
+        assert repository.get_metadata("session-a")["status"] == "idle"
+        branch = repository.get_branch("session-a")
+        assert [entry.payload["role"] for entry in branch] == ["user", "assistant", "tool"]
+        assert not any(
+            entry.payload.get("error") == "max_steps_exceeded"
+            for entry in branch
+        )
+        assert events.replay("session-a")[-1].event_type == "agent_end"
+        assert events.replay("session-a")[-1].payload["stop_reason"] == "proposal_ready"
 
     asyncio.run(scenario())
 

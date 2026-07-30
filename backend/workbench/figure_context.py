@@ -33,6 +33,7 @@ _FIGURE_SPECS: dict[str, dict[str, str]] = {
     "correlation_heatmap": {"chart_type": "correlation heatmap", "reads": "correlations"},
     "coef_plot": {"chart_type": "coefficient (forest) plot with confidence intervals", "reads": "model"},
     "residuals_fitted": {"chart_type": "residuals-vs-fitted diagnostic scatter", "reads": "diagnostics"},
+    "residuals_vs_": {"chart_type": "residuals-vs-predictor diagnostic scatter", "reads": "diagnostics"},
     "qq_residuals": {"chart_type": "normal Q-Q plot of residuals", "reads": "diagnostics"},
     "event_study": {"chart_type": "event-study dynamic effects with confidence bands", "reads": "event_study"},
     "time_trend": {"chart_type": "time trend of numeric variables", "reads": "time_trend"},

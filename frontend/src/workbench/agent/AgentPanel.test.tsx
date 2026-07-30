@@ -17,6 +17,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     prompt: "",
     setPrompt: vi.fn(),
     sendPrompt: vi.fn(),
+    abortTurn: vi.fn(),
     isSubmitting: false,
     error: null,
     scopeLabel: "Current chain · run-a",
@@ -38,6 +39,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     hierarchy: null,
   eventCursor: 0,
   lastEventType: null,
+    liveResponseText: "",
     ...overrides,
   };
 }
@@ -83,6 +85,87 @@ describe("AgentPanel — sandboxed program output", () => {
 });
 
 describe("AgentPanel", () => {
+  it("shows elapsed time and observable activity without a private-reasoning banner", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        activeTurnStartedAt: Date.now() - 4_000,
+        lastEventType: "tool_call",
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.getByTestId("agent-turn-progress")).toHaveTextContent(/Working · 4s/);
+    expect(screen.queryByText(/private reasoning is not displayed/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Checking evidence");
+  });
+
+  it("shows an actionable provider failure without leaving the turn marked as working", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "failed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("agent-turn-progress")).toBeNull();
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "The configured provider did not return a usable response",
+    );
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "No proposal or analysis was executed",
+    );
+  });
+
+  it("keeps a historical step-budget stop accurate when a proposal is pending", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "blocked",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "max_steps_exceeded" },
+        ],
+        proposals: [{
+          record_type: "revision",
+          proposal_id: "proposal-1",
+          operation_id: "operation.multi_step",
+          operation_version: "v1",
+          revision: 1,
+          session_id: "session-a",
+          chain_id: "chain-a",
+          command_id: "command-a",
+          target: {},
+          preconditions: {},
+          changes: { steps: [] },
+          evidence_refs: [],
+          expected_effect: [],
+          risks: [],
+          created_at: "2026-07-30T00:00:00Z",
+          fingerprint: "sha256:test",
+          status: "pending",
+        }],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "proposal that is still awaiting your review",
+    );
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "will not execute automatically",
+    );
+    expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(
+      "No proposal or analysis was executed",
+    );
+  });
+
   it("renders the durable transcript and scope/context summary", () => {
     render(
       <AgentSurfaceContext.Provider value={value()}>
@@ -118,6 +201,95 @@ describe("AgentPanel", () => {
     expect(userLine).toHaveTextContent("❯");
     expect(userLine.className).toContain("wb-agent-terminal-line");
     expect(agentLine.className).toContain("wb-agent-terminal-line");
+  });
+
+  it("follows newly appended output only while the transcript is at its bottom", () => {
+    const initial = value({
+      isSubmitting: true,
+      messages: [{ entry_id: "u1", role: "user", content: "检查结果", stop_reason: null }],
+    });
+    const { rerender } = render(
+      <AgentSurfaceContext.Provider value={initial}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    const transcript = screen.getByRole("log", { name: /Agent transcript/ }) as HTMLDivElement;
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+    });
+    transcript.scrollTop = 400;
+    fireEvent.scroll(transcript);
+
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 620 });
+    rerender(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        messages: [
+          ...initial.messages,
+          { entry_id: "a1", role: "assistant", content: "这是最新输出。", stop_reason: "stop" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(transcript.scrollTop).toBe(620);
+
+    transcript.scrollTop = 180;
+    fireEvent.scroll(transcript);
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 740 });
+    rerender(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        messages: [
+          ...initial.messages,
+          { entry_id: "a1", role: "assistant", content: "这是最新输出。\n\n补充说明。", stop_reason: "stop" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(transcript.scrollTop).toBe(180);
+  });
+
+  it("groups a tool-assisted turn into a collapsible reasoning trace", () => {
+    const withReasoning = value({
+      messages: [
+        { entry_id: "u1", role: "user", content: "检查模型结果", stop_reason: null },
+        {
+          entry_id: "a1",
+          role: "assistant",
+          content: "我会先核对模型和诊断证据。",
+          stop_reason: "tool_calls",
+        },
+        {
+          entry_id: "t1",
+          role: "tool",
+          name: "inspect_model_result",
+          content: JSON.stringify({ ok: true, output: { result_id: "result-1" } }),
+          stop_reason: null,
+        },
+        {
+          entry_id: "a2",
+          role: "assistant",
+          content: "模型结果已核对：系数为正。",
+          stop_reason: "stop",
+        },
+      ],
+    });
+
+    render(
+      <AgentSurfaceContext.Provider value={withReasoning}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const reasoning = screen.getByTestId("agent-reasoning-u1");
+    expect(reasoning).toHaveTextContent("Reasoning");
+    expect(reasoning).toHaveTextContent("2 steps");
+    expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
+    expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
+    expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
   });
 
   it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {

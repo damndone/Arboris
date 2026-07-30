@@ -86,6 +86,49 @@
   flex-wrap: wrap;
 }
 
+.nb-surface-header-title {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nb-notebook-new-analysis {
+  margin-left: auto;
+  position: relative;
+}
+
+.nb-notebook-new-analysis-trigger {
+  white-space: nowrap;
+}
+
+.nb-notebook-new-analysis-popover {
+  background: var(--background, #fff);
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  display: grid;
+  gap: 8px;
+  min-width: 270px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 4;
+}
+
+.nb-notebook-new-analysis-popover p {
+  color: var(--label-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.nb-notebook-new-analysis-popover .nb-button {
+  justify-self: start;
+}
+
 .nb-narrative-entry {
   margin: 0 0 8px;
 }
@@ -566,3 +609,57 @@
   color: var(--label-secondary);
   font-size: 11px;
 }
+
+.nb-user-intent {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.nb-interaction-mode {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+  justify-self: start;
+  padding: 3px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--background-secondary, transparent);
+}
+
+.nb-interaction-mode-button {
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--secondary-label, var(--label));
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.nb-interaction-mode-button[aria-pressed="true"] {
+  background: var(--accent, #1677ff);
+  color: var(--accent-foreground, #fff);
+}
+
+.nb-interaction-mode-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.nb-interaction-mode-help {
+  color: var(--secondary-label, var(--label));
+  font-size: 12px;
+  line-height: 1.4;
+  margin: -2px 0 0;
+}
+
+.nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
+.nb-user-intent textarea { background: var(--background-secondary, transparent); border: 1px solid var(--separator, rgba(128, 128, 128, 0.3)); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
+.nb-user-intent button { justify-self: start; }

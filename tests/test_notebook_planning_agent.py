@@ -11,6 +11,7 @@ import pytest
 
 from workbench.agent.model import ModelRequest, ModelStreamEvent
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord, InspectionRequest
+from workbench.contracts.agent.notebook_option import ExpectedArtifact
 from workbench.agent.notebook.planning_agent import (
     NOTEBOOK_TOOLS,
     NotebookPlanningAgent,
@@ -18,10 +19,15 @@ from workbench.agent.notebook.planning_agent import (
     NotebookPlanningTimeout,
     NotebookPlanningUnavailable,
     _parse_submissions,
+    _submission,
     _strict_typed_proposal,
 )
-from workbench.agent.notebook.producer import generate_option_batch
+from workbench.agent.notebook.producer import (
+    generate_option_batch,
+    option_drafts_from_submissions,
+)
 from workbench.agent.operations import OperationRegistry, OperationValidationError
+from workbench.agent.notebook.store import ProjectionSource, WorkflowSource
 from workbench.agent.context_compiler import compile_notebook_planning_context
 from workbench.agent.context_compiler import freshness_dependency_fingerprint
 from workbench.agent.notebook.proposal import TypedProposal
@@ -111,6 +117,18 @@ def _submit_call(*, capability_id: str = "time_series.ets", run_id: str = "noteb
     }
 
 
+def _pinned_rerun_submit_call(context) -> dict:
+    """Return the generic submit fixture with its server-published pin."""
+
+    pins = NotebookPlanningAgent._execution_pins(context)["rerun_preconditions_by_target"]
+    assert len(pins) == 1
+    call = _submit_call(run_id=str(context.active_head_run_id))
+    proposal = call["options"][0]["proposal"]
+    proposal["target"] = pins[0]["target"]
+    proposal["preconditions"] = pins[0]["preconditions"]
+    return call
+
+
 class SequencedAdapter:
     def __init__(self, submit_args: dict) -> None:
         self.submit_args = submit_args
@@ -191,11 +209,531 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
         "model_params",
         "model_options",
     ]
-    assert "comparative_claim" in adapter.requests[0].messages[0]["content"]
-    assert "evidence_id" in adapter.requests[0].messages[0]["content"]
+    assert "Comparative claims are bound by the option's structured evidence_refs" in adapter.requests[0].messages[0]["content"]
+    assert "completed evidence refs" in adapter.requests[0].messages[0]["content"]
     assert "dataset_source_id" in adapter.requests[0].messages[0]["content"]
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
+    assert "automatically materializes residuals_vs_<predictor>" in adapter.requests[0].messages[0]["content"]
     assert len(adapter.requests) == 2
+
+
+def test_action_mode_publishes_and_enforces_one_checked_draft_path(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    adapter = SequencedAdapter(_submit_call())
+    context = replace(
+        _context(project),
+        user_focus={"goal": "Fit the declared model.", "interaction_mode": "action"},
+    )
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=lambda _requests, _current: _evidence(),
+    ).plan(context=context, initial_evidence=DataEvidencePackV1("run:run_001", ()))
+
+    submit_tool = next(
+        tool
+        for tool in adapter.requests[0].tools
+        if tool["tool_id"] == "submit_notebook_option_batch"
+    )
+    assert submit_tool["input_schema"]["properties"]["options"]["maxItems"] == 1
+    assert "Action mode" in adapter.requests[0].messages[0]["content"]
+    assert len(result.option_drafts) == 1
+
+
+def test_run_notebook_publishes_and_accepts_one_source_pinned_composed_workflow(
+    tmp_path: Path,
+) -> None:
+    """A Notebook must expose the same declared-term workflow the runtime owns."""
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_source"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:raw",
+                "kind": "dataset_stage",
+                "stage": "source",
+                "artifact_id": "_uploads/source.csv",
+                "workflow_artifact_id": "raw_source_csv",
+                "context_fingerprint": "nocv1:workflow-source",
+            }
+        ],
+    )
+    workflow = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    assert workflow["target_exact"] == {
+        "run_id": "run_source",
+        "node_ref": "stage:raw",
+        "artifact_id": "raw_source_csv",
+    }
+
+    evidence = DataEvidencePackV1(
+        source_id="run:run_source",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:run_source",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "response"},
+                        {"name": "exposure"},
+                        {"name": "stratum"},
+                    ]
+                },
+                result_hash="sha256:profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "Fit declared categorical and quadratic terms in one reviewable workflow.",
+            "assumptions": [],
+            "capability_id": "ols",
+            "option_id": "opt_composed",
+            "proposal": {
+                "proposal_id": "prop_composed",
+                "proposal_revision": 1,
+                "operation_id": "operation.multi_step",
+                "operation_version": "v1",
+                "target": workflow["target_exact"],
+                "preconditions": workflow["preconditions_exact"],
+                "changes": {
+                    "steps": [
+                        {
+                            "step_id": "estimate",
+                            "operation_id": "model.genesis",
+                            "spec": {
+                                "model_family": "ols",
+                                "covariance": "unadjusted",
+                                "branches": [
+                                    {
+                                        "branch_id": "linear",
+                                        "outcome": "response",
+                                        "predictors": ["exposure"],
+                                    },
+                                    {
+                                        "branch_id": "curved",
+                                        "outcome": "response",
+                                        "predictors": ["exposure"],
+                                        "categorical": ["stratum"],
+                                        "polynomials": [
+                                            {"column": "exposure", "degree": 2}
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "step_id": "test_quadratic",
+                            "operation_id": "model.joint_f_test",
+                            "depends_on": ["estimate"],
+                            "spec": {
+                                "branch_id": "curved",
+                                "term_selectors": [
+                                    {"kind": "polynomial", "column": "exposure"}
+                                ],
+                            },
+                        },
+                        {
+                            "step_id": "stationary_point",
+                            "operation_id": "model.quadratic_stationary_point",
+                            "depends_on": ["estimate"],
+                            "spec": {"branch_id": "curved", "column": "exposure"},
+                        },
+                    ]
+                },
+            },
+            "expected_artifacts": [],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:profile",
+                    "source_refs": ["profile:run_source"],
+                }
+            ],
+            "comparative_claims": [
+                "evidence:profile confirms the declared source columns."
+            ],
+        }
+    )
+    agent = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(),
+        capability_catalog={"ols": {"model_type": "ols"}},
+    )
+
+    normalized = agent._validate_submissions(
+        context, evidence, (submission,), {"ols": {"model_type": "ols"}}
+    )
+    draft = option_drafts_from_submissions(context, normalized)[0]
+
+    # A composed workflow creates one independently registered primary model
+    # result per declared branch.  The server owns this count and the registry
+    # step label; a provider cannot make a healthy workflow fail by guessing
+    # either from its human workflow step id.
+    assert draft.expected_artifacts == (
+        ExpectedArtifact(
+            artifact_id="ols_1",
+            artifact_type="model_result",
+            required=True,
+            count=2,
+            step=None,
+        ),
+    )
+
+
+def test_composed_workflow_derives_artifacts_from_each_declared_model_family(
+    tmp_path: Path,
+) -> None:
+    """A comparison workflow is admitted from its model steps, not one outer label."""
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_source"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:raw",
+                "kind": "dataset_stage",
+                "stage": "source",
+                "artifact_id": "_uploads/source.csv",
+                "workflow_artifact_id": "raw_source_csv",
+                "context_fingerprint": "nocv1:mixed-workflow-source",
+            }
+        ],
+    )
+    workflow = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    evidence = DataEvidencePackV1(
+        source_id="run:run_source",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:run_source",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "response"},
+                        {"name": "exposure"},
+                        {"name": "firm"},
+                        {"name": "year"},
+                    ]
+                },
+                result_hash="sha256:mixed-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "Compare two declared, reviewable estimators over the same source.",
+            "assumptions": [],
+            "capability_id": "panel_ols",
+            "option_id": "opt_mixed_models",
+            "proposal": {
+                "proposal_id": "prop_mixed_models",
+                "proposal_revision": 1,
+                "operation_id": "operation.multi_step",
+                "operation_version": "v1",
+                "target": workflow["target_exact"],
+                "preconditions": workflow["preconditions_exact"],
+                "changes": {
+                    "steps": [
+                        {
+                            "step_id": "estimate_panel",
+                            "operation_id": "model.genesis",
+                            "spec": {
+                                "model_family": "panel_ols",
+                                "covariance": "clustered",
+                                "entity_col": "firm",
+                                "time_col": "year",
+                                "branches": [
+                                    {
+                                        "branch_id": "within",
+                                        "outcome": "response",
+                                        "predictors": ["exposure"],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "step_id": "estimate_dummy_fe",
+                            "operation_id": "model.genesis",
+                            "spec": {
+                                "model_family": "ols",
+                                "covariance": "robust",
+                                "branches": [
+                                    {
+                                        "branch_id": "dummy_fe",
+                                        "outcome": "response",
+                                        "predictors": ["exposure"],
+                                        "categorical": ["firm", "year"],
+                                    }
+                                ],
+                            },
+                        },
+                    ]
+                },
+            },
+            "expected_artifacts": [],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:mixed-profile",
+                    "source_refs": ["profile:run_source"],
+                }
+            ],
+            "comparative_claims": [
+                "evidence:profile confirms the declared source columns."
+            ],
+        }
+    )
+    catalog = {
+        "ols": {"model_type": "ols"},
+        "panel_ols": {"model_type": "panel_ols"},
+    }
+    agent = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+
+    normalized = agent._validate_submissions(context, evidence, (submission,), catalog)
+
+    assert normalized[0].expected_artifacts == (
+        ExpectedArtifact("ols_1", "model_result", required=True, count=1, step=None),
+        ExpectedArtifact("panel_ols_1", "model_result", required=True, count=1, step=None),
+    )
+
+
+def test_workflow_capability_id_must_name_its_model_capability(tmp_path: Path) -> None:
+    """The workflow tool is an operation; ``capability_id`` stays a model pack."""
+
+    source = ProjectionSource(
+        kind="dataset",
+        upload_sha256="a" * 64,
+        filename="source.csv",
+        workflow_source=WorkflowSource(
+            run_id="run_source",
+            node_ref="stage:raw",
+            artifact_id="raw-source.csv",
+            source_sha256="b" * 64,
+        ),
+    )
+    context = _context(make_project(tmp_path), projection_source=source.to_dict())
+    workflow = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "Use the declared workflow entry point.",
+            "assumptions": [],
+            "capability_id": "operation.multi_step",
+            "option_id": "opt_wrong_capability_id",
+            "proposal": {
+                "proposal_id": "prop_wrong_capability_id",
+                "proposal_revision": 1,
+                "operation_id": "operation.multi_step",
+                "operation_version": "v1",
+                "target": workflow["target_exact"],
+                "preconditions": workflow["preconditions_exact"],
+                "changes": {"steps": []},
+            },
+            "expected_artifacts": [],
+            "evidence_refs": [],
+            "comparative_claims": [],
+        }
+    )
+    agent = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(),
+        capability_catalog={"ols": {"model_type": "ols"}},
+    )
+
+    with pytest.raises(NotebookPlanningContractError, match="must name a server-published") as caught:
+        agent._validate_submissions(
+            context,
+            DataEvidencePackV1("dataset:source", ()),
+            (submission,),
+            {"ols": {"model_type": "ols"}},
+        )
+
+    correction = agent._correction_instruction(
+        error=caught.value,
+        context=context,
+        evidence=DataEvidencePackV1("dataset:source", ()),
+        correction_number=1,
+    )
+    assert "not an operation id" in correction
+    assert "time_series.ets" in correction
+
+
+def test_workflow_dependency_shape_error_gets_a_machine_actionable_correction(
+    tmp_path: Path,
+) -> None:
+    """A provider must be told the exact list shape, not merely that a plan failed."""
+
+    context = _context(make_project(tmp_path))
+    correction = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "typed proposal failed registry validation: workflow step estimate depends_on "
+            "must be step ids"
+        ),
+        context=context,
+        evidence=DataEvidencePackV1("run:run_001", ()),
+        correction_number=1,
+    )
+
+    assert "JSON array" in correction
+    assert "[\"source_step\"]" in correction
+    assert "omit depends_on" in correction
+
+
+def test_provider_gets_workflow_step_envelope_correction_after_misplaced_spec_fields(
+    tmp_path: Path,
+) -> None:
+    """A composed workflow must correct parameters misplaced beside ``spec``.
+
+    The step envelope is shared by every workflow operation.  This regression
+    protects the Provider correction loop without teaching it about a
+    particular dataset, model, or exercise.
+    """
+
+    source = ProjectionSource(
+        kind="dataset",
+        upload_sha256="a" * 64,
+        filename="source.csv",
+        workflow_source=WorkflowSource(
+            run_id="run_source",
+            node_ref="stage:raw",
+            artifact_id="raw-source.csv",
+            source_sha256="b" * 64,
+        ),
+    )
+    context = _context(make_project(tmp_path), projection_source=source.to_dict())
+    workflow = NotebookPlanningAgent._typed_operation_contracts(context)[
+        "operation.multi_step"
+    ]
+    evidence = DataEvidencePackV1(
+        source_id="dataset:source",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:source",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "response"},
+                        {"name": "exposure"},
+                    ]
+                },
+                result_hash="sha256:profile",
+            ),
+        ),
+    )
+    option = {
+        "rank": 1,
+        "rationale": "Estimate a bounded, reviewable source-pinned model.",
+        "assumptions": [],
+        "capability_id": "ols",
+        "option_id": "opt_workflow",
+        "proposal": {
+            "proposal_id": "prop_workflow",
+            "proposal_revision": 1,
+            "operation_id": "operation.multi_step",
+            "operation_version": "v1",
+            "target": workflow["target_exact"],
+            "preconditions": workflow["preconditions_exact"],
+            "changes": {
+                "steps": [
+                    {
+                        "step_id": "estimate",
+                        "operation_id": "model.genesis",
+                        "spec": {
+                            "model_family": "ols",
+                            "branches": [
+                                {
+                                    "branch_id": "primary",
+                                    "outcome": "response",
+                                    "predictors": ["exposure"],
+                                }
+                            ],
+                        },
+                    }
+                ]
+            },
+        },
+        "expected_artifacts": [
+            {
+                "artifact_id": "ols_1",
+                "artifact_type": "model_result",
+                "required": True,
+                "count": 1,
+                "step": "estimate",
+            }
+        ],
+        "evidence_refs": [
+            {
+                "evidence_id": "evidence:profile",
+                "result_hash": "sha256:profile",
+                "source_refs": ["profile:source"],
+            }
+        ],
+        "comparative_claims": [
+            "evidence:profile confirms the declared source columns."
+        ],
+    }
+    invalid = {"options": [json.loads(json.dumps(option))]}
+    invalid_step = invalid["options"][0]["proposal"]["changes"]["steps"][0]
+    invalid_step["operation"] = "fit"
+    invalid_step["selected_columns"] = ["response", "exposure"]
+
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-profile",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "profile.v1",
+                            "target_ref": "dataset:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "submit-invalid",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": invalid,
+            },
+            {
+                "tool_call_id": "submit-valid",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": {"options": [option]},
+            },
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"ols": {"model_type": "ols"}},
+        inspection_executor=lambda requests, current: evidence,
+    )
+
+    result = agent.plan(
+        context=context,
+        initial_evidence=DataEvidencePackV1("dataset:source", ()),
+    )
+
+    assert len(result.option_drafts) == 1
+    correction = adapter.requests[2].messages[-1]["content"]
+    assert "workflow step contains unknown field(s)" in correction
+    assert "step_id, operation_id, spec" in correction
+    assert "inside spec" in correction
 
 
 def test_provider_can_request_three_distinct_bounded_inspections_before_submitting(
@@ -261,6 +799,120 @@ def test_provider_can_request_three_distinct_bounded_inspections_before_submitti
     assert [request.inspection_id for request in result.inspection_requests] == list(inspection_ids)
     assert len(result.option_drafts) == 1
     assert len(adapter.requests) == 4
+
+
+def test_provider_reuses_an_identical_in_session_inspection_without_executing_it_twice(
+    tmp_path: Path,
+) -> None:
+    """A repeated read-only request replays bounded evidence, not work or failure."""
+
+    repeated = {
+        "tool_call_id": "inspect-time",
+        "tool_id": "request_notebook_inspections",
+        "arguments": {
+            "requests": [
+                {
+                    "inspection_id": "time_index.v1",
+                    "target_ref": "run:active",
+                    "arguments": {},
+                }
+            ]
+        },
+    }
+    adapter = ScriptedAdapter(
+        [
+            repeated,
+            {**repeated, "tool_call_id": "inspect-time-again"},
+            {
+                "tool_call_id": "submit-after-reuse",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            },
+        ]
+    )
+    executions: list[tuple[InspectionRequest, ...]] = []
+
+    def inspect(
+        requests: tuple[InspectionRequest, ...], current: DataEvidencePackV1
+    ) -> DataEvidencePackV1:
+        del current
+        executions.append(requests)
+        return _evidence()
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=inspect,
+        max_contract_corrections=0,
+    ).plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=DataEvidencePackV1("run:run_001", ()),
+    )
+
+    assert [request.inspection_id for request in result.inspection_requests] == ["time_index.v1"]
+    assert len(executions) == 1
+    assert len(adapter.requests) == 3
+
+
+def test_provider_rejects_a_changed_duplicate_inspection_without_relabeling_evidence(
+    tmp_path: Path,
+) -> None:
+    """Different bounded reads need distinct evidence, not silent reuse."""
+
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-time",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "time_index.v1",
+                            "target_ref": "run:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "inspect-time-changed",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "time_index.v1",
+                            "target_ref": "run:active",
+                            "arguments": {"max_rows": 5},
+                        }
+                    ]
+                },
+            },
+        ]
+    )
+    executions: list[tuple[InspectionRequest, ...]] = []
+
+    def inspect(
+        requests: tuple[InspectionRequest, ...], current: DataEvidencePackV1
+    ) -> DataEvidencePackV1:
+        del current
+        executions.append(requests)
+        return _evidence()
+
+    with pytest.raises(
+        NotebookPlanningContractError,
+        match="duplicate inspection id has conflicting arguments",
+    ):
+        NotebookPlanningAgent(
+            adapter=adapter,
+            capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+            inspection_executor=inspect,
+            max_contract_corrections=0,
+        ).plan(
+            context=_context(make_project(tmp_path)),
+            initial_evidence=DataEvidencePackV1("run:run_001", ()),
+        )
+
+    assert len(executions) == 1
 
 
 def test_model_custom_planning_contract_exposes_intent_but_rejects_authority_fields(
@@ -457,7 +1109,7 @@ def test_unregistered_inspection_is_rejected_before_execution_and_corrected(
             {
                 "tool_call_id": "submit-1",
                 "tool_id": "submit_notebook_option_batch",
-                "arguments": _submit_call(),
+                "arguments": _submit_call(run_id="run_001"),
             },
         ]
     )
@@ -728,7 +1380,7 @@ def test_provider_gets_projection_target_correction_for_failed_inspection(tmp_pa
 
 def test_provider_gets_bounded_correction_for_invalid_submission(tmp_path: Path) -> None:
     invalid = _submit_call()
-    invalid["options"][0]["comparative_claims"] = ["The time index supports the path."]
+    invalid["options"][0]["evidence_refs"][0]["result_hash"] = "sha256:not-the-time-result"
     adapter = ScriptedAdapter(
         [
             {
@@ -771,8 +1423,31 @@ def test_provider_gets_bounded_correction_for_invalid_submission(tmp_path: Path)
     assert len(adapter.requests) == 3
     correction_messages = adapter.requests[2].messages
     assert any(message.get("role") == "tool" and "rejected" in message["content"] for message in correction_messages)
-    assert "comparative claim has no evidence ref" in correction_messages[-1]["content"]
-    assert "evidence:time" in correction_messages[-1]["content"]
+    assert "option evidence ref is missing, changed, or incomplete" in correction_messages[-1]["content"]
+    assert "sha256:time-result" in correction_messages[-1]["content"]
+
+
+def test_provider_accepts_comparative_claim_bound_by_structured_evidence_ref(
+    tmp_path: Path,
+) -> None:
+    """The evidence_refs field, not prose text, binds a comparison claim."""
+
+    submission = _submit_call()
+    submission["options"][0]["comparative_claims"] = [
+        "The observed time index supports this registered path."
+    ]
+    agent = NotebookPlanningAgent(
+        adapter=SequencedAdapter(submission),
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=lambda requests, current: _evidence(),
+    )
+
+    result = agent.plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=DataEvidencePackV1("run:run_001", ()),
+    )
+
+    assert len(result.option_drafts) == 1
 
 
 def test_provider_correction_names_only_completed_refs_after_partial_sample_rejection() -> None:
@@ -871,12 +1546,24 @@ def test_provider_prompt_separates_completed_and_partial_evidence_refs(
         source_id="run:run_001",
         records=(*_evidence().records, partial),
     )
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:model",
+                "kind": "model",
+                "node_hash": "node-hash",
+                "forest_node_key": "forest-node-key",
+                "context_fingerprint": "nocv1:test",
+            }
+        ],
+    )
     adapter = ScriptedAdapter(
         [
             {
                 "tool_call_id": "submit-1",
                 "tool_id": "submit_notebook_option_batch",
-                "arguments": _submit_call(),
+                "arguments": _pinned_rerun_submit_call(context),
             }
         ]
     )
@@ -885,7 +1572,7 @@ def test_provider_prompt_separates_completed_and_partial_evidence_refs(
         capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
     )
 
-    agent.plan(context=_context(make_project(tmp_path)), initial_evidence=evidence)
+    agent.plan(context=context, initial_evidence=evidence)
 
     payload = json.loads(adapter.requests[0].messages[1]["content"])
     policy = payload["evidence_citation_policy"]
@@ -905,7 +1592,7 @@ def test_provider_prompt_separates_completed_and_partial_evidence_refs(
     ]
 
 
-def test_provider_cannot_repeat_a_terminal_partial_inspection(
+def test_provider_reuses_a_canonical_terminal_partial_inspection(
     tmp_path: Path,
 ) -> None:
     partial = EvidenceRecord(
@@ -921,6 +1608,18 @@ def test_provider_cannot_repeat_a_terminal_partial_inspection(
     evidence = DataEvidencePackV1(
         source_id="run:run_001",
         records=(*_evidence().records, partial),
+    )
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:model",
+                "kind": "model",
+                "node_hash": "node-hash",
+                "forest_node_key": "forest-node-key",
+                "context_fingerprint": "nocv1:test",
+            }
+        ],
     )
     adapter = ScriptedAdapter(
         [
@@ -941,7 +1640,7 @@ def test_provider_cannot_repeat_a_terminal_partial_inspection(
             {
                 "tool_call_id": "submit-1",
                 "tool_id": "submit_notebook_option_batch",
-                "arguments": _submit_call(),
+                "arguments": _pinned_rerun_submit_call(context),
             },
         ]
     )
@@ -954,12 +1653,72 @@ def test_provider_cannot_repeat_a_terminal_partial_inspection(
     )
 
     result = agent.plan(
-        context=_context(make_project(tmp_path)),
+        context=context,
         initial_evidence=evidence,
     )
 
     assert len(result.option_drafts) == 1
-    assert "duplicate inspection request" in adapter.requests[1].messages[-1]["content"]
+    assert json.loads(adapter.requests[1].messages[-1]["content"])[
+        "reused_inspection_ids"
+    ] == ["sample.v1"]
+
+
+def test_provider_reuses_a_canonical_terminal_completed_inspection(
+    tmp_path: Path,
+) -> None:
+    """A default run-root inspection is deterministic for its pinned source."""
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:model",
+                "kind": "model",
+                "node_hash": "node-hash",
+                "forest_node_key": "forest-node-key",
+                "context_fingerprint": "nocv1:test",
+            }
+        ],
+    )
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-time-again",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "time_index.v1",
+                            "target_ref": "run:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "submit-after-reuse",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _pinned_rerun_submit_call(context),
+            },
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        inspection_executor=lambda requests, current: pytest.fail(
+            f"initial terminal evidence should be reused, got {requests!r}"
+        ),
+    )
+
+    result = agent.plan(
+        context=context,
+        initial_evidence=_evidence(),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert json.loads(adapter.requests[1].messages[-1]["content"])[
+        "reused_inspection_ids"
+    ] == ["time_index.v1"]
 
 
 def test_provider_gets_server_owned_dataset_pin_after_invalid_submission(tmp_path: Path) -> None:
@@ -1649,6 +2408,32 @@ def test_run_execution_pins_include_the_registry_context_fingerprint(tmp_path: P
     assert pins["context_fingerprint"] == "nocv1:active-model"
     assert pins["context_fingerprint_by_node"] == {
         "stage:model": "nocv1:active-model"
+    }
+
+
+def test_workflow_execution_pins_use_server_resolved_raw_artifact_id(tmp_path: Path) -> None:
+    """A raw node's CAS path must never be passed as an artifact registry ID."""
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:raw",
+                "kind": "dataset_stage",
+                "stage": "source",
+                "artifact_id": "_uploads/source.csv",
+                "workflow_artifact_id": "raw_source_csv",
+                "context_fingerprint": "nocv1:raw-source",
+            }
+        ],
+    )
+
+    pins = NotebookPlanningAgent._execution_pins(context)["workflow_source"]
+
+    assert pins["target"] == {
+        "run_id": "run_001",
+        "node_ref": "stage:raw",
+        "artifact_id": "raw_source_csv",
     }
 
 

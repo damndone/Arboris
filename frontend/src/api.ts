@@ -14,6 +14,29 @@ export type RunResponse = {
   status: RunStatus;
 };
 
+export type RunDeletionPreview = {
+  run_id: string;
+  deletable: boolean;
+  blocking_descendant_run_ids: string[];
+  blocking_status: string | null;
+  artifact_counts: Record<string, number>;
+  report_count: number;
+  agent_session_ids: string[];
+  agent_event_session_ids: string[];
+  proposal_ids: string[];
+  operation_record_ids: string[];
+  retained_shared_record_ids: string[];
+  fingerprint: string;
+};
+
+export type RunDeletionReceipt = {
+  run_id: string;
+  deleted_agent_session_ids: string[];
+  deleted_agent_event_session_ids: string[];
+  deleted_proposal_ids: string[];
+  deleted_operation_record_ids: string[];
+};
+
 export type BatchRunSummary = {
   y: string;
   run_id: string;
@@ -741,6 +764,41 @@ export async function fetchRunDetail(
   );
   const response = await fetch(url);
   return readResponse<RunDetail>(response);
+}
+
+export async function previewRunDeletion(
+  projectRoot: string,
+  runId: string,
+): Promise<RunDeletionPreview> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/deletion-preview?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+  );
+  const body = await readResponse<{ preview: RunDeletionPreview }>(response);
+  return body.preview;
+}
+
+export async function confirmRunDeletion(
+  projectRoot: string,
+  runId: string,
+  confirmation: { fingerprint: string; confirmationRunId: string },
+): Promise<RunDeletionReceipt> {
+  const response = await fetch(
+    apiUrl(
+      `/runs/${encodeURIComponent(runId)}/deletion-confirmation?project_root=${encodeURIComponent(projectRoot)}`,
+    ),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fingerprint: confirmation.fingerprint,
+        confirmation_run_id: confirmation.confirmationRunId,
+      }),
+    },
+  );
+  const body = await readResponse<{ deletion: RunDeletionReceipt }>(response);
+  return body.deletion;
 }
 
 /**

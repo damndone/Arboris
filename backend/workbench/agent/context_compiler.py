@@ -508,8 +508,10 @@ def _project_lineage(
         node_id = node.get("id", key)
         indexed = indexed_nodes.get(node_id)
         node_hash = indexed.get("node_hash") if isinstance(indexed, dict) else None
+        cas_ref = indexed.get("cas_ref") if isinstance(indexed, dict) else None
+        artifact_id = cas_ref.get("artifact") if isinstance(cas_ref, dict) else None
         forest_key = f"{node_hash}::{node_id}" if node_hash else node_id
-        return {
+        projected = {
             "node_id": node_id,
             "kind": node.get("kind"),
             "stage": node.get("stage"),
@@ -519,6 +521,38 @@ def _project_lineage(
             "forest_node_key": forest_key,
             "context_fingerprint": context_fingerprint(node_id, node_hash, forest_key),
         }
+        # ``cas_ref.artifact`` is a repository-relative artifact identity, not
+        # a filesystem path.  A typed workflow needs that identity to bind its
+        # raw source; withholding it would force a planner to invent one.
+        if isinstance(artifact_id, str) and artifact_id:
+            projected["artifact_id"] = artifact_id
+        # A graph CAS reference may name the original upload rather than the
+        # artifact registry entry owned by the dataset stage.  Workflows bind
+        # to the latter, because the statistical source resolver validates
+        # ownership by registry artifact ID.  Publish that server-resolved ID
+        # separately so presentation lineage does not become an execution
+        # authority.
+        if (
+            node.get("kind") == "dataset_stage"
+            and node.get("stage") == "source"
+            and runs_root is not None
+            and active_head_run_id is not None
+            and isinstance(node_id, str)
+        ):
+            try:
+                from ..data_operations import resolve_data_column_cast_context
+
+                source = resolve_data_column_cast_context(
+                    runs_root.parent,
+                    source_run_id=active_head_run_id,
+                    source_node_id=node_id,
+                )
+                source_artifact_id = source.get("source_artifact_id")
+                if isinstance(source_artifact_id, str) and source_artifact_id:
+                    projected["workflow_artifact_id"] = source_artifact_id
+            except (OSError, ValueError, KeyError):
+                pass
+        return projected
 
     records = [
         project_node(key, node)

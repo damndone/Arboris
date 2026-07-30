@@ -14,6 +14,7 @@ import {
   type BottomPanelContext,
 } from "./registry/bottomPanelRegistry";
 import { useSessionByRunId } from "./state/useSessionByRunId";
+import { AgentComposer } from "./agent/AgentComposer";
 
 interface BottomPanelProps {
   runId: string;
@@ -104,10 +105,19 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
   const ctx: BottomPanelContext = { runId, projectRoot };
   const current = panelById(state.bottomPanel);
   const Body = current?.Component ?? null;
+  const showsCompactAgentComposer = !open && state.bottomPanel === "agent";
+  const expandAgentPanel = useCallback(() => {
+    setOpen(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="agent-composer"] textarea',
+      )?.focus();
+    });
+  }, [setOpen]);
 
   return (
     <div
-      className="bottom-panel"
+      className={`bottom-panel${showsCompactAgentComposer ? " bottom-panel--agent-compact" : ""}`}
       data-testid="bottom-panel"
       data-open={open ? "true" : "false"}
       style={{
@@ -115,8 +125,8 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
         display: "flex",
         flexDirection: "column",
         flex: "0 0 auto",
-        height: open ? clampHeight(height) : 34,
-        minHeight: open ? MIN_PANEL_HEIGHT : 34,
+        height: open ? clampHeight(height) : showsCompactAgentComposer ? "auto" : 34,
+        minHeight: open ? MIN_PANEL_HEIGHT : showsCompactAgentComposer ? 0 : 34,
       }}
     >
       {open ? (
@@ -240,6 +250,10 @@ export function BottomPanel({ runId, projectRoot }: BottomPanelProps) {
             </div>
           )}
         </>
+      ) : showsCompactAgentComposer ? (
+        <div className="bottom-panel__compact-agent" data-testid="bottom-panel-compact-agent">
+          <AgentComposer variant="compact" onExpand={expandAgentPanel} />
+        </div>
       ) : (
         <button
           type="button"

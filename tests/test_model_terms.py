@@ -45,6 +45,21 @@ def test_categorical_expands_to_dummies_with_one_dropped_reference() -> None:
     assert set(frame["wave_2002"].unique()) == {0, 1}
 
 
+def test_categorical_reuses_an_equivalent_persisted_indicator() -> None:
+    """A verified source indicator is the same term, not a name collision."""
+
+    source = _frame()
+    source["wave_2002"] = (source["wave"] == 2002).astype(int)
+
+    frame, predictors, references = expand_branch_terms(
+        source, _branch(categorical=["wave"])
+    )
+
+    assert predictors == ["x", "wave_2002", "wave_2006"]
+    assert references == {"wave": 1998}
+    assert frame["wave_2002"].equals(source["wave_2002"])
+
+
 def test_polynomial_adds_powers_without_implying_the_linear_term() -> None:
     frame, predictors, _ = expand_branch_terms(
         _frame(), _branch(polynomials=[{"column": "size", "degree": 3}])
@@ -132,6 +147,14 @@ def test_a_derived_name_that_collides_with_real_data_is_refused() -> None:
     frame = _frame().assign(size_pow2=0.0)
     with pytest.raises(ModelTermError, match="collides"):
         expand_branch_terms(frame, _branch(polynomials=[{"column": "size", "degree": 2}]))
+
+
+def test_a_categorical_collision_with_different_values_is_refused() -> None:
+    """A similarly named real column cannot silently change a fixed effect."""
+
+    frame = _frame().assign(wave_2002=1)
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(frame, _branch(categorical=["wave"]))
 
 
 def test_a_branch_without_derived_terms_is_left_exactly_as_it_was() -> None:

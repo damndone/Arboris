@@ -16,6 +16,8 @@ export interface ForestContextValue {
   /** Reload the forest after a durable change (e.g. a new comparison node).
    *  Optional so existing test providers stay valid. */
   refetch?: () => void;
+  /** Refresh all run-scoped surfaces after a permanent Run deletion. */
+  onRunDeleted?: (runId: string) => void;
 }
 
 export const ForestContext = createContext<ForestContextValue | null>(null);

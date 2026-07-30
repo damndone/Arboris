@@ -25,7 +25,7 @@
 // Table / Pipeline views compose into the same shell so the drawer +
 // rail + panel + search palette work identically across them.
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   useLocation,
   useNavigate,
@@ -38,7 +38,11 @@ import { ErrorBanner, Loading } from "../lineage/statusViews";
 import { useGraphKeyboard } from "../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../lineage/detail/DetailDrawer";
 import { RawJsonModal } from "../lineage/modals/RawJsonModal";
-import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
+import {
+  RunHistoryRail,
+  persistRunHistoryOpen,
+  readRunHistoryOpen,
+} from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { useWorkbench } from "./WorkbenchStateProvider";
@@ -302,14 +306,29 @@ function ForestWorkbench({
     };
   }, [focusRunId, legacyFocusProbeKey, projectRoot]);
 
+  const visibleDraftIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    const values = [searchParams.get("active"), searchParams.get("focus"), searchParams.get("tabs")]
+      .filter((value): value is string => Boolean(value))
+      .flatMap((value) => value.split(","));
+    const draftIds = new Set(values.flatMap((value) => {
+      if (!value.startsWith("draft:")) return [];
+      const draftId = value.slice("draft:".length).split(":")[0];
+      return draftId ? [draftId] : [];
+    }));
+    // An empty set means the URL did not request a draft filter. Passing that
+    // empty set to mergeDraftsIntoModel hid every hydrated draft, including a
+    // persisted genesis draft in a zero-run project.
+    return draftIds.size > 0 ? draftIds : undefined;
+  }, [searchParams]);
+
   const model = useMemo(
     () => {
       const base = forest
         ? forestToGraphViewModel(forest, resolvedRunId ?? "")
         : null;
-      return base ? mergeDraftsIntoModel(base, registry) : null;
+      return base ? mergeDraftsIntoModel(base, registry, { visibleDraftIds }) : null;
     },
-    [forest, resolvedRunId, registry],
+    [forest, resolvedRunId, registry, visibleDraftIds],
   );
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
@@ -505,6 +524,17 @@ function ForestWorkbench({
     void refetch();
   };
 
+  const handleRunDeleted = (deletedRunId: string) => {
+    const fallbackRunId = forest.heads.find(
+      (head) => head.runId !== deletedRunId,
+    )?.runId ?? null;
+    setActiveRunId((current) =>
+      current === deletedRunId ? fallbackRunId : current,
+    );
+    setRailRefreshToken((token) => token + 1);
+    void refetch();
+  };
+
   const handleExecuteDraft = async (draftId: string) => {
     const entry = registry.get(draftId);
     if (!entry) return;
@@ -624,7 +654,16 @@ function ForestWorkbench({
   const notebookActiveRunId = forest.heads.some((head) => head.runId === effectiveActiveRunId)
     ? effectiveActiveRunId
     : null;
-  const body = !shellRunId && searchParams.get("view") === "notebook" ? (
+  const selectedView = searchParams.get("view");
+  const waitForPersistedGenesisDrafts =
+    !shellRunId &&
+    forest.heads.length === 0 &&
+    !draftHandlers.persistedDraftsHydrated &&
+    selectedView !== "notebook" &&
+    selectedView !== "home";
+  const body = waitForPersistedGenesisDrafts ? (
+    <Loading />
+  ) : !shellRunId && selectedView === "notebook" ? (
     <NotebookOnlyShell
       projectRoot={projectRoot}
       activeRunId={notebookActiveRunId}
@@ -633,7 +672,7 @@ function ForestWorkbench({
         void refetch();
       }}
     />
-  ) : !shellRunId && searchParams.get("view") === "home" ? (
+  ) : !shellRunId && selectedView === "home" ? (
     <HomeOnlyShell
       projectRoot={projectRoot}
       onOpenSettings={() => setSettingsOpen(true)}
@@ -653,6 +692,7 @@ function ForestWorkbench({
           activeRunId: effectiveActiveRunId,
           setActiveRunId,
           refetch: () => void refetch(),
+          onRunDeleted: handleRunDeleted,
         }}
       >
         <WorkbenchStateProvider runId={shellRunId} validNodeKeys={validNodeKeys}>
@@ -1047,6 +1087,16 @@ function WorkbenchShell({
   const navigate = useNavigate();
   const [navigationParams, setNavigationParams] = useSearchParams();
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
+  const [runHistoryOpen, setRunHistoryOpen] = useState(() => readRunHistoryOpen(projectRoot));
+
+  useEffect(() => {
+    setRunHistoryOpen(readRunHistoryOpen(projectRoot));
+  }, [projectRoot]);
+
+  const onRunHistoryOpenChange = useCallback((open: boolean) => {
+    persistRunHistoryOpen(projectRoot, open);
+    setRunHistoryOpen(open);
+  }, [projectRoot]);
 
   const openAgentNavigation = useMemo(
     () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
@@ -1133,6 +1183,36 @@ function WorkbenchShell({
     >
       <WorkbenchTopbar
         projectRoot={projectRoot}
+        leadingActions={
+          state.view !== "home" ? (
+            <button
+              type="button"
+              data-testid="run-history-toggle"
+              aria-label={runHistoryOpen ? "Hide run history" : "Show run history"}
+              title={runHistoryOpen ? "Hide runs" : "Show runs"}
+              onClick={() => onRunHistoryOpenChange(!runHistoryOpen)}
+              style={{
+                alignItems: "center",
+                display: "inline-flex",
+                height: 28,
+                justifyContent: "center",
+                padding: 4,
+                width: 28,
+                border: 0,
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--label-secondary)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </button>
+          ) : null
+        }
         extraActions={
           onResumeGenesisDraft ? (
             <button
@@ -1165,7 +1245,13 @@ function WorkbenchShell({
             overflow: "hidden",
           }}
         >
-          {state.view !== "home" && <RunHistoryRail projectRoot={projectRoot} />}
+          {state.view !== "home" && (
+            <RunHistoryRail
+              projectRoot={projectRoot}
+              open={runHistoryOpen}
+              onOpenChange={onRunHistoryOpenChange}
+            />
+          )}
           <div
             data-testid="workbench-center-column"
             style={{

@@ -2,7 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { GraphCanvas, waitingReviewsCount } from "./GraphCanvas";
+import {
+  GRAPH_MIN_ZOOM,
+  GraphCanvas,
+  waitingReviewsCount,
+} from "./GraphCanvas";
 import { adaptRunGraph } from "../api/graphAdapter";
 import type { GraphResponse, LineageEdge, LineageNode } from "../types";
 
@@ -119,6 +123,40 @@ function StatefulVariableGraph() {
 }
 
 describe("GraphCanvas", () => {
+  it("uses a wide zoom-out floor for dense lineage graphs", () => {
+    expect(GRAPH_MIN_ZOOM).toBe(0.1);
+  });
+
+  it("does not place graph cleanup controls over the canvas", () => {
+    sessionStorage.clear();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId="stage:cleaned"
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("canvas-hide-selected")).toBeNull();
+    expect(screen.queryByTestId("canvas-restore-hidden")).toBeNull();
+  });
+
+  it("does not place a global run-and-review card over the lineage canvas", () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("canvas-status")).toBeNull();
+  });
+
   it("reports a blank-canvas click separately from node selection", async () => {
     const onPaneClick = vi.fn();
     render(
@@ -140,6 +178,29 @@ describe("GraphCanvas", () => {
     fireEvent.click(pane);
 
     expect(onPaneClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a blank-canvas right click for the context menu", async () => {
+    const onPaneContextMenu = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+        onPaneContextMenu={onPaneContextMenu}
+      />,
+    );
+
+    const pane = await waitFor(() => {
+      const el = document.querySelector(".react-flow__pane");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.contextMenu(pane, { clientX: 42, clientY: 24 });
+
+    expect(onPaneContextMenu).toHaveBeenCalledWith(42, 24);
   });
 
   it("clicking a folded variable group requests expansion", async () => {
@@ -610,27 +671,6 @@ describe("GraphCanvas", () => {
       }
     });
 
-    it("shows a concise run label without a meaningless zero-review counter", () => {
-      renderCanvas();
-      const status = screen.getByTestId("canvas-status");
-      expect(status).toHaveTextContent("Run r1");
-      expect(screen.queryByTestId("canvas-status-count")).toBeNull();
-    });
-
-    it("hides the status card when a draft graph has neither a run id nor pending reviews", () => {
-      const draftModel = { ...model(graph()), runId: "" };
-      render(
-        <GraphCanvas
-          model={draftModel}
-          selectedNodeId={null}
-          expandedGroups={new Set()}
-          onSelect={vi.fn()}
-          onExpandGroup={vi.fn()}
-        />,
-      );
-      expect(screen.queryByTestId("canvas-status")).toBeNull();
-    });
-
     it("counts decisions with reviewStatus ∈ {needed, failed} across all nodes", () => {
       // Build a graph with mixed review states; verify the badge text +
       // warn class. waitingReviewsCount itself is the pure unit.
@@ -718,9 +758,9 @@ describe("GraphCanvas", () => {
           onExpandGroup={vi.fn()}
         />,
       );
-      const count = screen.getByTestId("canvas-status-count");
-      expect(count).toHaveTextContent("2 reviews needed");
-      expect(count.className).toContain("--warn");
+      // Each affected node retains its own review badge; there is no global
+      // status card obscuring the lineage canvas.
+      expect(screen.getAllByTestId("node-badge")).toHaveLength(2);
     });
 
     // REV-2: explicitly verify non-triggering decision statuses do
@@ -771,7 +811,7 @@ describe("GraphCanvas", () => {
       expect(waitingReviewsCount(vm)).toBe(0);
     });
 
-    it("waitingReviewsCount uses singular form for N=1", () => {
+    it("waitingReviewsCount reports one review for a single flagged decision", () => {
       const g: GraphResponse = {
         schema_version: 2,
         run_id: "r-single",
@@ -807,18 +847,7 @@ describe("GraphCanvas", () => {
         edges: {},
         branches: {},
       };
-      render(
-        <GraphCanvas
-          model={model(g)}
-          selectedNodeId={null}
-          expandedGroups={new Set()}
-          onSelect={vi.fn()}
-          onExpandGroup={vi.fn()}
-        />,
-      );
-      expect(screen.getByTestId("canvas-status-count")).toHaveTextContent(
-        "1 review needed",
-      );
+      expect(waitingReviewsCount(model(g))).toBe(1);
     });
 
     it("renders all 8 stage swatches in the legend (collapsed by default)", () => {

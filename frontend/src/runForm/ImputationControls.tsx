@@ -15,6 +15,7 @@ export function ImputationControls(props: {
       <div className="imputation-controls">
         <label>
           <input
+            className="imputation-controls__toggle"
             type="checkbox"
             checked={props.value === only.key}
             onChange={(e) => props.onChange(e.target.checked ? only.key : null)}

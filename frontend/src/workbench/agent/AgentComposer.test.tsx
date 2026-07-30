@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentComposer } from "./AgentComposer";
 import {
@@ -13,6 +13,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     prompt: "",
     setPrompt: vi.fn(),
     sendPrompt: vi.fn(),
+    abortTurn: vi.fn(),
     isSubmitting: false,
     error: null,
     scopeLabel: "Current chain",
@@ -37,6 +38,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     hierarchy: null,
     eventCursor: 0,
     lastEventType: null,
+    liveResponseText: "",
     ...overrides,
   };
 }
@@ -55,6 +57,101 @@ describe("AgentComposer", () => {
 
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByText(/^idle$/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the compact composer interactive and expands only from its disclosure control", () => {
+    const context = value({ prompt: "inspect the active head" });
+    const onExpand = vi.fn();
+    render(
+      <AgentSurfaceContext.Provider value={context}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const compactComposer = screen.getByTestId("agent-compact-composer");
+    const input = screen.getByRole("textbox", { name: "Ask Agent" });
+    expect(compactComposer).toContainElement(input);
+    expect(compactComposer).toContainElement(screen.getByTestId("agent-context-ring"));
+    expect(screen.getByRole("listbox", { name: "Agent model" })).toBeInTheDocument();
+    expect(compactComposer).not.toContainElement(
+      screen.getByRole("button", { name: "Expand Agent panel" }),
+    );
+
+    fireEvent.change(input, { target: { value: "compare the active models" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(screen.getByRole("listbox", { name: "Agent model" }), {
+      target: { value: "deepseek-chat" },
+    });
+
+    expect(context.setPrompt).toHaveBeenCalledWith("compare the active models");
+    expect(context.sendPrompt).toHaveBeenCalledWith("inspect the active head");
+    expect(context.setModel).toHaveBeenCalledWith("deepseek-chat");
+    expect(onExpand).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Agent panel" }));
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps compact turn activity outside the input bar until the user opens it", () => {
+    const context = value({
+      isSubmitting: true,
+      sessionStatus: "running",
+      lastEventType: "tool_call",
+      activeTurnStartedAt: Date.now() - 4_000,
+    });
+    const onExpand = vi.fn();
+    render(
+      <AgentSurfaceContext.Provider value={context}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const activity = screen.getByRole("button", { name: "View Agent activity" });
+    expect(activity).toHaveTextContent(/working/i);
+    expect(activity).toHaveTextContent(/checking evidence/i);
+    expect(screen.getByTestId("agent-compact-composer")).not.toContainElement(activity);
+
+    fireEvent.click(activity);
+
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a sent compact prompt collapsed and then reports its completion", async () => {
+    const onExpand = vi.fn();
+    const initialContext = value({ prompt: "summarize the active model" });
+    const rendered = render(
+      <AgentSurfaceContext.Provider value={initialContext}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    expect(initialContext.sendPrompt).toHaveBeenCalledWith("summarize the active model");
+    expect(onExpand).not.toHaveBeenCalled();
+
+    rendered.rerender(
+      <AgentSurfaceContext.Provider value={value({
+        prompt: "",
+        isSubmitting: true,
+        sessionStatus: "running",
+        activeTurnStartedAt: Date.now() - 1_000,
+      })}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(/working/i);
+
+    rendered.rerender(
+      <AgentSurfaceContext.Provider value={value({ prompt: "" })}>
+        <AgentComposer variant="compact" onExpand={onExpand} />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "View Agent activity" })).toHaveTextContent(/processed/i);
+    });
+    expect(onExpand).not.toHaveBeenCalled();
   });
 
   it("renders the bounded context ring and synchronized model selector", () => {
@@ -141,7 +238,7 @@ describe("AgentComposer", () => {
     expect(context.sendPrompt).toHaveBeenCalledWith("inspect the active head");
   });
 
-  it("shows a visible error and disables submission while the turn is running", () => {
+  it("shows a visible error and replaces submission with stopping while the turn is running", () => {
     mount(
       value({
         isSubmitting: true,
@@ -151,7 +248,21 @@ describe("AgentComposer", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Thinking");
     expect(screen.getByRole("alert")).toHaveTextContent("LLM upstream is unavailable");
-    expect(screen.getByRole("button", { name: "Send to Agent" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send to Agent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop Agent" })).toBeEnabled();
+  });
+
+  it("offers an explicit stop control while a provider turn is running", () => {
+    const abortTurn = vi.fn();
+    mount({
+      ...value({ isSubmitting: true }),
+      abortTurn,
+    } as AgentSurfaceContextValue);
+
+    const stop = screen.getByRole("button", { name: "Stop Agent" });
+    expect(stop).toBeEnabled();
+    fireEvent.click(stop);
+    expect(abortTurn).toHaveBeenCalledTimes(1);
   });
 
   it("renders a hollow ring whose progress arc uses a round linecap and does not resize", () => {

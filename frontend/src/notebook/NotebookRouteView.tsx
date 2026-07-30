@@ -6,17 +6,20 @@ import { uploadDataset } from "../api";
 import {
   cancelNotebookPlanning,
   compileNotebookContext,
+  confirmNotebookOption,
   confirmAndExecuteNotebookOption,
+  ensureNotebookDatasetProjection,
   ensureNotebookProjection,
   getNotebook,
+  updateNotebookFocus,
   getNotebookTrace,
   listNotebooks,
   listNotebookOptions,
-  materializeNotebookOption,
   proposeNotebookOptions,
   recordNotebookDecision,
   type NotebookMaterializationResponse,
   type NotebookContextResponse,
+  type NotebookInteractionMode,
   type NotebookRecord,
 } from "./notebookApi";
 import { NotebookSurface } from "./NotebookSurface";
@@ -46,7 +49,7 @@ import type {
   DomainMemoryRetrievalProjection,
 } from "./domainMemoryContracts";
 
-type ApiErrorLike = Error & { code?: string | null };
+type ApiErrorLike = Error & { code?: string | null; status?: number | null };
 
 type NotebookPlanningResponse = Awaited<ReturnType<typeof proposeNotebookOptions>>;
 
@@ -68,11 +71,14 @@ function proposeNotebookOptionsOnce(
   notebookId: string,
   refreshToken: number,
   preferences: DomainMemoryPreferences | undefined,
+  interactionMode: NotebookInteractionMode,
 ): ActivePlanningRequest {
+  const maxOptions = interactionMode === "action" ? 1 : 3;
   const scopeKey = JSON.stringify({
     projectRoot,
     notebookId,
     preferences: preferences ?? null,
+    interactionMode,
   });
   const requestKey = `${scopeKey}:${refreshToken}`;
   const current = planningRequests.get(scopeKey);
@@ -83,11 +89,11 @@ function proposeNotebookOptionsOnce(
   }`;
   const controller = new AbortController();
   const promise = preferences
-    ? proposeNotebookOptions(projectRoot, notebookId, 3, preferences, {
+    ? proposeNotebookOptions(projectRoot, notebookId, maxOptions, preferences, {
         attemptId,
         signal: controller.signal,
       })
-    : proposeNotebookOptions(projectRoot, notebookId, 3, undefined, {
+    : proposeNotebookOptions(projectRoot, notebookId, maxOptions, undefined, {
         attemptId,
         signal: controller.signal,
       });
@@ -108,6 +114,15 @@ function failurePacket(error: unknown): { code: string; message: string } {
     code: candidate?.code ?? "NOTEBOOK_LOAD_FAILED",
     message: error instanceof Error ? error.message : "Notebook request failed",
   };
+}
+
+function persistedInteractionMode(notebook: NotebookRecord): NotebookInteractionMode {
+  return notebook.user_focus?.interaction_mode === "action" ? "action" : "plan";
+}
+
+function isMissingNotebook(error: unknown): boolean {
+  const candidate = error as ApiErrorLike | null;
+  return candidate?.code === "NOTEBOOK_NOT_FOUND" || candidate?.status === 404;
 }
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -385,6 +400,7 @@ export function NotebookRouteView({
   const [notebookId, setNotebookId] = useState<string | null>(
     searchParams.get("notebook"),
   );
+  const [routeChoices, setRouteChoices] = useState<NotebookRecord[] | null>(null);
   const [view, setView] = useState<NotebookView>({ status: "loading" });
   const [busy, setBusy] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -397,31 +413,55 @@ export function NotebookRouteView({
     message: string;
   } | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [reloadToken, setReloadToken] = useState(0);
   const [domainMemoryPreferences, setDomainMemoryPreferences] = useState<DomainMemoryPreferences>({
     cross_project_domain_memory_use: false,
     cross_project_domain_memory_iteration: false,
   });
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [notebookIntent, setNotebookIntent] = useState("");
+  const [notebookInteractionMode, setNotebookInteractionMode] =
+    useState<NotebookInteractionMode>("plan");
   const initializationClaimedRef = useRef(false);
   const lastLoadKeyRef = useRef<string | null>(null);
   const lastReadyViewRef = useRef<NotebookReadyView | null>(null);
   const activePlanningRef = useRef<ActivePlanningRequest | null>(null);
+  const completedPlanningTokenRef = useRef(0);
   const loadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
     const generation = loadGenerationRef.current + 1;
     loadGenerationRef.current = generation;
     const preserved = lastReadyViewRef.current;
-    if (!(refreshToken > 0 && preserved)) {
+    const explicitReplan = refreshToken > completedPlanningTokenRef.current;
+    if (!(explicitReplan && preserved)) {
       setView({ status: "loading" });
     }
+    let discoveredNotebooks: NotebookRecord[] | null = null;
     try {
       let notebook: NotebookRecord;
       if (notebookId) {
-        notebook = await getNotebook(projectRoot, notebookId);
+        try {
+          notebook = await getNotebook(projectRoot, notebookId);
+        } catch (error) {
+          // A Notebook is a durable project projection. A deep link can outlive
+          // a deleted projection, but recovering is only safe when this project
+          // has exactly one remaining Notebook; otherwise retain the error rather
+          // than silently choosing a different analysis.
+          if (!isMissingNotebook(error)) throw error;
+          const persisted = await listNotebooks(projectRoot);
+          discoveredNotebooks = persisted;
+          if (persisted.length !== 1) throw error;
+          notebook = persisted[0];
+          setNotebookId(notebook.notebook_id);
+          const next = new URLSearchParams(searchParams);
+          next.set("notebook", notebook.notebook_id);
+          setSearchParams(next, { replace: true });
+        }
       } else {
         const persisted = await listNotebooks(projectRoot);
+        discoveredNotebooks = persisted;
         if (persisted.length === 1) {
           // The Notebook is a durable project projection, not a view-local
           // cache.  Outer Workbench navigation can intentionally drop the
@@ -435,6 +475,7 @@ export function NotebookRouteView({
             title: "Analysis Notebook",
           });
         } else {
+          setRouteChoices(persisted.length > 0 ? persisted : null);
           return;
         }
         setNotebookId(notebook.notebook_id);
@@ -442,6 +483,13 @@ export function NotebookRouteView({
         next.set("notebook", notebook.notebook_id);
         setSearchParams(next, { replace: true });
       }
+      setRouteChoices(null);
+      const userGoal = typeof notebook.user_focus?.goal === "string"
+        ? notebook.user_focus.goal.trim()
+        : "";
+      setNotebookIntent(userGoal);
+      const interactionMode = persistedInteractionMode(notebook);
+      setNotebookInteractionMode(interactionMode);
 
       const memoryRequestPreferences =
         domainMemoryPreferences.cross_project_domain_memory_use ||
@@ -452,35 +500,39 @@ export function NotebookRouteView({
         ? await compileNotebookContext(projectRoot, notebook.notebook_id, memoryRequestPreferences)
         : await compileNotebookContext(projectRoot, notebook.notebook_id);
       let snapshot: NotebookPlanningResponse;
-      if (refreshToken > 0) {
+      if (explicitReplan && userGoal) {
         const request = proposeNotebookOptionsOnce(
             projectRoot,
             notebook.notebook_id,
             refreshToken,
             memoryRequestPreferences,
+            interactionMode,
           );
         activePlanningRef.current = request;
         setPlanningError(null);
         setPlanning(true);
         if (!preserved) setView({ status: "loading", phase: "planning" });
         snapshot = await request.promise;
+        completedPlanningTokenRef.current = refreshToken;
       } else {
         snapshot = memoryRequestPreferences
           ? await listNotebookOptions(projectRoot, notebook.notebook_id, memoryRequestPreferences)
           : await listNotebookOptions(projectRoot, notebook.notebook_id);
       }
-      if (snapshot.options.length === 0) {
+      if (snapshot.options.length === 0 && userGoal) {
         const request = proposeNotebookOptionsOnce(
           projectRoot,
           notebook.notebook_id,
           refreshToken,
           memoryRequestPreferences,
+          interactionMode,
         );
         activePlanningRef.current = request;
         setPlanningError(null);
         setPlanning(true);
         if (!preserved) setView({ status: "loading", phase: "planning" });
         snapshot = await request.promise;
+        completedPlanningTokenRef.current = refreshToken;
       }
       const traceId = snapshot.trace_id ?? compiled.trace_id;
       const trace = traceId
@@ -516,6 +568,10 @@ export function NotebookRouteView({
       setView(nextView);
     } catch (error: unknown) {
       if (generation !== loadGenerationRef.current) return;
+      if (discoveredNotebooks?.length) {
+        setRouteChoices(discoveredNotebooks);
+        return;
+      }
       if (!notebookId) initializationClaimedRef.current = false;
       const failure = failurePacket(error);
       if (lastReadyViewRef.current && activePlanningRef.current) {
@@ -535,6 +591,7 @@ export function NotebookRouteView({
     domainMemoryPreferences,
     notebookId,
     projectRoot,
+    reloadToken,
     refreshToken,
     searchParams,
     setSearchParams,
@@ -546,6 +603,7 @@ export function NotebookRouteView({
       notebookId,
       activeRunId,
       refreshToken,
+      reloadToken,
       domainMemoryUse: domainMemoryPreferences.cross_project_domain_memory_use,
       domainMemoryIteration:
         domainMemoryPreferences.cross_project_domain_memory_iteration,
@@ -567,6 +625,7 @@ export function NotebookRouteView({
     load,
     notebookId,
     projectRoot,
+    reloadToken,
     refreshToken,
   ]);
 
@@ -584,6 +643,7 @@ export function NotebookRouteView({
         created_by: "user",
         title: "Analysis Notebook",
       });
+      setRouteChoices(null);
       setNotebookId(notebook.notebook_id);
       const next = new URLSearchParams(searchParams);
       next.set("notebook", notebook.notebook_id);
@@ -596,10 +656,39 @@ export function NotebookRouteView({
     }
   }
 
+  async function startFromSourceRun() {
+    if (!activeRunId) return;
+    setUploadBusy(true);
+    setUploadError(null);
+    try {
+      const notebook = await ensureNotebookDatasetProjection(projectRoot, {
+        from_run_id: activeRunId,
+        created_by: "user",
+        title: "New analysis from source data",
+      });
+      initializationClaimedRef.current = false;
+      setRouteChoices(null);
+      setNotebookId(notebook.notebook_id);
+      const next = new URLSearchParams(searchParams);
+      next.set("notebook", notebook.notebook_id);
+      setSearchParams(next, { replace: true });
+      setView({ status: "loading" });
+    } catch (error: unknown) {
+      setUploadError(
+        error instanceof Error ? error.message : "Could not start from source data",
+      );
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
   function updateWithOption(option: NotebookOptionRevision, extras: Partial<NotebookData> = {}) {
-    setView((current) =>
-      current.status === "ready" ? replaceOption(current, option, extras) : current,
-    );
+    setView((current) => {
+      if (current.status !== "ready") return current;
+      const next = replaceOption(current, option, extras);
+      lastReadyViewRef.current = next;
+      return next;
+    });
   }
 
   async function decide(option: NotebookOptionRevision, decision: "deferred" | "rejected") {
@@ -652,6 +741,42 @@ export function NotebookRouteView({
 
   function revalidateOption() {
     setRefreshToken((token) => token + 1);
+  }
+
+  async function submitNotebookIntent(goal: string) {
+    if (!notebookId) return;
+    setActionError(null);
+    try {
+      const notebook = await updateNotebookFocus(projectRoot, notebookId, {
+        goal,
+        interaction_mode: notebookInteractionMode,
+      });
+      setNotebookIntent(typeof notebook.user_focus?.goal === "string" ? notebook.user_focus.goal : goal);
+      setNotebookInteractionMode(persistedInteractionMode(notebook));
+      setRefreshToken((token) => token + 1);
+    } catch (error: unknown) {
+      setActionError(failurePacket(error));
+    }
+  }
+
+  async function changeNotebookInteractionMode(mode: NotebookInteractionMode) {
+    if (!notebookId || mode === notebookInteractionMode) return;
+    setActionError(null);
+    try {
+      const notebook = await updateNotebookFocus(projectRoot, notebookId, {
+        interaction_mode: mode,
+      });
+      setNotebookIntent(
+        typeof notebook.user_focus?.goal === "string"
+          ? notebook.user_focus.goal
+          : notebookIntent,
+      );
+      setNotebookInteractionMode(persistedInteractionMode(notebook));
+      // Mode changes preserve prior history but do not begin planning or execution.
+      setReloadToken((token) => token + 1);
+    } catch (error: unknown) {
+      setActionError(failurePacket(error));
+    }
   }
 
   function showConfirmation(
@@ -717,25 +842,56 @@ export function NotebookRouteView({
             proposal_revision: selection.option.typed_proposal_revision,
           },
         );
+        // A completed workflow can publish several sibling runs. Refresh the
+        // forest before reloading the Notebook so the Global Agent receives a
+        // new, durable project overview instead of continuing on the source
+        // run that existed when its session was created.
+        forest?.refetch?.();
         setView((current) =>
           current.status === "ready"
             ? { ...current, notebook: { ...current.notebook, confirmation: null } }
             : current,
         );
-        setRefreshToken((token) => token + 1);
+        setReloadToken((token) => token + 1);
         return;
       }
-      const response = await materializeNotebookOption(
+      const response = await confirmNotebookOption(
         projectRoot,
         selection.option.notebook_id,
         selection.option.option_id,
+        {
+          option_revision: selection.option.option_revision,
+          proposal_id: selection.option.typed_proposal_id,
+          proposal_revision: selection.option.typed_proposal_revision,
+        },
       );
-      if (!response.materialization) {
-        throw new Error("Notebook materialization response is missing its record");
+      const packet = recordValue(response);
+      if ("workflow_execution" in packet) {
+        // See the equivalent confirm-and-execute path above.  The normal
+        // confirmation endpoint may execute a composed workflow synchronously
+        // and therefore needs the same project-context refresh.
+        forest?.refetch?.();
+        setView((current) =>
+          current.status === "ready"
+            ? { ...current, notebook: { ...current.notebook, confirmation: null } }
+            : current,
+        );
+        setReloadToken((token) => token + 1);
+        return;
       }
-      const materialization = parseOptionMaterialization(response.materialization);
-      draftActions?.onForkDraft(response);
-      onMaterializedDraft?.(response);
+      if (!("materialization" in packet)) {
+        setView((current) =>
+          current.status === "ready"
+            ? { ...current, notebook: { ...current.notebook, confirmation: null } }
+            : current,
+        );
+        setReloadToken((token) => token + 1);
+        return;
+      }
+      const materializationResponse = response as unknown as NotebookMaterializationResponse;
+      const materialization = parseOptionMaterialization(materializationResponse.materialization);
+      draftActions?.onForkDraft(materializationResponse);
+      onMaterializedDraft?.(materializationResponse);
       forest?.refetch?.();
       const materialized = { ...selection.option, lifecycle_status: "materialized" as const };
       updateWithOption(materialized, { confirmation: null, materialization });
@@ -842,6 +998,42 @@ export function NotebookRouteView({
     }
   }
 
+  function openRouteNotebook(notebook: NotebookRecord) {
+    initializationClaimedRef.current = false;
+    setRouteChoices(null);
+    setNotebookId(notebook.notebook_id);
+    const next = new URLSearchParams(searchParams);
+    next.set("notebook", notebook.notebook_id);
+    setSearchParams(next, { replace: true });
+    setView({ status: "loading" });
+  }
+
+  if (routeChoices?.length) {
+    return (
+      <section className="nb-dataset-start" data-testid="notebook-route-chooser">
+        <span className="nb-label">Choose an existing analysis</span>
+        <h2>Several durable Notebooks are available</h2>
+        <p>
+          Workbench cannot safely infer which analysis you meant. Choose one to open it,
+          or start a new analysis from verified source data.
+        </p>
+        <div className="nb-route-choice-list">
+          {routeChoices.map((notebook) => (
+            <button
+              key={notebook.notebook_id}
+              type="button"
+              data-testid={`notebook-choice-${notebook.notebook_id}`}
+              onClick={() => openRouteNotebook(notebook)}
+            >
+              <strong>{notebook.title || "Untitled analysis"}</strong>
+              <span>{notebook.active_head_run_id ?? "No completed Run"}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
   if (!notebookId && !activeRunId) {
     return (
       <section className="nb-dataset-start" data-testid="notebook-dataset-start">
@@ -884,11 +1076,21 @@ export function NotebookRouteView({
         }
       }}
     >
+      {uploadError ? <p role="alert" data-testid="notebook-source-restart-error">{uploadError}</p> : null}
       <NotebookSurface
         view={view}
         projectRoot={projectRoot}
         busy={busy}
-        onReplan={() => setRefreshToken((token) => token + 1)}
+        onStartNewAnalysis={activeRunId ? () => void startFromSourceRun() : undefined}
+        newAnalysisDisabled={uploadBusy}
+        onReplan={() => {
+          if (notebookIntent.trim()) setRefreshToken((token) => token + 1);
+          else setActionError({ code: "NOTEBOOK_GOAL_REQUIRED", message: "Describe what you want to find out before planning options." });
+        }}
+        interactionMode={notebookInteractionMode}
+        onInteractionModeChange={(mode) => void changeNotebookInteractionMode(mode)}
+        userIntent={notebookIntent}
+        onUserIntent={(goal) => void submitNotebookIntent(goal)}
         onCancelPlanning={cancelPlanning}
         planning={planning}
         planningError={planningError}

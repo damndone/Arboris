@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
-from ..artifacts import read_json, register_artifact, write_json
+from ..artifacts import read_json, register_artifact, sha256_file, write_json, write_text_durable
 from ..econometrics.runner import run_ols
 from ..exports import export_pdf, export_xlsx
+from ..graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
+from ..graph_store import GraphStore
 from ..lineage.pipeline_drafts import (
     PipelineDraftStore,
     compute_executable_draft_hash,
@@ -43,6 +47,268 @@ from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
 from .workflow_contracts import workflow_dispatcher_key
+
+
+_NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
+
+
+def _apply_numeric_recipes(
+    frame: pd.DataFrame,
+    recipes: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Apply the closed transform vocabulary to a copy of a source frame.
+
+    Contract validation owns recipe shape; runtime validation owns actual data
+    domain checks.  In particular, a log is never silently evaluated on zero,
+    negative, or non-numeric values, and arithmetic cannot produce infinities.
+    """
+
+    derived = frame.copy()
+    summaries: list[dict[str, Any]] = []
+    for recipe in recipes:
+        operator = str(recipe["operator"])
+        inputs = [str(column) for column in recipe["input_columns"]]
+        output_name = str(recipe["output_name"])
+        if output_name in derived.columns:
+            raise WorkflowExecutionError(
+                f"numeric derivation output already exists: {output_name}"
+            )
+        missing = [column for column in inputs if column not in derived.columns]
+        if missing:
+            raise WorkflowExecutionError(
+                "numeric derivation source column is unavailable: " + ", ".join(missing)
+            )
+        numeric_inputs: list[pd.Series] = []
+        for column in inputs:
+            original = derived[column]
+            converted = pd.to_numeric(original, errors="coerce")
+            if bool((original.notna() & converted.isna()).any()):
+                raise WorkflowExecutionError(
+                    f"numeric derivation input is not numeric: {column}"
+                )
+            numeric_inputs.append(converted.astype(float))
+        if operator == "natural_log":
+            value = numeric_inputs[0]
+            if bool((value.dropna() <= 0).any()):
+                raise WorkflowExecutionError(
+                    f"natural_log requires strictly positive values: {inputs[0]}"
+                )
+            result = np.log(value)
+        elif operator == "multiply":
+            result = numeric_inputs[0] * numeric_inputs[1]
+        else:  # contract validation should make this unreachable
+            raise WorkflowExecutionError(f"numeric derivation operator is unsupported: {operator}")
+        finite = result.notna()
+        if bool((~np.isfinite(result[finite])).any()):
+            raise WorkflowExecutionError(
+                f"numeric derivation produced non-finite values: {output_name}"
+            )
+        derived[output_name] = result
+        summaries.append(
+            {
+                "operator": operator,
+                "input_columns": inputs,
+                "output_name": output_name,
+                "nonmissing_count": int(finite.sum()),
+                "missing_count": int(result.isna().sum()),
+            }
+        )
+    return derived, summaries
+
+
+def _upstream_numeric_steps(
+    draft: WorkflowDraft,
+    step_id: str,
+    dependency_graph: Mapping[str, tuple[str, ...]],
+) -> tuple[Any, ...]:
+    """Return declared numeric ancestors in compiled topological order."""
+
+    seen: set[str] = set()
+
+    def visit(current: str) -> None:
+        for dependency in dependency_graph.get(current, ()):
+            if dependency in seen:
+                continue
+            seen.add(dependency)
+            visit(dependency)
+
+    visit(step_id)
+    return tuple(
+        item
+        for item in draft.steps
+        if item.step_id in seen and item.operation_id == "statistical.derive_numeric"
+    )
+
+
+def _workflow_input_frame(
+    source_frame: pd.DataFrame,
+    draft: WorkflowDraft,
+    step: Any,
+    dependency_graph: Mapping[str, tuple[str, ...]],
+) -> pd.DataFrame:
+    """Rebuild the exact transformed input for a step from its declared DAG."""
+
+    frame = source_frame
+    for transform_step in _upstream_numeric_steps(draft, str(step.step_id), dependency_graph):
+        frame, _ = _apply_numeric_recipes(frame, transform_step.spec["recipes"])
+    return frame
+
+
+def _ensure_runtime_artifact(
+    run_root: Path,
+    *,
+    artifact_id: str,
+    path: Path,
+    artifact_type: str,
+    step: str,
+    inputs: list[str],
+) -> None:
+    index = _read_artifacts_index(run_root)
+    matching = [item for item in index.get("artifacts", []) if item.get("artifact_id") == artifact_id]
+    digest = sha256_file(path)
+    if matching:
+        if len(matching) != 1 or matching[0].get("sha256") != digest:
+            raise WorkflowExecutionError("workflow-derived artifact binding is not deterministic")
+        return
+    register_artifact(run_root, artifact_id, path, artifact_type, step, inputs)
+
+
+def _persist_numeric_derivation(
+    *,
+    root: Path,
+    draft: WorkflowDraft,
+    source_context: Mapping[str, Any],
+    frame: pd.DataFrame,
+    step: Any,
+) -> WorkflowStepResult:
+    """Persist a derived dataset + recipe and add one visible graph child."""
+
+    derived, summaries = _apply_numeric_recipes(frame, step.spec["recipes"])
+    source_run_id = str(draft.target["run_id"])
+    run_root = root / "runs" / source_run_id
+    fingerprint = str(step.fingerprint)
+    relative_dir = Path("derived") / "workflow_numeric" / fingerprint
+    data_rel = (relative_dir / "data.csv").as_posix()
+    recipe_rel = (relative_dir / "recipe.json").as_posix()
+    data_path = run_root / data_rel
+    recipe_path = run_root / recipe_rel
+    data_path.parent.mkdir(parents=True, exist_ok=True)
+    recipe = {
+        "schema_version": _NUMERIC_DERIVATION_SCHEMA,
+        "workflow_id": draft.workflow_id,
+        "workflow_step_id": str(step.step_id),
+        "workflow_step_fingerprint": fingerprint,
+        "source": {
+            "artifact_id": str(draft.target["artifact_id"]),
+            "sha256": str(source_context["source_sha256"]),
+        },
+        "recipes": [dict(recipe) for recipe in step.spec["recipes"]],
+        "result": {"path": data_rel, "output_columns": summaries},
+    }
+    if recipe_path.exists():
+        if read_json(recipe_path) != recipe:
+            raise WorkflowExecutionError("numeric derivation recipe path is occupied")
+    else:
+        write_json(recipe_path, recipe)
+    serialized_data = derived.to_csv(index=False)
+    if data_path.exists():
+        if data_path.read_text(encoding="utf-8") != serialized_data:
+            raise WorkflowExecutionError("numeric derivation data path is occupied")
+    else:
+        write_text_durable(data_path, serialized_data)
+    data_artifact_id = f"workflow_derived_numeric_{fingerprint[:24]}"
+    recipe_artifact_id = f"workflow_derived_numeric_recipe_{fingerprint[:24]}"
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=data_artifact_id,
+        path=data_path,
+        artifact_type="derived_data",
+        step="workflow.derive_numeric",
+        inputs=[str(draft.target["artifact_id"])],
+    )
+    _ensure_runtime_artifact(
+        run_root,
+        artifact_id=recipe_artifact_id,
+        path=recipe_path,
+        artifact_type="metadata",
+        step="workflow.derive_numeric",
+        inputs=[str(draft.target["artifact_id"]), data_artifact_id],
+    )
+    child_node_id = f"data-derive-numeric:{fingerprint[:24]}"
+    branch_id = f"workflow-numeric:{fingerprint[:20]}"
+    source_node_id = str(draft.target["node_ref"])
+
+    def add_child(graph: Graph) -> Graph:
+        if child_node_id in graph.nodes:
+            return graph
+        child = Node(
+            id=child_node_id,
+            kind=NodeKind.DATASET_STAGE,
+            display_label="Derived numeric columns",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            parent_stage_id=source_node_id,
+            branch_id=branch_id,
+            trust=Trust.OK,
+            payload_ref=data_rel,
+            summary=(
+                f"{len(summaries)} declared numeric transform(s); "
+                f"{len(derived)} rows"
+            ),
+            annotations=(
+                {
+                    "type": "workflow_numeric_derivation",
+                    "workflow_id": draft.workflow_id,
+                    "workflow_step_id": str(step.step_id),
+                    "recipe_path": recipe_rel,
+                },
+            ),
+            stage=Stage.TRANSFORM,
+        )
+        return Graph(
+            schema_version=graph.schema_version,
+            run_id=graph.run_id,
+            nodes={**graph.nodes, child_node_id: child},
+            edges={
+                **graph.edges,
+                f"edge:{child_node_id}": Edge(
+                    id=f"edge:{child_node_id}",
+                    source_id=source_node_id,
+                    target_id=child_node_id,
+                    op="workflow.derive_numeric",
+                    params={"workflow_step_id": str(step.step_id)},
+                ),
+            },
+            branches={
+                **graph.branches,
+                branch_id: BranchRef(
+                    id=branch_id,
+                    forked_from_node_id=source_node_id,
+                    head_node_ids=(child_node_id,),
+                ),
+            },
+            legacy=graph.legacy,
+        )
+
+    GraphStore(root / "runs").mutate(source_run_id, add_child)
+    node_index_path = run_root / "node_index.json"
+    if node_index_path.is_file():
+        node_index = read_json(node_index_path)
+        entry = {
+            "node_hash": sha256_file(data_path),
+            "producing_stage": "workflow.derive_numeric",
+            "cas_ref": {"node_hash": sha256_file(data_path), "artifact": data_rel},
+        }
+        existing = node_index.get(child_node_id)
+        if existing is not None and existing != entry:
+            raise WorkflowExecutionError("numeric derivation node identity is not deterministic")
+        if existing is None:
+            write_json(node_index_path, {**node_index, child_node_id: entry})
+    return WorkflowStepResult(
+        artifact_ids=[data_artifact_id, recipe_artifact_id],
+        row_counts={item["output_name"]: item["nonmissing_count"] for item in summaries},
+        result_fingerprint=fingerprint,
+        payload={"output_columns": summaries, "child_node_id": child_node_id},
+    )
 
 
 def _exploration_spec(spec: Mapping[str, Any]) -> ExplorationSpec:
@@ -214,13 +480,24 @@ def build_workflow_step_executor(
         # a plan with a different shape or length must run on the same runtime.
         operation_id = step.operation_id
         dispatcher_key = workflow_dispatcher_key(operation_id)
+        step_frame = _workflow_input_frame(
+            source_frame, draft, step, dependency_graph
+        )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_explore" and "plots" not in step.spec:
             return _exploration_step(
                 root=root,
                 draft=draft,
                 source_context=source_context,
-                source_frame=source_frame,
+                source_frame=step_frame,
                 spec=_exploration_spec(step.spec),
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_numeric":
+            return _persist_numeric_derivation(
+                root=root,
+                draft=draft,
+                source_context=source_context,
+                frame=step_frame,
+                step=step,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.statistical_derive_boolean":
             detail, detail_step_id, detail_fingerprint = _detail_result(
@@ -253,7 +530,7 @@ def build_workflow_step_executor(
                         ),
                     },
                 )
-                result = execute_exploration(source_frame, spec)
+                result = execute_exploration(step_frame, spec)
                 actual = result.get("derived", {}).get("threshold")
                 if actual is None or abs(float(actual) - float(expected)) > 1e-12:
                     raise WorkflowExecutionError(
@@ -270,11 +547,11 @@ def build_workflow_step_executor(
                     spec=spec,
                     result=result,
                     fingerprint=fingerprint,
-                    source_frame=source_frame,
+                    source_frame=step_frame,
                 )
                 artifact_ids.extend(_record_artifact_ids(record))
                 row_counts[recipe["output_name"]] = int(
-                    result.get("source_row_count", len(source_frame))
+                    result.get("source_row_count", len(step_frame))
                 )
             return WorkflowStepResult(
                 artifact_ids=list(dict.fromkeys(artifact_ids)),
@@ -293,7 +570,7 @@ def build_workflow_step_executor(
             detail, detail_step_id, _detail_fp = _detail_result(
                 previous, source_run_root, step.depends_on, dependency_graph
             )
-            grouped = source_frame.copy()
+            grouped = step_frame.copy()
             artifact_ids: list[str] = []
             row_counts: dict[str, int] = {}
             summarize_columns = tuple(
@@ -346,7 +623,7 @@ def build_workflow_step_executor(
                     selected_columns=(plot["x_column"], plot["y_column"]),
                     options={"x_column": plot["x_column"], "y_column": plot["y_column"]},
                 )
-                result = execute_exploration(source_frame, spec)
+                result = execute_exploration(step_frame, spec)
                 fingerprint = exploration_fingerprint(str(source_context["source_sha256"]), spec)
                 record = persist_exploration(
                     root,
@@ -357,7 +634,7 @@ def build_workflow_step_executor(
                     spec=spec,
                     result=result,
                     fingerprint=fingerprint,
-                    source_frame=source_frame,
+                    source_frame=step_frame,
                 )
                 artifact_ids.extend(_record_artifact_ids(record))
                 row_counts[f"{plot['x_column']}->{plot['y_column']}"] = int(
@@ -368,18 +645,27 @@ def build_workflow_step_executor(
                 row_counts=row_counts,
             )
         if dispatcher_key == "workbench.services.genesis":
-            return _execute_ols_branches(
-                root, draft, source_context, source_frame, step
+            return _execute_model_genesis_branches(
+                root,
+                draft,
+                source_context,
+                step_frame,
+                step,
+                raw_source_frame=source_frame,
             )
         if dispatcher_key == "workbench.agent.workflow_runtime.model_joint_f_test":
             return _execute_model_joint_f_test(
-                root, draft, source_context, source_frame, step, previous
+                root, draft, source_context, step_frame, step, previous
+            )
+        if dispatcher_key == "workbench.agent.workflow_runtime.model_white_test":
+            return _execute_model_white_test(
+                root, draft, source_context, step_frame, step, previous
             )
         if dispatcher_key == (
             "workbench.agent.workflow_runtime.model_quadratic_stationary_point"
         ):
             return _execute_model_quadratic_stationary_point(
-                root, draft, source_context, source_frame, step, previous
+                root, draft, source_context, step_frame, step, previous
             )
         if dispatcher_key == "capability_factory.custom_dispatcher":
             if not callable(custom_step_executor):
@@ -406,12 +692,14 @@ def build_workflow_step_executor(
     return execute
 
 
-def _execute_ols_branches(
+def _execute_model_genesis_branches(
     root: Path,
     draft: WorkflowDraft,
     source_context: Mapping[str, Any],
     source_frame: pd.DataFrame,
     step: Any = None,
+    *,
+    raw_source_frame: pd.DataFrame | None = None,
 ) -> WorkflowStepResult:
     source_run_id = str(draft.target["run_id"])
     source_run_root = root / "runs" / source_run_id
@@ -420,7 +708,7 @@ def _execute_ols_branches(
     upload_sha = upload.get("sha256")
     filename = upload.get("filename") or "dataset.csv"
     if not isinstance(upload_sha, str) or not upload_sha:
-        raise WorkflowExecutionError("raw source upload is unavailable for OLS genesis")
+        raise WorkflowExecutionError("raw source upload is unavailable for model genesis")
     upload_bytes = verify_upload(root, upload_sha).read_bytes()
     store = PipelineDraftStore(root)
     branch_outputs: list[dict[str, Any]] = []
@@ -428,8 +716,12 @@ def _execute_ols_branches(
     # Read the branches off the step being executed. Indexing draft.steps[7]
     # tied the executor to one plan's length and ordering.
     branch_spec = step.spec if step is not None else draft.steps[7].spec
+    model_family = str(branch_spec["model_family"])
+    primary_model_artifact_id = f"{model_family}_1"
+    workflow_step_id = str(step.step_id) if step is not None else "legacy-model-genesis"
     for branch in branch_spec["branches"]:
         branch_id = str(branch["branch_id"])
+        branch_covariance = branch.get("covariance") or branch_spec.get("covariance") or "unadjusted"
         # Genesis estimates from an uploaded dataset, not from a formula, so a
         # dummy set or a squared term has to exist as a real column first. When
         # a branch declares derived terms, materialize an augmented upload and
@@ -443,7 +735,18 @@ def _execute_ols_branches(
             raise WorkflowExecutionError(
                 f"OLS branch {branch_id} derived terms: {exc}"
             ) from exc
-        if branch_predictors == [str(item) for item in branch["predictors"]]:
+        # A branch can have no branch-local dummy/polynomial expansion and
+        # still depend on an upstream numeric derivation.  Reusing the original
+        # upload in that case would silently discard a declared column before
+        # Genesis runs.  Only retain the original upload when the final design
+        # is exactly the immutable raw source; otherwise store the complete,
+        # server-derived table for this branch.
+        raw_frame = source_frame if raw_source_frame is None else raw_source_frame
+        use_original_upload = (
+            list(branch_frame.columns) == list(raw_frame.columns)
+            and branch_frame.equals(raw_frame)
+        )
+        if use_original_upload:
             branch_upload_sha = upload_sha
             branch_filename = filename
         else:
@@ -461,7 +764,12 @@ def _execute_ols_branches(
             # still resumes instead of re-estimating under a new identity.
             context_workflow = context.get("workflow_id", context.get("class3_workflow_id"))  # legacy-compat
             context_branch = context.get("branch_id", context.get("class3_branch_id"))  # legacy-compat
-            if context_workflow == draft.workflow_id and context_branch == branch_id:
+            context_step = context.get("workflow_step_id")
+            if (
+                context_workflow == draft.workflow_id
+                and context_branch == branch_id
+                and context_step == workflow_step_id
+            ):
                 stored = candidate
                 break
         if stored is None:
@@ -472,12 +780,21 @@ def _execute_ols_branches(
                 # where a derived dummy or power column does not exist.
                 selected_columns=tuple(
                     branch_spec.get("context_columns")
-                    or (str(branch["outcome"]), *[str(c) for c in branch["predictors"]])
+                    or (
+                        str(branch["outcome"]),
+                        *[str(c) for c in branch["predictors"]],
+                        *[
+                            str(column)
+                            for column in (branch_spec.get("entity_col"), branch_spec.get("time_col"))
+                            if column
+                        ],
+                    )
                 ),
                 options={"quantile_method": STATA_QUANTILE_METHOD},
             )
             context = {
                 "workflow_id": draft.workflow_id,
+                "workflow_step_id": workflow_step_id,
                 "branch_id": branch_id,
                 "source_run_id": source_run_id,
                 "source_node_id": str(draft.target["node_ref"]),
@@ -492,28 +809,39 @@ def _execute_ols_branches(
                 "predictor_columns": list(branch_predictors),
                 "source_predictor_columns": [str(item) for item in branch["predictors"]],
                 "categorical_reference_levels": references,
-                "covariance": "unadjusted",
+                "model_family": model_family,
+                "covariance": branch_covariance,
                 "workflow_plan_fingerprint": draft.plan_fingerprint,
             }
+            model_params: dict[str, Any] = {
+                "model_type": model_family,
+                "y": branch["outcome"],
+                "x": list(branch_predictors),
+                "covariance": branch_covariance,
+            }
+            if model_family == "ols":
+                model_params["model_options"] = {"covariance": branch_covariance}
+            else:
+                model_params["entity_col"] = branch_spec.get("entity_col")
+                model_params["time_col"] = branch_spec.get("time_col")
             stored = create_genesis_draft(
                 root,
                 upload_sha256=branch_upload_sha,
                 filename=branch_filename,
                 sheet_names=(),
                 columns=tuple(str(column) for column in branch_frame.columns),
-                model_params={
-                    "model_type": "ols",
-                    "y": branch["outcome"],
-                    "x": list(branch_predictors),
-                    "covariance": "unadjusted",
-                    "model_options": {"covariance": "unadjusted"},
-                },
+                model_params=model_params,
                 exploration_context=context,
+                notebook_provenance=(
+                    dict(draft.bindings["notebook_provenance"])
+                    if isinstance(draft.bindings.get("notebook_provenance"), Mapping)
+                    else None
+                ),
             )
         validation = validate_draft_for_execution(stored.draft, execution_mode="genesis")
         if not validation.get("executable"):
             raise WorkflowExecutionError(
-                f"OLS Draft validation failed for {branch_id}: {validation.get('checks')}"
+                f"{model_family} Draft validation failed for {branch_id}: {validation.get('checks')}"
             )
         result = execute_genesis_draft(
             stored.draft["draft_id"],
@@ -522,23 +850,31 @@ def _execute_ols_branches(
             stored,
             validated_draft_hash=compute_executable_draft_hash(stored.draft),
             execution_mode="genesis",
-            idempotency_key=f"{draft.workflow_id}:{branch_id}",
+            idempotency_key=f"{draft.workflow_id}:{workflow_step_id}:{branch_id}",
         )
         run_id = str(result["run_id"])
         _wait_for_run(root, run_id)
         run_root = root / "runs" / run_id
         manifest = read_json(run_root / "run_manifest.json")
         if manifest.get("status") != "completed":
-            raise WorkflowExecutionError(f"OLS branch {branch_id} did not complete")
+            raise WorkflowExecutionError(f"{model_family} branch {branch_id} did not complete")
         run_artifacts = _read_artifacts_index(run_root).get("artifacts", [])
         ids = [str(item["artifact_id"]) for item in run_artifacts if item.get("artifact_id")]
-        if "ols_1" not in ids or "diagnostic_summary" not in ids:
-            raise WorkflowExecutionError(f"OLS branch {branch_id} is missing model evidence")
-        model_result = read_json(run_root / "model_results" / "ols_1.json")
+        if primary_model_artifact_id not in ids:
+            raise WorkflowExecutionError(
+                f"{model_family} branch {branch_id} is missing model evidence"
+            )
+        if model_family == "ols" and "diagnostic_summary" not in ids:
+            raise WorkflowExecutionError(f"OLS branch {branch_id} is missing diagnostics")
+        model_result = read_json(
+            run_root / "model_results" / f"{primary_model_artifact_id}.json"
+        )
         if "ci_lower" not in json.dumps(model_result) or "ci_upper" not in json.dumps(model_result):
-            raise WorkflowExecutionError(f"OLS branch {branch_id} is missing coefficient confidence intervals")
+            raise WorkflowExecutionError(
+                f"{model_family} branch {branch_id} is missing coefficient confidence intervals"
+            )
         missing_figures = sorted(required_branch_figures(branch_predictors) - set(ids))
-        if missing_figures:
+        if model_family == "ols" and missing_figures:
             raise WorkflowExecutionError(
                 f"OLS branch {branch_id} is missing residual/fitted diagnostics: "
                 + ", ".join(missing_figures)
@@ -550,6 +886,9 @@ def _execute_ols_branches(
                 "run_id": run_id,
                 "artifact_ids": ids,
                 "branch_spec": {
+                    "model_family": model_family,
+                    "entity_col": branch_spec.get("entity_col"),
+                    "time_col": branch_spec.get("time_col"),
                     "outcome": str(branch["outcome"]),
                     "predictors": [str(item) for item in branch["predictors"]],
                     "categorical": [str(item) for item in branch.get("categorical", []) or []],
@@ -568,6 +907,27 @@ def _execute_ols_branches(
         artifact_ids=artifact_ids,
         row_counts={"source": len(source_frame)},
         payload={"branches": branch_outputs},
+    )
+
+
+def _execute_ols_branches(
+    root: Path,
+    draft: WorkflowDraft,
+    source_context: Mapping[str, Any],
+    source_frame: pd.DataFrame,
+    step: Any = None,
+    *,
+    raw_source_frame: pd.DataFrame | None = None,
+) -> WorkflowStepResult:
+    """Compatibility name for callers that historically imported the OLS-only executor."""
+
+    return _execute_model_genesis_branches(
+        root,
+        draft,
+        source_context,
+        source_frame,
+        step,
+        raw_source_frame=raw_source_frame,
     )
 
 
@@ -846,6 +1206,122 @@ def _execute_model_joint_f_test(
         "p_value": p_value,
         "numerator_df": numerator_df,
         "denominator_df": denominator_df,
+        "nobs": int(fitted.nobs),
+        "covariance": "unadjusted",
+    }
+    return _persist_model_post_estimation_result(
+        root,
+        draft,
+        step,
+        artifact_type="statistical_test",
+        result=result,
+        model_run_id=str(branch["run_id"]),
+        source_sha256=str(source_context["source_sha256"]),
+    )
+
+
+def _white_test_statistics(
+    residuals: Any,
+    exog: Any,
+) -> tuple[float, float, float, float, int, int]:
+    """Calculate White's test with one explicit auxiliary-design rank policy.
+
+    The auxiliary design contains every square and pairwise product of the
+    completed OLS design.  Its columns can differ widely in scale when a model
+    mixes polynomials and categorical expansions.  Normalize non-zero columns
+    before choosing the rank and use that exact tolerance for the least-squares
+    solve, so statistical validity does not depend on a third-party assertion
+    comparing two incompatible rank estimates.
+    """
+
+    errors = np.asarray(residuals, dtype=float).reshape(-1)
+    design = np.asarray(exog, dtype=float)
+    if design.ndim != 2 or design.shape[0] != errors.size:
+        raise WorkflowExecutionError("White test received an invalid completed OLS design")
+    if errors.size < 3 or not np.isfinite(errors).all() or not np.isfinite(design).all():
+        raise WorkflowExecutionError("White test requires finite residuals and design values")
+
+    left, right = np.triu_indices(design.shape[1])
+    auxiliary = design[:, left] * design[:, right]
+    scales = np.linalg.norm(auxiliary, axis=0)
+    usable = scales > 0
+    if not bool(usable.any()):
+        raise WorkflowExecutionError("White test auxiliary design has no non-zero columns")
+    normalized = auxiliary[:, usable] / scales[usable]
+    singular_values = np.linalg.svd(normalized, compute_uv=False)
+    if singular_values.size == 0 or not math.isfinite(float(singular_values[0])):
+        raise WorkflowExecutionError("White test auxiliary design rank is unavailable")
+    rcond = max(normalized.shape) * np.finfo(float).eps
+    rank = int((singular_values > singular_values[0] * rcond).sum())
+    auxiliary_df = rank - 1
+    residual_df = errors.size - rank
+    if auxiliary_df < 1 or residual_df < 1:
+        raise WorkflowExecutionError(
+            "White test auxiliary design does not leave enough independent degrees of freedom"
+        )
+
+    squared_errors = errors**2
+    centered = squared_errors - squared_errors.mean()
+    total_sum_squares = float(centered @ centered)
+    scale = max(float(squared_errors @ squared_errors), 1.0)
+    if total_sum_squares <= np.finfo(float).eps * scale:
+        raise WorkflowExecutionError("White test residual squares have no estimable variation")
+    coefficients, *_ = np.linalg.lstsq(normalized, squared_errors, rcond=rcond)
+    fitted = normalized @ coefficients
+    residual_sum_squares = float(np.square(squared_errors - fitted).sum())
+    r_squared = 1.0 - residual_sum_squares / total_sum_squares
+    if not math.isfinite(r_squared) or r_squared < -1e-9 or r_squared > 1.0 + 1e-9:
+        raise WorkflowExecutionError("White test auxiliary regression produced an invalid R-squared")
+    r_squared = min(1.0, max(0.0, r_squared))
+    unexplained = 1.0 - r_squared
+    if unexplained <= np.finfo(float).eps:
+        raise WorkflowExecutionError("White test auxiliary regression is saturated")
+
+    lm_statistic = errors.size * r_squared
+    f_statistic = (r_squared / auxiliary_df) / (unexplained / residual_df)
+    lm_p_value = float(stats.chi2.sf(lm_statistic, auxiliary_df))
+    f_p_value = float(stats.f.sf(f_statistic, auxiliary_df, residual_df))
+    values = (lm_statistic, lm_p_value, f_statistic, f_p_value)
+    if not all(math.isfinite(value) for value in values):
+        raise WorkflowExecutionError("White test produced a non-finite result")
+    return (*values, auxiliary_df, residual_df)
+
+
+def _execute_model_white_test(
+    root: Path,
+    draft: WorkflowDraft,
+    source_context: Mapping[str, Any],
+    source_frame: pd.DataFrame,
+    step: Any,
+    previous: Mapping[str, WorkflowStepResult],
+) -> WorkflowStepResult:
+    """Persist White's test from the immutable, declared OLS design."""
+
+    branch = _dependent_model_branch(step, previous)
+    fitted, _predictor_columns, _analysis_frame = _refit_completed_ols_branch(
+        source_frame, branch
+    )
+    (
+        lm_statistic,
+        lm_p_value,
+        f_statistic,
+        f_p_value,
+        auxiliary_df,
+        residual_df,
+    ) = _white_test_statistics(
+        fitted.resid,
+        fitted.model.exog,
+    )
+    result = {
+        "schema_version": "workbench.model.white-test/v1",
+        "test": "white_test",
+        "branch_id": str(branch["branch_id"]),
+        "lm_statistic": lm_statistic,
+        "lm_p_value": lm_p_value,
+        "f_statistic": f_statistic,
+        "f_p_value": f_p_value,
+        "auxiliary_df": auxiliary_df,
+        "residual_df": residual_df,
         "nobs": int(fitted.nobs),
         "covariance": "unadjusted",
     }

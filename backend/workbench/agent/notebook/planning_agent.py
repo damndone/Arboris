@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 from uuid import uuid4
 
@@ -24,12 +24,14 @@ from .recommendation import (
     ForecastRollingOriginProtocol,
     RecommendationValidator,
 )
+from .store import ProjectionSource, dataset_workflow_source_pin
 from .vocabulary import (
     ARTIFACT_VOCABULARY_VERSION,
     CAPABILITY_ARTIFACT_VOCABULARY_VERSION,
     DECLARED_ARTIFACT_TYPES,
     capability_artifact_types,
 )
+from ..workflow_contracts import workflow_step_vocabulary
 
 
 class NotebookPlanningUnavailable(RuntimeError):
@@ -124,7 +126,12 @@ _TYPED_PROPOSAL_SCHEMA: dict[str, Any] = {
         "proposal_revision": {"type": "integer", "minimum": 1},
         "operation_id": {
             "type": "string",
-            "enum": ["model.custom", "model.genesis", "model.rerun"],
+            "enum": [
+                "model.custom",
+                "model.genesis",
+                "model.rerun",
+                "operation.multi_step",
+            ],
         },
         "operation_version": {"type": "string", "const": "v1"},
         "target": {"type": "object"},
@@ -136,7 +143,8 @@ _TYPED_PROPOSAL_SCHEMA: dict[str, Any] = {
                 "model_options as nested objects. For model.rerun use only the "
                 "model_options nested object. For model.custom use only operation, "
                 "input_handle, parameters, and consumer_slots. The server injects "
-                "capability_ref and binding_ref. Never put executable source, "
+                "capability_ref and binding_ref. For operation.multi_step use only "
+                "steps. Never put executable source, "
                 "entrypoints, or trust/admission fields here."
             ),
             "properties": {
@@ -240,6 +248,42 @@ NOTEBOOK_TOOLS: tuple[dict[str, Any], ...] = (
 )
 
 
+def _interaction_mode(context: NotebookPlanningContextV1) -> str:
+    """Return the persisted user-selected planning interaction mode."""
+
+    mode = context.user_focus.get("interaction_mode", "plan")
+    if mode not in {"plan", "action"}:
+        raise NotebookPlanningContractError("Notebook interaction mode must be plan or action")
+    return mode
+
+
+def _notebook_tools_for(max_options: int) -> tuple[dict[str, Any], ...]:
+    """Publish the same closed tool vocabulary with a mode-specific batch cap."""
+
+    if max_options not in {1, 2, 3}:
+        raise ValueError("Notebook option limit must be between 1 and 3")
+    inspection_tool, submit_tool = NOTEBOOK_TOOLS
+    options_schema = submit_tool["input_schema"]["properties"]["options"]
+    return (
+        dict(inspection_tool),
+        {
+            **submit_tool,
+            "description": (
+                f"Submit 1 to {max_options} typed analysis option"
+                f"{'s' if max_options != 1 else ''}. Every option must cite completed "
+                "evidence and preserve the server-provided execution pins."
+            ),
+            "input_schema": {
+                **submit_tool["input_schema"],
+                "properties": {
+                    **submit_tool["input_schema"]["properties"],
+                    "options": {**options_schema, "maxItems": max_options},
+                },
+            },
+        },
+    )
+
+
 def _strict_mapping(value: Any, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise NotebookPlanningContractError(f"{label} must be an object")
@@ -295,9 +339,14 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
     if item["operation_version"] != "v1":
         raise NotebookPlanningContractError("operation_version must be exactly v1")
     operation_id = item["operation_id"]
-    if operation_id not in {"model.custom", "model.genesis", "model.rerun"}:
+    if operation_id not in {
+        "model.custom",
+        "model.genesis",
+        "model.rerun",
+        "operation.multi_step",
+    }:
         raise NotebookPlanningContractError(
-            "operation_id must be exactly model.custom, model.genesis, or model.rerun"
+            "operation_id must be exactly model.custom, model.genesis, model.rerun, or operation.multi_step"
         )
     target = _strict_mapping(item["target"], "typed proposal target")
     preconditions = _strict_mapping(
@@ -313,6 +362,8 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
             raise NotebookPlanningContractError(f"typed proposal {field} keys must be strings")
     if operation_id == "model.genesis":
         target_fields = ("dataset_source_id",)
+    elif operation_id == "operation.multi_step":
+        target_fields = ("run_id", "node_ref", "artifact_id")
     elif operation_id == "model.rerun":
         target_fields = ("run_id", "node_ref", "node_hash", "forest_node_key")
     elif "dataset_source_id" in target:
@@ -361,6 +412,11 @@ def _strict_typed_proposal(value: Any) -> TypedProposal:
         if "consumer_slots" in changes:
             _strict_string_list(
                 changes["consumer_slots"], "model.custom changes.consumer_slots"
+            )
+    elif operation_id == "operation.multi_step":
+        if set(changes) != {"steps"} or not isinstance(changes.get("steps"), list):
+            raise NotebookPlanningContractError(
+                "operation.multi_step changes must contain only a steps list"
             )
     return TypedProposal.from_dict(item)
 
@@ -506,6 +562,61 @@ class NotebookPlanningAgent:
             return dynamic
         return capability_artifact_types(capability_id)
 
+    def _workflow_primary_artifacts(
+        self,
+        steps: Any,
+        catalog: Mapping[str, Any],
+    ) -> tuple[dict[str, str], dict[str, int], frozenset[str]]:
+        """Derive a composed option's primary results from its model steps."""
+
+        artifact_types: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        families: set[str] = set()
+        for step in steps if isinstance(steps, list) else []:
+            if not isinstance(step, Mapping) or step.get("operation_id") != "model.genesis":
+                continue
+            spec = step.get("spec")
+            if not isinstance(spec, Mapping):
+                continue
+            model_family = spec.get("model_family")
+            if not isinstance(model_family, str) or not model_family:
+                raise NotebookPlanningContractError(
+                    "model.genesis workflow step requires a registered model_family"
+                )
+            declaration = catalog.get(model_family)
+            if not isinstance(declaration, Mapping):
+                raise NotebookPlanningContractError(
+                    "model.genesis model_family is not a server-published capability: "
+                    + model_family
+                )
+            declared_model_type = declaration.get("model_type")
+            if declared_model_type is not None and declared_model_type != model_family:
+                raise NotebookPlanningContractError(
+                    "model.genesis model_family does not match its server capability identity"
+                )
+            branches = spec.get("branches")
+            branch_count = len(branches) if isinstance(branches, list) else 0
+            published = self._published_artifact_types(model_family)
+            if branch_count and not published:
+                raise NotebookPlanningContractError(
+                    "model.genesis model_family has no published primary artifact: "
+                    + model_family
+                )
+            families.add(model_family)
+            for artifact_id, artifact_type in published.items():
+                previous = artifact_types.setdefault(artifact_id, artifact_type)
+                if previous != artifact_type:
+                    raise NotebookPlanningContractError(
+                        "model family artifact vocabulary assigns conflicting types to: "
+                        + artifact_id
+                    )
+                counts[artifact_id] = counts.get(artifact_id, 0) + branch_count
+        if not families:
+            raise NotebookPlanningContractError(
+                "operation.multi_step has no model.genesis branch outputs to contract"
+            )
+        return artifact_types, counts, frozenset(families)
+
     def plan(
         self,
         *,
@@ -522,6 +633,8 @@ class NotebookPlanningAgent:
     ) -> PlanningResult:
         if self.adapter is None:
             raise NotebookPlanningUnavailable("no model provider is configured")
+        interaction_mode = _interaction_mode(context)
+        max_options = 1 if interaction_mode == "action" else 3
         catalog = self.capability_catalog or {name: {} for name in context.available_capabilities}
         if not catalog:
             raise NotebookNoEligibleCapability("no registered executable Notebook capability is available")
@@ -529,6 +642,7 @@ class NotebookPlanningAgent:
             asyncio.get_running_loop().time() + self.planning_timeout_s
         )
         context_payload = notebook_planning_workbench_context(context)
+        context_payload["interaction_mode"] = interaction_mode
         context_payload["execution_pins"] = self._execution_pins(context)
         context_payload["available_inspection_ids"] = sorted(self.available_inspections)
         context_payload["typed_operation_contracts"] = self._typed_operation_contracts(context)
@@ -547,24 +661,56 @@ class NotebookPlanningAgent:
             {
                 "role": "system",
                 "content": (
-                    "Use only the two typed Notebook tools. Never invent metrics or executable capability ids. "
+                    (
+                        "Plan mode: submit one to three genuinely distinct, non-duplicate "
+                        "executable paths. Do not force three options: submit one when the "
+                        "evidence does not support meaningful alternatives, and say why. "
+                        if interaction_mode == "plan"
+                        else
+                        "Action mode: the user chose direct specification checking. Submit exactly "
+                        "one typed, editable Draft path with rank 1. Do not create alternatives, "
+                        "call it a recommendation, or execute it. Treat the user's goal as the "
+                        "requested specification; list only evidence-backed necessary assumptions "
+                        "and limitations. "
+                    )
+                    + "Use only the two typed Notebook tools. Never invent metrics or executable capability ids. "
                     "Inspection ids are exactly profile.v1, quality.v1, time_index.v1, sample.v1, "
                     "or forecast_rolling_origin.v1; use dataset:active for a dataset projection and "
                     "run:active for a run projection. Request evidence before submitting options. "
                     f"You may make at most {self.max_inspection_rounds} inspection turns, each requesting "
                     "one to five distinct ids; after enough evidence is available, submit the option batch. "
-                    "Submitted typed options must cite completed evidence refs. Every comparative_claim must literally contain "
-                    "the evidence_id of one of that option's evidence_refs; do not use unsupported prose. "
+                    "Submitted typed options must cite completed evidence refs. Comparative claims are "
+                    "bound by the option's structured evidence_refs; do not use unsupported prose. "
                     "Evidence with status partial or failed is non-citable. A partial bounded inspection is "
                     "terminal for that inspection id: describe its omissions as a limitation, but do not "
                     "request it again merely to remove a declared cap. "
-                    "Copy execution_pins exactly: for a dataset proposal use model.genesis and set "
-                    "target.dataset_source_id exactly to context.projection_source.upload_sha256; for a run "
-                    "proposal copy the active-head and node pins without rewriting them. For model.genesis, "
+                    "Copy execution_pins exactly: for a standalone dataset proposal use model.genesis and set "
+                    "target.dataset_source_id exactly to context.projection_source.upload_sha256; for a "
+                    "dataset-rooted operation.multi_step use its target_exact and preconditions_exact instead. "
+                    "For a run proposal copy the active-head and node pins without rewriting them. For model.genesis, "
                     "changes may contain only table_params, model_params, or model_options, each as an object; "
                     "put model-specific fields inside one of those objects, never directly in changes. "
                     "For model.genesis, model_params must include an evidence-backed model_type and y; "
                     "all non-time-series genesis models must also include x as a non-empty list. "
+                    "When context.typed_operation_contracts publishes operation.multi_step, use it for a "
+                    "typed statistical workflow that needs declared categorical terms, polynomial terms, "
+                    "or declared post-estimation steps. Copy its target_exact and preconditions_exact "
+                    "verbatim, and use only its published step vocabulary. Every entry in changes.steps "
+                    "has exactly this outer envelope: step_id, operation_id, spec, plus optional "
+                    "depends_on and expected_artifacts. Omit depends_on when a step has no prerequisite; "
+                    "otherwise depends_on must be a JSON array of exact earlier step_id strings, for example "
+                    "[\"source_step\"], never a string, object, or branch_id. Put every operation-specific field inside spec; "
+                    "never place model, exploration, or adapter fields beside spec. Do not replace a categorical "
+                    "term with a numeric code or omit a requested polynomial/post-estimation step. "
+                    "Each completed model.genesis branch automatically materializes residuals_vs_<predictor> and "
+                    "fitted_vs_<predictor> diagnostic figures for its declared predictor columns. When the user "
+                    "requests residuals versus a declared predictor, include that predictor in the branch and describe "
+                    "the persisted diagnostic figure; do not claim that a separate scatter step is required. "
+                    "capability_id always identifies a server-published model capability, never the "
+                    "operation id. For an operation.multi_step comparison it must name one model_family "
+                    "declared by that workflow, not operation.multi_step. Every model.genesis step must "
+                    "use a server-published model_family; panel_ols requires entity_col or time_col, and "
+                    "clustered panel_ols requires entity_col. "
                     "For OLS, the server-owned Agent envelope is model_options.covariance and its only "
                     "published values are robust, clustered, and unadjusted. For model.genesis, the "
                     "legacy model_params.covariance field is also accepted for human/Draft compatibility, "
@@ -630,6 +776,7 @@ class NotebookPlanningAgent:
                 messages,
                 timeout_s=min(self.model_timeout_s, remaining_s),
                 total_budget_limited=total_budget_limited,
+                max_options=max_options,
             )
             calls = [event.tool_call for event in events if event.type == "tool_call_delta" and event.tool_call]
             if len(calls) != 1:
@@ -670,12 +817,61 @@ class NotebookPlanningAgent:
                             + "; available: "
                             + ", ".join(sorted(self.available_inspections))
                         )
-                    if any(
-                        request in requests_seen
-                        or request.inspection_id in terminal_inspection_ids
-                        for request in requests
-                    ):
-                        raise NotebookPlanningContractError("duplicate inspection request")
+                    new_requests: list[InspectionRequest] = []
+                    reused_requests: list[InspectionRequest] = []
+                    requested_by_id: dict[str, InspectionRequest] = {}
+                    for request in requests:
+                        current = requested_by_id.get(request.inspection_id)
+                        if current is not None:
+                            if current != request:
+                                raise NotebookPlanningContractError(
+                                    "duplicate inspection id has conflicting arguments"
+                                )
+                            reused_requests.append(request)
+                            continue
+                        requested_by_id[request.inspection_id] = request
+                        prior_request = next(
+                            (
+                                prior
+                                for prior in requests_seen
+                                if prior.inspection_id == request.inspection_id
+                            ),
+                            None,
+                        )
+                        if prior_request is not None:
+                            if prior_request != request:
+                                # A completed evidence record is scoped to the
+                                # request that produced it.  Reusing it after
+                                # a changed target or arguments would quietly
+                                # relabel different evidence as equivalent.
+                                raise NotebookPlanningContractError(
+                                    "duplicate inspection id has conflicting arguments"
+                                )
+                            # A repeated, byte-for-byte equivalent read is
+                            # idempotent. Reuse its immutable evidence packet
+                            # below rather than spending another inspection
+                            # turn or making the model start over.
+                            reused_requests.append(request)
+                            continue
+                        if request.inspection_id in terminal_inspection_ids:
+                            # Default no-argument inspections against the
+                            # current pinned run are deterministic.  Initial
+                            # evidence is server-created for that exact source,
+                            # so this is an identity-preserving replay rather
+                            # than a request to widen a bounded read.  Other
+                            # target/argument shapes remain fail-closed because
+                            # v1 records do not persist a caller envelope.
+                            if (
+                                request.target_ref == "run:active"
+                                and not request.arguments
+                                and context.active_head_run_id is not None
+                                and evidence.source_id
+                                == f"run:{context.active_head_run_id}"
+                            ):
+                                reused_requests.append(request)
+                                continue
+                            raise NotebookPlanningContractError("duplicate inspection request")
+                        new_requests.append(request)
                 except NotebookPlanningContractError as error:
                     if contract_corrections >= self.max_contract_corrections:
                         raise
@@ -703,20 +899,37 @@ class NotebookPlanningAgent:
                         correction_number=contract_corrections,
                     )
                     continue
-                requests_seen.extend(requests)
-                if self.inspection_executor is None:
-                    raise NotebookPlanningUnavailable("inspection executor is not configured")
-                result = self.inspection_executor(requests, evidence)
-                inspection_pack = await result if hasattr(result, "__await__") else result
-                if not isinstance(inspection_pack, DataEvidencePackV1):
-                    raise NotebookPlanningContractError("inspection executor returned no Evidence Pack")
-                inspection_rounds += 1
-                evidence = self._append_evidence_pack(evidence, inspection_pack)
-                terminal_inspection_ids.update(
-                    record.inspection_id
-                    for record in inspection_pack.records
-                    if record.status in {"completed", "partial"}
-                )
+                if new_requests:
+                    if self.inspection_executor is None:
+                        raise NotebookPlanningUnavailable("inspection executor is not configured")
+                    result = self.inspection_executor(tuple(new_requests), evidence)
+                    inspection_pack = await result if hasattr(result, "__await__") else result
+                    if not isinstance(inspection_pack, DataEvidencePackV1):
+                        raise NotebookPlanningContractError("inspection executor returned no Evidence Pack")
+                    inspection_rounds += 1
+                    evidence = self._append_evidence_pack(evidence, inspection_pack)
+                    resolved_inspection_ids = {
+                        record.inspection_id
+                        for record in inspection_pack.records
+                        if record.status in {"completed", "partial"}
+                    }
+                    # A failed inspection has not produced reusable evidence.
+                    # Leave it retriable so the provider can correct its target
+                    # or arguments; only completed/partial reads become
+                    # idempotent requests in this planning episode.
+                    requests_seen.extend(
+                        request
+                        for request in new_requests
+                        if request.inspection_id in resolved_inspection_ids
+                    )
+                    terminal_inspection_ids.update(
+                        resolved_inspection_ids
+                    )
+                else:
+                    inspection_pack = DataEvidencePackV1(
+                        source_id=evidence.source_id,
+                        records=(),
+                    )
                 messages.extend([
                     {"role": "assistant", "tool_calls": [call]},
                     {
@@ -727,6 +940,9 @@ class NotebookPlanningAgent:
                                 "evidence": evidence.to_dict(),
                                 "evidence_citation_policy": self._evidence_citation_policy(
                                     evidence
+                                ),
+                                "reused_inspection_ids": sorted(
+                                    {request.inspection_id for request in reused_requests}
                                 ),
                             },
                             ensure_ascii=False,
@@ -772,8 +988,10 @@ class NotebookPlanningAgent:
                 )
                 continue
             try:
-                submissions = _parse_submissions(arguments)
-                self._validate_submissions(context, evidence, submissions, catalog)
+                submissions = _parse_submissions(arguments, max_options=max_options)
+                submissions = self._validate_submissions(
+                    context, evidence, submissions, catalog, max_options=max_options
+                )
             except NotebookPlanningContractError as error:
                 if contract_corrections >= self.max_contract_corrections:
                     raise
@@ -969,18 +1187,18 @@ class NotebookPlanningAgent:
                 f"inspection ids: {available}. If the available evidence cannot separate "
                 "options, submit them as tied or insufficient evidence."
             )
-        elif message == "comparative claim has no evidence ref":
-            available = ", ".join(evidence_ids) or "none"
-            remediation = (
-                "Resubmit the option batch. Every comparative_claim must literally "
-                f"contain one completed evidence_id from this pack: {available}."
-            )
         elif message == "duplicate inspection request":
             remediation = (
                 "Do not request an inspection id already present with status completed "
                 "or partial. A partial result is the terminal bounded result; preserve "
                 "its omissions as a limitation and proceed using only completed refs "
                 "from evidence_citation_policy for citations."
+            )
+        elif message == "duplicate inspection id has conflicting arguments":
+            remediation = (
+                "This planning pass already completed that inspection id with a different "
+                "target_ref or arguments. Do not relabel its evidence: use the evidence "
+                "already returned, or continue with a different registered inspection id."
             )
         elif message == "text-only planning completion is not accepted":
             remediation = (
@@ -1029,6 +1247,14 @@ class NotebookPlanningAgent:
                 "operation_id must be model.genesis and target.dataset_source_id must "
                 f"equal exactly {source_id!r}. Do not derive or shorten this value."
             )
+        elif message.startswith("operation.multi_step capability_id must name"):
+            eligible = sorted(str(item) for item in context.available_capabilities)
+            remediation = (
+                "Resubmit the same source-pinned operation.multi_step proposal, but set "
+                "capability_id to one server-published model_family declared by its "
+                "model.genesis steps. capability_id is not an operation id. "
+                f"Eligible published capabilities include {eligible}."
+            )
         elif "model.genesis preconditions missing" in message:
             pins = NotebookPlanningAgent._execution_pins(context)["genesis_preconditions"]
             remediation = (
@@ -1042,6 +1268,21 @@ class NotebookPlanningAgent:
                 "model_type, y, x, covariance, and other model settings inside "
                 "model_params or model_options; never put capability_id, params, "
                 "capability, parameters, or raw model fields directly under changes."
+            )
+        elif "workflow step contains unknown field(s)" in message:
+            remediation = (
+                "Resubmit the workflow with each changes.steps entry using only "
+                "step_id, operation_id, spec, and optionally depends_on or "
+                "expected_artifacts at its outer level. Move every operation-specific "
+                "field, including model, exploration, or adapter parameters, inside "
+                "spec; then use only the exact field names published for that step's "
+                "operation_id in typed_operation_contracts.operation.multi_step.step_vocabulary."
+            )
+        elif "depends_on must be step ids" in message:
+            remediation = (
+                "Resubmit every workflow step: omit depends_on when it has no prerequisite, "
+                "or as a JSON array of exact earlier step ids, for example \"depends_on\": "
+                "[\"source_step\"]. Never use a string, object, branch_id, or artifact id."
             )
         elif (
             message.startswith("model.genesis model_params must")
@@ -1176,8 +1417,12 @@ class NotebookPlanningAgent:
         *,
         timeout_s: float,
         total_budget_limited: bool,
+        max_options: int = 3,
     ) -> list[ModelStreamEvent]:
-        request = ModelRequest(messages=list(messages), tools=[dict(tool) for tool in NOTEBOOK_TOOLS])
+        request = ModelRequest(
+            messages=list(messages),
+            tools=[dict(tool) for tool in _notebook_tools_for(max_options)],
+        )
         try:
             events = await asyncio.wait_for(
                 self._collect_model_events(request), timeout=timeout_s
@@ -1208,7 +1453,7 @@ class NotebookPlanningAgent:
         return events
 
     @staticmethod
-    def _execution_pins(context: NotebookPlanningContextV1) -> dict[str, dict[str, Any]]:
+    def _execution_pins(context: NotebookPlanningContextV1) -> dict[str, Any]:
         model_context_fingerprints = {
             str(item["node_id"]): str(item["context_fingerprint"])
             for item in context.bounded_lineage
@@ -1242,7 +1487,7 @@ class NotebookPlanningAgent:
             if rerun_target_pins
             else ""
         )
-        return {
+        payload: dict[str, Any] = {
             "rerun_preconditions": {
                 "context_version": "node-operation-context/v1",
                 # The materializer and node-write validator consume this exact
@@ -1261,13 +1506,55 @@ class NotebookPlanningAgent:
                 "owner_resolution": "single_candidate",
             },
         }
+        # A composed workflow begins at the immutable raw-stage artifact, not
+        # at a fitted model.  It is published only when the compiler has a
+        # complete server-owned source identity; a model must never guess an
+        # artifact path or substitute a model node as the source table.
+        raw_sources = [
+            item
+            for item in context.bounded_lineage
+            if item.get("kind") == "dataset_stage"
+            and item.get("stage") == "source"
+            and all(
+                isinstance(item.get(field), str) and item[field]
+                for field in ("node_id", "workflow_artifact_id", "context_fingerprint")
+            )
+        ]
+        if context.active_head_run_id and len(raw_sources) == 1:
+            source = raw_sources[0]
+            payload["workflow_source"] = {
+                "target": {
+                    "run_id": context.active_head_run_id,
+                    "node_ref": source["node_id"],
+                    "artifact_id": source["workflow_artifact_id"],
+                },
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": source["context_fingerprint"],
+                    "active_head_run_id": context.active_head_run_id,
+                    "owner_resolution": "single_candidate",
+                },
+            }
+        elif isinstance(context.projection_source, Mapping):
+            # A fresh dataset Notebook deliberately has no active result head.
+            # It may still have a server-resolved raw source inherited from the
+            # Run the user chose in the UI.  Decode the strict persisted shape
+            # rather than trusting an ad-hoc context field from an Agent.
+            try:
+                source = ProjectionSource.from_dict(context.projection_source)
+                dataset_pin = dataset_workflow_source_pin(source)
+            except (TypeError, ValueError):
+                dataset_pin = None
+            if dataset_pin is not None:
+                payload["workflow_source"] = dataset_pin
+        return payload
 
     @staticmethod
     def _typed_operation_contracts(
         context: NotebookPlanningContextV1,
     ) -> dict[str, dict[str, Any]]:
         pins = NotebookPlanningAgent._execution_pins(context)
-        return {
+        contracts = {
             "model.custom": {
                 "operation_id": "model.custom",
                 "operation_version": "v1",
@@ -1303,6 +1590,17 @@ class NotebookPlanningAgent:
                 "changes_field_shape": "model_options is a non-empty object",
             },
         }
+        workflow_source = pins.get("workflow_source")
+        if workflow_source is not None:
+            contracts["operation.multi_step"] = {
+                "operation_id": "operation.multi_step",
+                "operation_version": "v1",
+                "target_exact": workflow_source["target"],
+                "preconditions_exact": workflow_source["preconditions"],
+                "changes_allowed_fields": ["steps"],
+                "step_vocabulary": workflow_step_vocabulary(),
+            }
+        return contracts
 
     def _validate_submissions(
         self,
@@ -1310,9 +1608,15 @@ class NotebookPlanningAgent:
         evidence: DataEvidencePackV1,
         submissions: tuple[AgentOptionSubmission, ...],
         catalog: Mapping[str, Any],
-    ) -> None:
-        if len(submissions) > 3 or not submissions:
-            raise NotebookPlanningContractError("option batch must contain 1 to 3 options")
+        *,
+        max_options: int = 3,
+    ) -> tuple[AgentOptionSubmission, ...]:
+        if len(submissions) > max_options or not submissions:
+            raise NotebookPlanningContractError(
+                f"option batch must contain 1 to {max_options} options"
+            )
+        if max_options == 1 and submissions[0].rank != 1:
+            raise NotebookPlanningContractError("Action mode option must have rank 1")
         evidence_by_id = {record.evidence_id: record for record in evidence.records}
         option_ids = [submission.option_id or f"candidate_{index + 1}" for index, submission in enumerate(submissions)]
         if any(submission.option_id is None for submission in submissions):
@@ -1327,8 +1631,14 @@ class NotebookPlanningAgent:
             raise NotebookPlanningContractError(
                 "option batch contains duplicate executable proposals"
             )
+        normalized_submissions: list[AgentOptionSubmission] = []
         for submission in submissions:
             if submission.capability_id not in catalog:
+                if submission.proposal.operation_id == "operation.multi_step":
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step capability_id must name a server-published "
+                        "model capability, not operation.multi_step"
+                    )
                 raise NotebookPlanningUnavailable(f"capability is not registered: {submission.capability_id}")
             try:
                 definition = self.operation_registry.require(
@@ -1356,6 +1666,16 @@ class NotebookPlanningAgent:
                     ) from error
             operation_id = submission.proposal.operation_id
             changes = submission.proposal.changes
+            workflow_artifact_types: dict[str, str] = {}
+            workflow_artifact_counts: dict[str, int] = {}
+            workflow_families: frozenset[str] = frozenset()
+            evidence_columns = {
+                str(column.get("name"))
+                for record in evidence.records
+                if isinstance(record.observations, Mapping)
+                for column in (record.observations.get("columns") or [])
+                if isinstance(column, Mapping) and column.get("name")
+            }
             if operation_id == "model.genesis":
                 unknown_changes = set(changes) - {"table_params", "model_params", "model_options"}
                 if unknown_changes:
@@ -1385,13 +1705,6 @@ class NotebookPlanningAgent:
                     raise NotebookPlanningContractError(
                         "model.genesis model_params must include evidence-backed y"
                     )
-                evidence_columns = {
-                    str(column.get("name"))
-                    for record in evidence.records
-                    if isinstance(record.observations, Mapping)
-                    for column in (record.observations.get("columns") or [])
-                    if isinstance(column, Mapping) and column.get("name")
-                }
                 if not evidence_columns:
                     raise NotebookPlanningContractError(
                         "model.genesis requires completed column evidence before proposing y or x"
@@ -1416,6 +1729,45 @@ class NotebookPlanningAgent:
                             "model.genesis x is not present in completed evidence columns: "
                             + ", ".join(missing_x)
                         )
+            elif operation_id == "operation.multi_step":
+                workflow_source = self._execution_pins(context).get("workflow_source")
+                if workflow_source is None:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step requires one server-pinned raw source"
+                    )
+                if submission.proposal.target != workflow_source["target"]:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step target does not copy the server workflow source pin"
+                    )
+                if submission.proposal.preconditions != workflow_source["preconditions"]:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step preconditions do not copy the server workflow source pin"
+                    )
+                if not evidence_columns:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step requires completed column evidence"
+                    )
+                from ..workflow_contracts import validate_workflow_steps
+
+                try:
+                    validate_workflow_steps(
+                        changes.get("steps"),
+                        available_columns=sorted(evidence_columns),
+                    )
+                except Exception as error:
+                    raise NotebookPlanningContractError(
+                        f"operation.multi_step source columns are invalid: {error}"
+                    ) from error
+                (
+                    workflow_artifact_types,
+                    workflow_artifact_counts,
+                    workflow_families,
+                ) = self._workflow_primary_artifacts(changes.get("steps"), catalog)
+                if submission.capability_id not in workflow_families:
+                    raise NotebookPlanningContractError(
+                        "operation.multi_step capability_id must name one declared "
+                        "model.genesis model_family"
+                    )
             elif operation_id == "model.custom":
                 unknown_changes = set(changes) - {
                     "operation",
@@ -1466,15 +1818,37 @@ class NotebookPlanningAgent:
                     )
             if not submission.evidence_refs:
                 raise NotebookPlanningContractError("every option needs at least one evidence ref")
-            published_artifacts = self._published_artifact_types(submission.capability_id)
-            if published_artifacts and not submission.expected_artifacts:
+            published_artifacts: Mapping[str, str] = (
+                workflow_artifact_types
+                if operation_id == "operation.multi_step"
+                else self._published_artifact_types(submission.capability_id)
+            )
+            canonical_expected_artifacts = submission.expected_artifacts
+            if operation_id == "operation.multi_step":
+                # A model-genesis workflow registers one primary result in
+                # each sibling Run. The server derives its primary artifact
+                # contract from the validated executable steps: letting the
+                # provider guess artifact ids, branch count, or registry step
+                # makes a non-executable presentation field block an otherwise
+                # valid analysis plan.
+                canonical_expected_artifacts = tuple(
+                    ExpectedArtifact(
+                        artifact_id=artifact_id,
+                        artifact_type=artifact_type,
+                        required=True,
+                        count=workflow_artifact_counts[artifact_id],
+                        step=None,
+                    )
+                    for artifact_id, artifact_type in sorted(published_artifacts.items())
+                )
+            elif published_artifacts and not submission.expected_artifacts:
                 raise NotebookPlanningContractError(
                     "capability required artifact(s) missing: "
                     + ", ".join(sorted(published_artifacts))
                 )
             try:
                 build_artifact_contract(
-                    submission.expected_artifacts,
+                    canonical_expected_artifacts,
                     additional_artifact_types=published_artifacts,
                 )
             except Exception as error:
@@ -1484,7 +1858,7 @@ class NotebookPlanningAgent:
             if published_artifacts:
                 required_ids = {
                     artifact.artifact_id
-                    for artifact in submission.expected_artifacts
+                    for artifact in canonical_expected_artifacts
                     if artifact.required
                 }
                 missing_artifacts = set(published_artifacts) - required_ids
@@ -1497,39 +1871,73 @@ class NotebookPlanningAgent:
                 record = evidence_by_id.get(reference.evidence_id)
                 if record is None or record.result_hash != reference.result_hash or record.status != "completed":
                     raise NotebookPlanningContractError("option evidence ref is missing, changed, or incomplete")
-            for claim in submission.comparative_claims:
-                if not any(reference.evidence_id in claim for reference in submission.evidence_refs):
-                    raise NotebookPlanningContractError("comparative claim has no evidence ref")
             if context.active_head_run_id:
-                if submission.proposal.operation_id not in {"model.rerun", "model.custom"} or submission.proposal.target.get("run_id") != context.active_head_run_id:
+                if submission.proposal.operation_id == "operation.multi_step":
+                    workflow_source = self._execution_pins(context).get("workflow_source")
+                    if workflow_source is None:
+                        raise NotebookPlanningContractError(
+                            "operation.multi_step requires one server-pinned raw source"
+                        )
+                    if (
+                        submission.proposal.target != workflow_source["target"]
+                        or submission.proposal.preconditions
+                        != workflow_source["preconditions"]
+                    ):
+                        raise NotebookPlanningContractError(
+                            "operation.multi_step is not pinned to the current raw source"
+                        )
+                elif submission.proposal.operation_id not in {"model.rerun", "model.custom"} or submission.proposal.target.get("run_id") != context.active_head_run_id:
                     raise NotebookPlanningContractError("run-source proposal is not a rerun-child of the active head")
-                pins = self._execution_pins(context)
-                matching_pins = [
-                    item
-                    for item in pins["rerun_preconditions_by_target"]
-                    if item["target"] == submission.proposal.target
-                ]
-                if not matching_pins:
-                    raise NotebookPlanningContractError(
-                        "run-source proposal target is not a server-pinned model node"
-                    )
-                if submission.proposal.preconditions != matching_pins[0]["preconditions"]:
-                    raise NotebookPlanningContractError("run-source proposal does not copy the server execution pins")
+                else:
+                    pins = self._execution_pins(context)
+                    matching_pins = [
+                        item
+                        for item in pins["rerun_preconditions_by_target"]
+                        if item["target"] == submission.proposal.target
+                    ]
+                    if not matching_pins:
+                        raise NotebookPlanningContractError(
+                            "run-source proposal target is not a server-pinned model node"
+                        )
+                    if submission.proposal.preconditions != matching_pins[0]["preconditions"]:
+                        raise NotebookPlanningContractError("run-source proposal does not copy the server execution pins")
             elif context.projection_source and context.projection_source.get("kind") == "dataset":
-                if submission.proposal.operation_id not in {"model.genesis", "model.custom"}:
-                    raise NotebookPlanningContractError("dataset-source proposal requires a genesis materialization path")
-                if submission.proposal.target.get("dataset_source_id") != context.projection_source.get("upload_sha256"):
+                if submission.proposal.operation_id == "operation.multi_step":
+                    # The preceding workflow-specific branch already verified
+                    # the immutable raw-source pin.  A composed workflow has
+                    # no single Pipeline Draft, so it must not be forced into
+                    # the genesis-materialization path used by one-model
+                    # dataset proposals.
+                    pass
+                elif submission.proposal.operation_id not in {"model.genesis", "model.custom"}:
+                    raise NotebookPlanningContractError(
+                        "dataset-source proposal requires a genesis, custom, or source-pinned workflow path"
+                    )
+                elif submission.proposal.target.get("dataset_source_id") != context.projection_source.get("upload_sha256"):
                     raise NotebookPlanningContractError("dataset-source proposal is not pinned to the source upload")
-                if submission.proposal.preconditions != self._execution_pins(context)["genesis_preconditions"]:
+                elif submission.proposal.preconditions != self._execution_pins(context)["genesis_preconditions"]:
                     raise NotebookPlanningContractError("dataset-source proposal does not copy the server execution pins")
+            normalized_submissions.append(
+                replace(
+                    submission,
+                    expected_artifacts=canonical_expected_artifacts,
+                )
+            )
+        return tuple(normalized_submissions)
 
 
-def _parse_submissions(value: Any) -> tuple[AgentOptionSubmission, ...]:
+def _parse_submissions(
+    value: Any,
+    *,
+    max_options: int = 3,
+) -> tuple[AgentOptionSubmission, ...]:
     payload = _strict_mapping(value, "option tool arguments")
     if set(payload) != {"options"} or not isinstance(payload["options"], list):
         raise NotebookPlanningContractError("option tool arguments must contain only options")
-    if len(payload["options"]) > 3:
-        raise NotebookPlanningContractError("option batch must contain at most 3 options")
+    if len(payload["options"]) > max_options:
+        raise NotebookPlanningContractError(
+            f"option batch must contain at most {max_options} options"
+        )
     return tuple(_submission(item) for item in payload["options"])
 
 

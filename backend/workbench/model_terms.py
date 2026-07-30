@@ -187,9 +187,18 @@ def expand_branch_terms(
         for level in levels[1:]:
             name = dummy_column_name(column, level)
             if name in augmented.columns:
-                raise ModelTermError(
-                    f"derived dummy column {name} collides with an existing column"
-                )
+                expected = (augmented[column] == level).astype(int)
+                existing = pd.to_numeric(augmented[name], errors="coerce")
+                if existing.isna().any() or not existing.eq(expected).all():
+                    raise ModelTermError(
+                        f"derived dummy column {name} collides with an existing column"
+                    )
+                # An existing indicator is safe only after proving it is the
+                # exact categorical contrast this branch requested.  Reusing
+                # it preserves a dataset's durable terminology without
+                # letting a similarly named column alter the fixed effect.
+                expanded.append(name)
+                continue
             augmented[name] = (augmented[column] == level).astype(int)
             expanded.append(name)
 

@@ -40,6 +40,117 @@
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
+.wb-agent-compact-composer-shell {
+  width: calc(100% - 24px);
+  margin: 7px 12px;
+}
+
+.wb-agent-compact-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wb-agent-compact-composer {
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in oklch, var(--separator) 82%, transparent);
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--bg-card-2) 92%, transparent);
+  color: var(--label-secondary);
+  display: flex;
+  gap: 9px;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.wb-agent-compact-composer:hover,
+.wb-agent-compact-composer:focus-visible {
+  border-color: color-mix(in oklch, var(--tint) 45%, var(--separator));
+  background: var(--bg-card-2);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--tint) 16%, transparent);
+  outline: none;
+}
+
+.wb-agent-compact-composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  max-height: 28px;
+  padding: 2px 0;
+  border: 0;
+  resize: none;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  line-height: 1.35;
+  outline: none;
+}
+
+.wb-agent-compact-composer textarea::placeholder {
+  color: var(--label-tertiary);
+  font-size: 13px;
+}
+
+.wb-agent-compact-composer__actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+  gap: 6px;
+}
+
+.wb-agent-compact-composer__model-control select {
+  max-width: 150px;
+  padding: 3px 18px 3px 6px;
+  font-size: 11px;
+}
+
+.wb-agent-compact-composer__expand {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--label-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.wb-agent-compact-activity {
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  margin: 0 0 5px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in oklch, var(--separator) 70%, transparent);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--bg-card-2) 86%, transparent);
+  color: var(--label-secondary);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  text-align: left;
+}
+
+.wb-agent-compact-activity:hover,
+.wb-agent-compact-activity:focus-visible {
+  border-color: color-mix(in oklch, var(--tint) 36%, var(--separator));
+  color: var(--label);
+  outline: none;
+}
+
+.wb-agent-compact-composer__expand:hover,
+.wb-agent-compact-composer__expand:focus-visible {
+  color: var(--label);
+  outline: none;
+}
+
 .wb-agent-composer-input-row {
   display: flex;
   align-items: flex-start;
@@ -187,6 +298,36 @@
   line-height: 1;
   cursor: pointer;
   transition: transform 150ms ease, background 150ms ease, opacity 150ms ease;
+}
+
+.wb-agent-stop {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--label) 12%, transparent);
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--label) 78%, var(--bg-card));
+  color: var(--bg-canvas);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.wb-agent-stop:hover,
+.wb-agent-stop:focus-visible {
+  transform: translateY(-1px);
+  background: var(--label);
+  outline: none;
+}
+
+.wb-agent-stop:active {
+  transform: scale(0.96);
 }
 
 .wb-agent-send:not(:disabled):hover {
@@ -422,6 +563,66 @@
   gap: 8px;
 }
 
+.wb-agent-execution-trace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 9px;
+  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 78%, transparent);
+  color: var(--label-secondary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.wb-agent-execution-trace__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.wb-agent-execution-trace__step[data-state="complete"] > span:first-child {
+  color: var(--tint);
+}
+
+.wb-agent-execution-trace__step[data-state="active"] {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.wb-agent-execution-trace__step[data-state="active"] > span:first-child {
+  color: var(--tint);
+  animation: wb-agent-trace-pulse 1.1s ease-in-out infinite;
+}
+
+.wb-agent-live-response {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--tint) 24%, var(--separator));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 86%, transparent);
+  color: var(--label-secondary);
+  font-size: 12px;
+}
+
+.wb-agent-live-response__label {
+  color: var(--label);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.wb-agent-live-response__pending {
+  color: var(--label-tertiary);
+}
+
+@keyframes wb-agent-trace-pulse {
+  50% { opacity: 0.38; }
+}
+
 .wb-agent-terminal {
   flex: 1;
   min-height: 0;
@@ -442,6 +643,70 @@
   overflow-wrap: anywhere;
   margin: 0;
   padding: 1px 0;
+}
+
+.wb-agent-turn + .wb-agent-turn {
+  margin-top: 10px;
+}
+
+.wb-agent-reasoning {
+  margin: 5px 0 6px 18px;
+  border: 1px solid color-mix(in oklch, var(--separator) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--bg-card-2) 72%, transparent);
+}
+
+.wb-agent-reasoning > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  padding: 0 9px;
+  color: var(--label-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.wb-agent-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wb-agent-reasoning > summary::before {
+  content: "›";
+  color: var(--label-tertiary);
+  font-size: 15px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.wb-agent-reasoning[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.wb-agent-reasoning > summary > span:first-of-type {
+  margin-right: auto;
+  color: var(--label);
+  font-weight: 600;
+}
+
+.wb-agent-reasoning > summary > span:last-of-type {
+  color: var(--label-tertiary);
+  font-size: 11px;
+}
+
+.wb-agent-reasoning-content {
+  display: grid;
+  gap: 2px;
+  padding: 6px 9px 8px;
+  border-top: 1px solid color-mix(in oklch, var(--separator) 62%, transparent);
+}
+
+.wb-agent-reasoning-content .wb-agent-terminal-line {
+  padding: 2px 0;
+  color: var(--label-secondary);
 }
 
 .wb-agent-terminal-content {

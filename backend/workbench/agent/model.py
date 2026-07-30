@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
@@ -11,8 +10,7 @@ from uuid import uuid4
 
 from workbench.llm.client import (
     LLMUpstreamError,
-    async_chat_completion,
-    chat_completion,
+    async_stream_chat_completion,
 )
 from workbench.llm.config import LLMConfig
 
@@ -168,13 +166,7 @@ class ModelAdapter(Protocol):
 
 
 class OpenAICompatibleModelAdapter:
-    """Adapt the existing one-shot client to the normalized stream contract.
-
-    The adapter owns provider-specific response handling. This first bridge is
-    intentionally one-shot because the existing DeepSeek-compatible client is
-    one-shot; the AgentCore still observes a stable delta/done sequence and can
-    later accept a native SSE implementation without changing its contract.
-    """
+    """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
@@ -187,87 +179,49 @@ class OpenAICompatibleModelAdapter:
         wire_messages = _to_openai_wire_messages(request.messages)
         wire_tools = _to_openai_tool_descriptors(request.tools)
         for attempt in range(2):
+            received_event = False
             try:
-                if request.tools:
-                    result = await asyncio.to_thread(
-                        chat_completion,
-                        wire_messages,
-                        self.config,
-                        tools=wire_tools,
-                    )
-                else:
-                    result = await asyncio.to_thread(chat_completion, wire_messages, self.config)
-                break
+                async for item in async_stream_chat_completion(
+                    wire_messages,
+                    self.config,
+                    tools=wire_tools if request.tools else None,
+                ):
+                    if abort_event is not None and abort_event.is_set():
+                        yield ModelStreamEvent.from_error(request.request_id, "aborted")
+                        return
+                    event_type = item.get("type")
+                    if event_type == "text_delta":
+                        delta = item.get("delta")
+                        if isinstance(delta, str) and delta:
+                            received_event = True
+                            yield ModelStreamEvent.text_delta(request.request_id, delta)
+                    elif event_type == "tool_call":
+                        tool_call = item.get("tool_call")
+                        if isinstance(tool_call, dict):
+                            received_event = True
+                            yield ModelStreamEvent.tool_call_delta(request.request_id, tool_call)
+                    elif event_type == "done":
+                        finish_reason = item.get("finish_reason")
+                        yield ModelStreamEvent(
+                            type="done",
+                            request_id=request.request_id,
+                            finish_reason=finish_reason if isinstance(finish_reason, str) else "stop",
+                            provider_request_id=request.request_id,
+                        )
+                        return
+                raise LLMUpstreamError("LLM provider ended the stream without a completion")
             except LLMUpstreamError as exc:
                 # A malformed 2xx body or transient network error has no
                 # trustworthy response status. Retry it once; never retry a
                 # provider-auth/request rejection such as 401/422.
-                if attempt == 0 and exc.upstream_status is None:
+                if attempt == 0 and not received_event and exc.upstream_status is None:
                     continue
                 yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
                 return
             except Exception as exc:
                 yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
                 return
-        if abort_event is not None and abort_event.is_set():
-            yield ModelStreamEvent.from_error(request.request_id, "aborted")
-            return
-        for event in _completion_events(request, result):
-            yield event
 
 
-class CancellableOpenAICompatibleModelAdapter:
-    """Async HTTP adapter whose in-flight provider request can be cancelled."""
-
-    def __init__(self, config: LLMConfig) -> None:
-        self.config = config
-
-    async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
-        abort_event = request.abort_event
-        if abort_event is not None and abort_event.is_set():
-            yield ModelStreamEvent.from_error(request.request_id, "aborted")
-            return
-        wire_messages = _to_openai_wire_messages(request.messages)
-        wire_tools = _to_openai_tool_descriptors(request.tools)
-        for attempt in range(2):
-            try:
-                result = await async_chat_completion(
-                    wire_messages,
-                    self.config,
-                    tools=wire_tools if request.tools else None,
-                )
-                break
-            except LLMUpstreamError as exc:
-                if attempt == 0 and exc.upstream_status is None:
-                    continue
-                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
-                return
-            except Exception as exc:
-                yield ModelStreamEvent.from_error(request.request_id, type(exc).__name__)
-                return
-        if abort_event is not None and abort_event.is_set():
-            yield ModelStreamEvent.from_error(request.request_id, "aborted")
-            return
-        for event in _completion_events(request, result):
-            yield event
-
-
-def _completion_events(
-    request: ModelRequest,
-    result: Mapping[str, Any],
-) -> tuple[ModelStreamEvent, ...]:
-    events: list[ModelStreamEvent] = []
-    tool_calls = result.get("tool_calls") or []
-    for tool_call in tool_calls:
-        events.append(ModelStreamEvent.tool_call_delta(request.request_id, tool_call))
-    if result.get("text"):
-        events.append(ModelStreamEvent.text_delta(request.request_id, str(result["text"])))
-    events.append(
-        ModelStreamEvent(
-            type="done",
-            request_id=request.request_id,
-            finish_reason="tool_calls" if tool_calls else "stop",
-            provider_request_id=request.request_id,
-        )
-    )
-    return tuple(events)
+class CancellableOpenAICompatibleModelAdapter(OpenAICompatibleModelAdapter):
+    """Backward-compatible name for the shared async streaming adapter."""
