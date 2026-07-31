@@ -16,6 +16,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -33,6 +34,40 @@ MAX_CATEGORICAL_LEVELS = 50
 MAX_POLYNOMIAL_DEGREE = 4
 
 _SAFE_NAME = re.compile(r"[^0-9A-Za-z]+")
+
+
+# A recomputed power may differ from a persisted one in the last bits without
+# being a different term. This bound is far above float64 noise and far below
+# any difference of analytical consequence, so it admits a round trip while
+# still refusing a column that merely shares a name.
+_DERIVED_VALUE_RTOL = 1e-9
+
+
+def _is_same_derived_series(existing: "pd.Series", expected: "pd.Series") -> bool:
+    """Whether a persisted column *is* the server-derived term.
+
+    Name equality is not enough to reuse a column: a similarly named column
+    would silently change the model. Equality must hold on the missing-value
+    pattern too, because a column that agrees only where both are present
+    would estimate on a different sample.
+    """
+
+    existing_missing = existing.isna().to_numpy()
+    expected_missing = expected.isna().to_numpy()
+    if not (existing_missing == expected_missing).all():
+        return False
+    present = ~existing_missing
+    if not present.any():
+        return False
+    return bool(
+        np.allclose(
+            existing.to_numpy()[present],
+            expected.to_numpy()[present],
+            rtol=_DERIVED_VALUE_RTOL,
+            atol=0.0,
+            equal_nan=False,
+        )
+    )
 
 
 def polynomial_column_name(column: str, power: int) -> str:
@@ -211,11 +246,20 @@ def expand_branch_terms(
             raise ModelTermError(f"polynomial column {column} is not numeric")
         for power in range(2, int(entry["degree"]) + 1):
             name = polynomial_column_name(column, power)
+            expected_power = numeric**power
             if name in augmented.columns:
-                raise ModelTermError(
-                    f"derived polynomial column {name} collides with an existing column"
-                )
-            augmented[name] = numeric**power
+                existing = pd.to_numeric(augmented[name], errors="coerce")
+                if not _is_same_derived_series(existing, expected_power):
+                    raise ModelTermError(
+                        f"derived polynomial column {name} collides with an existing column"
+                    )
+                # A persisted power is safe only after proving it is the term
+                # this branch requested, mirroring categorical indicator reuse.
+                # It is kept as stored rather than rewritten, so a dataset's
+                # durable column stays byte-identical across compositions.
+                expanded.append(name)
+                continue
+            augmented[name] = expected_power
             expanded.append(name)
 
     if len(set(expanded)) != len(expanded):

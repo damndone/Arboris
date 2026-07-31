@@ -54,6 +54,13 @@ from ..capability_factory.execution_authorization import (
 router = APIRouter()
 
 NOTEBOOK_PROVIDER_TIMEOUT_S = 120.0
+
+# The total planning budget, owned here and passed explicitly to the planner
+# rather than left to its internal derivation. One value serves both the
+# enforcement and the number published to the UI: a route timeout, a planner
+# budget and an on-screen expectation that drift apart is what left a live
+# request looking hung at 68s with cancellation as the only recourse.
+NOTEBOOK_PLANNING_DEADLINE_S = 180.0
 _ACTIVE_PLANNING_ATTEMPTS: dict[
     tuple[str, str, str], asyncio.Task[Any]
 ] = {}
@@ -414,6 +421,9 @@ def _context_packet(context: NotebookPlanningContextV1) -> dict[str, Any]:
     packet = context.to_dict()
     packet["generation_context_hash"] = generation_context_hash(context)
     packet["freshness_dependency_fingerprint"] = freshness_dependency_fingerprint(context)
+    # Published so a planning surface can show the budget it is running against
+    # instead of an open-ended elapsed counter.
+    packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
     return packet
 
 
@@ -683,6 +693,7 @@ def _planning_agent(
         proposal_validator=validate_proposal,
         available_inspections=tuple(INSPECTIONS),
         model_timeout_s=notebook_config.timeout_s,
+        planning_timeout_s=NOTEBOOK_PLANNING_DEADLINE_S,
     )
 
 

@@ -171,3 +171,73 @@ def test_branch_source_columns_include_derived_term_sources() -> None:
     assert branch_source_columns(
         _branch(categorical=["region"], polynomials=[{"column": "size", "degree": 2}])
     ) == {"y", "x", "region", "size"}
+
+
+def _poly_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "y": [10.0 + index for index in range(12)],
+            "x": [1.0 + index for index in range(12)],
+            "size": [2.0 + index * 0.5 for index in range(12)],
+        }
+    )
+
+
+def test_polynomial_reuses_an_equivalent_persisted_power() -> None:
+    """A persisted power column is the same term, not a name collision.
+
+    Composing a second workflow on a dataset that already carries a derived
+    power from an earlier one failed before fitting, even though the stored
+    column held exactly the requested power of exactly the requested source.
+    """
+
+    source = _poly_frame()
+    source["size_pow2"] = source["size"] ** 2
+
+    frame, predictors, _ = expand_branch_terms(
+        source, _branch(polynomials=[{"column": "size", "degree": 2}])
+    )
+
+    assert predictors == ["x", "size_pow2"]
+    assert frame["size_pow2"].equals(source["size_pow2"])
+
+
+def test_polynomial_reuse_tolerates_floating_point_noise() -> None:
+    """Recomputation may differ in the last bits without being a different term."""
+
+    source = _poly_frame()
+    exact = source["size"] ** 2
+    source["size_pow2"] = exact * (1.0 + 1e-13)
+
+    frame, predictors, _ = expand_branch_terms(
+        source, _branch(polynomials=[{"column": "size", "degree": 2}])
+    )
+
+    assert predictors == ["x", "size_pow2"]
+    # The persisted values are kept as they are; reuse never rewrites them.
+    assert frame["size_pow2"].equals(source["size_pow2"])
+
+
+def test_a_polynomial_column_with_different_values_is_refused() -> None:
+    """A difference of analytical consequence is a collision, not a term."""
+
+    source = _poly_frame()
+    source["size_pow2"] = (source["size"] ** 2) * 1.001
+
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(
+            source, _branch(polynomials=[{"column": "size", "degree": 2}])
+        )
+
+
+def test_a_polynomial_column_with_mismatched_missing_values_is_refused() -> None:
+    """Equal where both are present is not equal; the samples would differ."""
+
+    source = _poly_frame()
+    source.loc[3, "size"] = None
+    source["size_pow2"] = _poly_frame()["size"] ** 2
+
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(
+            source, _branch(polynomials=[{"column": "size", "degree": 2}])
+        )

@@ -25,6 +25,7 @@ from workbench.agent.workflow_runtime import (
     _execute_ols_branches,
     _execute_workflow_report,
     build_workflow_step_executor,
+    collect_post_estimation_results,
 )
 from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
@@ -254,6 +255,133 @@ def test_panel_genesis_step_runs_two_way_fixed_effects_with_entity_clusters(tmp_
     assert result["coefficients"]["exposure_pow2"]["ci_upper"] is not None
 
 
+def _post_estimation_results(project, run_id, state, step_ids):
+    """Read each declared post-estimation step's persisted result."""
+
+    index = json.loads(
+        (project / "runs" / run_id / "artifacts_index.json").read_text(encoding="utf-8")
+    )
+    records = {record["artifact_id"]: record for record in index["artifacts"]}
+    out = {}
+    for step_id in step_ids:
+        record = records[state.steps[step_id].artifact_ids[0]]
+        out[step_id] = json.loads(
+            (project / "runs" / run_id / record["path"]).read_text(encoding="utf-8")
+        )["result"]
+    return out
+
+
+def _curved_post_estimation_state(tmp_path, covariance: str):
+    """Run the same curved design under one declared covariance."""
+
+    rows = 48
+    exposure = [float(index - 24) for index in range(rows)]
+    frame = pd.DataFrame(
+        {
+            "response": [
+                20.0
+                + 1.8 * value
+                - 0.12 * value**2
+                # Deliberate heteroskedasticity: the robust and unadjusted
+                # covariances must not agree, or the assertion below is vacuous.
+                + ((index % 7) - 3) * (1.0 + abs(value) * 0.6)
+                for index, value in enumerate(exposure)
+            ],
+            "exposure": exposure,
+            "segment": ["lower" if index % 2 else "upper" for index in range(rows)],
+        }
+    )
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="fixture-dag",
+    )
+    draft = _compile(
+        (run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-cov-{covariance}",
+        steps=[
+            {
+                "step_id": "estimate",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": covariance,
+                    "branches": [
+                        {
+                            "branch_id": "curved",
+                            "outcome": "response",
+                            "predictors": ["exposure"],
+                            "polynomials": [{"column": "exposure", "degree": 2}],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "joint",
+                "operation_id": "model.joint_f_test",
+                "depends_on": ["estimate"],
+                "spec": {
+                    "branch_id": "curved",
+                    "term_selectors": [{"kind": "polynomial", "column": "exposure"}],
+                },
+            },
+            {
+                "step_id": "stationary",
+                "operation_id": "model.quadratic_stationary_point",
+                "depends_on": ["estimate"],
+                "spec": {"branch_id": "curved", "column": "exposure"},
+            },
+        ],
+    )
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+    assert state.status == "completed", {
+        step_id: step.error for step_id, step in state.steps.items() if step.error
+    }
+    return _post_estimation_results(
+        project, run_id, state, ["joint", "stationary"]
+    )
+
+
+def test_post_estimation_inference_uses_the_model_declared_covariance(tmp_path) -> None:
+    """A joint test must answer for the model the user actually fitted.
+
+    The F statistic depends on the covariance estimator, so refitting a robust
+    branch under an unadjusted vcov reports a p-value that belongs to a model
+    nobody estimated -- and labels it with the model's own provenance. The
+    label and the arithmetic have to move together.
+    """
+
+    robust = _curved_post_estimation_state(tmp_path / "robust", "robust")
+    unadjusted = _curved_post_estimation_state(tmp_path / "plain", "unadjusted")
+
+    assert robust["joint"]["covariance"] == "robust"
+    assert unadjusted["joint"]["covariance"] == "unadjusted"
+    # Not just a relabelling: the inference itself differs under the two
+    # estimators on a deliberately heteroskedastic design.
+    assert robust["joint"]["f_statistic"] != pytest.approx(
+        unadjusted["joint"]["f_statistic"], rel=1e-6
+    )
+
+    # The stationary point is a ratio of coefficients, so it is invariant to the
+    # covariance choice; only its reported provenance changes.
+    assert robust["stationary"]["covariance"] == "robust"
+    assert robust["stationary"]["stationary_point"] == pytest.approx(
+        unadjusted["stationary"]["stationary_point"], rel=1e-9
+    )
+
+
 def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
     tmp_path,
 ) -> None:
@@ -383,6 +511,57 @@ def test_declared_post_estimation_steps_materialize_reproducible_model_evidence(
     assert 0 <= white["lm_p_value"] <= 1
     assert white["f_statistic"] >= 0
     assert 0 <= white["f_p_value"] <= 1
+
+    # The result is only evidence a user can act on if a product surface can
+    # find it. The workflow persists on the *source* run, but the reader who
+    # asked the question opens the child model run, so the projection has to
+    # be reachable from both identities.
+    from_source = collect_post_estimation_results(project, run_id)
+    assert {entry["operation_id"] for entry in from_source} == {
+        "model.joint_f_test",
+        "model.quadratic_stationary_point",
+        "model.white_test",
+    }
+    stationary_entry = next(
+        entry
+        for entry in from_source
+        if entry["operation_id"] == "model.quadratic_stationary_point"
+    )
+    assert stationary_entry["run_id"] == run_id
+    assert stationary_entry["workflow_step_id"] == "locate_stationary_point"
+    assert stationary_entry["result"]["stationary_point"] == pytest.approx(7.5, abs=0.2)
+
+    model_run_id = stationary_entry["model_run_id"]
+    assert model_run_id and model_run_id != run_id
+    from_model_run = collect_post_estimation_results(project, model_run_id)
+    assert [entry["artifact_id"] for entry in from_model_run] == [
+        entry["artifact_id"] for entry in from_source
+    ]
+
+
+def test_post_estimation_projection_is_bounded_and_ignores_unregistered_files(
+    tmp_path,
+) -> None:
+    """The projection reads the artifacts index, never the directory listing.
+
+    An unregistered file dropped next to real evidence must not become a
+    result: the index is the admission record, and honouring loose files on
+    disk would let anything that can write to the run directory publish a
+    finding through the product surface.
+    """
+
+    frame = _frame()
+    project, run_id, artifact_id = _source_project(tmp_path, frame)
+    run_root = project / "runs" / run_id
+    stray = run_root / "artifacts" / "post_estimation" / "stray.json"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text(
+        json.dumps({"result": {"schema_version": "forged", "value": 1}}),
+        encoding="utf-8",
+    )
+
+    assert collect_post_estimation_results(project, run_id) == []
+    assert collect_post_estimation_results(project, run_id, limit=0) == []
 
 
 def test_white_test_handles_a_high_scale_polynomial_categorical_design(tmp_path) -> None:

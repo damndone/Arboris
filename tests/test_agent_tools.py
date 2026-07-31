@@ -344,7 +344,7 @@ def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
 def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
 
-    def fake_chat_completion(messages, actual_config, *, tools):
+    async def fake_stream(messages, actual_config, *, tools):
         assert actual_config == config
         assert tools[0] == {
             "type": "function",
@@ -353,19 +353,23 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
                 "parameters": {"type": "object"},
             },
         }
-        return {
-            "text": "",
+        yield {
+            "type": "tool_call",
+            "tool_call": {
+                "tool_call_id": "call-1",
+                "tool_id": "inspect_node_context",
+                "arguments": {"node_ref": "model-ols"},
+            },
+        }
+        yield {
+            "type": "done",
+            "finish_reason": "tool_calls",
             "model": "deepseek-chat",
-            "tool_calls": [
-                {
-                    "tool_call_id": "call-1",
-                    "tool_id": "inspect_node_context",
-                    "arguments": {"node_ref": "model-ols"},
-                }
-            ],
         }
 
-    monkeypatch.setattr("workbench.agent.model.chat_completion", fake_chat_completion)
+    monkeypatch.setattr(
+        "workbench.agent.model.async_stream_chat_completion", fake_stream
+    )
 
     async def scenario() -> None:
         adapter = OpenAICompatibleModelAdapter(config)
@@ -397,7 +401,7 @@ def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) ->
     started = asyncio.Event()
     cancelled = False
 
-    async def slow_completion(messages, actual_config, *, tools):
+    async def slow_stream(messages, actual_config, *, tools):
         nonlocal cancelled
         assert actual_config == config
         started.set()
@@ -406,10 +410,11 @@ def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) ->
         except asyncio.CancelledError:
             cancelled = True
             raise
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
 
     monkeypatch.setattr(
-        "workbench.agent.model.async_chat_completion",
-        slow_completion,
+        "workbench.agent.model.async_stream_chat_completion",
+        slow_stream,
     )
 
     async def scenario() -> None:
@@ -451,33 +456,21 @@ def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> N
         seen.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={
-                "model": "deepseek-chat",
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-wire-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "inspect_node_context",
-                                        "arguments": '{"node_ref":"model-ols"}',
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-            },
+            content=(
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                b'[{"index":0,"id":"call-wire-1","type":"function","function":'
+                b'{"name":"inspect_node_context","arguments":"{\\"node_ref\\":\\"model-ols\\"}"}}]},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
         )
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),
@@ -605,55 +598,34 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
         model="deepseek-chat",
     )
     seen: list[httpx.Request] = []
+    # A tool-call fragment whose assembled arguments are not valid JSON. The
+    # defect only becomes visible at the end of the stream, so the retry has to
+    # survive a well-formed SSE envelope carrying a malformed payload.
     responses = iter(
         [
             httpx.Response(
                 200,
-                json={
-                    "model": "deepseek-chat",
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [
-                                    {
-                                        "id": "call-bad",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "inspect_node_context",
-                                            "arguments": "{not-json",
-                                        },
-                                    }
-                                ],
-                            }
-                        }
-                    ],
-                },
+                content=(
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                    b'[{"index":0,"id":"call-bad","type":"function","function":'
+                    b'{"name":"inspect_node_context","arguments":"{not-json"}}]},'
+                    b'"finish_reason":null}]}\n\n'
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                    b'"finish_reason":"tool_calls"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
             ),
             httpx.Response(
                 200,
-                json={
-                    "model": "deepseek-chat",
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [
-                                    {
-                                        "id": "call-good",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "inspect_node_context",
-                                            "arguments": '{"node_ref":"model-ols"}',
-                                        },
-                                    }
-                                ],
-                            }
-                        }
-                    ],
-                },
+                content=(
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                    b'[{"index":0,"id":"call-good","type":"function","function":'
+                    b'{"name":"inspect_node_context","arguments":"{\\"node_ref\\":\\"model-ols\\"}"}}]},'
+                    b'"finish_reason":null}]}\n\n'
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                    b'"finish_reason":"tool_calls"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
             ),
         ]
     )
@@ -664,8 +636,8 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),
@@ -711,18 +683,19 @@ def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None
         seen.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={
-                "model": "deepseek-chat",
-                "choices": [
-                    {"message": {"role": "assistant", "content": "summary done"}}
-                ],
-            },
+            content=(
+                b'data: {"model":"deepseek-chat","choices":[{"delta":'
+                b'{"content":"summary done"},"finish_reason":null}]}\n\n'
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
         )
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),

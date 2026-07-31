@@ -12,6 +12,7 @@ import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import {
   buildFactTable,
   buildFigureFacts,
+  buildPostEstimationFacts,
   buildTimeSeriesFacts,
   type CitableFact,
 } from "./factTable";
@@ -33,7 +34,13 @@ import {
   saveReportRecord,
   type ReportRecord,
 } from "./reportHistory";
-import { artifactDownloadUrl, fetchArtifactJson, fetchRunArtifacts } from "../api";
+import {
+  artifactDownloadUrl,
+  fetchArtifactJson,
+  fetchRunArtifacts,
+  fetchRunDetail,
+} from "../api";
+import type { PostEstimationResult } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 
 const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
@@ -74,6 +81,30 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const [timeSeriesArtifacts, setTimeSeriesArtifacts] = useState<Record<string, unknown>>({});
   const [figureContextLoading, setFigureContextLoading] = useState(false);
   const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
+  const [postEstimation, setPostEstimation] = useState<PostEstimationResult[]>([]);
+
+  // Declared post-estimation results are server-computed scalars with artifact
+  // provenance, so they belong in the deterministic fact table. A failure here
+  // is not surfaced: the report is still truthful without these facts, and the
+  // figure inventory owns the visible error channel.
+  useEffect(() => {
+    const runId = activeRunId;
+    if (!runId || !projectRoot) {
+      setPostEstimation([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchRunDetail(projectRoot, runId)
+      .then((detail) => {
+        if (!cancelled) setPostEstimation(detail.post_estimation_results ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPostEstimation([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRunId, projectRoot]);
 
   useEffect(() => {
     const stored = loadReportHistory(historyRoot);
@@ -210,9 +241,18 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     ),
     [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
   );
+  const postEstimationFacts = useMemo(
+    () => buildPostEstimationFacts(
+      postEstimation,
+      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
+    ),
+    [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
+  );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts] : []),
-    [figureFacts, table, timeSeriesFacts],
+    () => (table
+      ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts]
+      : []),
+    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
   );
 
   if (!forest || !forest.activeRunId || !table) {

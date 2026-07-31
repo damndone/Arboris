@@ -91,7 +91,7 @@ def test_create_and_list_return_only_public_provider_data(api, store_path):
     assert stored.providers[0].notes == "Primary research provider"
 
 
-def test_environment_provider_is_visible_and_model_switch_materializes_local_settings(
+def test_environment_provider_is_visible_and_publishes_only_its_configured_model(
     api, store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
@@ -102,18 +102,37 @@ def test_environment_provider_is_visible_and_model_switch_materializes_local_set
     assert listed.status_code == 200, listed.text
     payload = listed.json()
     assert payload["active_provider_id"] == "environment"
-    assert {model["request_model"] for model in payload["providers"][0]["models"]} >= {
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-    }
+    # The environment variables *declare* one model; listing is not a
+    # capability-discovery protocol. Inferring extra vendor models from the
+    # base URL would offer a model this credential was never configured for.
+    # A genuine second choice can only arrive from the provider itself, via
+    # POST /llm/providers/{id}/models/refresh.
+    assert [
+        model["request_model"] for model in payload["providers"][0]["models"]
+    ] == ["deepseek-v4-flash"]
     assert API_KEY not in listed.text
 
+
+def test_environment_provider_model_switch_materializes_local_settings(
+    api, store_path, monkeypatch
+):
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "deepseek-v4-flash")
+
+    # An explicit operator write is the authoritative channel for `model`, so it
+    # is taken as given rather than checked against the published catalog.
     updated = api.put(
         "/llm/providers/environment",
         json={"model": "deepseek-v4-pro"},
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["model"] == "deepseek-v4-pro"
+    # The partial update omits `models`, so the bootstrapped catalog survives
+    # verbatim: switching the request model must not silently invent entries.
+    assert [model["request_model"] for model in updated.json()["models"]] == [
+        "deepseek-v4-flash"
+    ]
     assert load_provider_store(store_path).active_provider_id == "environment"
     assert load_llm_config().source == "local"
     assert load_llm_config().model == "deepseek-v4-pro"

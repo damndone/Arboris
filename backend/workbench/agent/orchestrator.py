@@ -320,6 +320,9 @@ class _OrchestratorOperationHandler:
                     "workflow_id": draft.workflow_id,
                     "workflow_plan_fingerprint": draft.plan_fingerprint,
                     "workflow_state": state.to_dict(),
+                    "post_estimation_results": self.orchestrator._workflow_post_estimation_results(
+                        self.project_root, draft
+                    ),
                 },
                 execution={
                     **record.execution,
@@ -383,7 +386,12 @@ class _OrchestratorOperationHandler:
             if state.status != "completed":
                 raise ValueError("workflow did not complete")
             return OperationEffect(
-                outputs={"workflow_state": state.to_dict()},
+                outputs={
+                    "workflow_state": state.to_dict(),
+                    "post_estimation_results": self.orchestrator._workflow_post_estimation_results(
+                        self.project_root, draft
+                    ),
+                },
                 execution=record.execution,
                 bindings={"workflow_id": draft.workflow_id},
                 verification={"passed": True, "status": "completed"},
@@ -578,6 +586,32 @@ class WorkbenchOrchestrator:
             steps=composed_steps,
             available_columns=[str(column) for column in frame.columns],
         )
+
+    def _workflow_post_estimation_results(
+        self, project_root: Any, draft: WorkflowDraft
+    ) -> list[dict[str, Any]]:
+        """Bounded results this workflow produced, for the operation record.
+
+        The Agent transcript renders the operation record, so without this a
+        confirmed workflow can only report that it finished -- the number the
+        user asked for stays in an artifact nobody opens.
+
+        Scoped to this workflow id: the source run accumulates evidence from
+        every workflow ever run against it, and replaying older findings under
+        a new confirmation would misattribute them.
+        """
+
+        from pathlib import Path
+
+        from .workflow_runtime import collect_post_estimation_results
+
+        return [
+            entry
+            for entry in collect_post_estimation_results(
+                Path(project_root), str(draft.target["run_id"])
+            )
+            if entry["workflow_id"] == draft.workflow_id
+        ]
 
     def _persist_workflow_step_audit(
         self,

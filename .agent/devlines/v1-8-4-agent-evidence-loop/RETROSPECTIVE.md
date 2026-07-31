@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 2/11 (18.2%; 18.2 per 100 events)
+- Failure frequency: 2/12 (16.7%; 16.7 per 100 events)
 - Repeat rate: 0/2 (0.0%)
 - Recurrence rate: 0/2 (0.0%)
 - MTTR: median=1435000 ms (sample=2; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/1 (0.0%)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -74,3 +74,4 @@ COMPLETED
 - #9: `b1a9d7f2-4f4e-44ab-bb0b-5242c2e4dd83` | 2026-07-28T15:50:56.000Z | WASTE/quick_gate_notebook_test_fallback | incident=`944b95ce-df43-49ae-88b2-79adc33a38d0` | lesson_key=`quick-gate-agent-notebook-classification` | event_sha256=`114871fd4c352071fc8cf719acb53e269854967755ec5f2a893f898371e33d30`
 - #10: `dbb1458c-20c1-4f9c-9d23-8c6f7eac2eaf` | 2026-07-28T15:52:01.000Z | STATE_CHANGE/agent_evidence_loop_completed | incident=`272e3d93-2df1-4e12-85a1-1e9ec7e3afe5` | lesson_key=`completed-operation-needs-public-evidence-view` | event_sha256=`3d973b44ba7f4f429b413f9be0fb97a7a460594a3306d9c4e39f7cdcc250fef6`
 - #11: `b45e4b30-6c46-418d-89e4-cf2f0a5b70f8` | 2026-07-28T15:52:50.000Z | REVIEW/operation_evidence_gap_resolved | incident=`b71e5843-398c-4028-83d1-9c5e70a9ad4e` | lesson_key=`agent-completed-operation-evidence-boundary` | event_sha256=`6070cfac92fa0896425f9a0586155a98b64a7e6dc2b097dad91c0c5589503cc4`
+- #12: `a350dd44-3e06-453b-9a08-1349a8693a1f` | 2026-07-31T02:40:00.000Z | GATE/v1_8_4_release_gate | incident=`4ca4cfc6-6cb9-4c18-be2c-d4157b053fda` | lesson_key=`v1-8-4-release-gate` | event_sha256=`d599888eccb2aca3941676a65e020ea5525a6a42b373d4b6f26350c3655ac8fa`

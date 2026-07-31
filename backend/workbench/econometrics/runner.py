@@ -599,6 +599,33 @@ def _attach_ols_result_contract(
     return result
 
 
+def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) -> Any:
+    """Return the fit carrying `covariance`, from a plain OLS fit.
+
+    Single source for how a covariance estimator is applied to OLS, so a
+    consumer that needs the fit itself -- rather than the normalized result --
+    cannot drift from what `run_ols` reports. `run_ols` returns the *plain*
+    fit, so post-estimation inference must apply the estimator itself or it
+    silently answers under `nonrobust`.
+    """
+
+    if covariance == "clustered":
+        if groups is None:
+            raise ValueError("clustered covariance requires cluster groups")
+        return original.get_robustcov_results(
+            cov_type="cluster",
+            groups=groups,
+            use_correction=True,
+            df_correction=True,
+            use_t=False,
+        )
+    if covariance == "robust":
+        return original.get_robustcov_results(cov_type="HC1", use_t=False)
+    if covariance == "unadjusted":
+        return original
+    raise ValueError(f"unsupported OLS covariance estimator: {covariance}")
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
@@ -679,16 +706,12 @@ def run_ols(
                 "on analysis rows."
             )
         _validate_cluster_group_values(groups)
-        fitted = original.get_robustcov_results(
-            cov_type="cluster",
-            groups=groups.to_numpy(copy=True),
-            use_correction=True,
-            df_correction=True,
-            use_t=False,
+        fitted = apply_ols_covariance(
+            original, "clustered", groups=groups.to_numpy(copy=True)
         )
         model_type = "ols_clustered"
     elif robust:
-        fitted = original.get_robustcov_results(cov_type="HC1", use_t=False)
+        fitted = apply_ols_covariance(original, "robust")
         model_type = "ols_robust"
     else:
         fitted = original

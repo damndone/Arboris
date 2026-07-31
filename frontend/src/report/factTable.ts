@@ -4,6 +4,7 @@
 // the same pure context resolver the drawer uses, and sent to the model as the
 // only permitted source of numbers. Chips later render from this local table
 // (never from model output), so an invented number can never become a chip.
+import type { PostEstimationResult } from "../api";
 import type { ForestViewModel } from "../lineage/api/graphViewTypes";
 import { resolveNodeOperationContext } from "../lineage/api/nodeOperationContext";
 
@@ -105,6 +106,47 @@ function isAtomicFact(value: unknown): value is string | number | boolean {
     || (typeof value === "number" && Number.isFinite(value))
     || typeof value === "boolean"
   );
+}
+
+/** Reader-facing names for declared post-estimation operations. */
+const POST_ESTIMATION_FACT_LABELS: Record<string, string> = {
+  "model.quadratic_stationary_point": "Quadratic stationary point",
+  "model.joint_f_test": "Joint F test",
+  "model.white_test": "White test",
+};
+
+/** Make declared post-estimation results citable in a generated report.
+ *
+ * These are server-computed scalars with artifact provenance, so they belong
+ * in the deterministic fact table rather than in prose. Every atomic field of
+ * the result is emitted, including qualifiers such as
+ * `stationary_point_within_observed_range`: citing a turning point without the
+ * flag saying it sits outside the observed data is how an extrapolation gets
+ * reported as a finding. Schema tags are dropped -- they identify the payload
+ * format, not the result. */
+export function buildPostEstimationFacts(
+  results: PostEstimationResult[],
+  startAt = 0,
+): CitableFact[] {
+  const facts: CitableFact[] = [];
+  let counter = startAt;
+  for (const entry of results) {
+    const label =
+      POST_ESTIMATION_FACT_LABELS[entry.operation_id] ?? entry.operation_id;
+    for (const [key, value] of Object.entries(entry.result)) {
+      if (key === "schema_version" || !isAtomicFact(value)) continue;
+      if (facts.length >= 80) return facts;
+      facts.push({
+        id: `c${++counter}`,
+        node_key: `post_estimation:${entry.workflow_step_id}`,
+        node_label: label,
+        field: `post_estimation:${entry.workflow_step_id}:${key}`,
+        label: `${label} — ${key.replace(/_/g, " ")}`,
+        value,
+      });
+    }
+  }
+  return facts;
 }
 
 /** Bounded whitelist of truthful scalar evidence from ARMA-GARCH artifacts. */

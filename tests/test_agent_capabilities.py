@@ -51,9 +51,11 @@ def test_capability_projection_is_sorted_json_safe_and_secret_free() -> None:
         "model.joint_f_test",
         "model.quadratic_stationary_point",
         "model.rerun",
+        "model.white_test",
         "operation.multi_step",
         "report.compose",
         "statistical.derive_boolean",
+        "statistical.derive_numeric",
         "statistical.derived_group_summarize",
         "statistical.explore",
     ]

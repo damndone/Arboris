@@ -27,6 +27,7 @@ from workbench.contracts.agent.notebook_option import (
     RecommendationDecisionV11,
 )
 from workbench.lineage.upload_store import store_upload_bytes
+from workbench.http import notebook_routes
 from workbench.http.notebook_routes import (
     _execution_results_packet,
     _planning_agent,
@@ -561,6 +562,13 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert proposed.json()["options"][0]["freshness_status"] == "fresh"
     assert proposed.json()["context"]["active_head_run_id"] is None
     assert proposed.json()["trace_id"].startswith("trace_")
+    # The planner's total budget is published so the UI can show the reader how
+    # long a planning pass may legitimately run. Without it a live request that
+    # is still inside its budget is indistinguishable from one that has hung,
+    # and the only recourse on screen is to cancel.
+    assert proposed.json()["context"]["planning_deadline_s"] == (
+        notebook_routes.NOTEBOOK_PLANNING_DEADLINE_S
+    )
 
     snapshot = client.get(
         f"/notebooks/{notebook_id}/options",

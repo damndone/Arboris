@@ -14,7 +14,7 @@ import pandas as pd
 from scipy import stats
 
 from ..artifacts import read_json, register_artifact, sha256_file, write_json, write_text_durable
-from ..econometrics.runner import run_ols
+from ..econometrics.runner import apply_ols_covariance, run_ols
 from ..exports import export_pdf, export_xlsx
 from ..graph_model import BranchRef, Edge, Graph, Node, NodeKind, Stage, Trust
 from ..graph_store import GraphStore
@@ -50,6 +50,101 @@ from .workflow_contracts import workflow_dispatcher_key
 
 
 _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
+
+# The artifact types a declared post-estimation step can persist. Both are
+# already registered evidence; this is the read side of the same contract.
+POST_ESTIMATION_ARTIFACT_TYPES = ("post_estimation", "statistical_test")
+
+# A product surface renders these inline, so the projection stays bounded
+# rather than growing with a project's workflow history.
+MAX_PROJECTED_POST_ESTIMATION_RESULTS = 20
+
+
+def collect_post_estimation_results(
+    root: Path,
+    run_id: str,
+    *,
+    limit: int = MAX_PROJECTED_POST_ESTIMATION_RESULTS,
+) -> list[dict[str, Any]]:
+    """Project durable post-estimation evidence that belongs to one run.
+
+    A completed workflow is not an answered question: the step writes a
+    provenance-carrying artifact, but nothing renders it, so the user who
+    asked never sees the number. This is the read side that a product surface
+    consumes.
+
+    Relevance has two identities on purpose. The artifact is persisted on the
+    workflow's *source* run, while the model it describes is a *child* run --
+    and the child is what the user opens to read the result. Matching only the
+    storing run would keep the answer invisible exactly where it is looked for.
+
+    Only artifacts registered in a run's index are read. The index is the
+    admission record; trusting loose files on disk would let anything able to
+    write into the run directory publish a finding through the product surface.
+    """
+
+    if limit <= 0:
+        return []
+    runs_root = root / "runs"
+    if not runs_root.is_dir():
+        return []
+
+    collected: list[dict[str, Any]] = []
+    for run_dir in sorted(runs_root.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        for record in _read_artifacts_index(run_dir).get("artifacts", []):
+            if record.get("artifact_type") not in POST_ESTIMATION_ARTIFACT_TYPES:
+                continue
+            entry = _read_post_estimation_entry(run_dir, record)
+            if entry is None:
+                continue
+            if entry["run_id"] != run_id and entry["model_run_id"] != run_id:
+                continue
+            collected.append(entry)
+
+    collected.sort(key=lambda item: (item["run_id"], item["artifact_id"]))
+    return collected[:limit]
+
+
+def _read_post_estimation_entry(
+    run_dir: Path, record: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """Read one registered post-estimation artifact, or None when unusable.
+
+    A malformed or missing artifact is skipped rather than raised: this is a
+    read-only projection for display, and one damaged record must not make a
+    run unreadable.
+    """
+
+    relative = str(record.get("path", ""))
+    if not relative:
+        return None
+    path = (run_dir / relative).resolve()
+    # The index stores repository-relative paths; a traversal escape means the
+    # record is not describing this run's own evidence.
+    if not path.is_file() or run_dir.resolve() not in path.parents:
+        return None
+    try:
+        payload = read_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    source = payload.get("source")
+    result = payload.get("result")
+    if not isinstance(source, Mapping) or not isinstance(result, Mapping):
+        return None
+    return {
+        "artifact_id": str(record.get("artifact_id", "")),
+        "artifact_type": str(record.get("artifact_type", "")),
+        "operation_id": str(record.get("step", "")),
+        "run_id": str(source.get("run_id", "")),
+        "model_run_id": str(source.get("model_run_id", "")),
+        "workflow_id": str(source.get("workflow_id", "")),
+        "workflow_step_id": str(source.get("workflow_step_id", "")),
+        "result": dict(result),
+    }
 
 
 def _apply_numeric_recipes(
@@ -887,6 +982,11 @@ def _execute_model_genesis_branches(
                 "artifact_ids": ids,
                 "branch_spec": {
                     "model_family": model_family,
+                    # Post-estimation refits this branch, and the covariance
+                    # estimator changes what a joint test answers. Without it
+                    # recorded here the refit could only guess, and would
+                    # report inference for a model nobody estimated.
+                    "covariance": branch_covariance,
                     "entity_col": branch_spec.get("entity_col"),
                     "time_col": branch_spec.get("time_col"),
                     "outcome": str(branch["outcome"]),
@@ -1012,11 +1112,32 @@ def _dependent_model_branch(
     return branch
 
 
+def _branch_covariance(branch_spec: Mapping[str, Any]) -> str:
+    """The covariance estimator the completed branch was actually fitted under.
+
+    Fails closed rather than defaulting. Silently refitting under `unadjusted`
+    is what produced a joint test whose p-value belonged to a model the user
+    never estimated, while carrying that model's provenance.
+    """
+
+    covariance = branch_spec.get("covariance")
+    if not isinstance(covariance, str) or not covariance:
+        raise WorkflowExecutionError(
+            "completed model branch does not record its covariance estimator, so "
+            "post-estimation inference cannot reproduce it"
+        )
+    if covariance not in {"unadjusted", "robust", "clustered"}:
+        raise WorkflowExecutionError(
+            f"completed model branch has an unsupported covariance estimator: {covariance}"
+        )
+    return covariance
+
+
 def _refit_completed_ols_branch(
     source_frame: pd.DataFrame,
     branch: Mapping[str, Any],
 ) -> tuple[Any, list[str], pd.DataFrame]:
-    """Reconstruct the exact unadjusted OLS design from immutable source data."""
+    """Reconstruct the completed OLS design and covariance from source data."""
 
     branch_spec = branch.get("branch_spec")
     if not isinstance(branch_spec, Mapping):
@@ -1035,14 +1156,27 @@ def _refit_completed_ols_branch(
         raise WorkflowExecutionError(
             "completed model branch design no longer matches its declared provenance"
         )
+    covariance = _branch_covariance(branch_spec)
+    cluster_col: str | None = None
+    if covariance == "clustered":
+        entity_col = branch_spec.get("entity_col")
+        if not isinstance(entity_col, str) or not entity_col:
+            raise WorkflowExecutionError(
+                "clustered post-estimation requires the branch's cluster column"
+            )
+        cluster_col = entity_col
     try:
-        _normalized, fitted = run_ols(
+        # run_ols returns the *plain* fit, so the declared estimator is applied
+        # here through the shared helper. Reading `fitted` straight from
+        # run_ols would silently do post-estimation inference under nonrobust.
+        _normalized, plain_fit = run_ols(
             branch_frame,
             str(branch_spec["outcome"]),
             predictor_columns,
-            robust=False,
+            robust=covariance == "robust",
             model_id="ols_1",
-            covariance="unadjusted",
+            cluster_col=cluster_col,
+            covariance=covariance,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise WorkflowExecutionError(
@@ -1051,7 +1185,7 @@ def _refit_completed_ols_branch(
     model_frame = branch_frame.copy()
     if not model_frame.index.is_unique:
         model_frame.index = pd.RangeIndex(len(model_frame), name="__ols_position__")
-    row_labels = getattr(fitted.model.data, "row_labels", None)
+    row_labels = getattr(plain_fit.model.data, "row_labels", None)
     if row_labels is None:
         raise WorkflowExecutionError("completed model does not expose its analysis sample")
     try:
@@ -1060,10 +1194,19 @@ def _refit_completed_ols_branch(
         raise WorkflowExecutionError(
             "completed model analysis sample cannot be recovered from immutable source data"
         ) from exc
-    if len(analysis_frame) != int(fitted.nobs):
+    if len(analysis_frame) != int(plain_fit.nobs):
         raise WorkflowExecutionError(
             "completed model analysis sample does not match its fitted observation count"
         )
+    groups = (
+        analysis_frame[cluster_col].to_numpy(copy=True) if cluster_col is not None else None
+    )
+    try:
+        fitted = apply_ols_covariance(plain_fit, covariance, groups=groups)
+    except ValueError as exc:
+        raise WorkflowExecutionError(
+            f"completed model covariance cannot be reproduced: {exc}"
+        ) from exc
     return fitted, predictor_columns, analysis_frame
 
 
@@ -1207,7 +1350,7 @@ def _execute_model_joint_f_test(
         "numerator_df": numerator_df,
         "denominator_df": denominator_df,
         "nobs": int(fitted.nobs),
-        "covariance": "unadjusted",
+        "covariance": _branch_covariance(branch["branch_spec"]),
     }
     return _persist_model_post_estimation_result(
         root,
@@ -1323,7 +1466,7 @@ def _execute_model_white_test(
         "auxiliary_df": auxiliary_df,
         "residual_df": residual_df,
         "nobs": int(fitted.nobs),
-        "covariance": "unadjusted",
+        "covariance": _branch_covariance(branch["branch_spec"]),
     }
     return _persist_model_post_estimation_result(
         root,
@@ -1402,7 +1545,7 @@ def _execute_model_quadratic_stationary_point(
         "stationary_point_within_observed_range": observed_min <= stationary_point <= observed_max,
         "curvature": "minimum" if quadratic_coefficient > 0 else "maximum",
         "nobs": int(fitted.nobs),
-        "covariance": "unadjusted",
+        "covariance": _branch_covariance(branch["branch_spec"]),
     }
     return _persist_model_post_estimation_result(
         root,

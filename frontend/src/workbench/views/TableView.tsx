@@ -28,7 +28,13 @@ import {
   fetchRunArtifacts,
   fetchRunDetail,
 } from "../../api";
-import type { ArtifactGroup, ArtifactItem, ModelResult, RunDetail } from "../../api";
+import type {
+  ArtifactGroup,
+  ArtifactItem,
+  ModelResult,
+  PostEstimationResult,
+  RunDetail,
+} from "../../api";
 import { buildRepeatedMeasuresViewModel } from "../repeatedMeasures/repeatedMeasuresViewModel";
 import { askAiAboutFigure, fetchFigureAiContext, figureAsDataUrl } from "./figureAi";
 import { fetchLlmConfig } from "../../llm/llmApi";
@@ -69,6 +75,62 @@ function confidenceIntervalText(coefficient: {
 function humanize(id: string): string {
   const s = id.replace(/[_-]+/g, " ").trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Reader-facing names for the declared post-estimation operations.
+ *
+ * An unknown operation still renders — it falls back to its id — because a
+ * missing label is a cosmetic gap, while hiding a computed result would put
+ * us back where this section started: evidence nobody sees. */
+const POST_ESTIMATION_LABELS: Record<string, string> = {
+  "model.quadratic_stationary_point": "Quadratic stationary point",
+  "model.joint_f_test": "Joint F test",
+  "model.white_test": "White test",
+};
+
+/** Keys that identify the payload format rather than tell the reader anything. */
+const POST_ESTIMATION_HIDDEN_KEYS = new Set(["schema_version"]);
+
+function postEstimationValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "—";
+    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  }
+  if (Array.isArray(value)) return value.map(postEstimationValue).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function PostEstimationResultTable({ entry }: { entry: PostEstimationResult }) {
+  const rows = Object.entries(entry.result).filter(
+    ([key]) => !POST_ESTIMATION_HIDDEN_KEYS.has(key),
+  );
+  return (
+    <div style={{ marginBottom: 12 }} data-testid={`post-estimation-${entry.artifact_id}`}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+        {POST_ESTIMATION_LABELS[entry.operation_id] ?? entry.operation_id}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--label)", marginBottom: 6 }}>
+        step {entry.workflow_step_id} · model run {entry.model_run_id}
+      </div>
+      <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
+        <tbody>
+          {rows.map(([key, value]) => (
+            <tr key={key}>
+              <td style={{ padding: "2px 12px 2px 0", color: "var(--label)" }}>
+                {key.replace(/_/g, " ")}
+              </td>
+              <td style={{ padding: "2px 0", fontVariantNumeric: "tabular-nums" }}>
+                {postEstimationValue(value)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function CoefficientTable({ model }: { model: ModelResult }) {
@@ -535,6 +597,7 @@ function RunResultsPanel({
   }, [runId, projectRoot]);
 
   const models = detail?.model_results ?? [];
+  const postEstimation = detail?.post_estimation_results ?? [];
   const figures = artifacts.filter((a) => a.artifact_type === "figure");
   const loadedExplorationIds = new Set(explorations.map(({ item }) => item.artifact_id));
   const otherArtifacts = artifacts.filter((a) =>
@@ -600,6 +663,17 @@ function RunResultsPanel({
           <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>Coefficients</h3>
           {models.map((m) => (
             <CoefficientTable key={m.model_id} model={m} />
+          ))}
+        </section>
+      )}
+
+      {!loading && !error && postEstimation.length > 0 && (
+        <section data-testid="table-view-post-estimation" style={{ marginTop: 16 }}>
+          <h3 style={{ fontSize: 14, margin: "0 0 8px", color: "var(--label)" }}>
+            Post-estimation
+          </h3>
+          {postEstimation.map((entry) => (
+            <PostEstimationResultTable key={entry.artifact_id} entry={entry} />
           ))}
         </section>
       )}

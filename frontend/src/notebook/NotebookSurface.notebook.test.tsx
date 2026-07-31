@@ -104,6 +104,100 @@ describe("NotebookSurface — six states, none of them lying", () => {
     );
     fireEvent.click(screen.getByTestId("notebook-cancel-planning"));
     expect(onCancelPlanning).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("planning: shows the server budget so a slow pass is not read as a hang", () => {
+    vi.useFakeTimers();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(68_000));
+    // The number that was missing at 68s: the reader could not tell a request
+    // still inside its budget from one that had hung.
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 68s / 180s",
+    );
+    expect(screen.getByTestId("notebook-planning-progress")).not.toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: marks the pass overdue once the published budget is exceeded", () => {
+    vi.useFakeTimers();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(181_000));
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "the server is ending it",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: keeps counting the same attempt across a remount", () => {
+    vi.useFakeTimers();
+    const startedAtMs = Date.now();
+    const { unmount } = render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+        planningStartedAtMs={startedAtMs}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(150_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 150s / 180s",
+    );
+
+    // The request outlives this component; the counter must too. Anchored to
+    // mount time it restarted at 0s here, reporting a nearly spent budget as
+    // barely touched.
+    unmount();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+        planningStartedAtMs={startedAtMs}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 150s / 180s",
+    );
+    act(() => vi.advanceTimersByTime(31_000));
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: falls back to a plain elapsed counter without a published budget", () => {
+    vi.useFakeTimers();
+    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 5s",
+    );
+    expect(screen.getByTestId("notebook-planning-elapsed")).not.toHaveTextContent("/");
+    vi.useRealTimers();
   });
 
   it("error: shows the error code and message, and no success wording", () => {

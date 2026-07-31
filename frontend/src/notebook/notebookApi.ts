@@ -36,6 +36,12 @@ export interface NotebookContextResponse {
   budget_report: Record<string, unknown>;
   source_manifest: Array<Record<string, unknown>>;
   trace_id?: string | null;
+  /** Total seconds a planning pass may run before the server ends it.
+   *
+   * Published so the planning surface can show the budget it is running
+   * against; an open-ended elapsed counter cannot tell a reader whether a
+   * live request is progressing or hung. */
+  planning_deadline_s?: number;
   [key: string]: unknown;
 }
 

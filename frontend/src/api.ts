@@ -168,12 +168,30 @@ export type CoefficientRisk = {
   }>;
 };
 
+/** One durable result produced by a declared post-estimation workflow step.
+ *
+ * The artifact is stored on the workflow's source run, so `run_id` and
+ * `model_run_id` differ whenever the workflow created the model it describes.
+ * `result` is the server's typed payload; its keys vary by operation, so a
+ * renderer reads what it recognises rather than assuming a fixed shape. */
+export type PostEstimationResult = {
+  artifact_id: string;
+  artifact_type: string;
+  operation_id: string;
+  run_id: string;
+  model_run_id: string;
+  workflow_id: string;
+  workflow_step_id: string;
+  result: Record<string, unknown>;
+};
+
 export type RunDetail = RunSummary & {
   lineage: Array<{ source: string; artifact_id: string }>;
   artifact_counts: Record<string, number>;
   errors: { issues: IssueRecord[] };
   model_results?: ModelResult[];
   diagnostic_summary_preview?: DiagnosticSummaryPreview;
+  post_estimation_results?: PostEstimationResult[];
 };
 
 export type CoefficientRecord = {

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
+import type { PostEstimationResult } from "../../api";
 import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
@@ -62,6 +63,12 @@ export interface AgentOperationStatus {
   target_run_id: string | null;
   /** Program output captured from a sandboxed operation (code.execute). */
   stdout: string | null;
+  /** Results of declared post-estimation steps in a completed workflow.
+   *
+   * A confirmed workflow that reports only "completed" leaves the question
+   * that prompted it unanswered, so the transcript carries the numbers it
+   * produced. */
+  postEstimationResults: PostEstimationResult[];
   diff_ref: Record<string, unknown> | null;
   verification: Record<string, unknown>;
   diffFocused: boolean;
@@ -72,10 +79,16 @@ function toOperationStatus(
   diffFocused = false,
 ): AgentOperationStatus {
   const outputs = record.outputs as
-    | { target_run_id?: unknown; stdout?: unknown }
+    | {
+        target_run_id?: unknown;
+        stdout?: unknown;
+        post_estimation_results?: unknown;
+      }
     | undefined;
   const target = outputs && typeof outputs === "object" ? outputs.target_run_id : null;
   const stdout = outputs && typeof outputs === "object" ? outputs.stdout : null;
+  const rawResults =
+    outputs && typeof outputs === "object" ? outputs.post_estimation_results : null;
   const rawDiff = record.diff_ref;
   const rawVerification = record.verification;
   return {
@@ -84,6 +97,15 @@ function toOperationStatus(
     status: record.status,
     target_run_id: typeof target === "string" ? target : null,
     stdout: typeof stdout === "string" && stdout.length > 0 ? stdout : null,
+    postEstimationResults: Array.isArray(rawResults)
+      ? (rawResults.filter(
+          (entry) =>
+            entry !== null &&
+            typeof entry === "object" &&
+            typeof (entry as PostEstimationResult).operation_id === "string" &&
+            typeof (entry as PostEstimationResult).result === "object",
+        ) as PostEstimationResult[])
+      : [],
     diff_ref: rawDiff && typeof rawDiff === "object"
       ? rawDiff as Record<string, unknown>
       : null,

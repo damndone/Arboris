@@ -59,6 +59,10 @@ export interface NotebookSurfaceProps {
   userIntent?: string;
   onUserIntent?: (goal: string) => void;
   onCancelPlanning?: () => void;
+  /** Server-published total planning budget, shown while a pass runs. */
+  planningDeadlineSeconds?: number;
+  /** Epoch ms the in-flight planning attempt began, when one is running. */
+  planningStartedAtMs?: number;
   onConfirm?: (confirmation: PendingConfirmation) => void;
   onCancelConfirmation?: (confirmation: PendingConfirmation) => void;
   onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
@@ -87,28 +91,58 @@ const MAX_VISIBLE_EXECUTION_ISSUES = 8;
 
 function NotebookPlanningProgress({
   onCancel,
+  deadlineSeconds,
+  startedAtMs,
 }: {
   onCancel?: () => void;
+  /** Server-published total planning budget, when known. */
+  deadlineSeconds?: number;
+  /**
+   * Epoch ms the attempt began. Mount time is not a usable substitute: this
+   * surface remounts while the same request is still in flight, and anchoring
+   * to the mount restarts the count at zero — which, next to a budget the
+   * attempt has already been spending, understates how long it has run.
+   */
+  startedAtMs?: number;
 }) {
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const anchorRef = useRef<number>(startedAtMs ?? Date.now());
+  if (typeof startedAtMs === "number") anchorRef.current = startedAtMs;
+  const anchor = anchorRef.current;
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - anchor) / 1000)),
+  );
 
   useEffect(() => {
-    const startedAt = Date.now();
+    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
     const timer = window.setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [anchor]);
+
+  // An elapsed counter alone cannot distinguish a pass that is still inside its
+  // budget from one that has hung, which left cancellation as the only recourse
+  // on screen. Show the budget when the server published one.
+  const hasDeadline = typeof deadlineSeconds === "number" && deadlineSeconds > 0;
+  const overdue = hasDeadline && elapsedSeconds > (deadlineSeconds as number);
+  const elapsedLabel = hasDeadline
+    ? `Elapsed ${elapsedSeconds}s / ${deadlineSeconds}s`
+    : `Elapsed ${elapsedSeconds}s`;
 
   return (
     <section
       className="nb-planning-progress"
       data-testid="notebook-planning-progress"
+      data-overdue={overdue ? "true" : undefined}
       aria-live="polite"
     >
       <header>
         <span className="nb-label">How the plan is being formed</span>
-        <span data-testid="notebook-planning-elapsed">{`Elapsed ${elapsedSeconds}s`}</span>
+        <span data-testid="notebook-planning-elapsed">
+          {overdue
+            ? `${elapsedLabel} — past the planning budget; the server is ending it`
+            : elapsedLabel}
+        </span>
       </header>
       <ol>
         <li data-status="completed">Bounded Notebook context compiled</li>
@@ -197,7 +231,11 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           {loadingMessage}
         </p>
         {view.phase === "planning" ? (
-          <NotebookPlanningProgress onCancel={props.onCancelPlanning} />
+          <NotebookPlanningProgress
+            onCancel={props.onCancelPlanning}
+            deadlineSeconds={props.planningDeadlineSeconds}
+            startedAtMs={props.planningStartedAtMs}
+          />
         ) : null}
       </div>
     );
@@ -399,7 +437,11 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       ) : null}
 
       {props.planning ? (
-        <NotebookPlanningProgress onCancel={props.onCancelPlanning} />
+        <NotebookPlanningProgress
+            onCancel={props.onCancelPlanning}
+            deadlineSeconds={props.planningDeadlineSeconds}
+            startedAtMs={props.planningStartedAtMs}
+          />
       ) : null}
 
       {props.planningError ? (
@@ -626,6 +668,7 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
                   <Fragment key={option.option_id}>
                     <OptionCard
                       option={option}
+                      interactionMode={props.interactionMode ?? "plan"}
                       outcome={outcome && outcome.observed.length > 0 ? outcome : null}
                       onSelect={props.onSelectOption}
                       onDefer={props.onDeferOption}

@@ -145,6 +145,61 @@ describe("TableView", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("renders declared post-estimation results so the answer is on screen", async () => {
+    mockDetail.current = {
+      model_results: [],
+      artifact_counts: {},
+      post_estimation_results: [
+        {
+          artifact_id: "workflow_model_quadratic_stationary_point_abc",
+          artifact_type: "post_estimation",
+          operation_id: "model.quadratic_stationary_point",
+          run_id: "run-source",
+          model_run_id: "run-1",
+          workflow_id: "wf-1",
+          workflow_step_id: "stationary_point",
+          result: {
+            schema_version: "workbench.model.quadratic-stationary-point/v1",
+            column: "experience",
+            stationary_point: 211.59338521178753,
+            observed_min: 1,
+            observed_max: 25,
+            stationary_point_within_observed_range: false,
+            curvature: "maximum",
+          },
+        },
+      ],
+    } as unknown as RunDetail;
+
+    renderTable(model("run-1"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("table-view-post-estimation")).toBeTruthy(),
+    );
+    expect(screen.getByText("Quadratic stationary point")).toBeTruthy();
+    expect(screen.getByText("stationary point")).toBeTruthy();
+    expect(screen.getByText("211.5934")).toBeTruthy();
+    // The out-of-range flag is the difference between a number and a claim.
+    expect(screen.getByText("stationary point within observed range")).toBeTruthy();
+    expect(screen.getByText("no")).toBeTruthy();
+    // Provenance, not decoration: it says which model the result describes.
+    expect(screen.getByText(/stationary_point/)).toBeTruthy();
+    // Internal schema tags are not reader-facing.
+    expect(screen.queryByText(/workbench\.model\.quadratic/)).toBeNull();
+  });
+
+  it("omits the post-estimation section when a run declared none", async () => {
+    mockDetail.current = {
+      model_results: [],
+      artifact_counts: {},
+      post_estimation_results: [],
+    } as unknown as RunDetail;
+
+    renderTable(model("run-1"));
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("table-view-post-estimation")).toBeNull();
+  });
+
   it("renders the canonical LMM packet coefficient and diagnostic", async () => {
     mockDetail.current = {
       model_results: [completePublicModelResult()],

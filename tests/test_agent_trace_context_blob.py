@@ -114,12 +114,20 @@ def test_no_cleanup_path_deletes_traces_or_blobs() -> None:
     Trace is the one artifact of this version that cannot be recreated after the
     fact. A future cleanup routine that globs a project directory would destroy
     it silently, so the absence of such a routine is asserted rather than assumed.
+
+    ``run_deletion.py`` is exempt for the same reason ``trace.py`` and
+    ``events.py`` are: it is not a cleanup routine. Permanent run deletion is a
+    user-initiated, two-step confirmed operation that resolves one session id at
+    a time. The invariant this test protects is *silent, indiscriminate* erasure,
+    which is why the exemption is paired with a check that it never sweeps the
+    protected directories wholesale.
     """
     backend = Path(__file__).resolve().parents[1] / "backend" / "workbench"
     protected = ("agent-events", "agent-context-blobs")
+    exempt = {"trace.py", "events.py", "run_deletion.py"}
     offenders: list[str] = []
     for path in sorted(backend.rglob("*.py")):
-        if path.name in {"trace.py", "events.py"}:
+        if path.name in exempt:
             continue
         text = path.read_text(encoding="utf-8")
         if "unlink" not in text and "rmtree" not in text:
@@ -129,3 +137,24 @@ def test_no_cleanup_path_deletes_traces_or_blobs() -> None:
                 offenders.append(f"{path.relative_to(backend)} may delete {name}")
 
     assert offenders == []
+
+
+def test_confirmed_run_deletion_never_sweeps_the_protected_directories() -> None:
+    """The retention exemption is bounded to per-session removal.
+
+    Deleting a run may remove that run's own agent records, but it must never
+    glob or recursively drop the protected directories themselves — that would
+    turn a confirmed, targeted deletion back into the silent erasure the
+    retention invariant exists to prevent.
+    """
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "backend"
+        / "workbench"
+        / "services"
+        / "run_deletion.py"
+    ).read_text(encoding="utf-8")
+
+    for line in source.splitlines():
+        if "agent-events" in line or "agent-context-blobs" in line:
+            assert "glob" not in line and "rmtree" not in line, line.strip()

@@ -2574,3 +2574,69 @@ def test_run_source_proposal_must_be_rerun_child_of_active_head(tmp_path: Path) 
     )
     with pytest.raises(NotebookPlanningContractError, match="rerun-child"):
         agent.plan(context=_context(make_project(tmp_path), active_head_run_id="run_001"), initial_evidence=DataEvidencePackV1("run:run_001", ()))
+
+
+def test_provider_correction_pins_a_rerun_target_when_lineage_admits_one(
+    tmp_path: Path,
+) -> None:
+    """A rejected run-source target must come back with the eligible ones.
+
+    The provider produced a target outside the active head's lineage and the
+    server correctly refused it, but the refusal named no usable alternative,
+    so the pass ended at a contract error with an otherwise workable request.
+    """
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[
+            {
+                "node_id": "stage:model",
+                "kind": "model",
+                "node_hash": "node-hash",
+                "forest_node_key": "forest-node-key",
+                "context_fingerprint": "nocv1:test",
+            }
+        ],
+    )
+
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "run-source proposal is not a rerun-child of the active head"
+        ),
+        context=context,
+        evidence=DataEvidencePackV1("run:run_001", ()),
+        correction_number=1,
+    )
+
+    # The exact server-owned pins, so the provider can resubmit rather than guess.
+    assert "stage:model" in message
+    assert "forest-node-key" in message
+    assert "nocv1:test" in message
+    assert "model.rerun" in message
+
+
+def test_provider_correction_falls_back_to_genesis_when_no_rerun_target_exists(
+    tmp_path: Path,
+) -> None:
+    """When the lineage admits no rerun, the provider must be sent to genesis.
+
+    Repeating "not a rerun-child" against a head with no eligible model node
+    would ask the provider to satisfy something impossible.
+    """
+
+    context = replace(
+        _context(make_project(tmp_path), active_head_run_id="run_001"),
+        bounded_lineage=[],
+    )
+
+    message = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "run-source proposal is not a rerun-child of the active head"
+        ),
+        context=context,
+        evidence=DataEvidencePackV1("run:run_001", ()),
+        correction_number=1,
+    )
+
+    assert "model.genesis" in message
+    assert "no eligible" in message.lower()

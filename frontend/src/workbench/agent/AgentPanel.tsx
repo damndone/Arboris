@@ -18,6 +18,26 @@ function roleLabel(role: string): string {
   return "tool";
 }
 
+/** Reader-facing names for declared post-estimation operations. An unknown
+ * operation falls back to its id rather than being hidden. */
+const AGENT_POST_ESTIMATION_LABELS: Record<string, string> = {
+  "model.quadratic_stationary_point": "Quadratic stationary point",
+  "model.joint_f_test": "Joint F test",
+  "model.white_test": "White test",
+};
+
+function formatAgentResultValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "—";
+    return Number.isInteger(value) ? String(value) : value.toFixed(4);
+  }
+  if (Array.isArray(value)) return value.map(formatAgentResultValue).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function observableActivity(eventType: string | null): string {
   if (!eventType) return "Preparing the bounded context";
   const normalized = eventType.toLowerCase();
@@ -433,6 +453,37 @@ export function AgentPanel({ runId, projectRoot }: { runId: string; projectRoot:
               ? ` · child run ${agent.activeOperation.target_run_id}`
               : ""}
           </span>
+        </div>
+      )}
+      {agent.activeOperation && agent.activeOperation.postEstimationResults.length > 0 && (
+        /* The answer to the question that prompted the workflow. Without it a
+         * confirmed operation reports only that it finished, and the computed
+         * result stays in an artifact the user never opens. */
+        <div
+          data-testid="agent-operation-post-estimation"
+          className="wb-agent-terminal-line"
+          data-role="tool"
+          style={{ flex: "0 0 auto", fontSize: 12, alignItems: "flex-start" }}
+        >
+          <span className="wb-agent-terminal-marker" aria-hidden="true">↳</span>
+          <div style={{ display: "grid", gap: 6 }}>
+            {agent.activeOperation.postEstimationResults.map((entry) => (
+              <div key={entry.artifact_id}>
+                <div style={{ fontWeight: 600 }}>
+                  {AGENT_POST_ESTIMATION_LABELS[entry.operation_id] ?? entry.operation_id}
+                  <span style={{ fontWeight: 400, opacity: 0.7 }}>
+                    {" "}· step {entry.workflow_step_id}
+                  </span>
+                </div>
+                <div style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {Object.entries(entry.result)
+                    .filter(([key]) => key !== "schema_version")
+                    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${formatAgentResultValue(value)}`)
+                    .join(" · ")}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {agent.activeOperation?.stdout && (

@@ -1390,6 +1390,30 @@ class NotebookPlanningAgent:
                 "Resubmit the proposal with the matching server-owned preconditions "
                 f"copied exactly from execution_pins: {json.dumps(pins, sort_keys=True)}."
             )
+        elif message == "run-source proposal is not a rerun-child of the active head":
+            # The server refused a target outside the active head's lineage.
+            # Naming only the violation leaves an otherwise workable request
+            # stranded, so hand back the eligible targets -- or, when the head
+            # admits none, send the provider to genesis instead of asking it to
+            # satisfy a rerun that cannot exist.
+            pins = NotebookPlanningAgent._execution_pins(context)
+            rerun_pins = pins.get("rerun_preconditions_by_target", [])
+            if rerun_pins:
+                remediation = (
+                    "A run-source proposal must target a model node on the active head. "
+                    "Resubmit with operation_id model.rerun (or model.custom) and one "
+                    "exact target and precondition pair copied from the server-owned "
+                    "execution_pins.rerun_preconditions_by_target; do not rewrite "
+                    f"run_id, node_ref, node_hash, forest_node_key, or context_fingerprint: "
+                    f"{json.dumps(rerun_pins, sort_keys=True)}."
+                )
+            else:
+                remediation = (
+                    "The active head exposes no eligible model node, so no rerun target "
+                    "exists. Do not retry a run-source proposal. Submit a dataset-source "
+                    "model.genesis proposal instead, copying the server-owned genesis "
+                    f"execution pins exactly: {json.dumps(pins.get('genesis'), sort_keys=True)}."
+                )
         elif message == "run-source proposal target is not a server-pinned model node":
             pins = NotebookPlanningAgent._execution_pins(context).get(
                 "rerun_preconditions_by_target", []

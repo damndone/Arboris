@@ -452,6 +452,26 @@ def test_confirmed_workflow_runs_declared_model_terms_and_post_estimation(
         assert state["status"] == "completed"
         assert state["steps"]["test_terms"]["artifact_ids"]
         assert state["steps"]["stationary_point"]["artifact_ids"]
+
+        # The operation record is what the Agent transcript renders. Without
+        # the results here a confirmed workflow reports only that it finished,
+        # and the question that prompted it stays unanswered on screen.
+        results = completed.outputs["post_estimation_results"]
+        assert {entry["operation_id"] for entry in results} == {
+            "model.joint_f_test",
+            "model.quadratic_stationary_point",
+        }
+        assert {entry["workflow_id"] for entry in results} == {
+            completed.outputs["workflow_id"]
+        }
+        stationary = next(
+            entry
+            for entry in results
+            if entry["operation_id"] == "model.quadratic_stationary_point"
+        )
+        assert stationary["workflow_step_id"] == "stationary_point"
+        assert stationary["result"]["column"] == "exposure"
+        assert isinstance(stationary["result"]["stationary_point"], float)
         child_operations = [
             item
             for item in orchestrator.operation_store.list_records()

@@ -1,8 +1,16 @@
 import type { ArtifactContractOutcome, NotebookOptionRevision } from "./contracts";
+import type { NotebookInteractionMode } from "./notebookApi";
 import { axisNote, executability, recommendationLabel } from "./statusAxes";
 
 export interface OptionCardProps {
   option: NotebookOptionRevision;
+  /**
+   * Which surface this card belongs to. Action mode asks for one Draft built
+   * from a specification the user already gave, so recommendation vocabulary
+   * ("Recommended", "Near-equivalent candidates") misstates it: nothing was
+   * chosen for the user and there is no alternative it was preferred over.
+   */
+  interactionMode?: NotebookInteractionMode;
   /** Backend verdict after execution. The UI never derives this. */
   outcome?: ArtifactContractOutcome | null;
   onSelect?: (option: NotebookOptionRevision) => void;
@@ -42,6 +50,7 @@ const RISK_LABELS = {
 
 export function OptionCard({
   option,
+  interactionMode = "plan",
   outcome = null,
   onSelect,
   onDefer,
@@ -59,14 +68,18 @@ export function OptionCard({
     <article
       className="nb-option-card"
       data-testid={`option-card-${option.option_id}`}
-      data-recommended={option.recommendation_status === "recommended" ? "true" : "false"}
+      data-recommended={
+        interactionMode !== "action" && option.recommendation_status === "recommended"
+          ? "true"
+          : "false"
+      }
       data-lifecycle={option.lifecycle_status}
       data-freshness={option.freshness_status}
       data-validation={option.validation_status}
     >
       <header className="nb-option-header">
         <span className="nb-option-rank" data-testid="option-rank">
-          {recommendationLabel(option)}
+          {recommendationLabel(option, interactionMode)}
         </span>
         <span
           className="nb-option-risk"

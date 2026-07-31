@@ -51,6 +51,7 @@ describe("AgentPanel — sandboxed program output", () => {
     status: "completed",
     target_run_id: null,
     stdout: "wage mean: 34.5\nrows in: 30\n",
+    postEstimationResults: [],
     diff_ref: null,
     verification: { passed: true },
     diffFocused: false,
@@ -81,6 +82,65 @@ describe("AgentPanel — sandboxed program output", () => {
     );
 
     expect(screen.queryByTestId("agent-operation-stdout")).toBeNull();
+  });
+});
+
+describe("AgentPanel — declared post-estimation results", () => {
+  const workflowOperation = {
+    record_id: "oprec_workflow_1",
+    operation_id: "operation.multi_step",
+    status: "completed",
+    target_run_id: "run-child",
+    stdout: null,
+    postEstimationResults: [
+      {
+        artifact_id: "workflow_model_quadratic_stationary_point_abc",
+        artifact_type: "post_estimation",
+        operation_id: "model.quadratic_stationary_point",
+        run_id: "run-source",
+        model_run_id: "run-child",
+        workflow_id: "wf-1",
+        workflow_step_id: "stationary_point",
+        result: {
+          schema_version: "workbench.model.quadratic-stationary-point/v1",
+          column: "experience",
+          stationary_point: 211.59338521178753,
+          stationary_point_within_observed_range: false,
+        },
+      },
+    ],
+    diff_ref: null,
+    verification: { passed: true },
+    diffFocused: false,
+  };
+
+  it("answers the question in the transcript instead of only reporting completion", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({ activeOperation: workflowOperation })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const results = screen.getByTestId("agent-operation-post-estimation");
+    expect(results).toHaveTextContent("Quadratic stationary point");
+    expect(results).toHaveTextContent("stationary point: 211.5934");
+    // The out-of-range flag is what separates a number from a claim.
+    expect(results).toHaveTextContent("stationary point within observed range: no");
+    expect(results).not.toHaveTextContent("workbench.model.quadratic");
+  });
+
+  it("renders no result line when the operation declared none", () => {
+    render(
+      <AgentSurfaceContext.Provider
+        value={value({
+          activeOperation: { ...workflowOperation, postEstimationResults: [] },
+        })}
+      >
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("agent-operation-post-estimation")).toBeNull();
   });
 });
 

@@ -59,6 +59,17 @@ interface ActivePlanningRequest {
   attemptId: string;
   controller: AbortController;
   promise: Promise<NotebookPlanningResponse>;
+  /**
+   * When this planning attempt actually began, in epoch milliseconds.
+   *
+   * The elapsed clock has to be anchored to the attempt, not to whichever
+   * component happens to be mounted. This map already outlives a remount so
+   * that a re-render rejoins the in-flight request instead of starting a
+   * second one; the start instant belongs at the same level, otherwise the
+   * counter restarts at zero against a budget the request has been spending
+   * all along, which reads as healthy when it is not.
+   */
+  startedAt: number;
 }
 
 const planningRequests = new Map<
@@ -97,7 +108,14 @@ function proposeNotebookOptionsOnce(
         attemptId,
         signal: controller.signal,
       });
-  const request = { scopeKey, requestKey, attemptId, controller, promise };
+  const request = {
+    scopeKey,
+    requestKey,
+    attemptId,
+    controller,
+    promise,
+    startedAt: Date.now(),
+  };
   planningRequests.set(scopeKey, request);
   const release = () => {
     if (planningRequests.get(scopeKey)?.promise === promise) {
@@ -404,6 +422,12 @@ export function NotebookRouteView({
   const [view, setView] = useState<NotebookView>({ status: "loading" });
   const [busy, setBusy] = useState(false);
   const [planning, setPlanning] = useState(false);
+  // Server-published total planning budget, kept so the planning surface can
+  // show what it is running against instead of an open-ended counter.
+  const [planningDeadline, setPlanningDeadline] = useState<number | undefined>(undefined);
+  // Epoch ms of the in-flight planning attempt, recovered from the module-level
+  // request registry so a remount keeps counting the same attempt.
+  const [planningStartedAt, setPlanningStartedAt] = useState<number | undefined>(undefined);
   const [planningError, setPlanningError] = useState<{
     code: string;
     message: string;
@@ -510,6 +534,7 @@ export function NotebookRouteView({
           );
         activePlanningRef.current = request;
         setPlanningError(null);
+        setPlanningStartedAt(request.startedAt);
         setPlanning(true);
         if (!preserved) setView({ status: "loading", phase: "planning" });
         snapshot = await request.promise;
@@ -529,6 +554,7 @@ export function NotebookRouteView({
         );
         activePlanningRef.current = request;
         setPlanningError(null);
+        setPlanningStartedAt(request.startedAt);
         setPlanning(true);
         if (!preserved) setView({ status: "loading", phase: "planning" });
         snapshot = await request.promise;
@@ -545,6 +571,8 @@ export function NotebookRouteView({
           parseNotebookExecutionResult(raw),
         ]),
       );
+      const publishedDeadline = snapshot.context?.planning_deadline_s;
+      if (typeof publishedDeadline === "number") setPlanningDeadline(publishedDeadline);
       const context = contextSlice(snapshot.context ?? compiled, trace.events);
       // A Notebook can retain multiple materialized siblings. The handoff
       // shown above the narrative must belong to the newest materialized
@@ -584,6 +612,7 @@ export function NotebookRouteView({
       if (generation === loadGenerationRef.current) {
         activePlanningRef.current = null;
         setPlanning(false);
+        setPlanningStartedAt(undefined);
       }
     }
   }, [
@@ -714,6 +743,7 @@ export function NotebookRouteView({
     }
     active.controller.abort();
     setPlanning(false);
+    setPlanningStartedAt(undefined);
     setPlanningError(null);
     if (lastReadyViewRef.current) {
       setView(lastReadyViewRef.current);
@@ -1092,6 +1122,8 @@ export function NotebookRouteView({
         userIntent={notebookIntent}
         onUserIntent={(goal) => void submitNotebookIntent(goal)}
         onCancelPlanning={cancelPlanning}
+        planningDeadlineSeconds={planningDeadline}
+        planningStartedAtMs={planningStartedAt}
         planning={planning}
         planningError={planningError}
         actionError={actionError}

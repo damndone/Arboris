@@ -24,6 +24,14 @@ AGENT_DIR = Path(__file__).resolve().parents[1] / "backend" / "workbench" / "age
 # it would put unbounded, unrecorded content in front of the model.
 COMPILER_OWNED_SOURCES = ("artifacts_index.json", "graph.json", "data_profile.json")
 
+# Modules allowed to read those sources directly. `context_tools.py` earns its
+# place because it is the bounded-inspection surface itself: it truncates what
+# it extracts and every tool it registers declares a `max_output_budget` the
+# registry enforces. That budget, not this string scan, is what actually keeps
+# a 22 KB index away from an 8192-byte tool result -- so the exemption is
+# paired with `test_every_inspect_tool_declares_an_output_budget`.
+COMPILER_SOURCE_READERS = {"context_compiler.py", "evidence.py", "context_tools.py"}
+
 
 @pytest.fixture()
 def project(tmp_path: Path) -> Path:
@@ -84,7 +92,7 @@ def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
     """
     offenders: list[str] = []
     for path in sorted(AGENT_DIR.rglob("*.py")):
-        if path.name in {"context_compiler.py", "evidence.py"}:
+        if path.name in COMPILER_SOURCE_READERS:
             continue
         text = path.read_text(encoding="utf-8")
         for source in COMPILER_OWNED_SOURCES:
@@ -92,3 +100,25 @@ def test_no_agent_module_reads_compiler_owned_sources(project: Path) -> None:
                 offenders.append(f"{path.relative_to(AGENT_DIR)} reads {source}")
 
     assert offenders == []
+
+
+def test_every_inspect_tool_declares_an_output_budget() -> None:
+    """The real bound on context_tools.py, which the string guard cannot express.
+
+    ``context_tools.py`` legitimately reads compiler-owned sources: its whole
+    job is answering bounded questions about a run, and it truncates what it
+    extracts. What must never regress is the enforcement -- a tool that reads
+    those sources without declaring ``max_output_budget`` would hand the model
+    an unbounded payload, which is the failure the exemption could otherwise
+    hide. The registry truncates and then errors with
+    ``tool_output_budget_exceeded``, so a declared budget is the protection.
+    """
+    source = (AGENT_DIR / "context_tools.py").read_text(encoding="utf-8")
+    registered = source.count("ToolDefinition(")
+    declared = source.count("max_output_budget=")
+
+    assert registered > 0, "no tools registered; the guard would be vacuous"
+    # Every ToolDefinition this module builds carries an explicit budget.
+    assert declared >= registered, (
+        f"{registered} tool definitions but only {declared} declared budgets"
+    )
