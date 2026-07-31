@@ -328,6 +328,31 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         verification_builder_key="exploration.derived_verification.v1",
         ui_description="Create one server-defined boolean grouping node.",
     ),
+    "statistical.derive_numeric": StepSpecContract(
+        summary=(
+            "Create numeric columns with a small server-defined transform vocabulary. "
+            "Expressions, formulas, code, and overwrite behavior are not accepted."
+        ),
+        fields={
+            "recipes": (
+                "List of {operator, input_columns, output_name}. operator is "
+                "natural_log (exactly one positive numeric input) or multiply "
+                "(exactly two distinct numeric inputs)."
+            ),
+        },
+        required=("recipes",),
+        field_types={"recipes": "list"},
+        semantic_validator_key="statistical.derive_numeric",
+        reference_resolver_key="workflow.source_columns",
+        column_extractor_key="statistical.derive_numeric",
+        output_schema_ref="workbench.workflow.derived-numeric/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.statistical_derive_numeric",
+        scope="Raw data numeric derivation",
+        reconciler_key="statistical.derive_numeric",
+        diff_builder_key="exploration.derived_diff.v1",
+        verification_builder_key="exploration.derived_verification.v1",
+        ui_description="Create declared numeric columns without arbitrary code.",
+    ),
     "statistical.derived_group_summarize": StepSpecContract(
         summary="Summarize columns within each derived group.",
         fields={
@@ -358,8 +383,16 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
     "model.genesis": StepSpecContract(
         summary="Estimate one or more models from the source table.",
         fields={
-            "model_family": "Model family identifier.",
+            "model_family": (
+                "Registered workflow-executable model family: ols or panel_ols. "
+                "Every branch in one step uses this same family."
+            ),
             "covariance": "Default covariance for every branch.",
+            "entity_col": (
+                "Panel entity column. panel_ols requires entity_col or time_col; "
+                "clustered panel covariance requires entity_col."
+            ),
+            "time_col": "Optional panel time column for time fixed effects.",
             "branches": (
                 "List of {branch_id, outcome, predictors[, categorical]"
                 "[, polynomials][, covariance]}; one estimated model per entry. "
@@ -386,10 +419,12 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             ),
             "context_columns": "Extra columns to carry into the model context.",
         },
-        required=("branches",),
+        required=("model_family", "branches"),
         field_types={
             "model_family": "string",
             "covariance": "string",
+            "entity_col": "string",
+            "time_col": "string",
             "branches": "list",
             "categorical": "list",
             "polynomials": "list",
@@ -408,6 +443,101 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         diff_builder_key="genesis.diff.v1",
         verification_builder_key="genesis.verification.v1",
         ui_description="Estimate one or more models from the source table.",
+    ),
+    "model.joint_f_test": StepSpecContract(
+        summary=(
+            "Test whether one or more declared OLS term groups are jointly zero. "
+            "Selectors can reference only linear predictors, categorical dummy "
+            "sets, or generated polynomial powers that the dependent model "
+            "branch already declared."
+        ),
+        fields={
+            "branch_id": "Declared model branch to read from a direct dependency.",
+            "term_selectors": (
+                "Non-empty list of {kind, column}; kind is linear, categorical, "
+                "or polynomial. `column` is a source column, not a generated "
+                "coefficient name or formula fragment."
+            ),
+        },
+        required=("branch_id", "term_selectors"),
+        field_types={"branch_id": "string", "term_selectors": "list"},
+        semantic_validator_key="model.joint_f_test",
+        reference_resolver_key="workflow.model_branch",
+        column_extractor_key="model.post_estimation",
+        risk_class="low",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.joint-f-test/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_joint_f_test",
+        effect_level="read_only",
+        scope="declared OLS post-estimation",
+        risk_level="none",
+        reconciler_key="model.joint_f_test",
+        diff_builder_key="model.post_estimation.diff.v1",
+        verification_builder_key="model.post_estimation.verification.v1",
+        ui_description=(
+            "Run a joint F test over terms already present in a completed, "
+            "unadjusted OLS branch."
+        ),
+    ),
+    "model.white_test": StepSpecContract(
+        summary=(
+            "Run White's heteroskedasticity test on a completed OLS branch. "
+            "The auxiliary regression is derived server-side from the fitted "
+            "design matrix; formulas and user-provided terms are not accepted."
+        ),
+        fields={
+            "branch_id": "Declared model branch to read from a direct dependency.",
+        },
+        required=("branch_id",),
+        field_types={"branch_id": "string"},
+        semantic_validator_key="model.white_test",
+        reference_resolver_key="workflow.model_branch",
+        column_extractor_key="model.post_estimation",
+        risk_class="low",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.white-test/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_white_test",
+        effect_level="read_only",
+        scope="declared OLS post-estimation",
+        risk_level="none",
+        reconciler_key="model.white_test",
+        diff_builder_key="model.post_estimation.diff.v1",
+        verification_builder_key="model.post_estimation.verification.v1",
+        ui_description=(
+            "Run White's test for heteroskedasticity on a completed OLS branch."
+        ),
+    ),
+    "model.quadratic_stationary_point": StepSpecContract(
+        summary=(
+            "Compute the stationary point of one declared linear-plus-square "
+            "term in a completed unadjusted OLS branch."
+        ),
+        fields={
+            "branch_id": "Declared model branch to read from a direct dependency.",
+            "column": (
+                "Source column declared both as a linear predictor and as a "
+                "degree-two polynomial term."
+            ),
+        },
+        required=("branch_id", "column"),
+        field_types={"branch_id": "string", "column": "string"},
+        semantic_validator_key="model.quadratic_stationary_point",
+        reference_resolver_key="workflow.model_branch",
+        column_extractor_key="model.post_estimation",
+        risk_class="low",
+        confirmation_policy="proposal_authorization",
+        output_schema_ref="workbench.model.quadratic-stationary-point/v1",
+        dispatcher_key="workbench.agent.workflow_runtime.model_quadratic_stationary_point",
+        effect_level="read_only",
+        scope="declared OLS post-estimation",
+        risk_level="none",
+        reconciler_key="model.quadratic_stationary_point",
+        diff_builder_key="model.post_estimation.diff.v1",
+        verification_builder_key="model.post_estimation.verification.v1",
+        ui_description=(
+            "Compute -beta_linear / (2 * beta_square) only when both declared "
+            "terms are present in a completed quadratic OLS branch."
+        ),
     ),
     "report.compose": StepSpecContract(
         summary="Assemble the completed steps into a report.",
@@ -535,12 +665,21 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
         for recipe in spec.get("recipes", []) or []:
             if isinstance(recipe, Mapping) and recipe.get("source_column"):
                 columns.add(str(recipe["source_column"]))
+    elif extractor_key == "statistical.derive_numeric":
+        for recipe in spec.get("recipes", []) or []:
+            if isinstance(recipe, Mapping):
+                columns.update(
+                    str(column) for column in recipe.get("input_columns", []) or []
+                )
     elif extractor_key == "statistical.derived_group_summarize":
         columns.update(str(item) for item in spec.get("summarize_columns", []) or [])
         for group in spec.get("groups", []) or []:
             if isinstance(group, Mapping) and group.get("source_column"):
                 columns.add(str(group["source_column"]))
     elif extractor_key == "model.genesis":
+        for field_name in ("entity_col", "time_col"):
+            if spec.get(field_name):
+                columns.add(str(spec[field_name]))
         for branch in spec.get("branches", []) or []:
             if isinstance(branch, Mapping):
                 if branch.get("outcome"):
@@ -552,6 +691,12 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
                 for entry in branch.get("polynomials", []) or []:
                     if isinstance(entry, Mapping) and entry.get("column"):
                         columns.add(str(entry["column"]))
+    elif extractor_key == "model.post_estimation":
+        if spec.get("column"):
+            columns.add(str(spec["column"]))
+        for selector in spec.get("term_selectors", []) or []:
+            if isinstance(selector, Mapping) and selector.get("column"):
+                columns.add(str(selector["column"]))
     return columns
 
 
@@ -642,6 +787,48 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
             name = recipe.get("output_name")
             if not isinstance(name, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
                 raise OperationValidationError("derive_boolean output_name must be a valid column name")
+    elif validator_key == "statistical.derive_numeric":
+        recipes = spec.get("recipes")
+        if not isinstance(recipes, list) or not recipes:
+            raise OperationValidationError("derive_numeric step requires a non-empty recipes list")
+        output_names: set[str] = set()
+        for recipe in recipes:
+            if not isinstance(recipe, Mapping):
+                raise OperationValidationError("each derive_numeric recipe must be an object")
+            if set(recipe) != {"operator", "input_columns", "output_name"}:
+                raise OperationValidationError(
+                    "derive_numeric recipe must contain only operator, input_columns, output_name"
+                )
+            operator = recipe.get("operator")
+            inputs = recipe.get("input_columns")
+            output_name = recipe.get("output_name")
+            if operator not in {"natural_log", "multiply"}:
+                raise OperationValidationError(
+                    "derive_numeric operator must be natural_log or multiply"
+                )
+            if not isinstance(inputs, list) or any(
+                not isinstance(column, str) or not column for column in inputs
+            ):
+                raise OperationValidationError(
+                    "derive_numeric input_columns must be a non-empty list of column names"
+                )
+            expected_count = 1 if operator == "natural_log" else 2
+            if len(inputs) != expected_count or len(set(inputs)) != len(inputs):
+                raise OperationValidationError(
+                    f"derive_numeric {operator} requires {expected_count} distinct input column(s)"
+                )
+            if (
+                not isinstance(output_name, str)
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", output_name) is None
+            ):
+                raise OperationValidationError(
+                    "derive_numeric output_name must be a valid column name"
+                )
+            if output_name in output_names:
+                raise OperationValidationError(
+                    f"derive_numeric output_name is duplicated: {output_name}"
+                )
+            output_names.add(output_name)
     elif validator_key == "statistical.derived_group_summarize":
         groups = spec.get("groups")
         if not isinstance(groups, list) or not groups:
@@ -677,6 +864,26 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         from ..contracts.model.ols import OLS_COVARIANCE_VALUES
         from ..model_terms import ModelTermError, validate_branch_terms
 
+        model_family = spec.get("model_family")
+        if model_family not in {"ols", "panel_ols"}:
+            raise OperationValidationError(
+                "model.genesis model_family must be a workflow-executable family: "
+                "ols or panel_ols"
+            )
+        entity_col = spec.get("entity_col")
+        time_col = spec.get("time_col")
+        if entity_col is not None and (not isinstance(entity_col, str) or not entity_col):
+            raise OperationValidationError("model.genesis entity_col must be a non-empty string")
+        if time_col is not None and (not isinstance(time_col, str) or not time_col):
+            raise OperationValidationError("model.genesis time_col must be a non-empty string")
+        if model_family == "ols" and (entity_col is not None or time_col is not None):
+            raise OperationValidationError(
+                "model.genesis ols does not accept panel entity_col or time_col"
+            )
+        if model_family == "panel_ols" and not entity_col and not time_col:
+            raise OperationValidationError(
+                "model.genesis panel_ols requires entity_col or time_col"
+            )
         branches = spec.get("branches")
         if not isinstance(branches, list) or not branches:
             raise OperationValidationError("model.genesis step requires a non-empty branches list")
@@ -705,6 +912,16 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                     f"model branch {branch_id} covariance must be one of: "
                     + ", ".join(OLS_COVARIANCE_VALUES)
                 )
+            if model_family == "panel_ols":
+                if covariance == "clustered" and not entity_col:
+                    raise OperationValidationError(
+                        "model.genesis clustered panel_ols requires entity_col"
+                    )
+                if branch.get("categorical"):
+                    raise OperationValidationError(
+                        "model.genesis panel_ols does not accept categorical expansion; "
+                        "declare entity_col/time_col for absorbed effects"
+                    )
             # Derived terms are validated by the module that also builds them,
             # so a spec that passes here cannot mean something else at execution.
             try:
@@ -713,6 +930,53 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
                 raise OperationValidationError(
                     f"model branch {branch_id}: {exc}"
                 ) from exc
+    elif validator_key == "model.joint_f_test":
+        selectors = spec.get("term_selectors")
+        if not isinstance(selectors, list) or not selectors:
+            raise OperationValidationError(
+                "model.joint_f_test requires a non-empty term_selectors list"
+            )
+        seen: set[tuple[str, str]] = set()
+        for selector in selectors:
+            if not isinstance(selector, Mapping):
+                raise OperationValidationError(
+                    "each model.joint_f_test term selector must be an object"
+                )
+            unknown = sorted(set(selector) - {"kind", "column"})
+            if unknown:
+                raise OperationValidationError(
+                    "model.joint_f_test term selector contains unsupported field(s): "
+                    + ", ".join(unknown)
+                )
+            kind = selector.get("kind")
+            column = selector.get("column")
+            if kind not in {"linear", "categorical", "polynomial"}:
+                raise OperationValidationError(
+                    "model.joint_f_test selector kind must be linear, categorical, or polynomial"
+                )
+            if not isinstance(column, str) or not column:
+                raise OperationValidationError(
+                    "model.joint_f_test selector column must be a non-empty string"
+                )
+            identity = (kind, column)
+            if identity in seen:
+                raise OperationValidationError(
+                    "model.joint_f_test contains a duplicate term selector: "
+                    f"{kind}:{column}"
+                )
+            seen.add(identity)
+    elif validator_key == "model.quadratic_stationary_point":
+        column = spec.get("column")
+        if not isinstance(column, str) or not column:
+            raise OperationValidationError(
+                "model.quadratic_stationary_point column must be a non-empty string"
+            )
+    elif validator_key == "model.white_test":
+        branch_id = spec.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id:
+            raise OperationValidationError(
+                "model.white_test branch_id must be a non-empty string"
+            )
 
 
 def _validate_declared_field_types(
@@ -823,6 +1087,16 @@ def validate_workflow_steps(
                 produced.update(
                     str(recipe["output_name"]) for recipe in step["spec"]["recipes"]
                 )
+            if step["operation_id"] == "statistical.derive_numeric":
+                outputs = {
+                    str(recipe["output_name"]) for recipe in step["spec"]["recipes"]
+                }
+                collisions = sorted(outputs & (available | produced))
+                if collisions:
+                    raise OperationValidationError(
+                        "derive_numeric output column already exists: " + ", ".join(collisions)
+                    )
+                produced.update(outputs)
     return ordered
 
 

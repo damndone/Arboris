@@ -57,7 +57,8 @@ import type { BottomPanelId } from "./registry/bottomPanelRegistry";
 // ─── public types ───────────────────────────────────────────────────
 
 export interface ContextMenuState {
-  nodeKey: string;
+  /** null means the user opened the graph's blank-canvas menu. */
+  nodeKey: string | null;
   x: number;
   y: number;
 }
@@ -84,6 +85,8 @@ export interface WorkbenchState {
    *  search hits. null when the palette is closed/empty. */
   searchCursorKey: string | null;
   contextMenu: ContextMenuState | null;
+  /** Monotonic refresh signal for per-run graph view cleanup state. */
+  graphCleanupVersion: number;
 }
 
 export interface WorkbenchDispatch {
@@ -111,6 +114,7 @@ export interface WorkbenchDispatch {
   setSearchCursorKey(nodeKey: string | null): void;
   openContextMenu(menu: ContextMenuState): void;
   closeContextMenu(): void;
+  refreshGraphCleanup(): void;
 }
 
 export interface WorkbenchContextValue {
@@ -121,6 +125,43 @@ export interface WorkbenchContextValue {
 // ─── context ────────────────────────────────────────────────────────
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
+
+const HIDDEN_NODES_STORAGE_KEY_PREFIX = "workbench:graph-hidden-node-ids:";
+
+function hiddenNodesStorageKey(runId: string): string {
+  return `${HIDDEN_NODES_STORAGE_KEY_PREFIX}${runId || "draft"}`;
+}
+
+export function readHiddenGraphNodeIds(runId: string): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(hiddenNodesStorageKey(runId));
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((value): value is string => typeof value === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+export function hideGraphNodeFromView(runId: string, nodeId: string): void {
+  const hidden = readHiddenGraphNodeIds(runId);
+  hidden.add(nodeId);
+  persistHiddenGraphNodeIds(runId, hidden);
+}
+
+export function restoreHiddenGraphNodes(runId: string): void {
+  persistHiddenGraphNodeIds(runId, new Set());
+}
+
+function persistHiddenGraphNodeIds(runId: string, nodeIds: ReadonlySet<string>): void {
+  try {
+    sessionStorage.setItem(hiddenNodesStorageKey(runId), JSON.stringify([...nodeIds].sort()));
+  } catch {
+    // This is a local view preference only. Storage rejection never affects
+    // the underlying lineage or the ability to use the graph.
+  }
+}
 
 /** Throws if used outside the provider — V1.5.1's LineageContext
  *  follows the same fail-loud convention. */
@@ -211,6 +252,7 @@ export function WorkbenchStateProvider({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(
     null,
   );
+  const [graphCleanupVersion, setGraphCleanupVersion] = useState(0);
 
   // ── single-commit URL writer ──────────────────────────────────
   // Every dispatch builds a partial { tabs?, slice? } and commit
@@ -398,6 +440,10 @@ export function WorkbenchStateProvider({
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
+  const refreshGraphCleanup = useCallback(() => {
+    setGraphCleanupVersion((version) => version + 1);
+  }, []);
+
   const value = useMemo<WorkbenchContextValue>(
     () => ({
       state: {
@@ -414,6 +460,7 @@ export function WorkbenchStateProvider({
         searchCursor,
         searchCursorKey,
         contextMenu,
+        graphCleanupVersion,
       },
       dispatch: {
         selectByCanvasClick,
@@ -431,6 +478,7 @@ export function WorkbenchStateProvider({
         setSearchCursorKey,
         openContextMenu,
         closeContextMenu,
+        refreshGraphCleanup,
       },
     }),
     [
@@ -442,6 +490,7 @@ export function WorkbenchStateProvider({
       searchCursor,
       searchCursorKey,
       contextMenu,
+      graphCleanupVersion,
       selectByCanvasClick,
       selectByTabSwitch,
       selectBySearchCommit,
@@ -457,6 +506,7 @@ export function WorkbenchStateProvider({
       setSearchCursorKey,
       openContextMenu,
       closeContextMenu,
+      refreshGraphCleanup,
     ],
   );
 

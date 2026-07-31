@@ -6,12 +6,13 @@
 // exists anywhere) and every exclusion is disclosed in the provenance line and
 // stored in the history record, so leaving out inconvenient facts is always
 // visible, never silent. Generated reports persist to a per-project history.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForest } from "../workbench/ForestContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
 import {
   buildFactTable,
   buildFigureFacts,
+  buildPostEstimationFacts,
   buildTimeSeriesFacts,
   type CitableFact,
 } from "./factTable";
@@ -33,7 +34,13 @@ import {
   saveReportRecord,
   type ReportRecord,
 } from "./reportHistory";
-import { artifactDownloadUrl, fetchArtifactJson, fetchRunArtifacts } from "../api";
+import {
+  artifactDownloadUrl,
+  fetchArtifactJson,
+  fetchRunArtifacts,
+  fetchRunDetail,
+} from "../api";
+import type { PostEstimationResult } from "../api";
 import { fetchFigureAiContext } from "../workbench/views/figureAi";
 
 const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
@@ -48,53 +55,89 @@ const REPORT_TIME_SERIES_ARTIFACT_IDS = new Set([
   "ts.next_forecast",
 ]);
 
+function reportsForRun(records: ReportRecord[], runId: string | null): ReportRecord[] {
+  if (!runId) return [];
+  return records.filter((record) => record.scope.run_id === runId);
+}
+
 export function ReportView({ projectRoot }: { projectRoot?: string }) {
   const forest = useForest();
   const wb = useWorkbenchOptional();
+  const activeRunId = forest?.activeRunId ?? null;
+  // Async generation belongs to the Run whose fact snapshot was submitted.
+  // Keep the latest visible Run outside a request closure so a completed Run A
+  // cannot replace the report currently being viewed for Run B.
+  const activeRunIdRef = useRef(activeRunId);
+  activeRunIdRef.current = activeRunId;
   const historyRoot = projectRoot ?? "unknown-project";
   const [instruction, setInstruction] = useState(DEFAULT_REPORT_INSTRUCTION);
   const [current, setCurrent] = useState<ReportRecord | null>(null);
   const [history, setHistory] = useState<ReportRecord[]>([]);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [generatingRunId, setGeneratingRunId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [reportFigures, setReportFigures] = useState<ReportFigure[]>([]);
   const [timeSeriesArtifacts, setTimeSeriesArtifacts] = useState<Record<string, unknown>>({});
   const [figureContextLoading, setFigureContextLoading] = useState(false);
   const [figureInventoryError, setFigureInventoryError] = useState<string | null>(null);
+  const [postEstimation, setPostEstimation] = useState<PostEstimationResult[]>([]);
+
+  // Declared post-estimation results are server-computed scalars with artifact
+  // provenance, so they belong in the deterministic fact table. A failure here
+  // is not surfaced: the report is still truthful without these facts, and the
+  // figure inventory owns the visible error channel.
+  useEffect(() => {
+    const runId = activeRunId;
+    if (!runId || !projectRoot) {
+      setPostEstimation([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchRunDetail(projectRoot, runId)
+      .then((detail) => {
+        if (!cancelled) setPostEstimation(detail.post_estimation_results ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPostEstimation([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRunId, projectRoot]);
 
   useEffect(() => {
     const stored = loadReportHistory(historyRoot);
-    setHistory(stored);
+    const scoped = reportsForRun(stored, activeRunId);
+    setHistory(scoped);
     // The report itself was never lost -- history is persisted -- but the
     // preview lived in local state, so switching tabs blanked the screen and
     // the user had to go dig it out of "Report history" to see it again.
     // Restoring the newest record makes coming back to this view show what
     // was last generated, which is what leaving it showed.
-    setCurrent((shown) => shown ?? stored[0] ?? null);
-  }, [historyRoot]);
+    setCurrent(scoped[0] ?? null);
+  }, [activeRunId, historyRoot]);
 
   useEffect(() => {
-    const runId = forest?.activeRunId;
+    const runId = activeRunId;
     if (!projectRoot || !runId) return;
     let cancelled = false;
     void fetchAiReports({ projectRoot, runId })
       .then((records) => {
         if (cancelled || records.length === 0) return;
-        const durable = records as unknown as ReportRecord[];
+        const durable = reportsForRun(records as unknown as ReportRecord[], runId);
         setHistory(durable);
-        setCurrent((shown) => shown ?? durable[0] ?? null);
+        setCurrent(durable[0] ?? null);
       })
       .catch(() => {
         // Local history is a cache and a sensible offline fallback. The user is
         // told about a new persistence failure at generation time instead.
       });
     return () => { cancelled = true; };
-  }, [forest?.activeRunId, projectRoot]);
+  }, [activeRunId, projectRoot]);
 
   useEffect(() => {
-    const runId = forest?.activeRunId;
+    const runId = activeRunId;
     if (!runId || !projectRoot) {
       setReportFigures([]);
       setTimeSeriesArtifacts({});
@@ -168,7 +211,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [forest?.activeRunId, projectRoot]);
+  }, [activeRunId, projectRoot]);
 
   const table = useMemo(() => {
     if (!forest || !forest.activeRunId) return null;
@@ -198,9 +241,18 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
     ),
     [figureFacts.length, table?.facts.length, timeSeriesArtifacts, timeSeriesProvenance],
   );
+  const postEstimationFacts = useMemo(
+    () => buildPostEstimationFacts(
+      postEstimation,
+      (table?.facts.length ?? 0) + figureFacts.length + timeSeriesFacts.length,
+    ),
+    [figureFacts.length, postEstimation, table?.facts.length, timeSeriesFacts.length],
+  );
   const allFacts = useMemo(
-    () => (table ? [...table.facts, ...figureFacts, ...timeSeriesFacts] : []),
-    [figureFacts, table, timeSeriesFacts],
+    () => (table
+      ? [...table.facts, ...figureFacts, ...timeSeriesFacts, ...postEstimationFacts]
+      : []),
+    [figureFacts, postEstimationFacts, table, timeSeriesFacts],
   );
 
   if (!forest || !forest.activeRunId || !table) {
@@ -228,7 +280,8 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
 
   async function handleGenerate() {
     if (!table) return;
-    setBusy(true);
+    const runId = table.scope.run_id;
+    setGeneratingRunId(runId);
     setError(null);
     try {
       const response = await generateReport({
@@ -252,8 +305,14 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
       if (projectRoot) {
         await saveAiReport({ projectRoot, runId: table.scope.run_id, record });
       }
-      setCurrent(record);
-      setHistory(saveReportRecord(historyRoot, record));
+      if (activeRunIdRef.current === runId) {
+        setCurrent(record);
+        setHistory(reportsForRun(saveReportRecord(historyRoot, record), runId));
+      } else {
+        // Still preserve the user-requested Run A report; only defer its view
+        // update until the user explicitly returns to Run A.
+        saveReportRecord(historyRoot, record);
+      }
       appendAiActivity(historyRoot, {
         kind: "report_generate",
         id: makeActivityId(),
@@ -270,10 +329,12 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
       // invites reading it as this attempt's output. It is not lost -- it is
       // still in Report history -- but it must not stand in for a result that
       // was never produced.
-      setCurrent(null);
-      setError(err instanceof Error ? err.message : "Report generation failed");
+      if (activeRunIdRef.current === runId) {
+        setCurrent(null);
+        setError(err instanceof Error ? err.message : "Report generation failed");
+      }
     } finally {
-      setBusy(false);
+      setGeneratingRunId((currentRunId) => currentRunId === runId ? null : currentRunId);
     }
   }
 
@@ -313,8 +374,31 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
   return (
     <div
       data-testid="report-view"
-      style={{ padding: 20, overflowY: "auto", flex: 1, minHeight: 0 }}
+      style={{ padding: "12px 20px 20px", overflowY: "auto", flex: 1, minHeight: 0 }}
     >
+      {forest.forest.heads.length > 0 && (
+        <nav
+          data-testid="report-view-run-picker"
+          className="wb-run-version-picker"
+          aria-label="Report run"
+          style={{ margin: "-12px -20px 12px" }}
+        >
+          <span className="wb-run-version-picker__label">Versions:</span>
+          {forest.forest.heads.map((head) => (
+            <button
+              key={head.runId}
+              type="button"
+              className="wb-run-version-picker__button"
+              aria-pressed={head.runId === activeRunId}
+              aria-label={`Show report for run ${head.runId}`}
+              title={head.runId}
+              onClick={() => forest.setActiveRunId(head.runId)}
+            >
+              {head.runId.slice(-8)}
+            </button>
+          ))}
+        </nav>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 12 }}>
         <textarea
           aria-label="Report instruction"
@@ -327,13 +411,17 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
           type="button"
           onClick={handleGenerate}
           disabled={
-            busy ||
+            generatingRunId === activeRunId ||
             figureContextLoading ||
             figureInventoryError !== null ||
             includedFacts.length === 0
           }
         >
-          {busy ? "Generating…" : figureContextLoading ? "Loading figures…" : "Generate report"}
+          {generatingRunId === activeRunId
+            ? "Generating…"
+            : figureContextLoading
+              ? "Loading figures…"
+              : "Generate report"}
         </button>
         {current && (
           <>
@@ -430,7 +518,7 @@ export function ReportView({ projectRoot }: { projectRoot?: string }) {
         currentId={current?.id ?? null}
         onOpen={(record) => setCurrent(record)}
         onDelete={(record) => {
-          setHistory(deleteReportRecord(historyRoot, record.id));
+          setHistory(reportsForRun(deleteReportRecord(historyRoot, record.id), activeRunId));
           if (current?.id === record.id) setCurrent(null);
         }}
       />

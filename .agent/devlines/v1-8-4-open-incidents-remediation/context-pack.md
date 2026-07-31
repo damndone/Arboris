@@ -1,0 +1,341 @@
+# Frozen Context Pack
+
+Line: `v1-8-4-open-incidents-remediation`
+Baseline SHA: `fdf47a407e137004d242bae9228e65b8456bd76d`
+
+## Objective
+# v1.8.4 遗留 12 条 open incident — Codex 对接指令
+
+本文件是给接手 agent 的**完整任务书**。所有事实以
+`.agent/devlines/v1-8-4-agent-model-composition/events.jsonl` 为准；本文件里的
+incident_id 可直接用于 `grep`。**不要凭本文件推断状态**，动手前先读原始事件。
+
+---
+
+## 0. 起手
+
+工作目录 `/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.4`，branch
+`workbench-v1.8.4`。**当前工作树有 50 处未 commit 的改动，这是 v1.8.4 的全部成果，
+先 commit 再动手**：
+
+```bash
+cd "/Users/jiayuanren/项目规划/.worktrees/workbench-v1.8.4"
+git status --short
+git add -A && git commit -m "feat(v1.8.4): agent model composition"
+```
+
+服务：`.claude/launch.json` 的 `backend-v184`(8000) 与 `frontend-v184`(5177)。
+新建 worktree 必须先 `bash scripts/link-shared-deps.sh <绝对路径>`，否则缺 `.venv`。
+
+### 硬约束（违反即作废）
+
+1. **不手改 `.agent/devlines/`。** 事件、rescope、verify 一律走
+   `scripts/devline_control.py`。枚举坑：`type` 没有 `FIX`（用原 type + `resolution`）；
+   `stage` 没有 `verification`（用 `gate`）；`resolution` 用 `resolved` 不是 `fixed`；
+   关线 = append `STATE_CHANGE` 且 `state_to: COMPLETED`。
+2. **`backend/workbench/*.py` 顶层文件**（`model_terms.py`、`figure_context.py` 等）
+   **无法用 `rescope-context` 加进 allowlist**——校验器拒绝 `len(parts) < 4` 的
+   backend 路径。要改这些文件必须**新开一条开发线**，在 `start` 时就把路径写进
+   allowlist。不要为了绕开去改受保护的 `context_pack.py`。
+3. **不要只改测试让它通过。** 两份测试互相矛盾时，先判定哪一份编码的是**已实现的
+   契约**，把过期的那份改写到实现契约上，并把它原本主张的东西**拆成独立断言保留**，
+   不要删。结构性护栏测试若必须放宽，每处豁免要配一条**新的真实断言**。
+4. **不宣称没验的东西。** 「测试通过」「浏览器验收」「发版」是三件事，分开写。
+   真机验收只用 Workbench 内置浏览器。
+5. **每条 incident 修完都要 append 一条事件，`incident_id` 用原来的那个**，否则原
+   incident 永远显示 open（v1.8.4 就踩过这个坑，事后补了 10 条 closing 事件）。
+
+### 每条 incident 的通用验收标准
+
+- [ ] 有一条**先失败后通过**的测试。提交前用 `git stash` 或临时回退实现，确认该测试
+      在修复前确实失败——只说「测试通过了」不算证据。
+- [ ] `LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 bash scripts/gate.sh --full` 通过
+      （**跑之前必须先停 vite**）。基线：backend 4245 passed / 8 skipped / 1 xfailed，
+      golden 23 0-drift，frontend 171 files / 1510 tests，tsc 0。**只许涨不许跌。**
+- [ ] append 一条事件，`incident_id` 用原 id，`resolution: resolved`，
+      `evidence.ref` 写清楚是哪次 gate / 哪次真机操作。
+
+---
+
+## 1. P0 — 产品缺陷，直接影响用户能否拿到答案
+
+### 1.1 `panel_workflow_model_composition` · `ac7b9d42-0f8d-4bf4-9cb5-dd3b4f39f023`
+
+**问题**：Panel OLS 能力在手动 run form 里能跑，但 `model.genesis` 的校验和
+workflow executor **把每个 branch 都当 OLS 处理**；composed option 还从**外层单一
+capability** 推导预期产物，而不是从每个 model step 声明的 model family 推导。
+
+**后果**：Notebook 无法提出/确认/执行一个通用固定效应面板设定，也做不了
+panel 与 dummy-fixed-effect 估计量之间的合法对比——尽管两者都是服务端已注册能力。
+
+**方法**：
+1. 在 `workflow_contracts.py` 给 model family 建立**显式的 workflow 语义契约**，
+   不要用 `if model_type == ...` 散在执行路径里。参考 v1.8.4 的
+   `WORKFLOW_STEP_SPEC_CONTRACTS` 写法。
+2. `workflow_runtime.py` 的 branch 执行按 step 声明的 family 分派；
+   预期产物（artifact admission）改为**逐 step 推导**。
+3. `planning_agent.py` 的已发布词表加入 panel 声明字段（entity / time / 效应类型）。
+4. 复用 `econometrics/runner.py` 已有的 panel 实现，**不要新写估计器**。
+
+**验收标准**：
+- [ ] 一个 `operation.multi_step`，branch A = panel FE、branch B = dummy FE，
+      **两个 branch 的估计结果在数值上一致到 1e-8**（同一设定的两种等价实现）；
+      这条对照就是本项的 oracle。
+- [ ] 不支持的 panel 设定 **fail-closed 并给出可执行的下一步**，不静默降级成 OLS。
+- [ ] 每个 branch 的产物按各自 family 准入；把 panel branch 的产物**误当 OLS 产物**
+      的情况要有一条专门的拒绝测试。
+- [ ] 真机浏览器：Notebook 一句话请求固定效应面板 → typed option → 确认 → 执行 →
+      结果在 Table 与 Report 可见。
+
+### 1.2 `global_agent_workflow_answer_path` · `33c552d6-6d98-4cec-b651-5bb71a4f91c9`
+
+**问题**：用户跑完 typed 多分支 workflow，证据都存着，但 Global Agent 答不出来。
+两个原因：protocol 里 receipt → branch evidence 的路径不够直接；receipt reader
+在项目概览候选 run **超过 4 个**时直接拒绝。
+
+**方法**：给「可见候选 run → 完成的 workflow receipt → branch evidence → 直接回答」
+建一条**显式的低步数路径**。候选 run 上限不是拒绝的理由——要么分页/按 recency 有界
+截断并说明截断了，要么按 workflow 反查而不是遍历项目。
+
+**验收标准**：
+- [ ] 项目里有 **≥8 个 run** 时，Global Agent 仍能回答一个关于已完成 workflow 的
+      数值问题，且答案**引用 branch evidence 的 artifact id**。
+- [ ] 步数有上界的测试：从提问到答案的工具调用次数不随项目 run 数增长。
+- [ ] 证据不存在时仍然拒答，**不允许为了能答而放宽有界证据边界**。
+
+### 1.3 `predictor_residual_diagnostic_evidence` · `64ec6d96-b9bb-4e36-ac51-a6a312a9d5c8`
+
+**问题**：`model.genesis` 其实**已经**为每个声明的 predictor 持久化了
+residual-vs-predictor 图，但 Notebook planner 不知道，Global Agent 的 context adapter
+也只能推导 residual-vs-fitted 的数值证据。于是一个合法 OLS workflow 会声称做不了
+用户要的残差诊断。
+
+**方法**：把「模型诊断产物」和「它的有界 Agent 证据」作为**同一个通用能力**发布。
+planner 要**描述自动产物**，而不是要求 provider 发明一个画图 step。
+Agent 只拿**聚合分箱**，不拿行级图形输入。
+
+⚠️ `backend/workbench/figure_context.py` 在 allowlist 之外，见硬约束 2——**这一条需要
+新开开发线**。
+
+**验收标准**：
+- [ ] planner 对「给我 X 对残差的图」的回应是指向已持久化产物，**不是**新增 step。
+- [ ] Agent 拿到的是分箱聚合；有一条测试断言**行级数据不出现在** Agent 上下文里。
+- [ ] 图确实不存在时（比如该变量没进模型）明确拒答。
+
+### 1.4 `global_agent_model_figure_evidence` · `8ff5b466-6718-4b26-afcd-e4d4cc238452`
+
+**问题**：有界的 residual-vs-predictor 图证据在 node context 层存在，但没接进
+Global Agent 的 project-scoped 只读工具注册表。Agent 拒绝编造解释是**对的**，但它也
+读不到已持久化的分箱事实。
+
+**方法**：加一个显式的、有界的 Global Agent reader。**与 1.3 一起做**，两者是同一条
+证据链的两端。
+
+**验收标准**：
+- [ ] Global Agent 能回答「residual vs education 的分箱事实」并引用 artifact。
+- [ ] node-scoped 可用**不自动等于** project-scoped 可用——要有一条测试锁死这个边界。
+
+---
+
+## 2. P1 — 契约与措辞正确性
+
+### 2.1 `proposal_ready_budget_terminal_error` · `9aac0586-f9d6-45b2-8129-ccc6c19a789f`
+
+**问题**：确认门控的 proposal 成功产出后，还强制再走一轮 model turn，把 step budget
+耗尽，于是用户拿到了有效的 pending proposal，但 Agent session 被错标成 blocked。
+
+**方法**：把「durable user-confirmation proposal」当作**合法终态**，不再要求
+额外的 provider completion turn。改 `backend/workbench/agent/core.py`。
+
+**验收标准**：
+- [ ] proposal-ready 直接终止，session 状态是 pending-confirmation 而非 blocked。
+- [ ] 有一条测试断言这一轮**没有**发生额外的 provider round-trip
+      （v1.8.4 修 `proposal_ready_test_expectations_stale` 时已建立这个断言范式，照抄）。
+- [ ] step budget 真的耗尽时仍然正确报 blocked——不要把这条路径一起吃掉。
+
+### 2.2 `covariance_comparison_interpretation_boundary` · `2c20a717-147f-4c09-9b91-df8a0037ab5e`
+
+**问题**：protocol 允许描述性地对比 robust 与 nonrobust 推断，但**没有明确禁止**把
+某一个系数显著性标签的变化归因于异方差。
+
+**方法**：在 `agent_routes.py` 的 protocol 里写死这条边界：
+> robust vs nonrobust 对比**支持**报告标准误、区间、显著性标签发生了变化；
+> **不支持**据此断定某个结果是假的，也不支持确立某一个系数变化的机制。
+
+**验收标准**：
+- [ ] 一条**负向**测试：喂进真实的 robust/nonrobust 对比证据，断言回答里
+      **不出现**因果归因措辞（「说明存在异方差」「原结果是假显著」之类）。
+- [ ] 正向能力不退化：仍然如实报告哪些标准误和标签变了。
+
+### 2.3 `notebook_workflow_dependency_shape_correction` · `11a22915-b003-4bf7-90c8-dff34cf0643a`
+
+**问题**：planning prompt 说 `depends_on` 可选，但没说清它的 JSON 数组形状。provider
+发了一个字符串，服务端**正确拒绝**了，但用户就此卡死。
+
+**方法**：发布**确切形状** + 一条**机械可分辨**的纠正响应，能区分「省略」「空数组」
+「形状错误」三种情况。这是 v1.8.4 修
+`notebook_planner_proposes_rerun_outside_active_head_lineage` 的同一套路——照抄那个
+remediation 分支的写法。
+
+**验收标准**：
+- [ ] 三种输入（省略 / `[]` / `"step_1"`）各有一条测试，纠正消息各不相同且都可执行。
+- [ ] 服务端**仍然拒绝**畸形值——修的是提示与恢复，不是放宽校验。
+
+### 2.4 `agent_model_composition_browser_acceptance_partial` · `0a41f2a3-2759-4c01-9e88-e23543cc8212`
+
+⚠️ **这条大部分已经在 v1.8.4 修掉了**，先读原事件再动手。原记录里的两大项——
+post-estimation 结果不投影到任何产品面、artifact 记 covariance unadjusted 而模型是
+robust——**都已修复并有真机证据**。
+
+**剩下的**：Agent transcript 是 scope-keyed 的，用户一选中新建的 run 去看结果，
+transcript 就消失了。
+
+**方法**：让 transcript 在用户导航到该 workflow 产出的 run 时保持可见。
+
+**验收标准**：
+- [ ] 真机：确认 → 执行 → 点开新 run，transcript 仍在。
+- [ ] 一条测试锁死「导航到 workflow 的产出 run 不清空 transcript」。
+- [ ] 关闭本 incident 时，事件里要**明确写出**哪些部分是 v1.8.4 已修、哪些是本次修的。
+
+---
+
+## 3. P2 — 未复现 / 环境类，方法与上面不同
+
+### 3.1 `notebook_load_not_found` · `15b227d6-8f7a-41a1-8f24-3d87eab09e59`
+
+**状态：cause_status = suspected，未复现。** v1.8.4 完整走了一遍 Notebook 流程没有
+出现。**不要为了关掉它而假设一个原因去改代码。**
+
+**方法**：先做**复现工作**，不是修复工作。
+1. 原始记录指向「persisted legacy Notebook route」——重点查**旧版本遗留的 notebook
+   记录**能否加载新的 planning 结果，而不是新建 notebook。
+2. 造一个 legacy 形状的 notebook fixture（字段缺失 / 旧 schema），走完整 planning。
+3. 复现到了 → 按 P0 流程修 + 先失败后通过的测试。
+4. 复现不了 → **保持 open**，append 一条事件记录你试过哪些路径、都没复现。
+   **这也是合格交付。** 不要关掉它。
+
+**验收标准**：
+- [ ] 二选一：要么有确定性复现 + 修复 + 测试；要么有一条记录了具体尝试路径的
+      「未复现」事件，incident 仍为 open。
+- [ ] **不接受**：没有复现证据就改代码然后声称修好了。
+
+### 3.2 `browser_acceptance_blocked` · `e3fd7954-cfe8-4c76-bd3d-8ea9b5f32ee2`
+
+**问题**：浏览器基线 run 撞上样本量护栏，停在 RecordingStage 持久化 node identity 之前。
+结果 forest 把这个 blocked run 渲染成 legacy 不透明 run，既供不了 selected-node
+Agent 上下文，也过不了浏览器验收。
+
+**方法**：两件事，都要做——
+1. **验收用的 fixture 要能过通用输入护栏**（样本量足够）。这是验收方法问题。
+2. **blocked run 必须在视觉上区别于历史 lineage 记录**。这是**真实产品缺陷**：
+   把「本次被拦下的 run」画成「旧的不透明 run」是在误导用户。
+
+**验收标准**：
+- [ ] 一条测试：被护栏拦下的 run 渲染为 blocked 态，**不是** legacy 态。
+- [ ] 真机：用满足护栏的 fixture 完成一次 selected-node Agent 上下文验收。
+
+### 3.3 `browser_use_url_policy_blocks_local_ui_acceptance` · `df709bbd-2aa7-416f-ac78-b92285c6cbd1`
+
+**这不是产品缺陷**，是内置浏览器控制器在服务重启后按自身 URL 安全策略拒绝了本地
+Workbench URL 的刷新/导航。
+
+**方法**：重启服务后重新 `preview_start` 建立干净的 tab，不要在旧 tab 上强行导航。
+**绝对不要**改用 HTTP 直连或外部浏览器绕过 UI 验收边界——那样得到的不是 UI 验收。
+
+**验收标准**：
+- [ ] 记录一条可复用的规程：服务重启后如何重建可用的验收 tab。
+- [ ] 关闭事件里写明这是 controller 策略问题，**不是** Workbench 产品失败。
+
+### 3.4 `chain_agent_proposal_upstream_error` · `ddcc9408-c7a4-4891-9ef8-0025a829c5ce`
+
+**问题**：DeepSeek V4 Pro 在产出任何 tool call 之前返回 `LLMUpstreamError`。
+
+**方法**：这是 provider 侧故障，不是 Workbench 逻辑错误。要做的是确认
+**upstream error 和 tool-protocol error 是两条独立的 fail-closed 边界**，且
+upstream error 有清楚的用户可见文案。
+**验收期间不要靠换 prompt 变体反复重试**——那会把 provider 故障和产品缺陷混为一谈。
+
+**验收标准**：
+- [ ] 一条测试：注入 `LLMUpstreamError`，断言它与 tool-protocol 错误走**不同**的
+      终态与文案。
+- [ ] 真机复现一次即可关闭；持续复现则记为 provider 侧问题，保持 open。
+
+---
+
+## 4. 收尾
+
+全部做完后：
+
+```bash
+# 1. 停 vite，跑 full gate
+LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 bash scripts/gate.sh --full
+
+# 2. FMS 校验
+PYTHONPATH=backend .venv/bin/python scripts/devline_control.py verify --all
+PYTHONPATH=backend .venv/bin/python scripts/devline_control.py index --all
+```
+
+- [ ] `verify --all` 通过，新开的开发线全部 COMPLETED + indexed。
+- [ ] 更新 `docs/releases/v1.8.4-release-notes.md` 的「明确不宣称」段：已解决的删掉，
+      仍未解决的**保留并说明原因**。
+- [ ] 更新 `docs/superpowers/followups/BACKLOG.md` 的 `V1.8.4-OPEN` 行；全清则删行。
+- [ ] 写一份新的 handoff，把
+      `docs/superpowers/handoff/2026-07-31-v1.8.4-release-handoff.md`
+      移进 `docs/superpowers/archive/handoff/`（handoff 只留最新一份），
+      并修好 release notes 里指向它的链接。
+
+**发版流程（commit 之后的 push / PR / merge / tag）不要自己走**，交回用户决定。
+
+## Boundary
+- Affected paths: `backend/workbench/agent/navigation.py`, `backend/workbench/agent/notebook/materialization.py`, `frontend/src/workbench/WorkbenchRouteContainer.tsx`, `frontend/src/workbench/WorkbenchRouteContainer.test.tsx`, `frontend/src/workbench/agent/agentNavigation.ts`, `frontend/src/workbench/agent/agentNavigation.test.ts`, `frontend/src/workbench/agent/AgentPanel.test.tsx`, `tests/test_agent_context_tools.py`, `tests/test_agent_routes.py`, `tests/test_notebook_planning_agent.py`, `tests/test_notebook_routes.py`, `tests/test_panel_covariance.py`, `tests/test_workflow_runtime.py`, `docs/releases/v1.8.4-release-notes.md`, `docs/superpowers/followups/BACKLOG.md`, `docs/superpowers/handoff/2026-07-31-v1.8.4-release-handoff.md`, `docs/superpowers/handoff/2026-07-30-v1.8.4-remediation-handoff.md`, `docs/superpowers/archive/handoff/2026-07-31-v1.8.4-release-handoff.md`, `.fms-event-input.json`
+- Allowed paths: `backend/workbench/agent/navigation.py`, `backend/workbench/agent/notebook/materialization.py`, `frontend/src/workbench/WorkbenchRouteContainer.tsx`, `frontend/src/workbench/WorkbenchRouteContainer.test.tsx`, `frontend/src/workbench/agent/agentNavigation.ts`, `frontend/src/workbench/agent/agentNavigation.test.ts`, `frontend/src/workbench/agent/AgentPanel.test.tsx`, `tests/test_agent_context_tools.py`, `tests/test_agent_routes.py`, `tests/test_notebook_planning_agent.py`, `tests/test_notebook_routes.py`, `tests/test_panel_covariance.py`, `tests/test_workflow_runtime.py`, `docs/releases/v1.8.4-release-notes.md`, `docs/superpowers/followups/BACKLOG.md`, `docs/superpowers/handoff/2026-07-31-v1.8.4-release-handoff.md`, `docs/superpowers/handoff/2026-07-30-v1.8.4-remediation-handoff.md`, `docs/superpowers/archive/handoff/2026-07-31-v1.8.4-release-handoff.md`, `.fms-event-input.json`
+- Protected paths: `.agent/devlines`, `docs/superpowers/specs`, `docs/superpowers/plans`, `scripts/devline_control.py`, `backend/workbench/native_containment`, `backend/workbench/engine/registry.py`
+- Dependencies: `v1-8-4-agent-model-composition`
+- Tests: `LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 PYTHONPATH=backend .venv/bin/pytest -q tests/test_workflow_runtime.py tests/test_panel_covariance.py tests/test_agent_context_tools.py tests/test_agent_routes.py tests/test_agent_tools.py tests/test_notebook_planning_agent.py tests/test_notebook_routes.py tests/test_context_compiler_entry_point.py`, `LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 bash scripts/gate.sh --full`, `browser: in-app Workbench UI acceptance only; no HTTP or external-browser substitute`
+- Known gates: `Use original incident_id with resolution=resolved; type has no FIX and stage has no verification.`, `Top-level backend/workbench files must be allowed at start; do not rescope around the depth rule.`, `Before each closure prove a focused regression test fails before the implementation and passes after it.`, `Stop Vite before full gate; do not pipe tsc output through tail.`
+
+## Rules
+```json
+{"candidate_rules":[],"candidate_rules_sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945","global_rules":{"rules":[],"schema_version":1},"global_rules_sha256":"994a863c694e05021d65d0f8b862f24a28da461080286b7b35d1695ee0775fdc","rules_sha256":"c43d07b614106c511776da60664c80b2b1d5f27cc62ddece26aa4e6761474c5c"}
+```
+
+## Selected historical lessons
+### v1-8-4-agent-model-composition (2026-07-31T02:50:00.000Z)
+
+Completed formal devline v1-8-4-agent-model-composition; final_state=COMPLETED; failure_lesson_keys=action-mode-route-enforcement, agent-covariance-interpretation-guardrail, agent-provider-and-tool-boundaries, bounded-model-specification-evidence, bounded-node-evidence-visibility, browser-blocked-run-lineage-identity, browser-policy-blocked-ui-acceptance, canonical-terminal-inspection-reuse, checkpoint-host-gate-separation, coefficient-batch-limit-protocol, covariance-comparison-interpretation-boundary, declared-white-test-post-estimation, derive-workflow-artifacts-server-side, existing-genesis-route-tests-failed, failed-inspection-retry, fms-event-enums-must-match-contract, fms-event-input-must-be-repository-relative, formal-event-redaction-text-ambiguity, formal-event-requires-real-evidence-digest, genesis-draft-url-visibility, genesis-draft-visibility-regression, global-agent-model-figure-evidence, global-agent-numeric-evidence-transcription, global-agent-workflow-answer-path, historical-proposal-terminal-message, inherited-suite-failures-must-be-baselined, notebook-persisted-lifecycle, notebook-planner-must-recover-to-server-pinned-rerun-target, notebook-planner-proposes-rerun-outside-active-head-lineage, notebook-planning-deadline-must-be-explicit-and-user-aligned, notebook-planning-evidence-admission, notebook-planning-exceeds-visible-timeout-without-terminal-state, notebook-workflow-dependency-shape-correction, notebook-workflow-evidence-bridge, panel-workflow-model-composition, persisted-draft-hydration-before-empty, planning-elapsed-counter-resets-on-remount, post-estimation-must-reproduce-declared-covariance, post-estimation-requires-explicit-step, predictor-residual-diagnostic-evidence, preexisting-backend-suite-failures, progress-clock-anchors-to-attempt, proposal-ready-boundary-updates-call-count, proposal-ready-terminal-state, provider-catalog-expectation-mismatch, provider-catalog-test-alignment, real-run-tests-must-claim-a-clean-slot, rescope-leaf-path-depth, separate-existing-route-failure, structured-evidence-not-prose-token, verified-categorical-indicator-reuse, white-test-auxiliary-rank-stability, white-test-own-rank-policy, workflow-branch-covariance-preservation, workflow-pin-registry-artifact-identity
+
+### v1-8-4-agent-evidence-loop (2026-07-28T15:52:01.000Z)
+
+Completed formal devline v1-8-4-agent-evidence-loop; final_state=COMPLETED; failure_lesson_keys=agent-completed-operation-evidence-boundary, public-artifact-aggregate-budget
+
+### v1-8-3-integration-acceptance (2026-07-28T12:11:00.000Z)
+
+Completed formal devline v1-8-3-integration-acceptance; final_state=COMPLETED; failure_lesson_keys=formal-cli-command-surface, formal-scope-narrowing, supported-host-containment-required
+
+### v1-8-3-mem3-memory-curator-exact-baseline (2026-07-27T11:35:00.000Z)
+
+Completed formal devline v1-8-3-mem3-memory-curator-exact-baseline; final_state=COMPLETED; failure_lesson_keys=curator-contract-first, review-api-awaits-response
+
+### v1-8-3-mem3-memory-curator (2026-07-27T11:10:00.000Z)
+
+Completed formal devline v1-8-3-mem3-memory-curator; final_state=CLOSED; failure_lesson_keys=none
+
+### v1-8-3-cf4-notebook-planner-projection-r1 (2026-07-26T23:16:01.000Z)
+
+Completed formal devline v1-8-3-cf4-notebook-planner-projection-r1; final_state=COMPLETED; failure_lesson_keys=bounded-planner-projection-inputs, consumer-admission-facts-align-across-contracts, scope-aware-bound-option-revalidation, tdd-red-before-planner-projection
+
+### v1-8-3-cf4-server-recommendation-stage (2026-07-27T06:24:00.000Z)
+
+Completed formal devline v1-8-3-cf4-server-recommendation-stage; final_state=COMPLETED; failure_lesson_keys=server-recommendation-red
+
+### v1-8-3-cf4-notebook-provider-injection (2026-07-26T22:45:00.000Z)
+
+Completed formal devline v1-8-3-cf4-notebook-provider-injection; final_state=COMPLETED; failure_lesson_keys=formal-rescope-boundary, tdd-red-before-provider-injection
+
+### wo-a-live-agent (2026-07-20T17:44:54.000Z)
+
+Completed formal devline wo-a-live-agent; final_state=CLOSED; failure_lesson_keys=none
+
+### v1-8-4-model-term-reuse (2026-07-31T02:50:00.000Z)
+
+Completed formal devline v1-8-4-model-term-reuse; final_state=COMPLETED; failure_lesson_keys=none

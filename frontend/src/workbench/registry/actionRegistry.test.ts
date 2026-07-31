@@ -63,7 +63,7 @@ function ctx(overrides: Partial<ActionContext> = {}): ActionContext {
 }
 
 describe("actionRegistry", () => {
-  it("registers the 12 V1.5.2 actions (P4 + P7 topbar additions)", () => {
+  it("registers the 11 live workbench actions", () => {
     expect(actionRegistry.map((a) => a.id).sort()).toEqual(
       [
         "askAiAboutNode",
@@ -71,7 +71,6 @@ describe("actionRegistry", () => {
         "copyLineagePath",
         "copyNodeId",
         "focusUpstream",
-        "generateReport",
         "markNeedsReview",
         "openDetail",
         "pinTab",
@@ -82,25 +81,22 @@ describe("actionRegistry", () => {
     );
   });
 
-  it("topbar surface yields rerun (live in v1.6.6) + generateReport (live in v1.6.11)", () => {
+  it("topbar surface exposes rerun without duplicating the Report view tab", () => {
     const topbarIds = actionsForSurface("topbar", ctx()).map((a) => a.id);
-    expect(topbarIds).toEqual(["rerun", "generateReport"]);
+    expect(topbarIds).toEqual(["rerun"]);
     // v1.6.6 ③: topbar Rerun is now live (routes to the node rerun flow).
     const rerun = actionRegistry.find((a) => a.id === "rerun")!;
     expect(rerun.disabled).toBeUndefined();
-    // v1.6.11 slice C: Generate report is live — switches to the Report view.
-    const gen = actionRegistry.find((a) => a.id === "generateReport")!;
-    expect(gen.disabled).toBeUndefined();
   });
 
   it("no disabled reason references a stale/already-shipped version (honesty)", () => {
     // v1.6.6 ③: dead-button reasons must point at real roadmap targets,
     // not the long-shipped "V1.5.3" / "V2.0" placeholders. v1.6.11: the Ask AI
-    // and Generate report placeholders are gone entirely (both live).
+    // and Generate report placeholders are gone entirely.
     for (const a of actionRegistry) {
       const out = a.disabled?.(ctx());
       if (out) expect(out.reason).not.toMatch(/V1\.5\.3|V2\.0|v1\.6\.9/);
-      if (a.id === "askAiAboutNode" || a.id === "generateReport") {
+      if (a.id === "askAiAboutNode") {
         expect(out).toBeUndefined();
       }
     }
@@ -134,7 +130,6 @@ describe("actionRegistry", () => {
       "rerunFromNode",
       "rerun", // v1.6.6 ③: topbar Rerun wired to the node rerun flow
       "askAiAboutNode", // v1.6.11 slice A: opens the drawer's Ask AI section
-      "generateReport", // v1.6.11 slice C: switches to the Report view
     ];
     for (const id of live) {
       const a = actionRegistry.find((x) => x.id === id)!;

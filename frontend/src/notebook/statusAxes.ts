@@ -94,9 +94,21 @@ export function axisNote(option: NotebookOptionRevision): {
   };
 }
 
-export function recommendationLabel(option: NotebookOptionRevision): string {
+export function recommendationLabel(
+  option: NotebookOptionRevision,
+  interactionMode: "plan" | "action" = "plan",
+): string {
   if (option.lifecycle_projection === "legacy_unverified") {
     return "Historical option · revalidate required";
+  }
+  // Action mode produces one Draft from a specification the user already
+  // wrote. Nothing was preferred over anything, so a recommendation word here
+  // would claim a judgement the agent did not make. Ineligibility is a
+  // property of the Draft itself and still has to be said.
+  if (interactionMode === "action") {
+    return option.validation_status === "invalid"
+      ? "Not eligible"
+      : "Prepared from your specification";
   }
   switch (option.recommendation_status) {
     case "recommended":

@@ -18,6 +18,11 @@ const STAGE_LABELS: Record<string, string> = {
   unknown: "Unknown stage",
 };
 
+function resultRuns(node: GraphViewNode): string[] {
+  const runs = (node as GraphViewNode & { runs?: unknown }).runs;
+  return Array.isArray(runs) ? runs.filter((run): run is string => typeof run === "string") : [];
+}
+
 function humaniseStage(stage: string): string {
   return STAGE_LABELS[stage] ?? stage;
 }
@@ -38,6 +43,8 @@ function formatCreated(iso: string | undefined): string {
 }
 
 export function BasicInfoSection({ node }: { node: GraphViewNode }) {
+  const isResult = node.stage === "report" && node.title === "Result";
+  const runs = resultRuns(node);
   return (
     <section
       aria-label="Basic info"
@@ -58,12 +65,13 @@ export function BasicInfoSection({ node }: { node: GraphViewNode }) {
           margin: 0,
         }}
       >
-        <KV label="Kind" value={humaniseKind(node.kind)} testid="kind" />
+        <KV label="Kind" value={isResult ? "Result" : humaniseKind(node.kind)} testid="kind" />
         <KV
           label="Stage"
-          value={humaniseStage(node.stage)}
+          value={isResult ? "Result" : humaniseStage(node.stage)}
           testid="stage"
         />
+        {isResult && <KV label="Run" value={runs.join(", ") || "—"} testid="run" />}
         <KV
           label="Created"
           value={formatCreated(node.createdAt)}

@@ -23,7 +23,7 @@ const caps_two: Capabilities = {
 test("with exactly one imputation method renders a checkbox", () => {
   const onChange = vi.fn();
   render(<ImputationControls capabilities={caps_one} value={null} onChange={onChange} />);
-  expect(screen.getByRole("checkbox", { name: /mice/i })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: /mice/i })).toHaveClass("imputation-controls__toggle");
   expect(screen.getByText(/MICE estimates plausible numeric values/i)).toBeInTheDocument();
 });
 

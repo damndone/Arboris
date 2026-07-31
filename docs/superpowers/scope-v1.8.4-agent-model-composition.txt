@@ -1,0 +1,31 @@
+v1.8.4 Agent Model Composition
+
+Objective
+
+Expose the existing server-validated OLS term vocabulary through the Notebook
+Agent lifecycle, so a user can request a model with declared categorical
+terms and declared polynomial terms, review the typed workflow, confirm it,
+and receive the completed results as bounded evidence.
+
+Add only two server-defined post-estimation result operations required to
+interpret such models generically: a joint test over a declared model-term
+group and the stationary point of a declared quadratic term.  Both must be
+derived from the completed model branch, carry artifact provenance, validate
+their semantic preconditions, and reject unsupported requests.
+
+Non-goals
+
+No arbitrary formulas, code execution, raw-data browsing, automatic
+execution, dataset- or exercise-specific column names, or implicit changes
+to an existing model.  Every workflow remains typed, server-validated, and
+subject to the existing Proposal/Risk confirmation lifecycle.
+
+Acceptance
+
+Focused tests prove that the Notebook planner accepts only a source-pinned
+operation.multi_step proposal, the published workflow vocabulary permits
+categorical and polynomial declarations, invalid selectors fail closed, and
+the two post-estimation results are reproducible from a completed branch with
+durable artifact references.  A Workbench UI acceptance run must show Agent
+recommendation -> user confirmation -> completed workflow -> evidence-backed
+answer without a backend code-upload path.

@@ -11,6 +11,17 @@ function option(overrides: Partial<NotebookOptionRevision> = {}): NotebookOption
 }
 
 describe("OptionCard — the canonical option, rendered as the packet states it", () => {
+  it.each([
+    ["low", "Low risk"],
+    ["medium", "Medium risk"],
+    ["high", "High risk"],
+  ] as const)("exposes %s risk as text and a semantic styling hook", (risk, label) => {
+    render(<OptionCard option={option({ risk_level: risk })} />);
+
+    expect(screen.getByTestId("option-risk")).toHaveTextContent(label);
+    expect(screen.getByTestId("option-risk")).toHaveAttribute("data-risk", risk);
+  });
+
   it("renders the packet's own rationale, assumptions and pinned revisions", () => {
     render(<OptionCard option={option()} />);
 
@@ -55,6 +66,41 @@ describe("OptionCard — the canonical option, rendered as the packet states it"
       "data-recommended",
       "false",
     );
+  });
+
+  it("does not use recommendation vocabulary for an Action-mode Draft", () => {
+    const specified = option({
+      contract_version: "1.1",
+      lifecycle_projection: "proposed",
+      materializable: true,
+      evidence_refs: [],
+      comparative_claims: [],
+      recommendation_decision_id: "rec_3",
+      recommendation_status: "recommended",
+    });
+
+    // Action mode returns one Draft built from what the user specified. Calling
+    // it "Recommended" claims the agent preferred it over alternatives it was
+    // never asked to weigh.
+    const { unmount } = render(<OptionCard option={specified} interactionMode="action" />);
+    expect(screen.getByTestId("option-rank")).toHaveTextContent(
+      "Prepared from your specification",
+    );
+    expect(screen.getByTestId("option-rank")).not.toHaveTextContent("Recommended");
+    expect(screen.getByTestId("option-card-opt_7f3a1c")).toHaveAttribute(
+      "data-recommended",
+      "false",
+    );
+    unmount();
+
+    // Ineligibility belongs to the Draft, not to a ranking, so it survives.
+    render(
+      <OptionCard
+        option={{ ...specified, validation_status: "invalid" }}
+        interactionMode="action"
+      />,
+    );
+    expect(screen.getByTestId("option-rank")).toHaveTextContent("Not eligible");
   });
 
   it("does not create a primary recommendation when evidence is insufficient", () => {
@@ -141,6 +187,7 @@ describe("OptionCard — a stale option is never directly executable", () => {
   it("allows execution only for a fresh, valid, proposed/selected option", () => {
     render(<OptionCard option={option()} />);
     expect(screen.getByTestId("option-execute")).toBeEnabled();
+    expect(screen.getByTestId("option-execute")).toHaveTextContent("Review plan");
     expect(screen.queryByTestId("option-blocked-reason")).toBeNull();
   });
 

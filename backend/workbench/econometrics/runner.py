@@ -93,15 +93,38 @@ def _normalize_linearmodels_result(
     fitted: Any,
     model_id: str,
     model_type: str,
+    *,
+    y_column: str | None = None,
+    covariance: str | None = None,
+    entity_col: str | None = None,
+    time_col: str | None = None,
+    clustered_on_entity: bool = False,
 ) -> dict[str, Any]:
     params = getattr(fitted, "params", {})
     std_errors = getattr(fitted, "std_errors", {})
     pvalues = getattr(fitted, "pvalues", {})
+    confidence_intervals = getattr(fitted, "conf_int", lambda: None)()
     coefficients: dict[str, dict[str, Any]] = {}
 
-    items = params.items() if hasattr(params, "items") else enumerate(params)
+    items = list(params.items() if hasattr(params, "items") else enumerate(params))
     for label, estimate in items:
         term = str(label)
+        interval = None
+        if hasattr(confidence_intervals, "loc"):
+            try:
+                interval = confidence_intervals.loc[label]
+            except (KeyError, TypeError):
+                interval = None
+        ci_lower = (
+            _json_safe_float(interval.get("lower"))
+            if hasattr(interval, "get")
+            else None
+        )
+        ci_upper = (
+            _json_safe_float(interval.get("upper"))
+            if hasattr(interval, "get")
+            else None
+        )
         p_value = _json_safe_float(
             pvalues.get(label) if hasattr(pvalues, "get") else None
         )
@@ -111,19 +134,52 @@ def _normalize_linearmodels_result(
                 std_errors.get(label) if hasattr(std_errors, "get") else None
             ),
             "p_value": round(p_value, 6) if p_value is not None else None,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
             "source_id": f"model_results.{model_id}.coefficients.{term}",
         }
 
-    return {
+    result = {
         "schema_version": 1,
         "model_id": model_id,
         "model_type": model_type,
         "engine": "linearmodels",
+        "y_column": y_column,
         "nobs": int(getattr(fitted, "nobs")),
         "r_squared": _json_safe_float(getattr(fitted, "rsquared", None)),
+        "r_squared_adj": _json_safe_float(getattr(fitted, "rsquared_adj", None)),
+        "df_model": _json_safe_float(getattr(fitted, "df_model", None)),
+        "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
         "coefficients": coefficients,
         "warnings": [],
     }
+    if covariance is not None:
+        cluster_count = None
+        if clustered_on_entity and entity_col is not None:
+            entities = getattr(fitted.model, "dependent", None)
+            entity_ids = getattr(entities, "entity_ids", None)
+            if entity_ids is not None:
+                cluster_count = len({str(value) for value in entity_ids.ravel()})
+        result.update(
+            {
+                "covariance": covariance,
+                "covariance_estimator": (
+                    "clustered_entity" if clustered_on_entity else covariance
+                ),
+                "entity_col": entity_col,
+                "time_col": time_col,
+                "x_columns": [str(label) for label, _ in items],
+                "covariance_evidence": {
+                    "covariance": covariance,
+                    "cluster_variable": entity_col if clustered_on_entity else None,
+                    "cluster_entity": clustered_on_entity,
+                    "cluster_count": cluster_count,
+                    "confidence_level": 0.95,
+                    "df_resid": _json_safe_float(getattr(fitted, "df_resid", None)),
+                },
+            }
+        )
+    return result
 
 
 def _root_cause_suffix(exc: Exception) -> str:
@@ -543,6 +599,33 @@ def _attach_ols_result_contract(
     return result
 
 
+def apply_ols_covariance(original: Any, covariance: str, *, groups: Any = None) -> Any:
+    """Return the fit carrying `covariance`, from a plain OLS fit.
+
+    Single source for how a covariance estimator is applied to OLS, so a
+    consumer that needs the fit itself -- rather than the normalized result --
+    cannot drift from what `run_ols` reports. `run_ols` returns the *plain*
+    fit, so post-estimation inference must apply the estimator itself or it
+    silently answers under `nonrobust`.
+    """
+
+    if covariance == "clustered":
+        if groups is None:
+            raise ValueError("clustered covariance requires cluster groups")
+        return original.get_robustcov_results(
+            cov_type="cluster",
+            groups=groups,
+            use_correction=True,
+            df_correction=True,
+            use_t=False,
+        )
+    if covariance == "robust":
+        return original.get_robustcov_results(cov_type="HC1", use_t=False)
+    if covariance == "unadjusted":
+        return original
+    raise ValueError(f"unsupported OLS covariance estimator: {covariance}")
+
+
 def run_ols(
     frame: pd.DataFrame, y: str, x: list[str], robust: bool, model_id: str,
     categorical_x: set[str] | None = None,
@@ -623,16 +706,12 @@ def run_ols(
                 "on analysis rows."
             )
         _validate_cluster_group_values(groups)
-        fitted = original.get_robustcov_results(
-            cov_type="cluster",
-            groups=groups.to_numpy(copy=True),
-            use_correction=True,
-            df_correction=True,
-            use_t=False,
+        fitted = apply_ols_covariance(
+            original, "clustered", groups=groups.to_numpy(copy=True)
         )
         model_type = "ols_clustered"
     elif robust:
-        fitted = original.get_robustcov_results(cov_type="HC1", use_t=False)
+        fitted = apply_ols_covariance(original, "robust")
         model_type = "ols_robust"
     else:
         fitted = original
@@ -875,6 +954,15 @@ def run_panel_ols(
         raise ValueError(
             "PANEL_FIELDS_MISSING: PanelOLS requires at least an entity or time field."
         )
+    covariance = covariance.strip().lower()
+    if covariance not in {"robust", "clustered", "unadjusted"}:
+        raise ValueError(
+            f"PANEL_COVARIANCE_UNSUPPORTED: unsupported covariance {covariance!r}."
+        )
+    if covariance == "clustered" and entity is None:
+        raise ValueError(
+            "PANEL_CLUSTER_ENTITY_REQUIRED: clustered PanelOLS requires an entity field."
+        )
 
     panel_module = require_optional_dependency(
         "linearmodels.panel",
@@ -885,6 +973,8 @@ def run_panel_ols(
     data = _ensure_numeric_y(frame.copy(), y)
     data = _ensure_numeric_x(data, x)
 
+    declared_entity = entity
+    declared_time = time
     index_cols: list[str] = []
     if entity is None:
         entity = "_panel_entity"
@@ -902,10 +992,23 @@ def run_panel_ols(
     if index_cols[1] != "_panel_time":
         terms.append("TimeEffects")
     formula = f"{_linearmodels_term(y)} ~ {' + '.join(terms)}"
-    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(
-        cov_type=covariance
+    fit_kwargs: dict[str, Any] = {"cov_type": covariance}
+    if covariance == "clustered":
+        fit_kwargs["cluster_entity"] = True
+    fitted = panel_module.PanelOLS.from_formula(formula, data=data).fit(**fit_kwargs)
+    return (
+        _normalize_linearmodels_result(
+            fitted,
+            model_id,
+            "panel_ols",
+            y_column=y,
+            covariance=covariance,
+            entity_col=declared_entity,
+            time_col=declared_time,
+            clustered_on_entity=covariance == "clustered",
+        ),
+        fitted,
     )
-    return _normalize_linearmodels_result(fitted, model_id, "panel_ols"), fitted
 
 
 def run_iv_2sls(

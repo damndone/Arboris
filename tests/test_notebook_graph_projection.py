@@ -14,7 +14,12 @@ from workbench.agent.notebook import NotebookService
 from workbench.agent.notebook import service as notebook_service
 from workbench.agent.notebook import store as notebook_store
 from workbench.agent.notebook.store import Notebook, NotebookStore
-from workbench.lineage.run_family import RunFamilyStore, migrate_project_families, resolve_run_family
+from workbench.lineage.run_family import (
+    RunFamilyStore,
+    bind_run_to_family,
+    migrate_project_families,
+    resolve_run_family,
+)
 from workbench.lineage.upload_store import store_upload_bytes
 
 from tests.test_notebook_support import make_project, make_run
@@ -53,6 +58,41 @@ def test_default_run_projection_is_idempotent_for_one_persisted_source(tmp_path:
         service.ensure_default_projection(from_run_id="run_002", created_by="ui")
 
     assert [item.notebook_id for item in service.list_notebooks()] == [first.notebook_id]
+
+
+def test_run_projection_reuses_the_unique_family_default_before_project_migration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = make_project(tmp_path)
+    run_root = make_run(project, "run_001")
+    family = RunFamilyStore(project).create_family(
+        project_id=project.name,
+        created_by="test",
+        origin="notebook",
+    )
+    bind_run_to_family(run_root, run_family_id=family.run_family_id, bound_by="test")
+    existing = Notebook(
+        notebook_id="nb_existing",
+        project_id=project.name,
+        run_family_id=family.run_family_id,
+        title="Existing analysis",
+        created_by="test",
+        created_at="2026-07-30T00:00:00+00:00",
+        projection_key=f"default-projection:{family.run_family_id}",
+        projection_source=notebook_store.ProjectionSource.from_dict(_dataset_ref("upload_001")),
+    )
+    service = NotebookService(project)
+    service.store.create_notebook(existing)
+
+    def migration_must_not_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a persisted family default must be reused before migration")
+
+    monkeypatch.setattr(notebook_service, "migrate_project_families", migration_must_not_run)
+
+    resolved = service.ensure_default_projection(from_run_id="run_001", created_by="ui")
+
+    assert resolved.notebook_id == existing.notebook_id
+    assert resolved.projection_source == existing.projection_source
 
 
 def test_post_cutover_unbound_run_fails_without_legacy_fallback(tmp_path: Path) -> None:

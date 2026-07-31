@@ -12,6 +12,64 @@
   overflow-y: auto;
 }
 
+.nb-planning-progress {
+  width: min(620px, 100%);
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--bg-card-2);
+}
+
+.nb-planning-progress header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.nb-planning-progress ol {
+  margin: 12px 0 8px;
+  padding-left: 22px;
+}
+
+.nb-planning-progress li {
+  margin: 6px 0;
+  color: var(--label-secondary);
+}
+
+.nb-planning-progress li[data-status="completed"]::marker {
+  content: "✓  ";
+  color: var(--success, #30d158);
+}
+
+.nb-planning-progress li[data-status="active"] {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.nb-planning-progress p {
+  margin: 0;
+  color: var(--label-tertiary);
+  font-size: 12px;
+}
+
+.nb-planning-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--orange, #d97706) 48%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--orange, #d97706) 9%, transparent);
+  color: var(--label-secondary);
+}
+
+.nb-planning-error .nb-button {
+  margin-left: auto;
+}
+
 .nb-label {
   color: var(--label-tertiary);
   font-size: 11px;
@@ -26,6 +84,49 @@
   gap: 8px;
   align-items: baseline;
   flex-wrap: wrap;
+}
+
+.nb-surface-header-title {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nb-notebook-new-analysis {
+  margin-left: auto;
+  position: relative;
+}
+
+.nb-notebook-new-analysis-trigger {
+  white-space: nowrap;
+}
+
+.nb-notebook-new-analysis-popover {
+  background: var(--background, #fff);
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  display: grid;
+  gap: 8px;
+  min-width: 270px;
+  padding: 10px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 4;
+}
+
+.nb-notebook-new-analysis-popover p {
+  color: var(--label-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.nb-notebook-new-analysis-popover .nb-button {
+  justify-self: start;
 }
 
 .nb-narrative-entry {
@@ -45,9 +146,7 @@
 }
 
 .nb-option-batch {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  border-radius: 8px;
 }
 
 .nb-option-batch-header {
@@ -57,11 +156,30 @@
   flex-wrap: wrap;
   color: var(--label-secondary);
   font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+}
+
+.nb-option-batch-header::-webkit-details-marker {
+  display: none;
 }
 
 .nb-option-batch-header code {
   color: var(--label-tertiary);
   font-family: ui-monospace, monospace;
+}
+
+.nb-option-batch-action {
+  margin-left: auto;
+  color: var(--tint, #3b82f6);
+}
+
+.nb-option-batch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .nb-option-card {
@@ -87,6 +205,30 @@
 
 .nb-option-rank {
   font-weight: 600;
+}
+
+.nb-option-risk {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.nb-option-risk[data-risk="low"] {
+  color: var(--green, #30d158);
+  background: color-mix(in oklch, var(--green, #30d158) 12%, transparent);
+}
+
+.nb-option-risk[data-risk="medium"] {
+  color: var(--orange, #d97706);
+  background: color-mix(in oklch, var(--orange, #d97706) 12%, transparent);
+}
+
+.nb-option-risk[data-risk="high"] {
+  color: var(--red, #dc2626);
+  background: color-mix(in oklch, var(--red, #dc2626) 12%, transparent);
 }
 
 .nb-option-axes {
@@ -204,10 +346,116 @@
 .nb-context-slice {
   border: 1px dashed var(--separator, rgba(128, 128, 128, 0.4));
   border-radius: 8px;
+  padding: 0;
+}
+
+.nb-context-details > summary {
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  list-style: none;
+}
+
+.nb-context-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nb-context-summary-action {
+  color: var(--tint, #3b82f6);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.nb-context-details[open] .nb-context-summary-action {
+  font-size: 0;
+}
+
+.nb-context-details[open] .nb-context-summary-action::after {
+  content: "Hide full evidence";
+  font-size: 11px;
+}
+
+.nb-context-details-body {
+  border-top: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.nb-memory-controls {
+  border: 1px solid color-mix(in oklch, var(--tint, #3b82f6) 52%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: color-mix(in oklch, var(--tint, #3b82f6) 12%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--tint, #3b82f6) 76%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nb-memory-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.nb-memory-toggle-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.nb-memory-switch {
+  appearance: none;
+  width: 30px;
+  min-width: 30px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 30px;
+  border: 1px solid color-mix(in oklch, var(--label-secondary) 48%, transparent);
+  border-radius: 999px;
+  background-color: color-mix(in oklch, var(--label-secondary) 24%, transparent);
+  background-image: radial-gradient(
+    circle at 8px 50%,
+    var(--bg-card, #fff) 0 5px,
+    transparent 5.5px
+  );
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    background-position 120ms ease,
+    border-color 120ms ease;
+}
+
+.nb-memory-switch:checked {
+  border-color: var(--tint, #3b82f6);
+  background-color: var(--tint, #3b82f6);
+  background-image: radial-gradient(
+    circle at calc(100% - 8px) 50%,
+    #fff 0 5px,
+    transparent 5.5px
+  );
+}
+
+.nb-memory-switch:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--tint, #3b82f6));
+  outline-offset: 2px;
+}
+
+.nb-memory-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.nb-memory-toggle-row label:has(.nb-memory-switch:disabled) {
+  cursor: not-allowed;
 }
 
 .nb-context-slice ul,
@@ -241,6 +489,19 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.nb-action-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--danger, #dc2626) 48%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--danger, #dc2626) 9%, transparent);
+  color: var(--label-secondary);
 }
 
 .nb-dataset-start,
@@ -348,3 +609,57 @@
   color: var(--label-secondary);
   font-size: 11px;
 }
+
+.nb-user-intent {
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.nb-interaction-mode {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+  justify-self: start;
+  padding: 3px;
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: 8px;
+  background: var(--background-secondary, transparent);
+}
+
+.nb-interaction-mode-button {
+  appearance: none;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--secondary-label, var(--label));
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+.nb-interaction-mode-button[aria-pressed="true"] {
+  background: var(--accent, #1677ff);
+  color: var(--accent-foreground, #fff);
+}
+
+.nb-interaction-mode-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.nb-interaction-mode-help {
+  color: var(--secondary-label, var(--label));
+  font-size: 12px;
+  line-height: 1.4;
+  margin: -2px 0 0;
+}
+
+.nb-user-intent label { color: var(--label); font-size: 13px; font-weight: 650; }
+.nb-user-intent textarea { background: var(--background-secondary, transparent); border: 1px solid var(--separator, rgba(128, 128, 128, 0.3)); border-radius: 7px; box-sizing: border-box; color: var(--label); font: inherit; padding: 9px; resize: vertical; width: 100%; }
+.nb-user-intent button { justify-self: start; }

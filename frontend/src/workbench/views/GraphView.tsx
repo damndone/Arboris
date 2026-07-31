@@ -224,6 +224,11 @@ export function GraphView() {
                   wb.dispatch.openContextMenu({ nodeKey: nodeId, x, y })
               : undefined
           }
+          onPaneContextMenu={
+            wb
+              ? (x, y) => wb.dispatch.openContextMenu({ nodeKey: null, x, y })
+              : undefined
+          }
           focusNodeKey={focusKey}
           focusUpstreamKeys={focusUpstreamKeys}
           searchHitKeys={searchHitKeys}
@@ -248,19 +253,12 @@ function ForestHeadBar({
     forest.nodes.find((n) => n.nodeHash === headNodeHash)?.id ?? null;
   return (
     <div
+      className="wb-run-version-picker"
       data-testid="forest-heads"
       role="group"
       aria-label="Run versions (active head)"
-      style={{
-        display: "flex",
-        gap: 6,
-        flexWrap: "wrap",
-        alignItems: "center",
-        padding: "6px 12px",
-        borderBottom: "1px solid var(--separator, #2e2e30)",
-      }}
     >
-      <span style={{ fontSize: 11, color: "var(--label-tertiary)", marginRight: 4 }}>
+      <span className="wb-run-version-picker__label">
         Versions:
       </span>
       {forest.heads.map((h) => {
@@ -269,22 +267,11 @@ function ForestHeadBar({
           <button
             key={h.runId}
             type="button"
+            className="wb-run-version-picker__button"
             data-testid={`forest-head-${h.runId}`}
             aria-pressed={isActive}
             title={h.rerunOf ? `rerun of ${h.rerunOf}` : "original run"}
             onClick={() => onPickHead(h.runId, keyForHead(h.headNodeHash))}
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--font-mono, monospace)",
-              padding: "4px 9px",
-              borderRadius: 6,
-              cursor: "pointer",
-              border: isActive
-                ? "1px solid var(--tint, #0a84ff)"
-                : "1px solid var(--separator, #2e2e30)",
-              background: isActive ? "var(--tint, #0a84ff)" : "transparent",
-              color: isActive ? "#fff" : "var(--label-secondary)",
-            }}
           >
             {h.rerunOf ? "↳ " : ""}
             {h.runId.slice(-8)}

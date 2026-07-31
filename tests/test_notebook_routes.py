@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
+import threading
 
 from fastapi.testclient import TestClient
 from dataclasses import replace
 from types import SimpleNamespace
+import pandas as pd
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 from workbench.api import app
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
+from workbench.agent.notebook.materialization import NotebookOptionMaterializer
+from workbench.agent.notebook.store import NOTEBOOK_FILENAME
+from workbench.agent.storage import append_jsonl_atomic
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
@@ -23,6 +30,7 @@ from workbench.contracts.agent.notebook_option import (
     RecommendationDecisionV11,
 )
 from workbench.lineage.upload_store import store_upload_bytes
+from workbench.http import notebook_routes
 from workbench.http.notebook_routes import (
     _execution_results_packet,
     _planning_agent,
@@ -121,6 +129,299 @@ def _create(client: TestClient, project: Path) -> dict:
     return response.json()
 
 
+def test_notebook_focus_route_persists_the_goal_without_dropping_existing_focus(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+
+    response = client.put(
+        f"/notebooks/{notebook['notebook_id']}/focus",
+        params={"project_root": str(project)},
+        json={"goal": "Compare two models and explain their fitted coefficients."},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_focus"] == {
+        "selected_text_hash": "sha256:seed",
+        "goal": "Compare two models and explain their fitted coefficients.",
+    }
+
+
+def test_notebook_focus_route_persists_an_explicit_action_mode(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+
+    response = client.put(
+        f"/notebooks/{notebook['notebook_id']}/focus",
+        params={"project_root": str(project)},
+        json={"interaction_mode": "action"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_focus"] == {
+        "selected_text_hash": "sha256:seed",
+        "interaction_mode": "action",
+    }
+
+
+def test_action_mode_rejects_multiple_requested_option_slots(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    focus = client.put(
+        f"/notebooks/{notebook['notebook_id']}/focus",
+        params={"project_root": str(project)},
+        json={"interaction_mode": "action"},
+    )
+    assert focus.status_code == 200, focus.text
+
+    response = client.post(
+        f"/notebooks/{notebook['notebook_id']}/options/propose",
+        params={"project_root": str(project)},
+        json={"count": 2},
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "NOTEBOOK_REQUEST_INVALID"
+
+
+def test_dataset_projection_from_run_pins_a_server_owned_workflow_source(
+    tmp_path: Path,
+) -> None:
+    """A fresh dataset Notebook may compose a workflow only from its real raw source.
+
+    This is deliberately a source-identity test, not a model test: a client only
+    names the prior Run.  The service must resolve and persist the raw node,
+    artifact, and content hash, so an Agent cannot substitute a different run
+    or invent an artifact id after the new Notebook has no active model head.
+    """
+
+    from tests.test_data_column_cast import _source_project
+    from workbench.lineage.run_inputs import write_run_inputs
+
+    frame = pd.DataFrame(
+        {"response": [1.0, 2.0, 3.0], "exposure": [2.0, 3.0, 4.0]}
+    )
+    project, source_run_id, source_artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="source.csv",
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "ols", "y": "response", "x": "exposure"},
+        upload={"sha256": upload_sha, "filename": "source.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="source-fixture",
+    )
+
+    service = NotebookService(project)
+    notebook = service.ensure_dataset_projection_from_run(
+        from_run_id=source_run_id,
+        created_by="ui",
+    )
+    persisted = service.get_notebook(notebook.notebook_id)
+
+    assert persisted.active_head_run_id is None
+    assert persisted.projection_source is not None
+    assert persisted.projection_source.to_dict()["workflow_source"] == {
+        "run_id": source_run_id,
+        "node_ref": "stage:source",
+        "artifact_id": source_artifact_id,
+        "source_sha256": persisted.projection_source.to_dict()["workflow_source"][
+            "source_sha256"
+        ],
+    }
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+
+    pins = NotebookPlanningAgent._execution_pins(
+        service.compile_context(notebook.notebook_id)
+    )
+    assert pins["workflow_source"]["target"] == {
+        "run_id": source_run_id,
+        "node_ref": "stage:source",
+        "artifact_id": source_artifact_id,
+    }
+    assert pins["workflow_source"]["preconditions"]["owner_resolution"] == (
+        "dataset_projection_source"
+    )
+
+
+def test_dataset_notebook_confirmation_executes_a_source_pinned_composed_workflow(
+    tmp_path: Path,
+) -> None:
+    """One UI confirmation executes declared model terms and post-estimation.
+
+    The body submits only the existing Run id to create the Notebook and then
+    the option/proposal revision pins to confirm it.  The workflow source,
+    compilation, execution, branch runs, and result references are all
+    reconstructed server-side.
+    """
+
+    from tests.test_data_column_cast import _source_project
+    from workbench.agent.notebook.planning_agent import NotebookPlanningAgent
+    from workbench.lineage.run_inputs import write_run_inputs
+
+    values = [float(index - 24) for index in range(48)]
+    frame = pd.DataFrame(
+        {
+            "response": [
+                16.0 + 1.5 * value - 0.11 * value**2 + (1.0 if index % 2 else -1.0)
+                for index, value in enumerate(values)
+            ],
+            "exposure": values,
+            "segment": ["lower" if index % 2 else "upper" for index in range(48)],
+        }
+    )
+    project, source_run_id, _source_artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project,
+        frame.to_csv(index=False).encode("utf-8"),
+        filename="source.csv",
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "ols", "y": "response", "x": "exposure"},
+        upload={"sha256": upload_sha, "filename": "source.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="source-fixture",
+    )
+    client = TestClient(app)
+    params = {"project_root": str(project)}
+    created = client.post(
+        "/notebooks/projection/from-run-dataset",
+        params=params,
+        json={"from_run_id": source_run_id, "created_by": "ui"},
+    )
+    assert created.status_code == 200, created.text
+    notebook_id = created.json()["notebook_id"]
+
+    service = NotebookService(project)
+    pins = NotebookPlanningAgent._execution_pins(service.compile_context(notebook_id))
+    workflow_source = pins["workflow_source"]
+    proposal = {
+        "proposal_id": "proposal_composed_fixture",
+        "proposal_revision": 1,
+        "operation_id": "operation.multi_step",
+        "operation_version": "v1",
+        "target": workflow_source["target"],
+        "preconditions": workflow_source["preconditions"],
+        "changes": {
+            "steps": [
+                {
+                    "step_id": "estimate",
+                    "operation_id": "model.genesis",
+                    "spec": {
+                        "model_family": "ols",
+                        "covariance": "unadjusted",
+                        "branches": [
+                            {
+                                "branch_id": "linear",
+                                "outcome": "response",
+                                "predictors": ["exposure"],
+                            },
+                            {
+                                "branch_id": "curved",
+                                "outcome": "response",
+                                "predictors": ["exposure"],
+                                "categorical": ["segment"],
+                                "polynomials": [{"column": "exposure", "degree": 2}],
+                            },
+                        ],
+                    },
+                },
+                {
+                    "step_id": "test_curve",
+                    "operation_id": "model.joint_f_test",
+                    "depends_on": ["estimate"],
+                    "spec": {
+                        "branch_id": "curved",
+                        "term_selectors": [{"kind": "polynomial", "column": "exposure"}],
+                    },
+                },
+                {
+                    "step_id": "stationary_point",
+                    "operation_id": "model.quadratic_stationary_point",
+                    "depends_on": ["estimate"],
+                    "spec": {"branch_id": "curved", "column": "exposure"},
+                },
+            ]
+        },
+    }
+    proposed = client.post(
+        f"/notebooks/{notebook_id}/options/propose",
+        params=params,
+        json={
+            "drafts": [
+                {
+                    "rank": 1,
+                    "rationale": "Estimate the declared linear and curved OLS branches.",
+                    "proposal": proposal,
+                    "expected_artifacts": [
+                        {
+                            "artifact_id": "ols_1",
+                            "artifact_type": "model_result",
+                            "required": True,
+                            "count": 2,
+                            "step": None,
+                        }
+                    ],
+                    "option_id": "opt_composed_fixture",
+                    "capability_id": "ols",
+                }
+            ]
+        },
+    )
+    assert proposed.status_code == 200, proposed.text
+    option = proposed.json()["options"][0]
+    selected = client.post(
+        f"/notebooks/{notebook_id}/options/{option['option_id']}/decision",
+        params=params,
+        json={"decision": "selected", "actor": "ui"},
+    )
+    assert selected.status_code == 200, selected.text
+
+    confirmed = client.post(
+        f"/notebooks/{notebook_id}/options/{option['option_id']}/confirm",
+        params=params,
+        json={
+            "option_revision": option["option_revision"],
+            "proposal_id": option["typed_proposal_id"],
+            "proposal_revision": option["typed_proposal_revision"],
+        },
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    workflow = confirmed.json()["workflow_execution"]
+    assert workflow["status"] == "completed"
+    assert len(workflow["branch_runs"]) == 2
+    assert {item["branch_id"] for item in workflow["branch_runs"]} == {
+        "linear",
+        "curved",
+    }
+    assert workflow["post_estimation_artifact_ids"]
+    listed = client.get(f"/notebooks/{notebook_id}/options", params=params)
+    assert listed.status_code == 200, listed.text
+    result = listed.json()["execution_results"][option["option_id"]]
+    assert result["execution_status"] == "succeeded"
+    assert result["committed"] is True
+    assert result["run_id"] is None
+    assert result["workflow_execution"]["branch_runs"] == workflow["branch_runs"]
+    assert service.get_notebook(notebook_id).active_head_run_id is None
+
+
 def test_run_notebook_catalog_only_advertises_model_packs_with_options_owner() -> None:
     assert _supports_rerun_model_options({"params": [{"key": "model_options"}]})
     assert not _supports_rerun_model_options(
@@ -189,6 +490,8 @@ def test_real_planner_reads_current_server_owned_custom_projection(
     assert planner.capability_catalog["custom.ols"]["artifact_types"] == {
         "custom.ols.result": "custom_json"
     }
+    assert planner.model_timeout_s == 120
+    assert planner.adapter.config.timeout_s == 120
     assert "binding" not in planner.capability_catalog["custom.ols"]
     assert "entrypoint_ref" not in planner.capability_catalog["custom.ols"]
 
@@ -212,6 +515,54 @@ def _drafts() -> list[dict]:
             "option_id": "opt_route_1",
         }
     ]
+
+
+def test_legacy_notebook_record_without_new_optional_fields_loads_and_compiles(
+    tmp_path: Path,
+) -> None:
+    """A persisted pre-projection Notebook must not become a phantom 404.
+
+    This fixture intentionally omits fields added after the first durable
+    Notebook record (focus, capability vocabulary, projection binding, and
+    schema version).  It exercises the real store and context route rather
+    than reconstructing a new Notebook through the current creation API.
+    """
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook_id = "nb_legacy_shape"
+    legacy_path = service.store.notebook_dir(notebook_id) / NOTEBOOK_FILENAME
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    append_jsonl_atomic(
+        legacy_path,
+        {
+            "record_type": "notebook",
+            "notebook_id": notebook_id,
+            "project_id": project.name,
+            "run_family_id": "family_legacy",
+            "title": "Persisted legacy analysis",
+            "created_by": "legacy-ui",
+            "created_at": "2026-01-01T00:00:00Z",
+            "analysis_contract": {"revision": 1, "target": "outcome"},
+        },
+    )
+    client = TestClient(app)
+
+    loaded = client.get(
+        f"/notebooks/{notebook_id}",
+        params={"project_root": str(project)},
+    )
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["notebook_id"] == notebook_id
+    assert loaded.json()["user_focus"] == {}
+
+    compiled = client.post(
+        f"/notebooks/{notebook_id}/context/compile",
+        params={"project_root": str(project)},
+    )
+    assert compiled.status_code == 200, compiled.text
+    assert compiled.json()["run_family_id"] == "family_legacy"
+    assert compiled.json()["trace_id"].startswith("trace_")
 
 
 def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
@@ -262,6 +613,13 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert proposed.json()["options"][0]["freshness_status"] == "fresh"
     assert proposed.json()["context"]["active_head_run_id"] is None
     assert proposed.json()["trace_id"].startswith("trace_")
+    # The planner's total budget is published so the UI can show the reader how
+    # long a planning pass may legitimately run. Without it a live request that
+    # is still inside its budget is indistinguishable from one that has hung,
+    # and the only recourse on screen is to cancel.
+    assert proposed.json()["context"]["planning_deadline_s"] == (
+        notebook_routes.NOTEBOOK_PLANNING_DEADLINE_S
+    )
 
     snapshot = client.get(
         f"/notebooks/{notebook_id}/options",
@@ -376,6 +734,62 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
 
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_UNAVAILABLE"
+
+
+def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project = make_project(tmp_path)
+    client = TestClient(app)
+    notebook = _create(client, project)
+    notebook_id = notebook["notebook_id"]
+    params = {"project_root": str(project)}
+    started = threading.Event()
+    cancelled = threading.Event()
+
+    class SlowPlanningAgent:
+        async def plan_async(self, *, context, initial_evidence):
+            del context, initial_evidence
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes._planning_agent",
+        lambda *args, **kwargs: SlowPlanningAgent(),
+    )
+
+    def propose():
+        with TestClient(app) as request_client:
+            return request_client.post(
+                f"/notebooks/{notebook_id}/options/propose",
+                params=params,
+                json={"count": 3, "attempt_id": "attempt_cancel_1"},
+            )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(propose)
+        assert started.wait(timeout=2)
+        stopped = client.delete(
+            f"/notebooks/{notebook_id}/planning/attempt_cancel_1",
+            params=params,
+        )
+        assert stopped.status_code == 200, stopped.text
+        assert stopped.json()["status"] == "cancelled"
+        response = pending.result(timeout=2)
+
+    assert cancelled.wait(timeout=1)
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_CANCELLED"
+    snapshot = client.get(
+        f"/notebooks/{notebook_id}/options",
+        params=params,
+    )
+    assert snapshot.status_code == 200, snapshot.text
+    assert snapshot.json()["options"] == []
 
 
 def test_notebook_route_persists_agent_decision_as_evidence_option_revision(
@@ -548,6 +962,59 @@ def test_projection_route_compiles_verified_dataset_without_inventing_run(tmp_pa
         "predictor",
     ]
     assert "rows" not in packet["dataset_profile"]
+
+
+def test_projection_route_can_restart_from_a_runs_verified_dataset_source(
+    tmp_path: Path,
+) -> None:
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,year,group\n1,2001,a\n2,2002,b\n",
+        filename="source.csv",
+    )
+    _persisted_run(project, "run_001")
+    (project / "runs" / "run_001" / "run_inputs.json").write_text(
+        json.dumps(
+            {
+                "upload": {
+                    "sha256": upload_sha,
+                    "filename": "source.csv",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    projection = client.post(
+        "/notebooks/projection/from-run-dataset",
+        params={"project_root": str(project)},
+        json={"from_run_id": "run_001", "created_by": "ui"},
+    )
+
+    assert projection.status_code == 200, projection.text
+    notebook = projection.json()
+    assert notebook["projection_source"] == {
+        "kind": "dataset",
+        "upload_sha256": upload_sha,
+        "filename": "source.csv",
+        "sheet_names": [],
+    }
+    assert notebook["active_head_run_id"] is None
+    assert notebook["run_family_id"] != "run_001"
+
+    context = client.post(
+        f"/notebooks/{notebook['notebook_id']}/context/compile",
+        params={"project_root": str(project)},
+    )
+    assert context.status_code == 200, context.text
+    assert context.json()["active_head_run_id"] is None
+    assert [column["name"] for column in context.json()["dataset_profile"]["columns"]] == [
+        "outcome",
+        "year",
+        "group",
+    ]
 
 
 def test_projection_route_rejects_ambiguous_source(tmp_path: Path) -> None:
@@ -740,6 +1207,115 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     )
     assert listed.status_code == 200, listed.text
     assert listed.json()["materializations"][option.option_id]["draft_id"] == packet["draft"]["draft_id"]
+
+
+def test_dataset_genesis_materializes_declared_panel_dimensions(tmp_path: Path) -> None:
+    """Notebook genesis must retain panel identity instead of rejecting it as OLS-only."""
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor,school,year\n1,2,a,2020\n2,3,a,2021\n3,4,b,2020\n4,5,b,2021\n",
+        filename="panel.csv",
+    )
+    client = TestClient(app)
+    notebook = client.post(
+        "/notebooks/projection",
+        params={"project_root": str(project)},
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "panel.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    service = NotebookService(project)
+    stored_notebook = service.get_notebook(notebook["notebook_id"])
+
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        stored_notebook,
+        {
+            "target": {"dataset_source_id": upload_sha},
+            "changes": {
+                "model_params": {
+                    "model_type": "panel_ols",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                    "entity_col": "school",
+                    "time_col": "year",
+                    "covariance": "robust",
+                }
+            },
+        },
+        {"notebook_id": notebook["notebook_id"], "option_id": "panel_option", "option_revision": "1"},
+    )
+
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"] == {
+        "model_type": "panel_ols",
+        "y": "outcome",
+        "x": ["predictor"],
+        "entity_col": "school",
+        "time_col": "year",
+        "covariance": "robust",
+    }
+
+
+def test_dataset_genesis_rejects_panel_model_without_declared_dimensions(
+    tmp_path: Path,
+) -> None:
+    """A malformed panel option must not silently become a pooled OLS Draft."""
+
+    import pytest
+
+    from workbench.agent.notebook.errors import OptionMaterializationFailed
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor,school\n1,2,a\n2,3,b\n",
+        filename="panel.csv",
+    )
+    client = TestClient(app)
+    notebook = client.post(
+        "/notebooks/projection",
+        params={"project_root": str(project)},
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "panel.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    service = NotebookService(project)
+    stored_notebook = service.get_notebook(notebook["notebook_id"])
+
+    with pytest.raises(
+        OptionMaterializationFailed,
+        match="requires an evidence-backed entity_col or time_col",
+    ):
+        NotebookOptionMaterializer(service)._materialize_dataset(
+            stored_notebook,
+            {
+                "target": {"dataset_source_id": upload_sha},
+                "changes": {
+                    "model_params": {
+                        "model_type": "panel_ols",
+                        "y": "outcome",
+                        "x": ["predictor"],
+                    }
+                },
+            },
+            {
+                "notebook_id": notebook["notebook_id"],
+                "option_id": "panel_option",
+                "option_revision": "1",
+            },
+        )
 
 
 def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authorization(

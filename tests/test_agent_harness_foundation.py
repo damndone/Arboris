@@ -790,15 +790,16 @@ def test_workbench_orchestrator_passes_command_budget_to_chain_agent(
     asyncio.run(scenario())
 
 
-def test_openai_compatible_adapter_normalizes_existing_one_shot_client(monkeypatch) -> None:
+def test_openai_compatible_adapter_normalizes_public_stream_client(monkeypatch) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
     calls: list[tuple[list[dict[str, str]], LLMConfig]] = []
 
-    def fake_chat_completion(messages: list[dict[str, str]], actual_config: LLMConfig) -> dict[str, str]:
+    async def fake_stream(messages: list[dict[str, str]], actual_config: LLMConfig, **_kwargs):
         calls.append((messages, actual_config))
-        return {"text": "one shot answer", "model": "deepseek-chat"}
+        yield {"type": "text_delta", "delta": "one streamed answer"}
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
 
-    monkeypatch.setattr("workbench.agent.model.chat_completion", fake_chat_completion)
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
 
     async def scenario() -> None:
         adapter = OpenAICompatibleModelAdapter(config)
@@ -808,9 +809,33 @@ def test_openai_compatible_adapter_normalizes_existing_one_shot_client(monkeypat
         )
         streamed = [event async for event in adapter.stream(request)]
         assert [event.type for event in streamed] == ["text_delta", "done"]
-        assert streamed[0].delta == "one shot answer"
+        assert streamed[0].delta == "one streamed answer"
         assert streamed[1].provider_request_id == "request-1"
         assert calls == [(request.messages, config)]
+
+    asyncio.run(scenario())
+
+
+def test_openai_compatible_adapter_forwards_public_stream_deltas(monkeypatch) -> None:
+    config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
+
+    async def fake_stream(*_args, **_kwargs):
+        yield {"type": "text_delta", "delta": "first "}
+        yield {"type": "text_delta", "delta": "second"}
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario() -> None:
+        adapter = OpenAICompatibleModelAdapter(config)
+        request = ModelRequest(
+            request_id="request-stream-1",
+            messages=[{"role": "user", "content": "inspect"}],
+        )
+        streamed = [event async for event in adapter.stream(request)]
+        assert [event.type for event in streamed] == ["text_delta", "text_delta", "done"]
+        assert [event.delta for event in streamed[:2]] == ["first ", "second"]
+        assert streamed[-1].provider_request_id == "request-stream-1"
 
     asyncio.run(scenario())
 

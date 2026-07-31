@@ -45,6 +45,21 @@ def test_categorical_expands_to_dummies_with_one_dropped_reference() -> None:
     assert set(frame["wave_2002"].unique()) == {0, 1}
 
 
+def test_categorical_reuses_an_equivalent_persisted_indicator() -> None:
+    """A verified source indicator is the same term, not a name collision."""
+
+    source = _frame()
+    source["wave_2002"] = (source["wave"] == 2002).astype(int)
+
+    frame, predictors, references = expand_branch_terms(
+        source, _branch(categorical=["wave"])
+    )
+
+    assert predictors == ["x", "wave_2002", "wave_2006"]
+    assert references == {"wave": 1998}
+    assert frame["wave_2002"].equals(source["wave_2002"])
+
+
 def test_polynomial_adds_powers_without_implying_the_linear_term() -> None:
     frame, predictors, _ = expand_branch_terms(
         _frame(), _branch(polynomials=[{"column": "size", "degree": 3}])
@@ -134,6 +149,14 @@ def test_a_derived_name_that_collides_with_real_data_is_refused() -> None:
         expand_branch_terms(frame, _branch(polynomials=[{"column": "size", "degree": 2}]))
 
 
+def test_a_categorical_collision_with_different_values_is_refused() -> None:
+    """A similarly named real column cannot silently change a fixed effect."""
+
+    frame = _frame().assign(wave_2002=1)
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(frame, _branch(categorical=["wave"]))
+
+
 def test_a_branch_without_derived_terms_is_left_exactly_as_it_was() -> None:
     frame = _frame()
     returned, predictors, references = expand_branch_terms(frame, _branch())
@@ -148,3 +171,73 @@ def test_branch_source_columns_include_derived_term_sources() -> None:
     assert branch_source_columns(
         _branch(categorical=["region"], polynomials=[{"column": "size", "degree": 2}])
     ) == {"y", "x", "region", "size"}
+
+
+def _poly_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "y": [10.0 + index for index in range(12)],
+            "x": [1.0 + index for index in range(12)],
+            "size": [2.0 + index * 0.5 for index in range(12)],
+        }
+    )
+
+
+def test_polynomial_reuses_an_equivalent_persisted_power() -> None:
+    """A persisted power column is the same term, not a name collision.
+
+    Composing a second workflow on a dataset that already carries a derived
+    power from an earlier one failed before fitting, even though the stored
+    column held exactly the requested power of exactly the requested source.
+    """
+
+    source = _poly_frame()
+    source["size_pow2"] = source["size"] ** 2
+
+    frame, predictors, _ = expand_branch_terms(
+        source, _branch(polynomials=[{"column": "size", "degree": 2}])
+    )
+
+    assert predictors == ["x", "size_pow2"]
+    assert frame["size_pow2"].equals(source["size_pow2"])
+
+
+def test_polynomial_reuse_tolerates_floating_point_noise() -> None:
+    """Recomputation may differ in the last bits without being a different term."""
+
+    source = _poly_frame()
+    exact = source["size"] ** 2
+    source["size_pow2"] = exact * (1.0 + 1e-13)
+
+    frame, predictors, _ = expand_branch_terms(
+        source, _branch(polynomials=[{"column": "size", "degree": 2}])
+    )
+
+    assert predictors == ["x", "size_pow2"]
+    # The persisted values are kept as they are; reuse never rewrites them.
+    assert frame["size_pow2"].equals(source["size_pow2"])
+
+
+def test_a_polynomial_column_with_different_values_is_refused() -> None:
+    """A difference of analytical consequence is a collision, not a term."""
+
+    source = _poly_frame()
+    source["size_pow2"] = (source["size"] ** 2) * 1.001
+
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(
+            source, _branch(polynomials=[{"column": "size", "degree": 2}])
+        )
+
+
+def test_a_polynomial_column_with_mismatched_missing_values_is_refused() -> None:
+    """Equal where both are present is not equal; the samples would differ."""
+
+    source = _poly_frame()
+    source.loc[3, "size"] = None
+    source["size_pow2"] = _poly_frame()["size"] ** 2
+
+    with pytest.raises(ModelTermError, match="collides"):
+        expand_branch_terms(
+            source, _branch(polynomials=[{"column": "size", "degree": 2}])
+        )

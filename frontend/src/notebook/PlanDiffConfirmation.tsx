@@ -36,9 +36,7 @@ export function PlanDiffConfirmation({
             ? experimental
               ? "Confirm before dispatching experimental capability"
               : "Confirm before dispatching capability"
-            : option.materializable
-              ? "Confirm before preparing Draft"
-              : "Confirm before running"}
+            : "Review before confirming"}
         </span>
         <span data-testid="confirmation-pins">
           {`${execution.option_id} rev ${execution.option_revision} · ${execution.proposal_id} rev ${execution.proposal_revision}`}
@@ -109,9 +107,7 @@ export function PlanDiffConfirmation({
               ? experimental
                 ? "Confirm experimental execution"
                 : "Confirm and execute"
-              : option.materializable
-              ? "Confirm and prepare Draft"
-              : "Confirm and run"}
+              : "Confirm"}
         </button>
         <button
           type="button"

@@ -25,7 +25,7 @@
 // Table / Pipeline views compose into the same shell so the drawer +
 // rail + panel + search palette work identically across them.
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   useLocation,
   useNavigate,
@@ -38,7 +38,11 @@ import { ErrorBanner, Loading } from "../lineage/statusViews";
 import { useGraphKeyboard } from "../lineage/hooks/useGraphKeyboard";
 import { DetailDrawer } from "../lineage/detail/DetailDrawer";
 import { RawJsonModal } from "../lineage/modals/RawJsonModal";
-import { RunHistoryRail } from "../lineage/runRail/RunHistoryRail";
+import {
+  RunHistoryRail,
+  persistRunHistoryOpen,
+  readRunHistoryOpen,
+} from "../lineage/runRail/RunHistoryRail";
 import "../lineage/tokens/lineage.css";
 import { WorkbenchStateProvider } from "./WorkbenchStateProvider";
 import { useWorkbench } from "./WorkbenchStateProvider";
@@ -67,6 +71,7 @@ import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
 import { useDraftHandlers } from "./useDraftHandlers";
 import {
   getRunGraphHeadSet,
+  fetchRunDetail,
   executePipelineDraft,
   deletePipelineDraft,
   waitForRunTerminal,
@@ -98,7 +103,7 @@ type PendingFocusTarget = {
 type LegacyFocusProbe = {
   key: string;
   loading: boolean;
-  legacy: boolean;
+  kind: "blocked" | "legacy" | "not_indexed";
 };
 
 const PENDING_FOCUS_RETRY_LIMIT = 20;
@@ -118,6 +123,8 @@ interface WorkbenchHomeProps {
   /** Optional run deep link (?run=). Absent → newest head is the active run;
    *  a zero-run project renders the empty canvas + genesis CTA instead. */
   focusRunId?: string;
+  /** Monotonic request from the outer project navigation. */
+  settingsRequestVersion?: number;
 }
 
 type AppShellStatusContext = {
@@ -126,7 +133,11 @@ type AppShellStatusContext = {
 
 /** v1.6.8 T11 — the project-keyed workbench home. The forest is keyed by
  *  projectRoot alone; runId is only an optional focus hint. */
-export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
+export function WorkbenchHome({
+  projectRoot,
+  focusRunId,
+  settingsRequestVersion = 0,
+}: WorkbenchHomeProps) {
   // This is the live project-home mount path. The bootstrap itself is
   // idempotent so React StrictMode and route remounts cannot duplicate a view.
   useEffect(() => {
@@ -137,7 +148,13 @@ export function WorkbenchHome({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   // only a focus hint; if that run is absent from the project forest, probe the
   // old run-keyed headset once so true legacy runs can still use the legacy
   // per-run workbench.
-  return <ForestWorkbench projectRoot={projectRoot} focusRunId={focusRunId} />;
+  return (
+    <ForestWorkbench
+      projectRoot={projectRoot}
+      focusRunId={focusRunId}
+      settingsRequestVersion={settingsRequestVersion}
+    />
+  );
 }
 
 interface WorkbenchRouteContainerProps {
@@ -154,7 +171,11 @@ export function WorkbenchRouteContainer({
   return <WorkbenchHome projectRoot={projectRoot} focusRunId={runId} />;
 }
 
-function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
+function ForestWorkbench({
+  projectRoot,
+  focusRunId,
+  settingsRequestVersion = 0,
+}: WorkbenchHomeProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { forest, loading, error, refetch } = useForestData(projectRoot);
@@ -166,6 +187,8 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     useState<LegacyFocusProbe | null>(null);
   const [focusIndexPollAttempts, setFocusIndexPollAttempts] = useState(0);
   const [genesisWizardOpen, setGenesisWizardOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const previousSettingsRequest = useRef(settingsRequestVersion);
   const [pendingGenesisRun, setPendingGenesisRun] =
     useState<PendingRun | null>(null);
   // v1.6.9 B1 — draft-execute rides the same index-wait layer as genesis. The
@@ -189,6 +212,12 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     () => Boolean(focusRunId && forest?.heads.some((h) => h.runId === focusRunId)),
     [forest, focusRunId],
   );
+
+  useEffect(() => {
+    if (previousSettingsRequest.current === settingsRequestVersion) return;
+    previousSettingsRequest.current = settingsRequestVersion;
+    setSettingsOpen(true);
+  }, [settingsRequestVersion]);
 
   // A run can be terminal before the project forest scanner has written its
   // head-set entry. Keep a focused deep link alive through that short window
@@ -246,7 +275,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   }, [searchParams, setSearchParams]);
 
   const legacyFocusProbeKey =
-    forest && !forest.legacy && focusRunId && !focusRunIsKnownHead
+    forest && focusRunId && !focusRunIsKnownHead
       ? `${projectRoot}\u0000${focusRunId}`
       : null;
 
@@ -255,14 +284,23 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       return undefined;
     }
     let cancelled = false;
-    setLegacyFocusProbe({ key: legacyFocusProbeKey, loading: true, legacy: false });
-    getRunGraphHeadSet(projectRoot, focusRunId)
-      .then((raw) => {
+    setLegacyFocusProbe({ key: legacyFocusProbeKey, loading: true, kind: "not_indexed" });
+    Promise.allSettled([
+      getRunGraphHeadSet(projectRoot, focusRunId),
+      fetchRunDetail(projectRoot, focusRunId),
+    ])
+      .then(([headSetResult, detailResult]) => {
         if (cancelled) return;
         setLegacyFocusProbe({
           key: legacyFocusProbeKey,
           loading: false,
-          legacy: raw.legacy === true || !Array.isArray(raw.heads),
+          kind:
+            detailResult.status === "fulfilled" && detailResult.value.status === "blocked"
+              ? "blocked"
+              : headSetResult.status === "fulfilled" &&
+                    (headSetResult.value.legacy === true || !Array.isArray(headSetResult.value.heads))
+                ? "legacy"
+                : "not_indexed",
         });
       })
       .catch(() => {
@@ -270,7 +308,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         setLegacyFocusProbe({
           key: legacyFocusProbeKey,
           loading: false,
-          legacy: false,
+          kind: "not_indexed",
         });
       });
     return () => {
@@ -278,14 +316,29 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     };
   }, [focusRunId, legacyFocusProbeKey, projectRoot]);
 
+  const visibleDraftIds = useMemo<ReadonlySet<string> | undefined>(() => {
+    const values = [searchParams.get("active"), searchParams.get("focus"), searchParams.get("tabs")]
+      .filter((value): value is string => Boolean(value))
+      .flatMap((value) => value.split(","));
+    const draftIds = new Set(values.flatMap((value) => {
+      if (!value.startsWith("draft:")) return [];
+      const draftId = value.slice("draft:".length).split(":")[0];
+      return draftId ? [draftId] : [];
+    }));
+    // An empty set means the URL did not request a draft filter. Passing that
+    // empty set to mergeDraftsIntoModel hid every hydrated draft, including a
+    // persisted genesis draft in a zero-run project.
+    return draftIds.size > 0 ? draftIds : undefined;
+  }, [searchParams]);
+
   const model = useMemo(
     () => {
       const base = forest
         ? forestToGraphViewModel(forest, resolvedRunId ?? "")
         : null;
-      return base ? mergeDraftsIntoModel(base, registry) : null;
+      return base ? mergeDraftsIntoModel(base, registry, { visibleDraftIds }) : null;
     },
-    [forest, resolvedRunId, registry],
+    [forest, resolvedRunId, registry, visibleDraftIds],
   );
   const validNodeKeys = useMemo<ReadonlySet<string> | undefined>(
     () => (model ? new Set(model.nodes.map((n) => n.nodeKey)) : undefined),
@@ -401,6 +454,9 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     setPending: setPendingRerunRun,
   });
 
+  if (settingsOpen) {
+    return <LlmProviderManager onBack={() => setSettingsOpen(false)} />;
+  }
   if (error !== null && forest === null) {
     return (
       <ErrorBanner
@@ -411,12 +467,6 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     );
   }
   if (loading || forest === null || model === null) return <Loading />;
-  // Legacy target (no node identity) → fall back to the legacy per-run
-  // workbench. Project forests normally omit legacy runs, but legacy-shaped
-  // forest fixtures and a positive deep-link probe both land here.
-  if (forest.legacy && focusRunId) {
-    return <LegacyGraphWorkbench projectRoot={projectRoot} runId={focusRunId} />;
-  }
   if (legacyFocusProbeKey) {
     if (
       legacyFocusProbe?.key !== legacyFocusProbeKey ||
@@ -424,8 +474,31 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
     ) {
       return <Loading />;
     }
-    if (legacyFocusProbe.legacy && focusRunId) {
-      return <LegacyGraphWorkbench projectRoot={projectRoot} runId={focusRunId} />;
+    if (legacyFocusProbe.kind === "blocked" && focusRunId) {
+      return <BlockedRunNotice projectRoot={projectRoot} runId={focusRunId} />;
+    }
+  }
+  // Legacy target (no node identity) → fall back to the legacy per-run
+  // workbench. Project forests normally omit legacy runs, but legacy-shaped
+  // forest fixtures and a positive deep-link probe both land here.
+  if (forest.legacy && focusRunId) {
+    return (
+      <LegacyGraphWorkbench
+        projectRoot={projectRoot}
+        runId={focusRunId}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+    );
+  }
+  if (legacyFocusProbeKey) {
+    if (legacyFocusProbe?.kind === "legacy" && focusRunId) {
+      return (
+        <LegacyGraphWorkbench
+          projectRoot={projectRoot}
+          runId={focusRunId}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      );
     }
   }
   // Zero-head project (and no focus run) → empty canvas. familyCount>0 means
@@ -463,6 +536,17 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
       focus,
       attempts: 0,
     });
+    void refetch();
+  };
+
+  const handleRunDeleted = (deletedRunId: string) => {
+    const fallbackRunId = forest.heads.find(
+      (head) => head.runId !== deletedRunId,
+    )?.runId ?? null;
+    setActiveRunId((current) =>
+      current === deletedRunId ? fallbackRunId : current,
+    );
+    setRailRefreshToken((token) => token + 1);
     void refetch();
   };
 
@@ -585,7 +669,16 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   const notebookActiveRunId = forest.heads.some((head) => head.runId === effectiveActiveRunId)
     ? effectiveActiveRunId
     : null;
-  const body = !shellRunId && searchParams.get("view") === "notebook" ? (
+  const selectedView = searchParams.get("view");
+  const waitForPersistedGenesisDrafts =
+    !shellRunId &&
+    forest.heads.length === 0 &&
+    !draftHandlers.persistedDraftsHydrated &&
+    selectedView !== "notebook" &&
+    selectedView !== "home";
+  const body = waitForPersistedGenesisDrafts ? (
+    <Loading />
+  ) : !shellRunId && selectedView === "notebook" ? (
     <NotebookOnlyShell
       projectRoot={projectRoot}
       activeRunId={notebookActiveRunId}
@@ -594,8 +687,11 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
         void refetch();
       }}
     />
-  ) : !shellRunId && searchParams.get("view") === "home" ? (
-    <HomeOnlyShell projectRoot={projectRoot} />
+  ) : !shellRunId && selectedView === "home" ? (
+    <HomeOnlyShell
+      projectRoot={projectRoot}
+      onOpenSettings={() => setSettingsOpen(true)}
+    />
   ) : !shellRunId ? (
     <EmptyProjectCanvas
       projectRoot={projectRoot}
@@ -611,6 +707,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
           activeRunId: effectiveActiveRunId,
           setActiveRunId,
           refetch: () => void refetch(),
+          onRunDeleted: handleRunDeleted,
         }}
       >
         <WorkbenchStateProvider runId={shellRunId} validNodeKeys={validNodeKeys}>
@@ -645,6 +742,7 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
                   );
                   void refetch();
                 }}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
               </CompareProvider>
             </LineageBridge>
@@ -666,9 +764,14 @@ function ForestWorkbench({ projectRoot, focusRunId }: WorkbenchHomeProps) {
   );
 }
 
-function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
+function HomeOnlyShell({
+  projectRoot,
+  onOpenSettings,
+}: {
+  projectRoot: string;
+  onOpenSettings: () => void;
+}) {
   const navigate = useNavigate();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div
@@ -693,22 +796,18 @@ function HomeOnlyShell({ projectRoot }: { projectRoot: string }) {
         <button
           type="button"
           data-testid="workbench-home-shell-settings"
-          onClick={() => setSettingsOpen(true)}
+          onClick={onOpenSettings}
           style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid var(--separator)", background: "transparent", color: "var(--label)", cursor: "pointer", fontSize: 12 }}
         >
           Settings
         </button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {settingsOpen ? (
-          <LlmProviderManager onBack={() => setSettingsOpen(false)} />
-        ) : (
-          <WorkbenchHomeView
-            projectRoot={projectRoot}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
-          />
-        )}
+        <WorkbenchHomeView
+          projectRoot={projectRoot}
+          onOpenSettings={onOpenSettings}
+          onOpenProject={(root) => navigate(`/p/${rootToSlug(root)}/graph`)}
+        />
       </div>
     </div>
   );
@@ -855,7 +954,7 @@ function EmptyProjectCanvas({
             <p style={{ margin: "0 0 6px", fontSize: 15, color: "var(--label)" }}>
               {hasLegacyFamilies
                 ? `This project has ${legacyDisplayRunCount} run${legacyDisplayRunCount === 1 ? "" : "s"} from before lineage indexing; they cannot be shown in the graph.`
-                : "This project has no data yet."}
+                : "This project has no imported data or analysis yet."}
             </p>
             {hasLegacyFamilies && (
               <p
@@ -893,7 +992,7 @@ function EmptyProjectCanvas({
                 cursor: "pointer",
               }}
             >
-              ＋ New analysis
+              ＋ Import data and create analysis
             </button>
           </div>
         </div>
@@ -902,10 +1001,54 @@ function EmptyProjectCanvas({
   );
 }
 
+function BlockedRunNotice({
+  projectRoot,
+  runId,
+}: {
+  projectRoot: string;
+  runId: string;
+}) {
+  return (
+    <div
+      data-testid="blocked-run-notice"
+      style={{
+        display: "grid",
+        placeItems: "center",
+        height: "100%",
+        minHeight: 0,
+        padding: 32,
+        background: "var(--bg-canvas)",
+      }}
+    >
+      <section
+        style={{
+          maxWidth: 560,
+          padding: 24,
+          border: "1px solid var(--danger, #d33)",
+          borderRadius: 12,
+          background: "var(--bg-card-2)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 8px", fontSize: 18 }}>Analysis blocked</h1>
+        <p style={{ margin: "0 0 10px", color: "var(--label-secondary)" }}>
+          This analysis was blocked before lineage was recorded.
+        </p>
+        <p style={{ margin: 0, color: "var(--label-secondary)", fontSize: 13 }}>
+          Fix the input guardrail issue and start a new analysis; this run has no graph nodes to inspect.
+        </p>
+        <p className="mono" style={{ margin: "14px 0 0", fontSize: 12, color: "var(--label-tertiary)" }}>
+          {projectRoot} · {runId}
+        </p>
+      </section>
+    </div>
+  );
+}
+
 function LegacyGraphWorkbench({
   projectRoot,
   runId,
-}: WorkbenchRouteContainerProps) {
+  onOpenSettings,
+}: WorkbenchRouteContainerProps & { onOpenSettings: () => void }) {
   const navigate = useNavigate();
   const appShellContext = useOutletContext<AppShellStatusContext>();
   const { model, loading, error, refetch } = useGraphData(projectRoot, runId);
@@ -939,7 +1082,11 @@ function LegacyGraphWorkbench({
   return (
     <WorkbenchStateProvider runId={runId} validNodeKeys={validNodeKeys}>
       <LineageBridge model={model}>
-        <WorkbenchShell runId={runId} projectRoot={projectRoot} />
+        <WorkbenchShell
+          runId={runId}
+          projectRoot={projectRoot}
+          onOpenSettings={onOpenSettings}
+        />
       </LineageBridge>
     </WorkbenchStateProvider>
   );
@@ -983,6 +1130,7 @@ function WorkbenchShell({
   pendingFocusTarget = null,
   onPendingFocusConsumed,
   onPendingFocusRetry,
+  onOpenSettings,
 }: {
   runId: string;
   projectRoot: string;
@@ -990,15 +1138,23 @@ function WorkbenchShell({
   pendingFocusTarget?: PendingFocusTarget | null;
   onPendingFocusConsumed?: () => void;
   onPendingFocusRetry?: () => void;
+  onOpenSettings: () => void;
 }) {
   const { model, selectedKey, select } = useLineage();
   const { state } = useWorkbench();
-  const location = useLocation();
   const navigate = useNavigate();
   const [navigationParams, setNavigationParams] = useSearchParams();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawJsonOpen, setRawJsonOpen] = useState(false);
-  const settingsLocationInitialized = useRef(false);
+  const [runHistoryOpen, setRunHistoryOpen] = useState(() => readRunHistoryOpen(projectRoot));
+
+  useEffect(() => {
+    setRunHistoryOpen(readRunHistoryOpen(projectRoot));
+  }, [projectRoot]);
+
+  const onRunHistoryOpenChange = useCallback((open: boolean) => {
+    persistRunHistoryOpen(projectRoot, open);
+    setRunHistoryOpen(open);
+  }, [projectRoot]);
 
   const openAgentNavigation = useMemo(
     () => (ref: Parameters<typeof applyAgentNavigationRef>[1]) => {
@@ -1008,14 +1164,6 @@ function WorkbenchShell({
     },
     [navigationParams, setNavigationParams],
   );
-
-  useEffect(() => {
-    if (!settingsLocationInitialized.current) {
-      settingsLocationInitialized.current = true;
-      return;
-    }
-    setSettingsOpen(false);
-  }, [location.pathname, location.search]);
 
   // Selected-node lookup with the V1.5.0 cross-run leak guard
   // (see V1.5.0 GraphWorkbench REV-3 #3). selectedKey may point at a
@@ -1073,12 +1221,12 @@ function WorkbenchShell({
     onCmdK: () => {
       /* SearchPalette owns its own ⌘K listener (V1.5.2 P7) */
     },
-    enabled: state.view !== "home" && !settingsOpen,
+    enabled: state.view !== "home",
   });
 
   // F6: global action-registry shortcut dispatcher (e.g. ⌘⇧C copy id).
   // Reuses F4's editable-target guard; acts on the selected node.
-  useGlobalShortcuts({ enabled: state.view !== "home" && !settingsOpen });
+  useGlobalShortcuts({ enabled: state.view !== "home" });
 
   return (
     <div
@@ -1093,8 +1241,36 @@ function WorkbenchShell({
     >
       <WorkbenchTopbar
         projectRoot={projectRoot}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onViewChange={() => setSettingsOpen(false)}
+        leadingActions={
+          state.view !== "home" ? (
+            <button
+              type="button"
+              data-testid="run-history-toggle"
+              aria-label={runHistoryOpen ? "Hide run history" : "Show run history"}
+              title={runHistoryOpen ? "Hide runs" : "Show runs"}
+              onClick={() => onRunHistoryOpenChange(!runHistoryOpen)}
+              style={{
+                alignItems: "center",
+                display: "inline-flex",
+                height: 28,
+                justifyContent: "center",
+                padding: 4,
+                width: 28,
+                border: 0,
+                borderRadius: 6,
+                background: "transparent",
+                color: "var(--label-secondary)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+                <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
+              </svg>
+            </button>
+          ) : null
+        }
         extraActions={
           onResumeGenesisDraft ? (
             <button
@@ -1104,7 +1280,7 @@ function WorkbenchShell({
               style={{
                 padding: "4px 10px",
                 borderRadius: 6,
-                border: "1px solid var(--separator)",
+                border: 0,
                 background: "var(--tint-bg, rgba(10,132,255,0.12))",
                 color: "var(--tint, #0a84ff)",
                 cursor: "pointer",
@@ -1127,7 +1303,13 @@ function WorkbenchShell({
             overflow: "hidden",
           }}
         >
-          {state.view !== "home" && <RunHistoryRail projectRoot={projectRoot} />}
+          {state.view !== "home" && (
+            <RunHistoryRail
+              projectRoot={projectRoot}
+              open={runHistoryOpen}
+              onOpenChange={onRunHistoryOpenChange}
+            />
+          )}
           <div
             data-testid="workbench-center-column"
             style={{
@@ -1139,24 +1321,20 @@ function WorkbenchShell({
               overflow: "hidden",
             }}
           >
-            {settingsOpen ? (
-              <LlmProviderManager onBack={() => setSettingsOpen(false)} />
-            ) : (
-              <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
-                <WorkbenchMain
-                  projectRoot={projectRoot}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                  onOpenProject={(root) => {
-                    navigate(`/p/${rootToSlug(root)}/graph`);
-                  }}
-                />
-                {!settingsOpen && state.view !== "home" && (
-                  <BottomPanel runId={runId} projectRoot={projectRoot} />
-                )}
-              </AgentSurfaceProvider>
-            )}
+            <AgentSurfaceProvider projectRoot={projectRoot} runId={runId}>
+              <WorkbenchMain
+                projectRoot={projectRoot}
+                onOpenSettings={onOpenSettings}
+                onOpenProject={(root) => {
+                  navigate(`/p/${rootToSlug(root)}/graph`);
+                }}
+              />
+              {state.view !== "home" && (
+                <BottomPanel runId={runId} projectRoot={projectRoot} />
+              )}
+            </AgentSurfaceProvider>
           </div>
-          {!settingsOpen && state.view !== "home" && selectedNode !== null && (
+          {state.view !== "home" && selectedNode !== null && (
             <DetailDrawer
               node={selectedNode}
               projectRoot={projectRoot}
@@ -1166,10 +1344,10 @@ function WorkbenchShell({
           )}
         </div>
       </AgentNavigationContext.Provider>
-      {!settingsOpen && state.view !== "home" && <ContextMenu />}
-      {!settingsOpen && state.view !== "home" && <SearchPalette />}
-      {!settingsOpen && state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
-      {!settingsOpen && state.view !== "home" && (
+      {state.view !== "home" && <ContextMenu />}
+      {state.view !== "home" && <SearchPalette />}
+      {state.view !== "home" && <CommandPalette projectRoot={projectRoot} />}
+      {state.view !== "home" && (
         <RawJsonModal
           open={rawJsonOpen}
           onClose={() => setRawJsonOpen(false)}

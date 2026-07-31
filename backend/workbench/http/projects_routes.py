@@ -18,6 +18,7 @@ from ..lineage.upload_store import store_upload_bytes
 from ..projects import create_project
 from ..repository.run_repository import _resolve_project_runs_dir
 from ..services.run_service import _read_upload_bytes
+from ..services.system_appearance import detect_system_appearance
 from ._deps import BYTES_PER_GB
 
 router = APIRouter()
@@ -31,6 +32,17 @@ class ProjectRequest(BaseModel):
 @router.get("/capabilities")
 def capabilities_endpoint() -> dict:
     return build_capabilities()
+
+
+@router.get("/system/appearance")
+def system_appearance_endpoint() -> dict[str, str | None]:
+    """Expose only the local host's light/dark preference.
+
+    The frontend consumes this endpoint only on loopback hosts. Remote clients
+    continue to use their own browser ``prefers-color-scheme`` signal.
+    """
+
+    return detect_system_appearance()
 
 
 @router.post("/projects")

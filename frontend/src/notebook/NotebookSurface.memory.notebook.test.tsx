@@ -65,9 +65,22 @@ describe("NotebookSurface domain memory integration", () => {
       />,
     );
 
-    expect(screen.getByTestId("domain-memory-controls")).toBeInTheDocument();
+    const controls = screen.getByTestId("domain-memory-controls");
+    const options = screen.getByTestId("notebook-option-list");
+    const useMemory = screen.getByTestId("domain-memory-use");
+    const suggestMemory = screen.getByTestId("domain-memory-iteration");
+    expect(controls).toHaveTextContent("Memory off");
+    expect(useMemory).toHaveAttribute("role", "switch");
+    expect(useMemory).toHaveClass("nb-memory-switch");
+    expect(suggestMemory).toHaveAttribute("role", "switch");
+    expect(suggestMemory).toHaveClass("nb-memory-switch");
+    expect(
+      Boolean(
+        controls.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
     expect(screen.getByTestId("domain-memory-entry-list")).toHaveTextContent("Check clustered dependence.");
-    fireEvent.click(screen.getByTestId("domain-memory-use"));
+    fireEvent.click(useMemory);
     expect(onChange).toHaveBeenCalledWith({
       cross_project_domain_memory_use: true,
       cross_project_domain_memory_iteration: false,

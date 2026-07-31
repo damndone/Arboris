@@ -229,14 +229,10 @@ def environment_provider_from_env() -> ProviderRecord | None:
         "deepseek-v4-flash": "DeepSeek V4 Flash",
         "deepseek-v4-pro": "DeepSeek V4 Pro",
     }
+    # An environment configuration declares one configured model. It is not a
+    # capability-discovery protocol: adding vendor-looking alternatives here can
+    # make the UI offer a model the credential was never configured to use.
     models = [ModelRecord(known_display_names.get(model, model), model, None, False)]
-    if "deepseek" in base_url.lower():
-        known_models = [
-            ModelRecord("DeepSeek V4 Flash", "deepseek-v4-flash", None, False),
-            ModelRecord("DeepSeek V4 Pro", "deepseek-v4-pro", None, False),
-        ]
-        existing_ids = {entry.request_model for entry in models}
-        models.extend(entry for entry in known_models if entry.request_model not in existing_ids)
 
     return ProviderRecord(
         id="environment",

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import math
 from pathlib import Path
+import re
 from typing import Any, Iterable, Protocol
 
 from ..artifacts import read_json
+from ..contracts.common.envelope import ContractError
 from .chains import ChainHeadConflict, ChainStore
 from ..diagnostic_preview import build_diagnostic_summary_preview
 from ..diagnostic_preview.artifact_manifest import build_artifact_manifest
@@ -20,8 +24,10 @@ from ..analysis_loop.time_series_compare import read_time_series_artifacts as _r
 from ..analysis_loop.plan import PlanDiff
 from ..analysis_loop.recovery import RECOVERY_ACTIONS
 from ..analysis_loop.validation import ValidationPacket
-from .operations import OperationRegistry
+from .context_compiler import resolve_registered_artifact
+from .operations import OperationRecord, OperationRecordStore, OperationRegistry
 from .recipes.registry import build_option_vocabulary, validate_model_options_patch
+from .storage import read_jsonl
 from .tools import ToolContext, ToolDefinition, ToolVisibleError
 
 
@@ -89,6 +95,83 @@ class InspectDataSchemaRequest:
     owner_run_id: str
     op_node_id: str
     active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectCompletedOperationsRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectNotebookWorkflowResultsRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+
+
+@dataclass(frozen=True)
+class InspectOperationArtifactRequest:
+    request_id: str
+    owner_run_id: str
+    op_node_id: str
+    active_head_run_id: str
+    operation_record_id: str
+    artifact_id: str
+
+
+@dataclass(frozen=True)
+class InspectProjectModelCoefficientsRequest:
+    """A bounded, project-wide lookup of persisted model estimates."""
+
+    run_ids: tuple[str, ...]
+    terms: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InspectProjectDatasetSchemaRequest:
+    """A bounded, project-wide lookup of one persisted dataset schema."""
+
+    run_id: str
+
+
+@dataclass(frozen=True)
+class InspectProjectNumericSummaryRequest:
+    """Read persisted aggregate numeric facts without exposing source rows."""
+
+    run_id: str
+    columns: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class InspectProjectModelFigureEvidenceRequest:
+    """Read bounded numeric evidence for explicitly named model figures."""
+
+    figures: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class InspectProjectLinearInteractionEffectsRequest:
+    """Compute OLS interaction slopes from persisted coefficients and means."""
+
+    effects: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class InspectProjectCoefficientTransformsRequest:
+    """Apply a small closed set of numeric transforms to stored coefficients."""
+
+    transforms: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True)
+class InspectProjectNotebookWorkflowResultsRequest:
+    """Discover committed Notebook workflow receipts for visible project runs."""
+
+    run_ids: tuple[str, ...]
 
 
 class OperationContractUnavailableError(ValueError):
@@ -182,6 +265,19 @@ class NodeOperationContextProvider:
                     operation_version=str(arguments.get("operation_version") or "v1"),
                 ),
                 operation_registry=registry,
+            )
+
+        def inspect_project_model_coefficients(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_project_model_coefficients(
+                InspectProjectModelCoefficientsRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"]),
+                    terms=tuple(str(term) for term in arguments["terms"]),
+                )
             )
 
         def inspect_diagnostics(
@@ -288,6 +384,70 @@ class NodeOperationContextProvider:
                 )
             )
 
+        def inspect_completed_operations(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_completed_operations(
+                InspectCompletedOperationsRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-completed-operations"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                ),
+                chain_id=chain_id,
+                session_id=session_id,
+            )
+
+        def inspect_operation_artifact(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_operation_artifact(
+                InspectOperationArtifactRequest(
+                    request_id=str(
+                        arguments.get("request_id") or "inspect-operation-artifact"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                    operation_record_id=str(arguments["operation_record_id"]),
+                    artifact_id=str(arguments["artifact_id"]),
+                ),
+                chain_id=chain_id,
+                session_id=session_id,
+            )
+
+        def inspect_notebook_workflow_results(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered chain scope")
+            return self.inspect_notebook_workflow_results(
+                InspectNotebookWorkflowResultsRequest(
+                    request_id=str(
+                        arguments.get("request_id")
+                        or "inspect-notebook-workflow-results"
+                    ),
+                    owner_run_id=str(arguments["owner_run_id"]),
+                    op_node_id=str(arguments["op_node_id"]),
+                    active_head_run_id=self._tool_active_head(
+                        chain_id, str(arguments["active_head_run_id"])
+                    ),
+                )
+            )
+
         def inspect_analysis_loop_context_tool(
             arguments: dict[str, Any],
             context: ToolContext,
@@ -362,6 +522,79 @@ class NodeOperationContextProvider:
                 scope_requirements=("project", "chain"),
                 max_output_budget=8192,
                 handler=inspect_data_schema,
+            ),
+            ToolDefinition(
+                tool_id="inspect_completed_operations",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_completed_operations,
+            ),
+            ToolDefinition(
+                tool_id="inspect_notebook_workflow_results",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_notebook_workflow_results,
+            ),
+            ToolDefinition(
+                tool_id="inspect_operation_artifact",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": [
+                        "owner_run_id",
+                        "op_node_id",
+                        "active_head_run_id",
+                        "operation_record_id",
+                        "artifact_id",
+                    ],
+                    "properties": {
+                        "request_id": {"type": "string"},
+                        "owner_run_id": {"type": "string"},
+                        "op_node_id": {"type": "string"},
+                        "active_head_run_id": {"type": "string"},
+                        "operation_record_id": {"type": "string"},
+                        "artifact_id": {"type": "string"},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_operation_artifact,
             ),
             ToolDefinition(
                 tool_id="inspect_analysis_loop_context",
@@ -516,6 +749,31 @@ class NodeOperationContextProvider:
                 handler=inspect_result_summary,
             ),
             ToolDefinition(
+                tool_id="inspect_project_model_coefficients",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids", "terms"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array", "minItems": 1, "maxItems": 4,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                        "terms": {
+                            "type": "array", "minItems": 1, "maxItems": 4,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project", "chain"),
+                max_output_budget=8192,
+                handler=inspect_project_model_coefficients,
+            ),
+            ToolDefinition(
                 tool_id="inspect_time_series_summary",
                 version="v1",
                 input_schema={
@@ -593,6 +851,314 @@ class NodeOperationContextProvider:
             ),
         ]
 
+    def global_tool_definitions(self, *, session_id: str) -> list[ToolDefinition]:
+        """Expose bounded project evidence readers to the Main Agent.
+
+        The Main Agent remains unable to mutate a graph or run.  It may only
+        inspect server-persisted aggregate evidence, without transferring model
+        payloads or data rows into its context.
+        """
+
+        def inspect_project_model_coefficients(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_model_coefficients(
+                InspectProjectModelCoefficientsRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"]),
+                    terms=tuple(str(term) for term in arguments["terms"]),
+                )
+            )
+
+        def inspect_project_dataset_schema(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_dataset_schema(
+                InspectProjectDatasetSchemaRequest(run_id=str(arguments["run_id"]))
+            )
+
+        def inspect_project_numeric_summary(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_numeric_summary(
+                InspectProjectNumericSummaryRequest(
+                    run_id=str(arguments["run_id"]),
+                    columns=tuple(str(column) for column in arguments["columns"]),
+                )
+            )
+
+        def inspect_project_model_figure_evidence(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_model_figure_evidence(
+                InspectProjectModelFigureEvidenceRequest(
+                    figures=tuple(
+                        {
+                            "run_id": str(item["run_id"]),
+                            "artifact_id": str(item["artifact_id"]),
+                        }
+                        for item in arguments["figures"]
+                    )
+                )
+            )
+
+        def inspect_project_linear_interaction_effects(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_linear_interaction_effects(
+                InspectProjectLinearInteractionEffectsRequest(
+                    effects=tuple(
+                        {
+                            "run_id": str(effect["run_id"]),
+                            "focal_term": str(effect["focal_term"]),
+                            "interaction_term": str(effect["interaction_term"]),
+                            "moderator_column": str(effect["moderator_column"]),
+                        }
+                        for effect in arguments["effects"]
+                    )
+                )
+            )
+
+        def inspect_project_coefficient_transforms(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_coefficient_transforms(
+                InspectProjectCoefficientTransformsRequest(
+                    transforms=tuple(
+                        {
+                            "run_id": str(item["run_id"]),
+                            "term": str(item["term"]),
+                            "transform": str(item["transform"]),
+                        }
+                        for item in arguments["transforms"]
+                    )
+                )
+            )
+
+        def inspect_project_notebook_workflow_results(
+            arguments: dict[str, Any],
+            context: ToolContext,
+        ) -> dict[str, Any]:
+            if context.session_id != session_id:
+                raise ValueError("tool session is outside the registered project scope")
+            return self.inspect_project_notebook_workflow_results(
+                InspectProjectNotebookWorkflowResultsRequest(
+                    run_ids=tuple(str(run_id) for run_id in arguments["run_ids"])
+                )
+            )
+
+        return [
+            ToolDefinition(
+                tool_id="inspect_project_model_coefficients",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids", "terms"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                        "terms": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 16,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_model_coefficients,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_dataset_schema",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_id"],
+                    "properties": {
+                        "run_id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_dataset_schema,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_numeric_summary",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_id", "columns"],
+                    "properties": {
+                        "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "columns": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 300},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_numeric_summary,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_model_figure_evidence",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["figures"],
+                    "properties": {
+                        "figures": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "object",
+                                "required": ["run_id", "artifact_id"],
+                                "properties": {
+                                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                                    "artifact_id": {"type": "string", "minLength": 1, "maxLength": 300},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_model_figure_evidence,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_linear_interaction_effects",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["effects"],
+                    "properties": {
+                        "effects": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "run_id",
+                                    "focal_term",
+                                    "interaction_term",
+                                    "moderator_column",
+                                ],
+                                "properties": {
+                                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                                    "focal_term": {"type": "string", "minLength": 1, "maxLength": 300},
+                                    "interaction_term": {"type": "string", "minLength": 1, "maxLength": 300},
+                                    "moderator_column": {"type": "string", "minLength": 1, "maxLength": 300},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_linear_interaction_effects,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_coefficient_transforms",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["transforms"],
+                    "properties": {
+                        "transforms": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 4,
+                            "items": {
+                                "type": "object",
+                                "required": ["run_id", "term", "transform"],
+                                "properties": {
+                                    "run_id": {"type": "string", "minLength": 1, "maxLength": 200},
+                                    "term": {"type": "string", "minLength": 1, "maxLength": 300},
+                                    "transform": {
+                                        "type": "string",
+                                        "enum": ["scale_0_01", "expm1_percent"],
+                                    },
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_coefficient_transforms,
+            ),
+            ToolDefinition(
+                tool_id="inspect_project_notebook_workflow_results",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 16,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 200},
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                scope_requirements=("project",),
+                max_output_budget=8192,
+                handler=inspect_project_notebook_workflow_results,
+            ),
+        ]
+
     def inspect_node_context(
         self,
         request: InspectNodeContextRequest,
@@ -626,6 +1192,23 @@ class NodeOperationContextProvider:
             request.operation_id,
             request.operation_version,
         )
+        # Registry definitions also exist for workflow children so the
+        # dispatcher can validate and execute them. They are not independent
+        # Agent proposal surfaces: inspecting one against a model node would
+        # otherwise (incorrectly) return that node's OLS/Rerun contract.
+        # Return a bounded correction that preserves the parent workflow's
+        # one-confirmation authorization boundary.
+        from .workflow_contracts import WORKFLOW_STEP_SPEC_CONTRACTS
+
+        if (
+            request.operation_id in WORKFLOW_STEP_SPEC_CONTRACTS
+            and not operation.natural_language_enabled
+        ):
+            raise OperationContractUnavailableError(
+                f"{request.operation_id}@{request.operation_version} is a workflow step, "
+                "not a top-level proposal contract. Inspect operation.multi_step@v1 "
+                "and declare this step in changes.steps."
+            )
         canonical, node, manifest = self._read_node_snapshot(
             request_id=request.request_id,
             owner_run_id=request.owner_run_id,
@@ -711,27 +1294,50 @@ class NodeOperationContextProvider:
 
         run_root = self.project_root / "runs" / owner_run_id
         try:
+            run_inputs = read_run_inputs(run_root)
+        except (FileNotFoundError, OSError, TypeError, ValueError):
+            run_inputs = {}
+        try:
             manifest = read_json(run_root / "run_manifest.json")
         except (FileNotFoundError, OSError, TypeError, ValueError):
-            return
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
         contract = resolve_operation_contract(stage="model", manifest=manifest)
-        if contract is None:
+        if contract is not None:
+            artifacts, _metadata = _read_time_series_artifacts(run_root)
+            current = artifacts.get("ts.analysis_contract")
+            if not isinstance(current, dict):
+                current = _analysis_contract_from_run_inputs(run_inputs)
+            if isinstance(current, dict):
+                # A server-persisted analysis contract is more authoritative
+                # than a legacy form's model_type.  This matters for reruns
+                # whose historical form predates the selected model pack.
+                validate_model_options_patch(
+                    contract.op_type,
+                    current_contract=current,
+                    patch=patch,
+                )
+                return
+
+        source_form = run_inputs.get("form") if isinstance(run_inputs, dict) else None
+        if not isinstance(source_form, dict):
             return
-        artifacts, _metadata = _read_time_series_artifacts(run_root)
-        current = artifacts.get("ts.analysis_contract")
-        if not isinstance(current, dict):
-            try:
-                run_inputs = read_run_inputs(run_root)
-            except (FileNotFoundError, OSError, TypeError, ValueError):
-                run_inputs = {}
-            current = _analysis_contract_from_run_inputs(run_inputs)
-        if not isinstance(current, dict):
-            return
-        validate_model_options_patch(
-            contract.op_type,
-            current_contract=current,
-            patch=patch,
-        )
+        from ..model_options import ModelOptionsError
+        from ..services.run_service import merge_form_overrides
+
+        try:
+            # This is the same pure merge/bind path the rerun service uses
+            # before allocating a child run.  It validates any model pack
+            # whose current form is the authoritative contract source.
+            merge_form_overrides(
+                source_form,
+                {"model_options": dict(patch)},
+            )
+        except ModelOptionsError as exc:
+            error = ContractError(str(exc))
+            error.code = exc.code  # type: ignore[attr-defined]
+            raise error from exc
 
     def inspect_diagnostics(
         self,
@@ -779,6 +1385,7 @@ class NodeOperationContextProvider:
             summary,
             summary_status=summary_status,
             preview=preview,
+            model_results=model_results,
         )
         omitted_sections = ["raw_model_results"]
         if result_summary["coefficient_rows_omitted"]:
@@ -789,6 +1396,442 @@ class NodeOperationContextProvider:
             "result_summary": result_summary,
             "omitted_sections": omitted_sections,
         }
+
+    def inspect_project_model_coefficients(
+        self,
+        request: InspectProjectModelCoefficientsRequest,
+    ) -> dict[str, Any]:
+        """Return exact public coefficient evidence for explicitly named terms.
+
+        This deliberately resolves neither a formula nor a raw-data artifact.
+        The caller chooses a small set of known project runs and terms; the
+        server projects only the persisted public statistics that answer that
+        question.  Missing terms remain visible rather than being inferred.
+        """
+
+        models: list[dict[str, Any]] = []
+        for run_id in request.run_ids:
+            run_root = self._project_run_root(run_id)
+            for result in read_model_results(run_root):
+                public_model = _public_requested_model_coefficients(
+                    run_id=run_id,
+                    result=result,
+                    requested_terms=request.terms,
+                )
+                if public_model is not None:
+                    models.append(public_model)
+        return {
+            "models": models,
+            "omitted_sections": ["raw_model_results", "raw_rows"],
+        }
+
+    def inspect_project_dataset_schema(
+        self,
+        request: InspectProjectDatasetSchemaRequest,
+    ) -> dict[str, Any]:
+        """Return bounded column metadata without raw rows or profile statistics."""
+
+        run_root = self._project_run_root(request.run_id)
+        try:
+            profile = read_json(run_root / "staged" / "data_profile.json")
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            raise ToolVisibleError(
+                "PROJECT_DATASET_SCHEMA_UNAVAILABLE: no persisted dataset schema is "
+                f"available for {request.run_id!r}."
+            ) from exc
+        if not isinstance(profile, dict):
+            raise ToolVisibleError(
+                "PROJECT_DATASET_SCHEMA_UNAVAILABLE: the persisted dataset schema is invalid."
+            )
+
+        source_columns = profile.get("columns")
+        if not isinstance(source_columns, dict):
+            raise ToolVisibleError(
+                "PROJECT_DATASET_SCHEMA_UNAVAILABLE: the persisted dataset schema has no columns."
+            )
+        columns: list[dict[str, Any]] = []
+        for name, metadata in sorted(source_columns.items(), key=lambda item: str(item[0])):
+            if not isinstance(name, str) or not name or not isinstance(metadata, dict):
+                continue
+            columns.append(
+                {
+                    "name": name,
+                    "dtype": metadata.get("dtype") if isinstance(metadata.get("dtype"), str) else None,
+                    "missing_rate": _public_stat_number(metadata.get("missing_rate")),
+                    "unique_count": _public_positive_int(metadata.get("unique_count")),
+                }
+            )
+        public_columns = columns[:64]
+        return {
+            "run_id": request.run_id,
+            "row_count": _public_positive_int(profile.get("row_count")),
+            "column_count": _public_positive_int(profile.get("column_count")),
+            "columns": public_columns,
+            "columns_omitted": max(len(columns) - len(public_columns), 0),
+            "evidence_ref": {
+                "run_id": request.run_id,
+                "profile_ref": "staged/data_profile.json",
+            },
+            "omitted_sections": [
+                "raw_rows",
+                "correlations",
+                "column_descriptives",
+            ],
+        }
+
+    def inspect_project_numeric_summary(
+        self,
+        request: InspectProjectNumericSummaryRequest,
+    ) -> dict[str, Any]:
+        """Return persisted numeric aggregates for explicitly requested columns.
+
+        The profile is already a server-produced aggregate.  This reader keeps
+        that boundary intact: it discloses no rows, values, correlations, or
+        unrequested columns, and it distinguishes an unavailable statistic from
+        a zero-valued one.
+        """
+
+        run_root = self._project_run_root(request.run_id)
+        try:
+            profile = read_json(run_root / "staged" / "data_profile.json")
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            raise ToolVisibleError(
+                "PROJECT_NUMERIC_SUMMARY_UNAVAILABLE: no persisted numeric summary is "
+                f"available for {request.run_id!r}."
+            ) from exc
+        source_columns = profile.get("columns") if isinstance(profile, dict) else None
+        if not isinstance(source_columns, dict):
+            raise ToolVisibleError(
+                "PROJECT_NUMERIC_SUMMARY_UNAVAILABLE: the persisted dataset profile is invalid."
+            )
+
+        numeric_summary: list[dict[str, Any]] = []
+        unavailable_columns: list[str] = []
+        for column in sorted(set(request.columns)):
+            metadata = source_columns.get(column)
+            mean = _public_stat_number(metadata.get("mean")) if isinstance(metadata, dict) else None
+            if mean is None:
+                unavailable_columns.append(column)
+                continue
+            numeric_summary.append(
+                {
+                    "column": column,
+                    "mean": mean,
+                    "std": _public_stat_number(metadata.get("std")),
+                }
+            )
+        return {
+            "run_id": request.run_id,
+            "numeric_summary": numeric_summary,
+            "unavailable_columns": unavailable_columns,
+            "evidence_ref": {
+                "run_id": request.run_id,
+                "profile_ref": "staged/data_profile.json",
+            },
+            "omitted_sections": ["raw_rows", "correlations"],
+        }
+
+    def inspect_project_model_figure_evidence(
+        self,
+        request: InspectProjectModelFigureEvidenceRequest,
+    ) -> dict[str, Any]:
+        """Return one bounded numeric projection per requested model figure."""
+
+        evidence: list[dict[str, Any]] = []
+        for item in request.figures:
+            if set(item) != {"run_id", "artifact_id"} or not all(
+                isinstance(value, str) and value for value in item.values()
+            ):
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_INVALID: each figure needs one run_id and artifact_id."
+                )
+            run_id = item["run_id"]
+            artifact_id = item["artifact_id"]
+            run_root = self._project_run_root(run_id)
+            try:
+                index = read_json(run_root / "artifacts_index.json")
+                records = index.get("artifacts") if isinstance(index, dict) else None
+                record = next(
+                    (
+                        value
+                        for value in records or []
+                        if isinstance(value, dict) and value.get("artifact_id") == artifact_id
+                    ),
+                    None,
+                )
+            except (FileNotFoundError, OSError, ValueError, TypeError) as exc:
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the persisted artifact index is unavailable."
+                ) from exc
+            if not isinstance(record, dict) or record.get("artifact_type") != "figure":
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: requested artifact is not a persisted figure."
+                )
+            models = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+            if len(models) != 1 or not isinstance(models[0].get("model_id"), str):
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure does not resolve to exactly one persisted model."
+                )
+            model_id = str(models[0]["model_id"])
+            numeric_source = _bounded_model_figure_numeric_source(
+                run_root,
+                node_id=f"model:{model_id}",
+                artifact_id=artifact_id,
+            )
+            if numeric_source is None:
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: the figure has no bounded numeric evidence."
+                )
+            try:
+                from ..figure_context import resolve_figure_ai_context
+
+                packet = resolve_figure_ai_context(
+                    self.project_root, run_id=run_id, artifact_id=artifact_id
+                )
+            except (FileNotFoundError, OSError, TypeError, ValueError) as exc:
+                raise ToolVisibleError(
+                    "PROJECT_MODEL_FIGURE_EVIDENCE_UNAVAILABLE: figure metadata is unavailable."
+                ) from exc
+            figure = packet.get("figure") if isinstance(packet, dict) else None
+            evidence.append(
+                {
+                    "run_id": run_id,
+                    "model_id": model_id,
+                    "artifact_id": artifact_id,
+                    "chart_type": figure.get("chart_type") if isinstance(figure, dict) else None,
+                    "numeric_source": numeric_source,
+                    "evidence_ref": {
+                        "run_id": run_id,
+                        "model_id": model_id,
+                        "artifact_id": artifact_id,
+                    },
+                }
+            )
+        return {
+            "figures": evidence,
+            "omitted_sections": ["raw_rows", "raw_model_results", "image_pixels", "figure_paths"],
+        }
+
+    def inspect_project_linear_interaction_effects(
+        self,
+        request: InspectProjectLinearInteractionEffectsRequest,
+    ) -> dict[str, Any]:
+        """Compute OLS-scale interaction slopes from persisted public inputs.
+
+        This is deliberately a read-only, server-side calculation rather than
+        asking a language model to do floating-point arithmetic.  It is only
+        available for OLS results, where the requested derivative on the
+        recorded outcome scale is beta_focal + beta_interaction * mean(moderator).
+        No standard error or interval is implied because that requires a
+        covariance term which this bounded reader does not expose.
+        """
+
+        effects: list[dict[str, Any]] = []
+        for item in request.effects:
+            if set(item) != {
+                "run_id",
+                "focal_term",
+                "interaction_term",
+                "moderator_column",
+            } or not all(isinstance(value, str) and value for value in item.values()):
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_INVALID: each effect must identify one "
+                    "run, focal term, interaction term, and moderator column."
+                )
+            run_id = item["run_id"]
+            focal_term = item["focal_term"]
+            interaction_term = item["interaction_term"]
+            moderator_column = item["moderator_column"]
+            if len({focal_term, interaction_term, moderator_column}) != 3:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_INVALID: focal term, interaction term, "
+                    "and moderator column must be distinct."
+                )
+            run_root = self._project_run_root(run_id)
+            matches: list[tuple[str, dict[str, Any]]] = []
+            for result in read_model_results(run_root):
+                model_id = result.get("model_id")
+                model_type = result.get("model_type")
+                coefficients = result.get("coefficients")
+                if (
+                    not isinstance(model_id, str)
+                    or not isinstance(model_type, str)
+                    or not model_type.startswith("ols")
+                    or not isinstance(coefficients, dict)
+                ):
+                    continue
+                focal = coefficients.get(focal_term)
+                interaction = coefficients.get(interaction_term)
+                if (
+                    isinstance(focal, dict)
+                    and isinstance(interaction, dict)
+                    and _public_stat_number(focal.get("estimate")) is not None
+                    and _public_stat_number(interaction.get("estimate")) is not None
+                ):
+                    matches.append((model_id, coefficients))
+            if len(matches) != 1:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: exactly one persisted OLS "
+                    f"model in {run_id!r} must contain the requested focal and interaction terms."
+                )
+            try:
+                profile = read_json(run_root / "staged" / "data_profile.json")
+            except (FileNotFoundError, OSError, ValueError) as exc:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the moderator mean is not persisted."
+                ) from exc
+            columns = profile.get("columns") if isinstance(profile, dict) else None
+            metadata = columns.get(moderator_column) if isinstance(columns, dict) else None
+            moderator_mean = (
+                _public_stat_number(metadata.get("mean"))
+                if isinstance(metadata, dict)
+                else None
+            )
+            if moderator_mean is None:
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: the requested moderator has "
+                    "no persisted numeric mean."
+                )
+            model_id, coefficients = matches[0]
+            focal_estimate = _public_stat_number(coefficients[focal_term].get("estimate"))
+            interaction_estimate = _public_stat_number(
+                coefficients[interaction_term].get("estimate")
+            )
+            assert focal_estimate is not None and interaction_estimate is not None
+            marginal_effect = float(focal_estimate) + float(interaction_estimate) * float(moderator_mean)
+            if not math.isfinite(marginal_effect):
+                raise ToolVisibleError(
+                    "PROJECT_INTERACTION_EFFECT_UNAVAILABLE: persisted inputs produced a "
+                    "non-finite marginal effect."
+                )
+            effects.append(
+                {
+                    "run_id": run_id,
+                    "model_id": model_id,
+                    "focal_term": focal_term,
+                    "interaction_term": interaction_term,
+                    "moderator_column": moderator_column,
+                    "moderator_mean": moderator_mean,
+                    "marginal_effect": marginal_effect,
+                    "evidence_ref": {
+                        "run_id": run_id,
+                        "model_id": model_id,
+                        "result_ref": f"model_results:{model_id}",
+                        "profile_ref": "staged/data_profile.json",
+                    },
+                }
+            )
+        return {
+            "effects": effects,
+            "omitted_sections": ["raw_model_results", "raw_rows", "correlations"],
+        }
+
+    def inspect_project_coefficient_transforms(
+        self,
+        request: InspectProjectCoefficientTransformsRequest,
+    ) -> dict[str, Any]:
+        """Apply closed, auditable numeric transforms to one stored coefficient.
+
+        The server returns mathematics only.  It does not infer that a term is
+        logged, that an outcome is logged, or that a percentage interpretation
+        is appropriate; those are separate conclusions which must be supported
+        by the persisted model evidence the Agent cites alongside this result.
+        """
+
+        values: list[dict[str, Any]] = []
+        for item in request.transforms:
+            if set(item) != {"run_id", "term", "transform"} or not all(
+                isinstance(value, str) and value for value in item.values()
+            ):
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_INVALID: each item must identify "
+                    "one run, term, and registered transform."
+                )
+            run_id = item["run_id"]
+            term = item["term"]
+            transform = item["transform"]
+            if transform not in {"scale_0_01", "expm1_percent"}:
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_INVALID: transform must be "
+                    "scale_0_01 or expm1_percent."
+                )
+            run_root = self._project_run_root(run_id)
+            matches: list[tuple[str, float]] = []
+            for result in read_model_results(run_root):
+                model_id = result.get("model_id")
+                coefficients = result.get("coefficients")
+                coefficient = coefficients.get(term) if isinstance(coefficients, dict) else None
+                estimate = (
+                    _public_stat_number(coefficient.get("estimate"))
+                    if isinstance(coefficient, dict)
+                    else None
+                )
+                if isinstance(model_id, str) and estimate is not None:
+                    matches.append((model_id, float(estimate)))
+            if len(matches) != 1:
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: exactly one persisted "
+                    f"model in {run_id!r} must contain {term!r}."
+                )
+            model_id, estimate = matches[0]
+            value = estimate * 0.01 if transform == "scale_0_01" else math.expm1(estimate) * 100.0
+            if not math.isfinite(value):
+                raise ToolVisibleError(
+                    "PROJECT_COEFFICIENT_TRANSFORM_UNAVAILABLE: persisted input produced "
+                    "a non-finite transformed value."
+                )
+            values.append(
+                {
+                    "run_id": run_id,
+                    "model_id": model_id,
+                    "term": term,
+                    "transform": transform,
+                    "value": value,
+                    "evidence_ref": {
+                        "run_id": run_id,
+                        "model_id": model_id,
+                        "result_ref": f"model_results:{model_id}",
+                    },
+                }
+            )
+        return {
+            "transforms": values,
+            "omitted_sections": ["raw_model_results", "raw_rows"],
+        }
+
+    def inspect_project_notebook_workflow_results(
+        self,
+        request: InspectProjectNotebookWorkflowResultsRequest,
+    ) -> dict[str, Any]:
+        """Read committed workflow receipts for named, visible project runs."""
+
+        workflows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for run_id in sorted(set(request.run_ids)):
+            self._project_run_root(run_id)
+            for workflow in self._notebook_workflow_results_for_run(run_id):
+                workflow_id = workflow.get("workflow_id")
+                plan_fingerprint = workflow.get("plan_fingerprint")
+                if not isinstance(workflow_id, str) or not isinstance(plan_fingerprint, str):
+                    continue
+                key = (workflow_id, plan_fingerprint)
+                if key in seen:
+                    continue
+                seen.add(key)
+                workflows.append(workflow)
+        workflows.sort(
+            key=lambda workflow: (
+                str(workflow.get("workflow_id") or ""),
+                str(workflow.get("plan_fingerprint") or ""),
+            )
+        )
+        payload: dict[str, Any] = {
+            "workflows": workflows[:4],
+            "omitted_sections": ["raw_artifact_payloads", "raw_rows"],
+        }
+        if len(workflows) > 4:
+            payload["workflows_omitted"] = len(workflows) - 4
+        return payload
 
     def inspect_time_series_summary(
         self,
@@ -936,9 +1979,287 @@ class NodeOperationContextProvider:
                 "run_lifecycle_status": lifecycle,
                 "artifact_counts": counts,
                 "artifact_manifest": artifact_manifest,
+                "public_result_evidence": _node_public_result_evidence(
+                    self.project_root,
+                    owner_run_id=request.owner_run_id,
+                    op_node_id=request.op_node_id,
+                ),
+                "figure_evidence": _bounded_run_figure_evidence(
+                    self.project_root,
+                    run_id=request.owner_run_id,
+                    node=node,
+                ),
             },
+            "omitted_sections": ["raw_artifact_payloads", "raw_rows", "image_pixels"],
+        }
+
+    def inspect_completed_operations(
+        self,
+        request: InspectCompletedOperationsRequest,
+        *,
+        chain_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Discover completed operations only within the current Agent scope."""
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        records = self._completed_operation_records(
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            chain_id=chain_id,
+            session_id=session_id,
+        )
+        omitted = max(len(records) - 8, 0)
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "completed_operations": [
+                _bounded_completed_operation(record) for record in records[:8]
+            ],
+            "omitted_counts": (
+                {"completed_operations": omitted} if omitted else {}
+            ),
             "omitted_sections": ["raw_artifact_payloads"],
         }
+
+    def inspect_operation_artifact(
+        self,
+        request: InspectOperationArtifactRequest,
+        *,
+        chain_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Return one declared operation artifact through a public result view.
+
+        The caller supplies durable ids, never a path.  The ids are accepted
+        only after checking the current node/Chain scope and the operation's
+        own emitted artifact list.
+        """
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        records = self._completed_operation_records(
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            chain_id=chain_id,
+            session_id=session_id,
+        )
+        record = next(
+            (
+                candidate
+                for candidate in records
+                if candidate.record_id == request.operation_record_id
+            ),
+            None,
+        )
+        if record is None:
+            raise ToolVisibleError(
+                "OPERATION_RESULT_NOT_IN_SCOPE: the completed operation is not "
+                "available in this Chain and node scope."
+            )
+        allowed_artifacts = set(_operation_artifact_ids(record))
+        if request.artifact_id not in allowed_artifacts:
+            raise ToolVisibleError(
+                "OPERATION_ARTIFACT_NOT_DECLARED: the artifact was not emitted "
+                "by this completed operation."
+            )
+        artifact = resolve_registered_artifact(
+            self.project_root / "runs" / request.owner_run_id,
+            request.artifact_id,
+        )
+        if artifact is None:
+            raise ToolVisibleError(
+                "OPERATION_ARTIFACT_UNAVAILABLE: the declared artifact is not "
+                "available from the active run."
+            )
+        artifact_type, artifact_sha256, payload = artifact
+        public_result, omitted_sections = _public_operation_artifact_result(
+            artifact_type,
+            payload,
+        )
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "artifact_evidence": {
+                "available": public_result is not None,
+                "status": (
+                    "complete"
+                    if public_result is not None
+                    else "public_result_not_available"
+                ),
+                "evidence_ref": {
+                    "operation_record_id": record.record_id,
+                    "artifact_id": request.artifact_id,
+                    "artifact_type": artifact_type,
+                    "sha256": artifact_sha256,
+                },
+                "result": public_result,
+                "reason": (
+                    None
+                    if public_result is not None
+                    else "This artifact type has no registered public Agent result view."
+                ),
+            },
+            "omitted_sections": omitted_sections,
+        }
+
+    def inspect_notebook_workflow_results(
+        self,
+        request: InspectNotebookWorkflowResultsRequest,
+    ) -> dict[str, Any]:
+        """Discover committed Notebook workflows containing the selected run.
+
+        Notebook confirmation has a separate append-only lifecycle from Agent
+        operation records.  This bridge exposes only receipts that explicitly
+        contain the currently selected run, then projects declared
+        post-estimation artifacts through the same public-result boundary used
+        elsewhere.  It never accepts a notebook id, option id, path, or source
+        run id from the model.
+        """
+
+        canonical, node, _manifest = self._read_node_snapshot(
+            request_id=request.request_id,
+            owner_run_id=request.owner_run_id,
+            op_node_id=request.op_node_id,
+            active_head_run_id=request.active_head_run_id,
+        )
+        workflows = self._notebook_workflow_results_for_run(request.owner_run_id)
+        omitted = max(len(workflows) - 4, 0)
+        return {
+            **canonical,
+            "node": _bounded_node(node),
+            "notebook_workflows": workflows[:4],
+            "omitted_counts": {"notebook_workflows": omitted} if omitted else {},
+            "omitted_sections": ["raw_artifact_payloads", "raw_rows"],
+        }
+
+    def _notebook_workflow_results_for_run(
+        self,
+        owner_run_id: str,
+    ) -> list[dict[str, Any]]:
+        """Read only committed receipts that prove membership of ``owner_run_id``."""
+
+        notebooks_root = self.project_root / "notebooks"
+        if not notebooks_root.is_dir():
+            return []
+        try:
+            resolved_notebooks_root = notebooks_root.resolve()
+        except OSError:
+            return []
+
+        workflows: list[dict[str, Any]] = []
+        seen_receipts: set[tuple[str, str, str]] = set()
+        for option_path in sorted(notebooks_root.glob("*/options/*.jsonl")):
+            try:
+                option_path.resolve().relative_to(resolved_notebooks_root)
+                records = read_jsonl(option_path)
+            except (OSError, ValueError):
+                continue
+            source_runs_by_revision = _notebook_source_runs_by_revision(records)
+            for record in reversed(records):
+                receipt = _committed_notebook_workflow_receipt(record)
+                if receipt is None:
+                    continue
+                workflow_id = receipt["workflow_id"]
+                option_revision = receipt["option_revision"]
+                receipt_key = (str(option_path), workflow_id, str(option_revision))
+                if receipt_key in seen_receipts:
+                    continue
+                branch_runs = receipt["branch_runs"]
+                if owner_run_id not in {branch["run_id"] for branch in branch_runs}:
+                    continue
+                seen_receipts.add(receipt_key)
+                source_run_id = source_runs_by_revision.get(option_revision)
+                evidence, unavailable = self._notebook_post_estimation_evidence(
+                    source_run_id=source_run_id,
+                    artifact_ids=receipt["post_estimation_artifact_ids"],
+                )
+                workflows.append(
+                    {
+                        "workflow_id": workflow_id,
+                        "plan_fingerprint": receipt["plan_fingerprint"],
+                        "status": "completed",
+                        "branch_runs": branch_runs[:8],
+                        "post_estimation_evidence": evidence[:16],
+                        "unavailable_post_estimation_artifact_count": unavailable,
+                    }
+                )
+        return workflows
+
+    def _notebook_post_estimation_evidence(
+        self,
+        *,
+        source_run_id: str | None,
+        artifact_ids: list[str],
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Resolve receipt-declared source artifacts through a public view only."""
+
+        if source_run_id is None:
+            return [], len(artifact_ids)
+        try:
+            source_root = self._project_run_root(source_run_id)
+        except ToolVisibleError:
+            return [], len(artifact_ids)
+        evidence: list[dict[str, Any]] = []
+        unavailable = 0
+        for artifact_id in artifact_ids[:16]:
+            artifact = resolve_registered_artifact(source_root, artifact_id)
+            if artifact is None:
+                unavailable += 1
+                continue
+            artifact_type, sha256, payload = artifact
+            public_result, _omitted = _public_operation_artifact_result(
+                artifact_type, payload
+            )
+            if public_result is None:
+                unavailable += 1
+                continue
+            evidence.append(
+                {
+                    "artifact_id": artifact_id,
+                    "artifact_type": artifact_type,
+                    "evidence_ref": {
+                        "run_id": source_run_id,
+                        "artifact_id": artifact_id,
+                        "artifact_type": artifact_type,
+                        "sha256": sha256,
+                    },
+                    "result": public_result,
+                }
+            )
+        return evidence, unavailable + max(len(artifact_ids) - 16, 0)
+
+    def _completed_operation_records(
+        self,
+        *,
+        owner_run_id: str,
+        op_node_id: str,
+        chain_id: str,
+        session_id: str,
+    ) -> list[OperationRecord]:
+        """Select only terminal, caller-owned parent operation records."""
+
+        store = OperationRecordStore(self.project_root / "workbench", create=False)
+        records = [
+            record
+            for record in store.list_records()
+            if record.status == "completed"
+            and record.chain_id == chain_id
+            and record.agent_session_id == session_id
+            and record.target.get("run_id") == owner_run_id
+            and record.target.get("node_ref") == op_node_id
+            and record.workflow_step_id is None
+        ]
+        return sorted(records, key=lambda record: (record.updated_at, record.record_id), reverse=True)
 
     def inspect_data_schema(
         self,
@@ -1035,6 +2356,239 @@ class NodeOperationContextProvider:
         manifest = _read_manifest(runs_root / owner_run_id)
         return canonical.model_dump(), node, manifest
 
+    def _project_run_root(self, run_id: str) -> Path:
+        """Resolve a project run identifier without accepting a filesystem path."""
+
+        if not _PROJECT_RUN_ID_RE.fullmatch(run_id):
+            raise ToolVisibleError(
+                "PROJECT_RUN_ID_INVALID: run_ids must be project run identifiers, not paths."
+            )
+        runs_root = (self.project_root / "runs").resolve()
+        run_root = (runs_root / run_id).resolve()
+        if run_root.parent != runs_root or not run_root.is_dir():
+            raise ToolVisibleError(
+                f"PROJECT_RUN_NOT_FOUND: no completed project run is available for {run_id!r}."
+            )
+        return run_root
+
+
+_PROJECT_RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}")
+_MAX_PUBLIC_MODEL_PREDICTORS = 32
+
+
+def _notebook_source_runs_by_revision(
+    records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Recover server-recorded source runs without trusting a caller value."""
+
+    source_runs: dict[str, str] = {}
+    for record in records:
+        if record.get("record_type") != "revision":
+            continue
+        revision = _notebook_option_revision_key(record.get("option_revision"))
+        proposal = record.get("typed_proposal")
+        target = proposal.get("target") if isinstance(proposal, dict) else None
+        source_run_id = target.get("run_id") if isinstance(target, dict) else None
+        if revision is None or not isinstance(source_run_id, str):
+            continue
+        if _PROJECT_RUN_ID_RE.fullmatch(source_run_id):
+            source_runs[revision] = source_run_id
+    return source_runs
+
+
+def _committed_notebook_workflow_receipt(
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Validate the minimal receipt shape needed for bounded read-only evidence."""
+
+    if (
+        record.get("record_type") != "execution_result"
+        or record.get("execution_status") != "succeeded"
+        or record.get("committed") is not True
+    ):
+        return None
+    option_revision = _notebook_option_revision_key(record.get("option_revision"))
+    execution = record.get("workflow_execution")
+    if option_revision is None or not isinstance(execution, dict):
+        return None
+    workflow_id = execution.get("workflow_id")
+    plan_fingerprint = execution.get("plan_fingerprint")
+    if (
+        not isinstance(workflow_id, str)
+        or not workflow_id
+        or len(workflow_id) > 300
+        or not isinstance(plan_fingerprint, str)
+        or not plan_fingerprint
+        or len(plan_fingerprint) > 300
+        or execution.get("status") != "completed"
+    ):
+        return None
+    raw_branches = execution.get("branch_runs")
+    if not isinstance(raw_branches, list) or not raw_branches:
+        return None
+    branch_runs: list[dict[str, str]] = []
+    for branch in raw_branches:
+        if not isinstance(branch, dict):
+            return None
+        branch_id = branch.get("branch_id")
+        run_id = branch.get("run_id")
+        if (
+            not isinstance(branch_id, str)
+            or not branch_id
+            or len(branch_id) > 300
+            or not isinstance(run_id, str)
+            or _PROJECT_RUN_ID_RE.fullmatch(run_id) is None
+        ):
+            return None
+        branch_runs.append({"branch_id": branch_id, "run_id": run_id})
+    raw_artifact_ids = execution.get("post_estimation_artifact_ids")
+    if not isinstance(raw_artifact_ids, list):
+        return None
+    artifact_ids = [
+        artifact_id
+        for artifact_id in raw_artifact_ids
+        if isinstance(artifact_id, str) and artifact_id and len(artifact_id) <= 500
+    ]
+    if len(artifact_ids) != len(raw_artifact_ids):
+        return None
+    return {
+        "option_revision": option_revision,
+        "workflow_id": workflow_id,
+        "plan_fingerprint": plan_fingerprint,
+        "branch_runs": branch_runs,
+        "post_estimation_artifact_ids": list(dict.fromkeys(artifact_ids)),
+    }
+
+
+def _notebook_option_revision_key(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return str(value)
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return str(int(value))
+    return None
+
+
+def _public_requested_model_coefficients(
+    *,
+    run_id: str,
+    result: dict[str, Any],
+    requested_terms: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Project one stored result into term-specific, non-row evidence."""
+
+    model_id = result.get("model_id")
+    coefficients = result.get("coefficients")
+    if not isinstance(model_id, str) or not model_id or not isinstance(coefficients, dict):
+        return None
+
+    public_coefficients: list[dict[str, Any]] = []
+    missing_terms: list[str] = []
+    for term in requested_terms:
+        coefficient = coefficients.get(term)
+        if not isinstance(coefficient, dict):
+            missing_terms.append(term)
+            continue
+        public_coefficients.append(
+            {
+                "term": term,
+                "estimate": _public_stat_number(coefficient.get("estimate")),
+                "std_error": _public_stat_number(coefficient.get("std_error")),
+                "p_value": _public_stat_number(coefficient.get("p_value")),
+                "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
+                "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                "source_id": (
+                    coefficient.get("source_id")
+                    if isinstance(coefficient.get("source_id"), str)
+                    else None
+                ),
+            }
+        )
+
+    predictors = result.get("x_columns")
+    public_predictors = (
+        [item for item in predictors if isinstance(item, str)][:_MAX_PUBLIC_MODEL_PREDICTORS]
+        if isinstance(predictors, list)
+        else []
+    )
+    predictor_count = (
+        len([item for item in predictors if isinstance(item, str)])
+        if isinstance(predictors, list)
+        else 0
+    )
+    covariance_evidence = result.get("covariance_evidence")
+    covariance_evidence = (
+        covariance_evidence if isinstance(covariance_evidence, dict) else {}
+    )
+    confidence_level = _public_probability(covariance_evidence.get("confidence_level"))
+    cluster_variable = covariance_evidence.get("cluster_variable")
+    cluster_count = _public_positive_int(covariance_evidence.get("cluster_count"))
+    return {
+        "run_id": run_id,
+        "model_id": model_id,
+        "model_type": result.get("model_type") if isinstance(result.get("model_type"), str) else None,
+        "nobs": _public_positive_int(result.get("nobs")),
+        "r_squared": _public_stat_number(result.get("r_squared")),
+        "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+        "df_model": _public_stat_number(result.get("df_model")),
+        "df_resid": _public_stat_number(result.get("df_resid")),
+        "outcome": result.get("y_column") if isinstance(result.get("y_column"), str) else None,
+        "predictors": public_predictors,
+        "predictors_omitted": max(predictor_count - len(public_predictors), 0),
+        "entity_col": result.get("entity_col") if isinstance(result.get("entity_col"), str) else None,
+        "time_col": result.get("time_col") if isinstance(result.get("time_col"), str) else None,
+        "covariance": result.get("covariance") if isinstance(result.get("covariance"), str) else None,
+        "covariance_estimator": (
+            result.get("covariance_estimator")
+            if isinstance(result.get("covariance_estimator"), str)
+            else None
+        ),
+        "confidence_interval": {
+            "level": confidence_level,
+            "method": (
+                covariance_evidence.get("confidence_interval_method")
+                if isinstance(covariance_evidence.get("confidence_interval_method"), str)
+                else None
+            ),
+        },
+        "covariance_details": {
+            "cluster_variable": cluster_variable if isinstance(cluster_variable, str) else None,
+            "cluster_count": cluster_count,
+            "cluster_entity": (
+                covariance_evidence.get("cluster_entity")
+                if isinstance(covariance_evidence.get("cluster_entity"), bool)
+                else None
+            ),
+        },
+        "coefficients": public_coefficients,
+        "missing_terms": missing_terms,
+        "evidence_ref": {
+            "run_id": run_id,
+            "model_id": model_id,
+            "result_ref": f"model_results:{model_id}",
+        },
+    }
+
+
+def _public_stat_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(float(value)) else None
+
+
+def _public_probability(value: Any) -> float | None:
+    number = _public_stat_number(value)
+    if number is None or not 0 < float(number) < 1:
+        return None
+    return float(number)
+
+
+def _public_positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
 
 def _read_manifest(run_root: Path) -> dict[str, Any]:
     try:
@@ -1086,6 +2640,7 @@ def _bounded_result_summary(
     *,
     summary_status: str,
     preview: dict[str, Any],
+    model_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     identity = summary.get("model_identity") if isinstance(summary, dict) else None
     identity = identity if isinstance(identity, dict) else {}
@@ -1161,7 +2716,50 @@ def _bounded_result_summary(
             else None
         ),
         "run_status": run_status if isinstance(run_status, dict) else None,
+        "persisted_models": _bounded_persisted_model_facts(model_results),
     }
+
+
+def _bounded_persisted_model_facts(
+    model_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project the public facts needed to answer a selected model question.
+
+    Diagnostic summaries are narrative-facing and may intentionally omit a
+    coefficient table.  The model-result contract is the durable numerical
+    authority, so return a small schema-owned projection rather than forcing
+    an Agent to guess from a report or to read a raw result payload.
+    """
+
+    projected: list[dict[str, Any]] = []
+    for result in model_results[:2]:
+        model_id = result.get("model_id")
+        coefficients = result.get("coefficients")
+        if not isinstance(model_id, str) or not isinstance(coefficients, dict):
+            continue
+        rows: list[dict[str, Any]] = []
+        for term, coefficient in list(coefficients.items())[:8]:
+            if not isinstance(term, str) or not isinstance(coefficient, dict):
+                continue
+            rows.append(
+                {
+                    "term": term,
+                    "estimate": _public_stat_number(coefficient.get("estimate")),
+                    "std_error": _public_stat_number(coefficient.get("std_error")),
+                    "p_value": _public_stat_number(coefficient.get("p_value")),
+                    "ci_lower": _public_stat_number(coefficient.get("ci_lower")),
+                    "ci_upper": _public_stat_number(coefficient.get("ci_upper")),
+                }
+            )
+        projected.append(
+            {
+                "model_id": model_id,
+                "r_squared": _public_stat_number(result.get("r_squared")),
+                "r_squared_adj": _public_stat_number(result.get("r_squared_adj")),
+                "coefficients": rows,
+            }
+        )
+    return projected
 
 
 def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -1171,6 +2769,8 @@ def _bounded_coefficient_row(row: dict[str, Any]) -> dict[str, Any]:
         "estimate",
         "std_error",
         "p_value",
+        "ci_lower",
+        "ci_upper",
         "significance_label",
     )
     return {key: row[key] for key in allowed if key in row}
@@ -1195,6 +2795,589 @@ def _bounded_artifact_manifest(
         if not isinstance(section, str) or not isinstance(value, dict):
             continue
         bounded[section] = {key: value[key] for key in allowed if key in value}
+    return bounded
+
+
+def _operation_artifact_ids(record: OperationRecord) -> list[str]:
+    """Collect only artifact ids already recorded as this operation's output."""
+
+    artifact_ids: list[str] = []
+    direct = record.outputs.get("artifact_ids")
+    if isinstance(direct, list):
+        artifact_ids.extend(item for item in direct if isinstance(item, str) and item)
+    workflow_state = record.outputs.get("workflow_state")
+    steps = workflow_state.get("steps") if isinstance(workflow_state, dict) else None
+    if isinstance(steps, dict):
+        for step in steps.values():
+            step_artifacts = step.get("artifact_ids") if isinstance(step, dict) else None
+            if isinstance(step_artifacts, list):
+                artifact_ids.extend(
+                    item for item in step_artifacts if isinstance(item, str) and item
+                )
+    return list(dict.fromkeys(artifact_ids))
+
+
+def _bounded_completed_operation(record: OperationRecord) -> dict[str, Any]:
+    workflow_state = record.outputs.get("workflow_state")
+    steps = workflow_state.get("steps") if isinstance(workflow_state, dict) else None
+    workflow_steps: list[dict[str, Any]] = []
+    if isinstance(steps, dict):
+        for step_id, step in sorted(steps.items()):
+            if not isinstance(step_id, str) or not isinstance(step, dict):
+                continue
+            artifact_ids = step.get("artifact_ids")
+            row_counts = step.get("row_counts")
+            workflow_steps.append(
+                {
+                    "step_id": step_id,
+                    "status": str(step.get("status") or "unknown"),
+                    "artifact_ids": [
+                        item
+                        for item in (artifact_ids if isinstance(artifact_ids, list) else [])
+                        if isinstance(item, str) and item
+                    ][:16],
+                    "row_counts": {
+                        str(key): value
+                        for key, value in (row_counts.items() if isinstance(row_counts, dict) else ())
+                        if isinstance(value, int) and not isinstance(value, bool)
+                    },
+                }
+            )
+    return {
+        "operation_record_id": record.record_id,
+        "operation_id": record.operation_id,
+        "operation_version": record.operation_version,
+        "status": record.status,
+        "artifact_ids": _operation_artifact_ids(record)[:16],
+        "workflow": {
+            "workflow_id": (
+                workflow_state.get("workflow_id")
+                if isinstance(workflow_state, dict)
+                and isinstance(workflow_state.get("workflow_id"), str)
+                else None
+            ),
+            "status": (
+                workflow_state.get("status")
+                if isinstance(workflow_state, dict)
+                and isinstance(workflow_state.get("status"), str)
+                else None
+            ),
+            "steps": workflow_steps[:16],
+        },
+    }
+
+
+_PUBLIC_RESULT_DENIED_KEYS = frozenset(
+    {
+        "_omitted_item_count",
+        "data",
+        "dataset",
+        "file",
+        "filename",
+        "path",
+        "raw_rows",
+        "rows",
+        "records",
+        "rendered_path",
+        "residuals",
+        "source_rows",
+        "row_ids",
+        "fitted_values",
+        "values",
+    }
+)
+
+
+@dataclass
+class _PublicResultBudget:
+    """One aggregate budget for a public artifact projection."""
+
+    remaining_items: int = 96
+    remaining_string_characters: int = 2048
+    remaining_key_characters: int = 1600
+    omitted_items: int = 0
+
+
+def _public_operation_artifact_result(
+    artifact_type: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Project a declared result type; unknown types remain deliberately opaque."""
+
+    if artifact_type not in {
+        "statistical_exploration",
+        "statistical_test",
+        "post_estimation",
+    }:
+        return None, ["raw_artifact_payloads"]
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None, ["raw_artifact_payloads"]
+    return _bounded_public_result_value(result), ["raw_artifact_payloads", "raw_rows"]
+
+
+def _node_public_result_evidence(
+    project_root: Path,
+    *,
+    owner_run_id: str,
+    op_node_id: str,
+) -> list[dict[str, Any]]:
+    """Read statistical results whose declared input is the selected data node.
+
+    This is deliberately a relation check, not a run-wide artifact dump.  A
+    UI-created statistical exploration records the selected data artifact in
+    its artifact-index inputs; only those descendants become Agent evidence.
+    """
+
+    try:
+        from ..data_operations import resolve_data_column_cast_context
+
+        source = resolve_data_column_cast_context(
+            project_root,
+            source_run_id=owner_run_id,
+            source_node_id=op_node_id,
+        )
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return []
+    source_artifact_id = source.get("source_artifact_id")
+    if not isinstance(source_artifact_id, str) or not source_artifact_id:
+        return []
+    run_root = project_root / "runs" / owner_run_id
+    try:
+        index = read_json(run_root / "artifacts_index.json")
+    except (FileNotFoundError, OSError, ValueError):
+        return []
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return []
+    evidence: list[dict[str, Any]] = []
+    for entry in entries:
+        if len(evidence) >= 8 or not isinstance(entry, dict):
+            break
+        artifact_id = entry.get("artifact_id")
+        artifact_type = entry.get("artifact_type")
+        inputs = entry.get("inputs")
+        if (
+            not isinstance(artifact_id, str)
+            or not isinstance(artifact_type, str)
+            or not isinstance(inputs, list)
+            or source_artifact_id not in inputs
+        ):
+            continue
+        artifact = resolve_registered_artifact(run_root, artifact_id)
+        if artifact is None:
+            continue
+        resolved_type, sha256, payload = artifact
+        public_result, _omitted = _public_operation_artifact_result(resolved_type, payload)
+        if public_result is None:
+            continue
+        evidence.append(
+            {
+                "artifact_id": artifact_id,
+                "artifact_type": artifact_type,
+                "sha256": sha256,
+                "result": public_result,
+            }
+        )
+    return evidence
+
+
+def _bounded_run_figure_evidence(
+    project_root: Path,
+    *,
+    run_id: str,
+    node: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Expose numeric figure backing facts, never image pixels or paths."""
+
+    if node.get("stage") != "model":
+        return []
+    try:
+        from ..figure_context import FigureContextError, resolve_figure_ai_context
+
+        run_root = project_root / "runs" / run_id
+        try:
+            index = read_json(run_root / "artifacts_index.json")
+        except (FileNotFoundError, OSError, ValueError):
+            return []
+        records = index.get("artifacts") if isinstance(index, dict) else None
+        if not isinstance(records, list):
+            return []
+        evidence: list[dict[str, Any]] = []
+        for record in records:
+            if len(evidence) >= 4 or not isinstance(record, dict):
+                break
+            artifact_id = record.get("artifact_id")
+            if record.get("artifact_type") != "figure" or not isinstance(artifact_id, str):
+                continue
+            try:
+                packet = resolve_figure_ai_context(project_root, run_id=run_id, artifact_id=artifact_id)
+            except (FigureContextError, FileNotFoundError, OSError, TypeError, ValueError):
+                continue
+            source = packet.get("source")
+            source_preview = source.get("preview_json") if isinstance(source, dict) else None
+            try:
+                raw_source = json.loads(source_preview) if isinstance(source_preview, str) else None
+            except (TypeError, ValueError):
+                raw_source = None
+            model_figure_source = _bounded_model_figure_numeric_source(
+                run_root,
+                node_id=str(node.get("id") or ""),
+                artifact_id=artifact_id,
+            )
+            numeric_source = (
+                model_figure_source
+                if model_figure_source is not None
+                else _bounded_public_result_value(raw_source)
+                if raw_source is not None
+                else None
+            )
+            evidence.append(
+                {
+                    "artifact_id": artifact_id,
+                    "chart_type": packet.get("figure", {}).get("chart_type") if isinstance(packet.get("figure"), dict) else None,
+                    "numeric_source": numeric_source,
+                    "source_available": numeric_source is not None,
+                    "scope": "run",
+                }
+            )
+        return evidence
+    except (FileNotFoundError, OSError, TypeError, ValueError):
+        return []
+
+
+def _bounded_model_figure_numeric_source(
+    run_root: Path,
+    *,
+    node_id: str,
+    artifact_id: str,
+) -> dict[str, Any] | None:
+    """Aggregate model vectors into chart facts without returning observations."""
+
+    if not artifact_id.startswith(("residuals_fitted", "residuals_vs_", "qq_residuals")):
+        return None
+    model_key = node_id.split(":", 1)[1] if node_id.startswith("model:") else ""
+    candidates = [
+        result
+        for result in read_model_results(run_root)
+        if isinstance(result, dict)
+        and (
+            not model_key
+            or str(result.get("model_id") or result.get("result_id") or "") == model_key
+        )
+    ]
+    if not candidates and model_key:
+        return None
+    if not candidates:
+        candidates = [result for result in read_model_results(run_root) if isinstance(result, dict)]
+    if len(candidates) != 1:
+        return None
+    result = candidates[0]
+    model_id = result.get("model_id") or result.get("result_id")
+    residuals = _finite_numeric_values(result.get("residuals"))
+    if not residuals:
+        return None
+    nobs = result.get("nobs")
+    analysis_observations = nobs if isinstance(nobs, int) and not isinstance(nobs, bool) and nobs >= len(residuals) else len(residuals)
+    if artifact_id.startswith("qq_residuals"):
+        return {
+            "kind": "residual_distribution_quantiles",
+            "model_id": model_id if isinstance(model_id, str) else None,
+            "analysis_observations": analysis_observations,
+            "plotted_observations": len(residuals),
+            "residual_mean": _numeric_mean(residuals),
+            "residual_standard_deviation": _numeric_standard_deviation(residuals),
+            "quantiles": [
+                {"quantile": quantile, "residual": _numeric_quantile(residuals, quantile)}
+                for quantile in (0.05, 0.25, 0.5, 0.75, 0.95)
+            ],
+        }
+    if artifact_id.startswith("residuals_vs_"):
+        return _bounded_residuals_vs_predictor_source(
+            run_root,
+            result=result,
+            artifact_id=artifact_id,
+            residuals=residuals,
+            analysis_observations=analysis_observations,
+        )
+    fitted = _finite_numeric_values(result.get("fitted_values"))
+    pairs = sorted(zip(fitted, residuals, strict=False), key=lambda pair: pair[0])
+    if len(pairs) < 8:
+        return None
+    bin_count = min(12, max(1, len(pairs) // 5))
+    bins: list[dict[str, Any]] = []
+    for index in range(bin_count):
+        start = index * len(pairs) // bin_count
+        stop = (index + 1) * len(pairs) // bin_count
+        chunk = pairs[start:stop]
+        if len(chunk) < 2:
+            continue
+        fitted_chunk = [pair[0] for pair in chunk]
+        residual_chunk = [pair[1] for pair in chunk]
+        bins.append(
+            {
+                "n": len(chunk),
+                "fitted_min": min(fitted_chunk),
+                "fitted_max": max(fitted_chunk),
+                "residual_mean": _numeric_mean(residual_chunk),
+                "residual_standard_deviation": _numeric_standard_deviation(residual_chunk),
+                "residual_absolute_mean": _numeric_mean([abs(value) for value in residual_chunk]),
+            }
+        )
+    if not bins:
+        return None
+    return {
+        "kind": "residuals_vs_fitted_bins",
+        "model_id": model_id if isinstance(model_id, str) else None,
+        "analysis_observations": analysis_observations,
+        "plotted_observations": len(pairs),
+        "binning": "equal_count_by_fitted_value",
+        "bins": bins,
+    }
+
+
+def _bounded_residuals_vs_predictor_source(
+    run_root: Path,
+    *,
+    result: dict[str, Any],
+    artifact_id: str,
+    residuals: list[float],
+    analysis_observations: int,
+) -> dict[str, Any] | None:
+    """Reconstruct one persisted predictor diagnostic as bounded bin statistics.
+
+    The figure renderer aligns the model's residual vector to the cleaned data
+    through ``analysis_sample.row_order``.  Reusing that same deterministic
+    alignment here lets an Agent describe the chart it is shown without
+    releasing any observation-level predictor or residual values.
+    """
+
+    suffix = artifact_id.removeprefix("residuals_vs_")
+    x_columns = result.get("x_columns")
+    if not isinstance(x_columns, list):
+        return None
+    candidates = [
+        str(column)
+        for column in x_columns
+        if _figure_artifact_suffix(str(column)) == suffix
+    ]
+    if len(candidates) != 1:
+        return None
+    predictor = candidates[0]
+    frame = _read_cleaned_dataset_for_figure_context(run_root)
+    if frame is None or predictor not in frame.columns:
+        return None
+    aligned = _align_figure_context_rows(frame, result, len(residuals))
+    if aligned is None:
+        return None
+    try:
+        import pandas as pd
+
+        values = pd.to_numeric(aligned[predictor], errors="coerce")
+    except (ImportError, TypeError, ValueError):
+        return None
+    pairs = sorted(
+        (
+            (float(value), residual)
+            for value, residual in zip(values, residuals, strict=True)
+            if not pd.isna(value) and math.isfinite(float(value))
+        ),
+        key=lambda pair: pair[0],
+    )
+    if len(pairs) < 8:
+        return None
+    bin_count = min(12, max(1, len(pairs) // 5))
+    bins: list[dict[str, Any]] = []
+    for index in range(bin_count):
+        start = index * len(pairs) // bin_count
+        stop = (index + 1) * len(pairs) // bin_count
+        chunk = pairs[start:stop]
+        if len(chunk) < 2:
+            continue
+        predictor_chunk = [pair[0] for pair in chunk]
+        residual_chunk = [pair[1] for pair in chunk]
+        bins.append(
+            {
+                "n": len(chunk),
+                "predictor_min": min(predictor_chunk),
+                "predictor_max": max(predictor_chunk),
+                "residual_mean": _numeric_mean(residual_chunk),
+                "residual_standard_deviation": _numeric_standard_deviation(residual_chunk),
+                "residual_absolute_mean": _numeric_mean([abs(value) for value in residual_chunk]),
+            }
+        )
+    if not bins:
+        return None
+    return {
+        "kind": "residuals_vs_predictor_bins",
+        "model_id": result.get("model_id") if isinstance(result.get("model_id"), str) else None,
+        "predictor": predictor,
+        "analysis_observations": analysis_observations,
+        "plotted_observations": len(pairs),
+        "binning": "equal_count_by_predictor",
+        "bins": bins,
+    }
+
+
+def _figure_artifact_suffix(column: str) -> str:
+    suffix = re.sub(r"[^0-9A-Za-z_]+", "_", column).strip("_")
+    return suffix or "predictor"
+
+
+def _read_cleaned_dataset_for_figure_context(run_root: Path) -> Any | None:
+    try:
+        index = read_json(run_root / "artifacts_index.json")
+        records = index.get("artifacts") if isinstance(index, dict) else None
+        if not isinstance(records, list):
+            return None
+        record = next(
+            (
+                item
+                for item in records
+                if isinstance(item, dict) and item.get("artifact_id") == "cleaned_dataset"
+            ),
+            None,
+        )
+        path_value = record.get("path") if isinstance(record, dict) else None
+        if not isinstance(path_value, str) or not path_value:
+            return None
+        path = (run_root / path_value).resolve()
+        path.relative_to(run_root.resolve())
+        if not path.is_file():
+            return None
+        import pandas as pd
+
+        return pd.read_parquet(path)
+    except (FileNotFoundError, OSError, ValueError, TypeError, ImportError):
+        return None
+
+
+def _align_figure_context_rows(frame: Any, result: dict[str, Any], size: int) -> Any | None:
+    if size < 1 or len(frame) < size:
+        return None
+    sample = result.get("analysis_sample")
+    row_order = sample.get("row_order") if isinstance(sample, dict) else None
+    if isinstance(row_order, list) and len(row_order) >= size:
+        positions = {str(value): position for position, value in enumerate(frame.index)}
+        selected = [positions.get(str(value)) for value in row_order[:size]]
+        if any(position is None for position in selected):
+            return None
+        return frame.iloc[[int(position) for position in selected]]
+    # Older persisted results may predate row identities.  Their existing
+    # visualization uses the first diagnostic-vector rows, so this retains
+    # that explicitly bounded legacy behavior rather than silently inventing
+    # a new alignment rule.
+    return frame.iloc[:size]
+
+
+def _finite_numeric_values(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    values: list[float] = []
+    for item in value:
+        if isinstance(item, bool):
+            return []
+        try:
+            numeric = float(item)
+        except (TypeError, ValueError):
+            return []
+        if not math.isfinite(numeric):
+            return []
+        values.append(numeric)
+    return values
+
+
+def _numeric_mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _numeric_standard_deviation(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    mean = _numeric_mean(values)
+    return math.sqrt(sum((value - mean) ** 2 for value in values) / (len(values) - 1))
+
+
+def _numeric_quantile(values: list[float], quantile: float) -> float:
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
+
+def _bounded_public_result_value(
+    value: Any,
+    *,
+    depth: int = 0,
+    budget: _PublicResultBudget | None = None,
+) -> Any:
+    """Keep a numerical result compact and reject row-shaped/raw payload fields."""
+
+    budget = budget or _PublicResultBudget()
+    if budget.remaining_items <= 0:
+        budget.omitted_items += 1
+        return "[omitted: result item budget]"
+    budget.remaining_items -= 1
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        limit = min(300, budget.remaining_string_characters)
+        if limit <= 0:
+            budget.omitted_items += 1
+            return "[omitted: result string budget]"
+        budget.remaining_string_characters -= limit
+        if len(value) > limit:
+            budget.omitted_items += 1
+        return value[:limit]
+    if depth >= 4:
+        budget.omitted_items += 1
+        return "[omitted: nesting limit]"
+    if isinstance(value, list):
+        bounded_list: list[Any] = []
+        for item in value:
+            if len(bounded_list) >= 16 or budget.remaining_items <= 0:
+                budget.omitted_items += 1
+                break
+            if isinstance(item, (dict, list, str, int, float, bool)) or item is None:
+                bounded_list.append(
+                    _bounded_public_result_value(item, depth=depth + 1, budget=budget)
+                )
+        return bounded_list
+    if not isinstance(value, dict):
+        budget.omitted_items += 1
+        return "[omitted: unsupported value]"
+    bounded: dict[str, Any] = {}
+    omissions_at_entry = budget.omitted_items
+    for key in sorted(value):
+        if not isinstance(key, str):
+            continue
+        normalized = key.lower()
+        if normalized in _PUBLIC_RESULT_DENIED_KEYS or normalized.startswith("raw_"):
+            continue
+        if (
+            len(bounded) >= 24
+            or budget.remaining_items <= 0
+            or budget.remaining_key_characters <= 0
+        ):
+            budget.omitted_items += 1
+            break
+        key_limit = min(64, budget.remaining_key_characters)
+        bounded_key = key[:key_limit]
+        budget.remaining_key_characters -= len(bounded_key)
+        if len(key) > key_limit:
+            budget.omitted_items += 1
+        if bounded_key in bounded:
+            budget.omitted_items += 1
+            continue
+        bounded[bounded_key] = _bounded_public_result_value(
+            value[key], depth=depth + 1, budget=budget
+        )
+    omitted_here = budget.omitted_items - omissions_at_entry
+    if omitted_here:
+        bounded["_omitted_item_count"] = omitted_here
     return bounded
 
 

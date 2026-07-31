@@ -28,7 +28,7 @@ export interface ThemeToggleProps {
 }
 
 export function ThemeToggle({ className }: ThemeToggleProps): JSX.Element {
-  const { theme, setTheme } = useTheme();
+  const { theme, effective, setTheme } = useTheme();
   return (
     <div
       role="radiogroup"
@@ -44,12 +44,22 @@ export function ThemeToggle({ className }: ThemeToggleProps): JSX.Element {
             role="radio"
             aria-checked={active}
             aria-label={opt.label}
-            title={opt.label}
+            title={
+              opt.value === "system"
+                ? `${opt.label} · currently ${effective}`
+                : opt.label
+            }
             data-active={active ? "true" : undefined}
+            data-resolved={opt.value === "system" ? effective : undefined}
             onClick={() => setTheme(opt.value)}
             className="theme-toggle__btn"
           >
-            <span aria-hidden="true">{opt.glyph}</span>
+            <span
+              className={opt.value === "system" ? "theme-toggle__auto" : undefined}
+              aria-hidden="true"
+            >
+              {opt.value === "system" ? "Auto" : opt.glyph}
+            </span>
           </button>
         );
       })}

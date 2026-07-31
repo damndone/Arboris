@@ -1,3 +1,5 @@
+import { Fragment, useEffect, useRef, useState } from "react";
+
 import "./notebook.css";
 import { ContextSlicePanel } from "./ContextSlicePanel";
 import { DomainMemoryControls } from "./DomainMemoryControls";
@@ -7,6 +9,7 @@ import { OptionCard } from "./OptionCard";
 import { PlanDiffConfirmation } from "./PlanDiffConfirmation";
 import { SelectionActions } from "./SelectionActions";
 import { rootToSlug } from "../workbench/projectSlug";
+import type { NotebookInteractionMode } from "./notebookApi";
 import {
   type NotebookExecutionResult,
   type NotebookOptionRevision,
@@ -19,10 +22,10 @@ import type { DomainMemoryCandidate, DomainMemoryPreferences } from "./domainMem
 
 /**
  * The Notebook surface: a narrative stream, persisted option batches, the
- * confirmation step, and the visible slice. The planner caps each generated
- * batch at three options; the Notebook must still show older batches and
- * deferred siblings so navigation never turns persisted analysis history into
- * an apparent deletion.
+ * confirmation step, and the visible slice. Plan mode caps a batch at three
+ * options, while Action mode verifies one requested path; the Notebook must
+ * still show older batches and deferred siblings so navigation never turns
+ * persisted analysis history into an apparent deletion.
  *
  * Six states have to be distinguishable at a glance — loading, error, empty,
  * pending, confirmation, success — because five of them are routinely rendered
@@ -35,6 +38,9 @@ export interface NotebookSurfaceProps {
   view: NotebookView;
   projectRoot?: string;
   busy?: boolean;
+  planning?: boolean;
+  planningError?: { code: string; message: string } | null;
+  actionError?: { code: string; message: string } | null;
   selectionAnchor?: NotebookSelectionAnchor | null;
   onDismissSelection?: () => void;
   onTextSelection?: (
@@ -46,6 +52,17 @@ export interface NotebookSurfaceProps {
   onRejectOption?: (option: NotebookOptionRevision) => void;
   onRevalidateOption?: (option: NotebookOptionRevision) => void;
   onReplan?: () => void;
+  onStartNewAnalysis?: () => void;
+  newAnalysisDisabled?: boolean;
+  interactionMode?: NotebookInteractionMode;
+  onInteractionModeChange?: (mode: NotebookInteractionMode) => void;
+  userIntent?: string;
+  onUserIntent?: (goal: string) => void;
+  onCancelPlanning?: () => void;
+  /** Server-published total planning budget, shown while a pass runs. */
+  planningDeadlineSeconds?: number;
+  /** Epoch ms the in-flight planning attempt began, when one is running. */
+  planningStartedAtMs?: number;
   onConfirm?: (confirmation: PendingConfirmation) => void;
   onCancelConfirmation?: (confirmation: PendingConfirmation) => void;
   onConfirmAndExecute?: (option: NotebookOptionRevision) => void;
@@ -72,8 +89,107 @@ function exclusionSummary(reasons: Record<string, number>): string {
 
 const MAX_VISIBLE_EXECUTION_ISSUES = 8;
 
+function NotebookPlanningProgress({
+  onCancel,
+  deadlineSeconds,
+  startedAtMs,
+}: {
+  onCancel?: () => void;
+  /** Server-published total planning budget, when known. */
+  deadlineSeconds?: number;
+  /**
+   * Epoch ms the attempt began. Mount time is not a usable substitute: this
+   * surface remounts while the same request is still in flight, and anchoring
+   * to the mount restarts the count at zero — which, next to a budget the
+   * attempt has already been spending, understates how long it has run.
+   */
+  startedAtMs?: number;
+}) {
+  const anchorRef = useRef<number>(startedAtMs ?? Date.now());
+  if (typeof startedAtMs === "number") anchorRef.current = startedAtMs;
+  const anchor = anchorRef.current;
+  const [elapsedSeconds, setElapsedSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - anchor) / 1000)),
+  );
+
+  useEffect(() => {
+    setElapsedSeconds(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [anchor]);
+
+  // An elapsed counter alone cannot distinguish a pass that is still inside its
+  // budget from one that has hung, which left cancellation as the only recourse
+  // on screen. Show the budget when the server published one.
+  const hasDeadline = typeof deadlineSeconds === "number" && deadlineSeconds > 0;
+  const overdue = hasDeadline && elapsedSeconds > (deadlineSeconds as number);
+  const elapsedLabel = hasDeadline
+    ? `Elapsed ${elapsedSeconds}s / ${deadlineSeconds}s`
+    : `Elapsed ${elapsedSeconds}s`;
+
+  return (
+    <section
+      className="nb-planning-progress"
+      data-testid="notebook-planning-progress"
+      data-overdue={overdue ? "true" : undefined}
+      aria-live="polite"
+    >
+      <header>
+        <span className="nb-label">How the plan is being formed</span>
+        <span data-testid="notebook-planning-elapsed">
+          {overdue
+            ? `${elapsedLabel} — past the planning budget; the server is ending it`
+            : elapsedLabel}
+        </span>
+      </header>
+      <ol>
+        <li data-status="completed">Bounded Notebook context compiled</li>
+        <li data-status="active">Agent and bounded evidence inspections are running</li>
+        <li data-status="pending">Validating evidence-bound options</li>
+      </ol>
+      <p>
+        Live, auditable Workbench stages and evidence checks. Private chain-of-thought is
+        not exposed; a provider summary requires an explicitly supported field.
+      </p>
+      {onCancel ? (
+        <button
+          type="button"
+          className="nb-button"
+          data-testid="notebook-cancel-planning"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 export function NotebookSurface(props: NotebookSurfaceProps) {
   const { view } = props;
+  const interactionMode = props.interactionMode ?? "plan";
+  const actionMode = interactionMode === "action";
+  const [intentDraft, setIntentDraft] = useState(props.userIntent ?? "");
+  const [newAnalysisOpen, setNewAnalysisOpen] = useState(false);
+  const confirmationSlotRef = useRef<HTMLDivElement>(null);
+  const confirmationKey =
+    view.status === "ready" && view.notebook.confirmation
+      ? `${view.notebook.confirmation.option.option_id}:${view.notebook.confirmation.option.option_revision}`
+      : null;
+
+  useEffect(() => {
+    if (!confirmationKey) return;
+    const slot = confirmationSlotRef.current;
+    if (!slot) return;
+    slot.focus({ preventScroll: true });
+    slot.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  }, [confirmationKey]);
+
+  useEffect(() => {
+    setIntentDraft(props.userIntent ?? "");
+  }, [props.userIntent]);
 
   function captureTextSelection(event: React.MouseEvent<HTMLDivElement>) {
     const browserSelection = window.getSelection();
@@ -114,6 +230,13 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         <p data-testid="notebook-loading" data-phase={view.phase ?? "compiling"}>
           {loadingMessage}
         </p>
+        {view.phase === "planning" ? (
+          <NotebookPlanningProgress
+            onCancel={props.onCancelPlanning}
+            deadlineSeconds={props.planningDeadlineSeconds}
+            startedAtMs={props.planningStartedAtMs}
+          />
+        ) : null}
       </div>
     );
   }
@@ -123,7 +246,9 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       view.error.code === "OPTION_MATERIALIZATION_FAILED" ||
       view.error.code === "GENESIS_MODEL_INCOMPLETE" ||
       view.error.code === "GENESIS_MODEL_EVIDENCE_REQUIRED" ||
-      view.error.code === "NOTEBOOK_PLANNING_CONTRACT_INVALID"
+      view.error.code === "NOTEBOOK_PLANNING_CONTRACT_INVALID" ||
+      view.error.code === "NOTEBOOK_PLANNING_TIMEOUT" ||
+      view.error.code === "NOTEBOOK_PLANNING_CANCELLED"
     );
     return (
       <div className="nb-surface" data-testid="notebook-surface" data-state="error">
@@ -133,11 +258,11 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           {canReplan ? (
             <button
               type="button"
-              className="nb-button nb-button-primary"
+            className="nb-button nb-button-primary"
               data-testid="notebook-replan-options"
               onClick={props.onReplan}
             >
-              Replan with current evidence
+              {actionMode ? "Recheck request" : "Replan with current evidence"}
             </button>
           ) : null}
         </div>
@@ -153,7 +278,17 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       groups.set(option.batch_id, batch);
       return groups;
     }, new Map<string, NotebookOptionRevision[]>()),
-  );
+  ).sort(([, left], [, right]) => {
+    const leftCreatedAt = Math.max(
+      ...left.map((option) => Date.parse(option.created_at)),
+    );
+    const rightCreatedAt = Math.max(
+      ...right.map((option) => Date.parse(option.created_at)),
+    );
+    return leftCreatedAt - rightCreatedAt;
+  });
+  const currentBatchId =
+    batches.length > 0 ? batches[batches.length - 1][0] : null;
   const executing = notebook.options.find((option) => option.lifecycle_status === "executing");
   const outcome = notebook.outcome ?? null;
   const executionResults = Object.values(notebook.executionResults ?? {});
@@ -184,6 +319,9 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       data-state={state}
       onPointerDown={(event) => {
         const target = event.target as HTMLElement | null;
+        if (!target?.closest('[data-testid="notebook-new-analysis-actions"]')) {
+          setNewAnalysisOpen(false);
+        }
         if (!target?.closest('[data-testid="notebook-selection-actions"]')) {
           props.onDismissSelection?.();
         }
@@ -191,20 +329,152 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
       onMouseUp={captureTextSelection}
     >
       <header className="nb-surface-header">
-        <span className="nb-label">Notebook</span>
-        <span>{`${notebook.notebook_id} · ${notebook.run_family_id}`}</span>
-        {props.onReplan ? (
-          <button
-            type="button"
-            className="nb-button"
-            data-testid="notebook-replan-options"
-            onClick={props.onReplan}
-            disabled={props.busy}
-          >
-            Replan with current evidence
-          </button>
+        <div className="nb-surface-header-title">
+          <span className="nb-label">Notebook</span>
+          <span>{`${notebook.notebook_id} · ${notebook.run_family_id}`}</span>
+        </div>
+        {props.onStartNewAnalysis ? (
+          <div className="nb-notebook-new-analysis" data-testid="notebook-new-analysis-actions">
+            <button
+              type="button"
+              className="nb-button nb-notebook-new-analysis-trigger"
+              data-testid="notebook-new-analysis-menu"
+              aria-expanded={newAnalysisOpen}
+              aria-haspopup="menu"
+              disabled={props.newAnalysisDisabled}
+              onClick={() => setNewAnalysisOpen((open) => !open)}
+            >
+              New analysis <span aria-hidden="true">▾</span>
+            </button>
+            {newAnalysisOpen ? (
+              <div className="nb-notebook-new-analysis-popover" role="menu">
+                <p>Creates a separate Notebook. The current analysis is unchanged.</p>
+                <button
+                  type="button"
+                  className="nb-button"
+                  data-testid="notebook-start-from-source"
+                  role="menuitem"
+                  disabled={props.newAnalysisDisabled}
+                  onClick={() => {
+                    setNewAnalysisOpen(false);
+                    props.onStartNewAnalysis?.();
+                  }}
+                >
+                  Start from source data
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </header>
+
+      <form
+        className="nb-user-intent"
+        data-testid="notebook-user-intent"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const goal = intentDraft.trim();
+          if (goal) props.onUserIntent?.(goal);
+        }}
+      >
+        <div className="nb-interaction-mode" role="group" aria-label="Notebook mode">
+          <button
+            type="button"
+            className="nb-interaction-mode-button"
+            data-testid="notebook-mode-plan"
+            aria-pressed={!actionMode}
+            disabled={props.planning || props.busy}
+            onClick={() => props.onInteractionModeChange?.("plan")}
+          >
+            Plan
+          </button>
+          <button
+            type="button"
+            className="nb-interaction-mode-button"
+            data-testid="notebook-mode-action"
+            aria-pressed={actionMode}
+            disabled={props.planning || props.busy}
+            onClick={() => props.onInteractionModeChange?.("action")}
+          >
+            Action
+          </button>
+        </div>
+        <p className="nb-interaction-mode-help">
+          {actionMode
+            ? "Check a specified analysis and prepare one editable Draft. Nothing runs until you confirm."
+            : "Explore evidence-backed analysis paths before choosing one Draft. Nothing runs until you confirm."}
+        </p>
+        <label htmlFor="notebook-user-intent-input">
+          {actionMode ? "What should Workbench do?" : "What do you want to find out?"}
+        </label>
+        <textarea
+          id="notebook-user-intent-input"
+          data-testid="notebook-user-intent-input"
+          value={intentDraft}
+          rows={3}
+          placeholder={actionMode
+            ? "Describe the analysis specification, variables, constraints, and required outputs."
+            : "Describe the research question, outcome, constraints, and the comparison you need."}
+          onChange={(event) => setIntentDraft(event.target.value)}
+        />
+        <button
+          type="submit"
+          className="nb-button nb-button-primary"
+          data-testid="notebook-submit-intent"
+          disabled={!intentDraft.trim() || props.planning}
+        >
+          {actionMode
+            ? props.userIntent ? "Update and prepare Draft" : "Check and prepare Draft"
+            : props.userIntent ? "Update goal and replan" : "Plan analysis"}
+        </button>
+      </form>
+
+      {props.domainMemoryPreferences && props.onDomainMemoryPreferencesChange ? (
+        <DomainMemoryControls
+          preferences={props.domainMemoryPreferences}
+          onChange={props.onDomainMemoryPreferencesChange}
+        />
+      ) : null}
+
+      {props.planning ? (
+        <NotebookPlanningProgress
+            onCancel={props.onCancelPlanning}
+            deadlineSeconds={props.planningDeadlineSeconds}
+            startedAtMs={props.planningStartedAtMs}
+          />
+      ) : null}
+
+      {props.planningError ? (
+        <div
+          className="nb-planning-error"
+          data-testid="notebook-planning-error"
+          role="status"
+        >
+          <span className="nb-error-code">{props.planningError.code}</span>
+          <span>{props.planningError.message}</span>
+          {props.onReplan ? (
+            <button
+              type="button"
+              className="nb-button"
+              data-testid="notebook-retry-planning"
+              onClick={props.onReplan}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {props.actionError ? (
+        <div
+          className="nb-action-error"
+          data-testid="notebook-action-error"
+          role="alert"
+        >
+          <span className="nb-error-code">{props.actionError.code}</span>
+          <span>{props.actionError.message}</span>
+        </div>
+      ) : null}
 
       <section className="nb-narrative" data-testid="notebook-narrative">
         {notebook.narrative.map((entry) => (
@@ -321,8 +591,15 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
           <span className="nb-label">Executed analysis</span>
           {executionResults.map((result: NotebookExecutionResult) => (
             <article key={`${result.option_id}:${result.option_revision}`}>
-              <p>{`${result.option_id} rev ${result.option_revision} · run ${result.run_id ?? "unassigned"}`}</p>
+              <p>
+                {result.workflow_execution
+                  ? `${result.option_id} rev ${result.option_revision} · ${result.workflow_execution.branch_runs.length} model branches · no single active head`
+                  : `${result.option_id} rev ${result.option_revision} · run ${result.run_id ?? "unassigned"}`}
+              </p>
               <p>{`execution ${result.execution_status} · output contract ${result.artifact_validation.validation_status}`}</p>
+              {result.workflow_execution ? (
+                <p>{`workflow ${result.workflow_execution.status} · ${result.workflow_execution.post_estimation_artifact_ids.length} post-estimation artifact${result.workflow_execution.post_estimation_artifact_ids.length === 1 ? "" : "s"}`}</p>
+              ) : null}
               <p>{`Committed ${result.committed ? "yes" : "no"}. Checked: ${result.artifact_validation.checked_dimensions.join(
                 ", ",
               )}. Not checked: ${result.artifact_validation.not_evaluated_dimensions.join(
@@ -362,53 +639,68 @@ export function NotebookSurface(props: NotebookSurfaceProps) {
         </p>
       ) : (
         <section className="nb-option-list" data-testid="notebook-option-list">
-          {batches.map(([batchId, options]) => (
-            <div
+          {batches.map(([batchId, options]) => {
+            const isCurrentBatch = batchId === currentBatchId;
+            const isHistoricalStaleBatch =
+              !isCurrentBatch &&
+              options.every((option) => option.freshness_status === "stale");
+            return (
+            <details
               className="nb-option-batch"
               data-testid={`notebook-option-batch-${batchId}`}
               key={batchId}
+              open={!isHistoricalStaleBatch}
             >
-              <header className="nb-option-batch-header">
-                <span className="nb-label">Analysis option batch</span>
+              <summary className="nb-option-batch-header">
+                <span className="nb-label">
+                  {isCurrentBatch ? "Current option batch" : "Previous option batch"}
+                </span>
                 <code>{batchId}</code>
-                <span>{`${options.length} persisted option${options.length === 1 ? "" : "s"}`}</span>
-              </header>
-              {options.map((option) => (
-                <OptionCard
-                  key={option.option_id}
-                  option={option}
-                  outcome={outcome && outcome.observed.length > 0 ? outcome : null}
-                  onSelect={props.onSelectOption}
-                  onDefer={props.onDeferOption}
-                  onReject={props.onRejectOption}
-                  onRevalidate={props.onRevalidateOption}
-                  onConfirmAndExecute={props.onConfirmAndExecute}
-                />
-              ))}
-            </div>
-          ))}
+                <span>
+                  {`${options.length} persisted option${options.length === 1 ? "" : "s"}${
+                    isHistoricalStaleBatch ? " · stale history" : ""
+                  }`}
+                </span>
+                <span className="nb-option-batch-action">Show / hide</span>
+              </summary>
+              <div className="nb-option-batch-body">
+                {options.map((option) => (
+                  <Fragment key={option.option_id}>
+                    <OptionCard
+                      option={option}
+                      interactionMode={props.interactionMode ?? "plan"}
+                      outcome={outcome && outcome.observed.length > 0 ? outcome : null}
+                      onSelect={props.onSelectOption}
+                      onDefer={props.onDeferOption}
+                      onReject={props.onRejectOption}
+                      onRevalidate={props.onRevalidateOption}
+                      onConfirmAndExecute={props.onConfirmAndExecute}
+                    />
+                    {notebook.confirmation?.option.option_id === option.option_id ? (
+                      <div
+                        ref={confirmationSlotRef}
+                        data-testid="notebook-confirmation-slot"
+                        tabIndex={-1}
+                      >
+                        <PlanDiffConfirmation
+                          confirmation={notebook.confirmation}
+                          busy={props.busy}
+                          onConfirm={props.onConfirm}
+                          onCancel={props.onCancelConfirmation}
+                        />
+                      </div>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </div>
+            </details>
+            );
+          })}
         </section>
       )}
 
-      {notebook.confirmation ? (
-        <div data-testid="notebook-confirmation-slot">
-          <PlanDiffConfirmation
-            confirmation={notebook.confirmation}
-            busy={props.busy}
-            onConfirm={props.onConfirm}
-            onCancel={props.onCancelConfirmation}
-          />
-        </div>
-      ) : null}
-
       {notebook.contextSlice ? <ContextSlicePanel slice={notebook.contextSlice} /> : null}
 
-      {props.domainMemoryPreferences && props.onDomainMemoryPreferencesChange ? (
-        <DomainMemoryControls
-          preferences={props.domainMemoryPreferences}
-          onChange={props.onDomainMemoryPreferencesChange}
-        />
-      ) : null}
       {notebook.contextSlice?.domain_memory_projection ? (
         <DomainMemoryEntryList projection={notebook.contextSlice.domain_memory_projection} />
       ) : null}

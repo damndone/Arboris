@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from threading import Event, Thread
 
 import httpx
@@ -90,7 +91,7 @@ def test_create_and_list_return_only_public_provider_data(api, store_path):
     assert stored.providers[0].notes == "Primary research provider"
 
 
-def test_environment_provider_is_visible_and_model_switch_materializes_local_settings(
+def test_environment_provider_is_visible_and_publishes_only_its_configured_model(
     api, store_path, monkeypatch
 ):
     monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
@@ -101,18 +102,37 @@ def test_environment_provider_is_visible_and_model_switch_materializes_local_set
     assert listed.status_code == 200, listed.text
     payload = listed.json()
     assert payload["active_provider_id"] == "environment"
-    assert {model["request_model"] for model in payload["providers"][0]["models"]} >= {
-        "deepseek-v4-flash",
-        "deepseek-v4-pro",
-    }
+    # The environment variables *declare* one model; listing is not a
+    # capability-discovery protocol. Inferring extra vendor models from the
+    # base URL would offer a model this credential was never configured for.
+    # A genuine second choice can only arrive from the provider itself, via
+    # POST /llm/providers/{id}/models/refresh.
+    assert [
+        model["request_model"] for model in payload["providers"][0]["models"]
+    ] == ["deepseek-v4-flash"]
     assert API_KEY not in listed.text
 
+
+def test_environment_provider_model_switch_materializes_local_settings(
+    api, store_path, monkeypatch
+):
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", API_KEY)
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "deepseek-v4-flash")
+
+    # An explicit operator write is the authoritative channel for `model`, so it
+    # is taken as given rather than checked against the published catalog.
     updated = api.put(
         "/llm/providers/environment",
         json={"model": "deepseek-v4-pro"},
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["model"] == "deepseek-v4-pro"
+    # The partial update omits `models`, so the bootstrapped catalog survives
+    # verbatim: switching the request model must not silently invent entries.
+    assert [model["request_model"] for model in updated.json()["models"]] == [
+        "deepseek-v4-flash"
+    ]
     assert load_provider_store(store_path).active_provider_id == "environment"
     assert load_llm_config().source == "local"
     assert load_llm_config().model == "deepseek-v4-pro"
@@ -1016,6 +1036,22 @@ def _install_upstream(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Re
     return seen
 
 
+def _install_async_upstream(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request]:
+    seen: list[httpx.Request] = []
+
+    def recording_handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return handler(request)
+
+    transport = httpx.MockTransport(recording_handler)
+    monkeypatch.setattr(
+        llm_client,
+        "_async_client_factory",
+        lambda config: httpx.AsyncClient(transport=transport, timeout=config.timeout_s),
+    )
+    return seen
+
+
 def test_refresh_models_uses_get_models_and_returns_public_provider(
     api, store_path, monkeypatch
 ):
@@ -1248,6 +1284,82 @@ def test_chat_completion_preserves_existing_base_url_joining(monkeypatch):
     )
 
     assert str(seen[0].url) == "https://api.example.com/v1/chat/completions"
+
+
+def test_async_stream_chat_completion_yields_public_text_deltas(monkeypatch) -> None:
+    seen = _install_async_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            content=(
+                b'data: {"model":"test-model","choices":[{"delta":{"content":"first "},"finish_reason":null}]}\n\n'
+                b'data: {"model":"test-model","choices":[{"delta":{"content":"second"},"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        ),
+    )
+
+    async def scenario() -> list[dict[str, object]]:
+        return [
+            event
+            async for event in llm_client.async_stream_chat_completion(
+                [{"role": "user", "content": "stream a public answer"}],
+                LLMConfig(
+                    base_url="https://api.example.com/v1",
+                    api_key=API_KEY,
+                    model="test-model",
+                ),
+            )
+        ]
+
+    events = asyncio.run(scenario())
+
+    assert events == [
+        {"type": "text_delta", "delta": "first "},
+        {"type": "text_delta", "delta": "second"},
+        {"type": "done", "finish_reason": "stop", "model": "test-model"},
+    ]
+    assert json.loads(seen[0].content)["stream"] is True
+
+
+def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatch) -> None:
+    _install_async_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            content=(
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"inspect_node","arguments":"{\\"node_ref\\":\\""}}]},"finish_reason":null}]}\n\n'
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"model:ols_1\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        ),
+    )
+
+    async def scenario() -> list[dict[str, object]]:
+        return [
+            event
+            async for event in llm_client.async_stream_chat_completion(
+                [{"role": "user", "content": "inspect the selected node"}],
+                LLMConfig(
+                    base_url="https://api.example.com/v1",
+                    api_key=API_KEY,
+                    model="test-model",
+                ),
+                tools=[{"type": "function", "function": {"name": "inspect_node"}}],
+            )
+        ]
+
+    assert asyncio.run(scenario()) == [
+        {
+            "type": "tool_call",
+            "tool_call": {
+                "tool_call_id": "call-1",
+                "tool_id": "inspect_node",
+                "arguments": {"node_ref": "model:ols_1"},
+            },
+        },
+        {"type": "done", "finish_reason": "tool_calls", "model": "test-model"},
+    ]
 
 
 def test_probe_uses_models_endpoint_and_never_chat_completion(

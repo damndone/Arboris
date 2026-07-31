@@ -35,6 +35,10 @@ beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   installMatchMedia(true);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise<Response>(() => undefined)),
+  );
 });
 
 afterEach(() => {
@@ -97,5 +101,18 @@ describe("ThemeToggle", () => {
     fireEvent.click(screen.getByLabelText("Use system theme"));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("system");
+  });
+
+  it("labels the system choice as Auto and exposes its current effective theme", () => {
+    render(
+      <ThemeProvider initial="system">
+        <ThemeToggle />
+      </ThemeProvider>,
+    );
+
+    const system = screen.getByLabelText("Use system theme");
+    expect(system).toHaveTextContent("Auto");
+    expect(system).toHaveAttribute("title", "Use system theme · currently dark");
+    expect(system).toHaveAttribute("data-resolved", "dark");
   });
 });

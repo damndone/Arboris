@@ -51,6 +51,15 @@ def _context_packet() -> dict[str, object]:
     }
 
 
+def test_chain_protocol_uses_notebook_receipt_evidence_directly() -> None:
+    """Receipt projections are final bounded evidence, not operation records."""
+    from workbench.http.agent_routes import CHAIN_AGENT_PROTOCOL
+
+    assert "inspect_notebook_workflow_results" in CHAIN_AGENT_PROTOCOL
+    assert "cite its returned post_estimation_evidence directly" in CHAIN_AGENT_PROTOCOL
+    assert "never call inspect_operation_artifact for those ids" in CHAIN_AGENT_PROTOCOL
+
+
 def test_agent_session_turn_is_durable_and_replayable(
     tmp_path: Path,
     monkeypatch,
@@ -118,6 +127,88 @@ def test_agent_session_turn_is_durable_and_replayable(
         assert not (project_root / "agent-events").exists()
 
 
+def test_agent_turn_abort_rejects_when_the_session_has_no_active_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Stop is explicit: it must never pretend to cancel an idle session."""
+
+    from workbench.http import agent_routes
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        assert created.status_code == 200
+
+        stopped = client.post(
+            f"/agent/sessions/{created.json()['session_id']}/abort",
+            params={"project_root": str(project_root)},
+        )
+
+    assert stopped.status_code == 409
+    assert stopped.json()["error"]["code"] == "AGENT_TURN_NOT_ACTIVE"
+
+
+def test_agent_turn_abort_targets_only_the_live_session_turn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The stop route forwards cancellation to the exact live AgentCore."""
+
+    from workbench.http import agent_routes
+
+    class ActiveAgent:
+        aborted = False
+
+        async def abort(self) -> None:
+            self.aborted = True
+
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    live = ActiveAgent()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={
+                "role": "chain",
+                "chain_id": "chain-a",
+                "run_id": "run-a",
+                "context_packet": _context_packet(),
+            },
+        )
+        assert created.status_code == 200
+        session_id = created.json()["session_id"]
+        monkeypatch.setitem(
+            agent_routes._ACTIVE_TURNS,
+            agent_routes._active_turn_key(project_root, session_id),
+            live,
+        )
+
+        stopped = client.post(
+            f"/agent/sessions/{session_id}/abort",
+            params={"project_root": str(project_root)},
+        )
+
+    assert stopped.status_code == 200
+    assert stopped.json()["status"] == "cancelling"
+    assert live.aborted is True
+
+
 def test_chain_turn_receives_structured_proposal_protocol(
     tmp_path: Path,
     monkeypatch,
@@ -161,6 +252,10 @@ def test_chain_turn_receives_structured_proposal_protocol(
     protocol = protocol_messages[0]["content"]
     assert "must call propose_operation" in protocol
     assert "does not execute" in protocol
+    assert "description does not execute a result" in protocol
+    assert "model.joint_f_test" in protocol
+    assert "model.quadratic_stationary_point" in protocol
+    assert "stationary_point_within_observed_range" in protocol
 
 
 def test_agent_session_rejects_oversized_context_and_unknown_session(tmp_path: Path) -> None:
@@ -216,6 +311,15 @@ def test_get_session_projection_returns_typed_links(tmp_path: Path) -> None:
         link["href"].get("operation_record_id") == fixture.record_id
         for link in body["projection"]["links"]
     )
+    child_run_link = next(
+        link
+        for link in body["projection"]["links"]
+        if link["kind"] == "run" and link["id"] == fixture.child_run_id
+    )
+    # A child run is reachable through the child Chain Agent that produced it.
+    # Preserve that verified session binding so selecting the output cannot
+    # silently discard the execution transcript.
+    assert child_run_link["href"]["session_id"] == fixture.child_session_id
     hierarchy = body["projection"]["hierarchy"]
     assert hierarchy["ref"]["id"] == "main-session"
     source_chain = next(
@@ -1113,7 +1217,7 @@ def test_chain_turn_wires_scoped_read_only_tools_without_mutation(
     assert _snapshot(project_root) == before
 
 
-def test_main_role_turn_exposes_no_workbench_tools(
+def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1138,7 +1242,25 @@ def test_main_role_turn_exposes_no_workbench_tools(
             json={"question": "总结项目状态。"},
         )
     assert turn.status_code == 200
-    assert FakeAgentAdapter.instances[-1].requests[0].tools == []
+    tool_ids = {
+        tool["tool_id"] for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+    }
+    assert tool_ids == {
+        "inspect_project_model_coefficients",
+        "inspect_project_coefficient_transforms",
+        "inspect_project_dataset_schema",
+        "inspect_project_model_figure_evidence",
+        "inspect_project_linear_interaction_effects",
+        "inspect_project_notebook_workflow_results",
+        "inspect_project_numeric_summary",
+    }
+    descriptor = next(
+        tool
+        for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+        if tool["tool_id"] == "inspect_project_dataset_schema"
+    )
+    assert descriptor["side_effect"] == "none"
+    assert descriptor["scope_requirements"] == ["project"]
     protocol_messages = [
         message
         for message in FakeAgentAdapter.instances[-1].requests[0].messages
@@ -1147,6 +1269,75 @@ def test_main_role_turn_exposes_no_workbench_tools(
     assert len(protocol_messages) == 1
     assert "project-level advisory Agent" in protocol_messages[0]["content"]
     assert "never invent" in protocol_messages[0]["content"].lower()
+    assert "inspect_project_model_coefficients" in protocol_messages[0]["content"]
+    assert "at most four exact persisted term names per call" in protocol_messages[0]["content"]
+    assert "inspect_project_coefficient_transforms" in protocol_messages[0]["content"]
+    assert "inspect_project_dataset_schema" in protocol_messages[0]["content"]
+    assert "inspect_project_model_figure_evidence" in protocol_messages[0]["content"]
+    assert "inspect_project_notebook_workflow_results" in protocol_messages[0]["content"]
+    assert "one receipt lookup with up to sixteen visible candidate run ids" in protocol_messages[0]["content"]
+    assert "do not inspect a dataset schema merely to restate a declared model specification" in protocol_messages[0]["content"].lower()
+    assert "inspect_project_numeric_summary" in protocol_messages[0]["content"]
+    assert "inspect_project_linear_interaction_effects" in protocol_messages[0]["content"]
+    assert "one recorded unit" in protocol_messages[0]["content"]
+    assert "overlap" in protocol_messages[0]["content"]
+    assert "exact sign" in protocol_messages[0]["content"]
+    assert "mechanically copy those returned fields" in protocol_messages[0]["content"]
+    assert "contradicts the returned p value" in protocol_messages[0]["content"]
+    assert "nonrobust significance is false" in protocol_messages[0]["content"]
+    assert "inference changes under the two covariance assumptions" in protocol_messages[0]["content"]
+    assert "caused by heteroskedasticity" in protocol_messages[0]["content"]
+    assert "standard-error size alone does not establish" in protocol_messages[0]["content"]
+    assert "a signal, an indication, a hint, or a suggestion" in protocol_messages[0]["content"]
+    assert "conditional association, not a causal effect" in protocol_messages[0]["content"]
+    assert "variable's real-world meaning" in protocol_messages[0]["content"]
+    assert "unique counts do not establish whether a covariate changes within entities" in protocol_messages[0]["content"]
+    workflow_descriptor = next(
+        tool
+        for tool in FakeAgentAdapter.instances[-1].requests[0].tools
+        if tool["tool_id"] == "inspect_project_notebook_workflow_results"
+    )
+    assert workflow_descriptor["input_schema"]["properties"]["run_ids"]["maxItems"] == 16
+
+
+def test_main_turn_refreshes_protocol_for_existing_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from workbench.http import agent_routes
+
+    FakeAgentAdapter.instances.clear()
+    monkeypatch.setattr(agent_routes, "load_llm_config", _config)
+    monkeypatch.setattr(agent_routes, "OpenAICompatibleModelAdapter", FakeAgentAdapter)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/agent/sessions",
+            params={"project_root": str(project_root)},
+            json={"role": "main", "context_packet": _context_packet()},
+        )
+        session_id = created.json()["session_id"]
+        marker = "PROTOCOL_UPGRADE_MARKER"
+        monkeypatch.setattr(
+            agent_routes,
+            "MAIN_AGENT_PROTOCOL",
+            f"{agent_routes.MAIN_AGENT_PROTOCOL}\n- {marker}",
+        )
+        turn = client.post(
+            f"/agent/sessions/{session_id}/turns",
+            params={"project_root": str(project_root)},
+            json={"question": "读取现有证据。"},
+        )
+
+    assert turn.status_code == 200
+    protocol_messages = [
+        message
+        for message in FakeAgentAdapter.instances[-1].requests[0].messages
+        if message.get("name") == "workbench_global_agent_protocol"
+    ]
+    assert any(marker in message["content"] for message in protocol_messages)
 
 
 class ProposingAdapter:

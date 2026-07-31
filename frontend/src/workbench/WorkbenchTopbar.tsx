@@ -3,9 +3,8 @@
 // V1.5.2 P3 — workbench top bar with view-mode switcher.
 //
 // View switcher tabs (Graph / Table / Pipeline) + the right-side action
-// slot (plan §15), driven by actionRegistry surface="topbar". v1.6.6 ③:
-// `Rerun` is live (routes to the node rerun flow); `Generate report` stays
-// an honest disabled placeholder (AI backend — v1.6.9 after roadmap re-sign).
+// slot (plan §15), driven by actionRegistry surface="topbar". `Rerun` routes
+// to the node rerun flow. Report navigation stays in the adjacent view tabs.
 //
 // The switcher writes `view` via `useWorkbench().dispatch.setView` —
 // which goes through the provider's single-commit URL writer.
@@ -222,12 +221,12 @@ export function ProjectSwitcher({ projectRoot }: { projectRoot: string }) {
 export function WorkbenchTopbar({
   projectRoot,
   extraActions = null,
-  onOpenSettings,
+  leadingActions = null,
   onViewChange,
 }: {
   projectRoot: string;
   extraActions?: ReactNode;
-  onOpenSettings?: () => void;
+  leadingActions?: ReactNode;
   onViewChange?: () => void;
 }) {
   const { state, dispatch } = useWorkbench();
@@ -255,8 +254,6 @@ export function WorkbenchTopbar({
           pinUpstream: dispatch.pinFocus,
           // F1: focus-only (see ContextMenu) — don't move selection.
           focusUpstream: dispatch.setFocusOnly,
-          // v1.6.11 slice C — Generate report switches the main view.
-          setView: dispatch.setView,
         },
       }
     : null;
@@ -279,7 +276,13 @@ export function WorkbenchTopbar({
         background: "var(--surface-elevated, transparent)",
       }}
     >
-      <ProjectSwitcher projectRoot={projectRoot} />
+      <div
+        data-testid="workbench-topbar-navigation"
+        style={{ display: "flex", alignItems: "center", gap: 8 }}
+      >
+        {leadingActions}
+        <ProjectSwitcher projectRoot={projectRoot} />
+      </div>
       <div
         role="tablist"
         aria-label="Workbench view mode"
@@ -299,31 +302,12 @@ export function WorkbenchTopbar({
           </ViewTabButton>
         ))}
       </div>
-      {/* Right-side action slot — plan §15. Driven by actionRegistry
-       *  surface="topbar": live Rerun + disabled Generate report (v1.6.9). */}
+      {/* Right-side analysis action slot, driven by actionRegistry. */}
       <div
         data-testid="workbench-topbar-actions"
         style={{ marginLeft: "auto", display: "flex", gap: 8 }}
       >
         {extraActions}
-        {onOpenSettings && (
-          <button
-            type="button"
-            data-testid="workbench-topbar-settings"
-            onClick={onOpenSettings}
-            style={{
-              padding: "4px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--separator)",
-              background: "transparent",
-              color: "var(--label)",
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            Settings
-          </button>
-        )}
         {topbarActions.map((action) => {
           const disabled = action.disabled?.(actionCtx!);
           return (
@@ -341,7 +325,7 @@ export function WorkbenchTopbar({
               style={{
                 padding: "4px 10px",
                 borderRadius: 6,
-                border: "1px solid var(--separator)",
+                border: 0,
                 background: "transparent",
                 color: disabled ? "var(--label-tertiary)" : "var(--label)",
                 cursor: disabled ? "not-allowed" : "pointer",

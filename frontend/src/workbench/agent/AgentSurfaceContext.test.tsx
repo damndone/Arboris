@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPanel } from "./AgentPanel";
@@ -8,6 +8,7 @@ import type { AgentMessage, AgentProposal } from "./agentTypes";
 
 const mocks = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
+  abortAgentTurn: vi.fn(),
   confirmAgentProposal: vi.fn(),
   declineAgentProposal: vi.fn(),
   reviseAgentProposal: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./agentApi", () => ({
   createAgentSession: mocks.createAgentSession,
+  abortAgentTurn: mocks.abortAgentTurn,
   confirmAgentProposal: mocks.confirmAgentProposal,
   declineAgentProposal: mocks.declineAgentProposal,
   reviseAgentProposal: mocks.reviseAgentProposal,
@@ -165,6 +167,7 @@ describe("AgentSurfaceProvider", () => {
     });
     mocks.updateLlmProvider.mockResolvedValue({ ...provider, model: "deepseek-chat" });
     mocks.createAgentSession.mockResolvedValue(session("agent_chain_new"));
+    mocks.abortAgentTurn.mockResolvedValue({ status: "cancelling", session_id: "agent_chain_new" });
     mocks.sendAgentTurn.mockResolvedValue({
       session: session("agent_chain_new", [
         { entry_id: "u1", role: "user", content: "检查这个图" },
@@ -277,7 +280,79 @@ describe("AgentSurfaceProvider", () => {
       "/proj",
       "agent_chain_new",
       "先检查这个图",
+      expect.any(AbortSignal),
     ));
+  });
+
+  it("renders public assistant deltas while a turn is still running", async () => {
+    let resolveTurn!: (value: {
+      session: ReturnType<typeof session>;
+      assistant: AgentMessage;
+      status: string;
+    }) => void;
+    mocks.sendAgentTurn.mockReturnValueOnce(new Promise((resolve) => {
+      resolveTurn = resolve;
+    }));
+    mocks.getAgentEvents.mockResolvedValue({
+      events: [{
+        event_id: "event-live-delta",
+        session_id: "agent_chain_new",
+        seq: 1,
+        event_type: "message_update",
+        payload: { delta: "正在核对当前模型的公开结果。" },
+        command_id: "command-1",
+        created_at: "2026-07-30T14:30:00Z",
+      }],
+    });
+    mount();
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
+      target: { value: "解释当前模型" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+
+    expect(await screen.findByTestId("agent-live-response")).toHaveTextContent(
+      "正在核对当前模型的公开结果。",
+    );
+
+    await act(async () => {
+      resolveTurn({
+        session: session("agent_chain_new", [
+          { entry_id: "u1", role: "user", content: "解释当前模型" },
+          {
+            entry_id: "a1",
+            role: "assistant",
+            content: "当前模型已核对。",
+            stop_reason: "stop",
+          },
+        ]),
+        assistant: { entry_id: "a1", role: "assistant", content: "当前模型已核对。" },
+        status: "idle",
+      });
+    });
+  });
+
+  it("cancels the active session and the local provider request", async () => {
+    mocks.sendAgentTurn.mockImplementationOnce((_projectRoot, _sessionId, _question, signal: AbortSignal) => (
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      })
+    ));
+    mount();
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
+      target: { value: "停止前先检查可见证据。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+    const stop = await screen.findByRole("button", { name: "Stop Agent" });
+    fireEvent.click(stop);
+
+    await waitFor(() => expect(mocks.abortAgentTurn).toHaveBeenCalledWith(
+      "/proj",
+      "agent_chain_new",
+    ));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("cancelled"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("binds a run-rail focus to the active model node instead of sending a run pseudo-key", async () => {
@@ -340,6 +415,78 @@ describe("AgentSurfaceProvider", () => {
     ));
   });
 
+  it("does not let a stale detail tab override the newly selected run", async () => {
+    const oldModel = {
+      id: "node-hash-old",
+      nodeKey: "node-hash-old",
+      opNodeId: "model:ols_1",
+      nodeHash: "node-hash-old",
+      raw: null,
+      stage: "model",
+      kind: "model",
+      title: "Old OLS",
+      parentStageId: null,
+      trust: "ok",
+      decisions: [],
+      runs: ["run-old"],
+    };
+    const newModel = {
+      ...oldModel,
+      id: "node-hash-new",
+      nodeKey: "node-hash-new",
+      nodeHash: "node-hash-new",
+      title: "New OLS",
+      runs: ["run-new"],
+    };
+    mocks.workbenchState.selectedKey = oldModel.nodeKey;
+    mocks.lineageModel.current = { nodes: [oldModel, newModel] };
+    mocks.forest.current = {
+      forest: {
+        schemaVersion: 4,
+        legacy: false,
+        nodes: [oldModel, newModel],
+        edges: [],
+        heads: [
+          {
+            runId: "run-new",
+            headNodeHash: newModel.nodeHash,
+            fromNode: null,
+            rerunOf: null,
+            rerunReason: null,
+            status: "completed",
+            createdAt: "2026-07-18T00:00:00Z",
+          },
+        ],
+        familyCount: 2,
+        familyRunCount: 2,
+      },
+      activeRunId: "run-new",
+      setActiveRunId: vi.fn(),
+    };
+
+    mount();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Ask Agent" }), {
+      target: { value: "检查刚切换的运行" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send to Agent" }));
+
+    expect(await screen.findByText("Current chain · New OLS")).toBeInTheDocument();
+
+    await waitFor(() => expect(mocks.createAgentSession).toHaveBeenCalledWith(
+      "/proj",
+      expect.objectContaining({
+        context_packet: expect.objectContaining({
+          selection: expect.objectContaining({
+            forest_node_key: "node-hash-new",
+          }),
+          operation_target: expect.objectContaining({
+            owner_run_id: "run-new",
+          }),
+        }),
+      }),
+    ));
+  });
+
   it("hydrates a durable session after reload", async () => {
     sessionStorage.setItem(
       "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone",
@@ -355,7 +502,7 @@ describe("AgentSurfaceProvider", () => {
     expect(await screen.findByText("可回放的回答。")).toBeInTheDocument();
   });
 
-  it("hydrates typed Main/Chain/fork navigation links with the durable session", async () => {
+  it("hydrates durable navigation links without duplicating them in the Agent transcript", async () => {
     sessionStorage.setItem(
       "workbench:agent-session:/proj:run-a:project%3Arun-a%3Anone",
       "agent_chain_saved",
@@ -394,7 +541,7 @@ describe("AgentSurfaceProvider", () => {
       "/proj",
       "agent_chain_saved",
     ));
-    expect(await screen.findByRole("button", { name: /open source model/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open source model/i })).not.toBeInTheDocument();
   });
 
   it("loads a linked child Agent session and operation focus from the URL", async () => {

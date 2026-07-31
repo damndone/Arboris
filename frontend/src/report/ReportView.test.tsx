@@ -229,6 +229,103 @@ describe("ReportView", () => {
     expect(screen.getByText(/pick a run/i)).toBeInTheDocument();
   });
 
+  it("lets the user choose which run's report facts are in view", () => {
+    render(<ReportView />);
+
+    expect(screen.getByTestId("report-view-run-picker")).toHaveClass(
+      "wb-run-version-picker",
+    );
+    expect(screen.getByTestId("report-view-run-picker")).toHaveTextContent(
+      "Versions:",
+    );
+    expect(screen.getByRole("button", { name: "Show report for run run_a" })).toHaveClass(
+      "wb-run-version-picker__button",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show report for run run_a" }));
+
+    const forest = mockForest.current as { setActiveRunId: ReturnType<typeof vi.fn> };
+    expect(forest.setActiveRunId).toHaveBeenCalledWith("run_a");
+  });
+
+  it("keeps the compact Run identifier visible for a single-run report", () => {
+    const seed = seedForest();
+    mockForest.current = {
+      forest: { ...seed.forest, heads: [{ runId: "only-run", createdAt: "2026-07-30T00:00:00Z" }] },
+      activeRunId: "only-run",
+      setActiveRunId: vi.fn(),
+    };
+
+    render(<ReportView />);
+
+    expect(screen.getByTestId("report-view-run-picker")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show report for run only-run" })).toHaveClass(
+      "wb-run-version-picker__button",
+    );
+  });
+
+  it("keeps persisted report history scoped to the selected run", async () => {
+    mockFetchAiReports.mockResolvedValue([
+      {
+        id: "report-run-a",
+        generatedAt: "2026-07-30T10:00:00Z",
+        model: "model-a",
+        instruction: "Run A only",
+        text: "Run A report",
+        scope: { run_id: "run_a", node_count: 1 },
+        facts: [],
+        excluded_fact_ids: [],
+        figures: [],
+      },
+      {
+        id: "report-run-c",
+        generatedAt: "2026-07-30T11:00:00Z",
+        model: "model-c",
+        instruction: "Run C only",
+        text: "Run C report",
+        scope: { run_id: "run_c", node_count: 1 },
+        facts: [],
+        excluded_fact_ids: [],
+        figures: [],
+      },
+    ]);
+
+    render(<ReportView projectRoot="/tmp/run-scoped-report-history" />);
+
+    expect(await screen.findByText("Run C report")).toBeInTheDocument();
+    expect(screen.getByText("Run C only")).toBeInTheDocument();
+    expect(screen.queryByText("Run A report")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run A only")).not.toBeInTheDocument();
+  });
+
+  it("does not show a completed report from a run that is no longer active", async () => {
+    let resolveGenerate: ((value: { text: string; model: string }) => void) | undefined;
+    mockGenerate.current = vi.fn().mockReturnValue(new Promise((resolve) => {
+      resolveGenerate = resolve;
+    }));
+    const setActiveRunId = vi.fn();
+    mockForest.current = {
+      ...(mockForest.current as object),
+      activeRunId: "run_c",
+      setActiveRunId,
+    };
+
+    const view = render(<ReportView projectRoot="/tmp/run-switch-race" />);
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
+
+    mockForest.current = {
+      ...(mockForest.current as object),
+      activeRunId: "run_a",
+      setActiveRunId,
+    };
+    view.rerender(<ReportView projectRoot="/tmp/run-switch-race" />);
+    resolveGenerate?.({ text: "Run C async report", model: "model-c" });
+
+    await waitFor(() => expect(mockSaveAiReport).toHaveBeenCalledTimes(1));
+    expect(mockSaveAiReport.mock.calls[0][0]).toMatchObject({ runId: "run_c" });
+    expect(screen.queryByText("Run C async report")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("report-body")).not.toBeInTheDocument();
+  });
+
   it("does not generate a report when the run figure inventory cannot load", async () => {
     mockFigureArtifactsError.current = new Error("artifact inventory unavailable");
     render(<ReportView projectRoot="/tmp/projA" />);

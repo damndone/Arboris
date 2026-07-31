@@ -2,7 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { GraphCanvas, waitingReviewsCount } from "./GraphCanvas";
+import {
+  GRAPH_MIN_ZOOM,
+  GraphCanvas,
+  waitingReviewsCount,
+} from "./GraphCanvas";
 import { adaptRunGraph } from "../api/graphAdapter";
 import type { GraphResponse, LineageEdge, LineageNode } from "../types";
 
@@ -119,6 +123,40 @@ function StatefulVariableGraph() {
 }
 
 describe("GraphCanvas", () => {
+  it("uses a wide zoom-out floor for dense lineage graphs", () => {
+    expect(GRAPH_MIN_ZOOM).toBe(0.1);
+  });
+
+  it("does not place graph cleanup controls over the canvas", () => {
+    sessionStorage.clear();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId="stage:cleaned"
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("canvas-hide-selected")).toBeNull();
+    expect(screen.queryByTestId("canvas-restore-hidden")).toBeNull();
+  });
+
+  it("does not place a global run-and-review card over the lineage canvas", () => {
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("canvas-status")).toBeNull();
+  });
+
   it("reports a blank-canvas click separately from node selection", async () => {
     const onPaneClick = vi.fn();
     render(
@@ -140,6 +178,29 @@ describe("GraphCanvas", () => {
     fireEvent.click(pane);
 
     expect(onPaneClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a blank-canvas right click for the context menu", async () => {
+    const onPaneContextMenu = vi.fn();
+    render(
+      <GraphCanvas
+        model={model(graph())}
+        selectedNodeId={null}
+        expandedGroups={new Set()}
+        onSelect={vi.fn()}
+        onExpandGroup={vi.fn()}
+        onPaneContextMenu={onPaneContextMenu}
+      />,
+    );
+
+    const pane = await waitFor(() => {
+      const el = document.querySelector(".react-flow__pane");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.contextMenu(pane, { clientX: 42, clientY: 24 });
+
+    expect(onPaneContextMenu).toHaveBeenCalledWith(42, 24);
   });
 
   it("clicking a folded variable group requests expansion", async () => {
@@ -465,50 +526,48 @@ describe("GraphCanvas", () => {
       );
     }
 
-    it("renders the toolbar with Free/Horizontal/Vertical/Fit/Fullscreen", () => {
+    it("renders distinct layout modes and equal-width view controls without a redundant Restore action", () => {
       renderCanvas();
       const toolbar = screen.getByTestId("canvas-toolbar");
       expect(toolbar).toBeInTheDocument();
-      // V1.5.1 T4': segmented layout control replaces the disabled
-      // Auto-layout indicator. Free is the default per user spec.
+      expect(screen.getByTestId("toolbar-layout-free")).toHaveTextContent("Manual");
       expect(screen.getByTestId("toolbar-layout-free")).toBeEnabled();
       expect(screen.getByTestId("toolbar-layout-lr")).toBeEnabled();
       expect(screen.getByTestId("toolbar-layout-tb")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fit")).toBeEnabled();
       expect(screen.getByTestId("toolbar-fullscreen")).toBeEnabled();
-      // v1.6.12 (V8): one-click reset back to the automatic arrangement.
-      expect(screen.getByTestId("toolbar-reset")).toBeEnabled();
+      expect(screen.queryByTestId("toolbar-reset")).not.toBeInTheDocument();
+      expect(
+        toolbar.querySelectorAll(".ln-canvas-toolbar__button"),
+      ).toHaveLength(5);
     });
 
-    it("Reset keeps the current layout mode and stays clickable (V8)", () => {
+    it("defaults to Horizontal automatic layout", () => {
       renderCanvas();
-      fireEvent.click(screen.getByTestId("toolbar-reset"));
-      // mode unchanged (still Free) — reset re-seeds, it does not switch mode
-      expect(screen.getByTestId("toolbar-layout-free")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      fireEvent.click(screen.getByTestId("toolbar-layout-lr"));
-      fireEvent.click(screen.getByTestId("toolbar-reset"));
       expect(screen.getByTestId("toolbar-layout-lr")).toHaveAttribute(
         "aria-pressed",
         "true",
       );
-    });
-
-    it("defaults to Free layout (Free button aria-pressed=true)", () => {
-      renderCanvas();
       expect(screen.getByTestId("toolbar-layout-free")).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByTestId("toolbar-layout-lr")).toHaveAttribute(
         "aria-pressed",
         "false",
       );
       expect(screen.getByTestId("toolbar-layout-tb")).toHaveAttribute(
         "aria-pressed",
         "false",
+      );
+    });
+
+    it("locks node dragging in automatic layouts and enables it in Manual", () => {
+      renderCanvas();
+      expect(screen.getByTestId("graph-canvas-root")).toHaveAttribute(
+        "data-nodes-draggable",
+        "false",
+      );
+      fireEvent.click(screen.getByTestId("toolbar-layout-free"));
+      expect(screen.getByTestId("graph-canvas-root")).toHaveAttribute(
+        "data-nodes-draggable",
+        "true",
       );
     });
 
@@ -544,10 +603,10 @@ describe("GraphCanvas", () => {
       ).not.toThrow();
     });
 
-    it("edge handles are horizontal (left/right) in Free/LR layouts", () => {
+    it("edge handles are horizontal (left/right) in Manual/LR layouts", () => {
       // React Flow's <Handle> renders a div with class
-      // .react-flow__handle-{left|right|top|bottom}. Default mode is Free,
-      // which maps to horizontal axis → left for target, right for source.
+      // .react-flow__handle-{left|right|top|bottom}. Horizontal is the
+      // automatic default and Manual preserves that axis.
       renderCanvas();
       // Wait synchronously: jsdom renders the handles inline.
       expect(
@@ -610,16 +669,6 @@ describe("GraphCanvas", () => {
         if (origEnabled)
           Object.defineProperty(document, "fullscreenEnabled", origEnabled);
       }
-    });
-
-    it("renders the status badge with run id and 0 waiting (clean graph)", () => {
-      renderCanvas();
-      const status = screen.getByTestId("canvas-status");
-      expect(status).toHaveTextContent("run_r1");
-      const count = screen.getByTestId("canvas-status-count");
-      expect(count).toHaveTextContent("waiting 0 reviews");
-      // No warn styling at zero.
-      expect(count.className).not.toContain("--warn");
     });
 
     it("counts decisions with reviewStatus ∈ {needed, failed} across all nodes", () => {
@@ -709,9 +758,9 @@ describe("GraphCanvas", () => {
           onExpandGroup={vi.fn()}
         />,
       );
-      const count = screen.getByTestId("canvas-status-count");
-      expect(count).toHaveTextContent("waiting 2 reviews");
-      expect(count.className).toContain("--warn");
+      // Each affected node retains its own review badge; there is no global
+      // status card obscuring the lineage canvas.
+      expect(screen.getAllByTestId("node-badge")).toHaveLength(2);
     });
 
     // REV-2: explicitly verify non-triggering decision statuses do
@@ -762,7 +811,7 @@ describe("GraphCanvas", () => {
       expect(waitingReviewsCount(vm)).toBe(0);
     });
 
-    it("waitingReviewsCount uses singular form for N=1", () => {
+    it("waitingReviewsCount reports one review for a single flagged decision", () => {
       const g: GraphResponse = {
         schema_version: 2,
         run_id: "r-single",
@@ -798,18 +847,7 @@ describe("GraphCanvas", () => {
         edges: {},
         branches: {},
       };
-      render(
-        <GraphCanvas
-          model={model(g)}
-          selectedNodeId={null}
-          expandedGroups={new Set()}
-          onSelect={vi.fn()}
-          onExpandGroup={vi.fn()}
-        />,
-      );
-      expect(screen.getByTestId("canvas-status-count")).toHaveTextContent(
-        "waiting 1 review",
-      );
+      expect(waitingReviewsCount(model(g))).toBe(1);
     });
 
     it("renders all 8 stage swatches in the legend (collapsed by default)", () => {

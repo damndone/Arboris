@@ -65,6 +65,7 @@ from ...lineage.run_family import (
     resolve_run_family,
 )
 from ...repository.run_repository import _read_artifact_records
+from ...data_operations import resolve_data_column_cast_context
 from ..context_compiler import (
     NotebookPlanningContextV1,
     compile_notebook_planning_context,
@@ -74,6 +75,7 @@ from ..context_compiler import (
 from ...lineage.upload_store import verify_upload
 from ..operations import OperationRegistry, OperationValidationError
 from ..trace import TraceWriter
+from ..workflow import compile_workflow, execute_workflow
 from .artifact_contract import (
     COMMITTABLE_VALIDATION_STATUSES,
     build_artifact_contract,
@@ -117,6 +119,8 @@ from .store import (
     OptionView,
     ProjectionSource,
     StoredRevision,
+    WorkflowSource,
+    dataset_workflow_source_pin,
 )
 from .evidence import (
     DatasetSource,
@@ -326,11 +330,37 @@ class NotebookService:
             with self.store.project_lock():
                 source = ProjectionSource.from_dict({"kind": "run", "run_id": from_run_id})
                 family_store = RunFamilyStore(self.project_root, create=False)
-                if not family_store.has_migrated():
-                    migrate_project_families(self.project_root, created_by="notebook_bootstrap")
                 resolved = resolve_run_family(
                     self.project_root, from_run_id, check_consistency=True
                 )
+                if resolved.source == "persisted":
+                    default_key = f"default-projection:{resolved.run_family_id}"
+                    defaults = [
+                        notebook
+                        for notebook in self.store.list_notebooks()
+                        if notebook.projection_key == default_key
+                    ]
+                    if len(defaults) > 1:
+                        raise ValueError(
+                            f"multiple default Notebook projections exist for "
+                            f"run family {resolved.run_family_id!r}"
+                        )
+                    if defaults:
+                        existing = defaults[0]
+                        if existing.projection_source == source:
+                            return existing
+                        family = family_store.get(resolved.run_family_id)
+                        if (
+                            existing.projection_source is not None
+                            and existing.projection_source.kind == "dataset"
+                            and family.origin == "notebook"
+                        ):
+                            return existing
+                elif not family_store.has_migrated():
+                    migrate_project_families(self.project_root, created_by="notebook_bootstrap")
+                    resolved = resolve_run_family(
+                        self.project_root, from_run_id, check_consistency=True
+                    )
                 if resolved.source != "persisted":
                     raise ValueError("default projection requires a persisted run family")
                 return self.store.ensure_default_projection(
@@ -377,6 +407,95 @@ class NotebookService:
             )
 
         return self.store.ensure_dataset_default_projection(source, create_dataset_notebook)
+
+    def ensure_dataset_projection_from_run(
+        self,
+        *,
+        from_run_id: str,
+        created_by: str,
+        title: str = "Analysis Notebook",
+        available_capabilities: Sequence[str] | None = None,
+    ) -> Notebook:
+        """Create a fresh dataset-backed Notebook from one verified run upload.
+
+        The client selects only an existing run id.  The server resolves its
+        persisted upload pin and filename, verifies the content-addressed blob,
+        then creates a separate family with no active model head.  This is not
+        a rerun and never changes the source run or its Notebook family.
+        """
+
+        from ...data_operations import (
+            DataColumnCastValidationError,
+            resolve_data_column_cast_context,
+        )
+        from ...lineage.run_inputs import read_run_inputs
+        from ...repository.run_repository import _resolve_run_root
+
+        run_root = _resolve_run_root(str(self.project_root), from_run_id)
+        inputs = read_run_inputs(run_root)
+        upload = inputs.get("upload")
+        if not isinstance(upload, Mapping):
+            raise ValueError("source run has no persisted upload metadata")
+        upload_sha256 = upload.get("sha256")
+        filename = upload.get("filename")
+        if not isinstance(upload_sha256, str) or not isinstance(filename, str):
+            raise ValueError("source run upload metadata is invalid")
+        if Path(filename).name != filename:
+            raise ValueError("source run upload filename is invalid")
+        form = inputs.get("form")
+        sheet_name = form.get("sheet_name") if isinstance(form, Mapping) else None
+        suffix = Path(filename).suffix.lower()
+        sheet_names = (
+            [sheet_name]
+            if suffix in {".xlsx", ".xls"} and isinstance(sheet_name, str) and sheet_name
+            else []
+        )
+        # A fresh dataset projection has no active result head, but a composed
+        # workflow still needs one immutable raw dataset identity.  Resolve it
+        # here from the chosen persisted Run; callers never submit node or
+        # artifact identifiers.  Older runs may call the source stage either
+        # ``stage:raw`` or ``stage:source``; those are compatibility reads of
+        # existing persisted graph identities, not new aliases a planner may
+        # write.  # legacy-compat
+        source_context: Mapping[str, Any] | None = None
+        source_node_ref: str | None = None
+        for candidate in ("stage:raw", "stage:source"):
+            try:
+                source_context = resolve_data_column_cast_context(
+                    self.project_root,
+                    source_run_id=from_run_id,
+                    source_node_id=candidate,
+                )
+                source_node_ref = candidate
+                break
+            except (DataColumnCastValidationError, KeyError, OSError, ValueError):
+                continue
+        workflow_source: dict[str, str] | None = None
+        if source_context is not None and source_node_ref is not None:
+            source_artifact_id = source_context.get("source_artifact_id")
+            source_sha256 = source_context.get("source_sha256")
+            if not isinstance(source_artifact_id, str) or not isinstance(source_sha256, str):
+                raise ValueError("source run raw dataset identity is invalid")
+            workflow_source = WorkflowSource(
+                run_id=from_run_id,
+                node_ref=source_node_ref,
+                artifact_id=source_artifact_id,
+                source_sha256=source_sha256,
+            ).to_dict()
+        dataset: dict[str, Any] = {
+            "kind": "dataset",
+            "upload_sha256": upload_sha256,
+            "filename": filename,
+            "sheet_names": sheet_names,
+        }
+        if workflow_source is not None:
+            dataset["workflow_source"] = workflow_source
+        return self.ensure_default_projection(
+            dataset=dataset,
+            created_by=created_by,
+            title=title,
+            available_capabilities=available_capabilities,
+        )
 
     def get_notebook(self, notebook_id: str) -> Notebook:
         return self.store.get_notebook(notebook_id)
@@ -443,24 +562,46 @@ class NotebookService:
                 "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
                 "server recommendation requires a non-empty evidence pack",
             )
-        if any(record.status != "completed" for record in evidence_pack.records):
-            raise OptionBatchInvalid(
-                "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
-                "server recommendation requires completed evidence for every record",
-            )
         evidence_records = {
-            record.evidence_id: record.to_dict() for record in evidence_pack.records
+            record.evidence_id: record for record in evidence_pack.records
         }
+        referenced_evidence_ids: set[str] = set()
         for draft in drafts:
             for evidence_ref in draft.evidence_refs:
                 record = evidence_records.get(evidence_ref.evidence_id)
-                if record is None or record["result_hash"] != evidence_ref.result_hash:
+                if record is None or record.result_hash != evidence_ref.result_hash:
                     raise OptionBatchInvalid(
                         "OPTION_SERVER_EVIDENCE_BINDING_INVALID",
                         "a candidate evidence reference is not covered by the server evidence pack",
                         option_id=draft.option_id,
                         evidence_id=evidence_ref.evidence_id,
                     )
+                if record.status != "completed":
+                    raise OptionBatchInvalid(
+                        "OPTION_SERVER_FEASIBILITY_INCOMPLETE",
+                        "server recommendation requires completed evidence for every referenced record",
+                        option_id=draft.option_id,
+                        evidence_id=evidence_ref.evidence_id,
+                    )
+                referenced_evidence_ids.add(evidence_ref.evidence_id)
+        decision_evidence_ids = referenced_evidence_ids or {
+            record.evidence_id
+            for record in evidence_pack.records
+            if record.status == "completed"
+        }
+        if not decision_evidence_ids:
+            raise OptionBatchInvalid(
+                "OPTION_SERVER_FEASIBILITY_UNAVAILABLE",
+                "server recommendation requires at least one completed evidence record",
+            )
+        decision_evidence_pack = DataEvidencePackV1(
+            source_id=evidence_pack.source_id,
+            records=tuple(
+                record
+                for record in evidence_pack.records
+                if record.evidence_id in decision_evidence_ids
+            ),
+        )
 
         # Validate every candidate before any source decision is written.  The
         # Agent's blocked_reason is deliberately not consulted here.
@@ -475,8 +616,12 @@ class NotebookService:
             for draft, binding in zip(drafts, bindings)
         ]
 
-        evidence_hash = evidence_pack.evidence_pack_hash
+        evidence_hash = decision_evidence_pack.evidence_pack_hash
         self.store.append_evidence_pack(notebook_id, evidence_pack.to_dict())
+        if decision_evidence_pack.evidence_pack_hash != evidence_pack.evidence_pack_hash:
+            self.store.append_evidence_pack(
+                notebook_id, decision_evidence_pack.to_dict()
+            )
         context_hash = generation_context_hash(context)
         freshness_hash = freshness_dependency_fingerprint(context)
         cohort_hash = candidate_cohort_hash(option_ids)
@@ -2264,6 +2409,221 @@ class NotebookService:
             )
         return execution
 
+    def confirm_and_execute_workflow(
+        self,
+        notebook_id: str,
+        option_id: str,
+        *,
+        option_revision: int,
+        proposal_id: str,
+        proposal_revision: int,
+        context: NotebookPlanningContextV1,
+        trace: TraceWriter | None = None,
+    ) -> dict[str, Any]:
+        """Run one confirmed ``operation.multi_step`` with server-owned facts.
+
+        The browser contributes only the immutable Option/Proposal revision
+        pins.  Source identity is recomputed from the Notebook projection,
+        workflow compilation uses the published server vocabulary, and result
+        artifact records are read from the resulting Runs.  In particular, this
+        never accepts a client-reported status, run id, or artifact list.
+        """
+
+        view = self.store.read_option(notebook_id, option_id)
+        current = view.current_revision
+        proposal = view.current_stored_revision.proposal
+        if (option_revision, proposal_id, proposal_revision) != (
+            current.option_revision,
+            current.typed_proposal_id,
+            current.typed_proposal_revision,
+        ):
+            raise OptionRevisionStale(
+                "workflow confirmation does not match the current option revision",
+                option_id=option_id,
+                requested_revision=option_revision,
+                current_revision=current.option_revision,
+                reason="proposal_pin_mismatch",
+            )
+        if proposal.operation_id != "operation.multi_step":
+            raise OptionValidationFailed(
+                "the selected option is not a composed workflow",
+                option_id=option_id,
+                option_revision=current.option_revision,
+            )
+        self._assert_current_recommendation_source(notebook_id, current)
+        self._assert_current_capability_binding(current)
+        assert_executable(current, context)
+
+        notebook = self.get_notebook(notebook_id)
+        expected_pin = self._workflow_source_pin(notebook, context)
+        if proposal.target != expected_pin["target"] or proposal.preconditions != expected_pin[
+            "preconditions"
+        ]:
+            raise OptionRevisionStale(
+                "workflow source pin no longer matches the current Notebook source",
+                option_id=option_id,
+                requested_revision=option_revision,
+                current_revision=current.option_revision,
+                reason="workflow_source_changed",
+            )
+        self._assert_dataset_workflow_source_current(notebook)
+
+        if view.lifecycle_status not in {"proposed", "deferred", "selected"}:
+            raise OptionLifecycleTransitionInvalid(
+                f"option {option_id} is {view.lifecycle_status}; it cannot start a workflow",
+                option_id=option_id,
+                lifecycle_status=view.lifecycle_status,
+            )
+        if view.lifecycle_status != "selected":
+            self._transition(
+                notebook_id,
+                view,
+                to_status="selected",
+                actor="user",
+                reason="workflow_confirm",
+                trace=trace,
+            )
+            view = self.store.read_option(notebook_id, option_id)
+        if current.materializable:
+            # V1.1 reserves direct selected -> executing for a persisted
+            # Pipeline Draft.  A typed workflow has no single Draft and may
+            # produce several sibling Runs, so retain the explicit intermediate
+            # state without fabricating a Draft materialization record.
+            self._transition(
+                notebook_id,
+                view,
+                to_status="materialized",
+                actor="system",
+                reason="workflow_execution_prepared",
+                trace=trace,
+                server_workflow_prepared=True,
+            )
+            view = self.store.read_option(notebook_id, option_id)
+        self._transition(
+            notebook_id,
+            view,
+            to_status="executing",
+            actor="user",
+            reason="workflow_confirmed",
+            trace=trace,
+        )
+        execution = OptionExecution(
+            option_id=option_id,
+            option_revision=current.option_revision,
+            proposal_id=current.typed_proposal_id,
+            proposal_revision=current.typed_proposal_revision,
+            freshness_dependency_fingerprint=current.freshness_dependency_fingerprint,
+            generation_context_id=current.generation_context_id,
+            run_id=None,
+        )
+
+        workflow_id = "workflow_" + sha256_canonical(
+            {
+                "notebook_id": notebook_id,
+                "option_id": option_id,
+                "option_revision": current.option_revision,
+                "proposal_hash": proposal.canonical_hash(),
+                "target": proposal.target,
+            }
+        )[:24]
+        if trace is not None:
+            trace.emit(
+                "option.execution.started",
+                payload={
+                    "option_id": option_id,
+                    "option_revision": current.option_revision,
+                    "proposal_id": current.typed_proposal_id,
+                    "proposal_revision": current.typed_proposal_revision,
+                },
+            )
+
+        receipt: dict[str, Any] | None = None
+        try:
+            source_context = resolve_data_column_cast_context(
+                self.project_root,
+                source_run_id=str(proposal.target["run_id"]),
+                source_node_id=str(proposal.target["node_ref"]),
+            )
+            source_columns = [
+                str(item["name"])
+                for item in source_context.get("columns", [])
+                if isinstance(item, Mapping) and isinstance(item.get("name"), str)
+            ]
+            workflow = compile_workflow(
+                workflow_id=workflow_id,
+                target=proposal.target,
+                preconditions=proposal.preconditions,
+                steps=proposal.changes.get("steps"),
+                available_columns=source_columns,
+            )
+            workflow = replace(
+                workflow,
+                bindings={
+                    "notebook_provenance": {
+                        "notebook_id": notebook.notebook_id,
+                        "run_family_id": notebook.run_family_id,
+                        "option_id": option_id,
+                        "option_revision": str(current.option_revision),
+                    }
+                },
+            )
+            self.store.append_option_record(
+                notebook_id,
+                option_id,
+                {
+                    "record_type": RECORD_EXECUTION,
+                    "option_id": option_id,
+                    "option_revision": current.option_revision,
+                    "execution": execution.to_dict(),
+                    "workflow_id": workflow.workflow_id,
+                    "workflow_plan_fingerprint": workflow.plan_fingerprint,
+                },
+            )
+            state = execute_workflow(self.project_root, workflow)
+            receipt = self._workflow_execution_receipt(workflow, state)
+            produced = self._workflow_produced_artifacts(workflow, state)
+            succeeded = state.status == "completed"
+            outcome = self.complete_execution(
+                notebook_id,
+                option_id,
+                execution_status="succeeded" if succeeded else "failed",
+                produced_artifacts=produced,
+                error_code=None if succeeded else "WORKFLOW_EXECUTION_FAILED",
+                trace=trace,
+                server_workflow_execution=True,
+                workflow_execution=receipt,
+            )
+        except Exception:
+            # Compilation and runtime are both server-owned.  Preserve the
+            # failure as an execution result, but never leak arbitrary raw
+            # exception text into the UI or advance a Notebook head.
+            outcome = self.complete_execution(
+                notebook_id,
+                option_id,
+                execution_status="failed",
+                produced_artifacts=(),
+                error_code="WORKFLOW_EXECUTION_FAILED",
+                trace=trace,
+                server_workflow_execution=True,
+            )
+            if trace is not None:
+                trace.emit(
+                    "operation.error",
+                    payload={
+                        "code": "WORKFLOW_EXECUTION_FAILED",
+                        "fatal": False,
+                        "option_id": option_id,
+                        "option_revision": current.option_revision,
+                    },
+                )
+        result = {
+            "execution": execution.to_dict(),
+            "outcome": outcome.to_dict(),
+        }
+        if receipt is not None:
+            result["workflow_execution"] = receipt
+        return result
+
     def complete_execution(
         self,
         notebook_id: str,
@@ -2274,6 +2634,8 @@ class NotebookService:
         produced_artifacts: Iterable[Mapping[str, Any]] | None = None,
         error_code: str | None = None,
         trace: TraceWriter | None = None,
+        server_workflow_execution: bool = False,
+        workflow_execution: Mapping[str, Any] | None = None,
     ) -> ExecutionOutcome:
         """Close the loop: validate the contract, then decide about the head.
 
@@ -2297,7 +2659,7 @@ class NotebookService:
                 option_revision=current.option_revision,
                 reason="capability_execution_receipt_required",
             )
-        if current.materializable:
+        if current.materializable and not server_workflow_execution:
             materialization = self.store.read_materialization(
                 notebook_id, option_id, current.option_revision
             )
@@ -2405,6 +2767,7 @@ class NotebookService:
                 actor="system",
                 reason="artifact_contract_" + validation["validation_status"],
                 trace=trace,
+                server_workflow_prepared=server_workflow_execution,
             )
         else:
             self._transition(
@@ -2435,6 +2798,11 @@ class NotebookService:
                 "execution_status": execution_status,
                 "artifact_validation": validation,
                 "committed": committable,
+                **(
+                    {"workflow_execution": dict(workflow_execution)}
+                    if server_workflow_execution and workflow_execution is not None
+                    else {}
+                ),
             },
         )
 
@@ -2462,6 +2830,146 @@ class NotebookService:
             active_head_advanced=advanced,
             lifecycle_status=self.store.read_option(notebook_id, option_id).lifecycle_status,
         )
+
+    def _workflow_source_pin(
+        self, notebook: Notebook, context: NotebookPlanningContextV1
+    ) -> dict[str, dict[str, str]]:
+        """Rebuild the current server-owned source pin for a workflow option."""
+
+        # Keeping publication and confirmation on this one pin builder avoids
+        # a planner accepting a source identity that the executor later
+        # interprets differently.  This import stays local to keep the
+        # planning service independent at module initialization.
+        from .planning_agent import NotebookPlanningAgent
+
+        pin = NotebookPlanningAgent._execution_pins(context).get("workflow_source")
+        if not isinstance(pin, Mapping):
+            raise OptionValidationFailed(
+                "the Notebook has no server-resolved raw source for a composed workflow",
+                notebook_id=notebook.notebook_id,
+            )
+        target = pin.get("target")
+        preconditions = pin.get("preconditions")
+        if not isinstance(target, Mapping) or not isinstance(preconditions, Mapping):
+            raise OptionValidationFailed(
+                "the Notebook workflow source pin is incomplete",
+                notebook_id=notebook.notebook_id,
+            )
+        return {
+            "target": {str(key): str(value) for key, value in target.items()},
+            "preconditions": {
+                str(key): str(value) for key, value in preconditions.items()
+            },
+        }
+
+    def _assert_dataset_workflow_source_current(self, notebook: Notebook) -> None:
+        """Detect a changed or detached persisted raw artifact before execution."""
+
+        source = notebook.projection_source
+        if source is None or source.kind != "dataset" or source.workflow_source is None:
+            return
+        pinned = source.workflow_source
+        try:
+            current = resolve_data_column_cast_context(
+                self.project_root,
+                source_run_id=pinned.run_id,
+                source_node_id=pinned.node_ref,
+            )
+        except Exception as error:
+            raise OptionRevisionStale(
+                "the Notebook raw workflow source is no longer available",
+                notebook_id=notebook.notebook_id,
+                reason="workflow_source_unavailable",
+            ) from error
+        if (
+            current.get("source_artifact_id") != pinned.artifact_id
+            or current.get("source_sha256") != pinned.source_sha256
+        ):
+            raise OptionRevisionStale(
+                "the Notebook raw workflow source changed after planning",
+                notebook_id=notebook.notebook_id,
+                reason="workflow_source_changed",
+            )
+
+    def _workflow_execution_receipt(self, workflow: Any, state: Any) -> dict[str, Any]:
+        """Project durable workflow outputs without exposing model payloads."""
+
+        from ...lineage.pipeline_drafts import PipelineDraftStore
+
+        branches: list[dict[str, Any]] = []
+        store = PipelineDraftStore(self.project_root)
+        for summary in store.list():
+            draft_id = summary.get("draft_id")
+            if not isinstance(draft_id, str):
+                continue
+            try:
+                stored = store.get(draft_id)
+            except Exception:
+                continue
+            exploration = stored.draft.get("exploration_context")
+            if not isinstance(exploration, Mapping) or exploration.get("workflow_id") != workflow.workflow_id:
+                continue
+            branch_id = exploration.get("branch_id")
+            run_id = stored.draft.get("executed_run_id")
+            if not isinstance(branch_id, str) or not isinstance(run_id, str) or not run_id:
+                continue
+            artifact_ids = sorted(
+                {
+                    str(item.get("artifact_id"))
+                    for item in self._read_run_artifacts(run_id)
+                    if isinstance(item.get("artifact_id"), str) and item.get("artifact_id")
+                }
+            )
+            branches.append(
+                {
+                    "branch_id": branch_id,
+                    "run_id": run_id,
+                    "artifact_ids": artifact_ids,
+                }
+            )
+        branches.sort(key=lambda item: (item["branch_id"], item["run_id"]))
+
+        post_estimation_ids: list[str] = []
+        steps_by_id = {step.step_id: step for step in workflow.steps}
+        for step_id, step_state in state.steps.items():
+            step = steps_by_id.get(step_id)
+            if step is None or not str(step.operation_id).startswith("model."):
+                continue
+            if step.operation_id == "model.genesis" or step_state.status != "completed":
+                continue
+            post_estimation_ids.extend(str(value) for value in step_state.artifact_ids)
+        return {
+            "workflow_id": workflow.workflow_id,
+            "plan_fingerprint": workflow.plan_fingerprint,
+            "status": str(state.status),
+            "branch_runs": branches,
+            "post_estimation_artifact_ids": sorted(set(post_estimation_ids)),
+        }
+
+    def _workflow_produced_artifacts(self, workflow: Any, state: Any) -> list[dict[str, Any]]:
+        """Read only registered artifacts referenced by completed workflow state."""
+
+        records: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        source_run_id = str(workflow.target["run_id"])
+        for step_state in state.steps.values():
+            if step_state.status != "completed":
+                continue
+            for raw_id in step_state.artifact_ids:
+                token = str(raw_id)
+                if ":" in token:
+                    run_id, artifact_id = token.split(":", 1)
+                else:
+                    run_id, artifact_id = source_run_id, token
+                if not run_id or not artifact_id or (run_id, artifact_id) in seen:
+                    continue
+                seen.add((run_id, artifact_id))
+                records.extend(
+                    item
+                    for item in self._read_run_artifacts(run_id)
+                    if item.get("artifact_id") == artifact_id
+                )
+        return records
 
     # ------------------------------------------------------------------
     # Internals
@@ -2976,9 +3484,23 @@ class NotebookService:
         actor: str,
         reason: str,
         trace: TraceWriter | None = None,
+        server_workflow_prepared: bool = False,
     ) -> None:
         current = view.lifecycle_status
-        if view.current_revision.materializable and to_status == "materialized":
+        if server_workflow_prepared:
+            proposal = view.current_stored_revision.proposal
+            if proposal.operation_id != "operation.multi_step":
+                raise OptionLifecycleTransitionInvalid(
+                    "only a server-owned composed workflow may bypass Pipeline Draft materialization",
+                    option_id=view.option_id,
+                    from_status=current,
+                    to_status=to_status,
+                )
+        if (
+            view.current_revision.materializable
+            and to_status == "materialized"
+            and not server_workflow_prepared
+        ):
             materialization = self.store.read_materialization(
                 notebook_id,
                 view.option_id,

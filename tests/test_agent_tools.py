@@ -5,9 +5,12 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
 from workbench.analysis_loop.resolver import AnalysisLoopSourceResolutionError
-from workbench.agent.core import AgentCore
+from workbench.agent import model as agent_model
+from workbench.agent.core import AgentCore, AgentRunBudget
+from workbench.agent.context import CustomAgentMessage
 from workbench.agent.events import AgentEventStream
 from workbench.agent.model import (
     ModelRequest,
@@ -76,6 +79,101 @@ class ToolRoundTripAdapter:
             yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
             return
         yield ModelStreamEvent.text_delta(request.request_id, "evidence found")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+class UnknownToolRecoveryAdapter:
+    """A provider typo must produce actionable feedback, not kill the turn."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "call-typo",
+                    "tool_id": "inspcet_operation_contract",
+                    "arguments": {},
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+
+        tool_messages = [message for message in request.messages if message.get("role") == "tool"]
+        assert len(tool_messages) == 1
+        payload = json.loads(tool_messages[0]["content"])
+        assert payload["error"] == "unknown_tool"
+        assert "inspect_operation_contract" in payload["error_details"][0]["message"]
+        yield ModelStreamEvent.text_delta(request.request_id, "recovered after tool feedback")
+        yield ModelStreamEvent.done(request.request_id)
+
+
+class ProposalReadyAdapter:
+    """A proposal tool result is already a complete, user-reviewable outcome."""
+
+    def __init__(self) -> None:
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        yield ModelStreamEvent.text_delta(request.request_id, "proposal prepared")
+        yield ModelStreamEvent.tool_call_delta(
+            request.request_id,
+            {
+                "tool_call_id": "call-propose",
+                "tool_id": "propose_operation",
+                "arguments": {},
+            },
+        )
+        yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+
+class BoundedWorkflowAnswerAdapter:
+    """Follow the published receipt-to-branch route in a fixed two-tool turn."""
+
+    def __init__(self, candidate_run_ids: list[str]) -> None:
+        self.candidate_run_ids = candidate_run_ids
+        self.requests: list[ModelRequest] = []
+
+    async def stream(self, request: ModelRequest):
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "receipt-1",
+                    "tool_id": "inspect_project_notebook_workflow_results",
+                    "arguments": {"run_ids": self.candidate_run_ids[:16]},
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        if len(self.requests) == 2:
+            tool_messages = [
+                message for message in request.messages if message.get("role") == "tool"
+            ]
+            assert len(tool_messages) == 1
+            assert "branch-east" in tool_messages[0]["content"]
+            yield ModelStreamEvent.tool_call_delta(
+                request.request_id,
+                {
+                    "tool_call_id": "coefficients-1",
+                    "tool_id": "inspect_project_model_coefficients",
+                    "arguments": {
+                        "run_ids": ["branch-east", "branch-west"],
+                        "terms": ["exposure"],
+                    },
+                },
+            )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+            return
+        yield ModelStreamEvent.text_delta(
+            request.request_id,
+            "The persisted branch evidence reports the requested coefficient.",
+        )
         yield ModelStreamEvent.done(request.request_id)
 
 
@@ -202,10 +300,217 @@ def test_agent_core_round_trips_tool_call_and_persists_tool_result(tmp_path: Pat
     asyncio.run(scenario())
 
 
+def test_unknown_tool_is_visible_to_the_agent_and_does_not_abort_the_turn(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+        tools.register(
+            ToolDefinition(
+                tool_id="inspect_operation_contract",
+                version="v1",
+                input_schema={"type": "object"},
+                side_effect="none",
+                handler=lambda _arguments, _context: {"status": "available"},
+            )
+        )
+        adapter = UnknownToolRecoveryAdapter()
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt("inspect the workflow contract") == "recovered after tool feedback"
+        branch = repository.get_branch("session-a")
+        tool_payload = json.loads(branch[2].payload["content"])
+        assert tool_payload["error"] == "unknown_tool"
+        assert len(adapter.requests) == 2
+        assert not any(
+            event.payload.get("error") == "tool_runtime_error"
+            for event in events.replay("session-a")
+        )
+
+    asyncio.run(scenario())
+
+
+def test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget(
+    tmp_path: Path,
+) -> None:
+    async def scenario() -> None:
+        repository = JsonlSessionRepository(tmp_path / "workbench")
+        repository.create_session("session-a", chain_id="chain-a", role="chain")
+        events = AgentEventStream(tmp_path / "workbench")
+        tools = ToolRegistry()
+        tools.register(
+            ToolDefinition(
+                tool_id="propose_operation",
+                version="v1",
+                input_schema={"type": "object"},
+                side_effect="proposal",
+                handler=lambda _arguments, _context: {
+                    "requires_confirmation": True,
+                    "proposal": {"proposal_id": "proposal-a"},
+                },
+            )
+        )
+        adapter = ProposalReadyAdapter()
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="session-a",
+            tools=tools.descriptors(),
+            tool_runtime=tools,
+        )
+
+        assert await agent.prompt(
+            "prepare a proposal",
+            budget=AgentRunBudget(max_steps=1),
+        ) == "proposal prepared"
+        assert len(adapter.requests) == 1
+        assert repository.get_metadata("session-a")["status"] == "idle"
+        branch = repository.get_branch("session-a")
+        assert [entry.payload["role"] for entry in branch] == ["user", "assistant", "tool"]
+        assert not any(
+            entry.payload.get("error") == "max_steps_exceeded"
+            for entry in branch
+        )
+        assert events.replay("session-a")[-1].event_type == "agent_end"
+        assert events.replay("session-a")[-1].payload["stop_reason"] == "proposal_ready"
+
+    asyncio.run(scenario())
+
+
+def test_completed_workflow_answer_uses_the_same_two_evidence_calls_for_eight_or_twenty_candidates(
+    tmp_path: Path,
+) -> None:
+    """Candidate count changes bounded input, never the receipt-to-answer path."""
+
+    async def answer_for(candidate_count: int) -> tuple[int, int]:
+        candidate_run_ids = [f"candidate-{index}" for index in range(candidate_count)]
+        repository = JsonlSessionRepository(tmp_path / f"workbench-{candidate_count}")
+        repository.create_session("main-session", chain_id="project-a", role="main")
+        repository.append(
+            "main-session",
+            "custom_message",
+            CustomAgentMessage(
+                content=(
+                    "A completed workflow must first use one receipt lookup with up to "
+                    "sixteen visible candidate run ids, then use returned branch runs for "
+                    "one bounded coefficient lookup."
+                ),
+                name="workbench_global_agent_protocol",
+            ).to_entry_payload(),
+        )
+        repository.append(
+            "main-session",
+            "custom_message",
+            CustomAgentMessage(
+                content=json.dumps({"visible_run_ids": candidate_run_ids}),
+                name="workbench_context",
+            ).to_entry_payload(),
+        )
+        events = AgentEventStream(tmp_path / f"workbench-{candidate_count}")
+        registry = ToolRegistry()
+        registry.register(
+            ToolDefinition(
+                tool_id="inspect_project_notebook_workflow_results",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids"],
+                    "properties": {
+                        "run_ids": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 16,
+                            "items": {"type": "string"},
+                        }
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                handler=lambda _arguments, _context: {
+                    "workflows": [
+                        {
+                            "status": "completed",
+                            "branch_runs": [
+                                {"branch_id": "east", "run_id": "branch-east"},
+                                {"branch_id": "west", "run_id": "branch-west"},
+                            ],
+                            "post_estimation_evidence": [],
+                        }
+                    ]
+                },
+            )
+        )
+        registry.register(
+            ToolDefinition(
+                tool_id="inspect_project_model_coefficients",
+                version="v1",
+                input_schema={
+                    "type": "object",
+                    "required": ["run_ids", "terms"],
+                    "properties": {
+                        "run_ids": {"type": "array", "minItems": 1, "maxItems": 4},
+                        "terms": {"type": "array", "minItems": 1, "maxItems": 4},
+                    },
+                    "additionalProperties": False,
+                },
+                side_effect="none",
+                handler=lambda _arguments, _context: {
+                    "models": [
+                        {
+                            "run_id": "branch-east",
+                            "term": "exposure",
+                            "estimate": 1.25,
+                            "evidence_ref": "model_results:ols_1",
+                        }
+                    ]
+                },
+            )
+        )
+        adapter = BoundedWorkflowAnswerAdapter(candidate_run_ids)
+        agent = AgentCore(
+            repository,
+            events,
+            adapter,
+            session_id="main-session",
+            tools=registry.descriptors(),
+            tool_runtime=registry,
+        )
+
+        response = await agent.prompt("What is the exposure coefficient?")
+
+        assert response == "The persisted branch evidence reports the requested coefficient."
+        calls = [
+            event for event in events.replay("main-session")
+            if event.event_type == "tool_execution_start"
+        ]
+        assert [call.payload["tool_id"] for call in calls] == [
+            "inspect_project_notebook_workflow_results",
+            "inspect_project_model_coefficients",
+        ]
+        assert len(adapter.requests) == 3
+        return len(calls), len(adapter.requests)
+
+    eight = asyncio.run(answer_for(8))
+    twenty = asyncio.run(answer_for(20))
+
+    assert eight == twenty == (2, 3)
+
+
 def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -> None:
     config = LLMConfig(base_url="https://api.example.test", api_key="secret", model="deepseek-chat")
 
-    def fake_chat_completion(messages, actual_config, *, tools):
+    async def fake_stream(messages, actual_config, *, tools):
         assert actual_config == config
         assert tools[0] == {
             "type": "function",
@@ -214,19 +519,23 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
                 "parameters": {"type": "object"},
             },
         }
-        return {
-            "text": "",
+        yield {
+            "type": "tool_call",
+            "tool_call": {
+                "tool_call_id": "call-1",
+                "tool_id": "inspect_node_context",
+                "arguments": {"node_ref": "model-ols"},
+            },
+        }
+        yield {
+            "type": "done",
+            "finish_reason": "tool_calls",
             "model": "deepseek-chat",
-            "tool_calls": [
-                {
-                    "tool_call_id": "call-1",
-                    "tool_id": "inspect_node_context",
-                    "arguments": {"node_ref": "model-ols"},
-                }
-            ],
         }
 
-    monkeypatch.setattr("workbench.agent.model.chat_completion", fake_chat_completion)
+    monkeypatch.setattr(
+        "workbench.agent.model.async_stream_chat_completion", fake_stream
+    )
 
     async def scenario() -> None:
         adapter = OpenAICompatibleModelAdapter(config)
@@ -248,6 +557,53 @@ def test_openai_compatible_adapter_normalizes_provider_tool_calls(monkeypatch) -
     asyncio.run(scenario())
 
 
+def test_cancellable_openai_adapter_propagates_task_cancellation(monkeypatch) -> None:
+    config = LLMConfig(
+        base_url="https://api.example.test",
+        api_key="secret",
+        model="deepseek-chat",
+        timeout_s=120,
+    )
+    started = asyncio.Event()
+    cancelled = False
+
+    async def slow_stream(messages, actual_config, *, tools):
+        nonlocal cancelled
+        assert actual_config == config
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-chat"}
+
+    monkeypatch.setattr(
+        "workbench.agent.model.async_stream_chat_completion",
+        slow_stream,
+    )
+
+    async def scenario() -> None:
+        adapter = agent_model.CancellableOpenAICompatibleModelAdapter(config)
+        request = ModelRequest(
+            request_id="request-cancellable",
+            messages=[{"role": "user", "content": "plan"}],
+            tools=[{"tool_id": "submit", "input_schema": {"type": "object"}}],
+        )
+
+        async def collect():
+            return [event async for event in adapter.stream(request)]
+
+        task = asyncio.create_task(collect())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    assert cancelled is True
+
+
 def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> None:
     config = LLMConfig(
         base_url="https://api.example.test",
@@ -266,33 +622,21 @@ def test_openai_wire_format_converts_workbench_tool_descriptor(monkeypatch) -> N
         seen.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={
-                "model": "deepseek-chat",
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-wire-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "inspect_node_context",
-                                        "arguments": '{"node_ref":"model-ols"}',
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-            },
+            content=(
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                b'[{"index":0,"id":"call-wire-1","type":"function","function":'
+                b'{"name":"inspect_node_context","arguments":"{\\"node_ref\\":\\"model-ols\\"}"}}]},'
+                b'"finish_reason":null}]}\n\n'
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
         )
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),
@@ -420,55 +764,34 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
         model="deepseek-chat",
     )
     seen: list[httpx.Request] = []
+    # A tool-call fragment whose assembled arguments are not valid JSON. The
+    # defect only becomes visible at the end of the stream, so the retry has to
+    # survive a well-formed SSE envelope carrying a malformed payload.
     responses = iter(
         [
             httpx.Response(
                 200,
-                json={
-                    "model": "deepseek-chat",
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [
-                                    {
-                                        "id": "call-bad",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "inspect_node_context",
-                                            "arguments": "{not-json",
-                                        },
-                                    }
-                                ],
-                            }
-                        }
-                    ],
-                },
+                content=(
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                    b'[{"index":0,"id":"call-bad","type":"function","function":'
+                    b'{"name":"inspect_node_context","arguments":"{not-json"}}]},'
+                    b'"finish_reason":null}]}\n\n'
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                    b'"finish_reason":"tool_calls"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
             ),
             httpx.Response(
                 200,
-                json={
-                    "model": "deepseek-chat",
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [
-                                    {
-                                        "id": "call-good",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "inspect_node_context",
-                                            "arguments": '{"node_ref":"model-ols"}',
-                                        },
-                                    }
-                                ],
-                            }
-                        }
-                    ],
-                },
+                content=(
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{"tool_calls":'
+                    b'[{"index":0,"id":"call-good","type":"function","function":'
+                    b'{"name":"inspect_node_context","arguments":"{\\"node_ref\\":\\"model-ols\\"}"}}]},'
+                    b'"finish_reason":null}]}\n\n'
+                    b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                    b'"finish_reason":"tool_calls"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                ),
             ),
         ]
     )
@@ -479,8 +802,8 @@ def test_openai_compatible_adapter_retries_one_malformed_tool_json_response(
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),
@@ -526,18 +849,19 @@ def test_openai_wire_format_converts_internal_tool_messages(monkeypatch) -> None
         seen.append(json.loads(request.content))
         return httpx.Response(
             200,
-            json={
-                "model": "deepseek-chat",
-                "choices": [
-                    {"message": {"role": "assistant", "content": "summary done"}}
-                ],
-            },
+            content=(
+                b'data: {"model":"deepseek-chat","choices":[{"delta":'
+                b'{"content":"summary done"},"finish_reason":null}]}\n\n'
+                b'data: {"model":"deepseek-chat","choices":[{"delta":{},'
+                b'"finish_reason":"stop"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
         )
 
     monkeypatch.setattr(
         llm_client,
-        "_client_factory",
-        lambda actual_config: httpx.Client(
+        "_async_client_factory",
+        lambda actual_config: httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=actual_config.timeout_s,
         ),

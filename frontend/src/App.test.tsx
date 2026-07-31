@@ -130,6 +130,7 @@ test("renders workbench navigation and disables run when invalid", () => {
 
   expect(screen.getByRole("tab", { name: "Home" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Workbench" })).toBeInTheDocument();
+  expect(document.querySelector(".activity")).not.toBeInTheDocument();
   expect(screen.getByLabelText("parent folder")).toBeInTheDocument();
   expect(screen.getByLabelText("project name")).toBeInTheDocument();
   expect(screen.getByLabelText("run mode")).toBeInTheDocument();
@@ -1320,7 +1321,9 @@ test("/p/:slug/graph on a zero-run project shows the empty canvas with the genes
     expect(screen.getByTestId("project-graph-route")).toBeInTheDocument();
   });
   expect(await screen.findByTestId("genesis-cta")).toBeInTheDocument();
-  expect(screen.getByText("This project has no data yet.")).toBeInTheDocument();
+  expect(
+    screen.getByText("This project has no imported data or analysis yet."),
+  ).toBeInTheDocument();
 });
 
 test("project Home activates the Home tab instead of Workbench", async () => {
@@ -1338,6 +1341,37 @@ test("project Home activates the Home tab instead of Workbench", async () => {
   expect(document.querySelector("main.workbench-shell")).toHaveClass(
     "workbench-shell--lineage",
   );
+});
+
+test("project navigation places a Settings gear immediately before the theme control and opens Settings", async () => {
+  const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+  fetchMock.mockImplementation((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/llm/providers")) {
+      return Promise.resolve(
+        jsonResponse({ providers: [], active_provider_id: null }),
+      );
+    }
+    return Promise.resolve(
+      jsonResponse({
+        nodes: {},
+        edges: [],
+        heads: [],
+        families: [],
+        schema_version: 2,
+        legacy: false,
+      }),
+    );
+  });
+  const { rootToSlug } = await import("./workbench/projectSlug");
+  renderAt(`/p/${rootToSlug("/tmp/p1")}/graph`);
+
+  const settings = screen.getByRole("button", { name: "Settings" });
+  const theme = screen.getByRole("radiogroup", { name: "Theme" });
+  expect(settings.nextElementSibling).toBe(theme);
+
+  fireEvent.click(settings);
+  expect(await screen.findByTestId("llm-provider-manager")).toBeInTheDocument();
 });
 
 import { validatePanelPrediction } from "./App";

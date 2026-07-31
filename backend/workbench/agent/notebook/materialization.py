@@ -588,6 +588,8 @@ class NotebookOptionMaterializer:
             "focal_x",
             "covariance",
             "model_options",
+            "entity_col",
+            "time_col",
         }
         if set(model_params) - allowed_model:
             raise _fail("genesis materialization received unknown model params")
@@ -610,6 +612,29 @@ class NotebookOptionMaterializer:
             raise _fail("genesis model_params requires evidence-backed y")
         if y not in columns:
             raise _fail("genesis y is not a column in the verified dataset", column=y)
+        panel_dimensions = {
+            key: model_params.get(key)
+            for key in ("entity_col", "time_col")
+            if model_params.get(key) is not None
+        }
+        if model_type == "panel_ols" and not panel_dimensions:
+            raise _fail(
+                "genesis panel_ols requires an evidence-backed entity_col or time_col"
+            )
+        if model_type != "panel_ols" and panel_dimensions:
+            raise _fail(
+                "genesis non-panel model does not accept entity_col or time_col"
+            )
+        for field_name, value in panel_dimensions.items():
+            if not isinstance(value, str) or not value:
+                raise _fail(
+                    f"genesis {field_name} must be a non-empty evidence-backed column"
+                )
+            if value not in columns:
+                raise _fail(
+                    f"genesis {field_name} is not a column in the verified dataset",
+                    column=value,
+                )
         # A model takes X regressors only when its published capability declares a
         # required parameter with role "x". Univariate models (ETS, ARMA-GARCH, ...)
         # declare none, so the model-agnostic Notebook must not demand one; keying

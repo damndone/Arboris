@@ -18,6 +18,7 @@ from workbench.agent.notebook.recommendation import (
     ServerDecisionRegistry,
     candidate_cohort_hash,
 )
+from workbench.contracts.agent.notebook_option import EvidenceRef
 
 
 def _candidate(option_id: str, *, blocked: str | None = None) -> OptionDraft:
@@ -116,6 +117,35 @@ def test_no_common_protocol_is_insufficient_not_a_heuristic_winner() -> None:
 
     assert decision.outcome == "insufficient_evidence"
     assert decision.recommended_option_id is None
+
+
+def test_structured_evidence_refs_support_natural_language_comparative_claims() -> None:
+    evidence_ref = EvidenceRef(
+        evidence_id="evidence:forecast",
+        result_hash="sha256:forecast-result",
+        source_refs=("forecast_rolling_origin:run_001",),
+    )
+    candidates = tuple(
+        replace(
+            _candidate(option_id),
+            evidence_refs=(evidence_ref,),
+            comparative_claims=(
+                "The rolling-origin evidence supports this candidate.",
+            ),
+        )
+        for option_id in ("opt_ets", "opt_arma")
+    )
+
+    decision = RecommendationValidator(
+        protocols={"forecast.v1": FakeForecastProtocol(0.02)}
+    ).decide(
+        batch_id="batch_structured_refs",
+        candidates=candidates,
+        evidence_pack=_pack(scores={"opt_ets": 0.10, "opt_arma": 0.20}),
+    )
+
+    assert decision.outcome == "recommended"
+    assert decision.recommended_option_id == "opt_ets"
 
 
 def test_duplicate_candidate_ids_are_rejected_before_decision() -> None:

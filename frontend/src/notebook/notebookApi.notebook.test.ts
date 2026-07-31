@@ -9,6 +9,7 @@ import {
   materializeNotebookOption,
   proposeNotebookOptions,
   recordNotebookDecision,
+  updateNotebookFocus,
 } from "./notebookApi";
 
 afterEach(() => {
@@ -70,5 +71,24 @@ describe("notebookApi", () => {
       "/api/notebooks/nb%2F1/options/opt_1/execute?project_root=%2Ftmp%2Fproject",
     ]);
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ count: 3 });
+  });
+
+  it("persists an explicit Notebook interaction mode with the focus request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ notebook_id: "nb_1" }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateNotebookFocus("/tmp/project", "nb_1", {
+      interaction_mode: "action",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/notebooks/nb_1/focus?project_root=%2Ftmp%2Fproject",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      interaction_mode: "action",
+    });
   });
 });

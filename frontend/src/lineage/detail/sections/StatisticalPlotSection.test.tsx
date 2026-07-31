@@ -27,6 +27,15 @@ const request: StatisticalExplorationRequest = {
 };
 
 describe("StatisticalPlotSection", () => {
+  it("opens the plot editor in a spacious dialog instead of constraining it to the drawer", () => {
+    render(<StatisticalPlotSection projectRoot="/tmp/project" request={request} numericColumns={["pfl", "spending"]} />);
+
+    fireEvent.click(screen.getByTestId("statistical-plot-open-editor"));
+
+    expect(screen.getByRole("dialog", { name: "Scatter plot editor" })).toBeInTheDocument();
+    expect(screen.getByTestId("statistical-plot-editor-dialog")).toBeInTheDocument();
+  });
+
   it("previews and saves a typed scatter plot", async () => {
     previewMock.mockResolvedValue({
       preview: {
@@ -44,6 +53,7 @@ describe("StatisticalPlotSection", () => {
     });
 
     render(<StatisticalPlotSection projectRoot="/tmp/project" request={request} numericColumns={["pfl", "spending"]} />);
+    fireEvent.click(screen.getByTestId("statistical-plot-open-editor"));
     fireEvent.click(screen.getByTestId("statistical-plot-preview"));
     await waitFor(() => expect(screen.getByTestId("statistical-plot-preview-result")).toBeInTheDocument());
     expect(previewMock).toHaveBeenCalledWith("/tmp/project", expect.objectContaining({ operation: "scatter" }));

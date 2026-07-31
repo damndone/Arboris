@@ -132,6 +132,19 @@ def test_environment_provider_from_env_preserves_legacy_variables(monkeypatch):
     assert provider.models == [ModelRecord("deepseek-chat", "deepseek-chat", None, False)]
 
 
+def test_environment_provider_does_not_invent_deepseek_model_choices(monkeypatch):
+    monkeypatch.setenv("WORKBENCH_LLM_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("WORKBENCH_LLM_API_KEY", "secret-key")
+    monkeypatch.setenv("WORKBENCH_LLM_MODEL", "deepseek-v4-flash")
+
+    provider = environment_provider_from_env()
+
+    assert provider is not None
+    assert provider.models == [
+        ModelRecord("DeepSeek V4 Flash", "deepseek-v4-flash", None, False)
+    ]
+
+
 @pytest.mark.parametrize("raw_timeout", ["nan", "inf", "0", "-1", "601"])
 def test_environment_provider_invalid_timeout_falls_back_to_default(
     monkeypatch, raw_timeout

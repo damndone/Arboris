@@ -7,7 +7,8 @@
  * navigates the rail.
  *
  * Storage key: workbench:layout:<runId>
- * Default: "free" (per user 2026-05-25 requirement).
+ * Default: horizontal automatic layout. Manual mode remains available when
+ * the user wants to drag and preserve custom positions.
  * Fallback: gracefully degrades to in-memory state if sessionStorage
  * throws (quota, privacy mode, SSR).
  */

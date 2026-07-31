@@ -46,13 +46,14 @@ def _changes() -> dict[str, object]:
                 "operation_id": "model.genesis",
                 "depends_on": ["describe"],
                 "spec": {
+                    "model_family": "ols",
                     "branches": [
                         {
                             "branch_id": "m1",
                             "outcome": "outcome",
                             "predictors": ["rate"],
                         }
-                    ]
+                    ],
                 },
             },
         ]

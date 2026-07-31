@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useSearchParams } from "react-router-dom";
+import type { PostEstimationResult } from "../../api";
 import { useLineage } from "../../lineage/LineageContext";
 import { buildAskAIContextPacket } from "../../lineage/detail/sections/askAiContextPacket";
 import { resolveNodeOperationContext } from "../../lineage/api/nodeOperationContext";
@@ -18,6 +19,7 @@ import { useForest } from "../ForestContext";
 import { useWorkbench } from "../WorkbenchStateProvider";
 import { useAgentNavigationOptional } from "./agentNavigation";
 import {
+  abortAgentTurn,
   createAgentSession,
   createAgentForkProposal,
   confirmAgentProposal,
@@ -61,6 +63,12 @@ export interface AgentOperationStatus {
   target_run_id: string | null;
   /** Program output captured from a sandboxed operation (code.execute). */
   stdout: string | null;
+  /** Results of declared post-estimation steps in a completed workflow.
+   *
+   * A confirmed workflow that reports only "completed" leaves the question
+   * that prompted it unanswered, so the transcript carries the numbers it
+   * produced. */
+  postEstimationResults: PostEstimationResult[];
   diff_ref: Record<string, unknown> | null;
   verification: Record<string, unknown>;
   diffFocused: boolean;
@@ -71,10 +79,16 @@ function toOperationStatus(
   diffFocused = false,
 ): AgentOperationStatus {
   const outputs = record.outputs as
-    | { target_run_id?: unknown; stdout?: unknown }
+    | {
+        target_run_id?: unknown;
+        stdout?: unknown;
+        post_estimation_results?: unknown;
+      }
     | undefined;
   const target = outputs && typeof outputs === "object" ? outputs.target_run_id : null;
   const stdout = outputs && typeof outputs === "object" ? outputs.stdout : null;
+  const rawResults =
+    outputs && typeof outputs === "object" ? outputs.post_estimation_results : null;
   const rawDiff = record.diff_ref;
   const rawVerification = record.verification;
   return {
@@ -83,6 +97,15 @@ function toOperationStatus(
     status: record.status,
     target_run_id: typeof target === "string" ? target : null,
     stdout: typeof stdout === "string" && stdout.length > 0 ? stdout : null,
+    postEstimationResults: Array.isArray(rawResults)
+      ? (rawResults.filter(
+          (entry) =>
+            entry !== null &&
+            typeof entry === "object" &&
+            typeof (entry as PostEstimationResult).operation_id === "string" &&
+            typeof (entry as PostEstimationResult).result === "object",
+        ) as PostEstimationResult[])
+      : [],
     diff_ref: rawDiff && typeof rawDiff === "object"
       ? rawDiff as Record<string, unknown>
       : null,
@@ -97,16 +120,19 @@ function runFocusModelNodeKey(
   forest: { forest: ForestViewModel; activeRunId: string },
   selectedKey: string | null,
 ): string | null {
-  if (
-    selectedKey &&
-    forest.forest.nodes.some((node) => node.nodeKey === selectedKey)
-  ) {
-    return selectedKey;
+  const selectedNode = selectedKey
+    ? forest.forest.nodes.find((node) => node.nodeKey === selectedKey)
+    : undefined;
+  // Detail tabs can outlive a run-rail selection. Only let an actual selected
+  // node scope a Chain Agent when it belongs to the active run; otherwise the
+  // active head is the authoritative run focus.
+  if (selectedNode?.runs.includes(forest.activeRunId)) {
+    return selectedNode.nodeKey;
   }
   // The run rail uses a `run:<id>` pseudo-selection.  It is a navigation
   // focus, not an executable node identity; bind the Agent to the active
   // model node before sending the session packet.
-  if (selectedKey !== null && !selectedKey.startsWith("run:")) return null;
+  if (selectedKey !== null && !selectedKey.startsWith("run:") && !selectedNode) return null;
   const activeHead = forest.forest.heads.find(
     (head) => head.runId === forest.activeRunId,
   );
@@ -188,6 +214,7 @@ export interface AgentSurfaceContextValue {
   prompt: string;
   setPrompt: (value: string) => void;
   sendPrompt: (value?: string) => Promise<void>;
+  abortTurn: () => Promise<void>;
   isSubmitting: boolean;
   error: string | null;
   scopeLabel: string;
@@ -214,6 +241,8 @@ export interface AgentSurfaceContextValue {
   activeOperation: AgentOperationStatus | null;
   eventCursor: number;
   lastEventType: string | null;
+  liveResponseText: string;
+  activeTurnStartedAt?: number | null;
   capabilityCatalog?: AgentCapabilityCatalog | null;
 }
 
@@ -252,17 +281,27 @@ export function AgentSurfaceProvider({
   const [activeOperation, setActiveOperation] = useState<AgentOperationStatus | null>(null);
   const [eventCursor, setEventCursor] = useState(0);
   const [lastEventType, setLastEventType] = useState<string | null>(null);
+  const [liveResponseText, setLiveResponseText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeTurnStartedAt, setActiveTurnStartedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [navigationLinks, setNavigationLinks] = useState<AgentNavigationRef[]>([]);
   const [hierarchy, setHierarchy] = useState<AgentHierarchyNode | null>(null);
   const [providers, setProviders] = useState<LlmProvider[]>([]);
   const [llmConfig, setLlmConfig] = useState<LlmConfigInfo | null>(null);
   const [capabilityCatalog, setCapabilityCatalog] = useState<AgentCapabilityCatalog | null>(null);
+  const activeTurnControllerRef = useRef<AbortController | null>(null);
+  const activeTurnSessionIdRef = useRef<string | null>(null);
 
   const selectedKey = workbench.state.selectedKey;
   const graphNodes = Array.isArray(graphModel?.nodes) ? graphModel.nodes : [];
   const selectedNode = graphNodes.find((node) => node.nodeKey === selectedKey) ?? null;
+  const scopedForestNodeKey = forest
+    ? runFocusModelNodeKey(forest, selectedKey)
+    : null;
+  const scopedSelectedNode = scopedForestNodeKey && forest
+    ? forest.forest.nodes.find((node) => node.nodeKey === scopedForestNodeKey) ?? selectedNode
+    : selectedNode;
   // A run-rail focus still belongs to its chain. Only an actual blank canvas
   // selection in forest mode promotes the surface to the project Main Agent.
   const isGlobalScope = Boolean(forest) && selectedNode === null && selectedKey === null;
@@ -270,19 +309,16 @@ export function AgentSurfaceProvider({
     if (isGlobalScope && forest) {
       return boundedGlobalProjectContext(projectRoot, forest);
     }
-    const scopedSelection = forest
-      ? runFocusModelNodeKey(forest, selectedKey)
-      : null;
-    if (forest && scopedSelection) {
+    if (forest && scopedForestNodeKey) {
       const resolved = resolveNodeOperationContext({
         forest: forest.forest,
-        selected_forest_node_key: scopedSelection,
+        selected_forest_node_key: scopedForestNodeKey,
         active_head_run_id: forest.activeRunId,
       });
       if (resolved.ok) return buildAskAIContextPacket(resolved.context);
     }
     return fallbackProjectContext(runId, selectedKey);
-  }, [forest, isGlobalScope, projectRoot, runId, selectedKey]);
+  }, [forest, isGlobalScope, projectRoot, runId, scopedForestNodeKey, selectedKey]);
 
   const contextFingerprint = typeof contextPacket.context_fingerprint === "string"
     && contextPacket.context_fingerprint
@@ -299,11 +335,30 @@ export function AgentSurfaceProvider({
     : storageKey;
   const activeScopeRef = useRef(sessionScope);
   const optimisticMessageCounterRef = useRef(0);
+  const eventCursorRef = useRef(0);
   const applyEvents = useCallback((events: AgentEvent[]) => {
-    if (events.length === 0) return;
-    const latest = events.reduce((current, event) => (
-      event.seq > current.seq ? event : current
-    ));
+    const unseen = events
+      .filter((event) => event.seq > eventCursorRef.current)
+      .sort((left, right) => left.seq - right.seq);
+    if (unseen.length === 0) return;
+    const latest = unseen[unseen.length - 1];
+    eventCursorRef.current = latest.seq;
+    for (const event of unseen) {
+      if (event.event_type === "message_start") {
+        setLiveResponseText("");
+      } else if (event.event_type === "message_update") {
+        const delta = event.payload.delta;
+        if (typeof delta === "string" && delta) {
+          setLiveResponseText((current) => `${current}${delta}`);
+        }
+      } else if (
+        event.event_type === "message_end"
+        || event.event_type === "aborted"
+        || event.event_type === "error"
+      ) {
+        setLiveResponseText("");
+      }
+    }
     setEventCursor((current) => Math.max(current, latest.seq));
     setLastEventType(latest.event_type);
   }, []);
@@ -333,6 +388,9 @@ export function AgentSurfaceProvider({
   }, [projectRoot]);
   useEffect(() => {
     let cancelled = false;
+    activeTurnControllerRef.current?.abort();
+    activeTurnControllerRef.current = null;
+    activeTurnSessionIdRef.current = null;
     activeScopeRef.current = sessionScope;
     optimisticMessageCounterRef.current = 0;
     setSessionId(null);
@@ -345,9 +403,12 @@ export function AgentSurfaceProvider({
     setHierarchy(null);
     setActiveOperation(null);
     setIsSubmitting(false);
+    setActiveTurnStartedAt(null);
     setConfirmationBusyId(null);
     setEventCursor(0);
+    eventCursorRef.current = 0;
     setLastEventType(null);
+    setLiveResponseText("");
     const stored = linkedSessionId ?? sessionStorage.getItem(storageKey);
     if (!stored) return () => { cancelled = true; };
     getAgentSession(projectRoot, stored)
@@ -470,8 +531,8 @@ export function AgentSurfaceProvider({
     : null;
   const scopeLabel = isGlobalScope
     ? `Global Agent · ${forest?.forest.familyRunCount ?? 0} runs · ${forest?.forest.familyCount ?? 0} families`
-    : selectedNode
-    ? `${forest ? "Current chain" : "Run"} · ${selectedNode.title}`
+    : scopedSelectedNode
+    ? `${forest ? "Current chain" : "Run"} · ${scopedSelectedNode.title}`
     : forest
       ? `Current chain · ${forest.activeRunId}`
       : `Run · ${runId}`;
@@ -507,7 +568,12 @@ export function AgentSurfaceProvider({
     setMessages((current) => [...current, optimisticMessage]);
     setPrompt("");
     setIsSubmitting(true);
+    setActiveTurnStartedAt(Date.now());
     setError(null);
+    setLiveResponseText("");
+    const controller = new AbortController();
+    activeTurnControllerRef.current = controller;
+    activeTurnSessionIdRef.current = null;
     try {
       let activeSessionId = sessionId;
       if (!activeSessionId) {
@@ -527,7 +593,9 @@ export function AgentSurfaceProvider({
         setSessionId(activeSessionId);
         if (!linkedSessionId) sessionStorage.setItem(storageKey, activeSessionId);
       }
-      const result = await sendAgentTurn(projectRoot, activeSessionId, question);
+      if (controller.signal.aborted) return;
+      activeTurnSessionIdRef.current = activeSessionId;
+      const result = await sendAgentTurn(projectRoot, activeSessionId, question, controller.signal);
       if (activeScopeRef.current !== requestScope) return;
       setMessages(result.session.messages);
       setProposals(result.session.proposals ?? []);
@@ -539,12 +607,43 @@ export function AgentSurfaceProvider({
         // The durable session response still contains the completed turn.
       }
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Agent turn failed");
-      setSessionStatus("failed");
+      if (controller.signal.aborted) {
+        setError(null);
+        setSessionStatus("cancelled");
+      } else {
+        setError(requestError instanceof Error ? requestError.message : "Agent turn failed");
+        setSessionStatus("failed");
+      }
     } finally {
-      if (activeScopeRef.current === requestScope) setIsSubmitting(false);
+      if (activeTurnControllerRef.current === controller) {
+        activeTurnControllerRef.current = null;
+        activeTurnSessionIdRef.current = null;
+      }
+      if (activeScopeRef.current === requestScope) {
+        setIsSubmitting(false);
+        setActiveTurnStartedAt(null);
+      }
     }
   }, [contextPacket, eventCursor, forest, isGlobalScope, isSubmitting, linkedSessionId, projectRoot, prompt, refreshNavigation, replayEvents, runId, sessionId, sessionScope, storageKey]);
+
+  const abortTurn = useCallback(async () => {
+    const controller = activeTurnControllerRef.current;
+    if (!controller || !isSubmitting) return;
+    const activeSessionId = activeTurnSessionIdRef.current;
+    setError(null);
+    setSessionStatus("cancelling");
+    if (activeSessionId) {
+      try {
+        await abortAgentTurn(projectRoot, activeSessionId);
+      } catch {
+        // A completed turn can leave the active map between the click and this
+        // request. The local request still needs to stop without showing a
+        // misleading provider failure.
+      }
+    }
+    controller.abort();
+    setSessionStatus("cancelled");
+  }, [isSubmitting, projectRoot]);
 
   const confirmProposal = useCallback(async (proposalId: string) => {
     if (!sessionId || confirmationBusyId !== null) return;
@@ -705,6 +804,7 @@ export function AgentSurfaceProvider({
     prompt,
     setPrompt,
     sendPrompt,
+    abortTurn,
     isSubmitting,
     error,
     scopeLabel,
@@ -727,6 +827,8 @@ export function AgentSurfaceProvider({
     activeOperation,
     eventCursor,
     lastEventType,
+    liveResponseText,
+    activeTurnStartedAt,
     capabilityCatalog,
   }), [
     activeOperation,
@@ -743,6 +845,7 @@ export function AgentSurfaceProvider({
     prompt,
     scopeLabel,
     sendPrompt,
+    abortTurn,
     setModel,
     sessionStatus,
     proposals,
@@ -754,6 +857,8 @@ export function AgentSurfaceProvider({
     navigation,
     eventCursor,
     lastEventType,
+    liveResponseText,
+    activeTurnStartedAt,
     capabilityCatalog,
   ]);
 

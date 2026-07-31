@@ -183,6 +183,38 @@ describe("adaptHeadSet", () => {
 
     expect(childModel.runRerunFrom?.rerun_request_id).toBe("req_report_head");
     expect(childReport.runRerunFrom).toBeUndefined();
+    expect(childReport.title).toBe("Result");
+  });
+
+  it("keeps a report node as Report when it has a downstream node", () => {
+    const backend = fixture();
+    backend.nodes.R1 = {
+      id: "report:intermediate",
+      kind: "report",
+      display_label: "Report",
+      stage: "report",
+      trust: "ok",
+      node_hash: "R1",
+      producing_stage: "report",
+      cas_ref: null,
+      runs: ["run_a"],
+    };
+    backend.nodes.D1 = {
+      id: "decision:review",
+      kind: "decision",
+      display_label: "Review",
+      stage: "compare",
+      trust: "ok",
+      node_hash: "D1",
+      producing_stage: "review",
+      cas_ref: null,
+      runs: ["run_a"],
+    };
+    backend.edges.push({ source: "M1", target: "R1" }, { source: "R1", target: "D1" });
+
+    const vm = adaptHeadSet(backend);
+
+    expect(vm.nodes.find((node) => node.nodeHash === "R1")?.title).toBe("Report");
   });
 
   it("carries model stats decoration through (C-2)", () => {

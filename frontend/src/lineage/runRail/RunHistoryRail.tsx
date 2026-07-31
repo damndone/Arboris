@@ -75,6 +75,14 @@ function readRailOpen(storageKey: string): boolean {
   return raw === null ? true : raw !== "false";
 }
 
+export function readRunHistoryOpen(projectRoot?: string | null): boolean {
+  return readRailOpen(`${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`);
+}
+
+export function persistRunHistoryOpen(projectRoot: string | null | undefined, open: boolean): void {
+  sessionStorage.setItem(`${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`, String(open));
+}
+
 function readRailWidth(storageKey: string): number {
   const raw = sessionStorage.getItem(storageKey);
   return raw === null ? DEFAULT_RAIL_WIDTH : clampRailWidth(Number(raw));
@@ -83,9 +91,16 @@ function readRailWidth(storageKey: string): number {
 export interface RunHistoryRailProps {
   /** Optional override. When omitted, reads `project_root` from URL. */
   projectRoot?: string | null;
+  /** Controlled shell state; keeps the visible control in the topbar. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailProps = {}): JSX.Element {
+export function RunHistoryRail({
+  projectRoot: projectRootProp,
+  open: controlledOpen,
+  onOpenChange,
+}: RunHistoryRailProps = {}): JSX.Element {
   const { runId: activeRunId } = useParams<{ runId: string }>();
   const [searchParams] = useSearchParams();
   const contextProjectRoot = useProjectRootOptional();
@@ -95,13 +110,15 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   const widthStorageKey = `workbench:runRailWidth:${projectRoot ?? "default"}`;
   const openStorageKey = `${RAIL_OPEN_KEY_PREFIX}${projectRoot ?? "default"}`;
   const [railWidth, setRailWidth] = useState(() => readRailWidth(widthStorageKey));
-  const [railOpen, setRailOpenState] = useState(() => readRailOpen(openStorageKey));
+  const [storedRailOpen, setStoredRailOpen] = useState(() => readRailOpen(openStorageKey));
+  const railOpen = controlledOpen ?? storedRailOpen;
+  const isControlled = controlledOpen !== undefined;
   const dragStart = useRef<{ x: number; width: number; pointerId: number } | null>(null);
 
   useEffect(() => {
     setRailWidth(readRailWidth(widthStorageKey));
-    setRailOpenState(readRailOpen(openStorageKey));
-  }, [openStorageKey, widthStorageKey]);
+    if (!isControlled) setStoredRailOpen(readRailOpen(openStorageKey));
+  }, [isControlled, openStorageKey, widthStorageKey]);
 
   const commitRailWidth = useCallback((nextWidth: number) => {
     const clamped = clampRailWidth(nextWidth);
@@ -110,9 +127,10 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   }, [widthStorageKey]);
 
   const setRailOpen = useCallback((nextOpen: boolean) => {
-    setRailOpenState(nextOpen);
-    sessionStorage.setItem(openStorageKey, String(nextOpen));
-  }, [openStorageKey]);
+    if (!isControlled) setStoredRailOpen(nextOpen);
+    persistRunHistoryOpen(projectRoot, nextOpen);
+    onOpenChange?.(nextOpen);
+  }, [isControlled, onOpenChange, projectRoot]);
 
   const onRailResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
     dragStart.current = {
@@ -182,17 +200,17 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
   return (
     <>
       <aside
-        className="run-rail"
+        className={`run-rail${railOpen ? "" : " run-rail--collapsed"}`}
         data-testid="run-rail"
         data-open={railOpen ? "true" : "false"}
         aria-label="Run history"
         style={railOpen
           ? { width: railWidth, flexBasis: railWidth }
-          : { width: 0, flexBasis: 0, overflow: "hidden" }}
+          : { width: 0, flexBasis: 0 }}
       >
       {railOpen && (
         <>
-          <header className="run-rail__header">
+          <header className="run-rail__header run-rail__header--compact">
             <h3 className="run-rail__title">Runs</h3>
             {projectRoot && (
               <Link
@@ -217,11 +235,11 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
                 background: "transparent",
                 color: "var(--label-secondary)",
                 cursor: "pointer",
-                fontSize: 16,
+                fontSize: 11,
                 lineHeight: 1,
               }}
             >
-              ‹
+              <span aria-hidden="true">◀</span>
             </button>
           </header>
           {loading && sorted.length === 0 && (
@@ -241,7 +259,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
                   <li key={r.run_id}>
                     <button
                       type="button"
-                      className="run-rail__row"
+                      className="run-rail__row run-rail__row--compact"
                       data-testid={`run-rail-row-${r.run_id}`}
                       data-active={isActive ? "true" : undefined}
                       aria-current={isActive ? "true" : undefined}
@@ -262,6 +280,20 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
             </ul>
           )}
         </>
+      )}
+      {!railOpen && !isControlled && (
+        <button
+          type="button"
+          className="run-rail__reopen run-rail__reopen--square"
+          aria-label="Open run history"
+          title="Show runs"
+          onClick={() => setRailOpen(true)}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+            <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+        </button>
       )}
       </aside>
       {railOpen ? (
@@ -290,41 +322,7 @@ export function RunHistoryRail({ projectRoot: projectRootProp }: RunHistoryRailP
           }}
           className="run-rail__resizer"
         />
-      ) : (
-        // Claude-style collapse: the rail fully disappears (no leftover strip);
-        // a single compact icon button floats at the top-left to reopen it.
-        <div style={{ position: "relative", width: 0, flexBasis: 0 }}>
-          <button
-            type="button"
-            className="run-rail__reopen"
-            aria-label="Open run history"
-            title="Show runs"
-            onClick={() => setRailOpen(true)}
-            style={{
-              position: "absolute",
-              top: 8,
-              left: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 30,
-              height: 30,
-              padding: 0,
-              border: "1px solid var(--separator)",
-              borderRadius: 8,
-              background: "color-mix(in oklch, var(--bg-card) 92%, transparent)",
-              color: "var(--label-secondary)",
-              cursor: "pointer",
-              zIndex: 5,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-              <line x1="9" y1="4" x2="9" y2="20" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-          </button>
-        </div>
-      )}
+      ) : null}
     </>
   );
 }

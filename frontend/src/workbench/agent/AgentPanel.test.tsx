@@ -17,6 +17,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     prompt: "",
     setPrompt: vi.fn(),
     sendPrompt: vi.fn(),
+    abortTurn: vi.fn(),
     isSubmitting: false,
     error: null,
     scopeLabel: "Current chain · run-a",
@@ -38,6 +39,7 @@ function value(overrides: Partial<AgentSurfaceContextValue> = {}): AgentSurfaceC
     hierarchy: null,
   eventCursor: 0,
   lastEventType: null,
+    liveResponseText: "",
     ...overrides,
   };
 }
@@ -49,6 +51,7 @@ describe("AgentPanel — sandboxed program output", () => {
     status: "completed",
     target_run_id: null,
     stdout: "wage mean: 34.5\nrows in: 30\n",
+    postEstimationResults: [],
     diff_ref: null,
     verification: { passed: true },
     diffFocused: false,
@@ -82,7 +85,165 @@ describe("AgentPanel — sandboxed program output", () => {
   });
 });
 
+describe("AgentPanel — declared post-estimation results", () => {
+  const workflowOperation = {
+    record_id: "oprec_workflow_1",
+    operation_id: "operation.multi_step",
+    status: "completed",
+    target_run_id: "run-child",
+    stdout: null,
+    postEstimationResults: [
+      {
+        artifact_id: "workflow_model_quadratic_stationary_point_abc",
+        artifact_type: "post_estimation",
+        operation_id: "model.quadratic_stationary_point",
+        run_id: "run-source",
+        model_run_id: "run-child",
+        workflow_id: "wf-1",
+        workflow_step_id: "stationary_point",
+        result: {
+          schema_version: "workbench.model.quadratic-stationary-point/v1",
+          column: "experience",
+          stationary_point: 211.59338521178753,
+          stationary_point_within_observed_range: false,
+        },
+      },
+    ],
+    diff_ref: null,
+    verification: { passed: true },
+    diffFocused: false,
+  };
+
+  it("answers the question in the transcript instead of only reporting completion", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({ activeOperation: workflowOperation })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const results = screen.getByTestId("agent-operation-post-estimation");
+    expect(results).toHaveTextContent("Quadratic stationary point");
+    expect(results).toHaveTextContent("stationary point: 211.5934");
+    // The out-of-range flag is what separates a number from a claim.
+    expect(results).toHaveTextContent("stationary point within observed range: no");
+    expect(results).not.toHaveTextContent("workbench.model.quadratic");
+  });
+
+  it("renders no result line when the operation declared none", () => {
+    render(
+      <AgentSurfaceContext.Provider
+        value={value({
+          activeOperation: { ...workflowOperation, postEstimationResults: [] },
+        })}
+      >
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("agent-operation-post-estimation")).toBeNull();
+  });
+});
+
 describe("AgentPanel", () => {
+  it("shows elapsed time and observable activity without a private-reasoning banner", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        activeTurnStartedAt: Date.now() - 4_000,
+        lastEventType: "tool_call",
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.getByTestId("agent-turn-progress")).toHaveTextContent(/Working · 4s/);
+    expect(screen.queryByText(/private reasoning is not displayed/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-execution-trace")).toHaveTextContent("Checking evidence");
+  });
+
+  it("shows an actionable provider failure without leaving the turn marked as working", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "failed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "LLMUpstreamError" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.queryByTestId("agent-turn-progress")).toBeNull();
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "The configured provider did not return a usable response",
+    );
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "No proposal or analysis was executed",
+    );
+  });
+
+  it("distinguishes a terminal tool failure from an upstream provider failure", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "failed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Inspect the model", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "tool_runtime_error" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const failure = screen.getByTestId("agent-turn-error");
+    expect(failure).toHaveTextContent("tool runtime stopped unexpectedly");
+    expect(failure).not.toHaveTextContent("configured provider");
+  });
+
+  it("keeps a historical step-budget stop accurate when a proposal is pending", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "blocked",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Prepare a workflow", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "max_steps_exceeded" },
+        ],
+        proposals: [{
+          record_type: "revision",
+          proposal_id: "proposal-1",
+          operation_id: "operation.multi_step",
+          operation_version: "v1",
+          revision: 1,
+          session_id: "session-a",
+          chain_id: "chain-a",
+          command_id: "command-a",
+          target: {},
+          preconditions: {},
+          changes: { steps: [] },
+          evidence_refs: [],
+          expected_effect: [],
+          risks: [],
+          created_at: "2026-07-30T00:00:00Z",
+          fingerprint: "sha256:test",
+          status: "pending",
+        }],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "proposal that is still awaiting your review",
+    );
+    expect(screen.getByTestId("agent-turn-error")).toHaveTextContent(
+      "will not execute automatically",
+    );
+    expect(screen.getByTestId("agent-turn-error")).not.toHaveTextContent(
+      "No proposal or analysis was executed",
+    );
+  });
+
   it("renders the durable transcript and scope/context summary", () => {
     render(
       <AgentSurfaceContext.Provider value={value()}>
@@ -94,6 +255,7 @@ describe("AgentPanel", () => {
     expect(screen.getByText("检查 active head")).toBeInTheDocument();
     expect(screen.getByText("发现一个待确认的风险。")).toBeInTheDocument();
     expect(screen.getByText(/Current chain · run-a/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Session status: idle")).not.toBeInTheDocument();
     // Context usage is a hollow ring; the token figures live in its aria-label
     // (and hover tooltip), not as inline summary text.
     expect(screen.getByTestId("agent-context-ring")).toHaveAccessibleName(
@@ -119,7 +281,96 @@ describe("AgentPanel", () => {
     expect(agentLine.className).toContain("wb-agent-terminal-line");
   });
 
-  it("keeps navigation context collapsed so the terminal owns the panel space", () => {
+  it("follows newly appended output only while the transcript is at its bottom", () => {
+    const initial = value({
+      isSubmitting: true,
+      messages: [{ entry_id: "u1", role: "user", content: "检查结果", stop_reason: null }],
+    });
+    const { rerender } = render(
+      <AgentSurfaceContext.Provider value={initial}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    const transcript = screen.getByRole("log", { name: /Agent transcript/ }) as HTMLDivElement;
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+    });
+    transcript.scrollTop = 400;
+    fireEvent.scroll(transcript);
+
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 620 });
+    rerender(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        messages: [
+          ...initial.messages,
+          { entry_id: "a1", role: "assistant", content: "这是最新输出。", stop_reason: "stop" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(transcript.scrollTop).toBe(620);
+
+    transcript.scrollTop = 180;
+    fireEvent.scroll(transcript);
+    Object.defineProperty(transcript, "scrollHeight", { configurable: true, value: 740 });
+    rerender(
+      <AgentSurfaceContext.Provider value={value({
+        isSubmitting: true,
+        messages: [
+          ...initial.messages,
+          { entry_id: "a1", role: "assistant", content: "这是最新输出。\n\n补充说明。", stop_reason: "stop" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+    expect(transcript.scrollTop).toBe(180);
+  });
+
+  it("groups a tool-assisted turn into a collapsible reasoning trace", () => {
+    const withReasoning = value({
+      messages: [
+        { entry_id: "u1", role: "user", content: "检查模型结果", stop_reason: null },
+        {
+          entry_id: "a1",
+          role: "assistant",
+          content: "我会先核对模型和诊断证据。",
+          stop_reason: "tool_calls",
+        },
+        {
+          entry_id: "t1",
+          role: "tool",
+          name: "inspect_model_result",
+          content: JSON.stringify({ ok: true, output: { result_id: "result-1" } }),
+          stop_reason: null,
+        },
+        {
+          entry_id: "a2",
+          role: "assistant",
+          content: "模型结果已核对：系数为正。",
+          stop_reason: "stop",
+        },
+      ],
+    });
+
+    render(
+      <AgentSurfaceContext.Provider value={withReasoning}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const reasoning = screen.getByTestId("agent-reasoning-u1");
+    expect(reasoning).toHaveTextContent("Reasoning");
+    expect(reasoning).toHaveTextContent("2 steps");
+    expect(reasoning).toHaveTextContent("我会先核对模型和诊断证据。");
+    expect(reasoning).toHaveTextContent("inspect_model_result ✓ ok");
+    expect(reasoning).not.toContainElement(screen.getByText("模型结果已核对：系数为正。"));
+  });
+
+  it("leaves hierarchy browsing to AI activity so the terminal owns the panel space", () => {
     const rootRef: AgentNavigationRef = {
       kind: "agent_session",
       id: "agent-main",
@@ -142,10 +393,9 @@ describe("AgentPanel", () => {
       </AgentSurfaceContext.Provider>,
     );
 
-    const context = screen.getByTestId("agent-context-details");
-    expect(context).not.toHaveAttribute("open");
+    expect(screen.queryByTestId("agent-context-details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agent context")).not.toBeInTheDocument();
     expect(screen.getByRole("log", { name: /Agent transcript/ })).toBeInTheDocument();
-    expect(screen.getByText("Agent context")).toBeInTheDocument();
   });
 
   it("offers a typed fork action on a message with a verified source node", () => {
@@ -361,68 +611,25 @@ describe("AgentPanel", () => {
     expect(card.textContent).not.toContain("[{");
   });
 
-  it("renders Main/Chain and operation lineage links", async () => {
-    const openNavigation = vi.fn();
-    const navigationLinks: AgentNavigationRef[] = [
-      {
-        kind: "graph_node",
-        id: "run-source::model:ols_1",
-        label: "Source model:ols_1",
-        relation: "source",
-        available: true,
-        href: {
-          view: "graph",
-          run_id: "run-source",
-          node_ref: "model:ols_1",
-          forest_node_key: "run-source::model:ols_1",
-        },
-      },
-      {
-        kind: "operation",
-        id: "oprec-1",
-        label: "model.rerun · completed",
-        relation: "audit",
-        available: true,
-        href: {
-          view: "agent",
-          session_id: "agent_chain",
-          operation_record_id: "oprec-1",
-        },
-      },
-      {
-        kind: "run",
-        id: "run-child",
-        label: "Child run run-child",
-        relation: "child",
-        available: true,
-        href: { view: "graph", run_id: "run-child" },
-      },
-      {
-        kind: "agent_session",
-        id: "agent_chain_child",
-        label: "Agent agent_chain_child",
-        relation: "child",
-        available: true,
-        href: { view: "agent", session_id: "agent_chain_child" },
-      },
-    ];
+  it("does not duplicate project navigation links already available in AI activity", () => {
+    const navigationLinks: AgentNavigationRef[] = [{
+      kind: "run",
+      id: "run-child",
+      label: "Child run run-child",
+      relation: "child",
+      available: true,
+      href: { view: "graph", run_id: "run-child" },
+    }];
     render(
       <AgentSurfaceContext.Provider
-        value={value({ navigationLinks, openNavigation })}
+        value={value({ navigationLinks, openNavigation: vi.fn() })}
       >
         <AgentPanel runId="run-a" projectRoot="/proj" />
       </AgentSurfaceContext.Provider>,
     );
 
-    expect(screen.getByRole("button", { name: /open source model/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open child run/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open operation/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /open child agent/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /open child run/i }));
-    expect(openNavigation).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "run", id: "run-child" }),
-    );
+    expect(screen.queryByTestId("agent-navigation-links")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open child run/i })).not.toBeInTheDocument();
   });
 
   it("offers a human-readable audit export for the operation's owning session", () => {
@@ -449,40 +656,6 @@ describe("AgentPanel", () => {
       "href",
       expect.stringContaining("/agent/sessions/agent_chain/audit?project_root=%2Fproj&format=html"),
     );
-  });
-
-  it("keeps typed navigation keys unique when one chain has two relations", () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const duplicateChainId = "chain-child";
-    const navigationLinks: AgentNavigationRef[] = [
-      {
-        kind: "chain",
-        id: duplicateChainId,
-        label: `Chain ${duplicateChainId}`,
-        relation: "parent",
-        available: true,
-        href: { view: "agent", chain_id: duplicateChainId },
-      },
-      {
-        kind: "chain",
-        id: duplicateChainId,
-        label: `Chain ${duplicateChainId}`,
-        relation: "child",
-        available: true,
-        href: { view: "agent", chain_id: duplicateChainId },
-      },
-    ];
-
-    render(
-      <AgentSurfaceContext.Provider value={value({ navigationLinks })}>
-        <AgentPanel runId="run-a" projectRoot="/proj" />
-      </AgentSurfaceContext.Provider>,
-    );
-
-    expect(screen.getByRole("button", { name: "Open parent Chain chain-child" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open child Chain chain-child" })).toBeInTheDocument();
-    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
-    consoleError.mockRestore();
   });
 
   it("keeps message navigation keys unique when one chain has two relations", () => {

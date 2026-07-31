@@ -63,6 +63,7 @@ from ..agent.execution import OperationClaimConflict
 from ..agent.orchestrator import WorkbenchOrchestrator
 from ..agent.proposals import ProposalConfirmationError, ProposalStaleError, ProposalStore
 from ..agent.session import EntryRef, JsonlSessionRepository
+from ..agent.tools import ToolRegistry
 from ..api_errors import WorkbenchAPIError
 from ..control_plane import control_plane_capability
 from ..llm.config import load_llm_config
@@ -82,8 +83,19 @@ MAX_QUESTION_CHARS = 4_000
 DEFAULT_MAX_STEPS = 10
 DEFAULT_TIMEOUT_S = 120.0
 
+# A live turn is process-local by design: the local Workbench server owns the
+# in-flight provider stream and is the only component able to abort it safely.
+# Durable session state remains in JsonlSessionRepository; this map contains no
+# prompt text, provider secret, or replay state and is always cleared in the
+# turn route's finally block.
+_ACTIVE_TURNS: dict[tuple[str, str], AgentCore] = {}
+
+
+def _active_turn_key(project_root: Path, session_id: str) -> tuple[str, str]:
+    return (str(project_root.resolve()), session_id)
+
 CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
-- You are the Econometrics Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- You are the Workbench Chain Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - Read-only inspection tools are the evidence source for this turn.
 - When the user asks for an OLS conventional-to-clustered Analysis Loop proposal, call propose_analysis_loop with the exact source_run_id, source_node_ref, active_head_run_id, cluster_variable, and (when supplied) result_id. This typed tool resolves the source facts and creates the PlanDiff binding.
 - When the user asks for a multi-step statistical workflow over the selected Raw data node (for example: grouped descriptive statistics, missing-value checks, a correlation matrix, percentile-derived group comparisons, scatter plots, and one or more regressions), use operation.multi_step@v1 as a SINGLE workflow proposal covering the whole request.
@@ -91,6 +103,7 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 {step_vocabulary}
 - A composed workflow runs over the dataset, not over one graph node. Once you have the data schema and the operation contract you have everything a plan needs: inspecting further nodes adds nothing and spends the budget that writing the plan requires. Do not walk the graph node by node.
 - Use the columns and grouping values the DATA actually has, taken from inspection — never invented and never copied from an example. depends_on must name the step that produced the evidence a later step relies on; a percentile threshold must depend on the summarize_detail step that produced it.
+- A requested post-estimation quantity requires its own actual typed step: use model.joint_f_test for a joint test and model.quadratic_stationary_point for a quadratic stationary point. Each must depend on the model.genesis step that declared its branch, and a report that includes either result must list that producing step in required_steps. A report section description does not execute a result and must never substitute for the producing step.
 - The server owns statistical semantics: percentile method, missing-value policy, covariance validation, diagnostics and artifacts. Choose which steps to run over which columns; do not restate those fixed semantics in changes.
 - The plan's length, ordering and column choices belong to the request being answered. There is no fixed number of steps.
 - For other registered mutations, you must call propose_operation with a complete structured payload; a JSON or Markdown proposal in ordinary text is not a submitted proposal.
@@ -105,15 +118,33 @@ CHAIN_AGENT_PROTOCOL = """Workbench Chain Agent workflow protocol (agent/v1):
 - When inspect_operation_contract returns an option_vocabulary, that vocabulary is the model pack's own field list: build model_options only from its declared paths, closed value sets, and limits, and satisfy its cross_field_rules. A patch may name only the keys it changes; nested sections are merged key-wise. A patch outside the vocabulary is rejected when the proposal is created, and its rejection code tells you what to fix.
 - Never copy a displayed editable-schema value or model narrative as the source fact when a typed Analysis Loop tool returns canonical source facts, PlanDiff, and expected invariants; explain only those backend-owned facts.
 - If evidence or a required field is missing, inspect more or explain what is missing instead of inventing it.
+- After a confirmed operation completes, its status is not numerical evidence. First use inspect_completed_operations for the current node, then inspect_operation_artifact only with an emitted artifact_id; cite that artifact id in the answer. A confirmed Notebook composed workflow has its own receipt lifecycle: when the question concerns sibling models or post-estimation results from that workflow, first use inspect_notebook_workflow_results. It discloses only committed workflows that contain the current run; use its returned branch run_ids with inspect_project_model_coefficients, and cite its returned post_estimation_evidence directly. That post_estimation_evidence is already the final bounded public result for the receipt: never call inspect_operation_artifact for those ids, because that separate tool intentionally admits only Agent operation records. Do not conclude that no composed workflow exists merely because inspect_completed_operations is empty. inspect_artifact_preview also exposes bounded public_result_evidence for already-persisted UI statistical artifacts that explicitly descend from the selected data node, and numeric figure_evidence for the selected model run. Cite the artifact id and state when figure evidence is run-scoped. If no public result view is available, say that the result cannot yet be verified. Never request raw rows, a filesystem path, or infer a figure from its title alone.
+- When interpreting a quadratic stationary point, use only the server-reported observed_min, observed_max, and stationary_point_within_observed_range fields. Never infer whether it is in range from a column name, label, or a typical domain.
 """
 
 MAIN_AGENT_PROTOCOL = """Workbench Global Agent workflow protocol (agent/v1):
-- You are the Econometrics Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
+- You are the Workbench Global Agent, running on the workbench's configured language-model provider. When asked what you are or which model powers you, identify yourself that way and name the configured provider and model given in your identity context. Never invent a product, brand, or vendor name (there is no product called "Vivistats"), and never deflect a question about your identity or model to external or "official" documentation.
 - You are the project-level advisory Agent. Use the bounded project overview and durable summaries supplied in the context packet.
 - You may summarize families, runs, heads, chains, and visible risks, and suggest questions or evidence-gathering steps.
 - Never invent raw-data facts, model metrics, run results, chain state, or unsupported causal claims.
-- You have no execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
-- If the bounded overview is insufficient, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
+- You have no mutation or execution tools in this scope. Never claim that a proposal, run, graph mutation, or file change was created or executed.
+- inspect_project_model_coefficients is a bounded, read-only evidence tool. When the user asks for an exact coefficient, standard error, p value, confidence interval, R-squared, adjusted R-squared, outcome, fixed-effect identifier, residual/model degrees of freedom, covariance details, or a side-by-side comparison from one or more visible runs, call it with the run ids and at most four exact persisted term names per call from the overview; split a longer list across calls. Report only its returned values and cite its run_id/model_id evidence_ref; do not calculate a new interval, read a report file, or infer a missing coefficient or specification field.
+- inspect_project_dataset_schema is a bounded, read-only evidence tool. Before stating that a column is absent or suggesting a typed model composition for a visible run, call it with that run id when the bounded overview does not already establish the relevant column names. It returns names, dtypes, missingness, and unique counts only; never infer category labels, raw values, or a formula from it.
+- inspect_project_notebook_workflow_results is the project-level receipt reader for a committed Notebook workflow. When a question concerns sibling models or post-estimation tests from such a workflow, make one receipt lookup with up to sixteen visible candidate run ids from the overview. From a returned completed receipt, use branch_runs to select model evidence and cite its returned post_estimation_evidence directly; do not claim a workflow exists without this receipt evidence.
+- For a completed workflow's requested coefficients, use its returned branch run ids and call inspect_project_model_coefficients once with all requested branch ids and at most four requested terms. Then answer from that result and the receipt. Do not inspect a dataset schema merely to restate a declared model specification, and do not retrieve unrelated coefficients just to repeat the complete predictor list already returned with model evidence.
+- inspect_project_numeric_summary is the bounded source for explicitly requested persisted means and standard deviations. Use it for a reported sample mean; it never returns raw rows or correlations.
+- inspect_project_model_figure_evidence is the bounded source for an explicitly named persisted model figure. Give it only visible run ids and figure artifact ids; it returns aggregate numeric evidence, never pixels, paths, or observation rows. For a residual-versus-predictor question, use its bins before describing variance patterns; if it returns unavailable, say the figure cannot yet be numerically verified.
+- inspect_project_linear_interaction_effects is the only source for an OLS interaction slope evaluated at a persisted moderator mean. It returns the marginal effect on the recorded outcome scale, but deliberately does not return an interval or standard error. Do not calculate this number yourself or apply this tool to a non-OLS model.
+- inspect_project_coefficient_transforms performs only one of two server-side numeric transforms: scale_0_01 or expm1_percent. It does not establish that a percentage interpretation is appropriate. Before applying its value in prose, cite model evidence that establishes the relevant recorded term and outcome scale; do not do the arithmetic yourself.
+- A coefficient is a change per one recorded unit of its term unless the visible model evidence documents another scale. Never convert it to a percentage-point, currency, or other unit from a variable name alone.
+- Do not use overlap or non-overlap of two separately estimated confidence intervals as a test that their coefficients differ. Do not label a comparison Simpson's paradox, claim an omitted-variable direction, state a correlation not in evidence, or rank one specification as more credible without a separately reported diagnostic or contrast. You may explain that conditioning on additional declared variables changes the reported conditional association, and state the limit.
+- When nonrobust and robust standard errors lead to different significance labels, report that the inference changes under the two covariance assumptions. Do not say the nonrobust significance is false, spurious, or caused by heteroskedasticity without a separate diagnostic that establishes that stronger claim.
+- A difference in standard-error size alone does not establish serial correlation, heteroskedasticity, clustering validity, or a preferred covariance estimator. Do not describe that difference as evidence, a signal, an indication, a hint, or a suggestion of any residual process. State only the returned difference and any separately reported diagnostic.
+- Interpret regression coefficients as conditional association, not a causal effect, unless the persisted model evidence explicitly supplies a causal identification claim. Do not infer a variable's real-world meaning from its name, abbreviation, or data type; use only the user's stated definition or persisted metadata.
+- Schema-level unique counts do not establish whether a covariate changes within entities. To say a named variable is absorbed by entity fixed effects, cite direct persisted within-entity evidence or state the result conditionally on the user-supplied premise that it is time-invariant; do not promote a name or a low unique-count to that premise.
+- Preserve the exact sign, digits, and interval endpoints returned by the evidence tool. Never "correct" a number from prose or a prior transcript; if earlier text conflicts with evidence, call the tool again and treat the new result as authoritative.
+- Before sending a numeric answer, mechanically copy those returned fields rather than recalculate or silently retype them. Check that the displayed estimate, standard error, p value, and interval endpoints are mutually consistent with the returned record; if your prose rendering of a confidence interval contradicts the returned p value or interval endpoints, re-read the same evidence tool and report only its latest fields.
+- If the bounded overview is insufficient to identify the relevant run or exact term, say what evidence is missing and ask the user to select a chain or node for a narrower evidence packet.
 """
 
 
@@ -343,6 +374,34 @@ def _context_serialized(packet: dict[str, Any]) -> tuple[str, str]:
     if not fingerprint:
         fingerprint = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     return serialized, fingerprint
+
+
+def _ensure_current_global_protocol(
+    repository: JsonlSessionRepository,
+    session_id: str,
+) -> None:
+    """Append a protocol revision once when a durable Main session is older."""
+
+    for entry in repository.get_branch(session_id):
+        if entry.entry_type != "custom_message":
+            continue
+        payload = entry.payload
+        if (
+            payload.get("name") == "workbench_global_agent_protocol"
+            and payload.get("content") == MAIN_AGENT_PROTOCOL
+        ):
+            return
+    repository.append(
+        session_id,
+        "custom_message",
+        {
+            "message_type": "agent_protocol",
+            "audience": "model",
+            "name": "workbench_global_agent_protocol",
+            "content": MAIN_AGENT_PROTOCOL,
+            "metadata": {"protocol_version": "agent/v1"},
+        },
+    )
 
 
 def _ensure_main_session(repository: JsonlSessionRepository, root: Path) -> str:
@@ -662,7 +721,7 @@ def create_agent_session(
             "audience": "model",
             "name": "workbench_agent_identity",
             "content": (
-                "Agent identity (authoritative): you are the Econometrics Workbench "
+                "Agent identity (authoritative): you are the Workbench "
                 + ("Chain" if body.role == "chain" else "Global")
                 + " Agent. You run on the configured provider "
                 + f"'{identity_config.provider_id or 'unknown'}' using model "
@@ -688,17 +747,7 @@ def create_agent_session(
             },
         )
     else:
-        repository.append(
-            session_id,
-            "custom_message",
-            {
-                "message_type": "agent_protocol",
-                "audience": "model",
-                "name": "workbench_global_agent_protocol",
-                "content": MAIN_AGENT_PROTOCOL,
-                "metadata": {"protocol_version": "agent/v1"},
-            },
-        )
+        _ensure_current_global_protocol(repository, session_id)
     events.emit(
         session_id,
         "session_created",
@@ -1750,6 +1799,14 @@ async def run_agent_turn(
 ) -> dict[str, Any]:
     root = _project_root(project_root)
     repository, events, metadata = _get_session(root, session_id)
+    turn_key = _active_turn_key(root, session_id)
+    if turn_key in _ACTIVE_TURNS:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_IN_PROGRESS",
+            message="This Agent session already has a running turn.",
+            details={"session_id": session_id},
+        )
     config = load_llm_config()
     if not config.is_configured():
         raise WorkbenchAPIError(
@@ -1767,6 +1824,8 @@ async def run_agent_turn(
         session_id=session_id,
     )
     tool_context: dict[str, Any] | None = None
+    if metadata.get("role") == "main":
+        _ensure_current_global_protocol(repository, session_id)
     if metadata.get("role") == "chain":
         # Handoff §7 slice: the ROUTE registers the chain-scoped read-only
         # tools through the existing orchestrator boundary — the model never
@@ -1787,11 +1846,22 @@ async def run_agent_turn(
                 scope_requirements=("chain", "active_head")
             )
         }
-    await agent.prompt(
-        body.question.strip(),
-        budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
-        tool_context=tool_context,
-    )
+    else:
+        provider = NodeOperationContextProvider(root)
+        registry = ToolRegistry()
+        for definition in provider.global_tool_definitions(session_id=session_id):
+            registry.register(definition)
+        agent.attach_tools(registry.descriptors(), registry)
+    _ACTIVE_TURNS[turn_key] = agent
+    try:
+        await agent.prompt(
+            body.question.strip(),
+            budget={"max_steps": DEFAULT_MAX_STEPS, "timeout_s": DEFAULT_TIMEOUT_S},
+            tool_context=tool_context,
+        )
+    finally:
+        if _ACTIVE_TURNS.get(turn_key) is agent:
+            _ACTIVE_TURNS.pop(turn_key, None)
     messages = _messages(repository, session_id)
     assistant = next(
         (message for message in reversed(messages) if message["role"] == "assistant"),
@@ -1808,6 +1878,27 @@ async def run_agent_turn(
         "assistant": assistant,
         "status": repository.get_metadata(session_id).get("status"),
     }
+
+
+@router.post("/agent/sessions/{session_id}/abort")
+async def abort_agent_turn(
+    session_id: str,
+    project_root: str,
+) -> dict[str, Any]:
+    """Request cancellation of the one active provider/tool turn for a session."""
+
+    root = _project_root(project_root)
+    _get_session(root, session_id)
+    agent = _ACTIVE_TURNS.get(_active_turn_key(root, session_id))
+    if agent is None:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="AGENT_TURN_NOT_ACTIVE",
+            message="This Agent session has no active turn to stop.",
+            details={"session_id": session_id},
+        )
+    await agent.abort()
+    return {"status": "cancelling", "session_id": session_id}
 
 
 @router.get("/agent/sessions/{session_id}/events")

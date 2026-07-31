@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NotebookSurface } from "./NotebookSurface";
 import { rootToSlug } from "../workbench/projectSlug";
@@ -44,6 +44,10 @@ function ready(overrides: Partial<NotebookReadyView["notebook"]> = {}): Notebook
 }
 
 describe("NotebookSurface — six states, none of them lying", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("loading: says the context is being compiled and shows no options", () => {
     render(<NotebookSurface view={{ status: "loading" }} />);
     expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
@@ -52,11 +56,148 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-option-list")).toBeNull();
   });
 
+  it("makes the user-selected Plan or Action mode explicit", () => {
+    const onInteractionModeChange = vi.fn();
+    render(
+      <NotebookSurface
+        view={ready()}
+        onInteractionModeChange={onInteractionModeChange}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-mode-plan")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByTestId("notebook-mode-action"));
+    expect(onInteractionModeChange).toHaveBeenCalledWith("action");
+  });
+
+  it("uses one-Draft, non-executing language in Action mode", () => {
+    render(<NotebookSurface view={ready()} interactionMode="action" />);
+
+    expect(screen.getByTestId("notebook-mode-action")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("What should Workbench do?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check and prepare Draft" })).toBeInTheDocument();
+    expect(screen.getByText(/Nothing runs until you confirm/)).toBeInTheDocument();
+  });
+
   it("loading (planning phase): names the slow agent step so it does not read as a hang", () => {
-    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+    vi.useFakeTimers();
+    const onCancelPlanning = vi.fn();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        onCancelPlanning={onCancelPlanning}
+      />,
+    );
     expect(screen.getByTestId("notebook-loading")).toHaveTextContent(
       "Planning analysis options with the agent…",
     );
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveTextContent(
+      "Validating evidence-bound options",
+    );
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveTextContent(
+      "How the plan is being formed",
+    );
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 5s",
+    );
+    fireEvent.click(screen.getByTestId("notebook-cancel-planning"));
+    expect(onCancelPlanning).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
+  it("planning: shows the server budget so a slow pass is not read as a hang", () => {
+    vi.useFakeTimers();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(68_000));
+    // The number that was missing at 68s: the reader could not tell a request
+    // still inside its budget from one that had hung.
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 68s / 180s",
+    );
+    expect(screen.getByTestId("notebook-planning-progress")).not.toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: marks the pass overdue once the published budget is exceeded", () => {
+    vi.useFakeTimers();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(181_000));
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "the server is ending it",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: keeps counting the same attempt across a remount", () => {
+    vi.useFakeTimers();
+    const startedAtMs = Date.now();
+    const { unmount } = render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+        planningStartedAtMs={startedAtMs}
+      />,
+    );
+
+    act(() => vi.advanceTimersByTime(150_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 150s / 180s",
+    );
+
+    // The request outlives this component; the counter must too. Anchored to
+    // mount time it restarted at 0s here, reporting a nearly spent budget as
+    // barely touched.
+    unmount();
+    render(
+      <NotebookSurface
+        view={{ status: "loading", phase: "planning" }}
+        planningDeadlineSeconds={180}
+        planningStartedAtMs={startedAtMs}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 150s / 180s",
+    );
+    act(() => vi.advanceTimersByTime(31_000));
+    expect(screen.getByTestId("notebook-planning-progress")).toHaveAttribute(
+      "data-overdue",
+      "true",
+    );
+    vi.useRealTimers();
+  });
+
+  it("planning: falls back to a plain elapsed counter without a published budget", () => {
+    vi.useFakeTimers();
+    render(<NotebookSurface view={{ status: "loading", phase: "planning" }} />);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByTestId("notebook-planning-elapsed")).toHaveTextContent(
+      "Elapsed 5s",
+    );
+    expect(screen.getByTestId("notebook-planning-elapsed")).not.toHaveTextContent("/");
+    vi.useRealTimers();
   });
 
   it("error: shows the error code and message, and no success wording", () => {
@@ -102,6 +243,25 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.queryByTestId("notebook-success")).toBeNull();
   });
 
+  it("planning timeout remains explicitly retryable", () => {
+    const onReplan = vi.fn();
+    render(
+      <NotebookSurface
+        view={{
+          status: "error",
+          error: {
+            code: "NOTEBOOK_PLANNING_TIMEOUT",
+            message: "Notebook planning provider exceeded 60s",
+          },
+        }}
+        onReplan={onReplan}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("notebook-replan-options"));
+    expect(onReplan).toHaveBeenCalledOnce();
+  });
+
   it("empty: says no options were proposed rather than rendering an empty list", () => {
     render(<NotebookSurface view={ready({ options: [] })} />);
     expect(screen.getByTestId("notebook-empty")).toHaveTextContent(
@@ -125,11 +285,17 @@ describe("NotebookSurface — six states, none of them lying", () => {
   });
 
   it("confirmation: shows the plan diff and required artifacts before anything runs", () => {
+    const selected = {
+      ...canonicalOptionRevision(),
+      lifecycle_status: "selected" as const,
+      materializable: true,
+    };
     render(
       <NotebookSurface
         view={ready({
+          options: [selected],
           confirmation: {
-            option: canonicalOptionRevision(),
+            option: selected,
             execution: canonicalOptionExecution(),
             plan_diff: [
               { field: "model_type", from: "time_series.arma_garch", to: "time_series.ets" },
@@ -149,13 +315,11 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(screen.getByTestId("confirmation-pins")).toHaveTextContent(
       "opt_7f3a1c rev 2 · prop_51de90 rev 1",
     );
+    expect(screen.getByTestId("confirmation-confirm")).toHaveTextContent("Confirm");
     expect(screen.queryByTestId("notebook-success")).toBeNull();
-    expect(
-      Boolean(
-        screen.getByTestId("notebook-option-list").compareDocumentPosition(confirmation) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
+    const card = screen.getByTestId(`option-card-${selected.option_id}`);
+    expect(card.nextElementSibling).toBe(screen.getByTestId("notebook-confirmation-slot"));
+    expect(screen.getByTestId("notebook-confirmation-slot")).toHaveFocus();
   });
 
   it("success: renders the executed result exactly as the ETS packet states it", () => {
@@ -178,6 +342,51 @@ describe("NotebookSurface — six states, none of them lying", () => {
     expect(success).toHaveTextContent("BIC 12078.9226330019");
     expect(success).toHaveTextContent("converged");
     expect(success).toHaveTextContent("run-9ab");
+  });
+
+  it("labels a composed workflow as sibling branches instead of an unassigned run", () => {
+    render(
+      <NotebookSurface
+        view={ready({
+          executionResults: {
+            opt_workflow: {
+              option_id: "opt_workflow",
+              option_revision: 1,
+              run_id: null,
+              execution_status: "succeeded",
+              committed: true,
+              artifact_validation: {
+                contract_profile: "artifact-identity-type-count/v1",
+                validation_status: "passed",
+                checked_dimensions: ["artifact_id"],
+                not_evaluated_dimensions: ["payload_schema"],
+                issues: [],
+              },
+              workflow_execution: {
+                workflow_id: "workflow_1",
+                plan_fingerprint: "plan_1",
+                status: "completed",
+                branch_runs: [
+                  { branch_id: "baseline", run_id: "run_1", artifact_ids: ["model_result"] },
+                  { branch_id: "extended", run_id: "run_2", artifact_ids: ["model_result"] },
+                ],
+                post_estimation_artifact_ids: ["joint_f"],
+              },
+            },
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
+      "2 model branches",
+    );
+    expect(screen.getByTestId("notebook-execution-summary")).toHaveTextContent(
+      "no single active head",
+    );
+    expect(screen.getByTestId("notebook-execution-summary")).not.toHaveTextContent(
+      "run unassigned",
+    );
   });
 
   it("renders a bounded model-neutral execution summary for non-ETS results", () => {
@@ -274,13 +483,95 @@ describe("NotebookSurface — persisted option batches and the visible slice", (
     expect(screen.queryByTestId("notebook-option-overflow")).toBeNull();
   });
 
-  it("offers an explicit replan action when persisted options need recovery", () => {
+  it("collapses an older stale-only batch while keeping the latest actionable batch open", () => {
+    const base = canonicalOptionRevision();
+    render(
+      <NotebookSurface
+        view={ready({
+          options: [
+            {
+              ...base,
+              option_id: "opt_old",
+              batch_id: "batch_old",
+              freshness_status: "stale",
+            },
+            {
+              ...base,
+              option_id: "opt_current",
+              batch_id: "batch_current",
+              freshness_status: "fresh",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).not.toHaveAttribute("open");
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_current")).toHaveAttribute("open");
+    expect(screen.getByTestId("notebook-option-batch-batch_current")).toHaveTextContent(
+      "Current option batch",
+    );
+  });
+
+  it("orders batches by generation time and labels only the newest batch as current", () => {
+    const base = canonicalOptionRevision();
+    render(
+      <NotebookSurface
+        view={ready({
+          options: [
+            {
+              ...base,
+              option_id: "opt_old",
+              batch_id: "batch_old",
+              created_at: "2026-07-22T10:00:00+00:00",
+              freshness_status: "stale",
+            },
+            {
+              ...base,
+              option_id: "opt_new",
+              batch_id: "batch_new",
+              created_at: "2026-07-22T12:00:00+00:00",
+              freshness_status: "fresh",
+            },
+            {
+              ...base,
+              option_id: "opt_middle",
+              batch_id: "batch_middle",
+              created_at: "2026-07-22T11:00:00+00:00",
+              freshness_status: "stale",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const batches = screen.getAllByTestId(/^notebook-option-batch-/);
+    expect(batches.map((batch) => batch.dataset.testid)).toEqual([
+      "notebook-option-batch-batch_old",
+      "notebook-option-batch-batch_middle",
+      "notebook-option-batch-batch_new",
+    ]);
+    expect(screen.getAllByText("Current option batch")).toHaveLength(1);
+    expect(screen.getByTestId("notebook-option-batch-batch_old")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_middle")).toHaveTextContent(
+      "Previous option batch",
+    );
+    expect(screen.getByTestId("notebook-option-batch-batch_new")).toHaveTextContent(
+      "Current option batch",
+    );
+  });
+
+  it("keeps replan out of the header because the goal composer owns it", () => {
     const onReplan = vi.fn();
     render(<NotebookSurface view={ready()} onReplan={onReplan} />);
 
-    fireEvent.click(screen.getByTestId("notebook-replan-options"));
-
-    expect(onReplan).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("notebook-replan-options")).toBeNull();
+    expect(onReplan).not.toHaveBeenCalled();
   });
 
   it("always keeps the context slice visible next to the options", () => {

@@ -33,6 +33,10 @@ export function applyAgentNavigationRef(
       view: "graph",
       focusKey,
       pinned: focusKey !== null,
+      // A graph output can have one backend-verified child Agent session.
+      // Carry only that explicit binding across the run switch; arbitrary
+      // graph navigation retains the existing URL state as before.
+      agentSessionId: href.session_id ?? current.agentSessionId,
       diffFocused: false,
     };
     return writeWorkbenchUrl(out, next);

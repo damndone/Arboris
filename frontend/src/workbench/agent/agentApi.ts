@@ -234,6 +234,7 @@ export async function sendAgentTurn(
   projectRoot: string,
   sessionId: string,
   question: string,
+  signal?: AbortSignal,
 ): Promise<{ session: AgentSession; assistant: AgentSession["messages"][number]; status: string }> {
   return request(
     agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/turns`),
@@ -241,7 +242,19 @@ export async function sendAgentTurn(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
+      signal,
     },
+  );
+}
+
+/** Request cancellation for the active server-side turn in this session. */
+export function abortAgentTurn(
+  projectRoot: string,
+  sessionId: string,
+): Promise<{ status: "cancelling"; session_id: string }> {
+  return request(
+    agentPath(projectRoot, `/agent/sessions/${encodeURIComponent(sessionId)}/abort`),
+    { method: "POST" },
   );
 }
 

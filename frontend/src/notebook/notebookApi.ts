@@ -19,6 +19,13 @@ export interface NotebookRecord {
   available_capabilities?: string[];
 }
 
+export type NotebookInteractionMode = "plan" | "action";
+
+export interface NotebookFocusInput {
+  goal?: string;
+  interaction_mode?: NotebookInteractionMode;
+}
+
 export interface NotebookContextResponse {
   context_id: string;
   context_profile: string;
@@ -29,6 +36,12 @@ export interface NotebookContextResponse {
   budget_report: Record<string, unknown>;
   source_manifest: Array<Record<string, unknown>>;
   trace_id?: string | null;
+  /** Total seconds a planning pass may run before the server ends it.
+   *
+   * Published so the planning surface can show the budget it is running
+   * against; an open-ended elapsed counter cannot tell a reader whether a
+   * live request is progressing or hung. */
+  planning_deadline_s?: number;
   [key: string]: unknown;
 }
 
@@ -47,6 +60,11 @@ export interface NotebookOptionsResponse {
   materializations?: Record<string, Record<string, unknown>>;
   execution_results?: Record<string, Record<string, unknown>>;
   trace_id: string;
+}
+
+export interface NotebookPlanningRequest {
+  attemptId: string;
+  signal?: AbortSignal;
 }
 
 export interface NotebookTraceResponse {
@@ -118,6 +136,25 @@ export function ensureNotebookProjection(
   });
 }
 
+export function ensureNotebookDatasetProjection(
+  projectRoot: string,
+  input: { from_run_id: string; created_by?: string; title?: string },
+): Promise<NotebookRecord> {
+  return readNotebookResponse<NotebookRecord>(
+    projectRoot,
+    "/notebooks/projection/from-run-dataset",
+    {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        created_by: "user",
+        title: "New analysis from source data",
+        ...input,
+      }),
+    },
+  );
+}
+
 export function getNotebook(
   projectRoot: string,
   notebookId: string,
@@ -125,6 +162,22 @@ export function getNotebook(
   return readNotebookResponse<NotebookRecord>(
     projectRoot,
     `/notebooks/${encodeURIComponent(notebookId)}`,
+  );
+}
+
+export function updateNotebookFocus(
+  projectRoot: string,
+  notebookId: string,
+  input: NotebookFocusInput,
+): Promise<NotebookRecord> {
+  return readNotebookResponse<NotebookRecord>(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/focus`,
+    {
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify(input),
+    },
   );
 }
 
@@ -145,6 +198,7 @@ export function proposeNotebookOptions(
   notebookId: string,
   count = 3,
   preferences?: DomainMemoryPreferences,
+  planning?: NotebookPlanningRequest,
 ): Promise<NotebookOptionsResponse> {
   return readNotebookResponse<NotebookOptionsResponse>(
     projectRoot,
@@ -152,8 +206,24 @@ export function proposeNotebookOptions(
     {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ count }),
+      body: JSON.stringify({
+        count,
+        ...(planning ? { attempt_id: planning.attemptId } : {}),
+      }),
+      signal: planning?.signal,
     },
+  );
+}
+
+export function cancelNotebookPlanning(
+  projectRoot: string,
+  notebookId: string,
+  attemptId: string,
+): Promise<{ attempt_id: string; status: "cancelled" | "not_active" }> {
+  return readNotebookResponse(
+    projectRoot,
+    `/notebooks/${encodeURIComponent(notebookId)}/planning/${encodeURIComponent(attemptId)}`,
+    { method: "DELETE" },
   );
 }
 

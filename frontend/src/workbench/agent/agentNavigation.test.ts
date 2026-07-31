@@ -58,6 +58,26 @@ describe("applyAgentNavigationRef", () => {
     expect(out.get("project_root")).toBe("/foo");
   });
 
+  it("keeps the verified child Agent session when opening its output run", () => {
+    const out = applyAgentNavigationRef(
+      new URLSearchParams("run=run-source&panel=agent"),
+      {
+        ...graphRef,
+        kind: "run",
+        relation: "child",
+        href: {
+          view: "graph",
+          run_id: "run-child",
+          session_id: "agent_chain_child",
+        },
+      },
+    );
+
+    expect(out.get("run")).toBe("run-child");
+    expect(out.get("agent_session")).toBe("agent_chain_child");
+    expect(out.get("panel")).toBe("agent");
+  });
+
   it("focuses an operation in the Agent panel", () => {
     const out = applyAgentNavigationRef(
       new URLSearchParams("run=run-source"),

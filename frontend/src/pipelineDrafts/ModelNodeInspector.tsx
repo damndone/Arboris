@@ -61,8 +61,20 @@ export function ModelNodeInspector({
   // v1.6.5 (§6.5): changed-fields summary — which params differ from the
   // source model, shown as `key: source → current` so the user sees exactly
   // what this draft edits before validating/executing.
-  const fmt = (v: unknown): string =>
-    v === undefined || v === "" ? "∅" : Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
+  const fmt = (v: unknown): string => {
+    if (v === undefined || v === "") return "∅";
+    if (Array.isArray(v)) return `${v.length} ${v.length === 1 ? "item" : "items"}`;
+    if (v && typeof v === "object") {
+      const count = Object.keys(v as Record<string, unknown>).length;
+      return `${count} ${count === 1 ? "setting" : "settings"}`;
+    }
+    return String(v);
+  };
+  const exact = (v: unknown): string => {
+    if (v === undefined || v === "") return "∅";
+    if (typeof v === "string") return v;
+    return JSON.stringify(v);
+  };
   const changedFields = Array.from(
     new Set([...Object.keys(node.source_params ?? {}), ...Object.keys(params)]),
   )
@@ -70,7 +82,7 @@ export function ModelNodeInspector({
     .sort();
 
   return (
-    <section aria-label="Model node inspector">
+    <section className="model-node-inspector" aria-label="Model node inspector">
       <h2>ModelNode</h2>
       <dl>
         <dt>Model type</dt>
@@ -83,36 +95,66 @@ export function ModelNodeInspector({
           setParams((prev) => ({ ...prev, [key]: value }));
         })}</div>
       ))}
-      <section aria-label="Changed fields" data-testid="changed-fields-summary">
-        <h3>Changed fields</h3>
+      <details
+        className="model-node-inspector__changes"
+        aria-label="Changed fields"
+        data-testid="changed-fields-summary"
+      >
+        <summary>
+          <span>Changed fields</span>
+          <span className="model-node-inspector__change-count">
+            {`${changedFields.length} ${
+              changedFields.length === 1 ? "change" : "changes"
+            }`}
+          </span>
+        </summary>
         {changedFields.length === 0 ? (
           <p>No changes from source</p>
         ) : (
           <ul>
             {changedFields.map((key) => (
               <li key={key}>
-                {key}: {fmt(node.source_params?.[key])} → {fmt(params[key])}
+                <code>{key}</code>
+                <span className="model-node-inspector__change-values">
+                  <span title={exact(node.source_params?.[key])}>
+                    {fmt(node.source_params?.[key])}
+                  </span>
+                  <span aria-hidden="true">→</span>
+                  <span
+                    data-testid={`changed-field-value-${key}`}
+                    title={exact(params[key])}
+                  >
+                    {fmt(params[key])}
+                  </span>
+                </span>
               </li>
             ))}
           </ul>
         )}
-      </section>
-      <button type="button" onClick={() => setParams(node.source_params ?? {})}>
-        Reset to source
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          onSave({
-            model_node_id: node.node_id,
-            base_draft_hash: draftHash,
-            params,
-          });
-        }}
-      >
-        Save changes
-      </button>
+      </details>
+      <div className="model-node-inspector__actions" data-testid="model-editor-actions">
+        <button
+          type="button"
+          className="draft-button draft-button--secondary"
+          onClick={() => setParams(node.source_params ?? {})}
+        >
+          Reset to source
+        </button>
+        <button
+          type="button"
+          className="draft-button draft-button--primary"
+          disabled={disabled}
+          onClick={() => {
+            onSave({
+              model_node_id: node.node_id,
+              base_draft_hash: draftHash,
+              params,
+            });
+          }}
+        >
+          Save changes
+        </button>
+      </div>
     </section>
   );
 }

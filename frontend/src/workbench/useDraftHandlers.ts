@@ -39,6 +39,11 @@ export interface UseDraftHandlersParams {
 
 export interface DraftActionHandlers {
   errors: Readonly<Record<string, string>>;
+  /** True once the current project's persisted-draft query (including any
+   * unanchored-draft backfill) has settled. Zero-run Graph views use this to
+   * avoid showing an empty-project state before a resumable genesis Draft is
+   * known. */
+  persistedDraftsHydrated: boolean;
   onForkDraft: (created: PipelineDraftResponse) => void;
   onPatch: (draftId: string, body: PipelineDraftPatchRequest) => Promise<void>;
   onValidate: (draftId: string) => Promise<void>;
@@ -60,6 +65,7 @@ export function useDraftHandlers({
   setDraftBusy,
 }: UseDraftHandlersParams): DraftActionHandlers {
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [hydratedProjectRoot, setHydratedProjectRoot] = useState<string | null>(null);
   const clearError = (draftId: string) => {
     setErrors((current) => {
       if (!(draftId in current)) return current;
@@ -75,10 +81,11 @@ export function useDraftHandlers({
     }));
   };
   // Hydrate persisted (unexecuted) drafts onto the forest on mount so drafts
-  // survive a page reload. Best-effort: never block the forest if it fails.
+  // survive a page reload. A failed query is still settled: it leaves the
+  // registry unchanged and lets the caller present the normal empty state.
   useEffect(() => {
     let cancelled = false;
-    listPipelineDrafts(projectRoot)
+    void listPipelineDrafts(projectRoot)
       .then(async (summaries) => {
         if (cancelled) return;
         const unexecuted = summaries.filter((s) => s.status !== "executed");
@@ -104,7 +111,10 @@ export function useDraftHandlers({
         }
       })
       .catch(() => {
-        /* drafts are best-effort; never block the forest */
+        /* The empty state remains available once the failed query settles. */
+      })
+      .finally(() => {
+        if (!cancelled) setHydratedProjectRoot(projectRoot);
       });
     return () => {
       cancelled = true;
@@ -220,6 +230,7 @@ export function useDraftHandlers({
 
   return {
     errors,
+    persistedDraftsHydrated: hydratedProjectRoot === projectRoot,
     onForkDraft,
     onPatch,
     onValidate,

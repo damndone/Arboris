@@ -111,8 +111,10 @@ def test_dispatch_executes_proposal_tool_without_workbench_mutation(
 
     result = asyncio.run(orchestrator.execute(command.command_id))
 
-    assert result == "proposal prepared"
-    assert len(adapter.requests) == 2
+    assert result == "proposal is ready for confirmation"
+    # A proposal-ready tool result terminates the turn at the user-owned
+    # confirmation boundary instead of spending another provider request.
+    assert len(adapter.requests) == 1
     proposal_events = [
         event
         for event in orchestrator.events.replay("chain-session")

@@ -99,6 +99,8 @@ describe("LauncherRoute", () => {
   it("V10: bare / with NO recents still shows the launcher (no dead end)", () => {
     renderAt("/");
     expect(screen.getByRole("button", { name: "新建项目" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Workbench" })).toBeInTheDocument();
+    expect(screen.queryByText(/Econometrics/i)).toBeNull();
   });
 
   it("V10: ?home=1 aliases the latest project Workbench Home", async () => {

@@ -1,8 +1,16 @@
 import type { ArtifactContractOutcome, NotebookOptionRevision } from "./contracts";
+import type { NotebookInteractionMode } from "./notebookApi";
 import { axisNote, executability, recommendationLabel } from "./statusAxes";
 
 export interface OptionCardProps {
   option: NotebookOptionRevision;
+  /**
+   * Which surface this card belongs to. Action mode asks for one Draft built
+   * from a specification the user already gave, so recommendation vocabulary
+   * ("Recommended", "Near-equivalent candidates") misstates it: nothing was
+   * chosen for the user and there is no alternative it was preferred over.
+   */
+  interactionMode?: NotebookInteractionMode;
   /** Backend verdict after execution. The UI never derives this. */
   outcome?: ArtifactContractOutcome | null;
   onSelect?: (option: NotebookOptionRevision) => void;
@@ -34,8 +42,15 @@ function Axis({
   );
 }
 
+const RISK_LABELS = {
+  low: "Low risk",
+  medium: "Medium risk",
+  high: "High risk",
+} as const;
+
 export function OptionCard({
   option,
+  interactionMode = "plan",
   outcome = null,
   onSelect,
   onDefer,
@@ -53,16 +68,26 @@ export function OptionCard({
     <article
       className="nb-option-card"
       data-testid={`option-card-${option.option_id}`}
-      data-recommended={option.recommendation_status === "recommended" ? "true" : "false"}
+      data-recommended={
+        interactionMode !== "action" && option.recommendation_status === "recommended"
+          ? "true"
+          : "false"
+      }
       data-lifecycle={option.lifecycle_status}
       data-freshness={option.freshness_status}
       data-validation={option.validation_status}
     >
       <header className="nb-option-header">
         <span className="nb-option-rank" data-testid="option-rank">
-          {recommendationLabel(option)}
+          {recommendationLabel(option, interactionMode)}
         </span>
-        <span className="nb-option-risk">{`risk ${option.risk_level}`}</span>
+        <span
+          className="nb-option-risk"
+          data-testid="option-risk"
+          data-risk={option.risk_level}
+        >
+          {RISK_LABELS[option.risk_level]}
+        </span>
       </header>
 
       <div className="nb-option-axes">
@@ -167,9 +192,7 @@ export function OptionCard({
         >
           {option.lifecycle_status === "executed"
             ? "Already executed"
-            : option.materializable
-              ? "Review and prepare Draft"
-              : "Review and confirm"}
+            : "Review plan"}
         </button>
         {option.confirmAndExecute ? (
           <button

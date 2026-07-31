@@ -144,7 +144,6 @@ FRESHNESS_DEPENDENCY_FIELDS = (
     "available_capabilities",
     "user_focus",
     "source_manifest",
-    "evidence_pack_refs",
 )
 
 
@@ -152,9 +151,11 @@ def freshness_dependency_fingerprint(context: NotebookPlanningContextV1) -> str:
     """Which upstream facts, if changed, force this option to be revalidated.
 
     Deliberately NOT the whole context. `existing_option_summaries`,
-    `budget_report`, `omissions` and `trace_id` describe the generation event,
-    not the analysis premises: folding them in would make an option stale itself
-    the moment its siblings were written (spec §4.0).
+    `evidence_pack_refs`, `budget_report`, `omissions` and `trace_id` describe
+    the generation event, not the analysis premises: folding them in would make
+    an option stale itself when its siblings or the recommendation's persisted
+    evidence subset were written (spec §4.0). Options and recommendation
+    decisions pin the exact immutable evidence hashes they consume.
     """
 
     payload = context.hashable_payload()
@@ -336,6 +337,52 @@ def _read_json(path: Path) -> Any:
         return None
 
 
+def resolve_registered_artifact(
+    run_root: Path,
+    artifact_id: str,
+) -> tuple[str, str | None, dict[str, Any]] | None:
+    """Resolve one registered JSON artifact without accepting a caller path.
+
+    The compiler owns artifact-index reads.  Agent tools may request only a
+    durable artifact id, then apply their own public result projection to this
+    server-resolved payload.  A missing, malformed, escaping, or non-JSON
+    artifact remains unavailable rather than becoming an alternate file-read
+    capability.
+    """
+
+    index = _read_json(run_root / "artifacts_index.json")
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    if not isinstance(entries, list):
+        return None
+    entry = next(
+        (
+            item
+            for item in entries
+            if isinstance(item, dict) and item.get("artifact_id") == artifact_id
+        ),
+        None,
+    )
+    if entry is None:
+        return None
+    artifact_type = entry.get("artifact_type")
+    artifact_path = entry.get("path")
+    if not isinstance(artifact_type, str) or not isinstance(artifact_path, str):
+        return None
+    try:
+        resolved_root = run_root.resolve()
+        resolved_path = (run_root / artifact_path).resolve()
+        resolved_path.relative_to(resolved_root)
+    except (OSError, ValueError):
+        return None
+    if not resolved_path.is_file():
+        return None
+    payload = _read_json(resolved_path)
+    if not isinstance(payload, dict):
+        return None
+    sha256 = entry.get("sha256")
+    return artifact_type, (sha256 if isinstance(sha256, str) else None), payload
+
+
 def _digest(value: Any) -> str:
     return "sha256:" + sha256_canonical(value)
 
@@ -411,15 +458,16 @@ _ARTIFACT_TYPE_RANK = {
     "model_result": 0,
     "model_diagnostic": 1,
     "statistical_test": 2,
-    "profile": 3,
-    "table_export": 4,
-    "report": 5,
-    "figure": 6,
-    "time_series_manifest": 7,
-    "processed_data": 8,
-    "metadata": 9,
-    "time_series_json": 10,
-    "raw_data": 11,
+    "post_estimation": 3,
+    "profile": 4,
+    "table_export": 5,
+    "report": 6,
+    "figure": 7,
+    "time_series_manifest": 8,
+    "processed_data": 9,
+    "metadata": 10,
+    "time_series_json": 11,
+    "raw_data": 12,
 }
 
 
@@ -460,8 +508,10 @@ def _project_lineage(
         node_id = node.get("id", key)
         indexed = indexed_nodes.get(node_id)
         node_hash = indexed.get("node_hash") if isinstance(indexed, dict) else None
+        cas_ref = indexed.get("cas_ref") if isinstance(indexed, dict) else None
+        artifact_id = cas_ref.get("artifact") if isinstance(cas_ref, dict) else None
         forest_key = f"{node_hash}::{node_id}" if node_hash else node_id
-        return {
+        projected = {
             "node_id": node_id,
             "kind": node.get("kind"),
             "stage": node.get("stage"),
@@ -471,6 +521,38 @@ def _project_lineage(
             "forest_node_key": forest_key,
             "context_fingerprint": context_fingerprint(node_id, node_hash, forest_key),
         }
+        # ``cas_ref.artifact`` is a repository-relative artifact identity, not
+        # a filesystem path.  A typed workflow needs that identity to bind its
+        # raw source; withholding it would force a planner to invent one.
+        if isinstance(artifact_id, str) and artifact_id:
+            projected["artifact_id"] = artifact_id
+        # A graph CAS reference may name the original upload rather than the
+        # artifact registry entry owned by the dataset stage.  Workflows bind
+        # to the latter, because the statistical source resolver validates
+        # ownership by registry artifact ID.  Publish that server-resolved ID
+        # separately so presentation lineage does not become an execution
+        # authority.
+        if (
+            node.get("kind") == "dataset_stage"
+            and node.get("stage") == "source"
+            and runs_root is not None
+            and active_head_run_id is not None
+            and isinstance(node_id, str)
+        ):
+            try:
+                from ..data_operations import resolve_data_column_cast_context
+
+                source = resolve_data_column_cast_context(
+                    runs_root.parent,
+                    source_run_id=active_head_run_id,
+                    source_node_id=node_id,
+                )
+                source_artifact_id = source.get("source_artifact_id")
+                if isinstance(source_artifact_id, str) and source_artifact_id:
+                    projected["workflow_artifact_id"] = source_artifact_id
+            except (OSError, ValueError, KeyError):
+                pass
+        return projected
 
     records = [
         project_node(key, node)

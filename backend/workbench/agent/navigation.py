@@ -600,6 +600,10 @@ class AgentNavigationProjector:
 
         execution = record.execution
         child_run_id = _optional_str(record.outputs.get("target_run_id"))
+        # The child session is a server-recorded execution binding, not a
+        # client guess.  Keep it on the child-run navigation ref so the UI can
+        # retain the output transcript while it moves to that exact run.
+        child_session_id = _optional_str(execution.get("child_session_id"))
         if child_run_id:
             child_available = self._run_exists(child_run_id)
             self._append_unique(
@@ -610,7 +614,15 @@ class AgentNavigationProjector:
                     label=f"Child run {child_run_id}",
                     relation="child",
                     available=child_available,
-                    href={"view": "graph", "run_id": child_run_id},
+                    href={
+                        "view": "graph",
+                        "run_id": child_run_id,
+                        **(
+                            {"session_id": child_session_id}
+                            if child_session_id
+                            else {}
+                        ),
+                    },
                     reason=None if child_available else "child run is not present in this project",
                 ),
             )
@@ -643,7 +655,6 @@ class AgentNavigationProjector:
                 self._chain_ref(chain, relation="child", identifier=child_chain_id),
             )
 
-        child_session_id = _optional_str(execution.get("child_session_id"))
         if child_session_id:
             self._append_unique(
                 links,

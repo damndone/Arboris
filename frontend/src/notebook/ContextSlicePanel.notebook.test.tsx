@@ -6,6 +6,16 @@ import { ContextSlicePanel } from "./ContextSlicePanel";
 import { provisionalContextSlice } from "./fixtures/provisionalContextSlice";
 
 describe("ContextSlicePanel — what the agent actually saw", () => {
+  it("keeps the full evidence and decision chain collapsed until requested", () => {
+    render(<ContextSlicePanel slice={provisionalContextSlice()} />);
+
+    const details = screen.getByTestId("context-evidence-details");
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByTestId("context-evidence-summary")).toHaveTextContent(
+      "6 recorded events",
+    );
+  });
+
   it("names the compiled context and both hashes, kept separate", () => {
     render(<ContextSlicePanel slice={provisionalContextSlice()} />);
 

@@ -300,6 +300,16 @@ class AgentCore:
             encoded_arguments = repr(arguments)
         return f"{tool_id}\x00{encoded_arguments}"
 
+    @staticmethod
+    def _is_confirmation_ready(result: ToolResult) -> bool:
+        """Whether a tool produced a durable, user-owned review boundary."""
+
+        return (
+            result.ok
+            and isinstance(result.output, Mapping)
+            and result.output.get("requires_confirmation") is True
+        )
+
     async def _run_commands(
         self,
         text: str | None,
@@ -499,6 +509,7 @@ class AgentCore:
             if self.tool_runtime is None:
                 error = "tool_runtime_unavailable"
             else:
+                confirmation_ready = False
                 for tool_call in tool_calls.values():
                     tool_call_id = str(tool_call.get("tool_call_id", ""))
                     tool_id = str(tool_call.get("tool_id", ""))
@@ -637,10 +648,15 @@ class AgentCore:
                         return self._persist_terminal_error(
                             "repeated_tool_call_limit"
                         )
+                    confirmation_ready = confirmation_ready or self._is_confirmation_ready(result)
                 self.events.emit(
                     self.session_id,
                     "turn_end",
-                    {"stop_reason": "tool_calls"},
+                    {
+                        "stop_reason": (
+                            "proposal_ready" if confirmation_ready else "tool_calls"
+                        )
+                    },
                     command_id=command_id,
                 )
                 self.events.emit(
@@ -649,6 +665,42 @@ class AgentCore:
                     {"entry_id": entry.entry_id, "context_fingerprint": context.fingerprint},
                     command_id=command_id,
                 )
+                if confirmation_ready:
+                    # A proposal is already persisted, reviewable, and gated by
+                    # explicit user confirmation. Requiring a further provider
+                    # completion turn can only waste budget and turn a usable
+                    # proposal into a misleading max-steps failure.
+                    if not content:
+                        content = "proposal is ready for confirmation"
+                        summary_entry = self.repository.append(
+                            self.session_id,
+                            "message",
+                            {
+                                "role": "assistant",
+                                "content": content,
+                                "stop_reason": "proposal_ready",
+                                "command_id": command_id,
+                            },
+                        )
+                        self.events.emit(
+                            self.session_id,
+                            "message_end",
+                            {
+                                "entry_id": summary_entry.entry_id,
+                                "content": content,
+                                "stop_reason": "proposal_ready",
+                                "error": None,
+                            },
+                            command_id=command_id,
+                        )
+                    self.events.emit(
+                        self.session_id,
+                        "agent_end",
+                        {"stop_reason": "proposal_ready"},
+                        command_id=command_id,
+                    )
+                    self._active_turn_started = False
+                    return content
                 self._active_turn_started = False
                 return await self._run_turn(
                     None,

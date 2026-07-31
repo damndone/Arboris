@@ -5,6 +5,7 @@ injected through the ``workbench.llm.client._client_factory`` seam.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -212,6 +213,53 @@ class TestHappyPath:
         )
 
         assert calls[0]["timeout"] == 12.5
+
+    def test_async_chat_completion_cancels_the_inflight_http_request(
+        self, monkeypatch
+    ):
+        started = asyncio.Event()
+        closed = False
+
+        class SlowAsyncClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                nonlocal closed
+                closed = True
+                return False
+
+            async def post(self, *_args, **_kwargs):
+                started.set()
+                await asyncio.Event().wait()
+                raise AssertionError("cancelled request resumed")
+
+        monkeypatch.setattr(
+            llm_client,
+            "_async_client_factory",
+            lambda config: SlowAsyncClient(),
+            raising=False,
+        )
+
+        async def scenario() -> None:
+            task = asyncio.create_task(
+                llm_client.async_chat_completion(
+                    [],
+                    llm_client.LLMConfig(
+                        base_url="https://api.example.com/v1",
+                        api_key=API_KEY,
+                        model="test-model",
+                        timeout_s=120,
+                    ),
+                )
+            )
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(scenario())
+        assert closed is True
 
     def test_system_prompt_carries_guardrails_and_packet(
         self, api: TestClient, configured_env, monkeypatch

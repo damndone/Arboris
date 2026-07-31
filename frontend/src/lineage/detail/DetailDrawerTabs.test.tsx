@@ -61,6 +61,12 @@ describe("DetailDrawerTabs", () => {
       "true",
     );
     expect(screen.getByRole("tab", { name: "Diagnostics" })).toBeInTheDocument();
+    expect(screen.getByTestId("detail-drawer-tabs")).toHaveClass(
+      "detail-tabs--versions",
+    );
+    expect(screen.getByRole("tablist")).toHaveClass(
+      "detail-tabs__strip--compact",
+    );
   });
 
   it("resolves labels by stable id when nodeKey differs", () => {

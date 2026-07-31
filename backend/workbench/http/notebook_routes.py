@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
+import threading
 from typing import Any, Literal, Mapping
 
 from fastapi import APIRouter, Request
@@ -19,7 +21,7 @@ from ..agent.context_compiler import (
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
-from ..agent.model import OpenAICompatibleModelAdapter
+from ..agent.model import CancellableOpenAICompatibleModelAdapter
 from ..agent.notebook.planning_agent import (
     NotebookNoEligibleCapability,
     NotebookPlanningAgent,
@@ -50,6 +52,19 @@ from ..capability_factory.execution_authorization import (
 )
 
 router = APIRouter()
+
+NOTEBOOK_PROVIDER_TIMEOUT_S = 120.0
+
+# The total planning budget, owned here and passed explicitly to the planner
+# rather than left to its internal derivation. One value serves both the
+# enforcement and the number published to the UI: a route timeout, a planner
+# budget and an on-screen expectation that drift apart is what left a live
+# request looking hung at 68s with cancellation as the only recourse.
+NOTEBOOK_PLANNING_DEADLINE_S = 180.0
+_ACTIVE_PLANNING_ATTEMPTS: dict[
+    tuple[str, str, str], asyncio.Task[Any]
+] = {}
+_ACTIVE_PLANNING_ATTEMPTS_LOCK = threading.Lock()
 
 _TRACE_VERSIONS = {
     "app_commit": "local-workbench",
@@ -86,6 +101,21 @@ class NotebookProjectionRequest(_StrictModel):
     title: str = Field(default="Analysis Notebook", min_length=1, max_length=300)
 
 
+class RunDatasetNotebookProjectionRequest(_StrictModel):
+    """Request a new dataset-rooted Notebook from a run's verified upload."""
+
+    from_run_id: str = Field(min_length=1, max_length=200)
+    created_by: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="Analysis Notebook", min_length=1, max_length=300)
+
+
+class NotebookFocusRequest(_StrictModel):
+    """User-authored intent and interaction mode; both are freshness dependencies."""
+
+    goal: str | None = Field(default=None, min_length=1, max_length=4_000)
+    interaction_mode: Literal["plan", "action"] | None = None
+
+
 class ExpectedArtifactRequest(_StrictModel):
     artifact_id: str = Field(min_length=1, max_length=200)
     artifact_type: str = Field(min_length=1, max_length=200)
@@ -103,11 +133,18 @@ class OptionDraftRequest(_StrictModel):
         default_factory=list, max_length=50
     )
     option_id: str | None = Field(default=None, min_length=1, max_length=200)
+    capability_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ProposeOptionsRequest(_StrictModel):
     drafts: list[OptionDraftRequest] = Field(default_factory=list, max_length=3)
     count: int | None = Field(default=None, ge=1, le=3)
+    attempt_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+    )
 
 
 class RevalidateOptionRequest(OptionDraftRequest):
@@ -374,6 +411,7 @@ def _draft(request: OptionDraftRequest) -> OptionDraft:
         proposal=TypedProposal.from_dict(request.proposal),
         expected_artifacts=expected,
         option_id=request.option_id,
+        capability_id=request.capability_id,
     )
 
 
@@ -383,6 +421,9 @@ def _context_packet(context: NotebookPlanningContextV1) -> dict[str, Any]:
     packet = context.to_dict()
     packet["generation_context_hash"] = generation_context_hash(context)
     packet["freshness_dependency_fingerprint"] = freshness_dependency_fingerprint(context)
+    # Published so a planning surface can show the budget it is running against
+    # instead of an open-ended elapsed counter.
+    packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
     return packet
 
 
@@ -473,6 +514,11 @@ def _execution_results_packet(
             "execution_status": raw.get("execution_status"),
             "committed": raw.get("committed") is True,
             "artifact_validation": validation_packet,
+            **(
+                {"workflow_execution": dict(raw["workflow_execution"])}
+                if isinstance(raw.get("workflow_execution"), Mapping)
+                else {}
+            ),
         }
     return results
 
@@ -634,14 +680,20 @@ def _planning_agent(
                     raise ValueError("MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED")
                 bind_new_model_options(model_type, payload)
 
+    notebook_config = (
+        config
+        if config.timeout_s >= NOTEBOOK_PROVIDER_TIMEOUT_S
+        else replace(config, timeout_s=NOTEBOOK_PROVIDER_TIMEOUT_S)
+    )
     return NotebookPlanningAgent(
-        adapter=OpenAICompatibleModelAdapter(config),
+        adapter=CancellableOpenAICompatibleModelAdapter(notebook_config),
         capability_catalog=catalog,
         capability_artifact_types=dynamic_artifact_types,
         inspection_executor=execute_inspections,
         proposal_validator=validate_proposal,
         available_inspections=tuple(INSPECTIONS),
-        model_timeout_s=config.timeout_s,
+        model_timeout_s=notebook_config.timeout_s,
+        planning_timeout_s=NOTEBOOK_PLANNING_DEADLINE_S,
     )
 
 
@@ -807,6 +859,38 @@ def ensure_notebook_projection_endpoint(
         raise _request_error(exc) from exc
 
 
+@router.post("/notebooks/projection/from-run-dataset")
+def ensure_notebook_dataset_projection_from_run_endpoint(
+    request: Request,
+    project_root: str,
+    body: RunDatasetNotebookProjectionRequest,
+) -> dict[str, Any]:
+    """Start a fresh analysis from a selected run's server-verified upload."""
+
+    _root, service = _service(request, project_root)
+    try:
+        available_capabilities = tuple(
+            str(entry["key"])
+            for entry in build_capabilities().get("model_types", [])
+            if isinstance(entry, dict)
+            and entry.get("key") not in {None, "auto"}
+        )
+        notebook = service.ensure_dataset_projection_from_run(
+            from_run_id=body.from_run_id,
+            created_by=body.created_by,
+            title=body.title,
+            available_capabilities=available_capabilities,
+        )
+        return {
+            **notebook.to_dict(),
+            "current_family_head_run_id": None,
+        }
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
+
+
 @router.get("/notebooks")
 def list_notebooks_endpoint(request: Request, project_root: str) -> list[dict[str, Any]]:
     _root, service = _service(request, project_root)
@@ -822,6 +906,32 @@ def get_notebook_endpoint(
         return service.get_notebook(notebook_id).to_dict()
     except NotebookOptionError as exc:
         raise _notebook_error(exc) from exc
+
+
+@router.put("/notebooks/{notebook_id}/focus")
+def set_notebook_focus_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    body: NotebookFocusRequest,
+) -> dict[str, Any]:
+    """Persist the user's intent/mode before the planner proposes options."""
+
+    _root, service = _service(request, project_root)
+    try:
+        notebook = service.get_notebook(notebook_id)
+        if body.goal is None and body.interaction_mode is None:
+            raise ValueError("provide a goal or interaction_mode")
+        focus = dict(notebook.user_focus)
+        if body.goal is not None:
+            focus["goal"] = body.goal.strip()
+        if body.interaction_mode is not None:
+            focus["interaction_mode"] = body.interaction_mode
+        return service.set_focus(notebook_id, user_focus=focus).to_dict()
+    except NotebookOptionError as exc:
+        raise _notebook_error(exc) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise _request_error(exc) from exc
 
 
 @router.post("/notebooks/{notebook_id}/context/compile")
@@ -851,8 +961,50 @@ def compile_notebook_context_endpoint(
         raise _request_error(exc) from exc
 
 
+def _planning_attempt_key(
+    root: Path,
+    notebook_id: str,
+    attempt_id: str,
+) -> tuple[str, str, str]:
+    return (str(root.resolve()), notebook_id, attempt_id)
+
+
+async def _run_planning_agent(
+    agent: NotebookPlanningAgent,
+    *,
+    context: NotebookPlanningContextV1,
+    initial_evidence: DataEvidencePackV1,
+):
+    plan_async = getattr(agent, "plan_async", None)
+    if callable(plan_async):
+        return await plan_async(context=context, initial_evidence=initial_evidence)
+    return await asyncio.to_thread(
+        agent.plan,
+        context=context,
+        initial_evidence=initial_evidence,
+    )
+
+
+@router.delete("/notebooks/{notebook_id}/planning/{attempt_id}")
+async def cancel_planning_attempt_endpoint(
+    request: Request,
+    project_root: str,
+    notebook_id: str,
+    attempt_id: str,
+) -> dict[str, str]:
+    root, service = _service(request, project_root)
+    service.get_notebook(notebook_id)
+    key = _planning_attempt_key(root, notebook_id, attempt_id)
+    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+        task = _ACTIVE_PLANNING_ATTEMPTS.get(key)
+    if task is None or task.done():
+        return {"attempt_id": attempt_id, "status": "not_active"}
+    task.get_loop().call_soon_threadsafe(task.cancel)
+    return {"attempt_id": attempt_id, "status": "cancelled"}
+
+
 @router.post("/notebooks/{notebook_id}/options/propose")
-def propose_options_endpoint(
+async def propose_options_endpoint(
     request: Request,
     project_root: str,
     notebook_id: str,
@@ -862,6 +1014,12 @@ def propose_options_endpoint(
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
+        notebook = service.get_notebook(notebook_id)
+        if notebook.user_focus.get("interaction_mode") == "action":
+            if body.count not in {None, 1} or len(body.drafts) > 1:
+                raise ValueError(
+                    "Action mode permits exactly one checked Draft path"
+                )
         context, trace = _compile(
             root,
             service,
@@ -881,10 +1039,39 @@ def propose_options_endpoint(
             initial_evidence = _baseline_planning_evidence(
                 service, notebook_id, context, trace
             )
-            result = agent.plan(
-                context=context,
-                initial_evidence=initial_evidence,
+            attempt_key = (
+                _planning_attempt_key(root, notebook_id, body.attempt_id)
+                if body.attempt_id is not None
+                else None
             )
+            current_task = asyncio.current_task()
+            if attempt_key is not None and current_task is not None:
+                with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                    active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
+                    if active is not None and not active.done():
+                        raise WorkbenchAPIError(
+                            status_code=409,
+                            code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
+                            message="Notebook planning attempt is already active",
+                        )
+                    _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
+            try:
+                result = await _run_planning_agent(
+                    agent,
+                    context=context,
+                    initial_evidence=initial_evidence,
+                )
+            except asyncio.CancelledError as exc:
+                raise WorkbenchAPIError(
+                    status_code=409,
+                    code="NOTEBOOK_PLANNING_CANCELLED",
+                    message="Notebook planning was cancelled",
+                ) from exc
+            finally:
+                if attempt_key is not None and current_task is not None:
+                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                        if _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key) is current_task:
+                            _ACTIVE_PLANNING_ATTEMPTS.pop(attempt_key, None)
             # Each bounded inspection is persisted separately by the service.
             # Persist the planner's final append-only view as well, because the
             # recommendation decision may cite evidence from more than one
@@ -1085,6 +1272,18 @@ def confirm_option_endpoint(
     try:
         context, trace = _compile(root, service, notebook_id)
         current = service.store.read_option(notebook_id, option_id).current_revision
+        proposal = service.store.read_option(notebook_id, option_id).current_stored_revision.proposal
+        if proposal.operation_id == "operation.multi_step":
+            result = service.confirm_and_execute_workflow(
+                notebook_id,
+                option_id,
+                option_revision=body.option_revision,
+                proposal_id=body.proposal_id,
+                proposal_revision=body.proposal_revision,
+                context=context,
+                trace=trace,
+            )
+            return {**result, "trace_id": trace.trace_id}
         if current.materializable:
             if (body.option_revision, body.proposal_id, body.proposal_revision) != (
                 current.option_revision,

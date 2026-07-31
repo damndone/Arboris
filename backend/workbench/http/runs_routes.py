@@ -25,6 +25,7 @@ from ..api_errors import (
     ERROR_REPORT_NOT_FOUND,
     WorkbenchAPIError,
 )
+from ..agent.workflow_runtime import collect_post_estimation_results
 from ..artifacts import read_json
 from ..config import load_config
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -53,6 +54,7 @@ from ..report_export import ReportExportError, export_report
 from ..report_store import list_ai_reports, save_ai_report
 from ..services.lmm_result_adapter import VersionedResultReadError
 from ..services.results_service import _model_results, _normalize_issue_stream
+from ..services.run_deletion import RunDeletionConfirmationError, RunDeletionService
 from ..services.run_service import (
     _mark_interrupted_if_dead,
     _read_upload_bytes,
@@ -94,6 +96,15 @@ class AiReportRecordRequest(BaseModel):
     facts: list[dict[str, Any]]
     excluded_fact_ids: list[str] = Field(default_factory=list)
     figures: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class RunDeletionConfirmationRequest(BaseModel):
+    """Second, explicit confirmation for permanent leaf-run deletion."""
+
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmation_run_id: str = Field(min_length=1, max_length=200)
 
 _TERMINAL_EVENTS = {
     "workflow_completed", "workflow_blocked",
@@ -378,7 +389,46 @@ def get_run_endpoint(run_id: str, project_root: str) -> dict:
         "errors": errors,
         "model_results": model_results,
         "diagnostic_summary_preview": preview,
+        # Serve-time projection of already-durable evidence: a declared
+        # post-estimation step answers a question, and this is what lets the
+        # run surface show that answer instead of leaving it in an artifact.
+        "post_estimation_results": collect_post_estimation_results(
+            run_root.parent.parent, run_id
+        ),
     }
+
+
+@router.get("/runs/{run_id}/deletion-preview")
+def get_run_deletion_preview(run_id: str, project_root: str) -> dict[str, Any]:
+    """Return an immutable summary of exactly what a confirmed deletion removes."""
+
+    service = RunDeletionService(project_root)
+    return {"preview": service.preview(run_id).to_dict()}
+
+
+@router.post("/runs/{run_id}/deletion-confirmation")
+def confirm_run_deletion(
+    run_id: str,
+    project_root: str,
+    request: RunDeletionConfirmationRequest,
+) -> dict[str, Any]:
+    """Permanently remove a previously previewed terminal leaf run."""
+
+    service = RunDeletionService(project_root)
+    try:
+        receipt = service.delete(
+            run_id,
+            expected_fingerprint=request.fingerprint,
+            confirmation_run_id=request.confirmation_run_id,
+        )
+    except RunDeletionConfirmationError as exc:
+        raise WorkbenchAPIError(
+            status_code=409,
+            code="RUN_DELETION_CONFIRMATION_REQUIRED",
+            message=str(exc),
+            details={"run_id": run_id},
+        ) from exc
+    return {"deletion": receipt.to_dict()}
 
 
 @router.post("/runs/{run_id}/cancel")

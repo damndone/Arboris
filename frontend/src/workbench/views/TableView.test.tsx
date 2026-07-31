@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { LineageContext } from "../../lineage/LineageContext";
 import type { LineageContextValue } from "../../lineage/LineageContext";
 import { ForestContext } from "../ForestContext";
+import { WorkbenchStateProvider } from "../WorkbenchStateProvider";
 import type { GraphViewModel } from "../../lineage/api/graphViewTypes";
 import type { ArtifactsResponse, RunDetail } from "../../api";
 import { completePublicModelResult } from "../repeatedMeasures/__fixtures__/publicModelResults";
@@ -138,9 +139,65 @@ describe("TableView", () => {
     expect(screen.getByText("0.08")).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "95% CI" })).toBeTruthy();
     expect(screen.getByText("[0.0604, 0.0996]")).toBeTruthy();
+    expect(screen.getByTestId("table-view-coefficient-scroll")).toHaveAttribute("tabindex", "0");
     // Stata `reg` prints Adj R-squared; a reader must not have to compute it.
     expect(screen.getByText(/adj\. R²=0\.41/)).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("renders declared post-estimation results so the answer is on screen", async () => {
+    mockDetail.current = {
+      model_results: [],
+      artifact_counts: {},
+      post_estimation_results: [
+        {
+          artifact_id: "workflow_model_quadratic_stationary_point_abc",
+          artifact_type: "post_estimation",
+          operation_id: "model.quadratic_stationary_point",
+          run_id: "run-source",
+          model_run_id: "run-1",
+          workflow_id: "wf-1",
+          workflow_step_id: "stationary_point",
+          result: {
+            schema_version: "workbench.model.quadratic-stationary-point/v1",
+            column: "experience",
+            stationary_point: 211.59338521178753,
+            observed_min: 1,
+            observed_max: 25,
+            stationary_point_within_observed_range: false,
+            curvature: "maximum",
+          },
+        },
+      ],
+    } as unknown as RunDetail;
+
+    renderTable(model("run-1"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("table-view-post-estimation")).toBeTruthy(),
+    );
+    expect(screen.getByText("Quadratic stationary point")).toBeTruthy();
+    expect(screen.getByText("stationary point")).toBeTruthy();
+    expect(screen.getByText("211.5934")).toBeTruthy();
+    // The out-of-range flag is the difference between a number and a claim.
+    expect(screen.getByText("stationary point within observed range")).toBeTruthy();
+    expect(screen.getByText("no")).toBeTruthy();
+    // Provenance, not decoration: it says which model the result describes.
+    expect(screen.getByText(/stationary_point/)).toBeTruthy();
+    // Internal schema tags are not reader-facing.
+    expect(screen.queryByText(/workbench\.model\.quadratic/)).toBeNull();
+  });
+
+  it("omits the post-estimation section when a run declared none", async () => {
+    mockDetail.current = {
+      model_results: [],
+      artifact_counts: {},
+      post_estimation_results: [],
+    } as unknown as RunDetail;
+
+    renderTable(model("run-1"));
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("table-view-post-estimation")).toBeNull();
   });
 
   it("renders the canonical LMM packet coefficient and diagnostic", async () => {
@@ -184,6 +241,13 @@ describe("TableView", () => {
     expect(screen.getByTestId("figure-ask-ai-button-correlation_heatmap")).toBeTruthy();
     // human-readable caption/alt
     expect(imgs[0].getAttribute("alt")).toContain("correlation_heatmap");
+
+    fireEvent.contextMenu(imgs[0]);
+    expect(screen.getByRole("menu", { name: "Chart actions" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Download chart" })).toHaveAttribute("download");
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu", { name: "Chart actions" })).toBeNull();
   });
 
   it("renders ARMA-GARCH JSON chart artifacts in Table alongside static figures", async () => {
@@ -287,6 +351,8 @@ describe("TableView", () => {
       "run-1",
       "statistical_exploration_years",
     );
+    expect(screen.getByTestId("table-view-statistical-exploration-scroll"))
+      .toHaveAttribute("tabindex", "0");
   });
 
   it("renders a pooled correlation matrix with variable names, not a download hint", async () => {
@@ -360,6 +426,9 @@ describe("TableView", () => {
   it("keeps the view=table switcher contract (data-view)", async () => {
     renderTable();
     expect(screen.getByTestId("view-table").getAttribute("data-view")).toBe("table");
+    expect(screen.getByTestId("view-table")).toHaveStyle({
+      padding: "12px 24px 24px",
+    });
     await waitFor(() => expect(screen.getByTestId("table-view-empty")).toBeTruthy());
   });
 
@@ -394,6 +463,155 @@ describe("TableView", () => {
       "/tmp/demo",
       "20260703_020202_000000_ac71ve00",
     ]);
+  });
+
+  it("shows one active run at a time and lets the user choose another run", async () => {
+    const setActiveRunId = vi.fn();
+    mockDetail.current = {
+      model_results: [
+        {
+          model_id: "active-model",
+          model_type: "ols",
+          coefficients: {},
+        },
+      ],
+      artifact_counts: {},
+    } as unknown as RunDetail;
+    const ctx: LineageContextValue = { model: model("url-run"), selectedKey: null, select: () => {} };
+    render(
+      <MemoryRouter initialEntries={["/runs/url-run?project_root=/tmp/demo"]}>
+        <ForestContext.Provider
+          value={{
+            forest: {
+              heads: [
+                { runId: "run_older", createdAt: "2026-07-29T00:00:00Z" },
+                { runId: "run_current", createdAt: "2026-07-30T00:00:00Z" },
+              ],
+              nodes: [],
+              edges: [],
+              familyCount: 1,
+              familyRunCount: 2,
+            } as never,
+            activeRunId: "run_current",
+            setActiveRunId,
+          }}
+        >
+          <LineageContext.Provider value={ctx}>
+            <TableView />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(screen.getAllByTestId("table-view-run-header")).toHaveLength(1);
+    expect(screen.getByTestId("table-view-run-header")).toHaveTextContent("current");
+    expect(detailCalls.current.map((args) => args[1])).toEqual(["run_current"]);
+    expect(screen.getByTestId("table-view-run-picker")).toHaveClass("wb-run-version-picker");
+    expect(screen.getByTestId("table-view-run-picker")).toHaveTextContent("Versions:");
+    expect(screen.getByRole("button", { name: "Show results for run run_current" })).toHaveClass(
+      "wb-run-version-picker__button",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show results for run run_older" }));
+    expect(setActiveRunId).toHaveBeenCalledWith("run_older");
+  });
+
+  it("keeps the compact Run identifier visible for a single-run project", async () => {
+    mockDetail.current = emptyDetail;
+    const ctx: LineageContextValue = { model: model("only-run"), selectedKey: null, select: () => {} };
+    render(
+      <MemoryRouter initialEntries={["/runs/only-run?project_root=/tmp/demo"]}>
+        <ForestContext.Provider
+          value={{
+            forest: {
+              heads: [{ runId: "only-run", createdAt: "2026-07-30T00:00:00Z" }],
+              nodes: [],
+              edges: [],
+              familyCount: 1,
+              familyRunCount: 1,
+            } as never,
+            activeRunId: "only-run",
+            setActiveRunId: () => {},
+          }}
+        >
+          <LineageContext.Provider value={ctx}>
+            <TableView />
+          </LineageContext.Provider>
+        </ForestContext.Provider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(detailCalls.current.length).toBeGreaterThan(0));
+    expect(screen.getByTestId("table-view-run-picker")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show results for run only-run" })).toHaveClass(
+      "wb-run-version-picker__button",
+    );
+  });
+
+  it("keeps every project Run pill available after a graph node is selected", async () => {
+    const setActiveRunId = vi.fn();
+    const ctx: LineageContextValue = { model: model("url-run"), selectedKey: null, select: () => {} };
+    render(
+      <MemoryRouter initialEntries={["/runs/url-run?project_root=/tmp/demo&tabs=node:older-only&active=node:older-only"]}>
+        <WorkbenchStateProvider
+          runId="run_current"
+          validNodeKeys={new Set(["node:older-only"])}
+        >
+          <ForestContext.Provider
+            value={{
+              forest: {
+                heads: [
+                  { runId: "run_older", createdAt: "2026-07-29T00:00:00Z" },
+                  { runId: "run_current", createdAt: "2026-07-30T00:00:00Z" },
+                ],
+                nodes: [{ nodeKey: "node:older-only", runs: ["run_older"] }],
+                edges: [],
+                familyCount: 1,
+                familyRunCount: 2,
+              } as never,
+              activeRunId: "run_current",
+              setActiveRunId,
+            }}
+          >
+            <LineageContext.Provider value={ctx}>
+              <TableView />
+            </LineageContext.Provider>
+          </ForestContext.Provider>
+        </WorkbenchStateProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("table-view-empty")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Show results for run run_current" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show results for run run_older" }));
+    expect(setActiveRunId).toHaveBeenCalledWith("run_older");
+  });
+
+  it("wraps fixed-width result charts in a horizontal scroll region", async () => {
+    mockArtifacts.current = {
+      groups: [
+        {
+          artifact_type: "time_series_json",
+          items: [
+            {
+              artifact_id: "ts.chart.series_transform",
+              path: "artifacts/time_series/ts.chart.series_transform.json",
+              artifact_type: "time_series_json",
+              step: "time_series_diagnostics",
+              sha256: "wide-chart",
+            },
+          ],
+        },
+      ],
+    } as unknown as ArtifactsResponse;
+    artifactJsonMock.mockResolvedValue({ payload: { rows: [] } });
+
+    renderTable();
+
+    const scrollRegion = await screen.findByTestId("table-view-time-series-scroll");
+    expect(scrollRegion).toHaveClass("wb-result-artifact-scroll");
+    expect(scrollRegion).toHaveAttribute("tabindex", "0");
   });
 
   it("asks AI about a figure using its numeric source context (G2)", async () => {

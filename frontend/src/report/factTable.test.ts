@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
-import { buildFactTable, buildFigureFacts, buildTimeSeriesFacts } from "./factTable";
+import {
+  buildFactTable,
+  buildFigureFacts,
+  buildPostEstimationFacts,
+  buildTimeSeriesFacts,
+} from "./factTable";
 
 function fixtureWithValues() {
   const seed = makeOwnerResolutionSeedFixture();
@@ -186,5 +191,51 @@ describe("buildFigureFacts", () => {
     expect(facts).toHaveLength(1);
     expect(facts[0].field).toBe("figure:time_trend:preview_truncated");
     expect(facts[0].value).toBe(true);
+  });
+});
+
+describe("buildPostEstimationFacts", () => {
+  const result = {
+    artifact_id: "workflow_model_quadratic_stationary_point_abc",
+    artifact_type: "post_estimation",
+    operation_id: "model.quadratic_stationary_point",
+    run_id: "run-source",
+    model_run_id: "run-child",
+    workflow_id: "wf-1",
+    workflow_step_id: "stationary_point",
+    result: {
+      schema_version: "workbench.model.quadratic-stationary-point/v1",
+      column: "experience",
+      stationary_point: 211.59338521178753,
+      stationary_point_within_observed_range: false,
+      curvature: "maximum",
+    },
+  };
+
+  it("makes a declared post-estimation result citable", () => {
+    const facts = buildPostEstimationFacts([result]);
+
+    const point = facts.find((fact) => fact.field.endsWith("stationary_point"));
+    expect(point?.value).toBe(211.59338521178753);
+    expect(point?.node_key).toBe("post_estimation:stationary_point");
+    expect(point?.node_label).toBe("Quadratic stationary point");
+    // The qualifier travels with the number: citing one without the other is
+    // how an extrapolated turning point gets reported as a finding.
+    expect(
+      facts.find((fact) =>
+        fact.field.endsWith("stationary_point_within_observed_range"),
+      )?.value,
+    ).toBe(false);
+  });
+
+  it("omits schema tags and non-atomic values, and continues the id sequence", () => {
+    const facts = buildPostEstimationFacts([result], 3);
+
+    expect(facts.map((fact) => fact.id)).toEqual(["c4", "c5", "c6", "c7"]);
+    expect(facts.some((fact) => fact.field.includes("schema_version"))).toBe(false);
+  });
+
+  it("returns nothing when no post-estimation step was declared", () => {
+    expect(buildPostEstimationFacts([])).toEqual([]);
   });
 });

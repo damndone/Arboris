@@ -13,7 +13,7 @@
 // node/topbar rerun ship live. The remaining placeholders keep their slots
 // reserved with an HONEST `disabled` reason pointing at the real roadmap
 // v1.6.11: askAiAboutNode (slice A, opens the drawer's Ask AI section) and
-// generateReport (slice C, switches to the Report view) are LIVE. The only
+// report generation belongs to the Report view itself. The only
 // remaining placeholder is markNeedsReview → warning-layer backlog
 // (roadmap §3.5 W). v1.6.6 ③ wired topbar `rerun` and made reasons honest.
 
@@ -207,8 +207,8 @@ export const actionRegistry: ActionEntry[] = [
   // Topbar action slots (plan §15). v1.6.6 ③: `rerun` is now live and
   // routes to the same node rerun flow as `rerunFromNode` (open the node's
   // detail → editable OperationSection → POST /runs/<id>/rerun, forking a
-  // child). `generateReport` stays an honest disabled placeholder until its
-  // AI backend lands in v1.6.9.
+  // child). Report navigation is intentionally not duplicated here; the
+  // adjacent Report tab is the single entry point.
   {
     id: "rerun",
     order: 110,
@@ -218,17 +218,6 @@ export const actionRegistry: ActionEntry[] = [
     // Live: opens the (selected/first) node's detail whose OperationSection
     // submits POST /runs/<id>/rerun — same mechanism as rerunFromNode.
     invoke: (ctx) => ctx.dispatch.openDetail(ctx.node.nodeKey),
-  },
-  {
-    id: "generateReport",
-    order: 120,
-    // Named for what it does. It was called "Generate report" while only
-    // switching views, so it read as a duplicate of the Report view's own
-    // generate button and looked broken when nothing was produced.
-    label: "Open report",
-    surfaces: ["topbar"],
-    shouldRender: () => true,
-    invoke: (ctx) => ctx.dispatch.setView?.("report"),
   },
 ];
 
