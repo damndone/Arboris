@@ -792,6 +792,57 @@ def test_global_workflow_reader_discovers_only_committed_visible_branch_evidence
     assert "raw_rows" not in json.dumps(result.output["workflows"])
 
 
+def test_global_workflow_reader_handles_eight_candidates_in_one_bounded_lookup(
+    tmp_path: Path,
+) -> None:
+    """A Main Agent reads one receipt packet, rather than probing every run.
+
+    Project run count must not turn a sibling-model question into a growing
+    sequence of Agent tool calls.  The tool is deliberately given eight visible
+    candidates in its single bounded request; only the committed workflow's
+    public receipt and artifact evidence may be returned.
+    """
+
+    project_root = tmp_path / "project"
+    _write_notebook_workflow_receipt(project_root)
+    candidate_run_ids = ["branch-east"]
+    for index in range(1, 8):
+        run_id = f"candidate-{index}"
+        _write_project_run(project_root, run_id=run_id)
+        candidate_run_ids.append(run_id)
+
+    provider = _load_provider_type()(project_root)
+    registry = ToolRegistry()
+    definitions = provider.global_tool_definitions(session_id="main-session")
+    for definition in definitions:
+        registry.register(definition)
+    descriptor = next(
+        item for item in registry.descriptors()
+        if item["tool_id"] == "inspect_project_notebook_workflow_results"
+    )
+    assert descriptor["input_schema"]["properties"]["run_ids"]["maxItems"] >= 8
+
+    result = asyncio.run(
+        registry.execute(
+            {
+                "tool_call_id": "one-bounded-project-receipt-lookup",
+                "tool_id": "inspect_project_notebook_workflow_results",
+                "arguments": {"run_ids": candidate_run_ids},
+            },
+            session_id="main-session",
+        )
+    )
+
+    assert result.ok is True
+    assert [workflow["workflow_id"] for workflow in result.output["workflows"]] == [
+        "workflow-committed"
+    ]
+    public_workflows = json.dumps(result.output["workflows"])
+    assert "raw_rows" not in public_workflows
+    assert str(project_root) not in json.dumps(result.output)
+    assert result.output["omitted_sections"] == ["raw_artifact_payloads", "raw_rows"]
+
+
 def test_global_numeric_summary_and_linear_interaction_effect_are_bounded(
     tmp_path: Path,
 ) -> None:

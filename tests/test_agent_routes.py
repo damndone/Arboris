@@ -311,6 +311,15 @@ def test_get_session_projection_returns_typed_links(tmp_path: Path) -> None:
         link["href"].get("operation_record_id") == fixture.record_id
         for link in body["projection"]["links"]
     )
+    child_run_link = next(
+        link
+        for link in body["projection"]["links"]
+        if link["kind"] == "run" and link["id"] == fixture.child_run_id
+    )
+    # A child run is reachable through the child Chain Agent that produced it.
+    # Preserve that verified session binding so selecting the output cannot
+    # silently discard the execution transcript.
+    assert child_run_link["href"]["session_id"] == fixture.child_session_id
     hierarchy = body["projection"]["hierarchy"]
     assert hierarchy["ref"]["id"] == "main-session"
     source_chain = next(

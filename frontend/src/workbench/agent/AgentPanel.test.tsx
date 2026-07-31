@@ -183,6 +183,24 @@ describe("AgentPanel", () => {
     );
   });
 
+  it("distinguishes a terminal tool failure from an upstream provider failure", () => {
+    render(
+      <AgentSurfaceContext.Provider value={value({
+        sessionStatus: "failed",
+        messages: [
+          { entry_id: "u1", role: "user", content: "Inspect the model", stop_reason: null },
+          { entry_id: "a1", role: "assistant", content: "", stop_reason: "error", error: "tool_runtime_error" },
+        ],
+      })}>
+        <AgentPanel runId="run-a" projectRoot="/proj" />
+      </AgentSurfaceContext.Provider>,
+    );
+
+    const failure = screen.getByTestId("agent-turn-error");
+    expect(failure).toHaveTextContent("tool runtime stopped unexpectedly");
+    expect(failure).not.toHaveTextContent("configured provider");
+  });
+
   it("keeps a historical step-budget stop accurate when a proposal is pending", () => {
     render(
       <AgentSurfaceContext.Provider value={value({

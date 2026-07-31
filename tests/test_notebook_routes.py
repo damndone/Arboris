@@ -17,6 +17,9 @@ from tests.test_notebook_support import make_project, make_run, model_rerun_prop
 from workbench.api import app
 from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
+from workbench.agent.notebook.materialization import NotebookOptionMaterializer
+from workbench.agent.notebook.store import NOTEBOOK_FILENAME
+from workbench.agent.storage import append_jsonl_atomic
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
@@ -512,6 +515,54 @@ def _drafts() -> list[dict]:
             "option_id": "opt_route_1",
         }
     ]
+
+
+def test_legacy_notebook_record_without_new_optional_fields_loads_and_compiles(
+    tmp_path: Path,
+) -> None:
+    """A persisted pre-projection Notebook must not become a phantom 404.
+
+    This fixture intentionally omits fields added after the first durable
+    Notebook record (focus, capability vocabulary, projection binding, and
+    schema version).  It exercises the real store and context route rather
+    than reconstructing a new Notebook through the current creation API.
+    """
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    notebook_id = "nb_legacy_shape"
+    legacy_path = service.store.notebook_dir(notebook_id) / NOTEBOOK_FILENAME
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    append_jsonl_atomic(
+        legacy_path,
+        {
+            "record_type": "notebook",
+            "notebook_id": notebook_id,
+            "project_id": project.name,
+            "run_family_id": "family_legacy",
+            "title": "Persisted legacy analysis",
+            "created_by": "legacy-ui",
+            "created_at": "2026-01-01T00:00:00Z",
+            "analysis_contract": {"revision": 1, "target": "outcome"},
+        },
+    )
+    client = TestClient(app)
+
+    loaded = client.get(
+        f"/notebooks/{notebook_id}",
+        params={"project_root": str(project)},
+    )
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["notebook_id"] == notebook_id
+    assert loaded.json()["user_focus"] == {}
+
+    compiled = client.post(
+        f"/notebooks/{notebook_id}/context/compile",
+        params={"project_root": str(project)},
+    )
+    assert compiled.status_code == 200, compiled.text
+    assert compiled.json()["run_family_id"] == "family_legacy"
+    assert compiled.json()["trace_id"].startswith("trace_")
 
 
 def test_notebook_route_creates_reads_and_compiles_a_runless_notebook(
@@ -1156,6 +1207,115 @@ def test_materialize_route_creates_genesis_draft_and_confirm_is_idempotent(
     )
     assert listed.status_code == 200, listed.text
     assert listed.json()["materializations"][option.option_id]["draft_id"] == packet["draft"]["draft_id"]
+
+
+def test_dataset_genesis_materializes_declared_panel_dimensions(tmp_path: Path) -> None:
+    """Notebook genesis must retain panel identity instead of rejecting it as OLS-only."""
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor,school,year\n1,2,a,2020\n2,3,a,2021\n3,4,b,2020\n4,5,b,2021\n",
+        filename="panel.csv",
+    )
+    client = TestClient(app)
+    notebook = client.post(
+        "/notebooks/projection",
+        params={"project_root": str(project)},
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "panel.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    service = NotebookService(project)
+    stored_notebook = service.get_notebook(notebook["notebook_id"])
+
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        stored_notebook,
+        {
+            "target": {"dataset_source_id": upload_sha},
+            "changes": {
+                "model_params": {
+                    "model_type": "panel_ols",
+                    "y": "outcome",
+                    "x": ["predictor"],
+                    "entity_col": "school",
+                    "time_col": "year",
+                    "covariance": "robust",
+                }
+            },
+        },
+        {"notebook_id": notebook["notebook_id"], "option_id": "panel_option", "option_revision": "1"},
+    )
+
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"] == {
+        "model_type": "panel_ols",
+        "y": "outcome",
+        "x": ["predictor"],
+        "entity_col": "school",
+        "time_col": "year",
+        "covariance": "robust",
+    }
+
+
+def test_dataset_genesis_rejects_panel_model_without_declared_dimensions(
+    tmp_path: Path,
+) -> None:
+    """A malformed panel option must not silently become a pooled OLS Draft."""
+
+    import pytest
+
+    from workbench.agent.notebook.errors import OptionMaterializationFailed
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,predictor,school\n1,2,a\n2,3,b\n",
+        filename="panel.csv",
+    )
+    client = TestClient(app)
+    notebook = client.post(
+        "/notebooks/projection",
+        params={"project_root": str(project)},
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "panel.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    service = NotebookService(project)
+    stored_notebook = service.get_notebook(notebook["notebook_id"])
+
+    with pytest.raises(
+        OptionMaterializationFailed,
+        match="requires an evidence-backed entity_col or time_col",
+    ):
+        NotebookOptionMaterializer(service)._materialize_dataset(
+            stored_notebook,
+            {
+                "target": {"dataset_source_id": upload_sha},
+                "changes": {
+                    "model_params": {
+                        "model_type": "panel_ols",
+                        "y": "outcome",
+                        "x": ["predictor"],
+                    }
+                },
+            },
+            {
+                "notebook_id": notebook["notebook_id"],
+                "option_id": "panel_option",
+                "option_revision": "1",
+            },
+        )
 
 
 def test_model_custom_route_uses_runtime_binding_then_stops_at_gateway_authorization(

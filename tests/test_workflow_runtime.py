@@ -255,6 +255,110 @@ def test_panel_genesis_step_runs_two_way_fixed_effects_with_entity_clusters(tmp_
     assert result["coefficients"]["exposure_pow2"]["ci_upper"] is not None
 
 
+def test_composed_panel_and_dummy_fixed_effects_branches_share_point_estimate(tmp_path) -> None:
+    """One typed workflow may compare equivalent panel and dummy-FE branches.
+
+    This is deliberately a runtime-level oracle: both branches are compiled,
+    admitted, and executed by ``operation.multi_step`` before their persisted
+    public model results are compared.  It therefore catches accidental
+    fallback of a panel branch to the generic OLS artifact path.
+    """
+
+    pytest.importorskip("linearmodels")
+    frame = _panel_frame()
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="panel_fixture.csv"
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "panel_fixture.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="panel-comparison-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id="wf-panel-dummy-equivalence",
+        steps=[
+            {
+                "step_id": "estimate_panel",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "panel_ols",
+                    "covariance": "robust",
+                    "entity_col": "school",
+                    "time_col": "year",
+                    "branches": [
+                        {
+                            "branch_id": "panel_two_way",
+                            "outcome": "outcome",
+                            "predictors": ["exposure"],
+                        }
+                    ],
+                },
+            },
+            {
+                "step_id": "estimate_dummy_fe",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "ols",
+                    "covariance": "robust",
+                    "branches": [
+                        {
+                            "branch_id": "dummy_two_way",
+                            "outcome": "outcome",
+                            "predictors": ["exposure"],
+                            "categorical": ["school", "year"],
+                        }
+                    ],
+                },
+            },
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    panel_ref = next(
+        artifact
+        for artifact in state.steps["estimate_panel"].artifact_ids
+        if artifact.endswith(":panel_ols_1")
+    )
+    dummy_ref = next(
+        artifact
+        for artifact in state.steps["estimate_dummy_fe"].artifact_ids
+        if artifact.endswith(":ols_1")
+    )
+    panel_run_id = panel_ref.split(":", 1)[0]
+    dummy_run_id = dummy_ref.split(":", 1)[0]
+    panel = json.loads(
+        (project / "runs" / panel_run_id / "model_results" / "panel_ols_1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    dummy = json.loads(
+        (project / "runs" / dummy_run_id / "model_results" / "ols_1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert panel["model_type"] == "panel_ols"
+    # The generic OLS family persists its robust covariance variant under the
+    # explicit ``ols_robust`` result type; it must not be a panel artifact.
+    assert dummy["model_type"] == "ols_robust"
+    assert dummy["covariance"] == "robust"
+    assert panel["coefficients"]["exposure"]["estimate"] == pytest.approx(
+        dummy["coefficients"]["exposure"]["estimate"], abs=1e-8
+    )
+
+
 def _post_estimation_results(project, run_id, state, step_ids):
     """Read each declared post-estimation step's persisted result."""
 

@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from workbench.artifacts import read_json
+from workbench.econometrics.runner import run_fixed_effects, run_panel_ols
 from workbench.orchestrator import run_workflow
 from workbench.projects import create_project
 
@@ -57,6 +58,42 @@ def test_default_covariance_runs(tmp_path):
         model_type="panel_ols", entity_col="firm", time_col="yr",
     )
     assert result["status"] == "completed"
+
+
+def test_two_way_panel_effects_match_explicit_dummy_fixed_effects() -> None:
+    """PanelOLS and the equivalent dummy specification share point estimates.
+
+    This is a model-family oracle, not a comparison of covariance estimators:
+    both estimators use the same balanced panel and unadjusted inference.  The
+    entity and time effects are represented by the PanelOLS absorber in one
+    branch and by explicit dummy terms in the independent reference branch.
+    """
+
+    frame = _panel_frame()
+    panel, _ = run_panel_ols(
+        frame,
+        "profit",
+        ["rnd"],
+        "firm",
+        "yr",
+        "panel_reference",
+        covariance="unadjusted",
+    )
+    dummy, _ = run_fixed_effects(
+        frame,
+        "profit",
+        ["rnd"],
+        "firm",
+        "yr",
+        "dummy_reference",
+    )
+
+    assert panel["model_type"] == "panel_ols"
+    assert dummy["model_type"] == "fixed_effects"
+    assert panel["coefficients"]["rnd"]["estimate"] == pytest.approx(
+        dummy["coefficients"]["rnd"]["estimate"],
+        abs=1e-8,
+    )
 
 
 def test_panel_ols_forwards_requested_covariance(tmp_path, monkeypatch):

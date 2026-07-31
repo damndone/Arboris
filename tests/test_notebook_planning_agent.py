@@ -31,6 +31,7 @@ from workbench.agent.notebook.store import ProjectionSource, WorkflowSource
 from workbench.agent.context_compiler import compile_notebook_planning_context
 from workbench.agent.context_compiler import freshness_dependency_fingerprint
 from workbench.agent.notebook.proposal import TypedProposal
+from workbench.agent.workflow_contracts import validate_workflow_steps
 from tests.test_notebook_support import make_project
 
 
@@ -588,6 +589,30 @@ def test_workflow_dependency_shape_error_gets_a_machine_actionable_correction(
     assert "JSON array" in correction
     assert "[\"source_step\"]" in correction
     assert "omit depends_on" in correction
+
+
+def test_workflow_dependency_shape_distinguishes_omitted_empty_and_invalid_string() -> None:
+    """No dependency and an empty dependency list are valid but not conflated with a string."""
+
+    base = {
+        "step_id": "profile",
+        "operation_id": "statistical.explore",
+        "spec": {"operation": "summarize", "selected_columns": ["outcome"]},
+    }
+    explicit_empty = {
+        "step_id": "detail",
+        "operation_id": "statistical.explore",
+        "depends_on": [],
+        "spec": {"operation": "summarize_detail", "selected_columns": ["outcome"]},
+    }
+
+    omitted = validate_workflow_steps([base])
+    empty = validate_workflow_steps([explicit_empty])
+
+    assert omitted[0]["depends_on"] == []
+    assert empty[0]["depends_on"] == []
+    with pytest.raises(OperationValidationError, match="depends_on must be step ids"):
+        validate_workflow_steps([{**explicit_empty, "depends_on": "profile"}])
 
 
 def test_provider_gets_workflow_step_envelope_correction_after_misplaced_spec_fields(

@@ -71,6 +71,7 @@ import { GenesisWizard } from "../lineage/drafts/GenesisWizard";
 import { useDraftHandlers } from "./useDraftHandlers";
 import {
   getRunGraphHeadSet,
+  fetchRunDetail,
   executePipelineDraft,
   deletePipelineDraft,
   waitForRunTerminal,
@@ -102,7 +103,7 @@ type PendingFocusTarget = {
 type LegacyFocusProbe = {
   key: string;
   loading: boolean;
-  legacy: boolean;
+  kind: "blocked" | "legacy" | "not_indexed";
 };
 
 const PENDING_FOCUS_RETRY_LIMIT = 20;
@@ -274,7 +275,7 @@ function ForestWorkbench({
   }, [searchParams, setSearchParams]);
 
   const legacyFocusProbeKey =
-    forest && !forest.legacy && focusRunId && !focusRunIsKnownHead
+    forest && focusRunId && !focusRunIsKnownHead
       ? `${projectRoot}\u0000${focusRunId}`
       : null;
 
@@ -283,14 +284,23 @@ function ForestWorkbench({
       return undefined;
     }
     let cancelled = false;
-    setLegacyFocusProbe({ key: legacyFocusProbeKey, loading: true, legacy: false });
-    getRunGraphHeadSet(projectRoot, focusRunId)
-      .then((raw) => {
+    setLegacyFocusProbe({ key: legacyFocusProbeKey, loading: true, kind: "not_indexed" });
+    Promise.allSettled([
+      getRunGraphHeadSet(projectRoot, focusRunId),
+      fetchRunDetail(projectRoot, focusRunId),
+    ])
+      .then(([headSetResult, detailResult]) => {
         if (cancelled) return;
         setLegacyFocusProbe({
           key: legacyFocusProbeKey,
           loading: false,
-          legacy: raw.legacy === true || !Array.isArray(raw.heads),
+          kind:
+            detailResult.status === "fulfilled" && detailResult.value.status === "blocked"
+              ? "blocked"
+              : headSetResult.status === "fulfilled" &&
+                    (headSetResult.value.legacy === true || !Array.isArray(headSetResult.value.heads))
+                ? "legacy"
+                : "not_indexed",
         });
       })
       .catch(() => {
@@ -298,7 +308,7 @@ function ForestWorkbench({
         setLegacyFocusProbe({
           key: legacyFocusProbeKey,
           loading: false,
-          legacy: false,
+          kind: "not_indexed",
         });
       });
     return () => {
@@ -457,6 +467,17 @@ function ForestWorkbench({
     );
   }
   if (loading || forest === null || model === null) return <Loading />;
+  if (legacyFocusProbeKey) {
+    if (
+      legacyFocusProbe?.key !== legacyFocusProbeKey ||
+      legacyFocusProbe.loading
+    ) {
+      return <Loading />;
+    }
+    if (legacyFocusProbe.kind === "blocked" && focusRunId) {
+      return <BlockedRunNotice projectRoot={projectRoot} runId={focusRunId} />;
+    }
+  }
   // Legacy target (no node identity) → fall back to the legacy per-run
   // workbench. Project forests normally omit legacy runs, but legacy-shaped
   // forest fixtures and a positive deep-link probe both land here.
@@ -470,13 +491,7 @@ function ForestWorkbench({
     );
   }
   if (legacyFocusProbeKey) {
-    if (
-      legacyFocusProbe?.key !== legacyFocusProbeKey ||
-      legacyFocusProbe.loading
-    ) {
-      return <Loading />;
-    }
-    if (legacyFocusProbe.legacy && focusRunId) {
+    if (legacyFocusProbe?.kind === "legacy" && focusRunId) {
       return (
         <LegacyGraphWorkbench
           projectRoot={projectRoot}
@@ -982,6 +997,49 @@ function EmptyProjectCanvas({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function BlockedRunNotice({
+  projectRoot,
+  runId,
+}: {
+  projectRoot: string;
+  runId: string;
+}) {
+  return (
+    <div
+      data-testid="blocked-run-notice"
+      style={{
+        display: "grid",
+        placeItems: "center",
+        height: "100%",
+        minHeight: 0,
+        padding: 32,
+        background: "var(--bg-canvas)",
+      }}
+    >
+      <section
+        style={{
+          maxWidth: 560,
+          padding: 24,
+          border: "1px solid var(--danger, #d33)",
+          borderRadius: 12,
+          background: "var(--bg-card-2)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 8px", fontSize: 18 }}>Analysis blocked</h1>
+        <p style={{ margin: "0 0 10px", color: "var(--label-secondary)" }}>
+          This analysis was blocked before lineage was recorded.
+        </p>
+        <p style={{ margin: 0, color: "var(--label-secondary)", fontSize: 13 }}>
+          Fix the input guardrail issue and start a new analysis; this run has no graph nodes to inspect.
+        </p>
+        <p className="mono" style={{ margin: "14px 0 0", fontSize: 12, color: "var(--label-tertiary)" }}>
+          {projectRoot} · {runId}
+        </p>
+      </section>
     </div>
   );
 }

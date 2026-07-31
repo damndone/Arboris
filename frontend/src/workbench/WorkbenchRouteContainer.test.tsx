@@ -1092,6 +1092,23 @@ describe("WorkbenchRouteContainer", () => {
       expect(screen.queryByTestId("workbench-empty-canvas")).toBeNull();
     });
 
+    it("renders a guardrail-blocked run as blocked rather than legacy", async () => {
+      vi.spyOn(api, "fetchProjectForest").mockResolvedValue(allLegacyProjectBody());
+      vi.spyOn(api, "fetchRunDetail").mockResolvedValue({
+        run_id: "run_blocked",
+        status: "blocked",
+        errors: { issues: [{ code: "MIN_MODEL_N" }] },
+      } as never);
+
+      mountHome("run_blocked");
+
+      expect(await screen.findByTestId("blocked-run-notice")).toHaveTextContent(
+        "This analysis was blocked before lineage was recorded.",
+      );
+      expect(screen.queryByTestId("legacy-banner")).toBeNull();
+      expect(api.getRunGraph).not.toHaveBeenCalledWith("/proj", "run_blocked");
+    });
+
     it("all-legacy projects show an honest legacy empty state while keeping the genesis CTA", async () => {
       vi.spyOn(api, "fetchProjectForest").mockResolvedValue(allLegacyProjectBody());
       mountHome();
