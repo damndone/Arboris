@@ -215,6 +215,7 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert "dataset_source_id" in adapter.requests[0].messages[0]["content"]
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
     assert "automatically materializes residuals_vs_<predictor>" in adapter.requests[0].messages[0]["content"]
+    assert "do not claim that a separate scatter step is required" in adapter.requests[0].messages[0]["content"]
     assert len(adapter.requests) == 2
 
 
@@ -589,6 +590,7 @@ def test_workflow_dependency_shape_error_gets_a_machine_actionable_correction(
     assert "JSON array" in correction
     assert "[\"source_step\"]" in correction
     assert "omit depends_on" in correction
+    assert "Never use a string, object, branch_id, or artifact id" in correction
 
 
 def test_workflow_dependency_shape_distinguishes_omitted_empty_and_invalid_string() -> None:

@@ -10,10 +10,10 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: N/A (sample=0)
-- Repeat rate: N/A (sample=0)
-- Recurrence rate: N/A (sample=0)
-- MTTR: N/A (sample=0; unresolved=0)
+- Failure frequency: 6/42 (14.3%; 14.3 per 100 events)
+- Repeat rate: 5/6 (83.3%)
+- Recurrence rate: 1/1 (100.0%)
+- MTTR: N/A (sample=0; unresolved=6)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
@@ -23,7 +23,7 @@ COMPLETED
 
 ## All failures
 
-- None recorded.
+- #39 2026-07-31T06:10:00.000Z `proposal_ready_budget_terminal_error`; cause_status: `known`; cause: The closing event cites test_proposal_ready_is_a_successful_terminal_state_even_at_step_budget in tests/test_agent_tools.py, introduced in baseline commit 6607c2d. That test file was not touched by 6d88903 and backend/workbench/agent/core.py was not modified.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
 
 ## All errors
 
@@ -31,7 +31,11 @@ COMPLETED
 
 ## All gaps
 
-- None recorded.
+- #37 2026-07-31T06:10:00.000Z `predictor_residual_diagnostic_evidence`; cause_status: `known`; cause: The closing event cites test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows, which git log -S places in commit 6607c2d, the baseline that predates this line. No change was made to figure_context.py, context_tools.py, agent_routes.py or planning_agent.py.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
+- #38 2026-07-31T06:10:00.000Z `global_agent_model_figure_evidence`; cause_status: `known`; cause: The closing event cites test_model_figure_evidence_exposes_binned_numeric_facts_not_raw_vectors, introduced in baseline commit 6607c2d. context_tools.py and agent_routes.py were not modified.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
+- #40 2026-07-31T06:10:00.000Z `covariance_comparison_interpretation_boundary`; cause_status: `known`; cause: The closing event cites test_main_role_turn_exposes_only_read_only_project_evidence_tool, which concerns read-only tool exposure and not covariance interpretation, and which git log -S places in baseline commit a5a5f49. The actual boundary text at backend/workbench/http/agent_routes.py:141-142 was introduced in baseline commit 6607c2d and agent_routes.py was not modified.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
+- #41 2026-07-31T06:10:00.000Z `global_agent_workflow_answer_path`; cause_status: `known`; cause: The new eight-candidate test asserts run_ids maxItems >= 8, but that schema bound has been 16 since baseline commit 6607c2d, so the assertion passes without any change. context_tools.py and agent_routes.py were not modified, and the incident's second half - making the receipt-to-branch-evidence path directly reachable - was not addressed.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
+- #42 2026-07-31T06:10:00.000Z `notebook_workflow_dependency_shape_correction`; cause_status: `known`; cause: The new test is genuinely new, but both the published depends_on array shape (planning_agent.py:700-701) and the corrective branch (planning_agent.py:1281) were introduced in baseline commit 6607c2d, and planning_agent.py was not modified by 6d88903.; resolution: `open`; lesson: A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
 
 ## All waste
 
@@ -39,7 +43,7 @@ COMPLETED
 
 ## Root causes and solutions
 
-- None recorded.
+- `closing-evidence-must-postdate-the-work`: occurrences=6; cause_status: `known`; root cause: The closing event cites test_model_predictor_residual_figure_exposes_binned_numeric_facts_not_rows, which git log -S places in commit 6607c2d, the baseline that predates this line. No change was made to figure_context.py, context_tools.py, agent_routes.py or planning_agent.py.; solution: `open`
 
 ## Added tests
 
@@ -47,10 +51,11 @@ COMPLETED
 
 ## New rules
 
-- No rule candidate recorded.
+- `closing-evidence-must-postdate-the-work`: line experience occurrence(s)=6
 
 ## Future guidance
 
+- A closing event must cite evidence created by the work it closes; a test that predates the line, or a passing assertion against an unchanged module, records a verification that never happened.
 - Do not turn a provider outage into a product fix by prompt retries; test failure classification locally and retain the incident until a provider reproduction is attributable.
 - When a persisted-state failure does not reproduce through its historical shape, retain the incident and record the exact attempted path instead of inventing a repair.
 
@@ -92,3 +97,9 @@ COMPLETED
 - #34: `0af273b7-8a01-48a6-b4f8-12a236b88f63` | 2026-07-31T04:07:10.000Z | GATE/browser_controller_policy_procedure | incident=`df709bbd-2aa7-416f-ac78-b92285c6cbd1` | lesson_key=`browser-controller-fresh-tab-procedure` | event_sha256=`cf685fcae8796a467975d4cf9779fe16b33c3f78bffafa08ad085e15b3593613`
 - #35: `4cda877e-c044-4f40-a44d-09c97a7b842a` | 2026-07-31T04:07:11.000Z | REVIEW/provider_upstream_boundary_verified | incident=`ddcc9408-c7a4-4891-9ef8-0025a829c5ce` | lesson_key=`upstream-provider-boundary-open` | event_sha256=`de02bcf9d67e5a0a2faab003f85f9aa6ef899545cc60985a18a2fc004030ec21`
 - #36: `4b0a9cbb-c1f9-4e05-ae23-73262e82bb78` | 2026-07-31T04:08:00.000Z | STATE_CHANGE/open_incident_remediation_completed | incident=`b4a8224e-e667-4116-ac79-71c0d8b5faf0` | lesson_key=`close-remediation-with-explicit-open-boundaries` | event_sha256=`ebebab170788446f5262910228ba0b02ab3bb76c5184adc6ab5795f297027fb8`
+- #37: `30da437a-74be-4852-9df2-c424f97fed35` | 2026-07-31T06:10:00.000Z | GAP/predictor_residual_diagnostic_evidence | incident=`64ec6d96-b9bb-4e36-ac51-a6a312a9d5c8` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`233b5272b796a3e750bcdb4da260d4aff211ef17ff87a508bbbb2af03ecbeaa4`
+- #38: `8aa282da-cc04-47a3-ae0b-94236d40326b` | 2026-07-31T06:10:00.000Z | GAP/global_agent_model_figure_evidence | incident=`8ff5b466-6718-4b26-afcd-e4d4cc238452` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`c53cf8c3a4028046ce84f2d9b2d3c592d49f7ec130444a46f1d563feba18a3f3`
+- #39: `b4854b2c-16dc-44b6-8d5f-bd694feadc09` | 2026-07-31T06:10:00.000Z | FAILURE/proposal_ready_budget_terminal_error | incident=`9aac0586-f9d6-45b2-8129-ccc6c19a789f` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`dc683c826fa27c663ff1e4d18f0cf633a16ff4181bcc42bfb8bee3ef738b39d4`
+- #40: `fec7f063-551f-48a9-b3eb-6f935b1ec280` | 2026-07-31T06:10:00.000Z | GAP/covariance_comparison_interpretation_boundary | incident=`2c20a717-147f-4c09-9b91-df8a0037ab5e` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`60bc3acce0c40f794bfeb62722904f2febdcf6e76161c8f6560d9a985bb0430f`
+- #41: `51b831e7-3e8c-4d71-b665-5b9945f75b36` | 2026-07-31T06:10:00.000Z | GAP/global_agent_workflow_answer_path | incident=`33c552d6-6d98-4cec-b651-5bb71a4f91c9` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`116d48c2c3cc444928e5ef2a8430e2d0401f6d043acfd28c72dfd2743b8a0103`
+- #42: `326a8e0b-34fa-411e-a08d-739c0e6cd3c6` | 2026-07-31T06:10:00.000Z | GAP/notebook_workflow_dependency_shape_correction | incident=`11a22915-b003-4bf7-90c8-dff34cf0643a` | lesson_key=`closing-evidence-must-postdate-the-work` | event_sha256=`b8d1833d0d3e08afcdf0d0ccf6b21dec67535ad0acf1912cdb124ccb47f98042`

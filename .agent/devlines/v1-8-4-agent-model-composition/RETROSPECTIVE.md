@@ -10,9 +10,9 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 59/218 (27.1%; 27.1 per 100 events)
-- Repeat rate: 4/59 (6.8%)
-- Recurrence rate: 4/55 (7.3%)
+- Failure frequency: 60/219 (27.4%; 27.4 per 100 events)
+- Repeat rate: 4/60 (6.7%)
+- Recurrence rate: 4/56 (7.1%)
 - MTTR: median=0 ms (sample=37; unresolved=12)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
@@ -88,6 +88,7 @@ COMPLETED
 - #211 2026-07-31T02:30:00.000Z `preexisting_backend_suite_failures`; cause_status: `known`; cause: A full backend run reported 22 failures; stashing only this line's backend changes reproduced them, establishing they were inherited rather than caused here.; resolution: `resolved`; lesson: All 22 were fixed at source. Structural guards were kept as guards: each exemption is paired with a new real assertion rather than merely widened.
 - #215 2026-07-31T02:30:00.000Z `genesis_draft_visibility_regression`; cause_status: `known`; cause: Same inherited cause as the genesis route test failures.; resolution: `resolved`; lesson: Closed with the same repair; both tests pass.
 - #216 2026-07-31T02:30:00.000Z `planning_elapsed_counter_resets_on_remount`; cause_status: `known`; cause: The elapsed counter was anchored to component mount while the request lives in a module-level registry that outlives a remount.; resolution: `resolved`; lesson: The attempt start instant now lives with the request and is passed down, so the counter survives a remount; covered by a deterministic unmount/remount test.
+- #219 2026-07-31T08:20:00.000Z `planning_elapsed_counter_resets_on_remount`; cause_status: `known`; cause: The elapsed counter was anchored to component mount while the request lives in a module-level registry that outlives a remount. A first closing event was appended with a timestamp earlier than the originating event, so ordering by timestamp still reported it open.; resolution: `resolved`; lesson: An event's timestamp must be the moment it is recorded; a closing event that predates the incident it closes is invisible to any timestamp-ordered reader.
 
 ## All waste
 
@@ -105,6 +106,7 @@ COMPLETED
 - `browser-policy-blocked-ui-acceptance`: occurrences=1; cause_status: `known`; root cause: The in-app Browser Use controller rejected refresh/navigation for the local Workbench URL under its own URL security policy after the service restart.; solution: `open`
 - `canonical-terminal-inspection-reuse`: occurrences=1; cause_status: `known`; root cause: The planner rejected a repeated default inspection even when it was a no-argument read of the same current pinned run and the server had already produced immutable terminal evidence for it.; solution: `resolved`
 - `checkpoint-host-gate-separation`: occurrences=1; cause_status: `known`; root cause: The full gate exposed one stale capability projection expectation, one stale Agent navigation expectation, and twenty sandbox/code-execution failures caused by sandbox_apply being denied on this macOS host.; solution: `mitigated`
+- `closing-event-timestamp-must-follow-the-incident`: occurrences=1; cause_status: `known`; root cause: The elapsed counter was anchored to component mount while the request lives in a module-level registry that outlives a remount. A first closing event was appended with a timestamp earlier than the originating event, so ordering by timestamp still reported it open.; solution: `resolved`
 - `coefficient-batch-limit-protocol`: occurrences=1; cause_status: `known`; root cause: The Global Agent protocol did not state the bounded coefficient reader's four-term request limit.; solution: `resolved`
 - `covariance-comparison-interpretation-boundary`: occurrences=1; cause_status: `known`; root cause: The Global Agent protocol allowed a descriptive comparison of robust and nonrobust inference but did not explicitly forbid attributing one coefficient's changing significance label to heteroskedasticity.; solution: `open`
 - `declared-white-test-post-estimation`: occurrences=1; cause_status: `known`; root cause: The published workflow vocabulary exposed residual plots and model estimation but not White's test, even though the runtime could safely derive it from a completed OLS design.; solution: `resolved`
@@ -182,6 +184,7 @@ COMPLETED
 - `browser-policy-blocked-ui-acceptance`: line experience occurrence(s)=1
 - `canonical-terminal-inspection-reuse`: line experience occurrence(s)=1
 - `checkpoint-host-gate-separation`: line experience occurrence(s)=1
+- `closing-event-timestamp-must-follow-the-incident`: line experience occurrence(s)=1
 - `coefficient-batch-limit-protocol`: line experience occurrence(s)=1
 - `covariance-comparison-interpretation-boundary`: line experience occurrence(s)=1
 - `declared-white-test-post-estimation`: line experience occurrence(s)=1
@@ -247,6 +250,7 @@ COMPLETED
 - A test that submits a real run shares the process-wide event manager, so it must claim a clean slot explicitly; diagnose a full-suite-only failure from the recorded step error before assuming the change under test is at fault.
 - A visible notebook identifier is not sufficient evidence that its persisted planning lifecycle can still be loaded.
 - All 22 were fixed at source. Structural guards were kept as guards: each exemption is paired with a new real assertion rather than merely widened.
+- An event's timestamp must be the moment it is recorded; a closing event that predates the incident it closes is invisible to any timestamp-ordered reader.
 - Before expanding a frozen allowlist, check the formal validator's minimum backend path depth and prefer an already-mounted narrow router plus a leaf service module.
 - Bind prose claims through exact structured evidence references and hashes; do not make user-visible natural language carry internal parser tokens.
 - Both indicator and polynomial construction now reuse a persisted column after proving it is value-identical (including the missing-value mask) to the requested term, and still refuse a merely similarly named one.
@@ -521,3 +525,4 @@ COMPLETED
 - #216: `61649ad1-e55f-49b7-a081-d89b6cc3d577` | 2026-07-31T02:30:00.000Z | GAP/planning_elapsed_counter_resets_on_remount | incident=`ba56ae10-e15f-467a-96b3-f745761c7725` | lesson_key=`planning-elapsed-counter-resets-on-remount` | event_sha256=`c90622a214f5f690a275a26cd0d80405a1dae68eb23a30aa1f5902c64261d8dc`
 - #217: `fde7010d-92a5-4bce-931c-e8ec2b639493` | 2026-07-31T02:40:00.000Z | GATE/v1_8_4_release_gate | incident=`67015439-4f8d-46fd-be6c-c5a5e2e3cbf1` | lesson_key=`v1-8-4-release-gate` | event_sha256=`80a651e59244f266f5e0ab1334b4b775d1d8d863b8a69466c41eccce3beda878`
 - #218: `10369b6a-3e27-4ee9-a976-12a20babdf07` | 2026-07-31T02:50:00.000Z | STATE_CHANGE/agent_model_composition_completed | incident=`a702b4cf-810a-4259-b88c-65ec98ef3e1d` | lesson_key=`close-on-evidence-carry-open-incidents-forward` | event_sha256=`bef9629f57e1e2fc0b2c0b5688e43b21946b2b012e25df9da8d1fdd1ad1a85ae`
+- #219: `2eceec3f-9806-4e26-872c-8338219ee157` | 2026-07-31T08:20:00.000Z | GAP/planning_elapsed_counter_resets_on_remount | incident=`ba56ae10-e15f-467a-96b3-f745761c7725` | lesson_key=`closing-event-timestamp-must-follow-the-incident` | event_sha256=`5340f487d517b5c23a18061e056f067e5fbfaac38d11f39e9175889e6d4b1c52`

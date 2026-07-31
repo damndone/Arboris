@@ -1285,6 +1285,8 @@ def test_main_role_turn_exposes_only_read_only_project_evidence_tool(
     assert "mechanically copy those returned fields" in protocol_messages[0]["content"]
     assert "contradicts the returned p value" in protocol_messages[0]["content"]
     assert "nonrobust significance is false" in protocol_messages[0]["content"]
+    assert "inference changes under the two covariance assumptions" in protocol_messages[0]["content"]
+    assert "caused by heteroskedasticity" in protocol_messages[0]["content"]
     assert "standard-error size alone does not establish" in protocol_messages[0]["content"]
     assert "a signal, an indication, a hint, or a suggestion" in protocol_messages[0]["content"]
     assert "conditional association, not a causal effect" in protocol_messages[0]["content"]
