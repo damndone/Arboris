@@ -208,7 +208,17 @@ v1.8.1 的输出契约只匹配 `artifact_id + artifact_type + count`（DEC-ART-
 
 ---
 
-## 5. v1.8.4 — Typed Memory + 项目历史检索
+## 5. v1.8.5 — Typed Memory + 项目历史检索
+
+> **2026-07-31 改标**：本节原定为 v1.8.4。实际发布的 v1.8.4（tag `v1.8.4` = `9ff0551`）
+> 是 Agent Model Composition —— 版本号被复用成了另一个主题，而本节从未同步，导致文档里
+> 一度同时存在两个互相矛盾的 v1.8.4 定义。根因是 v1.8.4 没有设计文档，范围只活在逐条
+> devline 的 Context Pack 里，没有任何一层回答「这个版本整体交付什么」。
+>
+> 本节内容顺延 v1.8.5，范围与裁定以
+> [`v1.8.5 设计文档`](../specs/2026-07-31-v1.8.5-typed-memory-and-model-family-design.md) 为准。
+> 其中 apply_mode 只做 `inform_only` + `suggest_default`，执行者做运行时判定 + gate
+> preflight 两层，**六层检索链明确排除在 v1.8.5 之外**。
 
 记忆不能是"把历史聊天总结一下塞进系统提示词，下次默默影响 Agent"。
 **会漂移的记忆比没有记忆更糟**——这句话是本仓库自己写的
