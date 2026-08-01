@@ -166,7 +166,8 @@ function optionalDomainMemoryProjection(value: unknown): DomainMemoryRetrievalPr
   if (value === null || value === undefined) return null;
   const item = recordValue(value);
   if (
-    item.contract_version !== "domain-memory-context-input/v1" ||
+    (item.contract_version !== "domain-memory-context-input/v1" &&
+      item.contract_version !== "domain-memory-context-input/v2") ||
     item.memory_authority !== "non_authoritative" ||
     item.bounded !== true ||
     typeof item.retrieval_ref !== "string" ||

@@ -202,6 +202,50 @@ describe("NotebookRouteView", () => {
     );
   });
 
+  it("accepts a valid v2 domain-memory projection when no memory is eligible", async () => {
+    const memoryContext = {
+      ...context,
+      domain_memory_projection: {
+        contract_version: "domain-memory-context-input/v2" as const,
+        retrieval_ref: "retrieval-memory-empty",
+        scope_ref: "scope-memory-private",
+        outcome: "empty" as const,
+        reason: "no_eligible_memory",
+        entries: [],
+        omissions: [{
+          memory_id: "memory-unadjusted",
+          revision: 1,
+          reason: "predicate_mismatch",
+        }],
+        bounded: true,
+        preference_ref: "preference-memory",
+        memory_authority: "non_authoritative" as const,
+      },
+    };
+    vi.mocked(compileNotebookContext).mockResolvedValue(memoryContext);
+    vi.mocked(listNotebookOptions).mockResolvedValue({
+      context: memoryContext,
+      options: [],
+      trace_id: "trace_memory_empty",
+    });
+    vi.mocked(proposeNotebookOptions).mockResolvedValue({
+      context: memoryContext,
+      options: [],
+      trace_id: "trace_memory_empty",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("notebook-surface")).toHaveAttribute("data-state", "empty"),
+    );
+    expect(screen.queryByTestId("notebook-error")).toBeNull();
+  });
+
   it("renders a typed API failure without pretending the notebook is empty", async () => {
     vi.mocked(ensureNotebookProjection).mockRejectedValue(
       Object.assign(new Error("project missing"), { code: "PROJECT_NOT_FOUND" }),
