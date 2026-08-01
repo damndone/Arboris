@@ -29,6 +29,25 @@ def test_registered_recipes_own_time_value_inputs_and_result_projection() -> Non
     assert arma_garch.result_projection == "time_series_manifest"
 
 
+def test_registered_recipes_resolve_server_owned_public_projection_builders() -> None:
+    from workbench.agent.recipes.registry import resolve_public_result_projection
+
+    ets = resolve_public_result_projection("time_series.ets")
+    arma_garch = resolve_public_result_projection("time_series.arma_garch")
+
+    assert ets.recipe_id == "time_series.ets"
+    assert ets.projection_id == "forecast_summary"
+    assert ets.owner == "time_series.ets"
+    assert arma_garch.recipe_id == "time_series.arma_garch"
+    assert arma_garch.projection_id == "time_series_manifest"
+    assert arma_garch.owner == "time_series.arma_garch"
+    assert callable(ets.build)
+    assert callable(arma_garch.build)
+
+    with pytest.raises(KeyError, match="no public projection"):
+        resolve_public_result_projection("time_series.unknown")
+
+
 def test_ets_recipe_vocabulary_reuses_its_authoritative_component_choices() -> None:
     """Planner-visible ETS choices must not drift from the fit contract."""
 

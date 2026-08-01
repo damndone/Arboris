@@ -42,6 +42,18 @@ class RecipeContract:
     def allowed_model_param_fields(self) -> frozenset[str]:
         return frozenset({"model_type", "model_options"})
 
+    def public_result_projection(self):
+        """Resolve the server-owned builder for this published Recipe."""
+
+        from .recipes.registry import resolve_public_result_projection
+
+        declaration = resolve_public_result_projection(self.recipe_id)
+        if declaration.projection_id != self.result_projection:
+            raise RuntimeError(
+                f"Recipe {self.recipe_id} projection id does not match its registry"
+            )
+        return declaration
+
     def source_columns(self, model_params: Mapping[str, object]) -> tuple[str, ...]:
         options = model_params.get("model_options")
         if not isinstance(options, Mapping):

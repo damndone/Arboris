@@ -1893,7 +1893,7 @@ class NodeOperationContextProvider:
             effective_model_type = input_model_types[0]
 
         if effective_model_type == "time_series.ets":
-            from .recipes.ets import build_ets_public_result_view
+            from .recipe_contracts import recipe_contract
 
             registered = _resolve_verified_registered_artifact(
                 run_root,
@@ -1901,7 +1901,7 @@ class NodeOperationContextProvider:
                 expected_type="model_result",
             )
             summary = (
-                build_ets_public_result_view(
+                recipe_contract(effective_model_type).public_result_projection().build(
                     registered[0],
                     artifact_id="ets_1",
                     artifact_sha256=registered[1],
@@ -1944,15 +1944,24 @@ class NodeOperationContextProvider:
                 "omitted_sections": ["raw_series"],
             }
 
-        from .recipes.arma_garch import build_arma_garch_public_result_view
+        from .recipe_contracts import recipe_contract
 
         artifacts, metadata = _read_time_series_artifacts(run_root)
-        summary = build_arma_garch_public_result_view(artifacts)
+        projection = recipe_contract(effective_model_type).public_result_projection()
+        summary = projection.build(
+            {"artifacts": artifacts},
+            artifact_id=None,
+            artifact_sha256=None,
+        )
         if "ts.analysis_contract" not in artifacts:
             recovered = _analysis_contract_from_run_inputs(run_inputs)
             if recovered is not None:
                 artifacts["ts.analysis_contract"] = recovered
-            summary = build_arma_garch_public_result_view(artifacts)
+            summary = projection.build(
+                {"artifacts": artifacts},
+                artifact_id=None,
+                artifact_sha256=None,
+            )
         persisted_source_run_id = run_inputs.get("rerun_of")
         declared_source_run_id = metadata.get("source_run_id")
         source_run_id = (

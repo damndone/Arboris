@@ -4,10 +4,92 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 
 BuildPacket = Callable[[Mapping[str, Any]], dict[str, Any]]
+PublicProjectionBuilder = Callable[..., dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class PublicProjectionDeclaration:
+    """One server-owned, bounded public result projection."""
+
+    recipe_id: str
+    projection_id: str
+    owner: str
+    build: PublicProjectionBuilder
+
+
+def _build_ets_projection(
+    payload: Mapping[str, Any], *, artifact_id: str | None, artifact_sha256: str | None
+) -> dict[str, Any]:
+    from .ets import build_ets_public_result_view
+
+    if not isinstance(artifact_id, str) or not isinstance(artifact_sha256, str):
+        return {"available": False, "reason_code": "ETS_PUBLIC_RESULT_UNAVAILABLE"}
+    return build_ets_public_result_view(
+        payload,
+        artifact_id=artifact_id,
+        artifact_sha256=artifact_sha256,
+    )
+
+
+def _build_arma_garch_projection(
+    payload: Mapping[str, Any], *, artifact_id: str | None, artifact_sha256: str | None
+) -> dict[str, Any]:
+    from .arma_garch import build_arma_garch_public_result_view
+
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        return {
+            "available": False,
+            "reason": "ARMA_GARCH_PUBLIC_ARTIFACTS_UNAVAILABLE",
+        }
+    return build_arma_garch_public_result_view(artifacts)
+
+
+_PUBLIC_PROJECTIONS: Mapping[str, PublicProjectionDeclaration] = MappingProxyType(
+    {
+        "time_series.ets": PublicProjectionDeclaration(
+            recipe_id="time_series.ets",
+            projection_id="forecast_summary",
+            owner="time_series.ets",
+            build=_build_ets_projection,
+        ),
+        "time_series.arma_garch": PublicProjectionDeclaration(
+            recipe_id="time_series.arma_garch",
+            projection_id="time_series_manifest",
+            owner="time_series.arma_garch",
+            build=_build_arma_garch_projection,
+        ),
+    }
+)
+
+
+def resolve_public_result_projection(recipe_id: str) -> PublicProjectionDeclaration:
+    try:
+        return _PUBLIC_PROJECTIONS[recipe_id]
+    except (KeyError, TypeError) as exc:
+        raise KeyError(f"no public projection for {recipe_id!r}") from exc
+
+
+def build_public_result_projection(
+    recipe_id: str,
+    payload: Mapping[str, Any],
+    *,
+    artifact_id: str | None = None,
+    artifact_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Build one bounded projection without model-type dispatch at the caller."""
+
+    declaration = resolve_public_result_projection(recipe_id)
+    return declaration.build(
+        payload,
+        artifact_id=artifact_id,
+        artifact_sha256=artifact_sha256,
+    )
 
 
 @dataclass(frozen=True)
