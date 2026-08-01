@@ -25,8 +25,6 @@ def _client(tmp_path: Path) -> tuple[TestClient, MemoryCandidateStore]:
     candidates = MemoryCandidateStore(tmp_path, SCOPE)
     service = DomainMemoryService(DomainMemoryStore(tmp_path, SCOPE), candidates)
     CuratorRuntime(candidates).generate(_summary(), resolve_preferences(SCOPE, DomainMemoryPreferences(cross_project_domain_memory_iteration=True)))
-    candidate = candidates.pending(SCOPE)[0]
-    candidates.transition(candidate.candidate_id, expected_revision=candidate.revision, status="needs_review")
     app = FastAPI()
     app.state.domain_memory_service = service
     app.state.domain_memory_review_service = MemoryReviewService(service, candidates, ConflictStore(tmp_path, SCOPE))
@@ -50,3 +48,24 @@ def test_review_route_forbids_unknown_fields(tmp_path: Path) -> None:
     candidate = candidates.pending(SCOPE)[0]
     response = client.post(f"/domain-memory/review/candidates/{candidate.candidate_id}", json={"decision": "rejected", "expected_revision": candidate.revision, "actor_id": "user-a", "execute": True})
     assert response.status_code == 422
+
+
+def test_curator_candidate_can_be_explicitly_approved_without_a_hidden_transition(tmp_path: Path) -> None:
+    client, candidates = _client(tmp_path)
+    candidate = candidates.pending(SCOPE)[0]
+    assert candidate.status == "needs_review"
+
+    response = client.post(
+        f"/domain-memory/review/candidates/{candidate.candidate_id}",
+        json={
+            "decision": "approved",
+            "expected_revision": candidate.revision,
+            "actor_id": "user-a",
+            "approved_at": "2026-08-01T00:00:00Z",
+            "review_after": "2026-12-01T00:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["automatic_execution"] is False
+    assert response.json()["validity"]["state"] == "active"
