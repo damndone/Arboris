@@ -34,6 +34,10 @@ from workbench.agent.context_compiler import (
 )
 from workbench.agent.context_compiler import freshness_dependency_fingerprint
 from workbench.agent.notebook.proposal import TypedProposal
+from workbench.agent.notebook.recommendation import (
+    RecommendationValidationError,
+    RecommendationValidator,
+)
 from workbench.contracts.agent.notebook_option import MemoryDefaultSource
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from tests.test_notebook_support import make_project
@@ -214,7 +218,16 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
         "model_params",
         "model_options",
     ]
+    recipe_payload = planning_payload["capability_catalog"]["time_series.ets"][
+        "recipe_contract"
+    ]
+    assert recipe_payload["recipe_id"] == "time_series.ets"
+    assert recipe_payload["required_inputs"] == ["time_column", "value_column"]
+    assert recipe_payload["expected_artifacts"] == {"ets_1": "model_result"}
+    assert recipe_payload["result_projection"] == "forecast_summary"
+    assert recipe_payload["parameter_vocabulary"]["owner_contract"] == "time_series.ets@v1"
     assert "Comparative claims are bound by the option's structured evidence_refs" in adapter.requests[0].messages[0]["content"]
+    assert "Treat completed evidence already supplied in the initial Evidence Pack as sufficient" in adapter.requests[0].messages[0]["content"]
     assert "completed evidence refs" in adapter.requests[0].messages[0]["content"]
     assert "dataset_source_id" in adapter.requests[0].messages[0]["content"]
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
@@ -1110,6 +1123,53 @@ def test_provider_plan_enforces_one_total_planning_budget(tmp_path: Path) -> Non
         )
 
 
+def test_provider_plan_without_total_deadline_allows_bounded_corrections(
+    tmp_path: Path,
+) -> None:
+    class SlowCorrectingAdapter:
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        async def stream(self, request):
+            self.requests.append(request)
+            await asyncio.sleep(0.04)
+            if len(self.requests) < 3:
+                yield ModelStreamEvent.tool_call_delta(
+                    request.request_id,
+                    {
+                        "tool_call_id": f"unknown-{len(self.requests)}",
+                        "tool_id": "unknown_tool",
+                        "arguments": {},
+                    },
+                )
+            else:
+                yield ModelStreamEvent.tool_call_delta(
+                    request.request_id,
+                    {
+                        "tool_call_id": "submit-1",
+                        "tool_id": "submit_notebook_option_batch",
+                        "arguments": _submit_call(),
+                    },
+                )
+            yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
+
+    adapter = SlowCorrectingAdapter()
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+        model_timeout_s=0.05,
+        planning_timeout_s=None,
+    )
+
+    result = agent.plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=_evidence(),
+    )
+
+    assert len(adapter.requests) == 3
+    assert len(result.option_drafts) == 1
+
+
 def test_option_parser_rejects_more_than_three_options_at_typed_boundary() -> None:
     payload = _submit_call()
     payload["options"] = payload["options"] * 4
@@ -1456,6 +1516,69 @@ def test_provider_gets_bounded_correction_for_invalid_submission(tmp_path: Path)
     assert any(message.get("role") == "tool" and "rejected" in message["content"] for message in correction_messages)
     assert "option evidence ref is missing, changed, or incomplete" in correction_messages[-1]["content"]
     assert "sha256:time-result" in correction_messages[-1]["content"]
+
+
+def test_provider_corrects_a_server_recommendation_validation_error(tmp_path: Path) -> None:
+    """Server-side recommendation rejection remains a bounded Agent correction.
+
+    This occurs after a syntactically valid provider submission.  It must not
+    escape as a generic request error because the Agent can submit a corrected,
+    evidence-bound candidate batch on its next turn.
+    """
+
+    class RejectOnceRecommendationValidator:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.delegate = RecommendationValidator()
+
+        def decide(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RecommendationValidationError("candidate batch is not comparable")
+            return self.delegate.decide(**kwargs)
+
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "inspect-valid",
+                "tool_id": "request_notebook_inspections",
+                "arguments": {
+                    "requests": [
+                        {
+                            "inspection_id": "time_index.v1",
+                            "target_ref": "run:active",
+                            "arguments": {},
+                        }
+                    ]
+                },
+            },
+            {
+                "tool_call_id": "submit-rejected",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            },
+            {
+                "tool_call_id": "submit-corrected",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            },
+        ]
+    )
+    agent = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {}},
+        inspection_executor=lambda requests, current: _evidence(),
+        recommendation_validator=RejectOnceRecommendationValidator(),
+    )
+
+    result = agent.plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=DataEvidencePackV1("run:run_001", ()),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert len(adapter.requests) == 3
+    assert "server recommendation validation failed" in adapter.requests[2].messages[-1]["content"]
 
 
 def test_provider_accepts_comparative_claim_bound_by_structured_evidence_ref(
@@ -2078,6 +2201,128 @@ def test_notebook_agent_rejects_an_incomplete_iv_genesis_spec(
     )._validate_submissions(context, evidence, (complete_submission,), catalog)
 
     assert normalized[0].proposal.changes["model_params"]["iv_instruments"] == ["instrument"]
+
+
+@pytest.mark.parametrize("active_head_run_id", [None, "run_001"])
+def test_notebook_agent_admits_recipe_genesis_without_y_or_x_and_rejects_legacy_shape(
+    tmp_path: Path, active_head_run_id: str | None
+) -> None:
+    """A Recipe is a separate input contract, not a univariate regression."""
+
+    upload_sha256 = "sha256:upload-recipe"
+    context = _context(
+        make_project(tmp_path),
+        active_head_run_id=active_head_run_id,
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": [{"name": "when"}, {"name": "value"}]},
+                result_hash="sha256:recipe-profile",
+            ),
+        ),
+    )
+    model_params = {
+        "model_type": "time_series.ets",
+        "model_options": {
+            "time_column": "when",
+            "value_column": "value",
+            "error": "add",
+            "trend": None,
+                "seasonal": None,
+                "damped_trend": False,
+                "time_index_semantics": "observation_order",
+            },
+        }
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The evidence-backed time and value fields define one series.",
+            "assumptions": ["the declared observation order is meaningful"],
+            "capability_id": "time_series.ets",
+            "option_id": "opt_recipe",
+            "proposal": {
+                "proposal_id": "prop_recipe",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": upload_sha256},
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": freshness_dependency_fingerprint(context),
+                    "owner_resolution": "single_candidate",
+                },
+                "changes": {"model_params": model_params},
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "ets_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:recipe-profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": [
+                "evidence:profile confirms the declared source columns."
+            ],
+        }
+    )
+    catalog = {"time_series.ets": {"model_type": "time_series.ets"}}
+    agent = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+
+    normalized = agent._validate_submissions(context, evidence, (submission,), catalog)
+
+    assert normalized[0].proposal.changes["model_params"] == model_params
+
+    legacy_params = {**model_params, "y": "value"}
+    legacy_submission = replace(
+        submission,
+        proposal=TypedProposal.from_dict(
+            {
+                **submission.proposal.to_dict(),
+                "changes": {"model_params": legacy_params},
+            }
+        ),
+    )
+    with pytest.raises(
+        NotebookPlanningContractError,
+        match="RECIPE_REGRESSION_FIELD_FORBIDDEN",
+    ):
+        agent._validate_submissions(context, evidence, (legacy_submission,), catalog)
+
+
+def test_recipe_model_options_rejection_republishes_exact_required_inputs(
+    tmp_path: Path,
+) -> None:
+    correction = NotebookPlanningAgent._correction_instruction(
+        error=NotebookPlanningContractError(
+            "RECIPE_MODEL_OPTIONS_REQUIRED: time_series.ets requires a model_options object."
+        ),
+        context=_context(make_project(tmp_path)),
+        evidence=_evidence(),
+        correction_number=1,
+    )
+
+    assert "time_series.ets" in correction
+    assert "model_params.model_options" in correction
+    assert "model_options" in correction
+    assert "time_column" in correction
+    assert "value_column" in correction
 
 
 def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(

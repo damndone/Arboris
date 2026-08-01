@@ -56,14 +56,14 @@ from ..capability_factory.execution_authorization import (
 
 router = APIRouter()
 
-NOTEBOOK_PROVIDER_TIMEOUT_S = 120.0
+NOTEBOOK_PROVIDER_TIMEOUT_S = 300.0
 
-# The total planning budget, owned here and passed explicitly to the planner
-# rather than left to its internal derivation. One value serves both the
-# enforcement and the number published to the UI: a route timeout, a planner
-# budget and an on-screen expectation that drift apart is what left a live
-# request looking hung at 68s with cancellation as the only recourse.
-NOTEBOOK_PLANNING_DEADLINE_S = 180.0
+# A local user can cancel a planning pass at any time. Do not impose a short
+# aggregate deadline across its bounded provider turns: a valid inspect →
+# correction → submit conversation can legitimately outlast it. Each provider
+# call still has the five-minute timeout above, and inspection/correction turn
+# limits remain owned by NotebookPlanningAgent.
+NOTEBOOK_PLANNING_DEADLINE_S: float | None = None
 _ACTIVE_PLANNING_ATTEMPTS: dict[
     tuple[str, str, str], asyncio.Task[Any]
 ] = {}
@@ -397,9 +397,8 @@ def _context_packet(context: NotebookPlanningContextV1) -> dict[str, Any]:
     packet = context.to_dict()
     packet["generation_context_hash"] = generation_context_hash(context)
     packet["freshness_dependency_fingerprint"] = freshness_dependency_fingerprint(context)
-    # Published so a planning surface can show the budget it is running against
-    # instead of an open-ended elapsed counter.
-    packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
+    if NOTEBOOK_PLANNING_DEADLINE_S is not None:
+        packet["planning_deadline_s"] = NOTEBOOK_PLANNING_DEADLINE_S
     return packet
 
 
@@ -506,6 +505,27 @@ def _notebook_error(exc: NotebookOptionError) -> WorkbenchAPIError:
         message=str(exc),
         details=exc.details,
     )
+
+
+def _record_planning_terminal_error(
+    trace: TraceWriter | None,
+    *,
+    code: str,
+    fatal: bool,
+    detail: str,
+) -> None:
+    """Persist one bounded terminal outcome for a planning attempt.
+
+    A planning failure is a user-visible product event, not merely an HTTP
+    response. Provider bodies and prompts never enter this record: the typed
+    code is sufficient for replay, diagnosis, and the UI timeline.
+    """
+
+    if trace is not None:
+        trace.emit(
+            "operation.error",
+            payload={"code": code, "fatal": fatal, "detail": detail},
+        )
 
 
 def _planning_agent(
@@ -642,6 +662,7 @@ def _planning_agent(
             return
 
         if proposal.operation_id == "model.genesis":
+            from ..agent.recipe_contracts import recipe_contract_for_model_type
             from ..model_options import bind_new_model_options
 
             model_params = changes.get("model_params") or {}
@@ -654,6 +675,16 @@ def _planning_agent(
             if payload:
                 if not isinstance(model_type, str) or not model_type:
                     raise ValueError("MODEL_OPTIONS_EXPLICIT_MODEL_REQUIRED")
+                recipe_contract = recipe_contract_for_model_type(model_type)
+                if recipe_contract is not None:
+                    source = _context.projection_source or {}
+                    source_hash = source.get("upload_sha256") if isinstance(source, Mapping) else None
+                    if not isinstance(source_hash, str) or not source_hash:
+                        raise ValueError("RECIPE_SOURCE_BINDING_INVALID")
+                    payload = recipe_contract.bind_server_owned_options(
+                        payload,
+                        source_reference=f"upload:{source_hash}",
+                    )
                 bind_new_model_options(model_type, payload)
 
     notebook_config = (
@@ -983,6 +1014,8 @@ async def propose_options_endpoint(
     body: ProposeOptionsRequest,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
+    trace: TraceWriter | None = None
+    planning_started = False
     try:
         notebook = service.get_notebook(notebook_id)
         if notebook.user_focus.get("interaction_mode") == "action":
@@ -1003,33 +1036,42 @@ async def propose_options_endpoint(
             else []
         )
         if not drafts:
-            agent = _planning_agent(root, service, notebook_id, context, trace)
-            initial_evidence = _baseline_planning_evidence(
-                service, notebook_id, context, trace
-            )
-            attempt_key = (
-                _planning_attempt_key(root, notebook_id, body.attempt_id)
-                if body.attempt_id is not None
-                else None
-            )
-            current_task = asyncio.current_task()
-            if attempt_key is not None and current_task is not None:
-                with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
-                    active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
-                    if active is not None and not active.done():
-                        raise WorkbenchAPIError(
-                            status_code=409,
-                            code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
-                            message="Notebook planning attempt is already active",
-                        )
-                    _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
+            planning_started = True
+            attempt_key = None
+            current_task = None
             try:
+                agent = _planning_agent(root, service, notebook_id, context, trace)
+                initial_evidence = _baseline_planning_evidence(
+                    service, notebook_id, context, trace
+                )
+                attempt_key = (
+                    _planning_attempt_key(root, notebook_id, body.attempt_id)
+                    if body.attempt_id is not None
+                    else None
+                )
+                current_task = asyncio.current_task()
+                if attempt_key is not None and current_task is not None:
+                    with _ACTIVE_PLANNING_ATTEMPTS_LOCK:
+                        active = _ACTIVE_PLANNING_ATTEMPTS.get(attempt_key)
+                        if active is not None and not active.done():
+                            raise WorkbenchAPIError(
+                                status_code=409,
+                                code="NOTEBOOK_PLANNING_ATTEMPT_ACTIVE",
+                                message="Notebook planning attempt is already active",
+                            )
+                        _ACTIVE_PLANNING_ATTEMPTS[attempt_key] = current_task
                 result = await _run_planning_agent(
                     agent,
                     context=context,
                     initial_evidence=initial_evidence,
                 )
             except asyncio.CancelledError as exc:
+                _record_planning_terminal_error(
+                    trace,
+                    code="NOTEBOOK_PLANNING_CANCELLED",
+                    fatal=False,
+                    detail="notebook planning cancelled by user",
+                )
                 raise WorkbenchAPIError(
                     status_code=409,
                     code="NOTEBOOK_PLANNING_CANCELLED",
@@ -1108,14 +1150,49 @@ async def propose_options_endpoint(
             "trace_id": trace.trace_id,
         }
     except NotebookOptionError as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise _notebook_error(exc) from exc
     except NotebookNoEligibleCapability as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
     except NotebookPlanningContractError as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=422, code=exc.code, message=str(exc)) from exc
     except NotebookPlanningUnavailable as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code=exc.code,
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise WorkbenchAPIError(status_code=409, code=exc.code, message=str(exc)) from exc
     except (OSError, ValueError, KeyError) as exc:
+        if planning_started:
+            _record_planning_terminal_error(
+                trace,
+                code="NOTEBOOK_REQUEST_INVALID",
+                fatal=True,
+                detail="notebook planning failed",
+            )
         raise _request_error(exc) from exc
 
 

@@ -7,8 +7,9 @@ per family — build_headset internals are untouched.
 Shape parity with the per-run headset body (the HARD requirement — the frontend
 feeds both through the same adaptHeadSet adapter):
 - `nodes`  : dict keyed by the dedup key (node_hash::node_id, or bare node_id),
-             exactly as build_headset returns it. First family to contribute a
-             key wins the view; `runs` lists are merged across families.
+             exactly as build_headset returns it. `runs` lists are merged
+             across families; if a later graph corrects a shared node's
+             human-facing presentation, its newer label and summary win.
 - `edges`  : list of {source, target, op, params}, deduped on (source, target, op)
              — the same triple build_headset dedups on within one family.
 - `heads`  : one entry per run, deduped by run_id across overlapping scans.
@@ -43,6 +44,11 @@ def build_project_forest(
     annotate: Optional[Callable[..., None]] = None,
 ) -> dict[str, Any]:
     nodes: dict[str, dict] = {}
+    # Project forests merge the outputs of distinct head-sets.  They must use
+    # the same presentation rule as `build_headset`: preserve immutable result
+    # evidence, but serve the newest human-facing label/summary for a shared
+    # result node.
+    presentation_created_at: dict[str, str] = {}
     edges: list[dict] = []
     edge_seen: set[tuple[str, str, Any]] = set()
     heads: list[dict] = []
@@ -81,10 +87,17 @@ def build_project_forest(
             existing = nodes.get(key)
             if existing is None:
                 nodes[key] = node
+                presentation_created_at[key] = str(node.get("created_at") or "")
             else:  # defensive: merge run membership across overlapping scans
                 for rid in node.get("runs", []):
                     if rid not in existing.get("runs", []):
                         existing.setdefault("runs", []).append(rid)
+                incoming_created_at = str(node.get("created_at") or "")
+                if incoming_created_at > presentation_created_at.get(key, ""):
+                    for field in ("display_label", "summary"):
+                        if field in node:
+                            existing[field] = node[field]
+                    presentation_created_at[key] = incoming_created_at
         for edge in body["edges"]:
             k = (edge["source"], edge["target"], edge.get("op"))
             if k not in edge_seen:

@@ -5,10 +5,25 @@ from typing import Any
 from ..context import ModelingContext, RunEnv
 
 
+def _model_result_payload(primary_result: dict[str, Any]) -> dict[str, Any]:
+    """Return the typed model result carried by a persisted result envelope.
+
+    Built-in regression results historically expose ``model_type`` at the
+    outer level.  Pack results persist a standard envelope whose authoritative
+    type and summary fields live under ``result``.  Lineage must use that
+    authoritative payload rather than silently displaying the OLS fallback.
+    """
+
+    nested = primary_result.get("result")
+    if isinstance(nested, dict) and isinstance(nested.get("model_type"), str):
+        return nested
+    return primary_result
+
+
 def _primary_payload_ref(model_id: str, primary_result: dict[str, Any]) -> str:
     """Point each graph model node at its single authoritative result file."""
 
-    if primary_result.get("model_type") == "linear_mixed_effects":
+    if _model_result_payload(primary_result).get("model_type") == "linear_mixed_effects":
         return f"artifacts/model_results/{model_id}.result.json"
     return f"model_results/{model_id}.json"
 
@@ -58,7 +73,11 @@ class RecordingStage:
         _model_type_dp = ctx.artifacts["_model_type_dp"]
         _robust_se_dp = ctx.artifacts["_robust_se_dp"]
 
-        primary_type = model_results[0][1].get("model_type", "ols") if model_results else "ols"
+        primary_type = (
+            _model_result_payload(model_results[0][1]).get("model_type", "ols")
+            if model_results
+            else "ols"
+        )
         drop_check_x = poisson_x if primary_type == "poisson_rate" else normalized_x
         declared_model_variables: set[str] = set()
         if primary_type in {"cs_did", "sa_did"}:
@@ -143,7 +162,8 @@ class RecordingStage:
         if model_results:
             primary_model_id = model_results[0][0]
             primary_result = model_results[0][1]
-            primary_model_type = primary_result.get("model_type", "ols")
+            primary_result_payload = _model_result_payload(primary_result)
+            primary_model_type = primary_result_payload.get("model_type", "ols")
             _dps_for_model = tuple(dp for dp in (_model_type_dp, _robust_se_dp) if dp is not None)
             _recorder.record_model(
                 node_id=f"model:{primary_model_id}",
@@ -152,11 +172,11 @@ class RecordingStage:
                 decision_points=_dps_for_model,
                 summary=_model_summary(
                     primary_model_type,
-                    primary_result,
+                    primary_result_payload,
                     robust_se_dp=_robust_se_dp,
                     exposure_col=exposure_col,
                     fallback_n=len(cleaned),
-                ),
+                ) or f"{primary_model_type} (n={len(cleaned)})",
                 stage=Stage.MODEL,
             )
             primary_parent_node_id = ctx.artifacts.get(

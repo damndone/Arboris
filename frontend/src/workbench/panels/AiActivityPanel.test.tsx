@@ -57,6 +57,39 @@ describe("AiActivityPanel", () => {
     expect(rows[1]).toHaveTextContent("first question");
   });
 
+  it("shows terminal Notebook and failed Report activity without pretending either succeeded", () => {
+    appendAiActivity(ROOT, {
+      kind: "notebook_plan",
+      id: makeActivityId(),
+      at: "2026-08-01T16:30:00Z",
+      notebook_id: "nb_1",
+      interaction_mode: "plan",
+      goal: "Forecast the series.",
+      status: "error",
+      error: "NOTEBOOK_PLANNING_UNAVAILABLE",
+    });
+    appendAiActivity(ROOT, {
+      kind: "report_generate",
+      id: makeActivityId(),
+      at: "2026-08-01T16:31:00Z",
+      run_id: "run_1",
+      instruction: "write the report",
+      fact_count: 15,
+      excluded_count: 2,
+      status: "error",
+      error: "LLM unavailable",
+    });
+
+    render(<AiActivityPanel runId="r1" projectRoot={ROOT} />);
+
+    expect(screen.getByTestId("ai-activity-notebook-plan")).toHaveTextContent(
+      "NOTEBOOK_PLANNING_UNAVAILABLE",
+    );
+    expect(screen.getByTestId("ai-activity-report")).toHaveTextContent(
+      "LLM unavailable",
+    );
+  });
+
   it("refreshes live when a record is appended elsewhere in the window", async () => {
     render(<AiActivityPanel runId="r1" projectRoot={ROOT} />);
     expect(screen.getByTestId("ai-activity-empty")).toBeInTheDocument();

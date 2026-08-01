@@ -3402,7 +3402,10 @@ class NotebookService:
                 validation_issues=[{"code": "OPERATION_VALIDATION", "detail": str(error)}],
             ) from error
         try:
-            self._validate_target_model_options(proposal)
+            self._validate_target_model_options(
+                proposal,
+                projection_source=notebook.projection_source,
+            )
         except Exception as error:
             code = getattr(error, "code", "MODEL_OPTIONS_PATCH_INVALID")
             raise OptionValidationFailed(
@@ -3515,7 +3518,12 @@ class NotebookService:
             canonical_changes["expected_artifacts"] = list(expected_artifacts)
         return replace(proposal, changes=canonical_changes)
 
-    def _validate_target_model_options(self, proposal: TypedProposal) -> None:
+    def _validate_target_model_options(
+        self,
+        proposal: TypedProposal,
+        *,
+        projection_source: Any,
+    ) -> None:
         """Validate model-specific options before persisting an Option revision."""
 
         changes = proposal.changes
@@ -3552,6 +3560,7 @@ class NotebookService:
             return
 
         if proposal.operation_id == "model.genesis":
+            from ..recipe_contracts import recipe_contract_for_model_type
             from ...model_options import bind_new_model_options
 
             model_params = changes.get("model_params") or {}
@@ -3575,6 +3584,15 @@ class NotebookService:
                         {"model_type": model_type, "model_options": payload}
                     )
                     return
+                recipe_contract = recipe_contract_for_model_type(model_type)
+                if recipe_contract is not None:
+                    source_hash = getattr(projection_source, "upload_sha256", None)
+                    payload = recipe_contract.bind_server_owned_options(
+                        payload,
+                        source_reference=f"upload:{source_hash}"
+                        if isinstance(source_hash, str) and source_hash
+                        else "",
+                    )
                 bind_new_model_options(model_type, payload)
 
     def _append_revision(self, notebook_id: str, stored: StoredRevision) -> None:

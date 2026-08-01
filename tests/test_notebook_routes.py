@@ -20,6 +20,7 @@ from workbench.agent.notebook import NotebookService, OptionDraft, TypedProposal
 from workbench.agent.notebook.evidence import DataEvidencePackV1, EvidenceRecord
 from workbench.agent.notebook.materialization import NotebookOptionMaterializer
 from workbench.agent.notebook.store import NOTEBOOK_FILENAME
+from workbench.agent.trace import TraceWriter
 from workbench.agent.storage import append_jsonl_atomic
 from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
@@ -491,10 +492,78 @@ def test_real_planner_reads_current_server_owned_custom_projection(
     assert planner.capability_catalog["custom.ols"]["artifact_types"] == {
         "custom.ols.result": "custom_json"
     }
-    assert planner.model_timeout_s == 120
-    assert planner.adapter.config.timeout_s == 120
+    assert planner.model_timeout_s == notebook_routes.NOTEBOOK_PROVIDER_TIMEOUT_S
+    assert planner.adapter.config.timeout_s == notebook_routes.NOTEBOOK_PROVIDER_TIMEOUT_S
     assert "binding" not in planner.capability_catalog["custom.ols"]
     assert "entrypoint_ref" not in planner.capability_catalog["custom.ols"]
+
+
+def test_real_planner_binds_recipe_source_before_owner_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A legacy model owner must not force the provider to invent dataset_ref."""
+
+    from workbench.llm.config import LLMConfig
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"when,value\n2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n",
+        filename="series.csv",
+    )
+    service = NotebookService(project)
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "series.csv",
+            "sheet_names": [],
+        },
+        created_by="test",
+        available_capabilities=["time_series.arma_garch"],
+    )
+    context = service.compile_context(notebook.notebook_id)
+    trace = _trace(project, notebook.notebook_id, notebook.run_family_id)
+    monkeypatch.setattr(
+        "workbench.http.notebook_routes.load_llm_config",
+        lambda: LLMConfig(
+            base_url="https://provider.invalid",
+            api_key="test-key",
+            model="test-model",
+        ),
+    )
+    planner = _planning_agent(project, service, notebook.notebook_id, context, trace)
+    submission = SimpleNamespace(
+        proposal=SimpleNamespace(
+            operation_id="model.genesis",
+            changes={
+                "model_params": {
+                    "model_type": "time_series.arma_garch",
+                    "model_options": {
+                        "time_column": "when",
+                        "value_column": "value",
+                        "time_index_semantics": "observation_order",
+                        "transform": "level",
+                        "transform_confirmed": True,
+                        "validation": {"validation_n": 1},
+                    },
+                }
+            },
+        )
+    )
+
+    assert planner.proposal_validator is not None
+    planner.proposal_validator(context, submission)
+    service._validate_target_model_options(
+        TypedProposal(
+            proposal_id="recipe-server-bound",
+            operation_id="model.genesis",
+            target={"dataset_source_id": upload_sha},
+            preconditions={},
+            changes=submission.proposal.changes,
+        ),
+        projection_source=notebook.projection_source,
+    )
 
 
 def _drafts() -> list[dict]:
@@ -614,13 +683,10 @@ def test_notebook_route_runs_option_lifecycle_through_artifact_validation(
     assert proposed.json()["options"][0]["freshness_status"] == "fresh"
     assert proposed.json()["context"]["active_head_run_id"] is None
     assert proposed.json()["trace_id"].startswith("trace_")
-    # The planner's total budget is published so the UI can show the reader how
-    # long a planning pass may legitimately run. Without it a live request that
-    # is still inside its budget is indistinguishable from one that has hung,
-    # and the only recourse on screen is to cancel.
-    assert proposed.json()["context"]["planning_deadline_s"] == (
-        notebook_routes.NOTEBOOK_PLANNING_DEADLINE_S
-    )
+    # A local planning pass has no short aggregate deadline. The UI continues
+    # to show elapsed time and offers cancellation, but must not invent a
+    # total budget that the server does not enforce.
+    assert "planning_deadline_s" not in proposed.json()["context"]
 
     snapshot = client.get(
         f"/notebooks/{notebook_id}/options",
@@ -735,6 +801,17 @@ def test_notebook_route_uses_server_planner_when_drafts_are_omitted(
 
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_UNAVAILABLE"
+    trace_id = NotebookService(project).store.ensure_trace_id(notebook["notebook_id"])
+    terminal = [
+        event
+        for event in TraceWriter.replay(project, trace_id)
+        if event["event_type"] == "operation.error/v1"
+    ]
+    assert terminal[-1]["payload"] == {
+        "code": "NOTEBOOK_PLANNING_UNAVAILABLE",
+        "fatal": True,
+        "detail": "notebook planning failed",
+    }
 
 
 def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
@@ -785,6 +862,17 @@ def test_notebook_planning_attempt_can_be_cancelled_without_persisting_options(
     assert cancelled.wait(timeout=1)
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "NOTEBOOK_PLANNING_CANCELLED"
+    trace_id = NotebookService(project).store.ensure_trace_id(notebook_id)
+    terminal = [
+        event
+        for event in TraceWriter.replay(project, trace_id)
+        if event["event_type"] == "operation.error/v1"
+    ]
+    assert terminal[-1]["payload"] == {
+        "code": "NOTEBOOK_PLANNING_CANCELLED",
+        "fatal": False,
+        "detail": "notebook planning cancelled by user",
+    }
     snapshot = client.get(
         f"/notebooks/{notebook_id}/options",
         params=params,

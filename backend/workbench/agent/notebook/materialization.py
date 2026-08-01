@@ -33,6 +33,10 @@ from ..workflow_contracts import (
     model_family_contract,
     validate_model_genesis_spec,
 )
+from ..recipe_contracts import (
+    RecipeValidationError,
+    recipe_contract_for_model_type,
+)
 from .errors import (
     OptionLifecycleTransitionInvalid,
     OptionMaterializationFailed,
@@ -611,24 +615,39 @@ class NotebookOptionMaterializer:
         capability = next(
             entry for entry in capability_entries if str(entry.get("key")) == model_type
         )
+        recipe_contract = recipe_contract_for_model_type(model_type)
         try:
             family_contract = model_family_contract(model_type)
         except OperationValidationError:
             family_contract = None
-        allowed_model = base_allowed_model | set(
-            family_contract.context_spec_fields if family_contract is not None else ()
-        )
+        if recipe_contract is not None:
+            allowed_model = set(recipe_contract.allowed_model_param_fields)
+        else:
+            allowed_model = base_allowed_model | set(
+                family_contract.context_spec_fields if family_contract is not None else ()
+            )
         if set(model_params) - allowed_model:
             raise _fail("genesis materialization received unknown model params")
         try:
             model_params = normalize_ols_genesis_model_params(model_params)
         except ValueError as exc:
             raise _fail(str(exc)) from exc
-        y = model_params.get("y")
-        if not isinstance(y, str) or not y:
-            raise _fail("genesis model_params requires evidence-backed y")
-        if y not in columns:
-            raise _fail("genesis y is not a column in the verified dataset", column=y)
+        if recipe_contract is not None:
+            try:
+                model_params["model_options"] = recipe_contract.bind_server_owned_options(
+                    model_params.get("model_options"),
+                    source_reference=f"upload:{source.upload_sha256}",
+                )
+                recipe_contract.validate_genesis_params(model_params, columns=columns)
+            except RecipeValidationError as exc:
+                raise _fail(str(exc)) from exc
+            y: str | None = None
+        else:
+            y = model_params.get("y")
+            if not isinstance(y, str) or not y:
+                raise _fail("genesis model_params requires evidence-backed y")
+            if y not in columns:
+                raise _fail("genesis y is not a column in the verified dataset", column=y)
         declared_dimensions = {
             key: model_params.get(key)
             for key in ("entity_col", "time_col", "cohort_col", "treatment_path_col")
@@ -686,7 +705,9 @@ class NotebookOptionMaterializer:
         # declare none, so the model-agnostic Notebook must not demand one; keying
         # this to a capability signal keeps every future model working unpatched.
         model_requires_x = (
-            family_contract.requires_nonempty_predictors
+            recipe_contract.requires_nonempty_predictors
+            if recipe_contract is not None
+            else family_contract.requires_nonempty_predictors
             if family_contract is not None
             else any(
                 isinstance(param, dict)
@@ -759,6 +780,7 @@ class NotebookOptionMaterializer:
             filename=source.filename or "dataset.csv",
             sheet_names=tuple(source.sheet_names),
             columns=columns,
+            model_family=(recipe_contract.model_family if recipe_contract is not None else "regression"),
             notebook_provenance=provenance,
             draft_id=draft_id,
         )

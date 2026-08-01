@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 import math
 from typing import Literal
 
@@ -215,6 +216,15 @@ def _timestamp_text(value: object) -> str:
 
 def _split_boundary_text(value: object, semantics: str) -> str:
     if semantics == "observation_order":
+        # Observation-order semantics deliberately make no claim about a
+        # calendar frequency.  A CSV date label is still retained as truthful
+        # boundary metadata, though: `prepare_arma_garch_input` may parse it
+        # into a Timestamp after establishing order.  Do not coerce that
+        # Timestamp to a numeric epoch merely because the fit uses observation
+        # order; doing so either fails or falsely presents nanoseconds as an
+        # observation index.
+        if isinstance(value, (pd.Timestamp, datetime, date)):
+            return _timestamp_text(value)
         return f"{float(value):g}"
     return _timestamp_text(value)
 

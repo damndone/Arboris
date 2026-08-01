@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
+from ..recipe_contracts import RECIPE_CONTRACTS
+
 _TIME_SERIES_JSON_ARTIFACTS = (
     "ts.analysis_contract",
     "ts.analysis_view_manifest",
@@ -91,12 +93,14 @@ _CAPABILITY_PRIMARY_ARTIFACTS = {
     "glm:binomial": {"glm_1": "model_result"},
     "glm:poisson": {"glm_1": "model_result"},
     "glm:negative_binomial": {"glm_1": "model_result"},
-    "time_series.ets": {"ets_1": "model_result"},
     "linear_mixed_effects": {
         "linear_mixed_effects_1.result": "model_result_packet"
     },
     "arma_garch_1": {"ts.artifact_manifest": "time_series_manifest"},
-    "time_series.arma_garch": {"ts.artifact_manifest": "time_series_manifest"},
+    **{
+        contract.recipe_id: dict(contract.artifact_types)
+        for contract in RECIPE_CONTRACTS.values()
+    },
 }
 CAPABILITY_ARTIFACT_TYPES = MappingProxyType(
     {

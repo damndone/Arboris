@@ -40,6 +40,7 @@ from ..workflow_contracts import (
     validate_model_genesis_spec,
     workflow_step_vocabulary,
 )
+from ..recipe_contracts import RecipeValidationError, recipe_contract_for_model_type
 
 
 class NotebookPlanningUnavailable(RuntimeError):
@@ -555,14 +556,11 @@ class NotebookPlanningAgent:
         if model_timeout_s <= 0:
             raise ValueError("model_timeout_s must be positive")
         self.model_timeout_s = float(model_timeout_s)
-        if planning_timeout_s is None:
-            planning_timeout_s = max(
-                self.model_timeout_s,
-                min(self.model_timeout_s * 2, 180.0),
-            )
-        if planning_timeout_s <= 0:
+        if planning_timeout_s is not None and planning_timeout_s <= 0:
             raise ValueError("planning_timeout_s must be positive")
-        self.planning_timeout_s = float(planning_timeout_s)
+        self.planning_timeout_s = (
+            None if planning_timeout_s is None else float(planning_timeout_s)
+        )
 
     def _published_artifact_types(self, capability_id: str) -> Mapping[str, str]:
         dynamic = self._capability_artifact_types.get(capability_id)
@@ -644,10 +642,22 @@ class NotebookPlanningAgent:
         interaction_mode = _interaction_mode(context)
         max_options = 1 if interaction_mode == "action" else 3
         catalog = self.capability_catalog or {name: {} for name in context.available_capabilities}
+        catalog = {
+            capability_id: dict(declaration)
+            for capability_id, declaration in catalog.items()
+        }
+        for capability_id, declaration in catalog.items():
+            contract = recipe_contract_for_model_type(
+                declaration.get("model_type", capability_id)
+            )
+            if contract is not None:
+                declaration["recipe_contract"] = contract.to_payload()
         if not catalog:
             raise NotebookNoEligibleCapability("no registered executable Notebook capability is available")
         planning_deadline = (
-            asyncio.get_running_loop().time() + self.planning_timeout_s
+            None
+            if self.planning_timeout_s is None
+            else asyncio.get_running_loop().time() + self.planning_timeout_s
         )
         context_payload = notebook_planning_workbench_context(context)
         context_payload["interaction_mode"] = interaction_mode
@@ -684,7 +694,11 @@ class NotebookPlanningAgent:
                     + "Use only the two typed Notebook tools. Never invent metrics or executable capability ids. "
                     "Inspection ids are exactly profile.v1, quality.v1, time_index.v1, sample.v1, "
                     "or forecast_rolling_origin.v1; use dataset:active for a dataset projection and "
-                    "run:active for a run projection. Request evidence before submitting options. "
+                    "run:active for a run projection. Treat completed evidence already supplied in "
+                    "the initial Evidence Pack as sufficient for the evidence requirement; request "
+                    "an inspection only to fill a concrete evidence gap needed by the option you "
+                    "will submit. Do not request profile.v1, quality.v1, time_index.v1, or sample.v1 "
+                    "again when that exact completed evidence is already present. "
                     f"You may make at most {self.max_inspection_rounds} inspection turns, each requesting "
                     "one to five distinct ids; after enough evidence is available, submit the option batch. "
                     "Submitted typed options must cite completed evidence refs. Comparative claims are "
@@ -695,10 +709,14 @@ class NotebookPlanningAgent:
                     "Copy execution_pins exactly: for a standalone dataset proposal use model.genesis and set "
                     "target.dataset_source_id exactly to context.projection_source.upload_sha256; for a "
                     "dataset-rooted operation.multi_step use its target_exact and preconditions_exact instead. "
+                    "A RecipeContract always remains a dataset-rooted model.genesis proposal when the "
+                    "Notebook projection is a dataset, even after that Notebook has an active result head: "
+                    "copy the dataset genesis pin and do not turn an ETS or ARMA/GARCH Recipe into a "
+                    "model.rerun merely because a prior result is visible. "
                     "For a run proposal copy the active-head and node pins without rewriting them. For model.genesis, "
                     "changes may contain only table_params, model_params, or model_options, each as an object; "
                     "put model-specific fields inside one of those objects, never directly in changes. "
-                    "For model.genesis, model_params must include an evidence-backed model_type and y. "
+                    "For model.genesis, model_params must include an evidence-backed model_type. "
                     "Use the server-published capability form for that family: x is non-empty only "
                     "when the selected family requires covariates; DID families instead require their "
                     "published entity, time, and cohort or treatment-path columns. Do not add OLS "
@@ -733,7 +751,12 @@ class NotebookPlanningAgent:
                     "paths, dependency refs, trust tiers, admission refs, or executable permissions. "
                     "A custom option is experimental/high-risk by default and still requires the existing "
                     "Proposal/Risk authorization and containment gateway; it is never an automatic fallback. "
-                    "y and x must be exact column names present in completed profile/sample evidence; "
+                    "For a regression model, y and x must be exact column names present in completed profile/sample evidence. "
+                    "For a RecipeContract, do not submit regression y/x fields: use its exact model_options time/value fields. "
+                    "Every time-series Recipe must explicitly set model_options.time_index_semantics. "
+                    "Use regular_calendar only when completed evidence establishes constant elapsed intervals; "
+                    "otherwise use observation_order and state that index interpretation as an assumption for user confirmation. "
+                    "Never submit recipe_contract.server_owned_option_fields; the server binds those fields to the typed dataset target. "
                     "if the target is not supported by evidence, do not submit the option. "
                     "For every non-empty model_options object, use the exact server-published field names "
                     "and nesting shown in capability_catalog's notebook_model_options_contract or "
@@ -777,15 +800,25 @@ class NotebookPlanningAgent:
         for round_number in range(
             1, self.max_inspection_rounds + 2 + self.max_contract_corrections
         ):
-            remaining_s = planning_deadline - asyncio.get_running_loop().time()
-            if remaining_s <= 0:
+            remaining_s = (
+                None
+                if planning_deadline is None
+                else planning_deadline - asyncio.get_running_loop().time()
+            )
+            if remaining_s is not None and remaining_s <= 0:
                 raise NotebookPlanningTimeout(
                     f"Notebook planning exceeded the {self.planning_timeout_s:g}s total budget"
                 )
-            total_budget_limited = remaining_s < self.model_timeout_s
+            total_budget_limited = (
+                remaining_s is not None and remaining_s < self.model_timeout_s
+            )
             events = await self._call_model(
                 messages,
-                timeout_s=min(self.model_timeout_s, remaining_s),
+                timeout_s=(
+                    self.model_timeout_s
+                    if remaining_s is None
+                    else min(self.model_timeout_s, remaining_s)
+                ),
                 total_budget_limited=total_budget_limited,
                 max_options=max_options,
             )
@@ -1023,15 +1056,38 @@ class NotebookPlanningAgent:
             # batch id would make a deliberate replan collide with the old
             # append-only RecommendationDecision record.
             batch_id = f"batch_agent_{context.context_id}_{uuid4().hex}"
-            drafts_without_decision = option_drafts_from_submissions(context, submissions)
-            decision = self.recommendation_validator.decide(
-                batch_id=batch_id,
-                candidates=drafts_without_decision,
-                evidence_pack=evidence,
-                generation_context_hash=generation_context_hash(context),
-                freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
-            )
-            drafts = option_drafts_from_submissions(context, submissions, decision=decision)
+            try:
+                drafts_without_decision = option_drafts_from_submissions(context, submissions)
+                decision = self.recommendation_validator.decide(
+                    batch_id=batch_id,
+                    candidates=drafts_without_decision,
+                    evidence_pack=evidence,
+                    generation_context_hash=generation_context_hash(context),
+                    freshness_dependency_fingerprint=freshness_dependency_fingerprint(context),
+                )
+                drafts = option_drafts_from_submissions(context, submissions, decision=decision)
+            except (KeyError, TypeError, ValueError) as error:
+                # A trusted, server-side decision can reject an otherwise
+                # typed provider batch.  Give the provider one bounded
+                # correction opportunity instead of leaking this as the
+                # route's generic request-validation failure.  The external
+                # correction intentionally carries a stable category, not
+                # internal exception text or provider-controlled content.
+                contract_error = NotebookPlanningContractError(
+                    "server recommendation validation failed"
+                )
+                if contract_corrections >= self.max_contract_corrections:
+                    raise contract_error from error
+                contract_corrections += 1
+                self._append_contract_correction(
+                    messages,
+                    call=call,
+                    error=contract_error,
+                    context=context,
+                    evidence=evidence,
+                    correction_number=contract_corrections,
+                )
+                continue
             return PlanningResult(tuple(requests_seen), evidence, submissions, drafts, decision, round_number)
         raise NotebookPlanningContractError("planning loop did not submit an option batch")
 
@@ -1251,6 +1307,27 @@ class NotebookPlanningAgent:
                 "its omissions may be described only as a limitation. Do not request "
                 "the same bounded inspection again merely to remove a declared cap."
             )
+        elif message.startswith("RECIPE_MODEL_OPTIONS_REQUIRED:"):
+            recipe_id = message.partition(":")[2].partition(" requires")[0].strip()
+            recipe_contract = recipe_contract_for_model_type(recipe_id)
+            if recipe_contract is None:
+                remediation = (
+                    "Resubmit the Recipe proposal with the exact server-required "
+                    "model_params.model_options object. Do not replace it with y/x "
+                    "or an unregistered alias."
+                )
+            else:
+                recipe_payload = recipe_contract.to_payload()
+                required_inputs = recipe_payload["required_inputs"]
+                remediation = (
+                    "Resubmit model.genesis with model_params.model_type exactly "
+                    f"{recipe_id!r} and model_params.model_options containing these "
+                    f"exact required fields: {json.dumps(required_inputs)}. The field "
+                    "values must be exact completed-evidence column names; do not use "
+                    "regression y/x fields. Use only the remaining option fields and "
+                    "values published in this Recipe vocabulary: "
+                    f"{json.dumps(recipe_payload['parameter_vocabulary'], sort_keys=True)}."
+                )
         elif message == "dataset-source proposal is not pinned to the source upload":
             source_id = (context.projection_source or {}).get("upload_sha256")
             remediation = (
@@ -1742,27 +1819,41 @@ class NotebookPlanningAgent:
                         "model.genesis model_type does not match the server-declared "
                         "capability model identity"
                     )
-                y = model_params.get("y")
-                if not isinstance(y, str) or not y:
-                    raise NotebookPlanningContractError(
-                        "model.genesis model_params must include evidence-backed y"
-                    )
                 if not evidence_columns:
                     raise NotebookPlanningContractError(
-                        "model.genesis requires completed column evidence before proposing y or x"
+                        "model.genesis requires completed column evidence before proposing inputs"
                     )
-                if y not in evidence_columns:
-                    raise NotebookPlanningContractError(
-                        f"model.genesis y is not present in completed evidence columns: {y}"
-                    )
-                try:
-                    family_contract = model_family_contract(model_type)
-                except WorkflowOperationValidationError:
+                recipe_contract = recipe_contract_for_model_type(model_type)
+                y: str | None = None
+                if recipe_contract is not None:
+                    try:
+                        recipe_contract.validate_planning_params(
+                            model_params, columns=tuple(sorted(evidence_columns))
+                        )
+                    except RecipeValidationError as error:
+                        raise NotebookPlanningContractError(str(error)) from error
                     family_contract = None
-                if family_contract is None:
-                    requires_x = model_type != "time_series.arma_garch"
+                    requires_x = recipe_contract.requires_nonempty_predictors
                 else:
-                    requires_x = family_contract.requires_nonempty_predictors
+                    y = model_params.get("y")
+                    if not isinstance(y, str) or not y:
+                        raise NotebookPlanningContractError(
+                            "model.genesis model_params must include evidence-backed y"
+                        )
+                    if y not in evidence_columns:
+                        raise NotebookPlanningContractError(
+                            f"model.genesis y is not present in completed evidence columns: {y}"
+                        )
+                    try:
+                        family_contract = model_family_contract(model_type)
+                    except WorkflowOperationValidationError:
+                        family_contract = None
+                    requires_x = (
+                        family_contract.requires_nonempty_predictors
+                        if family_contract is not None
+                        else True
+                    )
+                if family_contract is not None:
                     family_values = {
                         field_name: model_params.get(field_name)
                         for field_name in family_contract.required_spec_fields
@@ -1992,7 +2083,32 @@ class NotebookPlanningAgent:
                 if record is None or record.result_hash != reference.result_hash or record.status != "completed":
                     raise NotebookPlanningContractError("option evidence ref is missing, changed, or incomplete")
             if context.active_head_run_id:
-                if submission.proposal.operation_id == "operation.multi_step":
+                is_dataset_recipe_genesis = (
+                    submission.proposal.operation_id == "model.genesis"
+                    and isinstance(context.projection_source, Mapping)
+                    and context.projection_source.get("kind") == "dataset"
+                    and isinstance(submission.proposal.changes.get("model_params"), Mapping)
+                    and recipe_contract_for_model_type(
+                        submission.proposal.changes["model_params"].get("model_type")
+                    )
+                    is not None
+                )
+                if is_dataset_recipe_genesis:
+                    if (
+                        submission.proposal.target.get("dataset_source_id")
+                        != context.projection_source.get("upload_sha256")
+                    ):
+                        raise NotebookPlanningContractError(
+                            "dataset-source proposal is not pinned to the source upload"
+                        )
+                    if (
+                        submission.proposal.preconditions
+                        != self._execution_pins(context)["genesis_preconditions"]
+                    ):
+                        raise NotebookPlanningContractError(
+                            "dataset-source proposal does not copy the server execution pins"
+                        )
+                elif submission.proposal.operation_id == "operation.multi_step":
                     workflow_source = self._execution_pins(context).get("workflow_source")
                     if workflow_source is None:
                         raise NotebookPlanningContractError(

@@ -303,6 +303,7 @@ def create_genesis_draft(
     filename: str,
     sheet_names: tuple[str, ...],
     columns: tuple[str, ...],
+    model_family: str = "regression",
     model_params: Mapping[str, Any] | None = None,
     exploration_context: Mapping[str, Any] | None = None,
     notebook_provenance: Mapping[str, str] | None = None,
@@ -326,7 +327,7 @@ def create_genesis_draft(
     model_node: dict[str, Any] = {
         "node_id": "model_1",
         "node_type": "model",
-        "model_family": "regression",
+        "model_family": model_family,
         "model_type": requested_model_type if isinstance(requested_model_type, str) else None,
         "params": dict(model_params or {}),
         "status": "pending",

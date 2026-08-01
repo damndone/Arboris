@@ -10,6 +10,7 @@ from workbench.contracts.model.linear_mixed_effects import (
     LMM_MODEL_TYPE,
 )
 from workbench.lineage.pipeline_drafts import _validate_graph_shape
+from tests.fixtures.models.ets.known_truth import short_stable_series
 
 client = TestClient(app)
 
@@ -162,15 +163,20 @@ def test_validate_graph_shape_from_node_path_untouched():
 # --- Task 3: wizard step endpoint PATCH /pipeline-drafts/{id}/nodes/{node_id} ---
 
 
-def _genesis(root, sheet_names=None, **kw):
-    up = _upload(root, **({"name": kw.pop("name")} if "name" in kw else {}))
+def _genesis(root, sheet_names=None, columns=None, **kw):
+    upload_kwargs = {
+        key: kw.pop(key)
+        for key in ("name", "data")
+        if key in kw
+    }
+    up = _upload(root, **upload_kwargs)
     return client.post(
         f"/pipeline-drafts/genesis?project_root={root}",
         json={
             "upload_sha256": up["sha256"],
             "filename": up["filename"],
             "sheet_names": sheet_names or [],
-            "columns": ["y", "x"],
+            "columns": columns or ["y", "x"],
         },
     ).json()
 
@@ -322,12 +328,12 @@ def test_genesis_rejects_malformed_sha256(tmp_path):
 # --- Task 4: genesis branch of validate_draft_for_execution ---
 
 
-def _configure_chain(root, did, model_params=None, table_params=None):
+def _configure_chain(root, did, model_params=None, table_params=None, columns=None):
     client.patch(
         f"/pipeline-drafts/{did}/nodes/table_1?project_root={root}",
         json={
             "params": table_params or {"sheet_name": "", "transpose": False},
-            "columns": ["y", "x"],
+            "columns": columns or ["y", "x"],
         },
     )
     client.patch(
@@ -443,7 +449,95 @@ def test_validate_genesis_missing_xy_blocks(tmp_path):
     assert "validated_draft_hash" not in body
 
 
-def test_validate_genesis_accepts_univariate_arma_garch_without_x(tmp_path):
+def test_validate_genesis_accepts_univariate_arma_garch_recipe_without_regression_fields(tmp_path):
+    root = _mkproject(tmp_path)
+    draft = _genesis(
+        root,
+        data=b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+        columns=["when", "value"],
+    )
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": "time_series.arma_garch",
+            "model_options": {
+                "time_column": "when",
+                "value_column": "value",
+                "time_index_semantics": "observation_order",
+                "transform": "level",
+                "transform_confirmed": True,
+            },
+        },
+        columns=["when", "value"],
+    )
+
+    body = _validate(root, draft_id).json()
+
+    assert body["executable"] is True
+    assert not any(c["code"] == "GENESIS_MODEL_INCOMPLETE" for c in body["checks"])
+
+
+def test_execute_genesis_ets_recipe_maps_value_column_to_runtime_outcome(tmp_path):
+    """A Recipe keeps y/x out of its public Draft yet remains executable.
+
+    The generic workflow still needs one outcome column for early column
+    checks.  A RecipeContract, not a UI-specific branch, owns the mapping from
+    its value input to that internal runtime field.
+    """
+    root = _mkproject(tmp_path)
+    series = short_stable_series().frame(time_column="when", value_column="value")
+    draft = _genesis(
+        root,
+        data=series.to_csv(index=False).encode(),
+        columns=["when", "value"],
+    )
+    draft_id = draft["draft"]["draft_id"]
+    _configure_chain(
+        root,
+        draft_id,
+        model_params={
+            "model_type": "time_series.ets",
+            "model_options": {
+                "time_column": "when",
+                "value_column": "value",
+                "error": "add",
+                "trend": "add",
+                "seasonal": None,
+                "damped_trend": False,
+            },
+        },
+        columns=["when", "value"],
+    )
+
+    validation = _validate(root, draft_id).json()
+    assert validation["executable"] is True
+    response = client.post(
+        f"/pipeline-drafts/{draft_id}/execute?project_root={root}",
+        json={
+            "execution_mode": "genesis",
+            "validated_draft_hash": validation["validated_draft_hash"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+    inputs = json.loads(
+        (Path(root) / "runs" / run_id / "run_inputs.json").read_text(encoding="utf-8")
+    )
+    assert inputs["form"]["y"] == "value"
+    assert inputs["form"]["x"] == ""
+    assert _wait_terminal(root, run_id) == "completed"
+    graph = json.loads(
+        (Path(root) / "runs" / run_id / "graph.json").read_text(encoding="utf-8")
+    )
+    model_node = graph["nodes"]["model:ets_1"]
+    assert model_node["display_label"] == "time_series.ets (primary)"
+    assert model_node["summary"] == f"time_series.ets (n={len(series)})"
+
+
+def test_validate_genesis_rejects_regression_shaped_arma_garch_recipe(tmp_path):
     root = _mkproject(tmp_path)
     draft = _genesis(root)
     draft_id = draft["draft"]["draft_id"]
@@ -460,8 +554,8 @@ def test_validate_genesis_accepts_univariate_arma_garch_without_x(tmp_path):
 
     body = _validate(root, draft_id).json()
 
-    assert body["executable"] is True
-    assert not any(c["code"] == "GENESIS_MODEL_INCOMPLETE" for c in body["checks"])
+    assert body["executable"] is False
+    assert any(c["code"] == "GENESIS_RECIPE_INVALID" for c in body["checks"])
 
 
 def test_validate_genesis_multisheet_requires_sheet_choice(tmp_path):

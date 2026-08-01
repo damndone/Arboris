@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { uploadDataset } from "../api";
+import {
+  appendAiActivity,
+  makeActivityId,
+  type NotebookPlanActivityRecord,
+} from "../aiActivity/aiActivityLog";
 
 import {
   cancelNotebookPlanning,
@@ -56,6 +61,11 @@ interface ActivePlanningRequest {
   attemptId: string;
   controller: AbortController;
   promise: Promise<NotebookPlanningResponse>;
+  projectRoot: string;
+  notebookId: string;
+  interactionMode: NotebookInteractionMode;
+  goal: string;
+  activityRecorded: boolean;
   /**
    * When this planning attempt actually began, in epoch milliseconds.
    *
@@ -79,6 +89,7 @@ function proposeNotebookOptionsOnce(
   notebookId: string,
   refreshToken: number,
   interactionMode: NotebookInteractionMode,
+  goal: string,
 ): ActivePlanningRequest {
   const maxOptions = interactionMode === "action" ? 1 : 3;
   const scopeKey = JSON.stringify({
@@ -104,6 +115,11 @@ function proposeNotebookOptionsOnce(
     attemptId,
     controller,
     promise,
+    projectRoot,
+    notebookId,
+    interactionMode,
+    goal: boundedActivityText(goal),
+    activityRecorded: false,
     startedAt: Date.now(),
   };
   planningRequests.set(scopeKey, request);
@@ -113,13 +129,58 @@ function proposeNotebookOptionsOnce(
     }
   };
   void promise.then(release, release);
+  void promise.then(
+    (response) => {
+      recordNotebookPlanningActivity(request, {
+        status: "completed",
+        option_count: response.options.length,
+        trace_id: response.trace_id,
+      });
+    },
+    (error: unknown) => {
+      const failure = failurePacket(error);
+      recordNotebookPlanningActivity(request, {
+        status: controller.signal.aborted || failure.code === "NOTEBOOK_PLANNING_CANCELLED"
+          ? "cancelled"
+          : "error",
+        error: failure.code,
+      });
+    },
+  );
   return request;
+}
+
+function recordNotebookPlanningActivity(
+  request: ActivePlanningRequest,
+  outcome: Pick<NotebookPlanActivityRecord, "status" | "option_count" | "trace_id" | "error">,
+) {
+  if (request.activityRecorded) return;
+  request.activityRecorded = true;
+  appendAiActivity(request.projectRoot, {
+    kind: "notebook_plan",
+    id: makeActivityId(),
+    at: new Date().toISOString(),
+    notebook_id: request.notebookId,
+    interaction_mode: request.interactionMode,
+    goal: request.goal,
+    ...outcome,
+  });
+}
+
+function boundedActivityText(value: string, maximum = 500): string {
+  const normalized = value.trim();
+  return normalized.length <= maximum
+    ? normalized
+    : `${normalized.slice(0, Math.max(0, maximum - 1))}…`;
 }
 
 function failurePacket(error: unknown): { code: string; message: string } {
   const candidate = error as ApiErrorLike | null;
+  const code = typeof candidate?.code === "string" && candidate.code.trim()
+    ? candidate.code
+    : "NOTEBOOK_LOAD_FAILED";
   return {
-    code: candidate?.code ?? "NOTEBOOK_LOAD_FAILED",
+    code,
     message: error instanceof Error ? error.message : "Notebook request failed",
   };
 }
@@ -511,6 +572,7 @@ export function NotebookRouteView({
             notebook.notebook_id,
             refreshToken,
             interactionMode,
+            userGoal,
           );
         activePlanningRef.current = request;
         setPlanningError(null);
@@ -528,6 +590,7 @@ export function NotebookRouteView({
           notebook.notebook_id,
           refreshToken,
           interactionMode,
+          userGoal,
         );
         activePlanningRef.current = request;
         setPlanningError(null);
@@ -713,6 +776,10 @@ export function NotebookRouteView({
       planningRequests.delete(active.scopeKey);
     }
     active.controller.abort();
+    recordNotebookPlanningActivity(active, {
+      status: "cancelled",
+      error: "NOTEBOOK_PLANNING_CANCELLED",
+    });
     setPlanning(false);
     setPlanningStartedAt(undefined);
     setPlanningError(null);

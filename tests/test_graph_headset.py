@@ -121,6 +121,61 @@ def test_headset_dedups_shared_prefix_across_family(monkeypatch, tmp_path: Path)
     assert len(model_hashes) == 2
 
 
+def test_headset_uses_newest_presentation_for_one_shared_result_node(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A corrected later label must not be masked by an old merged Graph node."""
+
+    monkeypatch.setenv("WORKBENCH_INCREMENTAL_CACHE", "1")
+    project = create_project(tmp_path, "demo")
+    parent = _create_run(project.root)
+    node_id = _model_node_id(project.root, parent)
+    response = client.post(
+        f"/runs/{parent}/rerun",
+        params={"project_root": str(project.root)},
+        json={"from_node": node_id, "op_overrides": {}},
+    )
+    assert response.status_code == 200
+    child = response.json()["run_id"]
+    _wait_terminal(project.root, child)
+
+    for run_id, label, summary, created_at in (
+        (parent, "legacy presentation", "legacy summary", "2026-01-01T00:00:00+00:00"),
+        (child, "canonical presentation", "canonical summary", "2026-01-02T00:00:00+00:00"),
+    ):
+        graph_path = project.root / "runs" / run_id / "graph.json"
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        graph["nodes"][node_id].update(
+            {
+                "display_label": label,
+                "summary": summary,
+                "created_at": created_at,
+            }
+        )
+        graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+    parent_index_path = project.root / "runs" / parent / "node_index.json"
+    child_index_path = project.root / "runs" / child / "node_index.json"
+    parent_index = json.loads(parent_index_path.read_text(encoding="utf-8"))
+    child_index = json.loads(child_index_path.read_text(encoding="utf-8"))
+    child_index[node_id]["node_hash"] = parent_index[node_id]["node_hash"]
+    child_index_path.write_text(json.dumps(child_index), encoding="utf-8")
+
+    body = client.get(
+        f"/runs/{parent}/graph",
+        params={"project_root": str(project.root), "view": "headset"},
+    ).json()
+    shared_model = next(
+        node
+        for node in body["nodes"].values()
+        if node.get("id") == node_id
+        and set(node.get("runs", [])) == {parent, child}
+    )
+
+    assert shared_model["display_label"] == "canonical presentation"
+    assert shared_model["summary"] == "canonical summary"
+
+
 def test_headset_exposes_run_level_rerun_from_on_child_head(tmp_path: Path):
     project = create_project(tmp_path, "demo")
     parent = _create_run(project.root)

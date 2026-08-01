@@ -104,6 +104,58 @@ def test_project_forest_two_roots_no_cross_family_edges(tmp_path):
     assert roots == sorted([run_a, run_b])
 
 
+def test_project_forest_uses_newest_presentation_for_shared_result_node(tmp_path):
+    """A corrected result label wins when identical nodes span two families."""
+
+    root = _mkproject(tmp_path)
+    older_run = _execute_genesis_run(root)
+    newer_run = _execute_genesis_run(root)
+
+    graph_paths = {
+        run_id: Path(root) / "runs" / run_id / "graph.json"
+        for run_id in (older_run, newer_run)
+    }
+    graphs = {
+        run_id: json.loads(path.read_text(encoding="utf-8"))
+        for run_id, path in graph_paths.items()
+    }
+    model_id = next(
+        node_id
+        for node_id, node in graphs[older_run]["nodes"].items()
+        if node_id.startswith("model:")
+    )
+    assert model_id in graphs[newer_run]["nodes"]
+    for run_id, label, summary, created_at in (
+        (older_run, "legacy presentation", "legacy summary", "2026-01-01T00:00:00+00:00"),
+        (newer_run, "canonical presentation", "canonical summary", "2026-01-02T00:00:00+00:00"),
+    ):
+        graphs[run_id]["nodes"][model_id].update(
+            {
+                "display_label": label,
+                "summary": summary,
+                "created_at": created_at,
+            }
+        )
+        graph_paths[run_id].write_text(json.dumps(graphs[run_id]), encoding="utf-8")
+
+    older_index_path = Path(root) / "runs" / older_run / "node_index.json"
+    newer_index_path = Path(root) / "runs" / newer_run / "node_index.json"
+    older_index = json.loads(older_index_path.read_text(encoding="utf-8"))
+    newer_index = json.loads(newer_index_path.read_text(encoding="utf-8"))
+    newer_index[model_id]["node_hash"] = older_index[model_id]["node_hash"]
+    newer_index_path.write_text(json.dumps(newer_index), encoding="utf-8")
+
+    body = client.get("/graph", params={"project_root": root}).json()
+    shared_model = next(
+        node
+        for node in body["nodes"].values()
+        if node.get("id") == model_id
+        and set(node.get("runs", [])) == {older_run, newer_run}
+    )
+    assert shared_model["display_label"] == "canonical presentation"
+    assert shared_model["summary"] == "canonical summary"
+
+
 def test_project_forest_unicode_root(tmp_path):
     root = _mkproject(tmp_path, name="中文项目")
     r = client.get(f"/graph?project_root={root}")

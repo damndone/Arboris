@@ -851,10 +851,25 @@ def _validate_genesis_for_execution(
             )
         )
     model_type = model_params.get("model_type") or model.get("model_type")
-    required_model_fields = [
-        ("model_type", model_type),
-        ("y", model_params.get("y")),
-    ]
+    from ..agent.recipe_contracts import (
+        RecipeValidationError,
+        recipe_contract_for_model_type,
+    )
+
+    recipe_contract = recipe_contract_for_model_type(model_type)
+    required_model_fields = [("model_type", model_type)]
+    if recipe_contract is None:
+        required_model_fields.append(("y", model_params.get("y")))
+    else:
+        table_columns = tuple(
+            str(column)
+            for column in (table.get("columns") or [])
+            if isinstance(column, str) and column
+        )
+        try:
+            recipe_contract.validate_genesis_params(model_params, columns=table_columns)
+        except RecipeValidationError as exc:
+            checks.append(check("GENESIS_RECIPE_INVALID", str(exc), node_id="model_1"))
     if _genesis_model_requires_predictors(model_type):
         required_model_fields.append(("x", model_params.get("x")))
     missing = [key for key, value in required_model_fields if not value]
@@ -908,8 +923,11 @@ def _genesis_model_requires_predictors(model_type: Any) -> bool:
     accidentally rejected as an incomplete OLS request.
     """
 
-    if model_type == "time_series.arma_garch":
-        return False
+    from ..agent.recipe_contracts import recipe_contract_for_model_type
+
+    recipe_contract = recipe_contract_for_model_type(model_type)
+    if recipe_contract is not None:
+        return recipe_contract.requires_nonempty_predictors
     from ..agent.workflow_contracts import OperationValidationError, model_family_contract
 
     try:

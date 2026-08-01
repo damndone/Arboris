@@ -184,12 +184,29 @@ def execute_genesis_draft(
                 status_code=422,
                 detail="MODEL_OPTIONS_BINDING_CLIENT_MANAGED",
             )
-        x_val = mp.pop("x", "")
+        model_type = str(mp.get("model_type", "") or "auto")
+        from ..agent.recipe_contracts import RecipeValidationError, recipe_contract_for_model_type
+
+        recipe_contract = recipe_contract_for_model_type(model_type)
+        if recipe_contract is not None:
+            try:
+                # Keep the public Draft recipe-shaped (no exposed y/x), while
+                # giving the shared workflow its internal outcome column for
+                # early column checks.  The Recipe contract owns this mapping.
+                y_val = recipe_contract.runtime_outcome_column(mp)
+            except RecipeValidationError as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"GENESIS_RECIPE_RUNTIME_INPUT_INVALID: {exc}"
+                ) from exc
+            x_val: object = ""
+        else:
+            x_val = mp.pop("x", "")
+            y_val = mp.pop("y", "")
         focal = mp.pop("focal_x", "")
         merged_form = {
             "mode": "auto",
             "model_type": str(mp.pop("model_type", "") or "auto"),
-            "y": str(mp.pop("y", "")),
+            "y": str(y_val),
             # x / focal_x wire format is a comma-joined column list (the
             # dispatch comma-splits; see the v1.6.5 note in the from-node branch)
             "x": ",".join(x_val) if isinstance(x_val, list) else str(x_val),

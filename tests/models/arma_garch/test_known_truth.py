@@ -321,6 +321,33 @@ def test_nonstationary_or_illegal_persistence_has_no_finite_half_life(
         assert "INVALID_PARAMETER:alpha[1]:>= 0" in validation.failure_reasons
 
 
+def test_observation_order_split_preserves_datetime_boundary_without_numeric_coercion() -> None:
+    """Observation order may use a datetime-labelled source without inferring cadence."""
+
+    from workbench.engine.packs.arma_garch.input import prepare_arma_garch_input
+    from workbench.engine.packs.arma_garch.split import freeze_train_validation_split
+
+    frame = pd.DataFrame(
+        {
+            # CSV uploads carry date labels as strings; this is the path the
+            # Notebook Recipe executes rather than an already-datetime frame.
+            "when": pd.date_range("2025-01-01", periods=80, freq="D").strftime("%Y-%m-%d"),
+            "value": np.linspace(10.0, 20.0, 80),
+        }
+    )
+    contract = _contract(
+        mean_q=0,
+        variance={"model": "constant_variance"},
+        semantics="observation_order",
+    )
+
+    prepared = prepare_arma_garch_input(frame, contract)
+    frozen = freeze_train_validation_split(prepared.transformed_view, contract)
+
+    assert frozen.split_timestamp == "2025-03-01T00:00:00Z"
+    assert frozen.training_row_ids[-1] == "source-row:0000000059"
+
+
 def test_data_failure_contracts_are_structured_and_never_silently_repaired() -> None:
     from workbench.engine.packs.arma_garch.errors import ArmaGarchInputError
     from workbench.engine.packs.arma_garch.input import (

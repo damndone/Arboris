@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NotebookRouteView } from "./NotebookRouteView";
 import { readCanonicalFixture } from "./fixtures/canonicalMocks";
 import { uploadDataset } from "../api";
+import { loadAiActivity } from "../aiActivity/aiActivityLog";
 import {
   AgentSurfaceContext,
   type AgentSurfaceContextValue,
@@ -117,6 +118,7 @@ const context = {
 describe("NotebookRouteView", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.localStorage.clear();
     vi.mocked(uploadDataset).mockResolvedValue({ sha256: "a".repeat(64), filename: "data.csv" });
     vi.mocked(ensureNotebookProjection).mockResolvedValue({
       notebook_id: "nb_1",
@@ -893,6 +895,14 @@ describe("NotebookRouteView", () => {
     expect(attemptId).toMatch(/^attempt_/);
     expect(screen.queryByTestId("notebook-planning-progress")).toBeNull();
     expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
+    expect(loadAiActivity("/tmp/project")).toEqual([
+      expect.objectContaining({
+        kind: "notebook_plan",
+        notebook_id: "nb_1",
+        status: "cancelled",
+        error: "NOTEBOOK_PLANNING_CANCELLED",
+      }),
+    ]);
 
     resolvePlanning({ context, options: [late], trace_id: "trace_1" });
     await Promise.resolve();
@@ -971,6 +981,15 @@ describe("NotebookRouteView", () => {
         "NOTEBOOK_PLANNING_TIMEOUT",
       ),
     );
+    expect(loadAiActivity("/tmp/project")).toEqual([
+      expect.objectContaining({
+        kind: "notebook_plan",
+        notebook_id: "nb_1",
+        interaction_mode: "plan",
+        status: "error",
+        error: "NOTEBOOK_PLANNING_TIMEOUT",
+      }),
+    ]);
     expect(screen.getByTestId(`option-card-${current.option_id}`)).toBeInTheDocument();
     expect(screen.getByTestId("notebook-retry-planning")).toHaveTextContent("Retry");
   });

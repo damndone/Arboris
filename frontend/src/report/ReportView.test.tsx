@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeOwnerResolutionSeedFixture } from "../lineage/api/nodeOperationContext";
+import { loadAiActivity } from "../aiActivity/aiActivityLog";
 import { ReportView } from "./ReportView";
 
 const mockForest = vi.hoisted(() => ({ current: null as unknown }));
@@ -57,6 +58,7 @@ function seedForest() {
 
 describe("ReportView", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     const seed = seedForest();
     mockForest.current = { forest: seed.forest, activeRunId: "run_c", setActiveRunId: vi.fn() };
     mockWb.current = {
@@ -118,7 +120,7 @@ describe("ReportView", () => {
       model: "deepseek-v4-flash",
     });
     render(<ReportView />);
-    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
 
     await waitFor(() => expect(screen.getByTestId("report-body")).toBeInTheDocument());
     expect(screen.getByTestId("cite-chip")).toBeInTheDocument();
@@ -151,10 +153,17 @@ describe("ReportView", () => {
 
   it("surfaces backend errors honestly", async () => {
     mockGenerate.current = vi.fn().mockRejectedValue(new Error("LLM is not configured"));
-    render(<ReportView />);
-    fireEvent.click(screen.getByRole("button", { name: /generate report/i }));
+    render(<ReportView projectRoot="/tmp/projA" />);
+    fireEvent.click(await screen.findByRole("button", { name: /generate report/i }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
     expect(screen.getByRole("alert").textContent).toContain("LLM is not configured");
+    expect(loadAiActivity("/tmp/projA")).toEqual([
+      expect.objectContaining({
+        kind: "report_generate",
+        status: "error",
+        error: "LLM is not configured",
+      }),
+    ]);
   });
 
   it("sends figure source packets and expands [[fig:...]] in the generated report", async () => {
