@@ -350,3 +350,150 @@ def test_archive_removes_memory_from_future_use_without_erasing_its_provenance(t
 
     after = client.get("/domain-memory/libraries/global", params={"project_root": str(project)})
     assert after.json()["entries"][0]["state"] == "archived"
+
+
+def _candidate_payload(runtime, project: Path, candidate_id: str) -> dict[str, object]:
+    from workbench.domain_memory.contracts import (
+        ApplicabilityPredicate,
+        MemoryCandidate,
+        SourceSummaryRef,
+    )
+
+    return MemoryCandidate(
+        candidate_id=candidate_id,
+        revision=1,
+        scope=runtime.project_scope(project),
+        memory_kind="workflow_lesson",
+        domain_tags=("project-memory",),
+        applicability_predicates=(ApplicabilityPredicate("analysis_family", "equals", "ols"),),
+        compact_lesson="Keep the reviewed model specification explicit.",
+        recommended_effect_kind="assumption_check_hint",
+        recommended_target_refs=("target-model",),
+        source_summary_refs=(SourceSummaryRef("project-pseudonym", "summary-1", "a" * 64, "summary-v1", "binding-1"),),
+        created_from_manifest_ref="manifest-1",
+        status="needs_review",
+        created_at="2026-08-01T00:00:00Z",
+    ).to_dict()
+
+
+def test_legacy_candidate_mutations_are_project_bound_and_require_project_settings(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    # This flag represents the old non-local compatibility seam. Local runtime
+    # must not let it bypass the server-owned project boundary.
+    app.state.domain_memory_mutations_enabled = True
+    app.include_router(router)
+    client = TestClient(app)
+    payload = {"candidate": _candidate_payload(runtime, project, "candidate-local-scope")}
+
+    missing_project = client.post("/domain-memory/candidates", json=payload)
+    assert missing_project.status_code == 422
+
+    disabled = client.post(
+        "/domain-memory/candidates",
+        params={"project_root": str(project)},
+        json=payload,
+    )
+    assert disabled.status_code == 403
+    assert disabled.json()["detail"]["code"] == "DOMAIN_MEMORY_PROJECT_LIBRARY_DISABLED"
+
+    runtime.service_for_project(project, create=True)
+    runtime.preferences.update_project(
+        runtime.project_scope(project),
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    generation_disabled = client.post(
+        "/domain-memory/candidates",
+        params={"project_root": str(project)},
+        json=payload,
+    )
+    assert generation_disabled.status_code == 403
+    assert generation_disabled.json()["detail"]["code"] == "DOMAIN_MEMORY_CANDIDATE_GENERATION_DISABLED"
+
+
+def test_legacy_candidate_create_uses_project_store_and_server_setting_not_body_preferences(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    scope = runtime.project_scope(project)
+    runtime.preferences.update_project(
+        scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=True,
+    )
+    runtime.service_for_project(project, create=True)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/domain-memory/candidates",
+        params={"project_root": str(project)},
+        json={
+            "candidate": _candidate_payload(runtime, project, "candidate-project-store"),
+            "preferences": {"cross_project_domain_memory_iteration": False},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["candidate"]["scope"] == scope.to_dict()
+    assert [item.candidate_id for item in runtime.review_service_for_project(project).candidate_store.pending(scope)] == [
+        "candidate-project-store"
+    ]
+    assert runtime.candidate_store.pending(runtime.scope_resolver.global_scope) == ()
+
+
+def test_legacy_candidate_approval_uses_selected_project_store_even_after_generation_is_disabled(tmp_path: Path) -> None:
+    from workbench.domain_memory.contracts import MemoryCandidate
+
+    project = tmp_path / "project"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    scope = runtime.project_scope(project)
+    runtime.preferences.update_project(
+        scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    project_review = runtime.review_service_for_project(project, create=True)
+    candidate = MemoryCandidate.from_dict(_candidate_payload(runtime, project, "candidate-project-approval"))
+    project_review.candidate_store.append(candidate)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    app.include_router(router)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/domain-memory/candidates/{candidate.candidate_id}/approve",
+        params={"project_root": str(project)},
+        json={
+            "expected_revision": 1,
+            "approver_id": "local-user",
+            "approved_at": "2026-08-01T01:00:00Z",
+            "review_after": "2026-11-01T01:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["content"]["scope"] == scope.to_dict()
+    assert runtime.service.store.list_content() == ()
+    assert [item.memory_id for item in project_review.memory_service.store.list_content()] == [
+        "memory-candidate-project-approval"
+    ]

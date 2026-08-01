@@ -266,6 +266,31 @@ def _project_review_service(request: Request, project_root: str | None) -> Memor
         ) from error
 
 
+def _local_candidate_service(
+    request: Request, project_root: str | None, *, require_generation: bool
+) -> DomainMemoryService | None:
+    """Resolve local candidate mutations from server-owned project settings."""
+
+    runtime = getattr(request.app.state, "domain_memory_runtime", None)
+    if not isinstance(runtime, LocalDomainMemoryRuntime):
+        return None
+    if not isinstance(project_root, str) or not project_root:
+        raise HTTPException(status_code=422, detail={"code": "DOMAIN_MEMORY_PROJECT_REQUIRED"})
+    scope = _project_scope(runtime, project_root)
+    settings = runtime.preferences.project_settings(scope)
+    if not settings.library_enabled:
+        raise HTTPException(status_code=403, detail={"code": "DOMAIN_MEMORY_PROJECT_LIBRARY_DISABLED"})
+    if require_generation and not settings.candidate_generation_enabled:
+        raise HTTPException(status_code=403, detail={"code": "DOMAIN_MEMORY_CANDIDATE_GENERATION_DISABLED"})
+    try:
+        return runtime.service_for_project(project_root, create=False)
+    except LocalDomainMemoryRuntimeError as error:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DOMAIN_MEMORY_CANDIDATES_UNAVAILABLE", "message": str(error)},
+        ) from error
+
+
 def _require_mutations_enabled(request: Request, project_root: str | None = None) -> None:
     """Keep local memory read-only unless this project explicitly enabled its library."""
 
@@ -466,12 +491,21 @@ def retrieve_memory(body: RetrieveBody, project_root: str, request: Request) -> 
 
 
 @router.post("/candidates")
-def create_candidate(body: CandidateBody, request: Request) -> dict[str, Any]:
-    _require_mutations_enabled(request)
-    service = _service(request)
+def create_candidate(body: CandidateBody, request: Request, project_root: str | None = None) -> dict[str, Any]:
+    service = _local_candidate_service(request, project_root, require_generation=True)
+    if service is None:
+        _require_mutations_enabled(request)
+        service = _service(request)
+        preferences = _preferences(body.preferences)
+        override = _override(body.override)
+    else:
+        # The local project setting is the authority. Request-body preferences
+        # must not switch candidate generation on or off.
+        preferences = DomainMemoryPreferences(cross_project_domain_memory_iteration=True)
+        override = None
     try:
         candidate = service.create_candidate(
-            MemoryCandidate.from_dict(body.candidate), global_preferences=_preferences(body.preferences), override=_override(body.override)
+            MemoryCandidate.from_dict(body.candidate), global_preferences=preferences, override=override
         )
     except (ValueError, TypeError, KeyError) as error:
         raise HTTPException(status_code=400, detail={"code": "DOMAIN_MEMORY_CANDIDATE_INVALID", "message": str(error)}) from error
@@ -488,14 +522,23 @@ def list_pending_candidates(project_root: str, request: Request) -> dict[str, An
 
 
 @router.post("/candidates/{candidate_id}/approve")
-def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) -> dict[str, Any]:
-    _require_mutations_enabled(request)
-    service = _service(request)
+def approve_candidate(
+    candidate_id: str, body: ApproveBody, request: Request, project_root: str | None = None
+) -> dict[str, Any]:
+    service = _local_candidate_service(request, project_root, require_generation=False)
+    if service is None:
+        _require_mutations_enabled(request)
+        service = _service(request)
+        preferences = _preferences(body.preferences)
+        override = _override(body.override)
+    else:
+        preferences = DomainMemoryPreferences()
+        override = None
     try:
         result = service.approve_candidate(
             candidate_id, expected_revision=body.expected_revision, approver_id=body.approver_id,
             approved_at=body.approved_at, review_after=body.review_after,
-            global_preferences=_preferences(body.preferences), override=_override(body.override),
+            global_preferences=preferences, override=override,
         )
     except (DomainMemoryServiceError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(status_code=409, detail={"code": "DOMAIN_MEMORY_APPROVAL_FAILED", "message": str(error)}) from error
