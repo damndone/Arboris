@@ -1976,6 +1976,110 @@ def test_notebook_agent_accepts_did_genesis_with_family_timing_and_no_covariates
     assert normalized[0].proposal.changes["model_params"]["cohort_col"] == "first_treat"
 
 
+def test_notebook_agent_rejects_an_incomplete_iv_genesis_spec(
+    tmp_path: Path,
+) -> None:
+    """An IV option needs both declared endogeneity and instrument columns."""
+
+    upload_sha256 = "sha256:upload-iv"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "outcome"},
+                        {"name": "endogenous"},
+                        {"name": "instrument"},
+                    ]
+                },
+                result_hash="sha256:iv-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The proposed IV design needs an instrument declaration.",
+            "assumptions": ["the instrument is relevant and exogenous"],
+            "capability_id": "iv_2sls",
+            "option_id": "opt_iv",
+            "proposal": {
+                "proposal_id": "prop_iv",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": upload_sha256},
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": freshness_dependency_fingerprint(context),
+                    "owner_resolution": "single_candidate",
+                },
+                "changes": {
+                    "model_params": {
+                        "model_type": "iv_2sls",
+                        "y": "outcome",
+                        "x": [],
+                        "iv_endog": ["endogenous"],
+                    }
+                },
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "iv_2sls_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:iv-profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": ["evidence:profile confirms the declared source columns."],
+        }
+    )
+    catalog = {"iv_2sls": {"model_type": "iv_2sls"}}
+
+    with pytest.raises(
+        NotebookPlanningContractError,
+        match="model.genesis iv_2sls requires a non-empty iv_instruments column list",
+    ):
+        NotebookPlanningAgent(
+            adapter=TextOnlyAdapter(), capability_catalog=catalog
+        )._validate_submissions(context, evidence, (submission,), catalog)
+
+    completed_params = dict(submission.proposal.changes["model_params"])
+    completed_params["iv_instruments"] = ["instrument"]
+    complete_submission = replace(
+        submission,
+        proposal=TypedProposal.from_dict(
+            {
+                **submission.proposal.to_dict(),
+                "changes": {"model_params": completed_params},
+            }
+        ),
+    )
+    normalized = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(), capability_catalog=catalog
+    )._validate_submissions(context, evidence, (complete_submission,), catalog)
+
+    assert normalized[0].proposal.changes["model_params"]["iv_instruments"] == ["instrument"]
+
+
 def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(
     tmp_path: Path,
 ) -> None:

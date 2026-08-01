@@ -33,8 +33,11 @@ from .vocabulary import (
     capability_artifact_types,
 )
 from ..workflow_contracts import (
+    MODEL_FAMILY_SPEC_FIELDS,
     OperationValidationError as WorkflowOperationValidationError,
+    family_context_columns,
     model_family_contract,
+    validate_model_genesis_spec,
     workflow_step_vocabulary,
 )
 
@@ -1815,6 +1818,37 @@ class NotebookPlanningAgent:
                         "model.genesis x is not present in completed evidence columns: "
                         + ", ".join(missing_x)
                     )
+                if family_contract is not None:
+                    family_spec: dict[str, Any] = {
+                        "model_family": model_type,
+                        "branches": [
+                            {
+                                "branch_id": "notebook",
+                                "outcome": y,
+                                "predictors": list(x),
+                            }
+                        ],
+                    }
+                    for field_name in MODEL_FAMILY_SPEC_FIELDS:
+                        if field_name in model_params:
+                            family_spec[field_name] = model_params[field_name]
+                    if "covariance" in model_params:
+                        family_spec["covariance"] = model_params["covariance"]
+                    try:
+                        validated_contract = validate_model_genesis_spec(family_spec)
+                        declared_columns = family_context_columns(
+                            validated_contract, family_spec
+                        )
+                    except WorkflowOperationValidationError as error:
+                        raise NotebookPlanningContractError(str(error)) from error
+                    missing_family_columns = sorted(
+                        set(declared_columns) - evidence_columns
+                    )
+                    if missing_family_columns:
+                        raise NotebookPlanningContractError(
+                            "model.genesis family fields are not present in completed evidence columns: "
+                            + ", ".join(missing_family_columns)
+                        )
             elif operation_id == "operation.multi_step":
                 workflow_source = self._execution_pins(context).get("workflow_source")
                 if workflow_source is None:

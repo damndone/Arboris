@@ -26,7 +26,13 @@ from ...services.draft_materialization import (
 )
 from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
-from ..workflow_contracts import OperationValidationError, model_family_contract
+from ..workflow_contracts import (
+    MODEL_FAMILY_SPEC_FIELDS,
+    OperationValidationError,
+    family_context_columns,
+    model_family_contract,
+    validate_model_genesis_spec,
+)
 from .errors import (
     OptionLifecycleTransitionInvalid,
     OptionMaterializationFailed,
@@ -583,7 +589,7 @@ class NotebookOptionMaterializer:
         allowed_table = {"sheet_name", "transpose"}
         if set(table_params) - allowed_table:
             raise _fail("genesis materialization received unknown table params")
-        allowed_model = {
+        base_allowed_model = {
             "model_type",
             "y",
             "x",
@@ -595,8 +601,6 @@ class NotebookOptionMaterializer:
             "cohort_col",
             "treatment_path_col",
         }
-        if set(model_params) - allowed_model:
-            raise _fail("genesis materialization received unknown model params")
         model_type = model_params.get("model_type")
         if not isinstance(model_type, str) or not model_type:
             raise _fail("genesis model_params requires model_type")
@@ -611,6 +615,11 @@ class NotebookOptionMaterializer:
             family_contract = model_family_contract(model_type)
         except OperationValidationError:
             family_contract = None
+        allowed_model = base_allowed_model | set(
+            family_contract.context_spec_fields if family_contract is not None else ()
+        )
+        if set(model_params) - allowed_model:
+            raise _fail("genesis materialization received unknown model params")
         try:
             model_params = normalize_ols_genesis_model_params(model_params)
         except ValueError as exc:
@@ -626,7 +635,7 @@ class NotebookOptionMaterializer:
             if model_params.get(key) is not None
         }
         family_builds_native_params = bool(
-            family_contract is not None and not family_contract.allows_covariance
+            family_contract is not None and family_contract.builds_native_params
         )
         if family_builds_native_params:
             accepted_dimensions = set(family_contract.context_spec_fields)
@@ -676,11 +685,15 @@ class NotebookOptionMaterializer:
         # required parameter with role "x". Univariate models (ETS, ARMA-GARCH, ...)
         # declare none, so the model-agnostic Notebook must not demand one; keying
         # this to a capability signal keeps every future model working unpatched.
-        model_requires_x = any(
-            isinstance(param, dict)
-            and param.get("role") == "x"
-            and param.get("required")
-            for param in capability.get("params", [])
+        model_requires_x = (
+            family_contract.requires_nonempty_predictors
+            if family_contract is not None
+            else any(
+                isinstance(param, dict)
+                and param.get("role") == "x"
+                and param.get("required")
+                for param in capability.get("params", [])
+            )
         )
         x = model_params.get("x", [])
         if not isinstance(x, list) or any(not isinstance(item, str) or not item for item in x):
@@ -709,16 +722,36 @@ class NotebookOptionMaterializer:
                 ).payload
             except ModelOptionsError as exc:
                 raise _fail("genesis model_options failed validation", reason=exc.code) from exc
-        if family_builds_native_params:
-            family_spec = {
-                field_name: model_params[field_name]
-                for field_name in family_contract.context_spec_fields
+        if family_contract is not None:
+            family_spec: dict[str, Any] = {
+                "model_family": model_type,
+                "branches": [
+                    {"branch_id": "notebook", "outcome": y, "predictors": list(x)}
+                ],
             }
+            for field_name in MODEL_FAMILY_SPEC_FIELDS:
+                if field_name in model_params:
+                    family_spec[field_name] = model_params[field_name]
+            if "covariance" in model_params:
+                family_spec["covariance"] = model_params["covariance"]
+            try:
+                validated_contract = validate_model_genesis_spec(family_spec)
+                missing_family_columns = sorted(
+                    set(family_context_columns(validated_contract, family_spec)) - set(columns)
+                )
+            except OperationValidationError as exc:
+                raise _fail(str(exc)) from exc
+            if missing_family_columns:
+                raise _fail(
+                    "genesis family fields contain columns absent from the verified dataset",
+                    columns=missing_family_columns,
+                )
+        if family_builds_native_params:
             model_params = family_contract.build_model_params(
                 family_spec,
                 {"outcome": y, "predictors": x},
                 list(x),
-                "unadjusted",
+                str(model_params.get("covariance", "unadjusted")),
             )
         draft = create_genesis_draft(
             self.service.project_root,

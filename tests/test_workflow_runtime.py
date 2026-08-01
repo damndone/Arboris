@@ -39,7 +39,13 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
 
     assert set(MODEL_FAMILY_CONTRACTS) == {
         "ols",
+        "logit",
+        "probit",
+        "poisson",
+        "negative_binomial",
         "panel_ols",
+        "iv_2sls",
+        "did",
         "cs_did",
         "sa_did",
         "dcdh",
@@ -61,11 +67,54 @@ def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -
     assert panel.result_shape == "coefficient_intervals"
     assert callable(panel.build_model_params)
 
+    for family in ("logit", "probit", "poisson", "negative_binomial"):
+        generalized = MODEL_FAMILY_CONTRACTS[family]
+        assert generalized.expected_artifacts == (
+            f"{family}_1",
+            f"diagnostics_{family}_1",
+            "diagnostic_summary",
+        )
+        assert generalized.result_shape == "coefficient_intervals"
+        assert generalized.allows_covariance is False
+        assert generalized.builds_native_params is False
+
+    iv = MODEL_FAMILY_CONTRACTS["iv_2sls"]
+    assert iv.context_spec_fields == ("iv_endog", "iv_instruments")
+    assert iv.expected_artifacts == (
+        "iv_2sls_1",
+        "diagnostics_iv_2sls_1",
+        "iv_diagnostics",
+        "diagnostic_summary",
+    )
+    assert iv.requires_nonempty_predictors is False
+    assert iv.builds_native_params is True
+
+    twfe = MODEL_FAMILY_CONTRACTS["did"]
+    assert twfe.required_spec_fields == ("entity_col", "time_col")
+    assert twfe.context_spec_fields == (
+        "entity_col",
+        "time_col",
+        "did_mode",
+        "did_cohort_col",
+        "did_treat_col",
+        "did_post_col",
+        "did_status_col",
+    )
+    assert twfe.expected_artifacts == (
+        "did_1",
+        "diagnostics_did_1",
+        "did_diagnostics",
+        "diagnostic_summary",
+    )
+    assert twfe.requires_nonempty_predictors is False
+    assert twfe.builds_native_params is True
+
     cs = MODEL_FAMILY_CONTRACTS["cs_did"]
     assert set(cs.required_spec_fields) == {"entity_col", "time_col", "cohort_col"}
     assert cs.expected_artifacts == ("cs_did_1", "cs_did")
     assert cs.result_shape == "effect_estimate_bundle"
     assert cs.requires_nonempty_predictors is False
+    assert cs.builds_native_params is True
     assert cs.build_model_params(
         {"entity_col": "unit", "time_col": "period", "cohort_col": "first_treat"},
         {"outcome": "outcome", "predictors": []}, [], "unadjusted",
@@ -100,6 +149,46 @@ def test_did_model_family_requires_its_declared_timing_field_without_ols_fallbac
                 "time_col": "period",
                 "branches": [{"branch_id": "att", "outcome": "outcome", "predictors": []}],
             }
+        )
+
+
+def test_model_family_rejects_fields_owned_by_a_different_family() -> None:
+    """A typed parameter must never be accepted and then silently ignored."""
+
+    from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
+
+    with pytest.raises(
+        OperationValidationError,
+        match="model.genesis logit does not accept cohort_col",
+    ):
+        validate_model_genesis_spec(
+            {
+                "model_family": "logit",
+                "cohort_col": "first_treat",
+                "branches": [
+                    {"branch_id": "binary", "outcome": "outcome", "predictors": ["predictor"]}
+                ],
+            }
+        )
+
+
+@pytest.mark.parametrize("model_family", ("poisson", "negative_binomial"))
+def test_count_model_families_refuse_non_count_outcomes_before_execution(
+    model_family: str,
+) -> None:
+    """Count-family semantics are a contract preflight, not a fit-time guess."""
+
+    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS, OperationValidationError
+
+    validator = MODEL_FAMILY_CONTRACTS[model_family].validate_branch_frame
+    assert validator is not None
+    with pytest.raises(
+        OperationValidationError,
+        match=f"model.genesis {model_family} requires a non-negative integer count outcome",
+    ):
+        validator(
+            pd.DataFrame({"outcome": [0, 1.5, -1]}),
+            {"outcome": "outcome", "predictors": []},
         )
 
 
@@ -420,6 +509,334 @@ def test_did_model_family_workflow_executes_its_declared_contract(
         )
     )
     assert result["model_type"] == model_family
+
+
+@pytest.mark.parametrize(
+    ("did_mode", "timing_fields"),
+    (
+        ("cohort", {"did_cohort_col": "first_treat"}),
+        ("two_by_two", {"did_treat_col": "treatment_group", "did_post_col": "post"}),
+        ("status", {"did_status_col": "treatment_status"}),
+    ),
+)
+def test_twfe_did_workflow_executes_each_declared_treatment_definition(
+    tmp_path, did_mode: str, timing_fields: dict[str, str]
+) -> None:
+    """TWFE DID is admitted by mode, not mistaken for a generic panel OLS run."""
+
+    import numpy as np
+
+    rng = np.random.default_rng(41)
+    rows: list[dict[str, object]] = []
+    for unit_index in range(20):
+        first_treat = 3 if unit_index % 2 else 0
+        for period in range(1, 5):
+            treated = int(first_treat > 0 and period >= first_treat)
+            rows.append(
+                {
+                    "outcome": (
+                        1.0
+                        + 0.15 * unit_index
+                        + 0.3 * period
+                        + 1.2 * treated
+                        + rng.normal(scale=0.05)
+                    ),
+                    "unit": f"unit-{unit_index}",
+                    "period": period,
+                    "first_treat": first_treat,
+                    "treatment_group": int(unit_index % 2 == 1),
+                    "post": int(period >= 3),
+                    "treatment_status": treated,
+                }
+            )
+    frame = pd.DataFrame(rows)
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename=f"did-{did_mode}.csv"
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": f"did-{did_mode}.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash=f"did-{did_mode}-workflow-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-did-{did_mode}-runtime",
+        steps=[
+            {
+                "step_id": "estimate_did",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "did",
+                    "entity_col": "unit",
+                    "time_col": "period",
+                    "did_mode": did_mode,
+                    **timing_fields,
+                    "branches": [
+                        {
+                            "branch_id": "effect",
+                            "outcome": "outcome",
+                            "predictors": [],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed", state.steps["estimate_did"].error
+    artifact_ids = state.steps["estimate_did"].artifact_ids
+    assert any(item.endswith(":did_1") for item in artifact_ids)
+    assert any(item.endswith(":did_diagnostics") for item in artifact_ids)
+    assert any(item.endswith(":diagnostic_summary") for item in artifact_ids)
+
+
+def test_iv_model_family_workflow_executes_its_declared_contract(tmp_path) -> None:
+    """IV reaches its own diagnostics through Genesis, not an OLS fallback."""
+
+    import numpy as np
+
+    rng = np.random.default_rng(23)
+    nobs = 160
+    instrument = rng.normal(size=nobs)
+    confounder = rng.normal(size=nobs)
+    endogenous = 0.9 * instrument + confounder + rng.normal(scale=0.2, size=nobs)
+    exogenous = rng.normal(size=nobs)
+    outcome = 1.0 + 0.8 * endogenous + 0.3 * exogenous + confounder
+    frame = pd.DataFrame(
+        {
+            "outcome": outcome,
+            "exogenous": exogenous,
+            "endogenous": endogenous,
+            "instrument": instrument,
+        }
+    )
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="iv.csv"
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "iv.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="iv-workflow-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id="wf-iv-runtime",
+        steps=[
+            {
+                "step_id": "estimate_iv",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "iv_2sls",
+                    "iv_endog": ["endogenous"],
+                    "iv_instruments": ["instrument"],
+                    "branches": [
+                        {
+                            "branch_id": "iv",
+                            "outcome": "outcome",
+                            "predictors": ["exogenous"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    artifact_ids = state.steps["estimate_iv"].artifact_ids
+    assert any(item.endswith(":iv_2sls_1") for item in artifact_ids)
+    assert any(item.endswith(":iv_diagnostics") for item in artifact_ids)
+
+    from workbench.lineage.pipeline_drafts import PipelineDraftStore
+
+    summaries = PipelineDraftStore(project).list()
+    assert len(summaries) == 1
+    stored = PipelineDraftStore(project).get(summaries[0]["draft_id"])
+    assert stored.draft["exploration_context"]["spec"]["selected_columns"] == [
+        "outcome",
+        "exogenous",
+        "endogenous",
+        "instrument",
+    ]
+
+
+def test_iv_workflow_refuses_an_instrument_absent_from_the_pinned_source(tmp_path) -> None:
+    """An IV source-column typo must fail while compiling, before execution."""
+
+    frame = pd.DataFrame(
+        {
+            "outcome": [1.0, 2.0, 3.0, 4.0],
+            "endogenous": [0.2, 0.4, 0.6, 0.8],
+        }
+    )
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+
+    from workbench.agent.workflow_contracts import OperationValidationError
+
+    with pytest.raises(OperationValidationError, match=r"missing column\(s\): instrument"):
+        _compile(
+            (source_run_id, artifact_id),
+            frame,
+            workflow_id="wf-iv-missing-instrument",
+            steps=[
+                {
+                    "step_id": "estimate_iv",
+                    "operation_id": "model.genesis",
+                    "spec": {
+                        "model_family": "iv_2sls",
+                        "iv_endog": ["endogenous"],
+                        "iv_instruments": ["instrument"],
+                        "branches": [
+                            {
+                                "branch_id": "iv",
+                                "outcome": "outcome",
+                                "predictors": [],
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+
+
+def test_logit_workflow_rejects_a_nonbinary_outcome_before_execution(tmp_path) -> None:
+    """A declared Logit path fails as Logit instead of becoming an OLS run."""
+
+    frame = pd.DataFrame(
+        {
+            "outcome": [0, 1, 2, 0, 1, 2] * 8,
+            "predictor": list(range(48)),
+        }
+    )
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename="nonbinary.csv"
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": "nonbinary.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash="logit-nonbinary-workflow-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id="wf-logit-nonbinary-runtime",
+        steps=[
+            {
+                "step_id": "estimate_logit",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": "logit",
+                    "branches": [
+                        {
+                            "branch_id": "binary_only",
+                            "outcome": "outcome",
+                            "predictors": ["predictor"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(draft, build_workflow_step_executor(project, draft))
+
+    assert state.status == "failed"
+    assert state.steps["estimate_logit"].error == (
+        "model.genesis logit requires a binary 0/1 outcome before execution"
+    )
+
+
+@pytest.mark.parametrize(
+    "model_family",
+    ("logit", "probit", "poisson", "negative_binomial"),
+)
+def test_generalized_model_family_workflow_publishes_its_declared_evidence(
+    tmp_path, model_family: str
+) -> None:
+    """Each admitted generalized family executes without an OLS fallback."""
+
+    import numpy as np
+
+    rng = np.random.default_rng(31)
+    nobs = 180
+    predictor = rng.normal(size=nobs)
+    if model_family in {"logit", "probit"}:
+        outcome = rng.binomial(1, 1 / (1 + np.exp(-(-0.25 + 0.45 * predictor))))
+    else:
+        outcome = rng.poisson(np.exp(0.35 + 0.2 * predictor))
+    frame = pd.DataFrame({"outcome": outcome, "predictor": predictor})
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename=f"{model_family}.csv"
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": f"{model_family}.csv"},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash=f"{model_family}-workflow-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-{model_family}-runtime",
+        steps=[
+            {
+                "step_id": "estimate_generalized",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": model_family,
+                    "branches": [
+                        {
+                            "branch_id": "main",
+                            "outcome": "outcome",
+                            "predictors": ["predictor"],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed", state.steps["estimate_generalized"].error
+    artifact_ids = state.steps["estimate_generalized"].artifact_ids
+    assert any(item.endswith(f":{model_family}_1") for item in artifact_ids)
+    assert any(item.endswith(f":diagnostics_{model_family}_1") for item in artifact_ids)
+    assert any(item.endswith(":diagnostic_summary") for item in artifact_ids)
 
 
 def test_composed_panel_and_dummy_fixed_effects_branches_share_point_estimate(tmp_path) -> None:

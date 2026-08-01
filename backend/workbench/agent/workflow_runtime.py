@@ -46,7 +46,11 @@ from ..statistical_exploration import (
 from ..services.draft_materialization import create_genesis_draft
 from ..services.draft_service import execute_genesis_draft
 from .workflow import WorkflowDraft, WorkflowExecutionError, WorkflowStepResult
-from .workflow_contracts import model_family_contract, workflow_dispatcher_key
+from .workflow_contracts import (
+    family_context_columns,
+    model_family_contract,
+    workflow_dispatcher_key,
+)
 
 
 _NUMERIC_DERIVATION_SCHEMA = "workflow-derived-numeric.v1"
@@ -813,6 +817,7 @@ def _execute_model_genesis_branches(
     branch_spec = step.spec if step is not None else draft.steps[7].spec
     model_family = str(branch_spec["model_family"])
     family_contract = model_family_contract(model_family)
+    family_source_columns = family_context_columns(family_contract, branch_spec)
     primary_model_artifact_id = family_contract.expected_artifacts[0]
     workflow_step_id = str(step.step_id) if step is not None else "legacy-model-genesis"
     for branch in branch_spec["branches"]:
@@ -831,6 +836,8 @@ def _execute_model_genesis_branches(
             raise WorkflowExecutionError(
                 f"{model_family} branch {branch_id} derived terms: {exc}"
             ) from exc
+        if family_contract.validate_branch_frame is not None:
+            family_contract.validate_branch_frame(branch_frame, branch)
         # A branch can have no branch-local dummy/polynomial expansion and
         # still depend on an upstream numeric derivation.  Reusing the original
         # upload in that case would silently discard a declared column before
@@ -879,14 +886,7 @@ def _execute_model_genesis_branches(
                     or (
                         str(branch["outcome"]),
                         *[str(c) for c in branch["predictors"]],
-                        *[
-                            str(column)
-                            for column in (
-                                branch_spec.get(field_name)
-                                for field_name in family_contract.context_spec_fields
-                            )
-                            if column
-                        ],
+                        *family_source_columns,
                     )
                 ),
                 options={"quantile_method": STATA_QUANTILE_METHOD},

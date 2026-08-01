@@ -793,6 +793,112 @@ def test_selected_dataset_option_materializes_one_genesis_draft_idempotently(
     assert service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status == "materialized"
 
 
+def test_dataset_materialization_builds_a_native_iv_draft_from_evidence_backed_columns(
+    tmp_path: Path,
+) -> None:
+    """IV input lists are family fields, not unknown OLS-shaped parameters."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,endogenous,instrument\n1.0,0.2,0.1\n2.0,0.4,0.3\n",
+        filename="iv.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "iv.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        notebook,
+        {
+            "operation_id": "model.genesis",
+            "target": {"dataset_source_id": upload_sha},
+            "changes": {
+                "model_params": {
+                    "model_type": "iv_2sls",
+                    "y": "outcome",
+                    "x": [],
+                    "iv_endog": ["endogenous"],
+                    "iv_instruments": ["instrument"],
+                }
+            },
+        },
+        {"option_id": "opt_iv", "option_revision": "1"},
+    )
+
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert model["params"] == {
+        "model_type": "iv_2sls",
+        "y": "outcome",
+        "x": [],
+        "iv_endog": ["endogenous"],
+        "iv_instruments": ["instrument"],
+        "covariance": "unadjusted",
+    }
+
+
+def test_dataset_materialization_builds_a_native_did_draft_with_its_treatment_mode(
+    tmp_path: Path,
+) -> None:
+    """DID mode is metadata while timing fields remain evidence-backed columns."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,unit,period,first_treat\n1.0,a,1,0\n2.0,a,2,2\n",
+        filename="did.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "did.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        notebook,
+        {
+            "operation_id": "model.genesis",
+            "target": {"dataset_source_id": upload_sha},
+            "changes": {
+                "model_params": {
+                    "model_type": "did",
+                    "y": "outcome",
+                    "x": [],
+                    "entity_col": "unit",
+                    "time_col": "period",
+                    "did_mode": "cohort",
+                    "did_cohort_col": "first_treat",
+                }
+            },
+        },
+        {"option_id": "opt_did", "option_revision": "1"},
+    )
+
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_type"] == "model")
+    assert model["params"] == {
+        "model_type": "did",
+        "y": "outcome",
+        "x": [],
+        "entity_col": "unit",
+        "time_col": "period",
+        "did_mode": "cohort",
+        "covariance": "unadjusted",
+        "did_cohort_col": "first_treat",
+    }
+
+
 def test_univariate_genesis_option_materializes_without_x_regressors(
     tmp_path: Path,
 ) -> None:
