@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ...contracts.agent.notebook_option import MemoryDefaultSource
+from ..recipe_contracts import RECIPE_CONTRACTS
 from .proposal import TypedProposal
 
 
@@ -40,13 +41,14 @@ class DefaultTargetContract:
     target_ref: str
     operation_id: str
     model_type: str
-    field_path: tuple[str, str]
+    field_path: tuple[str, ...]
     value: str
     target_label: str
     method_risk: str
     restore_value: str | None
-    explicit_value_paths: tuple[tuple[str, str], ...] = ()
+    explicit_value_paths: tuple[tuple[str, ...], ...] = ()
     required_model_params: tuple[str, ...] = ()
+    required_model_option_fields: tuple[str, ...] = ()
 
     def applies_to(self, proposal: TypedProposal) -> bool:
         if proposal.operation_id != self.operation_id:
@@ -64,6 +66,18 @@ class DefaultTargetContract:
                 raise MemoryDefaultApplicationError(
                     f"memory default target {self.target_ref} requires {name}"
                 )
+        if self.required_model_option_fields:
+            options = params.get("model_options")
+            if not isinstance(options, Mapping):
+                raise MemoryDefaultApplicationError(
+                    f"memory default target {self.target_ref} requires model_options"
+                )
+            for name in self.required_model_option_fields:
+                value = options.get(name)
+                if not isinstance(value, str) or not value:
+                    raise MemoryDefaultApplicationError(
+                        f"memory default target {self.target_ref} requires model_options.{name}"
+                    )
 
     def source(self, *, memory_id: str, revision: int) -> MemoryDefaultSource:
         return MemoryDefaultSource(
@@ -74,6 +88,62 @@ class DefaultTargetContract:
             method_risk=self.method_risk,
             restore_value=self.restore_value,
         )
+
+
+def _recipe_time_index_targets() -> tuple[DefaultTargetContract, ...]:
+    """Derive only published Recipe targets from their authoritative vocabulary.
+
+    A Recipe must publish an exact target reference for every target it permits.
+    This prevents a memory registry addition from silently exposing a hidden
+    option, and it prevents a provider-facing list from drifting from the
+    write authority.
+    """
+
+    result: list[DefaultTargetContract] = []
+    for recipe_id, recipe in sorted(RECIPE_CONTRACTS.items()):
+        # Future Recipes remain closed by default.  Only a Recipe that
+        # explicitly publishes target refs opts into this writable boundary.
+        if not recipe.memory_target_refs:
+            continue
+        fields = recipe.parameter_vocabulary.get("fields")
+        if isinstance(fields, Mapping):
+            semantics = fields.get("time_index_semantics")
+        elif isinstance(fields, list):
+            semantics = next(
+                (
+                    item
+                    for item in fields
+                    if isinstance(item, Mapping) and item.get("path") == "time_index_semantics"
+                ),
+                None,
+            )
+        else:
+            raise RuntimeError(f"Recipe {recipe_id} has no field vocabulary")
+        if not isinstance(semantics, Mapping):
+            raise RuntimeError(f"Recipe {recipe_id} has no time-index vocabulary")
+        values = semantics.get("allowed_values", semantics.get("enum"))
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise RuntimeError(f"Recipe {recipe_id} has invalid time-index values")
+        expected_refs = tuple(
+            f"model.genesis.{recipe_id}.time_index_semantics.{value}" for value in values
+        )
+        if recipe.memory_target_refs != expected_refs:
+            raise RuntimeError(f"Recipe {recipe_id} memory targets do not match its vocabulary")
+        result.extend(
+            DefaultTargetContract(
+                target_ref=target_ref,
+                operation_id="model.genesis",
+                model_type=recipe_id,
+                field_path=("model_params", "model_options", "time_index_semantics"),
+                value=value,
+                target_label="Time-index interpretation",
+                method_risk="high",
+                restore_value=None,
+                required_model_option_fields=recipe.source_option_fields,
+            )
+            for target_ref, value in zip(recipe.memory_target_refs, values, strict=True)
+        )
+    return tuple(result)
 
 
 # The registry, not a memory's free-text lesson, fixes every writable field,
@@ -138,6 +208,7 @@ DEFAULT_TARGET_CONTRACTS: dict[str, DefaultTargetContract] = {
             explicit_value_paths=(("model_params", "covariance"),),
             required_model_params=("entity_col",),
         ),
+        *_recipe_time_index_targets(),
     )
 }
 
@@ -241,7 +312,7 @@ def _current_suggested_targets(
     return tuple(candidates)
 
 
-def _field_value(proposal: TypedProposal, path: tuple[str, str]) -> Any:
+def _field_value(proposal: TypedProposal, path: tuple[str, ...]) -> Any:
     current: Any = proposal.changes
     for part in path:
         if not isinstance(current, Mapping) or part not in current:
@@ -262,15 +333,23 @@ def _with_field(
     target: DefaultTargetContract,
     sources: tuple[MemoryDefaultSource, ...],
 ) -> TypedProposal:
-    changes = dict(proposal.changes)
-    container = changes.get(target.field_path[0])
-    if container is None:
-        container = {}
-    if not isinstance(container, Mapping):
-        raise MemoryDefaultApplicationError("memory default target container is invalid")
-    patched = dict(container)
-    patched[target.field_path[1]] = target.value
-    changes[target.field_path[0]] = patched
+    def patch(value: Any, path: tuple[str, ...]) -> dict[str, Any]:
+        if not path:
+            raise MemoryDefaultApplicationError("memory default target path is invalid")
+        if value is None:
+            current: dict[str, Any] = {}
+        elif isinstance(value, Mapping):
+            current = dict(value)
+        else:
+            raise MemoryDefaultApplicationError("memory default target container is invalid")
+        head, *tail = path
+        if not tail:
+            current[head] = target.value
+        else:
+            current[head] = patch(current.get(head), tuple(tail))
+        return current
+
+    changes = patch(proposal.changes, target.field_path)
     return replace(proposal, changes=changes, memory_default_sources=sources)
 
 
@@ -296,7 +375,7 @@ def apply_memory_defaults(
         return proposal
     candidates = _current_suggested_targets(proposal, projection)
     by_path: dict[
-        tuple[str, str], list[tuple[DefaultTargetContract, MemoryDefaultSource, int]]
+        tuple[str, ...], list[tuple[DefaultTargetContract, MemoryDefaultSource, int]]
     ] = defaultdict(list)
     for target, source, tier in candidates:
         by_path[target.field_path].append((target, source, tier))

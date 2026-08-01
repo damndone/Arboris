@@ -2306,6 +2306,153 @@ def test_notebook_agent_admits_recipe_genesis_without_y_or_x_and_rejects_legacy_
         agent._validate_submissions(context, evidence, (legacy_submission,), catalog)
 
 
+def test_notebook_agent_applies_recipe_memory_default_then_rechecks_current_columns(
+    tmp_path: Path,
+) -> None:
+    """A bounded Recipe default remains subject to current evidence validation."""
+
+    upload_sha256 = "sha256:upload-recipe-memory"
+    context = attach_domain_memory_projection(
+        _context(
+            make_project(tmp_path),
+            projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+        ),
+        {
+            "contract_version": "domain-memory-context-input/v3",
+            "retrieval_ref": "retrieval-recipe-memory",
+            "scope_ref": "scope-recipe-memory",
+            "outcome": "used",
+            "reason": "approved hint",
+            "entries": [
+                {
+                    "memory_id": "memory-recipe-observation-order",
+                    "revision": 3,
+                    "content_hash": "b" * 64,
+                    "memory_kind": "project_domain_fact",
+                    "domain_tags": ["time-series"],
+                    "compact_lesson": "This source is an observation-order series.",
+                    "recommended_effect_kind": "assumption_check_hint",
+                    "recommended_target_refs": [
+                        "model.genesis.time_series.ets.time_index_semantics.observation_order"
+                    ],
+                    "source_summary_refs": ["summary-recipe-memory"],
+                    "match_reason": ["project-domain"],
+                    "apply_mode": "suggest_default",
+                    "apply_mode_reason": "verifier_current",
+                    "vocabulary_version": "notebook-memory-defaults-v1",
+                    "source_scope_ref": "scope-recipe-memory",
+                    "memory_source": {
+                        "memory_id": "memory-recipe-observation-order",
+                        "revision": 3,
+                    },
+                    "memory_authority": "non_authoritative_hint",
+                }
+            ],
+            "omissions": [],
+            "bounded": True,
+            "preference_ref": "preference-recipe-memory",
+            "memory_authority": "non_authoritative",
+        },
+    )
+    complete_evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:recipe-profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:recipe-dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": [{"name": "when"}, {"name": "value"}]},
+                result_hash="sha256:recipe-memory-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The verified source contains one time-indexed series.",
+            "assumptions": ["Observation order is the approved interpretation."],
+            "capability_id": "time_series.ets",
+            "option_id": "opt-recipe-memory",
+            "proposal": {
+                "proposal_id": "prop-recipe-memory",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": upload_sha256},
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": freshness_dependency_fingerprint(context),
+                    "owner_resolution": "single_candidate",
+                },
+                "changes": {
+                    "model_params": {
+                        "model_type": "time_series.ets",
+                        "model_options": {
+                            "time_column": "when",
+                            "value_column": "value",
+                            "error": "add",
+                            "trend": None,
+                            "seasonal": None,
+                            "damped_trend": False,
+                        },
+                    }
+                },
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "ets_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:recipe-profile",
+                    "result_hash": "sha256:recipe-memory-profile",
+                    "source_refs": ["profile:recipe-dataset"],
+                }
+            ],
+            "comparative_claims": [
+                "evidence:recipe-profile confirms the declared source columns."
+            ],
+        }
+    )
+    catalog = {"time_series.ets": {"model_type": "time_series.ets"}}
+    agent = NotebookPlanningAgent(adapter=TextOnlyAdapter(), capability_catalog=catalog)
+
+    (normalized,) = agent._validate_submissions(
+        context, complete_evidence, (submission,), catalog
+    )
+
+    assert normalized.proposal.changes["model_params"]["model_options"][
+        "time_index_semantics"
+    ] == "observation_order"
+    assert normalized.proposal.memory_default_sources[0] == MemoryDefaultSource(
+        memory_id="memory-recipe-observation-order",
+        revision=3,
+        target_ref="model.genesis.time_series.ets.time_index_semantics.observation_order",
+        target_label="Time-index interpretation",
+        method_risk="high",
+        restore_value=None,
+    )
+
+    missing_value_evidence = replace(
+        complete_evidence,
+        records=(
+            replace(
+                complete_evidence.records[0],
+                observations={"columns": [{"name": "when"}]},
+            ),
+        ),
+    )
+    with pytest.raises(NotebookPlanningContractError, match="RECIPE_SOURCE_COLUMN_MISSING"):
+        agent._validate_submissions(context, missing_value_evidence, (submission,), catalog)
+
+
 def test_recipe_model_options_rejection_republishes_exact_required_inputs(
     tmp_path: Path,
 ) -> None:

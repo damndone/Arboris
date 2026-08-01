@@ -34,6 +34,7 @@ class RecipeContract:
     runtime_outcome_option_field: str
     server_owned_option_fields: tuple[str, ...] = ()
     planning_required_option_fields: tuple[str, ...] = ()
+    memory_target_refs: tuple[str, ...] = ()
     model_family: str = "time_series"
     requires_nonempty_predictors: bool = False
 
@@ -210,7 +211,7 @@ class RecipeContract:
             "parameter_vocabulary": self._agent_parameter_vocabulary(),
             "expected_artifacts": dict(self.artifact_types),
             "result_projection": self.result_projection,
-            "memory_targets": [],
+            "memory_targets": list(self.memory_target_refs),
         }
 
 
@@ -269,6 +270,11 @@ RECIPE_CONTRACTS: Mapping[str, RecipeContract] = MappingProxyType(
             parameter_vocabulary=_ets_vocabulary(),
             runtime_outcome_option_field="value_column",
             planning_required_option_fields=("time_index_semantics",),
+            memory_target_refs=(
+                "model.genesis.time_series.ets.time_index_semantics.regular_calendar",
+                "model.genesis.time_series.ets.time_index_semantics.business_or_trading_observations",
+                "model.genesis.time_series.ets.time_index_semantics.observation_order",
+            ),
         ),
         "time_series.arma_garch": RecipeContract(
             recipe_id="time_series.arma_garch",
@@ -282,6 +288,11 @@ RECIPE_CONTRACTS: Mapping[str, RecipeContract] = MappingProxyType(
             runtime_outcome_option_field="value_column",
             server_owned_option_fields=("dataset_ref",),
             planning_required_option_fields=("time_index_semantics",),
+            memory_target_refs=(
+                "model.genesis.time_series.arma_garch.time_index_semantics.regular_calendar",
+                "model.genesis.time_series.arma_garch.time_index_semantics.business_or_trading_observations",
+                "model.genesis.time_series.arma_garch.time_index_semantics.observation_order",
+            ),
         ),
     }
 )

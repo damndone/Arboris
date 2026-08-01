@@ -55,6 +55,22 @@ def test_recipe_payload_omits_server_owned_fields_from_agent_vocabulary() -> Non
     assert all(field["path"] != "dataset_ref" for field in fields)
 
 
+def test_recipe_payload_publishes_only_registered_memory_default_targets() -> None:
+    ets = recipe_contract("time_series.ets").to_payload()
+    arma_garch = recipe_contract("time_series.arma_garch").to_payload()
+
+    assert ets["memory_targets"] == [
+        "model.genesis.time_series.ets.time_index_semantics.regular_calendar",
+        "model.genesis.time_series.ets.time_index_semantics.business_or_trading_observations",
+        "model.genesis.time_series.ets.time_index_semantics.observation_order",
+    ]
+    assert arma_garch["memory_targets"] == [
+        "model.genesis.time_series.arma_garch.time_index_semantics.regular_calendar",
+        "model.genesis.time_series.arma_garch.time_index_semantics.business_or_trading_observations",
+        "model.genesis.time_series.arma_garch.time_index_semantics.observation_order",
+    ]
+
+
 def test_recipe_rejects_a_provider_supplied_server_owned_option() -> None:
     contract = recipe_contract("time_series.arma_garch")
 

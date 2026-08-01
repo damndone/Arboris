@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from workbench.agent.notebook.memory_defaults import (
+    DEFAULT_TARGET_CONTRACTS,
     DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
     MemoryDefaultApplicationError,
     apply_memory_defaults,
@@ -72,6 +73,31 @@ def _proposal(*, model_type: str, entity_col: str | None = None) -> TypedProposa
         target={"dataset_source_id": "upload-b1"},
         preconditions={"context_version": "node-operation-context/v1"},
         changes={"model_params": model_params},
+    )
+
+
+def _recipe_proposal(
+    *,
+    model_type: str,
+    include_time_column: bool = True,
+    include_value_column: bool = True,
+) -> TypedProposal:
+    options: dict[str, object] = {}
+    if include_time_column:
+        options["time_column"] = "when"
+    if include_value_column:
+        options["value_column"] = "value"
+    return TypedProposal(
+        proposal_id=f"proposal-{model_type}",
+        operation_id="model.genesis",
+        target={"dataset_source_id": "upload-b2"},
+        preconditions={"context_version": "node-operation-context/v1"},
+        changes={
+            "model_params": {
+                "model_type": model_type,
+                "model_options": options,
+            }
+        },
     )
 
 
@@ -185,3 +211,99 @@ def test_explicit_choice_precedes_a_memory_target_precondition() -> None:
     )
 
     assert apply_memory_defaults(explicit, clustered_memory) == explicit
+
+
+@pytest.mark.parametrize(
+    ("model_type", "target_ref", "time_semantics"),
+    (
+        (
+            "time_series.ets",
+            "model.genesis.time_series.ets.time_index_semantics.observation_order",
+            "observation_order",
+        ),
+        (
+            "time_series.arma_garch",
+            "model.genesis.time_series.arma_garch.time_index_semantics.business_or_trading_observations",
+            "business_or_trading_observations",
+        ),
+    ),
+)
+def test_recipe_time_index_defaults_are_registered_provenanced_and_input_bound(
+    model_type: str,
+    target_ref: str,
+    time_semantics: str,
+) -> None:
+    assert target_ref in DEFAULT_TARGET_CONTRACTS
+    projection = _projection(_entry(memory_id=f"memory-{model_type}", target_ref=target_ref))
+
+    defaulted = apply_memory_defaults(_recipe_proposal(model_type=model_type), projection)
+
+    assert defaulted.changes["model_params"]["model_options"] == {
+        "time_column": "when",
+        "value_column": "value",
+        "time_index_semantics": time_semantics,
+    }
+    assert defaulted.memory_default_sources[0].target_ref == target_ref
+
+    with pytest.raises(MemoryDefaultApplicationError, match="time_column"):
+        apply_memory_defaults(
+            _recipe_proposal(model_type=model_type, include_time_column=False), projection
+        )
+    with pytest.raises(MemoryDefaultApplicationError, match="value_column"):
+        apply_memory_defaults(
+            _recipe_proposal(model_type=model_type, include_value_column=False), projection
+        )
+
+
+def test_recipe_explicit_time_index_semantics_precedes_memory_default() -> None:
+    target_ref = "model.genesis.time_series.ets.time_index_semantics.observation_order"
+    projection = _projection(_entry(memory_id="memory-ets", target_ref=target_ref))
+    proposal = _recipe_proposal(model_type="time_series.ets")
+    explicit = TypedProposal(
+        proposal_id=proposal.proposal_id,
+        operation_id=proposal.operation_id,
+        target=proposal.target,
+        preconditions=proposal.preconditions,
+        changes={
+            "model_params": {
+                "model_type": "time_series.ets",
+                "model_options": {
+                    "time_column": "when",
+                    "value_column": "value",
+                    "time_index_semantics": "regular_calendar",
+                },
+            }
+        },
+    )
+
+    assert apply_memory_defaults(explicit, projection) == explicit
+
+
+def test_recipe_memory_cannot_write_orders_or_other_unpublished_fields() -> None:
+    proposal = _recipe_proposal(model_type="time_series.arma_garch")
+    unregistered = _projection(
+        _entry(
+            memory_id="memory-order",
+            target_ref="model.genesis.time_series.arma_garch.arma.p.1",
+        )
+    )
+    old_artifact_field = _projection(
+        _entry(
+            memory_id="memory-old-artifact",
+            target_ref="model.genesis.time_series.arma_garch.result.time_index_semantics.observation_order",
+        )
+    )
+    conflict = _projection(
+        _entry(
+            memory_id="memory-calendar",
+            target_ref="model.genesis.time_series.arma_garch.time_index_semantics.regular_calendar",
+        ),
+        _entry(
+            memory_id="memory-observation-order",
+            target_ref="model.genesis.time_series.arma_garch.time_index_semantics.observation_order",
+        ),
+    )
+
+    assert apply_memory_defaults(proposal, unregistered) == proposal
+    assert apply_memory_defaults(proposal, old_artifact_field) == proposal
+    assert apply_memory_defaults(proposal, conflict) == proposal
