@@ -85,6 +85,30 @@ def test_lmm_packet_is_unwrapped_for_legacy_downstream_stages() -> None:
     )
 
 
+def test_model_pack_packet_is_unwrapped_for_legacy_downstream_stages() -> None:
+    """Every packet envelope must expose its authoritative model payload.
+
+    ETS is the first Recipe packet whose public ``model_type`` is nested under
+    ``result``.  If the legacy stages receive the envelope shell, their
+    historical ``.get('model_type', 'ols')`` fallback mislabels the model.
+    """
+
+    from workbench.engine.stages.estimation import _result_for_downstream
+
+    packet = {
+        "result": {
+            "model_id": "ets_1",
+            "model_type": "time_series.ets",
+            "n_obs": 120,
+            "specification": {"canonical": "ETS(A,A,N)"},
+        },
+        "sample_fingerprint": "a" * 64,
+        "producer_version": "time_series.ets@1.0",
+    }
+
+    assert _result_for_downstream("time_series.ets", packet) == packet["result"]
+
+
 @pytest.mark.parametrize("admission", (None, object()))
 def test_runner_rejects_missing_or_forged_admission_before_fit(admission: object | None) -> None:
     from types import SimpleNamespace

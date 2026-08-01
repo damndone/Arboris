@@ -21,11 +21,19 @@ def _result_for_downstream(model_type: str, result: dict[str, Any]) -> dict[str,
 
     LMM owns a versioned PacketEnvelope on disk.  Diagnostics, recording, and
     report stages predate packets and consume the public result payload shape.
-    Passing the envelope through silently made those stages default to OLS
-    labels even though the LMM fit itself had succeeded.
+    Passing an envelope through silently makes those stages default to OLS
+    labels even though the model fit itself succeeded.  LMM uses the historical
+    ``payload`` envelope; model packs use a public ``result`` payload.  Both
+    forms are unwrapped here so every legacy consumer reads the same
+    authoritative model identity.
     """
 
     if model_type != "linear_mixed_effects":
+        nested = result.get("result")
+        if isinstance(nested, dict) and isinstance(nested.get("model_type"), str):
+            if nested["model_type"] != model_type:
+                raise RuntimeError("MODEL_RESULT_PAYLOAD_INVALID")
+            return nested
         return result
 
     from ...contracts.common.envelope import PacketEnvelope
