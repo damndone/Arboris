@@ -6,11 +6,11 @@
 
 ## Final status
 
-CONTEXT_RESCOPED
+COMPLETED
 
 ## Metrics
 
-- Failure frequency: 9/23 (39.1%; 39.1 per 100 events)
+- Failure frequency: 9/24 (37.5%; 37.5 per 100 events)
 - Repeat rate: 0/9 (0.0%)
 - Recurrence rate: 0/9 (0.0%)
 - MTTR: median=1734000 ms (sample=9; unresolved=0)
@@ -59,6 +59,7 @@ CONTEXT_RESCOPED
 
 ## Added tests
 
+- `B3 focused regression 142 passed, 1 skipped; TypeScript passed; final independent review APPROVED; visible provider attempt cancelled after 400 seconds and is separately NOT VERIFIED`
 - `B3 focused regression: 142 passed, 1 skipped; TypeScript passed`
 - `pytest targeted memory projection and planner prompt tests: 2 failed`
 - `pytest test_memory_projection_rejects_non_ascii_payload_over_utf8_byte_budget: external projection was accepted below the character limit while its UTF-8 bytes exceeded 8 KiB`
@@ -120,3 +121,4 @@ CONTEXT_RESCOPED
 - #21: `e5c10a3a-a55d-4be5-9c88-4b9c9857ad9e` | 2026-08-01T20:34:55.000Z | GATE/b3_route_utf8_budget_gate_passed | incident=`c467ea01-f274-445f-a07c-bf44b412f7fd` | lesson_key=`memory-payload-budget-is-utf8-bytes` | event_sha256=`2a4a03530b99ead647a941740dde0a89f44ec4e251d1ffb9e33804272bcab001`
 - #22: `a9fbd649-b853-4522-9f6a-2528c3c5e001` | 2026-08-01T20:34:55.000Z | GATE/b3_shared_utf8_projection_gate_passed | incident=`d0e00586-8007-44e3-917e-865fc6af0852` | lesson_key=`external-memory-projection-utf8-budget` | event_sha256=`74453c75af08a761e63bc90902c9f2d53bfb9483293963fb4e260c6c85424229`
 - #23: `dcd5d00e-df73-48d3-a1ad-28f738d9972e` | 2026-08-01T20:34:55.000Z | GATE/b3_recipe_group_atomic_budget_gate_passed | incident=`4ce246da-b63f-4cf1-af6a-7bd1dbc7e0d2` | lesson_key=`recipe-default-groups-must-be-budget-atomic` | event_sha256=`bf89673f988c0a6ff2f573a54ef011d37631bf540592d5121bc7f617acc78db6`
+- #24: `b3bfe405-38a4-499c-a1db-685c96c2ca3b` | 2026-08-01T20:48:00.000Z | STATE_CHANGE/b3_recipe_default_materialization_completed | incident=`e9f4daf3-4d10-4431-a03e-25e66e0e3e31` | lesson_key=`close-b3-at-verified-bridge-boundary` | event_sha256=`8ea1de3c4c92a94937bb6d03d42b82eed43fd5aa3c365b10c1b72e0ef7b17f2b`
