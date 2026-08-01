@@ -280,9 +280,14 @@ class ModelFamilyContract:
     expected_artifacts: tuple[str, ...]
     result_shape: str
     missing_required_fields_message: str | None = None
+    forbidden_spec_fields_message: str | None = None
     cluster_requires_entity: bool = False
     allows_categorical_terms: bool = True
+    allows_polynomial_terms: bool = True
+    requires_nonempty_predictors: bool = True
+    allows_covariance: bool = True
     requires_branch_figures: bool = False
+    context_spec_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.required_spec_field_mode not in {"all", "any"}:
@@ -322,6 +327,47 @@ def _build_panel_ols_model_params(
     }
 
 
+def _build_cs_did_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "cs_did",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_mode": "cohort",
+        "did_cohort_col": spec["cohort_col"],
+    }
+
+
+def _build_sa_did_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "sa_did",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_mode": "cohort",
+        "did_cohort_col": spec["cohort_col"],
+    }
+
+
+def _build_dcdh_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "dcdh",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "entity_col": spec["entity_col"],
+        "time_col": spec["time_col"],
+        "did_treatment_path": spec["treatment_path_col"],
+    }
+
+
 MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
     "ols": ModelFamilyContract(
         family="ols",
@@ -331,6 +377,7 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         build_model_params=_build_ols_model_params,
         expected_artifacts=("ols_1", "diagnostic_summary"),
         result_shape="coefficient_intervals",
+        forbidden_spec_fields_message="model.genesis ols does not accept panel entity_col or time_col",
         requires_branch_figures=True,
     ),
     "panel_ols": ModelFamilyContract(
@@ -346,6 +393,58 @@ MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
         ),
         cluster_requires_entity=True,
         allows_categorical_terms=False,
+        context_spec_fields=("entity_col", "time_col"),
+    ),
+    "cs_did": ModelFamilyContract(
+        family="cs_did",
+        required_spec_fields=("entity_col", "time_col", "cohort_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_cs_did_model_params,
+        expected_artifacts=("cs_did_1", "cs_did"),
+        result_shape="effect_estimate_bundle",
+        missing_required_fields_message=(
+            "model.genesis cs_did requires entity_col, time_col, and cohort_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "cohort_col"),
+    ),
+    "sa_did": ModelFamilyContract(
+        family="sa_did",
+        required_spec_fields=("entity_col", "time_col", "cohort_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_sa_did_model_params,
+        expected_artifacts=("sa_did_1", "sa_did"),
+        result_shape="effect_estimate_bundle",
+        missing_required_fields_message=(
+            "model.genesis sa_did requires entity_col, time_col, and cohort_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "cohort_col"),
+    ),
+    "dcdh": ModelFamilyContract(
+        family="dcdh",
+        required_spec_fields=("entity_col", "time_col", "treatment_path_col"),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=(),
+        build_model_params=_build_dcdh_model_params,
+        expected_artifacts=("dcdh_1", "dcdh"),
+        result_shape="event_study_bundle",
+        missing_required_fields_message=(
+            "model.genesis dcdh requires entity_col, time_col, and treatment_path_col"
+        ),
+        allows_categorical_terms=False,
+        allows_polynomial_terms=False,
+        requires_nonempty_predictors=False,
+        allows_covariance=False,
+        context_spec_fields=("entity_col", "time_col", "treatment_path_col"),
     ),
 }
 
@@ -366,8 +465,9 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     from ..model_terms import ModelTermError, validate_branch_terms
 
     contract = model_family_contract(spec.get("model_family"))
+    family_fields = set(contract.required_spec_fields) | set(contract.forbidden_spec_fields)
     dimensions: dict[str, str | None] = {}
-    for field_name in ("entity_col", "time_col"):
+    for field_name in family_fields:
         value = spec.get(field_name)
         if value is not None and (not isinstance(value, str) or not value):
             raise OperationValidationError(
@@ -377,7 +477,8 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
     forbidden = [field_name for field_name in contract.forbidden_spec_fields if dimensions[field_name] is not None]
     if forbidden:
         raise OperationValidationError(
-            "model.genesis ols does not accept panel entity_col or time_col"
+            contract.forbidden_spec_fields_message
+            or "model.genesis contains a field the selected family does not accept"
         )
     required_values = [dimensions[field_name] for field_name in contract.required_spec_fields]
     missing_required = (
@@ -404,7 +505,9 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
             raise OperationValidationError(f"duplicate model branch_id: {branch_id}")
         seen.add(branch_id)
         predictors = branch.get("predictors")
-        if not isinstance(predictors, list) or not predictors:
+        if not isinstance(predictors, list) or (
+            contract.requires_nonempty_predictors and not predictors
+        ):
             raise OperationValidationError(f"model branch {branch_id} requires predictors")
         if not branch.get("outcome"):
             raise OperationValidationError(f"model branch {branch_id} requires an outcome")
@@ -413,19 +516,26 @@ def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
                 f"model branch {branch_id} outcome must not also be a predictor"
             )
         covariance = branch.get("covariance", spec.get("covariance"))
-        if covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
+        if not contract.allows_covariance and covariance is not None:
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept OLS covariance settings"
+            )
+        if contract.allows_covariance and covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
             raise OperationValidationError(
                 f"model branch {branch_id} covariance must be one of: "
                 + ", ".join(OLS_COVARIANCE_VALUES)
             )
-        if contract.cluster_requires_entity and covariance == "clustered" and not dimensions["entity_col"]:
+        if contract.cluster_requires_entity and covariance == "clustered" and not dimensions.get("entity_col"):
             raise OperationValidationError(
                 "model.genesis clustered panel_ols requires entity_col"
             )
         if not contract.allows_categorical_terms and branch.get("categorical"):
             raise OperationValidationError(
-                "model.genesis panel_ols does not accept categorical expansion; "
-                "declare entity_col/time_col for absorbed effects"
+                f"model.genesis {contract.family} does not accept categorical expansion"
+            )
+        if not contract.allows_polynomial_terms and branch.get("polynomials"):
+            raise OperationValidationError(
+                f"model.genesis {contract.family} does not accept polynomial expansion"
             )
         try:
             validate_branch_terms(branch)
@@ -562,7 +672,7 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
         summary="Estimate one or more models from the source table.",
         fields={
             "model_family": (
-                "Registered workflow-executable model family: ols or panel_ols. "
+                "Registered workflow-executable model family: ols, panel_ols, cs_did, sa_did, or dcdh. "
                 "Every branch in one step uses this same family."
             ),
             "covariance": "Default covariance for every branch.",
@@ -571,6 +681,8 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
                 "clustered panel covariance requires entity_col."
             ),
             "time_col": "Optional panel time column for time fixed effects.",
+            "cohort_col": "First-treatment period for cs_did or sa_did (0 for never treated).",
+            "treatment_path_col": "Binary treatment path for dcdh, which may switch on and off.",
             "branches": (
                 "List of {branch_id, outcome, predictors[, categorical]"
                 "[, polynomials][, covariance]}; one estimated model per entry. "
@@ -603,6 +715,8 @@ WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
             "covariance": "string",
             "entity_col": "string",
             "time_col": "string",
+            "cohort_col": "string",
+            "treatment_path_col": "string",
             "branches": "list",
             "categorical": "list",
             "polynomials": "list",
@@ -855,7 +969,7 @@ def _spec_columns(operation_id: str, spec: Mapping[str, Any]) -> set[str]:
             if isinstance(group, Mapping) and group.get("source_column"):
                 columns.add(str(group["source_column"]))
     elif extractor_key == "model.genesis":
-        for field_name in ("entity_col", "time_col"):
+        for field_name in ("entity_col", "time_col", "cohort_col", "treatment_path_col"):
             if spec.get(field_name):
                 columns.add(str(spec[field_name]))
         for branch in spec.get("branches", []) or []:

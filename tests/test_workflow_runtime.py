@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -31,12 +32,18 @@ from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
 
 
-def test_model_family_contracts_declare_existing_ols_and_panel_semantics() -> None:
+def test_model_family_contracts_declare_existing_ols_panel_and_did_semantics() -> None:
     """The workflow core declares, rather than infers, each admitted family."""
 
     from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
 
-    assert set(MODEL_FAMILY_CONTRACTS) == {"ols", "panel_ols"}
+    assert set(MODEL_FAMILY_CONTRACTS) == {
+        "ols",
+        "panel_ols",
+        "cs_did",
+        "sa_did",
+        "dcdh",
+    }
 
     ols = MODEL_FAMILY_CONTRACTS["ols"]
     assert ols.family == "ols"
@@ -53,6 +60,47 @@ def test_model_family_contracts_declare_existing_ols_and_panel_semantics() -> No
     assert panel.expected_artifacts == ("panel_ols_1",)
     assert panel.result_shape == "coefficient_intervals"
     assert callable(panel.build_model_params)
+
+    cs = MODEL_FAMILY_CONTRACTS["cs_did"]
+    assert set(cs.required_spec_fields) == {"entity_col", "time_col", "cohort_col"}
+    assert cs.expected_artifacts == ("cs_did_1", "cs_did")
+    assert cs.result_shape == "effect_estimate_bundle"
+    assert cs.requires_nonempty_predictors is False
+    assert cs.build_model_params(
+        {"entity_col": "unit", "time_col": "period", "cohort_col": "first_treat"},
+        {"outcome": "outcome", "predictors": []}, [], "unadjusted",
+    ) == {
+        "model_type": "cs_did",
+        "y": "outcome",
+        "x": [],
+        "entity_col": "unit",
+        "time_col": "period",
+        "did_mode": "cohort",
+        "did_cohort_col": "first_treat",
+    }
+
+    sa = MODEL_FAMILY_CONTRACTS["sa_did"]
+    assert sa.expected_artifacts == ("sa_did_1", "sa_did")
+    assert sa.result_shape == "effect_estimate_bundle"
+
+    dcdh = MODEL_FAMILY_CONTRACTS["dcdh"]
+    assert set(dcdh.required_spec_fields) == {"entity_col", "time_col", "treatment_path_col"}
+    assert dcdh.expected_artifacts == ("dcdh_1", "dcdh")
+    assert dcdh.result_shape == "event_study_bundle"
+
+
+def test_did_model_family_requires_its_declared_timing_field_without_ols_fallback() -> None:
+    from workbench.agent.workflow_contracts import OperationValidationError, validate_model_genesis_spec
+
+    with pytest.raises(OperationValidationError, match="cs_did requires entity_col, time_col, and cohort_col"):
+        validate_model_genesis_spec(
+            {
+                "model_family": "cs_did",
+                "entity_col": "unit",
+                "time_col": "period",
+                "branches": [{"branch_id": "att", "outcome": "outcome", "predictors": []}],
+            }
+        )
 
 
 def _frame(rows: int = 24) -> pd.DataFrame:
@@ -277,6 +325,101 @@ def test_panel_genesis_step_runs_two_way_fixed_effects_with_entity_clusters(tmp_
     assert result["covariance_evidence"]["cluster_variable"] == "school"
     assert result["coefficients"]["exposure"]["ci_lower"] is not None
     assert result["coefficients"]["exposure_pow2"]["ci_upper"] is not None
+
+
+@pytest.mark.parametrize(
+    ("model_family", "fixture_path", "family_spec", "primary_artifact_id"),
+    [
+        (
+            "cs_did",
+            Path(__file__).parent / "fixtures" / "cs_did" / "panel.csv",
+            {"entity_col": "unit", "time_col": "period", "cohort_col": "first_treat"},
+            "cs_did_1",
+        ),
+        (
+            "sa_did",
+            Path(__file__).parent / "fixtures" / "cs_did" / "panel.csv",
+            {"entity_col": "unit", "time_col": "period", "cohort_col": "first_treat"},
+            "sa_did_1",
+        ),
+        (
+            "dcdh",
+            Path(__file__).parent / "fixtures" / "dcdh" / "panel_nonabsorbing.csv",
+            {"entity_col": "id", "time_col": "year", "treatment_path_col": "d"},
+            "dcdh_1",
+        ),
+    ],
+)
+def test_did_model_family_workflow_executes_its_declared_contract(
+    tmp_path,
+    model_family: str,
+    fixture_path: Path,
+    family_spec: dict[str, str],
+    primary_artifact_id: str,
+) -> None:
+    """Each admitted DID family executes as itself with no OLS fallback.
+
+    The fixtures are the estimators' existing independent end-to-end fixtures.
+    This test instead exercises the shared typed workflow → Genesis Draft path,
+    where an empty covariate list is valid only because the selected model
+    family contract explicitly declares it valid.
+    """
+
+    frame = pd.read_csv(fixture_path)
+    project, source_run_id, artifact_id = _source_project(tmp_path, frame)
+    upload_sha = store_upload_bytes(
+        project, frame.to_csv(index=False).encode("utf-8"), filename=fixture_path.name
+    )
+    write_run_inputs(
+        project / "runs" / source_run_id,
+        form={"model_type": "auto", "y": "", "x": ""},
+        upload={"sha256": upload_sha, "filename": fixture_path.name},
+        rerun_of=None,
+        from_node=None,
+        rerun_reason="initial",
+        override_hash=None,
+        dag_hash=f"{model_family}-workflow-fixture-dag",
+    )
+    draft = _compile(
+        (source_run_id, artifact_id),
+        frame,
+        workflow_id=f"wf-{model_family}-runtime",
+        steps=[
+            {
+                "step_id": "estimate_did",
+                "operation_id": "model.genesis",
+                "spec": {
+                    "model_family": model_family,
+                    **family_spec,
+                    "branches": [
+                        {
+                            "branch_id": "effect",
+                            "outcome": "y",
+                            "predictors": [],
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+
+    state = WorkflowExecutor(project).execute(
+        draft, build_workflow_step_executor(project, draft)
+    )
+
+    assert state.status == "completed"
+    model_ref = next(
+        artifact
+        for artifact in state.steps["estimate_did"].artifact_ids
+        if artifact.endswith(f":{primary_artifact_id}")
+    )
+    run_id = model_ref.split(":", 1)[0]
+    result = json.loads(
+        (project / "runs" / run_id / "model_results" / f"{primary_artifact_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["model_type"] == model_family
 
 
 def test_composed_panel_and_dummy_fixed_effects_branches_share_point_estimate(tmp_path) -> None:

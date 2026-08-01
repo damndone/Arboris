@@ -31,7 +31,11 @@ from .vocabulary import (
     DECLARED_ARTIFACT_TYPES,
     capability_artifact_types,
 )
-from ..workflow_contracts import workflow_step_vocabulary
+from ..workflow_contracts import (
+    OperationValidationError as WorkflowOperationValidationError,
+    model_family_contract,
+    workflow_step_vocabulary,
+)
 
 
 class NotebookPlanningUnavailable(RuntimeError):
@@ -690,8 +694,11 @@ class NotebookPlanningAgent:
                     "For a run proposal copy the active-head and node pins without rewriting them. For model.genesis, "
                     "changes may contain only table_params, model_params, or model_options, each as an object; "
                     "put model-specific fields inside one of those objects, never directly in changes. "
-                    "For model.genesis, model_params must include an evidence-backed model_type and y; "
-                    "all non-time-series genesis models must also include x as a non-empty list. "
+                    "For model.genesis, model_params must include an evidence-backed model_type and y. "
+                    "Use the server-published capability form for that family: x is non-empty only "
+                    "when the selected family requires covariates; DID families instead require their "
+                    "published entity, time, and cohort or treatment-path columns. Do not add OLS "
+                    "covariance fields to a DID family. "
                     "When context.typed_operation_contracts publishes operation.multi_step, use it for a "
                     "typed statistical workflow that needs declared categorical terms, polynomial terms, "
                     "or declared post-estimation steps. Copy its target_exact and preconditions_exact "
@@ -1737,22 +1744,69 @@ class NotebookPlanningAgent:
                     raise NotebookPlanningContractError(
                         f"model.genesis y is not present in completed evidence columns: {y}"
                     )
-                if model_type != "time_series.arma_garch":
-                    x = model_params.get("x")
-                    if (
-                        not isinstance(x, list)
-                        or not x
-                        or any(not isinstance(item, str) or not item for item in x)
-                    ):
-                        raise NotebookPlanningContractError(
-                            "model.genesis model_params must include non-empty evidence-backed x"
+                try:
+                    family_contract = model_family_contract(model_type)
+                except WorkflowOperationValidationError:
+                    family_contract = None
+                if family_contract is None:
+                    requires_x = model_type != "time_series.arma_garch"
+                else:
+                    requires_x = family_contract.requires_nonempty_predictors
+                    family_values = {
+                        field_name: model_params.get(field_name)
+                        for field_name in family_contract.required_spec_fields
+                    }
+                    if family_contract.required_spec_field_mode == "all":
+                        missing_family_fields = [
+                            field_name
+                            for field_name, value in family_values.items()
+                            if not isinstance(value, str) or not value
+                        ]
+                    else:
+                        missing_family_fields = (
+                            list(family_values)
+                            if family_values
+                            and not any(
+                                isinstance(value, str) and value
+                                for value in family_values.values()
+                            )
+                            else []
                         )
-                    missing_x = sorted(set(x) - evidence_columns)
-                    if missing_x:
+                    if missing_family_fields:
                         raise NotebookPlanningContractError(
-                            "model.genesis x is not present in completed evidence columns: "
-                            + ", ".join(missing_x)
+                            family_contract.missing_required_fields_message
+                            or "model.genesis is missing family-required fields"
                         )
+                    for field_name, value in family_values.items():
+                        if value is None:
+                            continue
+                        if not isinstance(value, str) or not value:
+                            raise NotebookPlanningContractError(
+                                f"model.genesis {field_name} must be an evidence-backed column"
+                            )
+                        if value not in evidence_columns:
+                            raise NotebookPlanningContractError(
+                                f"model.genesis {field_name} is not present in completed evidence columns: {value}"
+                            )
+                    if not family_contract.allows_covariance and "covariance" in model_params:
+                        raise NotebookPlanningContractError(
+                            f"model.genesis {model_type} does not accept OLS covariance settings"
+                        )
+                x = model_params.get("x", [])
+                if (
+                    not isinstance(x, list)
+                    or any(not isinstance(item, str) or not item for item in x)
+                    or (requires_x and not x)
+                ):
+                    raise NotebookPlanningContractError(
+                        "model.genesis model_params must include non-empty evidence-backed x"
+                    )
+                missing_x = sorted(set(x) - evidence_columns)
+                if missing_x:
+                    raise NotebookPlanningContractError(
+                        "model.genesis x is not present in completed evidence columns: "
+                        + ", ".join(missing_x)
+                    )
             elif operation_id == "operation.multi_step":
                 workflow_source = self._execution_pins(context).get("workflow_source")
                 if workflow_source is None:

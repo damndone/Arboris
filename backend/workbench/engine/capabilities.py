@@ -218,6 +218,39 @@ _OLS_MODEL_PARAMS = _COMMON_MODEL_PARAMS + [
     },
 ]
 
+_DID_MODEL_PARAMS = [
+    {"key": "model_type", "kind": "select", "label": "Model", "role": "model"},
+    {
+        "key": "x",
+        "kind": "columns",
+        "label": "Covariates (optional)",
+        "required": False,
+        "role": "x",
+    },
+    {"key": "entity_col", "kind": "columns", "label": "Entity", "required": True, "role": "entity"},
+    {"key": "time_col", "kind": "columns", "label": "Time", "required": True, "role": "time"},
+]
+
+_COHORT_DID_MODEL_PARAMS = _DID_MODEL_PARAMS + [
+    {
+        "key": "cohort_col",
+        "kind": "columns",
+        "label": "First treated period",
+        "required": True,
+        "role": "cohort",
+    },
+]
+
+_SWITCHING_DID_MODEL_PARAMS = _DID_MODEL_PARAMS + [
+    {
+        "key": "treatment_path_col",
+        "kind": "columns",
+        "label": "Treatment path",
+        "required": True,
+        "role": "treatment_path",
+    },
+]
+
 _MODEL_PARAMS: dict[str, list[dict]] = {
     "ols": _OLS_MODEL_PARAMS,
     "logit": _COMMON_MODEL_PARAMS,
@@ -233,9 +266,9 @@ _MODEL_PARAMS: dict[str, list[dict]] = {
         {"key": "iv_instruments", "kind": "columns", "label": "Instruments", "required": True, "role": "instruments"},
     ],
     "did": _COMMON_MODEL_PARAMS,
-    "cs_did": _COMMON_MODEL_PARAMS,
-    "sa_did": _COMMON_MODEL_PARAMS,
-    "dcdh": _COMMON_MODEL_PARAMS,
+    "cs_did": _COHORT_DID_MODEL_PARAMS,
+    "sa_did": _COHORT_DID_MODEL_PARAMS,
+    "dcdh": _SWITCHING_DID_MODEL_PARAMS,
     "glm:binomial": _COMMON_MODEL_PARAMS,
     "glm:poisson": _COMMON_MODEL_PARAMS,
     "glm:negative_binomial": _COMMON_MODEL_PARAMS,

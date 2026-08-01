@@ -855,7 +855,7 @@ def _validate_genesis_for_execution(
         ("model_type", model_type),
         ("y", model_params.get("y")),
     ]
-    if model_type != "time_series.arma_garch":
+    if _genesis_model_requires_predictors(model_type):
         required_model_fields.append(("x", model_params.get("x")))
     missing = [key for key, value in required_model_fields if not value]
     if missing:
@@ -896,6 +896,26 @@ def _validate_genesis_for_execution(
         result["validated_execution_mode"] = mode
         result["validated_draft_hash"] = compute_executable_draft_hash(draft)
     return result
+
+
+def _genesis_model_requires_predictors(model_type: Any) -> bool:
+    """Return the owning contract's predictor requirement for a Genesis model.
+
+    Genesis remains able to validate legacy model types that have not been
+    admitted to Agent workflows.  Those retain the conservative historical
+    requirement.  A workflow-admitted family, however, owns this rule through
+    its ModelFamilyContract, so a DID effect estimate with no covariates is not
+    accidentally rejected as an incomplete OLS request.
+    """
+
+    if model_type == "time_series.arma_garch":
+        return False
+    from ..agent.workflow_contracts import OperationValidationError, model_family_contract
+
+    try:
+        return model_family_contract(model_type).requires_nonempty_predictors
+    except OperationValidationError:
+        return True
 
 
 def validate_draft_for_execution(

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from dataclasses import replace
 from types import SimpleNamespace
 import pandas as pd
+import pytest
 
 from tests.test_notebook_support import make_project, make_run, model_rerun_proposal
 from workbench.api import app
@@ -1260,6 +1261,74 @@ def test_dataset_genesis_materializes_declared_panel_dimensions(tmp_path: Path) 
         "entity_col": "school",
         "time_col": "year",
         "covariance": "robust",
+    }
+
+
+@pytest.mark.parametrize(
+    ("model_type", "timing_field", "timing_value", "expected_timing"),
+    [
+        ("cs_did", "cohort_col", "first_treat", {"did_mode": "cohort", "did_cohort_col": "first_treat"}),
+        ("sa_did", "cohort_col", "first_treat", {"did_mode": "cohort", "did_cohort_col": "first_treat"}),
+        ("dcdh", "treatment_path_col", "treatment", {"did_treatment_path": "treatment"}),
+    ],
+)
+def test_dataset_genesis_materializes_did_family_contract_without_ols_defaults(
+    tmp_path: Path,
+    model_type: str,
+    timing_field: str,
+    timing_value: str,
+    expected_timing: dict[str, str],
+) -> None:
+    """Notebook parameters are converted by the DID family contract, not OLS rules."""
+
+    project = make_project(tmp_path)
+    upload_sha = store_upload_bytes(
+        project,
+        b"outcome,unit,period,first_treat,treatment\n1,a,2020,2021,0\n2,a,2021,2021,1\n",
+        filename="did.csv",
+    )
+    client = TestClient(app)
+    notebook = client.post(
+        "/notebooks/projection",
+        params={"project_root": str(project)},
+        json={
+            "dataset": {
+                "upload_sha256": upload_sha,
+                "filename": "did.csv",
+                "sheet_names": [],
+            },
+            "created_by": "ui",
+        },
+    ).json()
+    service = NotebookService(project)
+    stored_notebook = service.get_notebook(notebook["notebook_id"])
+
+    draft = NotebookOptionMaterializer(service)._materialize_dataset(
+        stored_notebook,
+        {
+            "target": {"dataset_source_id": upload_sha},
+            "changes": {
+                "model_params": {
+                    "model_type": model_type,
+                    "y": "outcome",
+                    "x": [],
+                    "entity_col": "unit",
+                    "time_col": "period",
+                    timing_field: timing_value,
+                }
+            },
+        },
+        {"notebook_id": notebook["notebook_id"], "option_id": "did_option", "option_revision": "1"},
+    )
+
+    model = next(node for node in draft.draft["graph"]["nodes"] if node["node_id"] == "model_1")
+    assert model["params"] == {
+        "model_type": model_type,
+        "y": "outcome",
+        "x": [],
+        "entity_col": "unit",
+        "time_col": "period",
+        **expected_timing,
     }
 
 

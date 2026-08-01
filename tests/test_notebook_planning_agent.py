@@ -1884,6 +1884,94 @@ def test_provider_gets_correction_for_incomplete_genesis_preconditions(tmp_path:
     assert freshness_dependency_fingerprint(context) in correction_messages[-1]["content"]
 
 
+def test_notebook_agent_accepts_did_genesis_with_family_timing_and_no_covariates(
+    tmp_path: Path,
+) -> None:
+    """The typed planner must not impose OLS X requirements on DID options."""
+
+    upload_sha256 = "sha256:upload-did"
+    context = _context(
+        make_project(tmp_path),
+        projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+    )
+    evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={
+                    "columns": [
+                        {"name": "outcome"},
+                        {"name": "unit"},
+                        {"name": "period"},
+                        {"name": "first_treat"},
+                    ]
+                },
+                result_hash="sha256:did-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The declared timing fields support a cohort DID design.",
+            "assumptions": ["cohort timing is correctly recorded"],
+            "capability_id": "cs_did",
+            "option_id": "opt_cs_did",
+            "proposal": {
+                "proposal_id": "prop_cs_did",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": upload_sha256},
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": freshness_dependency_fingerprint(context),
+                    "owner_resolution": "single_candidate",
+                },
+                "changes": {
+                    "model_params": {
+                        "model_type": "cs_did",
+                        "y": "outcome",
+                        "x": [],
+                        "entity_col": "unit",
+                        "time_col": "period",
+                        "cohort_col": "first_treat",
+                    }
+                },
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "cs_did_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:did-profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": ["evidence:profile confirms the declared source columns."],
+        }
+    )
+    catalog = {"cs_did": {"model_type": "cs_did"}}
+
+    normalized = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(), capability_catalog=catalog
+    )._validate_submissions(context, evidence, (submission,), catalog)
+
+    assert normalized[0].proposal.changes["model_params"]["cohort_col"] == "first_treat"
+
+
 def test_provider_rejects_genesis_without_evidence_backed_target(tmp_path: Path) -> None:
     upload_sha256 = "a" * 64
     context = _context(

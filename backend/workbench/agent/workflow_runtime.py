@@ -829,7 +829,7 @@ def _execute_model_genesis_branches(
             )
         except ModelTermError as exc:
             raise WorkflowExecutionError(
-                f"OLS branch {branch_id} derived terms: {exc}"
+                f"{model_family} branch {branch_id} derived terms: {exc}"
             ) from exc
         # A branch can have no branch-local dummy/polynomial expansion and
         # still depend on an upstream numeric derivation.  Reusing the original
@@ -881,7 +881,10 @@ def _execute_model_genesis_branches(
                         *[str(c) for c in branch["predictors"]],
                         *[
                             str(column)
-                            for column in (branch_spec.get("entity_col"), branch_spec.get("time_col"))
+                            for column in (
+                                branch_spec.get(field_name)
+                                for field_name in family_contract.context_spec_fields
+                            )
                             if column
                         ],
                     )
@@ -967,7 +970,7 @@ def _execute_model_genesis_branches(
         missing_figures = sorted(required_branch_figures(branch_predictors) - set(ids))
         if family_contract.requires_branch_figures and missing_figures:
             raise WorkflowExecutionError(
-                f"OLS branch {branch_id} is missing residual/fitted diagnostics: "
+                f"{model_family} branch {branch_id} is missing required diagnostics: "
                 + ", ".join(missing_figures)
             )
         artifact_ids.extend(f"{run_id}:{artifact_id}" for artifact_id in ids)
@@ -983,8 +986,10 @@ def _execute_model_genesis_branches(
                     # recorded here the refit could only guess, and would
                     # report inference for a model nobody estimated.
                     "covariance": branch_covariance,
-                    "entity_col": branch_spec.get("entity_col"),
-                    "time_col": branch_spec.get("time_col"),
+                    **{
+                        field_name: branch_spec.get(field_name)
+                        for field_name in family_contract.context_spec_fields
+                    },
                     "outcome": str(branch["outcome"]),
                     "predictors": [str(item) for item in branch["predictors"]],
                     "categorical": [str(item) for item in branch.get("categorical", []) or []],

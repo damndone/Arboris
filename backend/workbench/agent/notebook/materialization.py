@@ -26,6 +26,7 @@ from ...services.draft_materialization import (
 )
 from ..context_compiler import NotebookPlanningContextV1
 from ..trace import TraceWriter
+from ..workflow_contracts import OperationValidationError, model_family_contract
 from .errors import (
     OptionLifecycleTransitionInvalid,
     OptionMaterializationFailed,
@@ -590,6 +591,8 @@ class NotebookOptionMaterializer:
             "model_options",
             "entity_col",
             "time_col",
+            "cohort_col",
+            "treatment_path_col",
         }
         if set(model_params) - allowed_model:
             raise _fail("genesis materialization received unknown model params")
@@ -604,6 +607,10 @@ class NotebookOptionMaterializer:
             entry for entry in capability_entries if str(entry.get("key")) == model_type
         )
         try:
+            family_contract = model_family_contract(model_type)
+        except OperationValidationError:
+            family_contract = None
+        try:
             model_params = normalize_ols_genesis_model_params(model_params)
         except ValueError as exc:
             raise _fail(str(exc)) from exc
@@ -612,20 +619,49 @@ class NotebookOptionMaterializer:
             raise _fail("genesis model_params requires evidence-backed y")
         if y not in columns:
             raise _fail("genesis y is not a column in the verified dataset", column=y)
-        panel_dimensions = {
+        declared_dimensions = {
             key: model_params.get(key)
-            for key in ("entity_col", "time_col")
+            for key in ("entity_col", "time_col", "cohort_col", "treatment_path_col")
             if model_params.get(key) is not None
+        }
+        family_builds_native_params = bool(
+            family_contract is not None and not family_contract.allows_covariance
+        )
+        if family_builds_native_params:
+            accepted_dimensions = set(family_contract.context_spec_fields)
+            unexpected_dimensions = sorted(set(declared_dimensions) - accepted_dimensions)
+            if unexpected_dimensions:
+                raise _fail(
+                    f"genesis {model_type} does not accept " + ", ".join(unexpected_dimensions)
+                )
+            missing_dimensions = [
+                field_name
+                for field_name in family_contract.required_spec_fields
+                if field_name not in declared_dimensions
+            ]
+            if missing_dimensions:
+                raise _fail(
+                    family_contract.missing_required_fields_message
+                    or f"genesis {model_type} requires family timing fields"
+                )
+        panel_dimensions = {
+            key: value
+            for key, value in declared_dimensions.items()
+            if key in {"entity_col", "time_col"}
         }
         if model_type == "panel_ols" and not panel_dimensions:
             raise _fail(
                 "genesis panel_ols requires an evidence-backed entity_col or time_col"
             )
-        if model_type != "panel_ols" and panel_dimensions:
+        if model_type != "panel_ols" and panel_dimensions and not family_builds_native_params:
             raise _fail(
                 "genesis non-panel model does not accept entity_col or time_col"
             )
-        for field_name, value in panel_dimensions.items():
+        if not family_builds_native_params and any(
+            key in declared_dimensions for key in ("cohort_col", "treatment_path_col")
+        ):
+            raise _fail("genesis selected model does not accept DID timing fields")
+        for field_name, value in declared_dimensions.items():
             if not isinstance(value, str) or not value:
                 raise _fail(
                     f"genesis {field_name} must be a non-empty evidence-backed column"
@@ -645,21 +681,23 @@ class NotebookOptionMaterializer:
             and param.get("required")
             for param in capability.get("params", [])
         )
+        x = model_params.get("x", [])
+        if not isinstance(x, list) or any(not isinstance(item, str) or not item for item in x):
+            raise _fail("genesis x must be an evidence-backed column list")
         if model_requires_x:
-            x = model_params.get("x")
             if (
-                not isinstance(x, list)
-                or not x
-                or any(not isinstance(item, str) or not item for item in x)
+                not x
             ):
                 raise _fail("genesis model_params requires non-empty evidence-backed x")
-            missing_x = sorted(set(x) - set(columns))
-            if missing_x:
-                raise _fail(
-                    "genesis x contains columns absent from the verified dataset",
-                    columns=missing_x,
-                )
+        missing_x = sorted(set(x) - set(columns))
+        if missing_x:
+            raise _fail(
+                "genesis x contains columns absent from the verified dataset",
+                columns=missing_x,
+            )
         if "covariance" in model_params:
+            if family_contract is not None and not family_contract.allows_covariance:
+                raise _fail(f"genesis {model_type} does not accept OLS covariance settings")
             allowed_covariance = {str(entry["key"]) for entry in COVARIANCE_UI}
             if model_params["covariance"] not in allowed_covariance:
                 raise _fail("genesis covariance is not a registered option")
@@ -670,6 +708,17 @@ class NotebookOptionMaterializer:
                 ).payload
             except ModelOptionsError as exc:
                 raise _fail("genesis model_options failed validation", reason=exc.code) from exc
+        if family_builds_native_params:
+            family_spec = {
+                field_name: model_params[field_name]
+                for field_name in family_contract.context_spec_fields
+            }
+            model_params = family_contract.build_model_params(
+                family_spec,
+                {"outcome": y, "predictors": x},
+                list(x),
+                "unadjusted",
+            )
         draft = create_genesis_draft(
             self.service.project_root,
             upload_sha256=source.upload_sha256 or "",
