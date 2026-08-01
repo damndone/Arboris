@@ -251,6 +251,34 @@ run_gate_script_tests() {
   run_pytest tests/test_gate_script.py -q
 }
 
+run_domain_memory_preflight() {
+  # Deployment chooses whether a durable approved-memory store exists. Its
+  # health must be visible when configured, but memory expiry is never a
+  # reason to block unrelated implementation or release checks: runtime
+  # retrieval already omits/downgrades unsafe entries fail-closed.
+  if [ -z "${WORKBENCH_DOMAIN_MEMORY_ROOT:-}" ] \
+    || [ -z "${WORKBENCH_DOMAIN_MEMORY_SCOPE_JSON:-}" ]; then
+    printf '%s\n' 'DOMAIN_MEMORY_PREFLIGHT status=not_configured'
+    return 0
+  fi
+  if ! resolve_pytest_python; then
+    printf '%s\n' 'DOMAIN_MEMORY_PREFLIGHT status=unavailable reason=python_unavailable'
+    return 0
+  fi
+  local output status
+  output="$(PYTHONPATH="backend${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m workbench.domain_memory.preflight \
+    --root "$WORKBENCH_DOMAIN_MEMORY_ROOT" \
+    --scope-json "$WORKBENCH_DOMAIN_MEMORY_SCOPE_JSON" 2>&1)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "DOMAIN_MEMORY_PREFLIGHT status=unavailable reason=collector_failed"
+    [ -n "$output" ] && printf '%s\n' "$output"
+    return 0
+  fi
+  [ -n "$output" ] && printf '%s\n' "$output"
+  return 0
+}
+
 run_devline_control_verify() {
   resolve_pytest_python || return 1
   PYTHONPATH="backend${PYTHONPATH:+:$PYTHONPATH}" \
@@ -373,6 +401,7 @@ run_quick() {
 
 preflight_shared_deps
 preflight_exclusive
+run_domain_memory_preflight
 
 if [ "$mode" = "quick" ]; then
   run_quick

@@ -40,6 +40,27 @@ describe("OptionCard — the canonical option, rendered as the packet states it"
     expect(screen.getByTestId("option-pins")).toHaveTextContent("supersedes rev 1");
   });
 
+  it("makes a server-applied memory default visible with its immutable source", () => {
+    render(
+      <OptionCard
+        option={option({
+          contract_version: "1.3",
+          memory_default_sources: [
+            {
+              memory_id: "memory-ols-covariance",
+              revision: 2,
+              target_ref: "model.genesis.ols.covariance.robust",
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("option-memory-default-sources")).toHaveTextContent(
+      "memory-ols-covariance · rev 2 · model.genesis.ols.covariance.robust",
+    );
+  });
+
   it("uses the batch decision instead of display rank for recommendation styling", () => {
     const v11 = (overrides: Partial<NotebookOptionRevision> = {}) =>
       option({

@@ -146,6 +146,19 @@ export function OptionCard({
         </p>
       ) : null}
 
+      {option.memory_default_sources?.length ? (
+        <section className="nb-option-memory-defaults" data-testid="option-memory-default-sources">
+          <span className="nb-label">Default from memory</span>
+          <ul>
+            {option.memory_default_sources.map((source) => (
+              <li key={`${source.memory_id}:${source.revision}:${source.target_ref}`}>
+                {`${source.memory_id} · rev ${source.revision} · ${source.target_ref}`}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {outcome ? (
         <section className="nb-option-outcome" data-testid="option-contract-outcome">
           <span className="nb-outcome-headline">

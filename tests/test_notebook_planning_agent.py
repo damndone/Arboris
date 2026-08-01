@@ -28,9 +28,13 @@ from workbench.agent.notebook.producer import (
 )
 from workbench.agent.operations import OperationRegistry, OperationValidationError
 from workbench.agent.notebook.store import ProjectionSource, WorkflowSource
-from workbench.agent.context_compiler import compile_notebook_planning_context
+from workbench.agent.context_compiler import (
+    attach_domain_memory_projection,
+    compile_notebook_planning_context,
+)
 from workbench.agent.context_compiler import freshness_dependency_fingerprint
 from workbench.agent.notebook.proposal import TypedProposal
+from workbench.contracts.agent.notebook_option import MemoryDefaultSource
 from workbench.agent.workflow_contracts import validate_workflow_steps
 from tests.test_notebook_support import make_project
 
@@ -1970,6 +1974,128 @@ def test_notebook_agent_accepts_did_genesis_with_family_timing_and_no_covariates
     )._validate_submissions(context, evidence, (submission,), catalog)
 
     assert normalized[0].proposal.changes["model_params"]["cohort_col"] == "first_treat"
+
+
+def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(
+    tmp_path: Path,
+) -> None:
+    """A planner cannot turn a hint into an unowned or free-text default."""
+
+    upload_sha256 = "sha256:upload-memory-default"
+    context = attach_domain_memory_projection(
+        _context(
+            make_project(tmp_path),
+            projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
+        ),
+        {
+            "contract_version": "domain-memory-context-input/v2",
+            "retrieval_ref": "retrieval-memory-default",
+            "scope_ref": "scope-memory-default",
+            "outcome": "used",
+            "reason": "approved hint",
+            "entries": [
+                {
+                    "memory_id": "memory-ols-covariance",
+                    "revision": 2,
+                    "content_hash": "a" * 64,
+                    "memory_kind": "project_domain_fact",
+                    "domain_tags": ["education"],
+                    "compact_lesson": "Use robust covariance for this approved default.",
+                    "recommended_effect_kind": "assumption_check_hint",
+                    "recommended_target_refs": [
+                        "model.genesis.ols.covariance.robust"
+                    ],
+                    "source_summary_refs": ["summary-memory-default"],
+                    "match_reason": ["goal"],
+                    "apply_mode": "suggest_default",
+                    "apply_mode_reason": "verifier_current",
+                    "memory_source": {
+                        "memory_id": "memory-ols-covariance",
+                        "revision": 2,
+                    },
+                    "memory_authority": "non_authoritative_hint",
+                }
+            ],
+            "omissions": [],
+            "bounded": True,
+            "preference_ref": "preference-memory-default",
+            "memory_authority": "non_authoritative",
+        },
+    )
+    evidence = DataEvidencePackV1(
+        source_id="dataset:active",
+        records=(
+            EvidenceRecord(
+                evidence_id="evidence:profile",
+                inspection_id="profile.v1",
+                source_refs=("profile:dataset",),
+                protocol_version="profile/v1",
+                status="completed",
+                observations={"columns": [{"name": "outcome"}, {"name": "exposure"}]},
+                result_hash="sha256:memory-default-profile",
+            ),
+        ),
+    )
+    submission = _submission(
+        {
+            "rank": 1,
+            "rationale": "The profile confirms the requested OLS columns.",
+            "assumptions": ["the approved covariance convention remains applicable"],
+            "capability_id": "ols",
+            "option_id": "opt_memory_default",
+            "proposal": {
+                "proposal_id": "prop_memory_default",
+                "proposal_revision": 1,
+                "operation_id": "model.genesis",
+                "operation_version": "v1",
+                "target": {"dataset_source_id": upload_sha256},
+                "preconditions": {
+                    "context_version": "node-operation-context/v1",
+                    "context_fingerprint": freshness_dependency_fingerprint(context),
+                    "owner_resolution": "single_candidate",
+                },
+                "changes": {
+                    "model_params": {
+                        "model_type": "ols",
+                        "y": "outcome",
+                        "x": ["exposure"],
+                    }
+                },
+            },
+            "expected_artifacts": [
+                {
+                    "artifact_id": "ols_1",
+                    "artifact_type": "model_result",
+                    "required": True,
+                    "count": 1,
+                    "step": None,
+                }
+            ],
+            "evidence_refs": [
+                {
+                    "evidence_id": "evidence:profile",
+                    "result_hash": "sha256:memory-default-profile",
+                    "source_refs": ["profile:dataset"],
+                }
+            ],
+            "comparative_claims": [
+                "evidence:profile confirms the declared source columns."
+            ],
+        }
+    )
+
+    (normalized,) = NotebookPlanningAgent(
+        adapter=TextOnlyAdapter(), capability_catalog={"ols": {"model_type": "ols"}}
+    )._validate_submissions(context, evidence, (submission,), {"ols": {"model_type": "ols"}})
+
+    assert normalized.proposal.changes["model_options"] == {"covariance": "robust"}
+    assert normalized.proposal.memory_default_sources == (
+        MemoryDefaultSource(
+            memory_id="memory-ols-covariance",
+            revision=2,
+            target_ref="model.genesis.ols.covariance.robust",
+        ),
+    )
 
 
 def test_provider_rejects_genesis_without_evidence_backed_target(tmp_path: Path) -> None:

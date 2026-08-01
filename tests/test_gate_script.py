@@ -129,6 +129,15 @@ def test_gate_script_exposes_explicit_quick_and_full_modes() -> None:
     assert "--help" in source
 
 
+def test_gate_runs_a_nonblocking_domain_memory_preflight_when_a_store_is_configured() -> None:
+    source = GATE_SCRIPT.read_text()
+
+    assert "WORKBENCH_DOMAIN_MEMORY_ROOT" in source
+    assert "WORKBENCH_DOMAIN_MEMORY_SCOPE_JSON" in source
+    assert "DOMAIN_MEMORY_PREFLIGHT" in source
+    assert "domain_memory.preflight" in source
+
+
 def test_gate_prefers_explicit_workbench_python_override(tmp_path: Path) -> None:
     result, invocations, _ = _run_gate(
         tmp_path,

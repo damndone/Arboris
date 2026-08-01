@@ -28,10 +28,13 @@ export interface DomainMemoryHint {
   recommended_target_refs: string[];
   source_summary_refs: string[];
   match_reason: string[];
+  apply_mode?: "inform_only" | "suggest_default";
+  apply_mode_reason?: string;
+  memory_source?: { memory_id: string; revision: number };
 }
 
 export interface DomainMemoryRetrievalProjection {
-  contract_version?: "domain-memory-context-input/v1";
+  contract_version?: "domain-memory-context-input/v1" | "domain-memory-context-input/v2";
   retrieval_ref?: string;
   scope_ref?: string;
   outcome: "used" | "not_used" | "empty" | "blocked";

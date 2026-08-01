@@ -74,6 +74,7 @@ class NotebookOptionMaterializer:
         notebook = self.service.get_notebook(notebook_id)
         view = self.service.store.read_option(notebook_id, option_id)
         current = view.current_revision
+        self.service._assert_current_memory_default_sources(view, context)
         binding_ref = getattr(current, "capability_resolution_binding_ref", None)
         if binding_ref is not None:
             self.service._assert_current_capability_binding(current)

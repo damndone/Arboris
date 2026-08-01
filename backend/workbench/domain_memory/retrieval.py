@@ -65,23 +65,6 @@ class RetrievedMemoryHint:
             "memory_authority": "non_authoritative_hint",
         }
 
-    def to_context_v1_dict(self) -> dict[str, Any]:
-        """Keep the existing planner projection stable until its v2 consumer lands."""
-        return {
-            "memory_id": self.memory_id,
-            "revision": self.revision,
-            "content_hash": self.content_hash,
-            "memory_kind": self.memory_kind,
-            "domain_tags": list(self.domain_tags),
-            "compact_lesson": self.compact_lesson,
-            "recommended_effect_kind": self.recommended_effect_kind,
-            "recommended_target_refs": list(self.recommended_target_refs),
-            "source_summary_refs": list(self.source_summary_refs),
-            "match_reason": list(self.match_reason),
-            "memory_authority": "non_authoritative_hint",
-        }
-
-
 @dataclass(frozen=True, slots=True)
 class DomainMemoryRetrieval:
     retrieval_ref: str
@@ -95,12 +78,12 @@ class DomainMemoryRetrieval:
 
     def to_context_projection(self) -> dict[str, Any]:
         return {
-            "contract_version": "domain-memory-context-input/v1",
+            "contract_version": "domain-memory-context-input/v2",
             "retrieval_ref": self.retrieval_ref,
             "scope_ref": self.scope_ref,
             "outcome": self.outcome,
             "reason": self.reason,
-            "entries": [item.to_context_v1_dict() for item in self.entries],
+            "entries": [item.to_dict() for item in self.entries],
             "omissions": [item.to_dict() for item in self.omissions],
             "bounded": self.bounded,
             "preference_ref": self.preference_ref,

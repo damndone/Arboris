@@ -19,6 +19,7 @@ from ..context_compiler import (
 )
 from .artifact_contract import build_artifact_contract
 from .evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
+from .memory_defaults import MemoryDefaultApplicationError, apply_memory_defaults
 from .proposal import TypedProposal
 from .recommendation import (
     ForecastRollingOriginProtocol,
@@ -1657,13 +1658,20 @@ class NotebookPlanningAgent:
         ranks = [submission.rank for submission in submissions]
         if len(set(ranks)) != len(ranks):
             raise NotebookPlanningContractError("option ranks must be unique")
-        proposal_hashes = [submission.proposal.canonical_hash() for submission in submissions]
-        if len(set(proposal_hashes)) != len(proposal_hashes):
-            raise NotebookPlanningContractError(
-                "option batch contains duplicate executable proposals"
-            )
         normalized_submissions: list[AgentOptionSubmission] = []
         for submission in submissions:
+            try:
+                submission = replace(
+                    submission,
+                    proposal=apply_memory_defaults(
+                        submission.proposal,
+                        context.domain_memory_projection,
+                    ),
+                )
+            except MemoryDefaultApplicationError as error:
+                raise NotebookPlanningContractError(
+                    f"memory-derived proposal default is invalid: {error}"
+                ) from error
             if submission.capability_id not in catalog:
                 if submission.proposal.operation_id == "operation.multi_step":
                     raise NotebookPlanningContractError(
@@ -2000,6 +2008,14 @@ class NotebookPlanningAgent:
                     submission,
                     expected_artifacts=canonical_expected_artifacts,
                 )
+            )
+        proposal_hashes = [
+            submission.proposal.canonical_hash()
+            for submission in normalized_submissions
+        ]
+        if len(set(proposal_hashes)) != len(proposal_hashes):
+            raise NotebookPlanningContractError(
+                "option batch contains duplicate executable proposals"
             )
         return tuple(normalized_submissions)
 

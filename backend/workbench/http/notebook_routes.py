@@ -18,6 +18,7 @@ from ..agent.context_compiler import (
     freshness_dependency_fingerprint,
     generation_context_hash,
 )
+from ..agent.notebook.memory_defaults import DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
@@ -389,6 +390,7 @@ def _default_domain_memory_projection(
         now=datetime.now(timezone.utc).isoformat(),
         max_entries=8,
         max_bytes=8192,
+        vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
     )
     return result.to_context_projection()
 
