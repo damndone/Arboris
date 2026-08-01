@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from typing import Any
 
@@ -40,8 +40,33 @@ class RetrievedMemoryHint:
     recommended_target_refs: tuple[str, ...]
     source_summary_refs: tuple[str, ...]
     match_reason: tuple[str, ...]
+    apply_mode: str
+    apply_mode_reason: str
+
+    @property
+    def memory_source(self) -> dict[str, int | str]:
+        return {"memory_id": self.memory_id, "revision": self.revision}
 
     def to_dict(self) -> dict[str, Any]:
+        return {
+            "memory_id": self.memory_id,
+            "revision": self.revision,
+            "content_hash": self.content_hash,
+            "memory_kind": self.memory_kind,
+            "domain_tags": list(self.domain_tags),
+            "compact_lesson": self.compact_lesson,
+            "recommended_effect_kind": self.recommended_effect_kind,
+            "recommended_target_refs": list(self.recommended_target_refs),
+            "source_summary_refs": list(self.source_summary_refs),
+            "match_reason": list(self.match_reason),
+            "apply_mode": self.apply_mode,
+            "apply_mode_reason": self.apply_mode_reason,
+            "memory_source": self.memory_source,
+            "memory_authority": "non_authoritative_hint",
+        }
+
+    def to_context_v1_dict(self) -> dict[str, Any]:
+        """Keep the existing planner projection stable until its v2 consumer lands."""
         return {
             "memory_id": self.memory_id,
             "revision": self.revision,
@@ -75,7 +100,7 @@ class DomainMemoryRetrieval:
             "scope_ref": self.scope_ref,
             "outcome": self.outcome,
             "reason": self.reason,
-            "entries": [item.to_dict() for item in self.entries],
+            "entries": [item.to_context_v1_dict() for item in self.entries],
             "omissions": [item.to_dict() for item in self.omissions],
             "bounded": self.bounded,
             "preference_ref": self.preference_ref,
@@ -106,6 +131,27 @@ def _valid_timestamp(value: str) -> datetime:
         raise DomainMemoryRetrievalError("timestamp must be ISO-8601") from error
 
 
+def _optional_vocabulary_version(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > 256 or "/" in value or "\\" in value:
+        raise DomainMemoryRetrievalError("vocabulary_version must be an opaque bounded id")
+    return value
+
+
+def _effective_apply_mode(content: DomainMemoryContentRevision, now: datetime) -> tuple[str, str]:
+    if content.apply_mode == "inform_only":
+        return "inform_only", "declared_inform_only"
+    if content.verifier is None or content.last_validated_at is None:
+        return "inform_only", "verifier_missing"
+    validated_at = _valid_timestamp(content.last_validated_at)
+    if validated_at > now:
+        return "inform_only", "validation_time_invalid"
+    if now - validated_at > timedelta(seconds=content.verifier.valid_for_seconds):
+        return "inform_only", "verifier_stale"
+    return "suggest_default", "verifier_current"
+
+
 def retrieve_domain_memory(
     store: DomainMemoryStore,
     *,
@@ -115,6 +161,7 @@ def retrieve_domain_memory(
     now: str,
     max_entries: int = 8,
     max_bytes: int = 8192,
+    vocabulary_version: str | None = None,
 ) -> DomainMemoryRetrieval:
     if not isinstance(store, DomainMemoryStore) or not isinstance(requester, MemoryScope):
         raise DomainMemoryRetrievalError("store and requester are required")
@@ -127,6 +174,7 @@ def retrieve_domain_memory(
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 256 <= max_bytes <= 32768:
         raise DomainMemoryRetrievalError("max_bytes budget is invalid")
     _valid_timestamp(now)
+    vocabulary_version = _optional_vocabulary_version(vocabulary_version)
     retrieval_ref = "retrieval-" + preferences.preference_ref[:40]
     if not preferences.use:
         return DomainMemoryRetrieval(retrieval_ref, requester.scope_ref, "not_used", "DOMAIN_MEMORY_DISABLED", (), (), True, preferences.preference_ref)
@@ -134,7 +182,7 @@ def retrieve_domain_memory(
         return DomainMemoryRetrieval(retrieval_ref, requester.scope_ref, "blocked", "DOMAIN_MEMORY_SCOPE_MISMATCH", (), (), True, preferences.preference_ref)
     now_value = _valid_timestamp(now)
     omissions: list[RetrievalOmission] = []
-    candidates: list[tuple[DomainMemoryContentRevision, tuple[str, ...]]] = []
+    candidates: list[tuple[DomainMemoryContentRevision, tuple[str, ...], str, str]] = []
     active = store.active_contents()
     identities = {f"{item.memory_id}@{item.revision}" for item in active}
     conflict_map = {
@@ -148,8 +196,12 @@ def retrieve_domain_memory(
         if any(not _predicate_matches(item, facts) for item in content.applicability_predicates):
             omissions.append(RetrievalOmission(content.memory_id, content.revision, "predicate_mismatch")); continue
         try:
+            if content.expires_at is not None and now_value >= _valid_timestamp(content.expires_at):
+                raise ValueError("expired")
             if now_value >= _valid_timestamp(content.review_after):
                 raise ValueError("review_due")
+            if content.vocabulary_version is not None and content.vocabulary_version != vocabulary_version:
+                raise ValueError("vocabulary_mismatch")
             source_refs: list[str] = []
             for source in content.source_summary_refs:
                 binding = bindings.get(source.source_access_binding_ref)
@@ -171,10 +223,11 @@ def retrieve_domain_memory(
         }
         if conflicts:
             omissions.append(RetrievalOmission(content.memory_id, content.revision, "conflict")); continue
-        candidates.append((content, tuple(source_refs)))
+        apply_mode, apply_mode_reason = _effective_apply_mode(content, now_value)
+        candidates.append((content, tuple(source_refs), apply_mode, apply_mode_reason))
     candidates.sort(key=lambda item: (-len(item[0].applicability_predicates), item[0].memory_id, item[0].revision))
     selected: list[RetrievedMemoryHint] = []
-    for content, source_refs in candidates:
+    for content, source_refs, apply_mode, apply_mode_reason in candidates:
         if len(selected) >= max_entries:
             omissions.append(RetrievalOmission(content.memory_id, content.revision, "entry_budget")); continue
         hint = RetrievedMemoryHint(
@@ -182,6 +235,7 @@ def retrieve_domain_memory(
             memory_kind=content.memory_kind, domain_tags=content.domain_tags, compact_lesson=content.compact_lesson,
             recommended_effect_kind=content.recommended_effect_kind, recommended_target_refs=content.recommended_target_refs,
             source_summary_refs=source_refs, match_reason=tuple(item.predicate_id for item in content.applicability_predicates),
+            apply_mode=apply_mode, apply_mode_reason=apply_mode_reason,
         )
         encoded = json.dumps(hint.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(encoded) > max_bytes or (selected and len(json.dumps([item.to_dict() for item in selected], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) + len(encoded) > max_bytes):

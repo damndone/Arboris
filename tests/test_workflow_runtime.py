@@ -31,6 +31,30 @@ from workbench.lineage.run_inputs import write_run_inputs
 from workbench.lineage.upload_store import store_upload_bytes
 
 
+def test_model_family_contracts_declare_existing_ols_and_panel_semantics() -> None:
+    """The workflow core declares, rather than infers, each admitted family."""
+
+    from workbench.agent.workflow_contracts import MODEL_FAMILY_CONTRACTS
+
+    assert set(MODEL_FAMILY_CONTRACTS) == {"ols", "panel_ols"}
+
+    ols = MODEL_FAMILY_CONTRACTS["ols"]
+    assert ols.family == "ols"
+    assert ols.required_spec_fields == ()
+    assert set(ols.forbidden_spec_fields) == {"entity_col", "time_col"}
+    assert set(ols.expected_artifacts) == {"ols_1", "diagnostic_summary"}
+    assert ols.result_shape == "coefficient_intervals"
+    assert callable(ols.build_model_params)
+
+    panel = MODEL_FAMILY_CONTRACTS["panel_ols"]
+    assert panel.family == "panel_ols"
+    assert set(panel.required_spec_fields) == {"entity_col", "time_col"}
+    assert panel.forbidden_spec_fields == ()
+    assert panel.expected_artifacts == ("panel_ols_1",)
+    assert panel.result_shape == "coefficient_intervals"
+    assert callable(panel.build_model_params)
+
+
 def _frame(rows: int = 24) -> pd.DataFrame:
     return pd.DataFrame(
         {

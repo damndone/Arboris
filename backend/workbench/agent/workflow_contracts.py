@@ -6,7 +6,7 @@ import re
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from .operations import OperationValidationError
 
@@ -256,6 +256,184 @@ class StepSpecContract:
             "properties": properties,
             "additionalProperties": False,
         }
+
+
+ModelParameterBuilder = Callable[[Mapping[str, Any], Mapping[str, Any], list[str], str], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ModelFamilyContract:
+    """The complete workflow admission contract for one model family.
+
+    The contract separates a family from the runtime's execution mechanics:
+    validation, Genesis parameters, required evidence, and result semantics all
+    travel together.  A future family therefore cannot silently inherit OLS
+    diagnostics or coefficient-interval assumptions merely because it reaches
+    the generic workflow executor.
+    """
+
+    family: str
+    required_spec_fields: tuple[str, ...]
+    required_spec_field_mode: str
+    forbidden_spec_fields: tuple[str, ...]
+    build_model_params: ModelParameterBuilder
+    expected_artifacts: tuple[str, ...]
+    result_shape: str
+    missing_required_fields_message: str | None = None
+    cluster_requires_entity: bool = False
+    allows_categorical_terms: bool = True
+    requires_branch_figures: bool = False
+
+    def __post_init__(self) -> None:
+        if self.required_spec_field_mode not in {"all", "any"}:
+            raise ValueError("ModelFamilyContract required_spec_field_mode is invalid")
+        if self.result_shape not in {
+            "coefficient_intervals",
+            "effect_estimate_bundle",
+            "event_study_bundle",
+        }:
+            raise ValueError("ModelFamilyContract result_shape is invalid")
+        if not self.family or not self.expected_artifacts:
+            raise ValueError("ModelFamilyContract requires family and expected artifacts")
+
+
+def _build_ols_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "ols",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "covariance": covariance,
+        "model_options": {"covariance": covariance},
+    }
+
+
+def _build_panel_ols_model_params(
+    spec: Mapping[str, Any], branch: Mapping[str, Any], predictors: list[str], covariance: str
+) -> dict[str, Any]:
+    return {
+        "model_type": "panel_ols",
+        "y": branch["outcome"],
+        "x": list(predictors),
+        "covariance": covariance,
+        "entity_col": spec.get("entity_col"),
+        "time_col": spec.get("time_col"),
+    }
+
+
+MODEL_FAMILY_CONTRACTS: dict[str, ModelFamilyContract] = {
+    "ols": ModelFamilyContract(
+        family="ols",
+        required_spec_fields=(),
+        required_spec_field_mode="all",
+        forbidden_spec_fields=("entity_col", "time_col"),
+        build_model_params=_build_ols_model_params,
+        expected_artifacts=("ols_1", "diagnostic_summary"),
+        result_shape="coefficient_intervals",
+        requires_branch_figures=True,
+    ),
+    "panel_ols": ModelFamilyContract(
+        family="panel_ols",
+        required_spec_fields=("entity_col", "time_col"),
+        required_spec_field_mode="any",
+        forbidden_spec_fields=(),
+        build_model_params=_build_panel_ols_model_params,
+        expected_artifacts=("panel_ols_1",),
+        result_shape="coefficient_intervals",
+        missing_required_fields_message=(
+            "model.genesis panel_ols requires entity_col or time_col"
+        ),
+        cluster_requires_entity=True,
+        allows_categorical_terms=False,
+    ),
+}
+
+
+def model_family_contract(model_family: Any) -> ModelFamilyContract:
+    if not isinstance(model_family, str) or model_family not in MODEL_FAMILY_CONTRACTS:
+        raise OperationValidationError(
+            "model.genesis model_family must be a workflow-executable family: "
+            + " or ".join(MODEL_FAMILY_CONTRACTS)
+        )
+    return MODEL_FAMILY_CONTRACTS[model_family]
+
+
+def validate_model_genesis_spec(spec: Mapping[str, Any]) -> ModelFamilyContract:
+    """Validate family-owned Genesis semantics and return its exact contract."""
+
+    from ..contracts.model.ols import OLS_COVARIANCE_VALUES
+    from ..model_terms import ModelTermError, validate_branch_terms
+
+    contract = model_family_contract(spec.get("model_family"))
+    dimensions: dict[str, str | None] = {}
+    for field_name in ("entity_col", "time_col"):
+        value = spec.get(field_name)
+        if value is not None and (not isinstance(value, str) or not value):
+            raise OperationValidationError(
+                f"model.genesis {field_name} must be a non-empty string"
+            )
+        dimensions[field_name] = value
+    forbidden = [field_name for field_name in contract.forbidden_spec_fields if dimensions[field_name] is not None]
+    if forbidden:
+        raise OperationValidationError(
+            "model.genesis ols does not accept panel entity_col or time_col"
+        )
+    required_values = [dimensions[field_name] for field_name in contract.required_spec_fields]
+    missing_required = (
+        contract.required_spec_field_mode == "all" and any(value is None for value in required_values)
+    ) or (
+        contract.required_spec_field_mode == "any" and contract.required_spec_fields and not any(required_values)
+    )
+    if missing_required:
+        raise OperationValidationError(
+            contract.missing_required_fields_message
+            or "model.genesis is missing a family-required field"
+        )
+    branches = spec.get("branches")
+    if not isinstance(branches, list) or not branches:
+        raise OperationValidationError("model.genesis step requires a non-empty branches list")
+    seen: set[str] = set()
+    for branch in branches:
+        if not isinstance(branch, Mapping):
+            raise OperationValidationError("each model branch must be an object")
+        branch_id = branch.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id.strip():
+            raise OperationValidationError("each model branch requires a branch_id")
+        if branch_id in seen:
+            raise OperationValidationError(f"duplicate model branch_id: {branch_id}")
+        seen.add(branch_id)
+        predictors = branch.get("predictors")
+        if not isinstance(predictors, list) or not predictors:
+            raise OperationValidationError(f"model branch {branch_id} requires predictors")
+        if not branch.get("outcome"):
+            raise OperationValidationError(f"model branch {branch_id} requires an outcome")
+        if branch.get("outcome") in predictors:
+            raise OperationValidationError(
+                f"model branch {branch_id} outcome must not also be a predictor"
+            )
+        covariance = branch.get("covariance", spec.get("covariance"))
+        if covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
+            raise OperationValidationError(
+                f"model branch {branch_id} covariance must be one of: "
+                + ", ".join(OLS_COVARIANCE_VALUES)
+            )
+        if contract.cluster_requires_entity and covariance == "clustered" and not dimensions["entity_col"]:
+            raise OperationValidationError(
+                "model.genesis clustered panel_ols requires entity_col"
+            )
+        if not contract.allows_categorical_terms and branch.get("categorical"):
+            raise OperationValidationError(
+                "model.genesis panel_ols does not accept categorical expansion; "
+                "declare entity_col/time_col for absorbed effects"
+            )
+        try:
+            validate_branch_terms(branch)
+        except ModelTermError as exc:
+            raise OperationValidationError(
+                f"model branch {branch_id}: {exc}"
+            ) from exc
+    return contract
 
 
 WORKFLOW_STEP_SPEC_CONTRACTS: dict[str, StepSpecContract] = {
@@ -861,75 +1039,7 @@ def _validate_step_spec(operation_id: str, spec: Mapping[str, Any]) -> None:
         if not isinstance(spec.get("summarize_columns"), list) or not spec["summarize_columns"]:
             raise OperationValidationError("derived_group_summarize requires summarize_columns")
     elif validator_key == "model.genesis":
-        from ..contracts.model.ols import OLS_COVARIANCE_VALUES
-        from ..model_terms import ModelTermError, validate_branch_terms
-
-        model_family = spec.get("model_family")
-        if model_family not in {"ols", "panel_ols"}:
-            raise OperationValidationError(
-                "model.genesis model_family must be a workflow-executable family: "
-                "ols or panel_ols"
-            )
-        entity_col = spec.get("entity_col")
-        time_col = spec.get("time_col")
-        if entity_col is not None and (not isinstance(entity_col, str) or not entity_col):
-            raise OperationValidationError("model.genesis entity_col must be a non-empty string")
-        if time_col is not None and (not isinstance(time_col, str) or not time_col):
-            raise OperationValidationError("model.genesis time_col must be a non-empty string")
-        if model_family == "ols" and (entity_col is not None or time_col is not None):
-            raise OperationValidationError(
-                "model.genesis ols does not accept panel entity_col or time_col"
-            )
-        if model_family == "panel_ols" and not entity_col and not time_col:
-            raise OperationValidationError(
-                "model.genesis panel_ols requires entity_col or time_col"
-            )
-        branches = spec.get("branches")
-        if not isinstance(branches, list) or not branches:
-            raise OperationValidationError("model.genesis step requires a non-empty branches list")
-        seen: set[str] = set()
-        for branch in branches:
-            if not isinstance(branch, Mapping):
-                raise OperationValidationError("each model branch must be an object")
-            branch_id = branch.get("branch_id")
-            if not isinstance(branch_id, str) or not branch_id.strip():
-                raise OperationValidationError("each model branch requires a branch_id")
-            if branch_id in seen:
-                raise OperationValidationError(f"duplicate model branch_id: {branch_id}")
-            seen.add(branch_id)
-            predictors = branch.get("predictors")
-            if not isinstance(predictors, list) or not predictors:
-                raise OperationValidationError(f"model branch {branch_id} requires predictors")
-            if not branch.get("outcome"):
-                raise OperationValidationError(f"model branch {branch_id} requires an outcome")
-            if branch.get("outcome") in predictors:
-                raise OperationValidationError(
-                    f"model branch {branch_id} outcome must not also be a predictor"
-                )
-            covariance = branch.get("covariance", spec.get("covariance"))
-            if covariance is not None and covariance not in OLS_COVARIANCE_VALUES:
-                raise OperationValidationError(
-                    f"model branch {branch_id} covariance must be one of: "
-                    + ", ".join(OLS_COVARIANCE_VALUES)
-                )
-            if model_family == "panel_ols":
-                if covariance == "clustered" and not entity_col:
-                    raise OperationValidationError(
-                        "model.genesis clustered panel_ols requires entity_col"
-                    )
-                if branch.get("categorical"):
-                    raise OperationValidationError(
-                        "model.genesis panel_ols does not accept categorical expansion; "
-                        "declare entity_col/time_col for absorbed effects"
-                    )
-            # Derived terms are validated by the module that also builds them,
-            # so a spec that passes here cannot mean something else at execution.
-            try:
-                validate_branch_terms(branch)
-            except ModelTermError as exc:
-                raise OperationValidationError(
-                    f"model branch {branch_id}: {exc}"
-                ) from exc
+        validate_model_genesis_spec(spec)
     elif validator_key == "model.joint_f_test":
         selectors = spec.get("term_selectors")
         if not isinstance(selectors, list) or not selectors:
