@@ -25,6 +25,7 @@ from ..agent.notebook.memory_defaults import (
     DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
 )
 from ..agent.recipe_contracts import RECIPE_CONTRACTS
+from ..agent.workflow_contracts import notebook_workflow_capability_ids
 from ..agent.notebook import NotebookService, OptionDraft, TypedProposal
 from ..agent.notebook.evidence import DataEvidencePackV1, INSPECTIONS, InspectionRequest
 from ..agent.notebook.errors import NotebookOptionError, OptionRevisionStale
@@ -850,10 +851,14 @@ def _planning_agent(
     config = load_llm_config()
     if not config.is_configured():
         raise NotebookPlanningUnavailable(config.configuration_error_message())
+    admitted_native = set(notebook_workflow_capability_ids())
     manifest = {
         str(entry["key"]): dict(entry)
         for entry in build_capabilities().get("model_types", [])
-        if isinstance(entry, dict) and entry.get("key") not in {None, "auto"}
+        if (
+            isinstance(entry, dict)
+            and entry.get("key") in admitted_native
+        )
     }
     proposal_adapter = (
         "model.genesis"
@@ -891,7 +896,12 @@ def _planning_agent(
         if isinstance(item.get("artifact_types"), Mapping)
     }
     candidate_capabilities = tuple(
-        dict.fromkeys((*context.available_capabilities, *server_manifest))
+        dict.fromkeys(
+            (
+                *(capability for capability in context.available_capabilities if capability in manifest),
+                *server_manifest,
+            )
+        )
     )
     catalog = {
         capability: {
@@ -1145,11 +1155,11 @@ def ensure_notebook_projection_endpoint(
             message="Provide exactly one of from_run_id or dataset.",
         )
     try:
+        admitted_native = set(notebook_workflow_capability_ids())
         available_capabilities = tuple(
             str(entry["key"])
             for entry in build_capabilities().get("model_types", [])
-            if isinstance(entry, dict)
-            and entry.get("key") not in {None, "auto"}
+            if isinstance(entry, dict) and entry.get("key") in admitted_native
         )
         notebook = service.ensure_default_projection(
             from_run_id=body.from_run_id,
@@ -1184,11 +1194,11 @@ def ensure_notebook_dataset_projection_from_run_endpoint(
 
     _root, service = _service(request, project_root)
     try:
+        admitted_native = set(notebook_workflow_capability_ids())
         available_capabilities = tuple(
             str(entry["key"])
             for entry in build_capabilities().get("model_types", [])
-            if isinstance(entry, dict)
-            and entry.get("key") not in {None, "auto"}
+            if isinstance(entry, dict) and entry.get("key") in admitted_native
         )
         notebook = service.ensure_dataset_projection_from_run(
             from_run_id=body.from_run_id,

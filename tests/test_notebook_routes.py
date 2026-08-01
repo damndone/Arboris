@@ -41,6 +41,16 @@ from workbench.http.notebook_routes import (
 )
 
 
+def test_notebook_workflow_capability_admission_uses_published_contracts() -> None:
+    from workbench.agent.workflow_contracts import notebook_workflow_capability_ids
+
+    admitted = set(notebook_workflow_capability_ids())
+
+    assert {"ols", "panel_ols", "logit", "iv_2sls", "cs_did", "time_series.ets"} <= admitted
+    assert "glm:poisson" not in admitted
+    assert "glm:negative_binomial" not in admitted
+
+
 def test_notebook_route_projects_trusted_capability_completion_refs() -> None:
     from types import SimpleNamespace
 
@@ -1036,6 +1046,8 @@ def test_projection_route_compiles_verified_dataset_without_inventing_run(tmp_pa
     notebook = projection.json()
     assert notebook["projection_source"]["kind"] == "dataset"
     assert notebook["active_head_run_id"] is None
+    assert "glm:poisson" not in notebook["available_capabilities"]
+    assert "time_series.ets" in notebook["available_capabilities"]
     assert list((project / "runs").iterdir()) == []
 
     context = client.post(

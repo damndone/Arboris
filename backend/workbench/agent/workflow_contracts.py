@@ -727,6 +727,21 @@ MODEL_FAMILY_SPEC_FIELDS = frozenset(
 )
 
 
+def notebook_workflow_capability_ids() -> tuple[str, ...]:
+    """Return the native capabilities admitted to the Notebook planner.
+
+    The manual capability manifest is intentionally broader than the typed
+    Notebook workflow surface. A handler or legacy UI alias is not enough to
+    make a model workflow-executable: it must have the shared family contract
+    or a published Recipe contract that defines its input and result boundary.
+    Importing Recipes lazily keeps the contract module free of an import cycle.
+    """
+
+    from .recipe_contracts import RECIPE_CONTRACTS
+
+    return tuple(sorted({*MODEL_FAMILY_CONTRACTS, *RECIPE_CONTRACTS}))
+
+
 def model_family_contract(model_family: Any) -> ModelFamilyContract:
     if not isinstance(model_family, str) or model_family not in MODEL_FAMILY_CONTRACTS:
         raise OperationValidationError(
