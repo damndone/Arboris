@@ -206,6 +206,30 @@ def _library_entries(runtime: LocalDomainMemoryRuntime, scope: MemoryScope) -> l
     return sorted(entries, key=lambda item: (item["memory_id"], item["revision"]))
 
 
+def _pending_candidate_entries(runtime: LocalDomainMemoryRuntime, project_root: str) -> list[dict[str, Any]]:
+    scope = _project_scope(runtime, project_root)
+    if not runtime.preferences.project_settings(scope).library_enabled:
+        return []
+    try:
+        candidates = runtime.review_service_for_project(project_root, create=False).candidate_store.pending(scope)
+    except (LocalDomainMemoryRuntimeError, ValueError) as error:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DOMAIN_MEMORY_CANDIDATES_UNAVAILABLE", "message": str(error)},
+        ) from error
+    return [
+        {
+            "candidate_id": candidate.candidate_id,
+            "revision": candidate.revision,
+            "status": candidate.status,
+            "memory_kind": candidate.memory_kind,
+            "compact_lesson": candidate.compact_lesson,
+            "source_summary_refs": [item.source_access_binding_ref for item in candidate.source_summary_refs],
+        }
+        for candidate in candidates
+    ]
+
+
 def _archive_target_refs(runtime: LocalDomainMemoryRuntime, scope: MemoryScope, memory_ids: list[str]) -> tuple[str, ...]:
     if len(set(memory_ids)) != len(memory_ids) or any(not item or len(item) > 256 for item in memory_ids):
         raise ValueError("memory ids must be unique bounded values")
@@ -225,13 +249,34 @@ def _review_service(request: Request) -> MemoryReviewService:
     return service
 
 
-def _require_mutations_enabled(request: Request) -> None:
-    """Keep the newly bootstrapped local library read-only until Settings opts in."""
+def _project_review_service(request: Request, project_root: str | None) -> MemoryReviewService:
+    """Resolve a review store from the server-owned current-project identity."""
 
     runtime = getattr(request.app.state, "domain_memory_runtime", None)
-    if isinstance(runtime, LocalDomainMemoryRuntime) and getattr(
-        request.app.state, "domain_memory_mutations_enabled", False
-    ) is not True:
+    if not isinstance(runtime, LocalDomainMemoryRuntime):
+        return _review_service(request)
+    if not isinstance(project_root, str) or not project_root:
+        raise HTTPException(status_code=422, detail={"code": "DOMAIN_MEMORY_PROJECT_REQUIRED"})
+    try:
+        return runtime.review_service_for_project(project_root, create=False)
+    except LocalDomainMemoryRuntimeError as error:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "DOMAIN_MEMORY_REVIEW_UNAVAILABLE", "message": str(error)},
+        ) from error
+
+
+def _require_mutations_enabled(request: Request, project_root: str | None = None) -> None:
+    """Keep local memory read-only unless this project explicitly enabled its library."""
+
+    runtime = getattr(request.app.state, "domain_memory_runtime", None)
+    if not isinstance(runtime, LocalDomainMemoryRuntime):
+        return
+    if isinstance(project_root, str) and project_root:
+        scope = _project_scope(runtime, project_root)
+        if runtime.preferences.project_settings(scope).library_enabled:
+            return
+    if getattr(request.app.state, "domain_memory_mutations_enabled", False) is not True:
         raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_MUTATIONS_DISABLED"})
 
 
@@ -433,6 +478,15 @@ def create_candidate(body: CandidateBody, request: Request) -> dict[str, Any]:
     return {"candidate": candidate.to_dict(), "automatic_execution": False}
 
 
+@router.get("/candidates")
+def list_pending_candidates(project_root: str, request: Request) -> dict[str, Any]:
+    runtime = _runtime(request)
+    return {
+        "candidates": _pending_candidate_entries(runtime, project_root),
+        "memory_authority": "server_owned",
+    }
+
+
 @router.post("/candidates/{candidate_id}/approve")
 def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) -> dict[str, Any]:
     _require_mutations_enabled(request)
@@ -452,9 +506,14 @@ def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) ->
 
 
 @router.post("/review/candidates/{candidate_id}")
-def review_candidate(candidate_id: str, body: CandidateReviewBody, request: Request) -> dict[str, Any]:
-    _require_mutations_enabled(request)
-    review = _review_service(request)
+def review_candidate(
+    candidate_id: str,
+    body: CandidateReviewBody,
+    request: Request,
+    project_root: str | None = None,
+) -> dict[str, Any]:
+    _require_mutations_enabled(request, project_root)
+    review = _project_review_service(request, project_root)
     try:
         if body.decision == "rejected":
             result = review.reject_candidate(candidate_id, expected_revision=body.expected_revision, actor_id=body.actor_id)

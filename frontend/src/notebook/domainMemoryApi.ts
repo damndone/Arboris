@@ -1,6 +1,7 @@
 import { apiUrl, readResponse } from "../api";
 import type {
   DomainMemoryCandidate,
+  DomainMemoryCandidateQueue,
   DomainMemoryRetrievalProjection,
   DomainMemorySettings,
   DomainMemoryLibrary,
@@ -37,6 +38,14 @@ export async function reviewDomainMemoryCandidate(
   return readResponse<Record<string, unknown>>(await fetch(memoryPath(`/domain-memory/review/candidates/${encodeURIComponent(candidateId)}`, projectRoot), {
     method: "POST", headers: jsonHeaders, body: JSON.stringify(input),
   }));
+}
+
+export async function listDomainMemoryCandidates(
+  projectRoot: string,
+): Promise<DomainMemoryCandidateQueue> {
+  return readResponse<DomainMemoryCandidateQueue>(
+    await fetch(memoryPath("/domain-memory/candidates", projectRoot)),
+  );
 }
 
 export async function fetchDomainMemorySettings(projectRoot: string): Promise<DomainMemorySettings> {

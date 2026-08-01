@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   archiveMemoryLibraryEntries,
   fetchDomainMemorySettings,
   issueArchiveMemoryConfirmation,
   issueMemorySettingsConfirmation,
+  listDomainMemoryCandidates,
   listDomainMemoryLibrary,
+  reviewDomainMemoryCandidate,
   updateGlobalMemorySettings,
   updateProjectMemorySetting,
 } from "../notebook/domainMemoryApi";
 import type {
+  DomainMemoryCandidate,
   DomainMemoryLibrary,
   DomainMemorySettings,
   MemorySettingsConfirmation,
 } from "../notebook/domainMemoryContracts";
+import { DomainMemoryReviewQueue } from "../notebook/DomainMemoryReviewQueue";
 
 type PendingChange = {
   confirmation: MemorySettingsConfirmation;
@@ -45,23 +49,73 @@ const buttonStyle: React.CSSProperties = {
 
 export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
   const [settings, setSettings] = useState<DomainMemorySettings | null>(null);
+  const [settingsProjectRoot, setSettingsProjectRoot] = useState<string | null>(null);
   const [libraries, setLibraries] = useState<Record<"global" | "project", DomainMemoryLibrary | null>>({ global: null, project: null });
+  const [candidates, setCandidates] = useState<DomainMemoryCandidate[]>([]);
+  const [candidatesProjectRoot, setCandidatesProjectRoot] = useState<string | null>(null);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const currentProjectRoot = useRef(projectRoot);
+  const refreshGeneration = useRef(0);
+  currentProjectRoot.current = projectRoot;
+  const isCurrentProject = useCallback(
+    (requestedProjectRoot: string) => currentProjectRoot.current === requestedProjectRoot,
+    [],
+  );
 
   const refresh = useCallback(async () => {
+    if (currentProjectRoot.current !== projectRoot) return;
+    const generation = refreshGeneration.current + 1;
+    refreshGeneration.current = generation;
+    const isCurrent = () => (
+      currentProjectRoot.current === projectRoot && refreshGeneration.current === generation
+    );
     const [nextSettings, globalLibrary, projectLibrary] = await Promise.all([
       fetchDomainMemorySettings(projectRoot),
       listDomainMemoryLibrary(projectRoot, "global"),
       listDomainMemoryLibrary(projectRoot, "project"),
     ]);
+    if (!isCurrent()) return;
     setSettings(nextSettings);
+    setSettingsProjectRoot(projectRoot);
     setLibraries({ global: globalLibrary, project: projectLibrary });
+    setCandidates([]);
+    setCandidatesProjectRoot(null);
+    setCandidateError(null);
+    try {
+      const nextCandidates = await listDomainMemoryCandidates(projectRoot);
+      if (!isCurrent()) return;
+      setCandidates(nextCandidates.candidates);
+      setCandidatesProjectRoot(projectRoot);
+      setCandidateError(null);
+    } catch {
+      if (!isCurrent()) return;
+      setCandidates([]);
+      setCandidatesProjectRoot(projectRoot);
+      setCandidateError("Candidate review is temporarily unavailable. Other memory settings remain available.");
+    }
   }, [projectRoot]);
 
   useEffect(() => {
-    void refresh().catch((requestError) => setError(errorMessage(requestError)));
+    let active = true;
+    setSettings(null);
+    setSettingsProjectRoot(null);
+    setLibraries({ global: null, project: null });
+    setCandidates([]);
+    setCandidatesProjectRoot(null);
+    setCandidateError(null);
+    setPending(null);
+    setError(null);
+    setBusy(false);
+    void refresh().catch((requestError) => {
+      if (active) setError(errorMessage(requestError));
+    });
+    return () => {
+      active = false;
+      refreshGeneration.current += 1;
+    };
   }, [refresh]);
 
   async function beginSetting(
@@ -132,7 +186,35 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
     }
   }
 
-  if (!settings) {
+  async function reviewCandidate(
+    candidateId: string,
+    decision: "approved" | "rejected",
+    expectedRevision: number,
+  ) {
+    const requestedProjectRoot = projectRoot;
+    setBusy(true);
+    setError(null);
+    try {
+      const now = new Date();
+      await reviewDomainMemoryCandidate(requestedProjectRoot, candidateId, decision === "approved"
+        ? {
+            decision,
+            expected_revision: expectedRevision,
+            actor_id: "local-user",
+            approved_at: now.toISOString(),
+            review_after: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          }
+        : { decision, expected_revision: expectedRevision, actor_id: "local-user" });
+      if (!isCurrentProject(requestedProjectRoot)) return;
+      await refresh();
+    } catch (requestError) {
+      if (isCurrentProject(requestedProjectRoot)) setError(errorMessage(requestError));
+    } finally {
+      if (isCurrentProject(requestedProjectRoot)) setBusy(false);
+    }
+  }
+
+  if (!settings || settingsProjectRoot !== projectRoot) {
     return <section data-testid="memory-settings-panel" aria-label="Memory settings">{error ?? "Loading memory settings…"}</section>;
   }
 
@@ -218,6 +300,18 @@ export function MemorySettingsPanel({ projectRoot }: { projectRoot: string }) {
           expected_revision: projectSettings.revision, confirmation_receipt: confirmation.receipt,
         }),
       ))}
+      <section aria-label="Pending memory candidate review" style={{ marginTop: 20 }}>
+        <h3 style={{ margin: "0 0 6px" }}>Pending review</h3>
+        <p style={{ marginTop: 0, color: "var(--label-secondary, #98989d)" }}>
+          Approving a candidate only adds a reviewed memory entry. It never runs analysis or changes a Draft.
+        </p>
+        {candidateError && candidatesProjectRoot === projectRoot ? <p role="status">{candidateError}</p> : (
+          <DomainMemoryReviewQueue
+            candidates={candidatesProjectRoot === projectRoot ? candidates : []}
+            onReview={(candidateId, decision, revision) => void reviewCandidate(candidateId, decision, revision)}
+          />
+        )}
+      </section>
       {renderLibrary("global")}
       {renderLibrary("project")}
       {pending ? <div role="dialog" aria-label="Confirm memory change" style={{ marginTop: 20, border: "1px solid var(--separator, #3a3a3c)", borderRadius: 10, padding: 16 }}>

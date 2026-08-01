@@ -200,3 +200,169 @@ def test_bootstrapped_product_rejects_memory_mutation_until_settings_authorizes(
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "DOMAIN_MEMORY_MUTATIONS_DISABLED"
+
+
+def _pending_project_candidate(runtime, project: Path):
+    from workbench.domain_memory.contracts import (
+        ApplicabilityPredicate,
+        MemoryCandidate,
+        SourceSummaryRef,
+    )
+
+    scope = runtime.project_scope(project)
+    review = runtime.review_service_for_project(project, create=True)
+    candidate = MemoryCandidate(
+        candidate_id="candidate-project-review",
+        revision=1,
+        scope=scope,
+        memory_kind="workflow_lesson",
+        domain_tags=("time-series",),
+        applicability_predicates=(ApplicabilityPredicate("analysis_family", "equals", "time_series.ets"),),
+        compact_lesson="Use the reviewed time-index semantics for this project family.",
+        recommended_effect_kind="assumption_check_hint",
+        recommended_target_refs=("target-time-index",),
+        source_summary_refs=(SourceSummaryRef(
+            "project-pseudonym",
+            "summary-1",
+            "a" * 64,
+            "summary-v1",
+            "binding-1",
+        ),),
+        created_from_manifest_ref="manifest-1",
+        status="needs_review",
+        created_at="2026-08-01T00:00:00Z",
+    )
+    return review.candidate_store.append(candidate)
+
+
+def test_pending_candidate_route_derives_only_the_current_project_scope_and_rejects_without_execution(
+    tmp_path: Path,
+) -> None:
+    from workbench.http.memory_routes import router
+
+    project = tmp_path / "project-a"
+    other_project = tmp_path / "project-b"
+    project.mkdir()
+    other_project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    project_scope = runtime.project_scope(project)
+    runtime.preferences.update_project(
+        project_scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    candidate = _pending_project_candidate(runtime, project)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    app.include_router(router)
+    client = TestClient(app)
+
+    listed = client.get("/domain-memory/candidates", params={"project_root": str(project)})
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "candidates": [{
+            "candidate_id": candidate.candidate_id,
+            "revision": candidate.revision,
+            "status": "needs_review",
+            "memory_kind": "workflow_lesson",
+            "compact_lesson": candidate.compact_lesson,
+            "source_summary_refs": ["binding-1"],
+        }],
+        "memory_authority": "server_owned",
+    }
+    assert str(project) not in str(listed.json())
+    assert client.get("/domain-memory/candidates", params={"project_root": str(other_project)}).json()["candidates"] == []
+
+    rejected = client.post(
+        f"/domain-memory/review/candidates/{candidate.candidate_id}",
+        params={"project_root": str(project)},
+        json={"decision": "rejected", "expected_revision": candidate.revision, "actor_id": "local-user"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["automatic_execution"] is False
+    assert client.get("/domain-memory/candidates", params={"project_root": str(project)}).json()["candidates"] == []
+
+
+def test_pending_candidate_route_maps_an_unreadable_candidate_store_to_a_controlled_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from workbench.http.memory_routes import router
+
+    project = tmp_path / "project-a"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    scope = runtime.project_scope(project)
+    runtime.preferences.update_project(
+        scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    review = runtime.review_service_for_project(project, create=True)
+
+    def unreadable_pending(_scope):
+        raise ValueError("candidate journal is unreadable")
+
+    monkeypatch.setattr(review.candidate_store, "pending", unreadable_pending)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    app.include_router(router)
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/domain-memory/candidates", params={"project_root": str(project)}
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "DOMAIN_MEMORY_CANDIDATES_UNAVAILABLE"
+
+
+def test_project_candidate_approval_is_explicit_and_only_publishes_to_the_project_library(
+    tmp_path: Path,
+) -> None:
+    from workbench.http.memory_routes import router
+
+    project = tmp_path / "project-a"
+    project.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    scope = runtime.project_scope(project)
+    runtime.preferences.update_project(
+        scope,
+        expected_revision=0,
+        library_enabled=True,
+        inherit_global=False,
+        candidate_generation_enabled=False,
+    )
+    candidate = _pending_project_candidate(runtime, project)
+    app = FastAPI()
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
+    app.state.domain_memory_review_service = runtime.review_service
+    app.include_router(router)
+    client = TestClient(app)
+
+    approved = client.post(
+        f"/domain-memory/review/candidates/{candidate.candidate_id}",
+        params={"project_root": str(project)},
+        json={
+            "decision": "approved",
+            "expected_revision": candidate.revision,
+            "actor_id": "local-user",
+            "approved_at": "2026-08-01T01:00:00Z",
+            "review_after": "2026-11-01T01:00:00Z",
+        },
+    )
+
+    assert approved.status_code == 200
+    assert approved.json()["automatic_execution"] is False
+    assert client.get("/domain-memory/candidates", params={"project_root": str(project)}).json()["candidates"] == []
+    project_library = client.get("/domain-memory/libraries/project", params={"project_root": str(project)}).json()
+    global_library = client.get("/domain-memory/libraries/global", params={"project_root": str(project)}).json()
+    assert [entry["memory_id"] for entry in project_library["entries"]] == [f"memory-{candidate.candidate_id}"]
+    assert global_library["entries"] == []

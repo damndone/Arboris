@@ -60,6 +60,11 @@ export interface DomainMemoryCandidate {
   source_summary_refs: string[];
 }
 
+export interface DomainMemoryCandidateQueue {
+  candidates: DomainMemoryCandidate[];
+  memory_authority: "server_owned";
+}
+
 export interface DomainMemorySettings {
   global: { revision: number; library_enabled: boolean };
   project: {
