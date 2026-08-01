@@ -106,7 +106,7 @@ def test_bootstrap_rejects_a_corrupt_conflict_journal(tmp_path: Path) -> None:
         bootstrap_local_domain_memory_runtime(root)
 
 
-def test_product_memory_route_ignores_a_client_supplied_scope(tmp_path: Path) -> None:
+def test_product_memory_route_rejects_a_client_supplied_scope(tmp_path: Path) -> None:
     from workbench.http.memory_routes import router
     from workbench.domain_memory.scope import MemoryScope
 
@@ -115,26 +115,28 @@ def test_product_memory_route_ignores_a_client_supplied_scope(tmp_path: Path) ->
     app.state.domain_memory_runtime = runtime
     app.state.domain_memory_service = runtime.service
     app.include_router(router)
+    project = tmp_path / "project"
+    project.mkdir()
     forged_scope = MemoryScope("foreign", "foreign", "foreign", None, "private", "user")
 
     response = TestClient(app).post(
         "/domain-memory/retrieve",
+        params={"project_root": str(project)},
         json={
             "requester_scope": forged_scope.to_dict(),
-            "preferences": {"cross_project_domain_memory_use": True},
             "facts": {},
-            "now": "2026-08-01T00:00:00Z",
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["scope_ref"] == runtime.scope_resolver.global_scope.scope_ref
+    assert response.status_code == 422
 
 
-def test_product_memory_route_cannot_enable_use_from_request_preferences(tmp_path: Path) -> None:
+def test_product_memory_route_rejects_request_preferences_and_overrides(tmp_path: Path) -> None:
     from workbench.http.memory_routes import router
 
     runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    project = tmp_path / "project"
+    project.mkdir()
     app = FastAPI()
     app.state.domain_memory_runtime = runtime
     app.state.domain_memory_service = runtime.service
@@ -142,17 +144,15 @@ def test_product_memory_route_cannot_enable_use_from_request_preferences(tmp_pat
 
     response = TestClient(app).post(
         "/domain-memory/retrieve",
+        params={"project_root": str(project)},
         json={
-            "requester_scope": runtime.scope_resolver.global_scope.to_dict(),
             "preferences": {"cross_project_domain_memory_use": True},
             "override": {"cross_project_domain_memory_use": True},
             "facts": {},
-            "now": "2026-08-01T00:00:00Z",
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["reason"] == "DOMAIN_MEMORY_DISABLED"
+    assert response.status_code == 422
 
 
 def test_memory_route_fails_closed_without_a_server_owned_scope_resolver(
@@ -173,7 +173,8 @@ def test_memory_route_fails_closed_without_a_server_owned_scope_resolver(
 
     response = TestClient(app).post(
         "/domain-memory/retrieve",
-        json={"requester_scope": scope.to_dict(), "facts": {}, "now": "2026-08-01T00:00:00Z"},
+        params={"project_root": str(tmp_path)},
+        json={"facts": {}},
     )
 
     assert response.status_code == 503

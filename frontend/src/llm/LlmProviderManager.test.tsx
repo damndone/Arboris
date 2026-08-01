@@ -10,6 +10,10 @@ import {
   refreshLlmProviderModels,
   updateLlmProvider,
 } from "./llmApi";
+import {
+  fetchDomainMemorySettings,
+  listDomainMemoryLibrary,
+} from "../notebook/domainMemoryApi";
 import type { LlmProvider, LlmProvidersResponse } from "./llmTypes";
 
 vi.mock("./llmApi", () => ({
@@ -20,6 +24,16 @@ vi.mock("./llmApi", () => ({
   probeLlmProvider: vi.fn(),
   refreshLlmProviderModels: vi.fn(),
   updateLlmProvider: vi.fn(),
+}));
+
+vi.mock("../notebook/domainMemoryApi", () => ({
+  fetchDomainMemorySettings: vi.fn(),
+  listDomainMemoryLibrary: vi.fn(),
+  issueMemorySettingsConfirmation: vi.fn(),
+  updateGlobalMemorySettings: vi.fn(),
+  updateProjectMemorySetting: vi.fn(),
+  issueArchiveMemoryConfirmation: vi.fn(),
+  archiveMemoryLibraryEntries: vi.fn(),
 }));
 
 const providers: LlmProvider[] = [
@@ -91,6 +105,12 @@ describe("LlmProviderManager", () => {
       ...providers[0],
       model: "deepseek-v4-pro",
     });
+    vi.mocked(fetchDomainMemorySettings).mockResolvedValue({
+      global: { revision: 0, library_enabled: false },
+      project: { revision: 0, library_enabled: false, inherit_global: false, candidate_generation_enabled: false },
+      memory_authority: "server_owned",
+    });
+    vi.mocked(listDomainMemoryLibrary).mockResolvedValue({ library: "global", entries: [], memory_authority: "server_owned" });
   });
 
   it("renders provider status rows in a full-height manager dialog", async () => {
@@ -104,7 +124,7 @@ describe("LlmProviderManager", () => {
       maxHeight: "100%",
       overflowY: "auto",
     });
-    expect(manager).toHaveTextContent("LLM Providers");
+    expect(manager).toHaveTextContent("Settings");
     expect(screen.getByTestId("llm-provider-list")).toBeInTheDocument();
     expect(screen.getByTestId("llm-provider-active-deepseek")).toHaveTextContent("Active");
     expect(screen.getByText("API key configured")).toBeInTheDocument();
@@ -113,6 +133,16 @@ describe("LlmProviderManager", () => {
     expect(screen.getByText(/https:\/\/api\.deepseek\.com/)).toBeInTheDocument();
     expect(screen.getAllByText(/Not tested/)).not.toHaveLength(0);
     expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument();
+  });
+
+  it("keeps memory management in the same Settings surface", async () => {
+    render(<LlmProviderManager projectRoot="/project-a" onBack={vi.fn()} />);
+    await screen.findByTestId("llm-provider-manager");
+
+    fireEvent.click(screen.getByRole("button", { name: "Memory" }));
+
+    expect(await screen.findByTestId("memory-settings-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("llm-provider-list")).not.toBeInTheDocument();
   });
 
   it("backs out and opens the editor for add and edit", async () => {

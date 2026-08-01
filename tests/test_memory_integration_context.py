@@ -30,6 +30,7 @@ from workbench.contracts.agent.notebook_option import (
     RecommendationDecision,
 )
 from workbench.domain_memory.candidate_store import MemoryCandidateStore
+from workbench.domain_memory.local_runtime import bootstrap_local_domain_memory_runtime
 from workbench.domain_memory.contracts import (
     DomainMemoryApprovalRecord,
     DomainMemoryContentRevision,
@@ -465,8 +466,8 @@ def test_invalid_or_oversized_domain_memory_projection_fails_closed(tmp_path: Pa
         )
 
 
-def test_notebook_provider_is_opt_in_and_receives_independent_preferences(tmp_path: Path) -> None:
-    calls: list[object] = []
+def test_notebook_provider_receives_compiled_context_without_browser_owned_preferences(tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
     projection = {
         "contract_version": "domain-memory-context-input/v1",
         "retrieval_ref": "retrieval-1",
@@ -481,17 +482,15 @@ def test_notebook_provider_is_opt_in_and_receives_independent_preferences(tmp_pa
     }
 
     def provider(**kwargs):
-        calls.append(kwargs["preferences"])
+        calls.append(kwargs)
         return projection
 
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(domain_memory_context_provider=provider))
     )
-    assert _domain_memory_projection(request, tmp_path, object(), "notebook-1", use=False, iteration=True) is None
-    assert calls == []
-    assert _domain_memory_projection(request, tmp_path, object(), "notebook-1", use=True, iteration=False) == projection
-    assert calls[0].cross_project_domain_memory_use is True
-    assert calls[0].cross_project_domain_memory_iteration is False
+    assert _domain_memory_projection(request, tmp_path, object(), "notebook-1", context=_context(tmp_path)) == projection
+    assert len(calls) == 1
+    assert "preferences" not in calls[0]
 
 
 def test_notebook_provider_receives_compiled_project_context_before_memory_lookup(
@@ -514,8 +513,6 @@ def test_notebook_provider_receives_compiled_project_context_before_memory_looku
             object(),
             "notebook-1",
             context=base,
-            use=True,
-            iteration=False,
         )
         is None
     )
@@ -524,7 +521,7 @@ def test_notebook_provider_receives_compiled_project_context_before_memory_looku
     assert base.domain_memory_projection is None
 
 
-def test_configured_memory_service_is_the_default_read_only_notebook_provider(
+def test_legacy_memory_service_does_not_enable_notebook_memory_without_a_runtime(
     tmp_path: Path,
 ) -> None:
     scope = MemoryScope("ns-a", "profile-a", "user-a", None, "private", "user")
@@ -547,11 +544,50 @@ def test_configured_memory_service_is_the_default_read_only_notebook_provider(
         object(),
         "notebook-1",
         context=_context(tmp_path),
-        use=True,
-        iteration=False,
     )
 
+    assert projection is None
+
+
+def test_local_runtime_uses_only_persisted_memory_settings(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "domain-memory")
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                domain_memory_runtime=runtime,
+                domain_memory_context_provider=None,
+                domain_memory_service=None,
+            )
+        )
+    )
+    context = _context(project_root)
+
+    assert _domain_memory_projection(request, project_root, object(), "notebook-1", context=context) is None
+
+    global_settings = runtime.preferences.update_global(
+        expected_revision=0,
+        library_enabled=True,
+    )
+    project_scope = runtime.project_scope(project_root)
+    runtime.preferences.update_project(
+        project_scope,
+        expected_revision=0,
+        library_enabled=False,
+        inherit_global=True,
+        candidate_generation_enabled=False,
+    )
+
+    projection = _domain_memory_projection(
+        request,
+        project_root,
+        object(),
+        "notebook-1",
+        context=context,
+    )
+
+    assert global_settings.library_enabled is True
     assert projection is not None
     assert projection["outcome"] == "empty"
-    assert projection["memory_authority"] == "non_authoritative"
     assert projection["entries"] == []

@@ -54,3 +54,40 @@ export interface DomainMemoryCandidate {
   compact_lesson: string;
   source_summary_refs: string[];
 }
+
+export interface DomainMemorySettings {
+  global: { revision: number; library_enabled: boolean };
+  project: {
+    revision: number;
+    library_enabled: boolean;
+    inherit_global: boolean;
+    candidate_generation_enabled: boolean;
+  };
+  memory_authority: "server_owned";
+}
+
+export interface MemorySettingsConfirmation {
+  receipt: string;
+  action: string;
+  scope_ref: string;
+  expected_revision?: number;
+  target_count: number;
+  expires_at: string;
+}
+
+export interface DomainMemoryLibraryEntry {
+  memory_id: string;
+  revision: number;
+  state: "active" | "stale" | "archived";
+  validity_revision: number;
+  memory_kind: string;
+  domain_tags: string[];
+  compact_lesson: string;
+  apply_mode: "inform_only" | "suggest_default";
+}
+
+export interface DomainMemoryLibrary {
+  library: "global" | "project";
+  entries: DomainMemoryLibraryEntry[];
+  memory_authority: "server_owned";
+}

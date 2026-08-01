@@ -201,6 +201,12 @@ class DomainMemoryStore:
         return self._current_approval(self._read(), memory_id)
 
     def current_validity(self, memory_id: str) -> DomainMemoryValidityRecord | None:
+        latest = self.latest_validity(memory_id)
+        return latest if latest is not None and latest.state == "active" else None
+
+    def latest_validity(self, memory_id: str) -> DomainMemoryValidityRecord | None:
+        """Return the current approval's lifecycle state, including archived records."""
+
         records = self._read()
         approval = self._current_approval(records, memory_id)
         if approval is None:
@@ -208,8 +214,7 @@ class DomainMemoryStore:
         history = [item for kind, item in records if kind == "memory_validity" and item.approval_ref == approval.approval_ref]
         if not history:
             return None
-        latest = max(history, key=lambda item: item.validity_revision)
-        return latest if latest.state == "active" else None
+        return max(history, key=lambda item: item.validity_revision)
 
     def active_contents(self) -> tuple[DomainMemoryContentRevision, ...]:
         records = self._read()

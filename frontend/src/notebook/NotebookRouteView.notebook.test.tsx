@@ -194,7 +194,6 @@ describe("NotebookRouteView", () => {
       "/tmp/project",
       "nb_1",
       3,
-      undefined,
       {
         attemptId: expect.stringMatching(/^attempt_/),
         signal: expect.any(AbortSignal),
@@ -244,6 +243,21 @@ describe("NotebookRouteView", () => {
       expect(screen.getByTestId("notebook-surface")).toHaveAttribute("data-state", "empty"),
     );
     expect(screen.queryByTestId("notebook-error")).toBeNull();
+  });
+
+  it("opens shared Settings through a navigation intent instead of local memory switches", async () => {
+    render(
+      <MemoryRouter initialEntries={["/p/project/graph?view=notebook"]}>
+        <NotebookRouteView projectRoot="/tmp/project" activeRunId="run_head" />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    await screen.findByTestId("notebook-manage-memory");
+    fireEvent.click(screen.getByTestId("notebook-manage-memory"));
+
+    expect(screen.getByTestId("location-search")).toHaveTextContent('"memory_settings":"1"');
+    expect(screen.getByTestId("location-search")).not.toHaveTextContent("domain_memory_use");
   });
 
   it("renders a typed API failure without pretending the notebook is empty", async () => {

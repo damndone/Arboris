@@ -35,8 +35,10 @@ from ..agent.trace import (
     record_compiled_context,
     record_domain_memory_retrieval,
 )
-from ..domain_memory.preferences import DomainMemoryPreferences
-from ..domain_memory.service import DomainMemoryService
+from ..domain_memory.local_runtime import (
+    LocalDomainMemoryRuntime,
+    LocalDomainMemoryRuntimeError,
+)
 from ..api_errors import WorkbenchAPIError
 from ..contracts.agent.notebook_option import ExpectedArtifact
 from ..engine.capabilities import build_capabilities
@@ -268,8 +270,6 @@ def _compile(
     *,
     focused_run_id: str | None = None,
     request: Request | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> tuple[NotebookPlanningContextV1, TraceWriter]:
     notebook = service.get_notebook(notebook_id)
     trace = _notebook_trace(root, service, notebook.notebook_id)
@@ -282,8 +282,6 @@ def _compile(
         service,
         notebook_id,
         context=context,
-        use=domain_memory_use,
-        iteration=domain_memory_iteration,
     )
     if projection is not None:
         context = attach_domain_memory_projection(context, projection)
@@ -299,8 +297,6 @@ def _domain_memory_projection(
     notebook_id: str,
     *,
     context: NotebookPlanningContextV1 | None = None,
-    use: bool,
-    iteration: bool,
 ) -> dict[str, Any] | None:
     """Ask only the server-owned provider for an already-bounded projection.
 
@@ -311,42 +307,46 @@ def _domain_memory_projection(
     freshness dependencies.
     """
 
-    if not use:
-        return None
     provider = getattr(request.app.state, "domain_memory_context_provider", None) if request else None
-    if provider is None:
-        service_provider = getattr(request.app.state, "domain_memory_service", None) if request else None
-        if isinstance(service_provider, DomainMemoryService):
-            return _default_domain_memory_projection(
-                service_provider,
-                context=context,
-                preferences=DomainMemoryPreferences(
-                    cross_project_domain_memory_use=use,
-                    cross_project_domain_memory_iteration=iteration,
-                ),
+    runtime = getattr(request.app.state, "domain_memory_runtime", None) if request else None
+    if isinstance(runtime, LocalDomainMemoryRuntime):
+        if context is None:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
+                message="A compiled Notebook context is required before memory retrieval.",
             )
-        return {
-            "contract_version": "domain-memory-context-input/v1",
-            "retrieval_ref": "retrieval:unavailable",
-            "scope_ref": "scope:unavailable",
-            "outcome": "blocked",
-            "reason": "DOMAIN_MEMORY_UNAVAILABLE",
-            "entries": [],
-            "omissions": [],
-            "bounded": True,
-            "preference_ref": "preference:unavailable",
-            "memory_authority": "non_authoritative",
-        }
+        try:
+            result = runtime.retrieve_for_project(
+                root,
+                facts=_domain_memory_facts(context),
+                now=datetime.now(timezone.utc).isoformat(),
+                max_entries=8,
+                max_bytes=8192,
+                vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
+            )
+        except LocalDomainMemoryRuntimeError as error:
+            raise WorkbenchAPIError(
+                status_code=503,
+                code="DOMAIN_MEMORY_UNAVAILABLE",
+                message="The local memory runtime is unavailable.",
+            ) from error
+        # Default-off is intentionally invisible to planning. The absence of a
+        # projection means no memory participated; an enabled-but-empty library
+        # remains observable as a bounded empty projection.
+        if result.outcome == "not_used":
+            return None
+        return result.to_context_projection()
+    if provider is None:
+        # A legacy service object has no local preference authority. Do not let
+        # its mere presence implicitly turn memory on for every project.
+        return None
     projection = provider(
         request=request,
         project_root=root,
         notebook_service=service,
         notebook_id=notebook_id,
         context=context,
-        preferences=DomainMemoryPreferences(
-            cross_project_domain_memory_use=use,
-            cross_project_domain_memory_iteration=iteration,
-        ),
     )
     if projection is not None and not isinstance(projection, dict):
         raise WorkbenchAPIError(
@@ -357,42 +357,16 @@ def _domain_memory_projection(
     return projection
 
 
-def _default_domain_memory_projection(
-    service: DomainMemoryService,
-    *,
-    context: NotebookPlanningContextV1 | None,
-    preferences: DomainMemoryPreferences,
-) -> dict[str, Any]:
-    """Use the configured server-owned store without inventing request scope.
+def _domain_memory_facts(context: NotebookPlanningContextV1) -> dict[str, Any]:
+    """Project a small, server-compiled applicability vocabulary for retrieval."""
 
-    The compiled Notebook context is the direct canonical fallback when a
-    deployment has not installed a persisted ProjectContextIndex provider.
-    Facts are a small scalar projection used only for applicability matching;
-    they never grant source access or capability authority.
-    """
-
-    if context is None:
-        raise WorkbenchAPIError(
-            status_code=503,
-            code="DOMAIN_MEMORY_CONTEXT_UNAVAILABLE",
-            message="A compiled Notebook context is required before memory retrieval.",
-        )
     facts: dict[str, Any] = {}
     for source in (context.analysis_contract, context.user_focus):
         for key in ("analysis_family", "model_family", "goal", "domain", "data_kind"):
             value = source.get(key)
             if isinstance(value, str) and value and len(value) <= 128:
                 facts.setdefault(key, value)
-    result = service.retrieve(
-        requester=service.store.scope,
-        global_preferences=preferences,
-        facts=facts,
-        now=datetime.now(timezone.utc).isoformat(),
-        max_entries=8,
-        max_bytes=8192,
-        vocabulary_version=DOMAIN_MEMORY_DEFAULT_VOCABULARY_VERSION,
-    )
-    return result.to_context_projection()
+    return facts
 
 
 def _draft(request: OptionDraftRequest) -> OptionDraft:
@@ -942,8 +916,6 @@ def compile_notebook_context_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
@@ -953,8 +925,6 @@ def compile_notebook_context_endpoint(
             notebook_id,
             focused_run_id=focused_run_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         return _context_packet(context)
     except NotebookOptionError as exc:
@@ -1011,8 +981,6 @@ async def propose_options_endpoint(
     project_root: str,
     notebook_id: str,
     body: ProposeOptionsRequest,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     root, service = _service(request, project_root)
     try:
@@ -1027,8 +995,6 @@ async def propose_options_endpoint(
             service,
             notebook_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         recommendation_decision = None
         drafts = (
@@ -1095,8 +1061,6 @@ async def propose_options_endpoint(
                 service,
                 notebook_id,
                 request=request,
-                domain_memory_use=domain_memory_use,
-                domain_memory_iteration=domain_memory_iteration,
             )
             drafts, recommendation_decision = service.derive_server_recommendation(
                 notebook_id,
@@ -1161,8 +1125,6 @@ def list_options_endpoint(
     project_root: str,
     notebook_id: str,
     focused_run_id: str | None = None,
-    domain_memory_use: bool = False,
-    domain_memory_iteration: bool = False,
 ) -> dict[str, Any]:
     """Return the current options against one freshly compiled context.
 
@@ -1180,8 +1142,6 @@ def list_options_endpoint(
             notebook_id,
             focused_run_id=focused_run_id,
             request=request,
-            domain_memory_use=domain_memory_use,
-            domain_memory_iteration=domain_memory_iteration,
         )
         options = service.list_options(notebook_id, context=context)
         revisions = [
