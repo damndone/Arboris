@@ -27,6 +27,10 @@ import {
   type NotebookInteractionMode,
   type NotebookRecord,
 } from "./notebookApi";
+import {
+  listDomainMemoryCandidates,
+  reviewDomainMemoryCandidate,
+} from "./domainMemoryApi";
 import { NotebookSurface } from "./NotebookSurface";
 import { useAgentSurfaceOptional } from "../workbench/agent/AgentSurfaceContext";
 import { useWorkbenchOptional } from "../workbench/WorkbenchStateProvider";
@@ -49,7 +53,10 @@ import {
   type PlanDiffLine,
   type TraceEvent,
 } from "./contracts";
-import type { DomainMemoryRetrievalProjection } from "./domainMemoryContracts";
+import type {
+  DomainMemoryCandidate,
+  DomainMemoryRetrievalProjection,
+} from "./domainMemoryContracts";
 
 type ApiErrorLike = Error & { code?: string | null; status?: number | null };
 
@@ -496,12 +503,87 @@ export function NotebookRouteView({
   const [notebookIntent, setNotebookIntent] = useState("");
   const [notebookInteractionMode, setNotebookInteractionMode] =
     useState<NotebookInteractionMode>("plan");
+  const [domainMemoryCandidates, setDomainMemoryCandidates] = useState<DomainMemoryCandidate[] | undefined>(undefined);
+  const [domainMemoryCandidateError, setDomainMemoryCandidateError] = useState<string | null>(null);
+  const [domainMemoryReviewBusy, setDomainMemoryReviewBusy] = useState(false);
+  const domainMemoryProjectRootRef = useRef(projectRoot);
+  domainMemoryProjectRootRef.current = projectRoot;
   const initializationClaimedRef = useRef(false);
   const lastLoadKeyRef = useRef<string | null>(null);
   const lastReadyViewRef = useRef<NotebookReadyView | null>(null);
   const activePlanningRef = useRef<ActivePlanningRequest | null>(null);
   const completedPlanningTokenRef = useRef(0);
   const loadGenerationRef = useRef(0);
+  const domainMemoryGenerationRef = useRef(0);
+
+  const loadDomainMemoryCandidates = useCallback(async () => {
+    const generation = domainMemoryGenerationRef.current + 1;
+    domainMemoryGenerationRef.current = generation;
+    setDomainMemoryCandidates(undefined);
+    setDomainMemoryCandidateError(null);
+    if (!notebookId) return;
+    try {
+      const response = await listDomainMemoryCandidates(projectRoot);
+      if (generation !== domainMemoryGenerationRef.current) return;
+      setDomainMemoryCandidates(response.candidates);
+    } catch (error: unknown) {
+      if (generation !== domainMemoryGenerationRef.current) return;
+      const failure = failurePacket(error);
+      setDomainMemoryCandidateError(`${failure.code}: ${failure.message}`);
+    }
+  }, [notebookId, projectRoot]);
+
+  useEffect(() => {
+    setDomainMemoryReviewBusy(false);
+    void loadDomainMemoryCandidates();
+    return () => {
+      domainMemoryGenerationRef.current += 1;
+    };
+  }, [loadDomainMemoryCandidates]);
+
+  const reviewNotebookMemoryCandidate = useCallback(async (
+    candidateId: string,
+    decision: "approved" | "rejected",
+    revision: number,
+  ) => {
+    if (domainMemoryReviewBusy) return;
+    const requestedProjectRoot = projectRoot;
+    const generation = domainMemoryGenerationRef.current;
+    setDomainMemoryReviewBusy(true);
+    setDomainMemoryCandidateError(null);
+    try {
+      const now = new Date();
+      await reviewDomainMemoryCandidate(projectRoot, candidateId, decision === "approved"
+        ? {
+            decision,
+            expected_revision: revision,
+            actor_id: "local-user",
+            approved_at: now.toISOString(),
+            review_after: new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000).toISOString(),
+          }
+        : {
+            decision,
+            expected_revision: revision,
+            actor_id: "local-user",
+          });
+      if (
+        generation !== domainMemoryGenerationRef.current ||
+        domainMemoryProjectRootRef.current !== requestedProjectRoot
+      ) return;
+      await loadDomainMemoryCandidates();
+    } catch (error: unknown) {
+      if (
+        generation !== domainMemoryGenerationRef.current ||
+        domainMemoryProjectRootRef.current !== requestedProjectRoot
+      ) return;
+      const failure = failurePacket(error);
+      setDomainMemoryCandidateError(`${failure.code}: ${failure.message}`);
+    } finally {
+      if (domainMemoryProjectRootRef.current === requestedProjectRoot) {
+        setDomainMemoryReviewBusy(false);
+      }
+    }
+  }, [domainMemoryReviewBusy, loadDomainMemoryCandidates, projectRoot]);
 
   const load = useCallback(async () => {
     const generation = loadGenerationRef.current + 1;
@@ -1092,7 +1174,7 @@ export function NotebookRouteView({
               type="button"
               data-testid={`notebook-choice-${notebook.notebook_id}`}
               onClick={() => openRouteNotebook(notebook)}
-            >
+    >
               <strong>{notebook.title || "Untitled analysis"}</strong>
               <span>{notebook.active_head_run_id ?? "No completed Run"}</span>
             </button>
@@ -1143,8 +1225,17 @@ export function NotebookRouteView({
           dismissSelectionSurface();
         }
       }}
-    >
+      >
       {uploadError ? <p role="alert" data-testid="notebook-source-restart-error">{uploadError}</p> : null}
+      {domainMemoryCandidateError ? (
+        <p
+          role="status"
+          data-testid="domain-memory-candidate-error"
+          aria-live="polite"
+        >
+          {domainMemoryCandidateError}
+        </p>
+      ) : null}
       <section aria-label="Notebook memory" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <span>Memory is managed per project in Settings and never applies automatically.</span>
         <button
@@ -1195,7 +1286,14 @@ export function NotebookRouteView({
         onSelectionFollowUp={askInSideChat}
         onSelectionSaveNote={(selection) => onSelectionAction(selection, "note")}
         onSelectionDefer={(selection) => onSelectionAction(selection, "defer")}
+        domainMemoryCandidates={domainMemoryCandidates}
+        onDomainMemoryCandidateReview={reviewNotebookMemoryCandidate}
       />
+      {domainMemoryReviewBusy ? (
+        <p data-testid="domain-memory-review-status" aria-live="polite">
+          Saving memory review…
+        </p>
+      ) : null}
       {selectionDraft ? (
         <section className="nb-selection-composer" data-testid="notebook-selection-composer">
           <header className="nb-selection-composer-header">
