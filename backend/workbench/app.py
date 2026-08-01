@@ -23,6 +23,11 @@ from .capability_factory.dependency_service import DependencyService
 from .capability_factory.runtime import CapabilityFactoryRuntime, DependencyAdmissionGate
 from .capability_factory.trace_contracts import trace_catalog as capability_trace_catalog
 from .control_plane import control_plane_capability, validate_control_plane
+from .domain_memory.local_runtime import (
+    LocalDomainMemoryRuntime,
+    LocalDomainMemoryRuntimeError,
+    bootstrap_local_domain_memory_runtime,
+)
 from .domain_memory.service import DomainMemoryService
 from .domain_memory.review_service import MemoryReviewService
 from .domain_memory.trace_contracts import (
@@ -51,6 +56,9 @@ app.state.capability_factory_runtime = None
 app.state.domain_memory_service = None
 app.state.domain_memory_review_service = None
 app.state.domain_memory_context_provider = None
+app.state.domain_memory_runtime = None
+app.state.domain_memory_bootstrap_error = None
+app.state.domain_memory_mutations_enabled = False
 
 
 def register_v183_trace_catalogs() -> None:
@@ -246,6 +254,27 @@ def configure_domain_memory_services(
     app.state.domain_memory_review_service = review_service
 
 
+def bootstrap_local_domain_memory_services() -> LocalDomainMemoryRuntime | None:
+    """Install the empty local memory library or leave memory fail-closed.
+
+    A failure is intentionally non-fatal to the rest of Workbench: Notebook
+    analysis keeps working without memory, while the memory routes and any
+    explicit opt-in receive the existing unavailable response.
+    """
+
+    try:
+        runtime = bootstrap_local_domain_memory_runtime()
+    except LocalDomainMemoryRuntimeError:
+        app.state.domain_memory_runtime = None
+        app.state.domain_memory_bootstrap_error = "DOMAIN_MEMORY_LOCAL_RUNTIME_UNAVAILABLE"
+        configure_domain_memory_services(None, None)
+        return None
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_bootstrap_error = None
+    configure_domain_memory_services(runtime.service, runtime.review_service)
+    return runtime
+
+
 def configure_domain_memory_context_provider(provider: object | None) -> None:
     """Install a server-owned Notebook memory projection provider.
 
@@ -263,6 +292,11 @@ def configure_domain_memory_context_provider(provider: object | None) -> None:
 def _validate_supported_deployment() -> None:
     validate_control_plane()
     current_execution_profile()
+    if (
+        getattr(app.state, "domain_memory_service", None) is None
+        and getattr(app.state, "domain_memory_review_service", None) is None
+    ):
+        bootstrap_local_domain_memory_services()
     runtime = getattr(app.state, "capability_factory_runtime", None)
     if runtime is not None:
         runtime.validate_for_bootstrap()

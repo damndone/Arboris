@@ -5,10 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from workbench.domain_memory.candidate_store import MemoryCandidateStore
-from workbench.domain_memory.service import DomainMemoryService
+from workbench.domain_memory.local_runtime import bootstrap_local_domain_memory_runtime
 from workbench.domain_memory.scope import MemoryScope
-from workbench.domain_memory.store import DomainMemoryStore
 from workbench.http.memory_routes import router
 
 
@@ -17,7 +15,9 @@ SCOPE = MemoryScope("ns-a", "profile-a", "user-a", "org-a", "private", "user")
 
 def _client(tmp_path: Path) -> TestClient:
     app = FastAPI()
-    app.state.domain_memory_service = DomainMemoryService(DomainMemoryStore(tmp_path, SCOPE), MemoryCandidateStore(tmp_path, SCOPE))
+    runtime = bootstrap_local_domain_memory_runtime(tmp_path / "memory")
+    app.state.domain_memory_runtime = runtime
+    app.state.domain_memory_service = runtime.service
     app.include_router(router)
     return TestClient(app)
 

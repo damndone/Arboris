@@ -15,12 +15,23 @@ class DomainMemoryRootError(DomainMemoryScopeError):
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
+def _reject_symlink_ancestors(path: Path) -> None:
+    """Reject a requested boundary when any caller-controlled ancestor is a link."""
+
+    current = Path(path.anchor)
+    for segment in path.parts[1:]:
+        current = current / segment
+        if current.is_symlink():
+            raise DomainMemoryRootError("memory base directory must not traverse symlinks")
+
+
 def resolve_domain_memory_root(base_dir: Path | str, scope: MemoryScope, *, create: bool = True) -> Path:
     if not isinstance(scope, MemoryScope):
         raise DomainMemoryRootError("scope is required")
     base = Path(base_dir).expanduser()
     if not base.is_absolute():
         raise DomainMemoryRootError("memory base directory must be absolute")
+    _reject_symlink_ancestors(base)
     if base.is_symlink() or (base.exists() and not base.is_dir()):
         raise DomainMemoryRootError("memory base directory must be a real directory")
     if not base.exists():

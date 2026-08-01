@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain_memory.contracts import MemoryCandidate
+from ..domain_memory.local_runtime import LocalDomainMemoryRuntime
 from ..domain_memory.preferences import DomainMemoryPreferences, DomainMemoryRequestOverride
 from ..domain_memory.scope import MemoryScope
 from ..domain_memory.service import DomainMemoryService, DomainMemoryServiceError
@@ -90,11 +91,36 @@ def _service(request: Request) -> DomainMemoryService:
     return service
 
 
+def _requester_scope(request: Request, supplied_scope: dict[str, Any]) -> MemoryScope:
+    """Use the runtime-owned local scope when normal Workbench is bootstrapped.
+
+    A local product request cannot select its namespace, profile, owner, or
+    visibility by changing JSON in the browser. There is no legacy fallback:
+    a deployment must install its own authenticated resolver rather than reuse
+    this local route with a user-supplied identity.
+    """
+
+    runtime = getattr(request.app.state, "domain_memory_runtime", None)
+    if isinstance(runtime, LocalDomainMemoryRuntime):
+        return runtime.scope_resolver.global_scope
+    raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_IDENTITY_UNAVAILABLE"})
+
+
 def _review_service(request: Request) -> MemoryReviewService:
     service = getattr(request.app.state, "domain_memory_review_service", None)
     if not isinstance(service, MemoryReviewService):
         raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_REVIEW_UNAVAILABLE"})
     return service
+
+
+def _require_mutations_enabled(request: Request) -> None:
+    """Keep the newly bootstrapped local library read-only until Settings opts in."""
+
+    runtime = getattr(request.app.state, "domain_memory_runtime", None)
+    if isinstance(runtime, LocalDomainMemoryRuntime) and getattr(
+        request.app.state, "domain_memory_mutations_enabled", False
+    ) is not True:
+        raise HTTPException(status_code=503, detail={"code": "DOMAIN_MEMORY_MUTATIONS_DISABLED"})
 
 
 def _preferences(body: PreferenceBody) -> DomainMemoryPreferences:
@@ -116,8 +142,12 @@ def retrieve_memory(body: RetrieveBody, request: Request) -> dict[str, Any]:
     service = _service(request)
     try:
         result = service.retrieve(
-            requester=MemoryScope.from_dict(body.requester_scope), global_preferences=_preferences(body.preferences),
-            override=_override(body.override), facts=body.facts, now=body.now,
+            requester=_requester_scope(request, body.requester_scope),
+            # A browser request cannot turn memory on or override a persisted
+            # setting. A2 will source these values from confirmed local state.
+            global_preferences=DomainMemoryPreferences(),
+            override=DomainMemoryRequestOverride(),
+            facts=body.facts, now=body.now,
             max_entries=body.max_entries, max_bytes=body.max_bytes,
         )
     except (ValueError, TypeError, KeyError) as error:
@@ -127,6 +157,7 @@ def retrieve_memory(body: RetrieveBody, request: Request) -> dict[str, Any]:
 
 @router.post("/candidates")
 def create_candidate(body: CandidateBody, request: Request) -> dict[str, Any]:
+    _require_mutations_enabled(request)
     service = _service(request)
     try:
         candidate = service.create_candidate(
@@ -139,6 +170,7 @@ def create_candidate(body: CandidateBody, request: Request) -> dict[str, Any]:
 
 @router.post("/candidates/{candidate_id}/approve")
 def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) -> dict[str, Any]:
+    _require_mutations_enabled(request)
     service = _service(request)
     try:
         result = service.approve_candidate(
@@ -156,6 +188,7 @@ def approve_candidate(candidate_id: str, body: ApproveBody, request: Request) ->
 
 @router.post("/review/candidates/{candidate_id}")
 def review_candidate(candidate_id: str, body: CandidateReviewBody, request: Request) -> dict[str, Any]:
+    _require_mutations_enabled(request)
     review = _review_service(request)
     try:
         if body.decision == "rejected":
@@ -174,6 +207,7 @@ def review_candidate(candidate_id: str, body: CandidateReviewBody, request: Requ
 
 @router.post("/review/memories/{memory_id}/state")
 def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request) -> dict[str, Any]:
+    _require_mutations_enabled(request)
     review = _review_service(request)
     try:
         result = review.change_memory_state(
@@ -187,6 +221,7 @@ def change_memory_state(memory_id: str, body: MemoryStateBody, request: Request)
 
 @router.post("/review/memories/{memory_id}/restore")
 def restore_memory(memory_id: str, body: MemoryRestoreBody, request: Request) -> dict[str, Any]:
+    _require_mutations_enabled(request)
     review = _review_service(request)
     try:
         result = review.restore_memory(memory_id, actor_id=body.actor_id, approved_at=body.approved_at, evidence_ref=body.evidence_ref)
