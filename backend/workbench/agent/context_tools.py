@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from typing import Any, Iterable, Protocol
 
-from ..artifacts import read_json
+from ..artifacts import read_json, sha256_file
 from ..contracts.common.envelope import ContractError
 from .chains import ChainHeadConflict, ChainStore
 from ..diagnostic_preview import build_diagnostic_summary_preview
@@ -1837,23 +1837,117 @@ class NodeOperationContextProvider:
         self,
         request: InspectTimeSeriesSummaryRequest,
     ) -> dict[str, Any]:
-        """Return public ARMA-GARCH evidence without exposing raw series."""
+        """Return the public projection owned by the run's actual Recipe."""
 
-        canonical, node, _manifest = self._read_node_snapshot(
+        canonical, node, manifest = self._read_node_snapshot(
             request_id=request.request_id,
             owner_run_id=request.owner_run_id,
             op_node_id=request.op_node_id,
             active_head_run_id=request.active_head_run_id,
         )
-        from .recipes.arma_garch import build_arma_garch_public_result_view
-
         run_root = self.project_root / "runs" / request.owner_run_id
-        artifacts, metadata = _read_time_series_artifacts(run_root)
-        summary = build_arma_garch_public_result_view(artifacts)
         try:
             run_inputs = read_run_inputs(run_root)
         except (FileNotFoundError, OSError, TypeError, ValueError):
             run_inputs = {}
+        routing = manifest.get("model_routing")
+        manifest_model_type = (
+            routing.get("effective_model_type")
+            if isinstance(routing, dict)
+            else None
+        )
+        effective_model_type = manifest_model_type
+        input_model_types: list[str] = []
+        if isinstance(run_inputs, dict):
+            for section_name in ("executed_payload", "confirmed_payload", "form"):
+                section = run_inputs.get(section_name)
+                model_type = section.get("model_type") if isinstance(section, dict) else None
+                if isinstance(model_type, str) and model_type:
+                    input_model_types.append(model_type)
+        input_model_type_set = set(input_model_types)
+        if len(input_model_type_set) > 1 or (
+            manifest_model_type in {"time_series.ets", "time_series.arma_garch"}
+            and input_model_type_set
+            and input_model_type_set != {manifest_model_type}
+        ):
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "lineage": {
+                    "run_id": request.owner_run_id,
+                    "source_run_id": None,
+                    "node_id": node.get("id"),
+                    "model_type": manifest_model_type,
+                },
+                "time_series_summary": {
+                    "available": False,
+                    "reason_code": "TIME_SERIES_MODEL_IDENTITY_CONFLICT",
+                },
+                "compare": None,
+                "omitted_sections": ["raw_series"],
+            }
+        if input_model_types and effective_model_type not in {
+            "time_series.ets",
+            "time_series.arma_garch",
+        }:
+            effective_model_type = input_model_types[0]
+
+        if effective_model_type == "time_series.ets":
+            from .recipes.ets import build_ets_public_result_view
+
+            registered = _resolve_verified_registered_artifact(
+                run_root,
+                artifact_id="ets_1",
+                expected_type="model_result",
+            )
+            summary = (
+                build_ets_public_result_view(
+                    registered[0],
+                    artifact_id="ets_1",
+                    artifact_sha256=registered[1],
+                )
+                if registered is not None
+                else {
+                    "available": False,
+                    "reason_code": "ETS_PUBLIC_RESULT_UNAVAILABLE",
+                }
+            )
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "lineage": {
+                    "run_id": request.owner_run_id,
+                    "source_run_id": None,
+                    "node_id": node.get("id"),
+                    "model_type": effective_model_type,
+                },
+                "time_series_summary": summary,
+                "compare": None,
+                "omitted_sections": ["raw_series"],
+            }
+
+        if effective_model_type != "time_series.arma_garch":
+            return {
+                **canonical,
+                "node": _bounded_node(node),
+                "lineage": {
+                    "run_id": request.owner_run_id,
+                    "source_run_id": None,
+                    "node_id": node.get("id"),
+                    "model_type": effective_model_type,
+                },
+                "time_series_summary": {
+                    "available": False,
+                    "reason_code": "TIME_SERIES_PUBLIC_RESULT_UNSUPPORTED",
+                },
+                "compare": None,
+                "omitted_sections": ["raw_series"],
+            }
+
+        from .recipes.arma_garch import build_arma_garch_public_result_view
+
+        artifacts, metadata = _read_time_series_artifacts(run_root)
+        summary = build_arma_garch_public_result_view(artifacts)
         if "ts.analysis_contract" not in artifacts:
             recovered = _analysis_contract_from_run_inputs(run_inputs)
             if recovered is not None:
@@ -3392,6 +3486,49 @@ def _bounded_node(node: dict[str, Any]) -> dict[str, Any]:
         "trust",
     )
     return {key: node[key] for key in allowed if key in node}
+
+
+def _resolve_verified_registered_artifact(
+    run_root: Path,
+    *,
+    artifact_id: str,
+    expected_type: str,
+) -> tuple[dict[str, Any], str] | None:
+    """Resolve a known artifact id and verify its registered content digest."""
+
+    resolved = resolve_registered_artifact(run_root, artifact_id)
+    if resolved is None:
+        return None
+    artifact_type, registered_sha256, payload = resolved
+    if artifact_type != expected_type or not isinstance(registered_sha256, str):
+        return None
+    if re.fullmatch(r"[0-9a-f]{64}", registered_sha256) is None:
+        return None
+    try:
+        index = read_json(run_root / "artifacts_index.json")
+    except (OSError, ValueError):
+        return None
+    entries = index.get("artifacts") if isinstance(index, dict) else None
+    entry = next(
+        (
+            item
+            for item in entries or ()
+            if isinstance(item, dict) and item.get("artifact_id") == artifact_id
+        ),
+        None,
+    )
+    relative_path = entry.get("path") if isinstance(entry, dict) else None
+    if not isinstance(relative_path, str) or Path(relative_path).is_absolute():
+        return None
+    try:
+        resolved_root = run_root.resolve()
+        path = (run_root / relative_path).resolve()
+        path.relative_to(resolved_root)
+        if not path.is_file() or sha256_file(path) != registered_sha256:
+            return None
+    except (OSError, ValueError):
+        return None
+    return payload, registered_sha256
 
 
 def _bounded_diagnostics(preview: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:

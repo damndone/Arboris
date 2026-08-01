@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import pytest
+import pandas as pd
 
 from workbench.agent.recipe_contracts import (
     RecipeValidationError,
     recipe_contract,
     validate_recipe_genesis_params,
 )
+from workbench.model_options import bind_new_model_options
 
 
 def test_registered_recipes_own_time_value_inputs_and_result_projection() -> None:
@@ -128,3 +130,79 @@ def test_recipe_planning_requires_resolved_time_index_semantics() -> None:
         },
         columns=("when", "value"),
     )
+
+
+def test_recipe_preflight_reuses_the_owner_ets_input_diagnostic() -> None:
+    """A Recipe does not recreate time-series quality rules at the Notebook edge."""
+
+    contract = recipe_contract("time_series.ets")
+    params = {
+        "model_type": "time_series.ets",
+        "model_options": {
+            "time_column": "when",
+            "value_column": "value",
+            "time_index_semantics": "regular_calendar",
+            "error": "add",
+            "trend": None,
+            "seasonal": None,
+            "damped_trend": False,
+        },
+    }
+    source = pd.DataFrame(
+        {
+            "when": [
+                "2020-01-01",
+                "2020-01-02",
+                "2020-01-02",
+                "2020-01-03",
+            ],
+            "value": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+
+    with pytest.raises(
+        RecipeValidationError,
+        match="RECIPE_INPUT_PREFLIGHT_FAILED: time_series.ets .*ETS_DUPLICATE_TIMESTAMP",
+    ):
+        contract.validate_input_preflight(params, source=source)
+
+
+def test_recipe_preflight_reuses_the_owner_arma_transform_gate() -> None:
+    """A confirmed but ineligible transform must be blocked before a Draft exists."""
+
+    contract = recipe_contract("time_series.arma_garch")
+    options = bind_new_model_options(
+        "time_series.arma_garch",
+        {
+            "dataset_ref": "upload:pinned",
+            "time_column": "when",
+            "value_column": "value",
+            "time_index_semantics": "observation_order",
+            "transform": "log_return_pct",
+            "transform_confirmed": True,
+            "analysis_goal": "balanced",
+            "selection_mode": "auto",
+            "arma": {"p": None, "q": None, "constant_mode": "auto"},
+            "variance": {"model": "auto", "arch_p": None, "garch_p": None, "garch_q": None},
+            "estimation_strategy": "auto",
+            "innovation_distribution": "normal",
+            "missing_value_policy": "drop_missing_confirmed",
+            "validation": {"validation_n": 20, "refit_every": 1},
+            "random_seed": 1,
+        },
+    ).payload
+    source = pd.DataFrame(
+        {
+            "when": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+            "value": [1.0, 0.0, 2.0, 3.0],
+        }
+    )
+
+    with pytest.raises(
+        RecipeValidationError,
+        match="RECIPE_INPUT_PREFLIGHT_FAILED: time_series.arma_garch .*LOG_REQUIRES_POSITIVE_VALUES",
+    ):
+        contract.validate_input_preflight(
+            {"model_type": "time_series.arma_garch", "model_options": options},
+            source=source,
+        )

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, TYPE_CHECKING
 from uuid import uuid4
+
+import pandas as pd
 
 from ...canonical import sha256_canonical
 from ...contracts.agent.notebook_option import (
@@ -15,6 +18,7 @@ from ...contracts.agent.notebook_option import (
 )
 from ...engine.capabilities import COVARIANCE_UI, build_capabilities
 from ...lineage.pipeline_drafts import PipelineDraftStore, StoredDraft, schema_hash
+from ...lineage.upload_store import verify_upload
 from ...model_options import (
     ModelOptionsError,
     bind_new_model_options,
@@ -43,6 +47,7 @@ from .errors import (
     OptionRevisionStale,
 )
 from .freshness import assert_executable
+from .evidence import MAX_SOURCE_ROWS
 
 if TYPE_CHECKING:
     from .service import NotebookService
@@ -743,6 +748,16 @@ class NotebookOptionMaterializer:
                 ).payload
             except ModelOptionsError as exc:
                 raise _fail("genesis model_options failed validation", reason=exc.code) from exc
+        if recipe_contract is not None:
+            try:
+                recipe_contract.validate_input_preflight(
+                    model_params,
+                    source=self._read_recipe_preflight_source(
+                        source, recipe_contract, model_params
+                    ),
+                )
+            except RecipeValidationError as exc:
+                raise _fail(str(exc)) from exc
         if family_contract is not None:
             family_spec: dict[str, Any] = {
                 "model_family": model_type,
@@ -798,6 +813,63 @@ class NotebookOptionMaterializer:
         except Exception:
             store.delete(draft.draft["draft_id"])
             raise
+
+    def _read_recipe_preflight_source(
+        self,
+        source: Any,
+        recipe_contract: Any,
+        model_params: Mapping[str, object],
+    ) -> pd.DataFrame:
+        """Read only a Recipe's declared columns, completely or not at all.
+
+        Evidence inspection can report a truncated sample. Admission cannot:
+        a sample cannot prove there are no later duplicate timestamps, gaps, or
+        transform-ineligible values.  This keeps the existing bounded source
+        policy while rejecting a source that exceeds it instead of inspecting a
+        prefix and treating the result as complete.
+        """
+
+        upload_sha256 = getattr(source, "upload_sha256", None)
+        if not isinstance(upload_sha256, str) or not upload_sha256:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the pinned upload identity is missing"
+            )
+        try:
+            path = verify_upload(self.service.project_root, upload_sha256)
+            columns = list(dict.fromkeys(recipe_contract.source_columns(model_params)))
+            suffix = Path(getattr(source, "filename", "") or "").suffix.lower()
+            read_limit = MAX_SOURCE_ROWS + 1
+            if suffix == ".csv":
+                frame = pd.read_csv(path, usecols=columns, nrows=read_limit)
+            elif suffix in {".xlsx", ".xls"}:
+                with pd.ExcelFile(path) as workbook:
+                    sheet_names = tuple(getattr(source, "sheet_names", ()) or ())
+                    sheet = sheet_names[0] if sheet_names else workbook.sheet_names[0]
+                    frame = pd.read_excel(
+                        workbook,
+                        sheet_name=sheet,
+                        usecols=columns,
+                        nrows=read_limit,
+                    )
+            else:
+                raise ValueError(f"unsupported dataset upload type: {suffix or 'unknown'}")
+        except RecipeValidationError:
+            raise
+        except (ImportError, OSError, TypeError, UnicodeError, ValueError) as exc:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the verified source could not be opened"
+            ) from exc
+        if len(frame) > MAX_SOURCE_ROWS:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_BOUNDED: the complete source exceeds the preflight row limit"
+            )
+        try:
+            verify_upload(self.service.project_root, upload_sha256)
+        except (OSError, ValueError) as exc:
+            raise _fail(
+                "RECIPE_PREFLIGHT_SOURCE_UNAVAILABLE: the verified source changed during preflight"
+            ) from exc
+        return frame
 
     def _materialize_custom_dataset(
         self,

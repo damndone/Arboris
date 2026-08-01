@@ -909,7 +909,10 @@ def test_univariate_genesis_option_materializes_without_x_regressors(
     service = NotebookService(project)
     upload_sha = store_upload_bytes(
         project,
-        b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+        b"when,value\n"
+        b"2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n2020-01-04,4\n"
+        b"2020-01-05,5\n2020-01-06,6\n2020-01-07,7\n2020-01-08,8\n"
+        b"2020-01-09,9\n2020-01-10,10\n",
         filename="series.csv",
     )
     notebook = service.ensure_default_projection(
@@ -1037,6 +1040,135 @@ def test_univariate_genesis_option_materializes_without_x_regressors(
         service.option_view(notebook.notebook_id, revision.option_id).lifecycle_status
         == "materialized"
     )
+
+
+def test_dataset_recipe_preflight_blocks_invalid_ets_before_draft_write(
+    tmp_path: Path,
+) -> None:
+    """Schema evidence alone must not allow a known-invalid series to become a Draft."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"when,value\n"
+        b"2020-01-01,1\n"
+        b"2020-01-02,2\n"
+        b"2020-01-02,3\n"
+        b"2020-01-03,4\n"
+        b"2020-01-04,5\n"
+        b"2020-01-05,6\n"
+        b"2020-01-06,7\n"
+        b"2020-01-07,8\n"
+        b"2020-01-08,9\n"
+        b"2020-01-09,10\n",
+        filename="duplicate-series.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "duplicate-series.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    proposal = {
+        "operation_id": "model.genesis",
+        "target": {"dataset_source_id": upload_sha},
+        "changes": {
+            "model_params": {
+                "model_type": "time_series.ets",
+                "model_options": {
+                    "time_column": "when",
+                    "value_column": "value",
+                    "time_index_semantics": "regular_calendar",
+                    "error": "add",
+                    "trend": None,
+                    "seasonal": None,
+                    "damped_trend": False,
+                },
+            }
+        },
+    }
+
+    with pytest.raises(
+        OptionMaterializationFailed,
+        match="RECIPE_INPUT_PREFLIGHT_FAILED.*ETS_DUPLICATE_TIMESTAMP",
+    ):
+        NotebookOptionMaterializer(service)._materialize_dataset(
+            notebook,
+            proposal,
+            {"option_id": "opt_duplicate_ets", "option_revision": "1"},
+        )
+
+    assert not (project / "pipeline_drafts").exists()
+
+
+def test_dataset_recipe_preflight_blocks_ineligible_arma_transform_before_draft_write(
+    tmp_path: Path,
+) -> None:
+    """The Pack remains the sole authority for ARMA/GARCH transform eligibility."""
+
+    project = make_project(tmp_path)
+    service = NotebookService(project)
+    upload_sha = store_upload_bytes(
+        project,
+        b"when,value\n"
+        b"2020-01-01,1\n2020-01-02,0\n2020-01-03,2\n2020-01-04,3\n",
+        filename="ineligible-transform.csv",
+    )
+    notebook = service.ensure_default_projection(
+        dataset={
+            "kind": "dataset",
+            "upload_sha256": upload_sha,
+            "filename": "ineligible-transform.csv",
+            "sheet_names": [],
+        },
+        created_by="ui",
+    )
+    proposal = {
+        "operation_id": "model.genesis",
+        "target": {"dataset_source_id": upload_sha},
+        "changes": {
+            "model_params": {
+                "model_type": "time_series.arma_garch",
+                "model_options": {
+                    "time_column": "when",
+                    "value_column": "value",
+                    "time_index_semantics": "observation_order",
+                    "transform": "log_return_pct",
+                    "transform_confirmed": True,
+                    "analysis_goal": "balanced",
+                    "selection_mode": "auto",
+                    "arma": {"p": None, "q": None, "constant_mode": "auto"},
+                    "variance": {
+                        "model": "auto",
+                        "arch_p": None,
+                        "garch_p": None,
+                        "garch_q": None,
+                    },
+                    "estimation_strategy": "auto",
+                    "innovation_distribution": "normal",
+                    "missing_value_policy": "drop_missing_confirmed",
+                    "validation": {"validation_n": 20, "refit_every": 1},
+                    "random_seed": 1,
+                },
+            }
+        },
+    }
+
+    with pytest.raises(
+        OptionMaterializationFailed,
+        match="RECIPE_INPUT_PREFLIGHT_FAILED.*LOG_REQUIRES_POSITIVE_VALUES",
+    ):
+        NotebookOptionMaterializer(service)._materialize_dataset(
+            notebook,
+            proposal,
+            {"option_id": "opt_ineligible_arma", "option_revision": "1"},
+        )
+
+    assert not (project / "pipeline_drafts").exists()
 
 
 @pytest.mark.parametrize(
@@ -1248,7 +1380,10 @@ def test_genesis_recipe_rejects_an_unconfirmed_arma_transform_before_draft_write
     service = NotebookService(project)
     upload_sha = store_upload_bytes(
         project,
-        b"when,value\n2020-01-01,1\n2020-01-02,2\n",
+        b"when,value\n"
+        b"2020-01-01,1\n2020-01-02,2\n2020-01-03,3\n2020-01-04,4\n"
+        b"2020-01-05,5\n2020-01-06,6\n2020-01-07,7\n2020-01-08,8\n"
+        b"2020-01-09,9\n2020-01-10,10\n",
         filename="series.csv",
     )
     notebook = service.ensure_default_projection(

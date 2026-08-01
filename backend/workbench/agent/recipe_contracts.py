@@ -141,6 +141,65 @@ class RecipeContract:
                 + ".",
             )
 
+    def validate_input_preflight(
+        self, model_params: Mapping[str, object], *, source: object
+    ) -> None:
+        """Apply the owning Pack's blocking input gate before Draft persistence.
+
+        This contract deliberately dispatches to the Pack rather than copying
+        time-series rules into Notebook code.  The caller must supply a fully
+        read, server-verified source containing exactly the declared columns;
+        partial source scans are never accepted as a successful preflight.
+        """
+
+        options = model_params.get("model_options")
+        if not isinstance(options, Mapping):
+            raise _error(
+                "RECIPE_MODEL_OPTIONS_REQUIRED",
+                f"{self.recipe_id} requires a model_options object.",
+            )
+        if self.recipe_id == "time_series.ets":
+            from ..engine.packs.ets.errors import ETSInputError
+            from ..engine.packs.ets.input import ETSModelOptions, prepare_ets_input
+
+            try:
+                prepare_ets_input(source, ETSModelOptions.from_dict(options))
+            except ETSInputError as exc:
+                raise _error(
+                    "RECIPE_INPUT_PREFLIGHT_FAILED",
+                    f"{self.recipe_id} {exc.code}: {exc}",
+                ) from exc
+            except (TypeError, ValueError) as exc:
+                raise _error(
+                    "RECIPE_INPUT_PREFLIGHT_INVALID",
+                    f"{self.recipe_id} owner contract rejected the verified source.",
+                ) from exc
+            return
+        if self.recipe_id == "time_series.arma_garch":
+            from ..contracts.model.arma_garch import ArmaGarchAnalysisContract
+            from ..engine.packs.arma_garch.errors import ArmaGarchInputError
+            from ..engine.packs.arma_garch.input import prepare_arma_garch_input
+
+            try:
+                prepare_arma_garch_input(
+                    source, ArmaGarchAnalysisContract.from_dict(options)
+                )
+            except ArmaGarchInputError as exc:
+                raise _error(
+                    "RECIPE_INPUT_PREFLIGHT_FAILED",
+                    f"{self.recipe_id} {exc.code}: {exc}",
+                ) from exc
+            except (TypeError, ValueError) as exc:
+                raise _error(
+                    "RECIPE_INPUT_PREFLIGHT_INVALID",
+                    f"{self.recipe_id} owner contract rejected the verified source.",
+                ) from exc
+            return
+        raise _error(
+            "RECIPE_INPUT_PREFLIGHT_UNSUPPORTED",
+            f"{self.recipe_id} has no registered input preflight.",
+        )
+
     def bind_server_owned_options(
         self,
         value: object,
