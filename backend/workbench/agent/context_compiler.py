@@ -284,7 +284,7 @@ def attach_domain_memory_projection(
             raise ValueError("domain memory omission revision is invalid")
         if not all(isinstance(omission[key], str) and omission[key] for key in omission_fields - {"revision"}):
             raise ValueError("domain memory omission contains an invalid text field")
-    if len(canonical_json_v1(projection)) > 8192:
+    if len(canonical_json_v1(projection).encode("utf-8")) > 8192:
         raise ValueError("domain memory projection exceeds its byte budget")
 
     attached = replace(context, domain_memory_projection=dict(projection))

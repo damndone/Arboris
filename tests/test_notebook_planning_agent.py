@@ -233,6 +233,12 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
     assert "execution_pins" in adapter.requests[0].messages[0]["content"]
     assert "automatically materializes residuals_vs_<predictor>" in adapter.requests[0].messages[0]["content"]
     assert "do not claim that a separate scatter step is required" in adapter.requests[0].messages[0]["content"]
+    assert "only when the current context includes an eligible approved memory default" in (
+        adapter.requests[0].messages[0]["content"]
+    )
+    assert "Every time-series Recipe must explicitly set" not in (
+        adapter.requests[0].messages[0]["content"]
+    )
     assert len(adapter.requests) == 2
 
 

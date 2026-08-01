@@ -101,7 +101,7 @@ def test_recipe_genesis_rejects_missing_source_columns_and_regression_fields() -
         validate_recipe_genesis_params({**valid_ets, "y": "value"}, columns=("when", "value"))
 
 
-def test_recipe_planning_requires_explicit_time_index_semantics() -> None:
+def test_recipe_planning_requires_resolved_time_index_semantics() -> None:
     contract = recipe_contract("time_series.ets")
     params = {
         "model_type": "time_series.ets",

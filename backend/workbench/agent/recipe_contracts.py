@@ -116,9 +116,9 @@ class RecipeContract:
         """Apply the stricter disclosure gate used by Agent-generated options.
 
         Existing human-authored Drafts retain the pack contract's backwards-
-        compatible defaults.  An Agent recommendation must make time-index
-        semantics explicit so the user's confirmation includes the assumption
-        that controls missing/irregular-period handling.
+        compatible defaults. An Agent recommendation must resolve time-index
+        semantics before confirmation, either from its explicit field or from
+        an eligible server-applied, provenance-bearing memory default.
         """
 
         self.validate_genesis_params(model_params, columns=columns)
@@ -136,7 +136,7 @@ class RecipeContract:
         if missing:
             raise _error(
                 "RECIPE_PLANNING_OPTION_REQUIRED",
-                f"{self.recipe_id} requires explicit planning option(s): "
+                f"{self.recipe_id} requires resolved planning option(s): "
                 + ", ".join(missing)
                 + ".",
             )
