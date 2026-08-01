@@ -61,6 +61,29 @@ describe("OptionCard — the canonical option, rendered as the packet states it"
     );
   });
 
+  it("renders server-owned target metadata and the safe restore value for a memory default", () => {
+    const memoryOption = {
+      ...option(),
+      contract_version: "1.4",
+      memory_default_sources: [
+        {
+          memory_id: "memory-panel-covariance",
+          revision: 4,
+          target_ref: "model.genesis.panel_ols.covariance.robust",
+          target_label: "Covariance estimator",
+          method_risk: "medium",
+          restore_value: null,
+        },
+      ],
+    } as unknown as NotebookOptionRevision;
+
+    render(<OptionCard option={memoryOption} />);
+
+    expect(screen.getByTestId("option-memory-default-sources")).toHaveTextContent(
+      "Covariance estimator · rev 4 · Medium method risk · Restore: use the model default",
+    );
+  });
+
   it("uses the batch decision instead of display rank for recommendation styling", () => {
     const v11 = (overrides: Partial<NotebookOptionRevision> = {}) =>
       option({

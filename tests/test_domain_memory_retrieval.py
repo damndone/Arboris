@@ -48,7 +48,11 @@ def test_retrieval_requires_use_flag_and_is_bounded_projection(tmp_path: Path) -
     result = retrieve_domain_memory(store, requester=SCOPE, preferences=enabled, facts={"analysis_family": "ols"}, now="2026-07-27T00:00:00Z")
     assert result.outcome == "used"
     assert result.entries[0].recommended_effect_kind == "assumption_check_hint"
-    assert result.to_context_projection()["memory_authority"] == "non_authoritative"
+    projection = result.to_context_projection()
+    assert projection["contract_version"] == "domain-memory-context-input/v3"
+    assert projection["memory_authority"] == "non_authoritative"
+    assert projection["entries"][0]["source_scope_ref"] == SCOPE.scope_ref
+    assert projection["entries"][0]["vocabulary_version"] is None
 
 
 def test_predicate_scope_and_source_revocation_fail_closed(tmp_path: Path) -> None:

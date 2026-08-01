@@ -198,6 +198,7 @@ def attach_domain_memory_projection(
     if version not in {
         "domain-memory-context-input/v1",
         "domain-memory-context-input/v2",
+        "domain-memory-context-input/v3",
     }:
         raise ValueError("domain memory projection contract_version is unsupported")
     if projection["memory_authority"] != "non_authoritative":
@@ -226,8 +227,13 @@ def attach_domain_memory_projection(
         "apply_mode_reason",
         "memory_source",
     }
+    v3_entry_fields = v2_entry_fields | {"vocabulary_version", "source_scope_ref"}
     for entry in projection["entries"]:
-        expected_entry_fields = v2_entry_fields if version == "domain-memory-context-input/v2" else entry_fields
+        expected_entry_fields = {
+            "domain-memory-context-input/v1": entry_fields,
+            "domain-memory-context-input/v2": v2_entry_fields,
+            "domain-memory-context-input/v3": v3_entry_fields,
+        }[version]
         if not isinstance(entry, dict) or set(entry) != expected_entry_fields:
             raise ValueError("domain memory entry has an invalid contract shape")
         if entry["memory_authority"] != "non_authoritative_hint":
@@ -249,7 +255,7 @@ def attach_domain_memory_projection(
             "match_reason",
         )):
             raise ValueError("domain memory entry list fields are invalid")
-        if version == "domain-memory-context-input/v2":
+        if version in {"domain-memory-context-input/v2", "domain-memory-context-input/v3"}:
             if entry["apply_mode"] not in {"inform_only", "suggest_default"}:
                 raise ValueError("domain memory entry apply_mode is invalid")
             if not isinstance(entry["apply_mode_reason"], str) or not entry["apply_mode_reason"]:
@@ -262,6 +268,14 @@ def attach_domain_memory_projection(
                 or source["revision"] != entry["revision"]
             ):
                 raise ValueError("domain memory entry source is invalid")
+        if version == "domain-memory-context-input/v3":
+            if entry["vocabulary_version"] is not None and (
+                not isinstance(entry["vocabulary_version"], str)
+                or not entry["vocabulary_version"]
+            ):
+                raise ValueError("domain memory entry vocabulary_version is invalid")
+            if not isinstance(entry["source_scope_ref"], str) or not entry["source_scope_ref"]:
+                raise ValueError("domain memory entry source_scope_ref is invalid")
     omission_fields = {"memory_id", "revision", "reason"}
     for omission in projection["omissions"]:
         if not isinstance(omission, dict) or set(omission) != omission_fields:

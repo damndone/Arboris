@@ -1988,7 +1988,7 @@ def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(
             projection_source={"kind": "dataset", "upload_sha256": upload_sha256},
         ),
         {
-            "contract_version": "domain-memory-context-input/v2",
+            "contract_version": "domain-memory-context-input/v3",
             "retrieval_ref": "retrieval-memory-default",
             "scope_ref": "scope-memory-default",
             "outcome": "used",
@@ -2007,9 +2007,11 @@ def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(
                     ],
                     "source_summary_refs": ["summary-memory-default"],
                     "match_reason": ["goal"],
-                    "apply_mode": "suggest_default",
-                    "apply_mode_reason": "verifier_current",
-                    "memory_source": {
+                        "apply_mode": "suggest_default",
+                        "apply_mode_reason": "verifier_current",
+                        "vocabulary_version": "notebook-memory-defaults-v1",
+                        "source_scope_ref": "scope-memory-default",
+                        "memory_source": {
                         "memory_id": "memory-ols-covariance",
                         "revision": 2,
                     },
@@ -2094,6 +2096,9 @@ def test_notebook_agent_applies_a_current_memory_default_with_exact_provenance(
             memory_id="memory-ols-covariance",
             revision=2,
             target_ref="model.genesis.ols.covariance.robust",
+            target_label="Covariance estimator",
+            method_risk="medium",
+            restore_value=None,
         ),
     )
 

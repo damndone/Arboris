@@ -33,6 +33,7 @@ from ...contracts.agent.notebook_option import (
     NotebookOptionRevisionV11,
     NotebookOptionRevisionV12,
     NotebookOptionRevisionV13,
+    NotebookOptionRevisionV14,
     OptionExecution,
     RecommendationDecision,
     RecommendationDecisionV11,
@@ -1061,6 +1062,7 @@ class NotebookService:
             | NotebookOptionRevisionV11
             | NotebookOptionRevisionV12
             | NotebookOptionRevisionV13
+            | NotebookOptionRevisionV14
         ] = []
         for draft, (proposal, contract, risk_level), binding in zip(
             drafts, prepared, bindings
@@ -1071,7 +1073,11 @@ class NotebookService:
                 if binding is not None:
                     revision_type = NotebookOptionRevisionV12
                 elif proposal.memory_default_sources:
-                    revision_type = NotebookOptionRevisionV13
+                    revision_type = (
+                        NotebookOptionRevisionV14
+                        if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                        else NotebookOptionRevisionV13
+                    )
                 else:
                     revision_type = NotebookOptionRevisionV11
                 revision_kwargs = {
@@ -1276,6 +1282,7 @@ class NotebookService:
             | NotebookOptionRevisionV11
             | NotebookOptionRevisionV12
             | NotebookOptionRevisionV13
+            | NotebookOptionRevisionV14
         ] = []
         stored: list[StoredRevision | None] = []
         for draft, (proposal, contract, risk_level), prior, binding in zip(
@@ -1317,7 +1324,11 @@ class NotebookService:
             if binding is not None:
                 revision_type = NotebookOptionRevisionV12
             elif proposal.memory_default_sources:
-                revision_type = NotebookOptionRevisionV13
+                revision_type = (
+                    NotebookOptionRevisionV14
+                    if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                    else NotebookOptionRevisionV13
+                )
             else:
                 revision_type = NotebookOptionRevisionV11
             revision_kwargs = {
@@ -1560,7 +1571,12 @@ class NotebookService:
                 **revision_values,
             }
             if proposal.memory_default_sources:
-                revision = NotebookOptionRevisionV13(
+                revision_type = (
+                    NotebookOptionRevisionV14
+                    if all(source.has_display_metadata for source in proposal.memory_default_sources)
+                    else NotebookOptionRevisionV13
+                )
+                revision = revision_type(
                     **v11_values,
                     memory_default_sources=proposal.memory_default_sources,
                 )

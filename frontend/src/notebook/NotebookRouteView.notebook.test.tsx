@@ -205,7 +205,7 @@ describe("NotebookRouteView", () => {
     const memoryContext = {
       ...context,
       domain_memory_projection: {
-        contract_version: "domain-memory-context-input/v2" as const,
+        contract_version: "domain-memory-context-input/v3" as const,
         retrieval_ref: "retrieval-memory-empty",
         scope_ref: "scope-memory-private",
         outcome: "empty" as const,

@@ -25,8 +25,10 @@ from workbench.contracts.agent.notebook_option import (
     EvidenceRef,
     ExpectedArtifact,
     MemoryDefaultSource,
+    NotebookOptionRevision,
     NotebookOptionRevisionV11,
     NotebookOptionRevisionV13,
+    NotebookOptionRevisionV14,
     RecommendationDecision,
 )
 from workbench.domain_memory.candidate_store import MemoryCandidateStore
@@ -64,7 +66,7 @@ def _context(tmp_path: Path):
 
 def _memory_projection(*entries: dict[str, object]) -> dict[str, object]:
     return {
-        "contract_version": "domain-memory-context-input/v2",
+        "contract_version": "domain-memory-context-input/v3",
         "retrieval_ref": "retrieval-1",
         "scope_ref": "scope-1",
         "outcome": "used" if entries else "empty",
@@ -97,6 +99,8 @@ def _memory_hint(
         "match_reason": ["goal"],
         "apply_mode": apply_mode,
         "apply_mode_reason": "verifier_current" if apply_mode == "suggest_default" else "declared_inform_only",
+        "vocabulary_version": "notebook-memory-defaults-v1",
+        "source_scope_ref": "scope-1",
         "memory_source": {"memory_id": memory_id, "revision": revision},
         "memory_authority": "non_authoritative_hint",
     }
@@ -250,7 +254,7 @@ def test_domain_memory_projection_is_visible_but_not_a_freshness_dependency(tmp_
     )
 
 
-def test_memory_v2_projection_preserves_apply_mode_without_becoming_a_freshness_input(
+def test_memory_v3_projection_preserves_apply_mode_without_becoming_a_freshness_input(
     tmp_path: Path,
 ) -> None:
     base = _context(tmp_path)
@@ -260,9 +264,19 @@ def test_memory_v2_projection_preserves_apply_mode_without_becoming_a_freshness_
 
     entry = attached.domain_memory_projection["entries"][0]
     assert entry["apply_mode"] == "suggest_default"
+    assert entry["vocabulary_version"] == "notebook-memory-defaults-v1"
+    assert entry["source_scope_ref"] == "scope-1"
     assert entry["memory_source"] == {"memory_id": "memory-1", "revision": 1}
     assert generation_context_hash(attached) != generation_context_hash(base)
     assert freshness_dependency_fingerprint(attached) == freshness_dependency_fingerprint(base)
+
+
+def test_memory_v3_projection_rejects_missing_authority_ordering_facts(tmp_path: Path) -> None:
+    projection = _memory_projection(_memory_hint())
+    del projection["entries"][0]["source_scope_ref"]
+
+    with pytest.raises(ValueError, match="invalid contract shape"):
+        attach_domain_memory_projection(_context(tmp_path), projection)
 
 
 def test_memory_defaults_are_atomic_provenanced_and_fail_closed(tmp_path: Path) -> None:
@@ -277,6 +291,9 @@ def test_memory_defaults_are_atomic_provenanced_and_fail_closed(tmp_path: Path) 
             memory_id="memory-1",
             revision=1,
             target_ref="model.genesis.ols.covariance.unadjusted",
+            target_label="Covariance estimator",
+            method_risk="medium",
+            restore_value=None,
         ),
     )
     assert defaulted.canonical_hash() != proposal.canonical_hash()
@@ -340,7 +357,7 @@ def test_memory_preflight_reports_expiry_and_default_verifier_risks_without_bloc
     assert stale.approved_count == 1
 
 
-def test_memory_default_provenance_persists_as_a_v13_option_revision(tmp_path: Path) -> None:
+def test_memory_default_provenance_persists_as_a_v14_option_revision(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     service = NotebookService(project)
     notebook = service.create_notebook(title="memory provenance", created_by="user-memory")
@@ -399,12 +416,15 @@ def test_memory_default_provenance_persists_as_a_v13_option_revision(tmp_path: P
         ),
     )
 
-    assert isinstance(revision, NotebookOptionRevisionV13)
+    assert isinstance(revision, NotebookOptionRevisionV14)
     assert revision.memory_default_sources == (
         MemoryDefaultSource(
             memory_id="memory-ols-covariance",
             revision=2,
             target_ref="model.genesis.ols.covariance.robust",
+            target_label="Covariance estimator",
+            method_risk="medium",
+            restore_value=None,
         ),
     )
     assert (
@@ -412,6 +432,16 @@ def test_memory_default_provenance_persists_as_a_v13_option_revision(tmp_path: P
         .current_revision.to_dict()["memory_default_sources"]
         == [item.to_dict() for item in revision.memory_default_sources]
     )
+    legacy_payload = revision.to_dict()
+    legacy_payload["contract_version"] = "1.3"
+    legacy_payload["memory_default_sources"] = [
+        {
+            "memory_id": "memory-ols-covariance",
+            "revision": 2,
+            "target_ref": "model.genesis.ols.covariance.robust",
+        }
+    ]
+    assert isinstance(NotebookOptionRevision.from_dict(legacy_payload), NotebookOptionRevisionV13)
     with pytest.raises(OptionRevisionStale, match="memory default is no longer current"):
         service._assert_current_memory_default_sources(
             service.store.read_option(notebook.notebook_id, "option-memory-persisted"),
@@ -441,7 +471,7 @@ def test_memory_default_provenance_persists_as_a_v13_option_revision(tmp_path: P
         ),
     )
     assert isinstance(revalidated, NotebookOptionRevisionV11)
-    assert not isinstance(revalidated, NotebookOptionRevisionV13)
+    assert not isinstance(revalidated, (NotebookOptionRevisionV13, NotebookOptionRevisionV14))
 
 
 def test_invalid_or_oversized_domain_memory_projection_fails_closed(tmp_path: Path) -> None:

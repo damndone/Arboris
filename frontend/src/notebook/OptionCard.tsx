@@ -152,7 +152,11 @@ export function OptionCard({
           <ul>
             {option.memory_default_sources.map((source) => (
               <li key={`${source.memory_id}:${source.revision}:${source.target_ref}`}>
-                {`${source.memory_id} · rev ${source.revision} · ${source.target_ref}`}
+                {source.target_label && source.method_risk
+                  ? `${source.target_label} · rev ${source.revision} · ${
+                      source.method_risk[0].toUpperCase() + source.method_risk.slice(1)
+                    } method risk · Restore: ${source.restore_value ?? "use the model default"}`
+                  : `${source.memory_id} · rev ${source.revision} · ${source.target_ref}`}
               </li>
             ))}
           </ul>

@@ -42,6 +42,8 @@ class RetrievedMemoryHint:
     match_reason: tuple[str, ...]
     apply_mode: str
     apply_mode_reason: str
+    vocabulary_version: str | None
+    source_scope_ref: str
 
     @property
     def memory_source(self) -> dict[str, int | str]:
@@ -61,6 +63,8 @@ class RetrievedMemoryHint:
             "match_reason": list(self.match_reason),
             "apply_mode": self.apply_mode,
             "apply_mode_reason": self.apply_mode_reason,
+            "vocabulary_version": self.vocabulary_version,
+            "source_scope_ref": self.source_scope_ref,
             "memory_source": self.memory_source,
             "memory_authority": "non_authoritative_hint",
         }
@@ -78,7 +82,7 @@ class DomainMemoryRetrieval:
 
     def to_context_projection(self) -> dict[str, Any]:
         return {
-            "contract_version": "domain-memory-context-input/v2",
+            "contract_version": "domain-memory-context-input/v3",
             "retrieval_ref": self.retrieval_ref,
             "scope_ref": self.scope_ref,
             "outcome": self.outcome,
@@ -219,6 +223,8 @@ def retrieve_domain_memory(
             recommended_effect_kind=content.recommended_effect_kind, recommended_target_refs=content.recommended_target_refs,
             source_summary_refs=source_refs, match_reason=tuple(item.predicate_id for item in content.applicability_predicates),
             apply_mode=apply_mode, apply_mode_reason=apply_mode_reason,
+            vocabulary_version=content.vocabulary_version,
+            source_scope_ref=content.scope.scope_ref,
         )
         encoded = json.dumps(hint.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if len(encoded) > max_bytes or (selected and len(json.dumps([item.to_dict() for item in selected], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")) + len(encoded) > max_bytes):

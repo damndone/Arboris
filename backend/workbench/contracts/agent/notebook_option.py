@@ -34,6 +34,7 @@ NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1"
 NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0"
 NOTEBOOK_OPTION_V12_CONTRACT_VERSION = "1.2"
 NOTEBOOK_OPTION_V13_CONTRACT_VERSION = "1.3"
+NOTEBOOK_OPTION_V14_CONTRACT_VERSION = "1.4"
 OPTION_EXECUTION_CONTRACT_VERSION = "1.1"
 OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0"
 RECOMMENDATION_DECISION_CONTRACT_VERSION = "1.0"
@@ -345,30 +346,56 @@ class MemoryDefaultSource:
     memory_id: str
     revision: int
     target_ref: str
+    target_label: str | None = None
+    method_risk: str | None = None
+    restore_value: str | None = None
 
     def __post_init__(self) -> None:
         _require_str(self.memory_id, "memory_default_source.memory_id")
         _require_int(self.revision, "memory_default_source.revision", minimum=1)
         _require_str(self.target_ref, "memory_default_source.target_ref")
+        display_fields = (self.target_label, self.method_risk, self.restore_value)
+        has_any_display_field = any(value is not None for value in display_fields)
+        if has_any_display_field:
+            _require_str(self.target_label, "memory_default_source.target_label")
+            _require_choice(self.method_risk, RISK_LEVELS, "memory_default_source.method_risk")
+            if self.restore_value is not None:
+                _require_str(self.restore_value, "memory_default_source.restore_value")
+
+    @property
+    def has_display_metadata(self) -> bool:
+        return self.target_label is not None and self.method_risk is not None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "memory_id": self.memory_id,
             "revision": self.revision,
             "target_ref": self.target_ref,
         }
+        if self.has_display_metadata:
+            payload.update(
+                {
+                    "target_label": self.target_label,
+                    "method_risk": self.method_risk,
+                    "restore_value": self.restore_value,
+                }
+            )
+        return payload
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "MemoryDefaultSource":
-        require_exact_keys(
-            value,
-            {"memory_id", "revision", "target_ref"},
-            "memory_default_source",
-        )
+        base_keys = {"memory_id", "revision", "target_ref"}
+        display_keys = {"target_label", "method_risk", "restore_value"}
+        keys = set(value) if isinstance(value, Mapping) else set()
+        if keys != base_keys and keys != base_keys | display_keys:
+            raise NotebookContractError("memory_default_source fields are invalid")
         return cls(
             memory_id=value["memory_id"],
             revision=value["revision"],
             target_ref=value["target_ref"],
+            target_label=value.get("target_label"),
+            method_risk=value.get("method_risk"),
+            restore_value=value.get("restore_value"),
         )
 
 
@@ -419,7 +446,7 @@ class NotebookOptionRevision:
     @classmethod
     def from_dict(
         cls, value: Mapping[str, Any]
-    ) -> "NotebookOptionRevision | NotebookOptionRevisionV11 | NotebookOptionRevisionV12 | NotebookOptionRevisionV13":
+    ) -> "NotebookOptionRevision | NotebookOptionRevisionV11 | NotebookOptionRevisionV12 | NotebookOptionRevisionV13 | NotebookOptionRevisionV14":
         payload = _require_mapping(value, "notebook_option_revision")
         version = payload.get("contract_version", NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION)
         if version == NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION:
@@ -430,10 +457,13 @@ class NotebookOptionRevision:
             return NotebookOptionRevisionV12.from_dict(payload)
         if version == NOTEBOOK_OPTION_V13_CONTRACT_VERSION:
             return NotebookOptionRevisionV13.from_dict(payload)
+        if version == NOTEBOOK_OPTION_V14_CONTRACT_VERSION:
+            return NotebookOptionRevisionV14.from_dict(payload)
         raise NotebookContractError(
             f"NotebookOptionRevision contract_version must be one of "
             f"[{NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_CONTRACT_VERSION!r}, "
-            f"{NOTEBOOK_OPTION_V12_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_V13_CONTRACT_VERSION!r}], "
+            f"{NOTEBOOK_OPTION_V12_CONTRACT_VERSION!r}, {NOTEBOOK_OPTION_V13_CONTRACT_VERSION!r}, "
+            f"{NOTEBOOK_OPTION_V14_CONTRACT_VERSION!r}], "
             f"got {version!r}"
         )
 
@@ -769,6 +799,98 @@ class NotebookOptionRevisionV13(NotebookOptionRevisionV11):
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "NotebookOptionRevisionV13":
         require_exact_keys(value, cls._V13_KEYS, "notebook_option_revision")
+        evidence_refs = value["evidence_refs"]
+        sources = value["memory_default_sources"]
+        if not isinstance(evidence_refs, (tuple, list)):
+            raise NotebookContractError("evidence_refs must be a tuple or list")
+        if not isinstance(sources, (tuple, list)):
+            raise NotebookContractError("memory_default_sources must be a tuple or list")
+        return cls(
+            option_id=value["option_id"],
+            option_revision=value["option_revision"],
+            notebook_id=value["notebook_id"],
+            run_family_id=value["run_family_id"],
+            generation_context_id=value["generation_context_id"],
+            generation_context_hash=value["generation_context_hash"],
+            freshness_dependency_fingerprint=value["freshness_dependency_fingerprint"],
+            typed_proposal_id=value["typed_proposal_id"],
+            typed_proposal_revision=value["typed_proposal_revision"],
+            artifact_contract=ArtifactContract.from_dict(value["artifact_contract"]),
+            rationale=value["rationale"],
+            assumptions=_require_string_tuple(value["assumptions"], "assumptions"),
+            risk_level=value["risk_level"],
+            lifecycle_status=value["lifecycle_status"],
+            freshness_status=value["freshness_status"],
+            validation_status=value["validation_status"],
+            rank=value["rank"],
+            batch_id=value["batch_id"],
+            created_at=value["created_at"],
+            evidence_refs=tuple(EvidenceRef.from_dict(item) for item in evidence_refs),
+            comparative_claims=_require_string_tuple(value["comparative_claims"], "comparative_claims"),
+            recommendation_decision_id=value["recommendation_decision_id"],
+            recommendation_status=value["recommendation_status"],
+            supersedes_option_revision=value["supersedes_option_revision"],
+            memory_default_sources=tuple(MemoryDefaultSource.from_dict(item) for item in sources),
+            contract_version=value["contract_version"],
+        )
+
+
+@dataclass(frozen=True)
+class NotebookOptionRevisionV14(NotebookOptionRevisionV11):
+    """NotebookOptionRevision@1.4 with complete memory-default display facts."""
+
+    memory_default_sources: tuple[MemoryDefaultSource, ...] = ()
+    contract_version: str = NOTEBOOK_OPTION_V14_CONTRACT_VERSION
+
+    _V14_KEYS = NotebookOptionRevisionV11._V11_KEYS | frozenset({"memory_default_sources"})
+
+    def __post_init__(self) -> None:
+        if self.contract_version != NOTEBOOK_OPTION_V14_CONTRACT_VERSION:
+            raise NotebookContractError(
+                f"contract_version must be {NOTEBOOK_OPTION_V14_CONTRACT_VERSION}"
+            )
+        _validate_option_fields(self, LIFECYCLE_STATUSES)
+        _require_str(self.rationale, "rationale")
+        object.__setattr__(self, "assumptions", _require_string_tuple(self.assumptions, "assumptions"))
+        if not isinstance(self.evidence_refs, (tuple, list)):
+            raise NotebookContractError("evidence_refs must be a tuple or list")
+        evidence_refs = tuple(self.evidence_refs)
+        if any(not isinstance(item, EvidenceRef) for item in evidence_refs):
+            raise NotebookContractError("evidence_refs must contain EvidenceRef records")
+        object.__setattr__(self, "evidence_refs", evidence_refs)
+        object.__setattr__(
+            self, "comparative_claims", _require_string_tuple(self.comparative_claims, "comparative_claims")
+        )
+        _require_str(self.recommendation_decision_id, "recommendation_decision_id")
+        _require_choice(self.recommendation_status, RECOMMENDATION_OUTCOMES, "recommendation_status")
+        _require_optional_int(self.supersedes_option_revision, "supersedes_option_revision")
+        if not isinstance(self.memory_default_sources, (tuple, list)) or not self.memory_default_sources:
+            raise NotebookContractError("memory_default_sources must be a non-empty tuple or list")
+        sources = tuple(self.memory_default_sources)
+        if any(not isinstance(item, MemoryDefaultSource) for item in sources):
+            raise NotebookContractError("memory_default_sources must contain MemoryDefaultSource records")
+        if any(not item.has_display_metadata for item in sources):
+            raise NotebookContractError("v1.4 memory_default_sources require display metadata")
+        if len({(item.memory_id, item.revision, item.target_ref) for item in sources}) != len(sources):
+            raise NotebookContractError("memory_default_sources must be unique")
+        object.__setattr__(self, "memory_default_sources", sources)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _option_wire_dict(self)
+        payload.update(
+            {
+                "evidence_refs": [item.to_dict() for item in self.evidence_refs],
+                "comparative_claims": list(self.comparative_claims),
+                "recommendation_decision_id": self.recommendation_decision_id,
+                "recommendation_status": self.recommendation_status,
+                "memory_default_sources": [item.to_dict() for item in self.memory_default_sources],
+            }
+        )
+        return payload
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "NotebookOptionRevisionV14":
+        require_exact_keys(value, cls._V14_KEYS, "notebook_option_revision")
         evidence_refs = value["evidence_refs"]
         sources = value["memory_default_sources"]
         if not isinstance(evidence_refs, (tuple, list)):
@@ -1524,11 +1646,13 @@ __all__ = [
     "NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION",
     "NOTEBOOK_OPTION_V12_CONTRACT_VERSION",
     "NOTEBOOK_OPTION_V13_CONTRACT_VERSION",
+    "NOTEBOOK_OPTION_V14_CONTRACT_VERSION",
     "NotebookContractError",
     "NotebookOptionRevision",
     "NotebookOptionRevisionV11",
     "NotebookOptionRevisionV12",
     "NotebookOptionRevisionV13",
+    "NotebookOptionRevisionV14",
     "OPTION_EXECUTION_LEGACY_CONTRACT_VERSION",
     "OPTION_EXECUTION_CONTRACT_VERSION",
     "OPTION_MATERIALIZATION_CONTRACT_VERSION",

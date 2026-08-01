@@ -14,6 +14,7 @@ import type { DomainMemoryRetrievalProjection } from "./domainMemoryContracts";
 export const NOTEBOOK_OPTION_CONTRACT_VERSION = "1.1";
 export const NOTEBOOK_OPTION_V12_CONTRACT_VERSION = "1.2";
 export const NOTEBOOK_OPTION_V13_CONTRACT_VERSION = "1.3";
+export const NOTEBOOK_OPTION_V14_CONTRACT_VERSION = "1.4";
 export const NOTEBOOK_OPTION_LEGACY_CONTRACT_VERSION = "1.0";
 export const OPTION_EXECUTION_CONTRACT_VERSION = "1.1";
 export const OPTION_EXECUTION_LEGACY_CONTRACT_VERSION = "1.0";
@@ -305,6 +306,9 @@ export interface MemoryDefaultSource {
   memory_id: string;
   revision: number;
   target_ref: string;
+  target_label?: string;
+  method_risk?: RiskLevel;
+  restore_value?: string | null;
 }
 
 export type CapabilityExecutionMode =
@@ -314,7 +318,7 @@ export type CapabilityExecutionMode =
 
 /** Common consumer shape. New parser outputs are the narrower union below. */
 export interface NotebookOptionRevision extends NotebookOptionRevisionBase {
-  contract_version: "1.0" | "1.1" | "1.2" | "1.3";
+  contract_version: "1.0" | "1.1" | "1.2" | "1.3" | "1.4";
   lifecycle_projection: LifecycleStatus | "legacy_unverified";
   materializable: boolean;
   evidence_refs?: EvidenceRef[];
@@ -366,11 +370,26 @@ export interface NotebookOptionRevisionV13 extends Omit<
   memory_default_sources: MemoryDefaultSource[];
 }
 
+export interface NotebookOptionRevisionV14 extends Omit<
+  NotebookOptionRevisionV11,
+  "contract_version" | "memory_default_sources"
+> {
+  contract_version: "1.4";
+  memory_default_sources: Array<
+    MemoryDefaultSource & {
+      target_label: string;
+      method_risk: RiskLevel;
+      restore_value: string | null;
+    }
+  >;
+}
+
 export type ParsedNotebookOptionRevision =
   | LegacyNotebookOptionRevision
   | NotebookOptionRevisionV11
   | NotebookOptionRevisionV12
-  | NotebookOptionRevisionV13;
+  | NotebookOptionRevisionV13
+  | NotebookOptionRevisionV14;
 
 const OPTION_BASE_REQUIRED_KEYS = [
   "option_id",
@@ -444,15 +463,34 @@ function parseEvidenceRef(value: unknown, index: number): EvidenceRef {
   };
 }
 
-function parseMemoryDefaultSource(value: unknown, index: number): MemoryDefaultSource {
+function parseMemoryDefaultSource(
+  value: unknown,
+  index: number,
+  requireDisplayMetadata = false,
+): MemoryDefaultSource {
   const path = `notebook_option_revision.memory_default_sources[${index}]`;
   const raw = asRecord(value, path);
-  requireExactKeys(raw, ["memory_id", "revision", "target_ref"], path);
-  return {
+  const keys = ["memory_id", "revision", "target_ref"];
+  if (requireDisplayMetadata) {
+    requireExactKeys(
+      raw,
+      [...keys, "target_label", "method_risk", "restore_value"],
+      path,
+    );
+  } else {
+    requireExactKeys(raw, keys, path);
+  }
+  const source: MemoryDefaultSource = {
     memory_id: requireString(raw, "memory_id", path),
     revision: requirePositiveInt(raw, "revision", path),
     target_ref: requireString(raw, "target_ref", path),
   };
+  if (requireDisplayMetadata) {
+    source.target_label = requireString(raw, "target_label", path);
+    source.method_risk = requireChoice(raw, "method_risk", RISK_LEVELS, path);
+    source.restore_value = optionalString(raw, "restore_value", path);
+  }
+  return source;
 }
 
 export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptionRevision {
@@ -487,17 +525,19 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
   if (
     version !== NOTEBOOK_OPTION_CONTRACT_VERSION &&
     version !== NOTEBOOK_OPTION_V12_CONTRACT_VERSION &&
-    version !== NOTEBOOK_OPTION_V13_CONTRACT_VERSION
+    version !== NOTEBOOK_OPTION_V13_CONTRACT_VERSION &&
+    version !== NOTEBOOK_OPTION_V14_CONTRACT_VERSION
   ) {
     // Keep the v1.8.1 rejection wording for the historical 2.0 probe while
     // accepting the explicit v1.2 successor below.
-    const supported = version === "2.0" ? "1.0 or 1.1" : "1.0, 1.1, 1.2, or 1.3";
+    const supported = version === "2.0" ? "1.0 or 1.1" : "1.0, 1.1, 1.2, 1.3, or 1.4";
     throw new NotebookContractError(
       `NotebookOptionRevision contract_version must be ${supported}, got ${version}`,
     );
   }
   const isV12 = version === NOTEBOOK_OPTION_V12_CONTRACT_VERSION;
   const isV13 = version === NOTEBOOK_OPTION_V13_CONTRACT_VERSION;
+  const isV14 = version === NOTEBOOK_OPTION_V14_CONTRACT_VERSION;
   requireExactKeys(
     raw,
     [
@@ -508,7 +548,7 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
       "recommendation_decision_id",
       "recommendation_status",
       ...(isV12 ? ["capability_resolution_binding_ref", "execution_modes"] : []),
-      ...(isV13 ? ["memory_default_sources"] : []),
+      ...(isV13 || isV14 ? ["memory_default_sources"] : []),
     ],
     "notebook_option_revision",
   );
@@ -536,14 +576,16 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
     lifecycle_projection: base.lifecycle_status,
     materializable: true as const,
   };
-  if (isV13) {
+  if (isV13 || isV14) {
     const sources = raw.memory_default_sources;
     if (!Array.isArray(sources) || sources.length === 0) {
       throw new NotebookContractError(
         "notebook_option_revision.memory_default_sources must be a non-empty array",
       );
     }
-    const parsedSources = sources.map(parseMemoryDefaultSource);
+    const parsedSources = sources.map((source, index) =>
+      parseMemoryDefaultSource(source, index, isV14),
+    );
     const sourceKeys = parsedSources.map(
       (source) => `${source.memory_id}:${source.revision}:${source.target_ref}`,
     );
@@ -551,6 +593,18 @@ export function parseNotebookOptionRevision(value: unknown): ParsedNotebookOptio
       throw new NotebookContractError(
         "notebook_option_revision.memory_default_sources must be unique",
       );
+    }
+    if (isV14) {
+      return {
+        ...baseOption,
+        contract_version: "1.4",
+        memory_default_sources: parsedSources.map((source) => ({
+          ...source,
+          target_label: source.target_label as string,
+          method_risk: source.method_risk as RiskLevel,
+          restore_value: source.restore_value ?? null,
+        })),
+      };
     }
     return {
       ...baseOption,

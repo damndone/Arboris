@@ -204,6 +204,35 @@ describe("contracts — v1.1 evidence, decision, and materialization records", (
     ]);
   });
 
+  it("reads a v1.4 option revision with server-owned target display metadata", () => {
+    const option = parseNotebookOptionRevision({
+      ...readV11Fixture("notebook_option_revision_v11"),
+      contract_version: "1.4",
+      memory_default_sources: [
+        {
+          memory_id: "memory-panel-covariance",
+          revision: 4,
+          target_ref: "model.genesis.panel_ols.covariance.clustered",
+          target_label: "Covariance estimator",
+          method_risk: "high",
+          restore_value: null,
+        },
+      ],
+    });
+
+    if (option.contract_version !== "1.4") throw new Error("expected a v1.4 option fixture");
+    expect(option.memory_default_sources).toEqual([
+      {
+        memory_id: "memory-panel-covariance",
+        revision: 4,
+        target_ref: "model.genesis.panel_ols.covariance.clustered",
+        target_label: "Covariance estimator",
+        method_risk: "high",
+        restore_value: null,
+      },
+    ]);
+  });
+
   it("rejects a v1.3 option without memory-default provenance", () => {
     const raw = {
       ...readV11Fixture("notebook_option_revision_v11"),
