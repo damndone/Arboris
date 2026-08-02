@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 12/42 (28.6%; 28.6 per 100 events)
+- Failure frequency: 12/43 (27.9%; 27.9 per 100 events)
 - Repeat rate: 1/12 (8.3%)
 - Recurrence rate: 1/11 (9.1%)
 - MTTR: median=134000 ms (sample=5; unresolved=5)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/12 (0.0%)
+- Gate waste rate: 0/13 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -141,3 +141,4 @@ COMPLETED
 - #40: `d8bdb795-3db7-4af3-aeaf-90349f5fb973` | 2026-08-02T07:31:43.000Z | REVIEW/memory_confirmation_modal_visibility_fixed | incident=`d8bdb795-3db7-4af3-aeaf-90349f5fb973` | lesson_key=`memory-confirmation-must-be-visible` | event_sha256=`97f6001e42a62a1f14b1ad1bebbf62f42c0eade1f08b08a57c6348d9a32f005c`
 - #41: `7e3f6f7d-5469-4ac4-9a17-8aa82c198e75` | 2026-08-02T09:29:09.000Z | GATE/memory_settings_confirmation_browser_passed | incident=`7e3f6f7d-5469-4ac4-9a17-8aa82c198e75` | lesson_key=`memory-settings-confirmation-browser-evidence` | event_sha256=`4251e4bd398341f24b0ffb8fd5531a95bf5b139bf929b5f1d7674f093eed106b`
 - #42: `e3a5c7d9-2f4b-4a6e-8c1d-5b7e9f2a3d40` | 2026-08-02T11:23:33.067Z | STATE_CHANGE/v1_8_5_typed_memory_completed | incident=`f4b6d8e1-3a5c-4f7b-9d2e-6c8a1b3e5f70` | lesson_key=`typed-memory-closeout-with-consumer-evidence` | event_sha256=`3c464f4eeec77c49218e6e8eb923a05e04396e244f4c81f55c37fa74c547a181`
+- #43: `d7f3a2b9-6c1e-4e8a-9d5f-2b7c0a1e4f86` | 2026-08-02T11:58:05.000Z | GATE/memory_suggest_default_browser_passed | incident=`d7f3a2b9-6c1e-4e8a-9d5f-2b7c0a1e4f86` | lesson_key=`memory-default-consumer-browser-evidence` | event_sha256=`25f09ced688ec216a5995287735801d6d7da38372c05713f79bc8e413873881a`

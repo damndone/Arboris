@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 3/7 (42.9%; 42.9 per 100 events)
+- Failure frequency: 3/8 (37.5%; 37.5 per 100 events)
 - Repeat rate: 0/3 (0.0%)
 - Recurrence rate: 0/3 (0.0%)
 - MTTR: median=0 ms (sample=3; unresolved=0)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/1 (0.0%)
+- Gate waste rate: 0/2 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0)
 
@@ -71,3 +71,4 @@ COMPLETED
 - #5: `f0c9d42a-18f4-48ac-b91a-0f4a1d7e63e2` | 2026-08-02T03:48:04.000Z | REVIEW/notebook_resilience_review_verified | incident=`f0c9d42a-18f4-48ac-b91a-0f4a1d7e63e2` | lesson_key=`resilience-boundary-review-verified` | event_sha256=`698b910f66f91d1d7954a78cd789786e00f94c1ae2fc390a06217127b267f64a`
 - #6: `b11d4a95-a0dd-4f39-9b7b-a16721a8b54a` | 2026-08-02T03:50:30.000Z | GATE/notebook_resilience_focused_gate_passed | incident=`b11d4a95-a0dd-4f39-9b7b-a16721a8b54a` | lesson_key=`notebook-resilience-focused-gate-passed` | event_sha256=`9384626665754a98660a61b864176c25c43408e433444c8aa815c432fb33391e`
 - #7: `c8f5c29a-c2d7-49af-a8d6-9e4f2c42e71d` | 2026-08-02T03:50:30.000Z | STATE_CHANGE/notebook_resilience_slice_completed | incident=`c8f5c29a-c2d7-49af-a8d6-9e4f2c42e71d` | lesson_key=`close-notebook-resilience-slice` | event_sha256=`e829d8d272e3caba5fc7fe020c0ac2d76863ec5e355baa644e2c9c6937f5f9c1`
+- #8: `c8d91b45-3f0a-4f54-9d27-1b8d7c6a2e90` | 2026-08-02T11:58:04.000Z | GATE/notebook_provider_replan_current_passed | incident=`c8d91b45-3f0a-4f54-9d27-1b8d7c6a2e90` | lesson_key=`notebook-current-provider-replan` | event_sha256=`22bf5a8d9365207c46c9230e935f987cf0429d8024b02a3aca43ff72b2258794`

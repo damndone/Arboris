@@ -10,14 +10,14 @@ COMPLETED
 
 ## Metrics
 
-- Failure frequency: 6/50 (12.0%; 12.0 per 100 events)
+- Failure frequency: 6/53 (11.3%; 11.3 per 100 events)
 - Repeat rate: 0/6 (0.0%)
 - Recurrence rate: 0/6 (0.0%)
 - MTTR: median=0 ms (sample=3; unresolved=3)
 - Review churn: changes_required=0; average_review_round=N/A (sample=0); withdrawn=0
 - Spec churn: N/A (sample=0)
 - Plan churn: N/A (sample=0)
-- Gate waste rate: 0/13 (0.0%)
+- Gate waste rate: 0/16 (0.0%)
 - Same-state retry rate: N/A (sample=0)
 - Token waste: N/A (sample=0; coverage=0/1)
 
@@ -132,3 +132,6 @@ COMPLETED
 - #48: `c54a3cf3-0a87-46dd-9d76-47e5c3f4a22f` | 2026-08-02T11:04:00.000Z | GATE/notebook_contract_normalization_browser_passed | incident=`d5e7c4fb-f9b8-4ef0-9c9f-1bc2a79a5d31` | lesson_key=`notebook-server-owned-contract-normalization` | event_sha256=`add1dabd8fd425d9d6ae7b5079dd25532c53f2a27665e1108e7633cb0bdb593f`
 - #49: `d2f4f4a1-1b6b-4c7f-8c5e-7b2f6d1a9e31` | 2026-08-02T11:23:33.067Z | STATE_CHANGE/v1_8_5_model_family_completed | incident=`d9f1e7a2-4c6b-4d8e-9a1f-2b3c5d7e8f90` | lesson_key=`model-family-closeout-on-final-tree` | event_sha256=`c9a5583ecc164333106c1e6a8807d030f6c6b1db3328e9a15746e2ef5713bd25`
 - #50: `4a4f2f25-1c9b-4e3d-a3f5-8bde7f1156f2` | 2026-08-02T12:00:00.000Z | REVIEW/notebook_contract_boundary_fix | incident=`4a4f2f25-1c9b-4e3d-a3f5-8bde7f1156f2` | lesson_key=`notebook-contract-boundary-normalization` | event_sha256=`934e788a7de818e6f7fa2c5dba2ef216849828daba10325e94ef936be4974946`
+- #51: `5b1a9b52-9d3c-4c0e-8f31-6a6a3f750d02` | 2026-08-02T11:58:01.000Z | GATE/glm_browser_acceptance_current | incident=`5b1a9b52-9d3c-4c0e-8f31-6a6a3f750d02` | lesson_key=`glm-browser-acceptance-separate` | event_sha256=`2cdf20e9934af6e5bd50127ab51ebf3058fab3f2de47ce942898e4860ef0b2e8`
+- #52: `7c4d5c66-4c18-4c6d-b998-18f5a2b0b6ab` | 2026-08-02T11:58:02.000Z | GATE/iv_2sls_browser_acceptance_current | incident=`7c4d5c66-4c18-4c6d-b998-18f5a2b0b6ab` | lesson_key=`iv-2sls-browser-acceptance-separate` | event_sha256=`03ff1d22649ee67ea8a24f22f67ff079330b733688da75e83c10e9ce5c706c49`
+- #53: `a2ef85e4-9d63-46c5-9c44-9e11a1fb37b0` | 2026-08-02T11:58:03.000Z | GATE/twfe_did_browser_acceptance_current | incident=`a2ef85e4-9d63-46c5-9c44-9e11a1fb37b0` | lesson_key=`twfe-did-browser-acceptance-separate` | event_sha256=`430e058d4237dc75494532b48f8c1aff3b769ca6f101532b532085e33a89551c`
