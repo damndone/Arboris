@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from workbench.llm.client import (
@@ -168,8 +170,45 @@ class ModelAdapter(Protocol):
 class OpenAICompatibleModelAdapter:
     """Adapt OpenAI-compatible public SSE to the normalized stream contract."""
 
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, *, idle_timeout_s: float = 90.0) -> None:
         self.config = config
+        if idle_timeout_s <= 0:
+            raise ValueError("idle_timeout_s must be positive")
+        self.idle_timeout_s = float(idle_timeout_s)
+
+    def supports_named_tool_choice(self) -> bool:
+        """Return whether this provider accepts a named ``tool_choice``.
+
+        DeepSeek V4 thinking models accept function tools but reject the
+        ``tool_choice`` request field.  The planner still publishes only the
+        single typed submission tool for those models; omitting this optional
+        field preserves the same tool-surface restriction without turning a
+        provider capability mismatch into a planning failure.
+        """
+
+        provider = self.config.provider_name.casefold()
+        host = (urlparse(self.config.base_url).hostname or "").casefold()
+        model = self.config.model.casefold()
+        is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
+        return not (is_deepseek and model.startswith("deepseek-v4"))
+
+    def planning_request_config(self) -> dict[str, Any]:
+        """Return a bounded provider-specific config for typed planning.
+
+        DeepSeek V4 enables high-effort thinking by default. Notebook planning
+        already supplies bounded evidence and requires a typed tool call, so a
+        non-thinking request avoids spending several minutes on private
+        reasoning that cannot be shown or used as evidence. The generic
+        adapter leaves other providers unchanged.
+        """
+
+        provider = self.config.provider_name.casefold()
+        host = (urlparse(self.config.base_url).hostname or "").casefold()
+        model = self.config.model.casefold()
+        is_deepseek = "deepseek" in provider or host == "api.deepseek.com"
+        if is_deepseek and model.startswith("deepseek-v4"):
+            return {"thinking": {"type": "disabled"}, "max_tokens": 4096}
+        return {}
 
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         abort_event = request.abort_event
@@ -181,11 +220,24 @@ class OpenAICompatibleModelAdapter:
         for attempt in range(2):
             received_event = False
             try:
-                async for item in async_stream_chat_completion(
+                stream = async_stream_chat_completion(
                     wire_messages,
                     self.config,
                     tools=wire_tools if request.tools else None,
-                ):
+                    model_config=request.model_config,
+                )
+                while True:
+                    try:
+                        item = await asyncio.wait_for(
+                            stream.__anext__(), timeout=self.idle_timeout_s
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        yield ModelStreamEvent.from_error(
+                            request.request_id, "provider_no_progress"
+                        )
+                        return
                     if abort_event is not None and abort_event.is_set():
                         yield ModelStreamEvent.from_error(request.request_id, "aborted")
                         return
@@ -200,6 +252,13 @@ class OpenAICompatibleModelAdapter:
                         if isinstance(tool_call, dict):
                             received_event = True
                             yield ModelStreamEvent.tool_call_delta(request.request_id, tool_call)
+                    elif event_type == "provider_activity":
+                        # Providers such as DeepSeek may stream private
+                        # reasoning before a public tool call. It is activity,
+                        # not user-visible Agent content, but it must prevent a
+                        # second expensive request when the stream later ends
+                        # without a completion.
+                        received_event = True
                     elif event_type == "done":
                         finish_reason = item.get("finish_reason")
                         yield ModelStreamEvent(

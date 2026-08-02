@@ -266,31 +266,52 @@ def _interaction_mode(context: NotebookPlanningContextV1) -> str:
     return mode
 
 
-def _notebook_tools_for(max_options: int) -> tuple[dict[str, Any], ...]:
-    """Publish the same closed tool vocabulary with a mode-specific batch cap."""
+_BASELINE_INSPECTION_IDS = frozenset(
+    {"profile.v1", "quality.v1", "time_index.v1", "sample.v1"}
+)
+
+
+def _has_complete_baseline_evidence(evidence: DataEvidencePackV1) -> bool:
+    """Whether the server-prepared source evidence is sufficient for submission."""
+
+    return _BASELINE_INSPECTION_IDS.issubset(
+        {
+            record.inspection_id
+            for record in evidence.records
+            if record.status == "completed"
+        }
+    )
+
+
+def _notebook_tools_for(
+    max_options: int,
+    *,
+    include_inspection: bool = True,
+) -> tuple[dict[str, Any], ...]:
+    """Publish the closed tool vocabulary with a mode-specific batch cap."""
 
     if max_options not in {1, 2, 3}:
         raise ValueError("Notebook option limit must be between 1 and 3")
     inspection_tool, submit_tool = NOTEBOOK_TOOLS
     options_schema = submit_tool["input_schema"]["properties"]["options"]
-    return (
-        dict(inspection_tool),
-        {
-            **submit_tool,
-            "description": (
-                f"Submit 1 to {max_options} typed analysis option"
-                f"{'s' if max_options != 1 else ''}. Every option must cite completed "
-                "evidence and preserve the server-provided execution pins."
-            ),
-            "input_schema": {
-                **submit_tool["input_schema"],
-                "properties": {
-                    **submit_tool["input_schema"]["properties"],
-                    "options": {**options_schema, "maxItems": max_options},
-                },
+    bounded_submit_tool = {
+        **submit_tool,
+        "description": (
+            f"Submit 1 to {max_options} typed analysis option"
+            f"{'s' if max_options != 1 else ''}. Every option must cite completed "
+            "evidence and preserve the server-provided execution pins."
+        ),
+        "input_schema": {
+            **submit_tool["input_schema"],
+            "properties": {
+                **submit_tool["input_schema"]["properties"],
+                "options": {**options_schema, "maxItems": max_options},
             },
         },
-    )
+    }
+    if not include_inspection:
+        return (bounded_submit_tool,)
+    return (dict(inspection_tool), bounded_submit_tool)
 
 
 def _strict_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -568,6 +589,24 @@ class NotebookPlanningAgent:
             return dynamic
         return capability_artifact_types(capability_id)
 
+    def _supports_named_tool_choice(self) -> bool:
+        capability = getattr(self.adapter, "supports_named_tool_choice", None)
+        if callable(capability):
+            return bool(capability())
+        if isinstance(capability, bool):
+            return capability
+        # Test doubles and provider adapters that have not declared a
+        # limitation retain the generic OpenAI-compatible behavior.
+        return True
+
+    def _planning_request_config(self) -> dict[str, Any]:
+        config = getattr(self.adapter, "planning_request_config", None)
+        if callable(config):
+            value = config()
+            if isinstance(value, Mapping):
+                return dict(value)
+        return {}
+
     def _workflow_primary_artifacts(
         self,
         steps: Any,
@@ -815,6 +854,7 @@ class NotebookPlanningAgent:
             total_budget_limited = (
                 remaining_s is not None and remaining_s < self.model_timeout_s
             )
+            baseline_complete = _has_complete_baseline_evidence(evidence)
             events = await self._call_model(
                 messages,
                 timeout_s=(
@@ -824,6 +864,7 @@ class NotebookPlanningAgent:
                 ),
                 total_budget_limited=total_budget_limited,
                 max_options=max_options,
+                submit_only=baseline_complete,
             )
             calls = [event.tool_call for event in events if event.type == "tool_call_delta" and event.tool_call]
             if len(calls) != 1:
@@ -1533,10 +1574,32 @@ class NotebookPlanningAgent:
         timeout_s: float,
         total_budget_limited: bool,
         max_options: int = 3,
+        submit_only: bool = False,
     ) -> list[ModelStreamEvent]:
         request = ModelRequest(
             messages=list(messages),
-            tools=[dict(tool) for tool in _notebook_tools_for(max_options)],
+            tools=[
+                dict(tool)
+                for tool in _notebook_tools_for(
+                    max_options,
+                    include_inspection=not submit_only,
+                )
+            ],
+            model_config=(
+                {
+                    **self._planning_request_config(),
+                    **(
+                        {
+                            "tool_choice": {
+                                "type": "function",
+                                "function": {"name": "submit_notebook_option_batch"},
+                            }
+                        }
+                        if submit_only and self._supports_named_tool_choice()
+                        else {}
+                    ),
+                }
+            ),
         )
         try:
             events = await asyncio.wait_for(
@@ -1743,6 +1806,50 @@ class NotebookPlanningAgent:
             raise NotebookPlanningContractError("option ranks must be unique")
         normalized_submissions: list[AgentOptionSubmission] = []
         for submission in submissions:
+            # Recipe options are canonically nested under model_params.  Keep
+            # the accepted top-level compatibility envelope useful for model
+            # providers, but normalize it before memory defaults are applied;
+            # otherwise a valid memory hint is reported as if its container
+            # were malformed and the provider receives no actionable repair.
+            if submission.proposal.operation_id == "model.genesis":
+                changes = submission.proposal.changes
+                model_params = changes.get("model_params")
+                if isinstance(model_params, Mapping):
+                    model_type = model_params.get("model_type")
+                    recipe_contract = (
+                        recipe_contract_for_model_type(model_type)
+                        if isinstance(model_type, str)
+                        else None
+                    )
+                    if recipe_contract is not None:
+                        model_options = model_params.get("model_options")
+                        top_level_options = changes.get("model_options")
+                        if model_options is None and isinstance(top_level_options, Mapping):
+                            normalized_params = {
+                                **model_params,
+                                "model_options": dict(top_level_options),
+                            }
+                            submission = replace(
+                                submission,
+                                proposal=replace(
+                                    submission.proposal,
+                                    changes={
+                                        **changes,
+                                        "model_params": normalized_params,
+                                    },
+                                ),
+                            )
+                        elif not isinstance(model_options, Mapping):
+                            required_inputs = ", ".join(
+                                f"model_options.{field_name}"
+                                for field_name in recipe_contract.source_option_fields
+                            )
+                            raise NotebookPlanningContractError(
+                                f"RECIPE_MODEL_OPTIONS_REQUIRED: {model_type} requires "
+                                f"model_options containing {required_inputs}; a memory "
+                                "default can fill only its registered field after those "
+                                "source columns are declared"
+                            )
             try:
                 submission = replace(
                     submission,

@@ -8,7 +8,7 @@ anything raised from here.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
 
 import httpx
@@ -91,11 +91,12 @@ def chat_completion(
     config: LLMConfig,
     *,
     tools: list[dict[str, Any]] | None = None,
+    model_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """POST Chat Completions and normalize text plus optional tool calls."""
     if not config.is_configured():
         raise LLMNotConfiguredError(config.configuration_error_message())
-    request_payload = _chat_request_payload(messages, config, tools)
+    request_payload = _chat_request_payload(messages, config, tools, model_config=model_config)
     try:
         with _client_factory(config) as client:
             response = client.post(
@@ -118,12 +119,13 @@ async def async_chat_completion(
     config: LLMConfig,
     *,
     tools: list[dict[str, Any]] | None = None,
+    model_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Cancellable async variant used by long-running Agent workflows."""
 
     if not config.is_configured():
         raise LLMNotConfiguredError(config.configuration_error_message())
-    request_payload = _chat_request_payload(messages, config, tools)
+    request_payload = _chat_request_payload(messages, config, tools, model_config=model_config)
     try:
         async with _async_client_factory(config) as client:
             response = await client.post(
@@ -146,6 +148,7 @@ async def async_stream_chat_completion(
     config: LLMConfig,
     *,
     tools: list[dict[str, Any]] | None = None,
+    model_config: Mapping[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield normalized public Chat Completions SSE events.
 
@@ -157,7 +160,13 @@ async def async_stream_chat_completion(
 
     if not config.is_configured():
         raise LLMNotConfiguredError(config.configuration_error_message())
-    request_payload = _chat_request_payload(messages, config, tools, stream=True)
+    request_payload = _chat_request_payload(
+        messages,
+        config,
+        tools,
+        model_config=model_config,
+        stream=True,
+    )
     tool_fragments: dict[int, dict[str, Any]] = {}
     model = config.model
     finish_reason: str | None = None
@@ -207,6 +216,11 @@ async def async_stream_chat_completion(
                     content = delta.get("content")
                     if isinstance(content, str) and content:
                         yield {"type": "text_delta", "delta": content}
+                    if delta.get("reasoning_content") is not None:
+                        # Keep private reasoning out of the public stream while
+                        # preserving a provider-activity signal for retry
+                        # control in the generic adapter.
+                        yield {"type": "provider_activity"}
                     raw_tool_calls = delta.get("tool_calls") or []
                     if not isinstance(raw_tool_calls, list):
                         raise LLMUpstreamError(
@@ -243,6 +257,7 @@ def _chat_request_payload(
     config: LLMConfig,
     tools: list[dict[str, Any]] | None,
     *,
+    model_config: Mapping[str, Any] | None = None,
     stream: bool = False,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -252,6 +267,12 @@ def _chat_request_payload(
     }
     if tools:
         payload["tools"] = tools
+    if model_config:
+        # Only server-owned, provider-neutral request controls cross this
+        # boundary. The planner never forwards arbitrary model parameters.
+        for key in ("tool_choice", "thinking", "max_tokens"):
+            if key in model_config:
+                payload[key] = model_config[key]
     return payload
 
 

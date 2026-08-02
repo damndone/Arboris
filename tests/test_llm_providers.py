@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from workbench.api import app
 from workbench.http import llm_routes
+from workbench.agent.model import ModelRequest, OpenAICompatibleModelAdapter
 from workbench.llm import client as llm_client
 from workbench.llm.client import LLMConfig, LLMUpstreamError
 from workbench.llm.config import load_llm_config
@@ -1360,6 +1361,131 @@ def test_async_stream_chat_completion_assembles_split_typed_tool_call(monkeypatc
         },
         {"type": "done", "finish_reason": "tool_calls", "model": "test-model"},
     ]
+
+
+def test_async_stream_chat_completion_forwards_safe_model_request_config(monkeypatch) -> None:
+    seen = _install_async_upstream(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            content=(
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"submit_notebook_option_batch","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        ),
+    )
+
+    async def scenario() -> list[dict[str, object]]:
+        return [
+            event
+            async for event in llm_client.async_stream_chat_completion(
+                [{"role": "user", "content": "submit"}],
+                LLMConfig(
+                    base_url="https://api.example.com/v1",
+                    api_key=API_KEY,
+                    model="test-model",
+                ),
+                tools=[{"type": "function", "function": {"name": "submit_notebook_option_batch"}}],
+                model_config={
+                    "tool_choice": {
+                        "type": "function",
+                        "function": {"name": "submit_notebook_option_batch"},
+                    },
+                    "thinking": {"type": "disabled"},
+                    "max_tokens": 4096,
+                },
+            )
+        ]
+
+    asyncio.run(scenario())
+    payload = json.loads(seen[0].content)
+    assert payload["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "submit_notebook_option_batch"},
+    }
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["max_tokens"] == 4096
+
+
+def test_openai_adapter_does_not_retry_after_private_reasoning_activity(monkeypatch) -> None:
+    attempts = 0
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        yield {"type": "provider_activity"}
+        raise llm_client.LLMUpstreamError("stream ended without completion")
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.example.test",
+                api_key=API_KEY,
+                model="deepseek-chat",
+            )
+        )
+        return [
+            event
+            async for event in adapter.stream(
+                ModelRequest(messages=[{"role": "user", "content": "plan"}])
+            )
+        ]
+
+    events = asyncio.run(scenario())
+    assert attempts == 1
+    assert events[-1].type == "error"
+
+
+def test_openai_adapter_stops_one_no_progress_stream_without_retry(monkeypatch) -> None:
+    attempts = 0
+
+    async def fake_stream(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        await asyncio.sleep(0.05)
+        yield {"type": "done", "finish_reason": "stop", "model": "deepseek-v4-flash"}
+
+    monkeypatch.setattr("workbench.agent.model.async_stream_chat_completion", fake_stream)
+
+    async def scenario():
+        adapter = OpenAICompatibleModelAdapter(
+            LLMConfig(
+                base_url="https://api.deepseek.com",
+                api_key=API_KEY,
+                model="deepseek-v4-flash",
+            ),
+            idle_timeout_s=0.01,
+        )
+        return [
+            event
+            async for event in adapter.stream(
+                ModelRequest(messages=[{"role": "user", "content": "plan"}])
+            )
+        ]
+
+    events = asyncio.run(scenario())
+    assert attempts == 1
+    assert events[-1].type == "error"
+    assert events[-1].error == "provider_no_progress"
+
+
+def test_deepseek_v4_adapter_does_not_advertise_named_tool_choice() -> None:
+    adapter = OpenAICompatibleModelAdapter(
+        LLMConfig(
+            base_url="https://api.deepseek.com",
+            api_key=API_KEY,
+            model="deepseek-v4-flash",
+            provider_name="DeepSeek",
+        )
+    )
+
+    assert adapter.supports_named_tool_choice() is False
+    assert adapter.planning_request_config() == {
+        "thinking": {"type": "disabled"},
+        "max_tokens": 4096,
+    }
 
 
 def test_probe_uses_models_endpoint_and_never_chat_completion(

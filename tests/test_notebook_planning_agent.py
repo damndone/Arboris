@@ -80,6 +80,29 @@ def _evidence() -> DataEvidencePackV1:
     )
 
 
+def _complete_baseline_evidence() -> DataEvidencePackV1:
+    records = []
+    for inspection_id in ("profile.v1", "quality.v1", "time_index.v1", "sample.v1"):
+        evidence_id = "evidence:time" if inspection_id == "time_index.v1" else f"evidence:{inspection_id}"
+        result_hash = "sha256:time-result" if inspection_id == "time_index.v1" else f"sha256:{inspection_id}"
+        records.append(
+            EvidenceRecord(
+                evidence_id=evidence_id,
+                inspection_id=inspection_id,
+                source_refs=(f"{inspection_id}:run_001",),
+                protocol_version=f"{inspection_id}/v1",
+                status="completed",
+                observations=(
+                    {"columns": [{"name": "when"}, {"name": "outcome"}]}
+                    if inspection_id in {"profile.v1", "sample.v1"}
+                    else {}
+                ),
+                result_hash=result_hash,
+            )
+        )
+    return DataEvidencePackV1(source_id="run:run_001", records=tuple(records))
+
+
 def _submit_call(*, capability_id: str = "time_series.ets", run_id: str = "notebook:nb_plan") -> dict:
     return {
         "options": [
@@ -178,6 +201,10 @@ class ScriptedAdapter:
         yield ModelStreamEvent.done(request.request_id, finish_reason="tool_calls")
 
 
+class NoNamedToolChoiceAdapter(ScriptedAdapter):
+    supports_named_tool_choice = False
+
+
 class FailingAdapter:
     async def stream(self, request: ModelRequest) -> AsyncIterator[ModelStreamEvent]:
         yield ModelStreamEvent.from_error(request.request_id, "provider_unavailable")
@@ -240,6 +267,63 @@ def test_provider_plan_runs_registered_inspection_then_submits_batch(tmp_path: P
         adapter.requests[0].messages[0]["content"]
     )
     assert len(adapter.requests) == 2
+
+
+def test_complete_baseline_evidence_forces_direct_typed_submission_turn(tmp_path: Path) -> None:
+    adapter = ScriptedAdapter(
+        [
+            {
+                "tool_call_id": "submit-first",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            }
+        ]
+    )
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+    ).plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=_complete_baseline_evidence(),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert [tool["tool_id"] for tool in adapter.requests[0].tools] == [
+        "submit_notebook_option_batch"
+    ]
+    assert adapter.requests[0].model_config == {
+        "tool_choice": {
+            "type": "function",
+            "function": {"name": "submit_notebook_option_batch"},
+        }
+    }
+
+
+def test_complete_baseline_evidence_respects_provider_tool_choice_capability(tmp_path: Path) -> None:
+    adapter = NoNamedToolChoiceAdapter(
+        [
+            {
+                "tool_call_id": "submit-first",
+                "tool_id": "submit_notebook_option_batch",
+                "arguments": _submit_call(),
+            }
+        ]
+    )
+
+    result = NotebookPlanningAgent(
+        adapter=adapter,
+        capability_catalog={"time_series.ets": {"proposal_adapter": "model.rerun"}},
+    ).plan(
+        context=_context(make_project(tmp_path)),
+        initial_evidence=_complete_baseline_evidence(),
+    )
+
+    assert len(result.option_drafts) == 1
+    assert [tool["tool_id"] for tool in adapter.requests[0].tools] == [
+        "submit_notebook_option_batch"
+    ]
+    assert adapter.requests[0].model_config == {}
 
 
 def test_action_mode_publishes_and_enforces_one_checked_draft_path(tmp_path: Path) -> None:
